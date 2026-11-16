@@ -15,6 +15,8 @@ LANGUAGE_FEATURE(user_defined_literals, cplusplus_11, never,
 LANGUAGE_FEATURE(cplusplus_11_keywords, cplusplus_11, never, "[diff.cpp03.lex]/3: New keywords")
 LANGUAGE_FEATURE(less_colon_colon_is_less, cplusplus_11, never,
                  "[lex.pptoken]/3.2: <:: not followed by : or > is < ::, new in C++11")
+LANGUAGE_FEATURE(universal_character_names_for_basic_characters_in_literals, cplusplus_11, never,
+                 "[lex.charset]/2: allowed inside literals; C++03 forbade them everywhere")
 /* C++14 */
 LANGUAGE_FEATURE(digit_separators, cplusplus_14, never,
                  "[diff.cpp11.lex]/1: pp-number can contain one or more single quotes")

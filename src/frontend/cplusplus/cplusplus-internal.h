@@ -70,6 +70,21 @@ struct lexer::pp_number_analysis {
 VPRIV bool is_valid_ud_suffix(const implementation_defined_behavior &b,
                               const char *s, size_t n);
 
+/* ---- [lex.ccon], [lex.string] ----------------------------------------- */
+
+/* the meaning of one c-char or s-char: a code unit (an escape-sequence) or a
+   code point the encoding turns into code units */
+struct lexer::c_char {
+    uint32_t value = 0;
+    bool is_code_point = false;
+    /* bytes that are not UTF-8: value is the byte */
+    bool invalid_encoding = false;
+    bool error = false;
+};
+
+VPRIV uint32_t largest_code_unit(const implementation_defined_behavior &b,
+                                 encoding_prefix prefix);
+
 /* ---- [lex.charset] ----------------------------------------------------- */
 
 struct code_point_range {

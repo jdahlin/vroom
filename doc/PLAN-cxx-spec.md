@@ -46,18 +46,28 @@ preprocessing tokens (`-dump-raw-tokens`), tokens after `clang -E`
 (`-dump-tokens`), and lexical diagnostics.  clang is the oracle, not the
 `expected-*` directives (most of those tests need a parser).
 
-Now: raw 68/97, tokens 63/97, diags 70/97.
+It also checks values: `cxxlex -literal-claims` writes each literal's type
+and value (integer, character, every code unit of a string) as
+`_Static_assert`s that clang compiles (about 2000 in C++20 mode alone).
+`src/test/cxx/lex/known-differences.txt` lists the runs whose difference from
+clang is understood: the standard is followed where clang is not, or the
+difference is a later phase's.
+
+Now (2026-11-16): raw 99/99, tokens 99/99, values 99/99, diags 99/99, 5 of
+them known differences.
 
 ## Steps
 
 - **L0 fundamentals** (this PR): source files and presumed lines
   (`[lex.separate]`, `[cpp.line]`), diagnostics (`[intro.compliance]`),
   implementation-defined behavior, fundamental types (`[basic.fundamental]`).
-- **L1 lexer** (this PR, partial): phases 1-3 complete in shape; phase 7 for
-  identifiers, keywords, alternative tokens, operators, integer literals.
-  Missing: values of character, string and floating literals (phases 5-6),
-  `\N{}`, Unicode whitespace and homoglyph diagnostics, raw-string error
-  recovery as clang, the remaining mismatches `bench/cxx-lex.py` lists.
+- **L1 lexer** (this PR): phases 1-3; phase 5 for character and string
+  literals (escapes, universal-character-names, UTF-8/16/32); phase 7 for
+  identifiers, keywords, alternative tokens, operators, integer literals
+  (values, Table 8 types), the types of floating-point literals.  Per-edition
+  rules are named features (`diff/language-features.inc`).  Missing: values
+  of floating-point literals, phase 6 (string concatenation, Table 11),
+  `\N{}`, Unicode white space and homoglyph diagnostics.
 - **L2** citation checker (`bench/cxx-spec-refs.py`: every `[label]/N`
   exists, every quoted production matches the spec's), in CI.
 - **L3** the preprocessor (`[cpp]`) on these tokens, or an adapter from vcc's

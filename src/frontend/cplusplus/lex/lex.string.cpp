@@ -168,4 +168,161 @@ uint32_t lexer::scan_raw_string(uint32_t quote, preprocessing_token &token,
     return file.size;
 }
 
+void lexer::append_code_unit(uint32_t unit)
+{
+    if (code_unit_count == code_unit_capacity) {
+        code_unit_capacity = code_unit_capacity ? 2 * code_unit_capacity : 256;
+        code_units = static_cast<uint32_t *>(
+            realloc(code_units, code_unit_capacity * sizeof *code_units));
+        if (!code_units)
+            abort();
+    }
+    code_units[code_unit_count++] = unit;
+}
+
+/*
+ * A code point in the execution character set of an encoding-prefix
+ * ([lex.string]/5-10): "each successive element of the object representation
+ * has the value of the corresponding code unit of the UTF-8 encoding" (also
+ * for an ordinary string literal here), UTF-16 for u (with "surrogate pairs",
+ * [lex.string]/8 Note 3), UTF-32 for U and a 32-bit wchar_t.
+ */
+void lexer::append_encoded(uint32_t code_point, encoding_prefix prefix)
+{
+    switch (prefix) {
+    case encoding_prefix::none:
+    case encoding_prefix::u8:
+        if (code_point < 0x80)
+            append_code_unit(code_point);
+        else if (code_point < 0x800) {
+            append_code_unit(0xC0 | code_point >> 6);
+            append_code_unit(0x80 | (code_point & 0x3F));
+        } else if (code_point < 0x10000) {
+            append_code_unit(0xE0 | code_point >> 12);
+            append_code_unit(0x80 | (code_point >> 6 & 0x3F));
+            append_code_unit(0x80 | (code_point & 0x3F));
+        } else {
+            append_code_unit(0xF0 | code_point >> 18);
+            append_code_unit(0x80 | (code_point >> 12 & 0x3F));
+            append_code_unit(0x80 | (code_point >> 6 & 0x3F));
+            append_code_unit(0x80 | (code_point & 0x3F));
+        }
+        break;
+    case encoding_prefix::L:
+        if (behavior.wchar_t_width >= 32) {
+            append_code_unit(code_point);
+            break;
+        }
+        [[fallthrough]];
+    case encoding_prefix::u:
+        if (code_point < 0x10000)
+            append_code_unit(code_point);
+        else {
+            append_code_unit(0xD800 + ((code_point - 0x10000) >> 10));
+            append_code_unit(0xDC00 + ((code_point - 0x10000) & 0x3FF));
+        }
+        break;
+    case encoding_prefix::U:
+        append_code_unit(code_point);
+        break;
+    }
+}
+
+/*
+ * Phase 5 for one string-literal ([lex.phases]/1.5): its s-chars, or the
+ * r-chars of a raw string literal, as code units of its encoding; and its
+ * element type ([lex.string]/5-10).  The size of [lex.string]/13 is
+ * string_length + 1 once phase 6 has concatenated it with its neighbours.
+ */
+void lexer::convert_string_literal(const char *spelling, size_t length,
+                                   token &out)
+{
+    encoding_prefix prefix = out.preprocessing.prefix;
+    source_location at = out.preprocessing.location;
+    out.literal = literal_kind::string_literal;
+    switch (prefix) {
+    case encoding_prefix::u8:
+        /* [lex.string]/6: "array of n const char8_t"; char before C++20
+           ([diff.cpp17.lex]/5) */
+        out.type = behavior.char8_t_keyword ? fundamental_type::char8_t_
+                                            : fundamental_type::char_;
+        break;
+    case encoding_prefix::u:
+        out.type = fundamental_type::char16_t_;
+        break;
+    case encoding_prefix::U:
+        out.type = fundamental_type::char32_t_;
+        break;
+    case encoding_prefix::L:
+        out.type = fundamental_type::wchar_t_;
+        break;
+    default:
+        out.type = fundamental_type::char_;
+        break;
+    }
+    out.string_offset = (uint32_t)code_unit_count;
+
+    size_t i = 0;
+    while (i < length && spelling[i] != '"')
+        i++;
+    size_t end = length - 1; /* the closing quote */
+    bool error = false;
+
+    if (out.preprocessing.raw) {
+        /* [lex.string]: raw-string: '"' d-char-sequence_opt '('
+           r-char-sequence_opt ')' d-char-sequence_opt '"'.  [lex.string]/3
+           Note 2: "A source-file new-line in a raw string literal results in
+           a new-line in the resulting execution string literal." */
+        size_t open = i + 1;
+        while (open < length && spelling[open] != '(')
+            open++;
+        size_t delimiter = open - (i + 1);
+        size_t close = end - delimiter - 1; /* the ')' */
+        for (size_t r = open + 1; r < close;) {
+            uint32_t code_point;
+            uint32_t n = decode_utf8(
+                reinterpret_cast<const unsigned char *>(spelling + r),
+                (uint32_t)(close - r), &code_point);
+            if (!n) {
+                if (prefix == encoding_prefix::none)
+                    diagnostics.issue(diagnostic_id::warn_bad_string_encoding,
+                                      at);
+                else {
+                    diagnostics.issue(diagnostic_id::err_bad_string_encoding,
+                                      at);
+                    error = true;
+                }
+                append_code_unit((unsigned char)spelling[r++]);
+                continue;
+            }
+            append_encoded(code_point, prefix);
+            r += n;
+        }
+    } else {
+        i++;
+        while (i < end) {
+            c_char c = evaluate_c_char(spelling, end, &i, at, prefix);
+            error |= c.error;
+            if (c.invalid_encoding) {
+                if (prefix == encoding_prefix::none)
+                    diagnostics.issue(diagnostic_id::warn_bad_string_encoding,
+                                      at);
+                else {
+                    diagnostics.issue(diagnostic_id::err_bad_string_encoding,
+                                      at);
+                    error = true;
+                }
+                append_code_unit(c.value);
+            } else if (c.is_code_point)
+                append_encoded(c.value, prefix);
+            else
+                /* [lex.ccon]/6: "An escape sequence specifies a single
+                   character", one code unit */
+                append_code_unit(c.value);
+        }
+    }
+    out.string_length = (uint32_t)(code_unit_count - out.string_offset);
+    out.value_known = !error;
+}
+
 } // namespace cplusplus

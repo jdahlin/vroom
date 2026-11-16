@@ -77,16 +77,26 @@ token lexer::convert(const preprocessing_token &pp)
             convert_integer_literal(a, out);
         break;
     case preprocessing_token_kind::character_literal:
+        spelling(pp, &spelling_buffer);
         out.kind = token_kind::literal;
-        out.literal = literal_kind::character_literal;
+        convert_character_literal(spelling_buffer.p, spelling_buffer.n, out);
         break;
     case preprocessing_token_kind::string_literal:
+        spelling(pp, &spelling_buffer);
         out.kind = token_kind::literal;
-        out.literal = literal_kind::string_literal;
+        convert_string_literal(spelling_buffer.p, spelling_buffer.n, out);
         break;
     case preprocessing_token_kind::user_defined_character_literal:
     case preprocessing_token_kind::user_defined_string_literal:
+        /* [lex.ext]: the literal before the ud-suffix has its value as any
+           other ([lex.ext]/5-8 pass it to the literal operator) */
+        spelling(pp, &spelling_buffer);
         out.kind = token_kind::literal;
+        if (pp.kind == preprocessing_token_kind::user_defined_character_literal)
+            convert_character_literal(spelling_buffer.p, pp.ud_suffix_offset,
+                                      out);
+        else
+            convert_string_literal(spelling_buffer.p, pp.ud_suffix_offset, out);
         out.literal = literal_kind::user_defined_literal;
         break;
     case preprocessing_token_kind::preprocessing_op_or_punc:

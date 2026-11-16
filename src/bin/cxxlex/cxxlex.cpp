@@ -8,6 +8,10 @@
  *   cxxlex -dump-tokens [OPTIONS] FILE       phase 7: tokens (FILE should be
  *                                            preprocessed: line markers are
  *                                            followed, other directives skipped)
+ *   cxxlex -literal-claims [OPTIONS] FILE    the same tokens' literals as a C++
+ *                                            file of static_asserts: each
+ *                                            literal's type and value as
+ *                                            computed here, for clang to check
  *
  * OPTIONS are the clang -cc1 options that change lexing: -std=, -x,
  * -fms-extensions, -fms-compatibility, -fdollars-in-identifiers,
@@ -39,6 +43,45 @@ static void write_escaped(vbuffer *out, const char *s, size_t n)
         else
             vbuffer_append(out, &c, 1);
     }
+}
+
+/*
+ * A literal's type and value as static_asserts clang can check:
+ *   _Static_assert(__is_same(__decltype(LIT), T), "");
+ *   _Static_assert(LIT == (T)V, "");       integer and character literals
+ *   _Static_assert(LIT[k] == (T)V_k, "");  each code unit of a string literal
+ * with #line so that a failed claim names the literal's place (clang's
+ * spellings, which every edition has).
+ */
+static void write_claim(vbuffer *out, const lexer &l, const token &t,
+                        const char *spelling, size_t n, source_position p)
+{
+    if (t.kind != token_kind::literal || !t.value_known ||
+        t.literal == literal_kind::user_defined_literal ||
+        t.literal == literal_kind::floating_point_literal ||
+        t.type == fundamental_type::bit_precise_int ||
+        t.type == fundamental_type::unsigned_bit_precise_int)
+        return;
+    const char *type = fundamental_type_name(t.type);
+    vbuffer_format_append(out, "#line %u \"%s\"\n", p.line, p.file_name);
+    if (t.literal == literal_kind::string_literal) {
+        vbuffer_format_append(out,
+                              "_Static_assert(__is_same(__decltype(%.*s), "
+                              "const %s(&)[%u]), \"\");",
+                              (int)n, spelling, type, t.string_length + 1);
+        for (uint32_t k = 0; k < t.string_length && k < 64; k++)
+            vbuffer_format_append(
+                out, " _Static_assert(%.*s[%u] == (%s)0x%xu, \"\");", (int)n,
+                spelling, k, type, l.string_code_units()[t.string_offset + k]);
+        vbuffer_string_append(out, "\n");
+        return;
+    }
+    vbuffer_format_append(
+        out,
+        "_Static_assert(__is_same(__decltype(%.*s), %s), \"\"); "
+        "_Static_assert(%.*s == (%s)0x%llxull, \"\");\n",
+        (int)n, spelling, type, (int)n, spelling, type,
+        (unsigned long long)t.value);
 }
 
 static bool parse_edition(const char *s, implementation_defined_behavior *b)
@@ -78,8 +121,8 @@ int main(int argc, char **argv)
         implementation_defined_behavior::for_edition(
             standard_edition::cplusplus_17, true);
     diagnostic_options diagnostic_settings;
-    bool raw = false, char8_set = false, char8 = false, trigraph_set = false,
-         trigraphs = false;
+    bool raw = false, claims = false, char8_set = false, char8 = false,
+         trigraph_set = false, trigraphs = false;
     bool dollar_set = false, dollar = true, ms = false, ms_compat = false;
     const char *path = nullptr;
 
@@ -89,6 +132,8 @@ int main(int argc, char **argv)
             raw = true;
         else if (!strcmp(a, "-dump-tokens"))
             raw = false;
+        else if (!strcmp(a, "-literal-claims"))
+            raw = false, claims = true;
         else if (!strncmp(a, "-std=", 5)) {
             if (!parse_edition(a + 5, &behavior)) {
                 fprintf(stderr, "cxxlex: unsupported %s\n", a);
@@ -194,6 +239,14 @@ int main(int argc, char **argv)
         spelling.n = 0;
         if (pp.kind != preprocessing_token_kind::end_of_file)
             l.spelling(pp, &spelling);
+        if (claims) {
+            if (pp.kind != preprocessing_token_kind::end_of_file)
+                write_claim(&out, l, t, spelling.p, spelling.n,
+                            file.position(pp.location));
+            if (pp.kind == preprocessing_token_kind::end_of_file)
+                break;
+            continue;
+        }
         source_position p = file.position(pp.location);
         vbuffer_format_append(&out, "%s '", name);
         write_escaped(&out, spelling.p ? spelling.p : "", spelling.n);

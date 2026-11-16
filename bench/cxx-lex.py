@@ -10,6 +10,8 @@ For each %clang_cc1 RUN line of a test, with the RUN line's language options:
   tokens  the file preprocessed by clang -E, then cxxlex -dump-tokens vs
           clang -cc1 -dump-tokens on that: phase 7 (keywords, alternative
           tokens, literals), with [LeadingSpace]
+  values  each literal's type and value as cxxlex computes them, written as
+          static_asserts (cxxlex -literal-claims) that clang checks
   diags   the lexical diagnostics: clang -cc1 -fsyntax-only on the file,
           keeping only messages that are one of the diagnostics the lexer
           issues; cxxlex's from both runs above
@@ -268,8 +270,23 @@ def check(test, opts, clang, cxxlex, regexes, tmp):
         _, theirs_t = run([clang, '-cc1', '-dump-tokens'] + opts + [ii])
         a, b = parse_tokens(ours_t, True), parse_tokens(theirs_t, True)
         res['tokens'] = first_difference(a, b) if a != b else ''
+        # values: clang checks each literal's type and value as cxxlex
+        # computed them (phases 5 and 7)
+        claims, _ = run([cxxlex, '-literal-claims'] + opts + [ii])
+        cpp = ii + '.claims.cpp'
+        open(cpp, 'w').write(claims)
+        # C++98 has no constant expression that reads a string literal's
+        # elements: its claims are checked as C++11, where the literals C++98
+        # has keep their types and values
+        claim_opts = [re.sub(r'^-std=(c|gnu)\+\+(98|03)$', r'-std=\1++11', o)
+                      for o in opts if o.startswith('-std=') or o.startswith('-f')]
+        _, failed = run([clang, '-cc1', '-fsyntax-only', '-triple', 'aarch64-unknown-linux-gnu', '-ferror-limit', '0',
+                         '-Wno-everything'] + claim_opts + [cpp])
+        errors = [line for line in failed.splitlines() if ': error: ' in line]
+        res['values'] = f'{len(errors)} claims fail, first: {errors[0]}' if errors else ''
     else:
         res['tokens'] = 'clang -E failed'
+        res['values'] = ''
         ours_t_err = ''
     # diags
     _, clang_err = run([clang, '-cc1', '-fsyntax-only', '-I', '.', '-I', 'Inputs'] + opts + [name], cwd=d)
@@ -287,10 +304,10 @@ def check(test, opts, clang, cxxlex, regexes, tmp):
 
 
 def known_differences():
-    """test -> set of comparisons where the front end follows the standard
-    and clang does not (src/test/cxx/lex/clang-differences.txt)"""
+    """test -> set of comparisons whose difference from clang is understood
+    (src/test/cxx/lex/known-differences.txt)"""
     out = {}
-    for line in open(os.path.join(TESTS, 'clang-differences.txt')):
+    for line in open(os.path.join(TESTS, 'known-differences.txt')):
         if line.strip() and not line.startswith('#'):
             test, kinds, _ = [f.strip() for f in line.split('|', 2)]
             out[test] = set(kinds.split())  # 'path' or 'path [options]'
@@ -311,7 +328,7 @@ def main():
         tests = [t for t in tests if any(p in t for p in args.patterns)]
     regexes = lexer_diagnostics()
     jobs = [(t, o) for t in tests for o in run_lines(t)]
-    passed = {'raw': 0, 'tokens': 0, 'diags': 0}
+    passed = {'raw': 0, 'tokens': 0, 'values': 0, 'diags': 0}
     known = known_differences()
     known_runs = 0
     with tempfile.TemporaryDirectory() as tmp, concurrent.futures.ThreadPoolExecutor(args.j) as pool:
@@ -328,7 +345,7 @@ def main():
                 print(f'    {k}: {v}')
     n = len(results)
     print(f'{n} runs of {len(tests)} tests: ' + ', '.join(f'{k} {v}/{n}' for k, v in passed.items()) +
-          f' ({known_runs} runs differ from clang where the standard is followed)')
+          f' ({known_runs} known differences)')
     return 0 if all(v == n for v in passed.values()) else 1
 
 

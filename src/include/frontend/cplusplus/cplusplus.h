@@ -352,6 +352,9 @@ struct token {
     int16_t keyword = -1; /* index in the keyword table ([lex.key]) */
     preprocessing_token
         preprocessing; /* the preprocessing token it came from */
+    /* a string literal: its code units in lexer::string_code_units(),
+       without the terminating '\0' of [lex.string]/12 */
+    uint32_t string_offset = 0, string_length = 0;
     /* N of _BitInt(N) */
     uint16_t bit_precise_width = 0;
     /* the value of an integer or boolean literal, when value_known */
@@ -366,6 +369,9 @@ class lexer
     lexer(const source_file &file,
           const implementation_defined_behavior &behavior,
           diagnostic_consumer &diagnostics, lexer_options options = {});
+    ~lexer();
+    lexer(const lexer &) = delete;
+    lexer &operator=(const lexer &) = delete;
 
     /* [lex.pptoken]/3: the next preprocessing token */
     preprocessing_token next();
@@ -405,6 +411,18 @@ class lexer
     uint32_t scan_ud_suffix(uint32_t at, preprocessing_token &token);
     bool is_identifier_start(uint32_t code_point) const;
     bool is_identifier_continue(uint32_t code_point) const;
+    struct c_char;
+    c_char evaluate_c_char(const char *spelling, size_t length, size_t *i,
+                           source_location at, encoding_prefix prefix);
+    void convert_character_literal(const char *spelling, size_t length,
+                                   token &out);
+    void convert_string_literal(const char *spelling, size_t length,
+                                token &out);
+    /* [lex.string]: the code units of the string literals converted so far */
+    const uint32_t *string_code_units() const
+    {
+        return code_units;
+    }
     struct pp_number_analysis;
     bool analyze_pp_number(const char *spelling, size_t length,
                            source_location at, pp_number_analysis &a);
@@ -414,6 +432,10 @@ class lexer
 
   private:
     preprocessing_token lex(bool header_name_permitted);
+    void append_code_unit(uint32_t unit);
+    void append_encoded(uint32_t code_point, encoding_prefix prefix);
+    uint32_t *code_units = nullptr;
+    size_t code_unit_count = 0, code_unit_capacity = 0;
     uint32_t position = 0;
     bool at_start_of_line = true, after_white_space = false;
 };
