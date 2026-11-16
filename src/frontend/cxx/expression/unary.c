@@ -87,8 +87,12 @@ VPRIV void cxx_unary_expression_parse(cxx *c)
 				int64_t v = c->evalue;
 				uint32_t xn = c->enode;
 
-				if (!c->tentative && !cxx_operator_call_type(c, opid, c->etype, NULL, 0)) {
-					cxx_unary_type(c, op, c->etype, c->elval);
+				/* (the operand's type and value category: the operator functions tried and ruled out reset them) */
+				ast_qualified_type xt = c->etype;
+				bool xl = c->elval;
+
+				if (!c->tentative && !cxx_operator_call_type(c, opid, xt, NULL, 0)) {
+					cxx_unary_type(c, op, xt, xl);
 					cxx_gen_unary(c, op, xn, oploc);
 				} else if (!c->tentative && c->call_resolved && c->call_picked)
 					cxx_gen_operator_call(c, xn, NULL, 0, oploc);

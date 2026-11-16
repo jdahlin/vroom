@@ -2818,3 +2818,12 @@ eller ett annat nullptr_t-objekt är nollpekaren det håller (doctests
 `CHECK(p == nullptr)`, där nullptr vidarebefordras som `R&&`), och en lokal
 `nullptr_t n = nullptr;` byggs.  Test: `run/nullptr-object-compare.cpp`.
 Sviter gröna (162/162, 38/38, mangle).
+
+## Status 187 (2026-11-16)
+Unärt `&x` (och de andra unära operatorerna) på en klass vars namnrymd har
+operatorfunktioner som inte passar: den inbyggda operatorn får operandens typ
+och värdekategori från före uppslagningen; kandidaterna som prövades hade
+nollställt dem, så `&m` av en `std::map` eller `std::string` blev otypat
+(doctests `CHECK(&p1 == v.get_ptr<object_t *>())`).  Test:
+`run/address-of-with-operator-candidates.cpp`, som misslyckas utan ändringen.
+Sviter gröna (163/163, 38/38, mangle).
