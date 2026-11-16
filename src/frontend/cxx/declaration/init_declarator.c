@@ -298,8 +298,8 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope 
 				auto_e = e;
 			/* code generation: a local variable of the function body being built */
 			if (e && kind == CXX_ENTITY_VALUE && !f && context == CXX_CONTEXT_BLOCK && cxx_gen_on(c)) {
-				if (auto_e && !(flags & (DS_STATIC | DS_CONSTEXPR)))
-					auto_gen = true;	/* (auto: its symbol once the initializer gave its type) */
+				if (auto_e && !(flags & DS_STATIC))
+					auto_gen = true;	/* (auto, constexpr auto: its symbol once the initializer gave its type) */
 				else if (!auto_e && (flags & (DS_STATIC | DS_CONSTEXPR)) && !cxx_tokens_have_kw(c, ds_from, c->pos, CXX_KW_thread_local) && t != CXX_TY_UNKNOWN &&
 					 !(AST_TYPE_KIND(c->ast, t) == AST_TYPE_ARRAY && !AST_TYPE(c->ast, t)->n) &&
 					 (!cc_type_is_record(c->ast, t) || !cxx_gen_needs_construction_public(c, t)))
