@@ -197,9 +197,11 @@ tuning and caching need no change of interfaces.
 
 ## Validation
 
-Six checks, in the order they are run for every step.  The earlier a check,
-the more it speaks for the standard and the less for clang; a step moves on
-to the next check only when the one before is green.
+Six checks.  While a step is written, V4a (clang's accept/reject) on the
+affected tests is the main signal, with V1 and V2 as spot checks; all six
+are run once, when the step is closed and before its PR is updated
+(decided 2026-11-16: development speed first, robustness and completeness
+passes later).
 
 ### V1. Grammar coverage (`bench/cxx-spec-refs.py`, <1 s; L2 of PLAN-cxx-spec)
 
@@ -209,7 +211,8 @@ to the next check only when the one before is green.
 - New here: per clause, the nonterminals of `docs/cxx-spec/grammar-index.md`
   against the ones a parser function quotes.  The output is the table
   "clause: productions implemented / in the clause / in this step's scope",
-  and a step is not done while one of its productions is missing.
+  A wrong quote fails; a missing production is listed, and does not block
+  a step.
 - Totals to reach: dcl 97, expr 59, class 25, temp 22, stmt 14, module 8,
   except 6, over 3, basic 1 (235 nonterminals).
 
@@ -219,8 +222,8 @@ to the next check only when the one before is green.
   from `docs/cxx-spec` once; the files are committed and then annotated by
   hand.  The clauses have about 780 examples (dcl 179, temp 215, class 132,
   expr 83, basic 74, over 56, module 18, stmt 14, except 10).
-- A line the standard marks `// error` or `// ill-formed` gets one of two
-  annotations: `// syntax-error` (the parser must report an error on this
+- A line the standard marks `// error` or `// ill-formed` is annotated
+  only when the parser disagrees with what the example says, with one of `// syntax-error` (the parser must report an error on this
   line) or `// semantic` (ill-formed for a reason the parser does not check;
   it must accept).  Everything else must parse with no `erroneous` node.
 - Where an example states which reading an ambiguity has
@@ -231,9 +234,9 @@ to the next check only when the one before is green.
 
 ### V3. Our own cases per production (`src/test/cxx/parse/gram/LABEL.cpp`)
 
-- One accepted input per alternative of every production in scope, and one
-  rejected input per place the grammar ends an alternative (missing `;`,
-  missing declarator, unbalanced bracket).
+- Only where clang's tests and the standard's examples leave a gap: an
+  alternative or a rejection no test reaches (V1's table and a coverage
+  count show which).
 - Snapshot of `-dump-syntax` next to each file, rewritten with `--bless`
   and reviewed as a diff (as `vcc-diag.py --bless`).
 
@@ -251,7 +254,8 @@ one step's subset are rare (26 of 213 in Parser/, 19 of 229 in dcl+basic):
   rejects / not comparable yet".  Each disagreement is fixed or goes to
   `known-differences.txt` with its reason: the standard's paragraph, or the
   extension clang accepted.
-- **V4b declarator claims.**  `cxxparse -declaration-claims` writes, for
+- **V4b declarator claims** (written once P1's declarators are stable, not
+  during P1).  `cxxparse -declaration-claims` writes, for
   every declarator-id it parsed, the type the declarator gives it
   ([dcl.meaning]) in an encoding built from the tree, not from the source
   text: `pointer_to<array_of<function<int(char)>, 3>>`.  The file is the
@@ -272,6 +276,9 @@ one step's subset are rare (26 of 213 in Parser/, 19 of 229 in dcl+basic):
 
 ### V5. Robustness (`bench/cxx-parse.py --mutate`, the ASan build)
 
+Deferred until P1-P3 have grammar and error recovery to stress, then run
+as a pass of its own.
+
 - Every V2-V4 input through `build/ccs-asan/cxxparse`.
 - Token mutants of the accepted cases (delete, duplicate, swap, insert a
   bracket): never a crash or a hang, always either a tree without
@@ -287,9 +294,15 @@ the step; `cxxparse -dump-tokens` is byte-identical to `cxxlex
 
 ### What is recorded
 
-Per step, in this file: V1's table, V2 examples passing / annotated /
-waiting, V3 cases, V4a's four numbers, V4b claims checked, `unparsed` and
-`erroneous` node counts over the corpus, ns per token.
+Per step, in this file: V4a's numbers, the `unparsed` count over the
+corpus, and anything surprising.
+
+### Keeping the full run cheap
+
+clang's side of V4 (its diagnostics and `-ast-dump` per test and option
+set) never changes for a given clang and test file: it is cached in
+`work/cxx-parse-ref/`, keyed by the file's contents, the options and
+clang's version, so a full run is dominated by cxxparse alone.
 
 ## Steps
 
