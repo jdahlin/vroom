@@ -284,9 +284,8 @@ VPRIV ast_qualified_type cxx_function_signature_parse(cxx *c, bool any_return,
                     }
                 }
                 /* a constexpr instance (RoundUp<int>): its body and parameters, for cxx_const_call */
-                bool keep_body = gi && (ds & DS_CONSTEXPR) &&
-                                 !c->tentative && !gi->body_end &&
-                                 pack_n == UINT32_MAX;
+                bool keep_body = gi && (ds & DS_CONSTEXPR) && !c->tentative &&
+                                 !gi->body_end && pack_n == UINT32_MAX;
                 if (keep_body) {
                     free(gi->body_params);
                     gi->body_params =
