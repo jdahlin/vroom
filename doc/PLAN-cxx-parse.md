@@ -310,6 +310,14 @@ balanced token sequence into an `unparsed` node until the step that owns it.
 - Done when: V6 holds; every clang test and every extracted example goes
   through without a crash (ASan); the declaration boundaries agree with
   clang's top-level declarations on the files that have no syntax error.
+- Status (2026-11-16, done): `parse/` (token stream, tree, declared names,
+  parser with the splitter), `cxxparse`, `bench/cxx-parse.py`,
+  `bench/cxx-spec-refs.py` (in CI), `bench/cxx-spec-examples.py` (87 files
+  for P1's subclauses).  1729 runs of 1050 clang tests: tokens 1729/1729,
+  no crash 1729/1729, declarations 1310/1310 where clang finds no syntax
+  error; V1: 293 citations, 53 productions, 0 wrong.  ~250 ns per token, all
+  of it phases 1-7.  The ASan and mutant runs (V5) are left for later
+  (decided 2026-11-16: keep moving, catch those bugs in a later pass).
 
 ### P1. Declarations: specifiers, declarators, namespaces
 
