@@ -1965,6 +1965,19 @@ VPRIV void cxx_ctor_use(cxx *c, ast_qualified_type t,
     cxx_type_require_complete(c, AST_QUALIFIED_TYPE_UNQUALIFIED(t));
     memcpy(c->carg_brace, bcopy, sizeof bcopy);
     set = cxx_lookup_in(c, cls, cxx_ctor_id(), 0);
+    if (set && nargs) {
+        /* (only the default constructor code generation made for T{} (cxx_gen_constructor_body): none
+           declared, an aggregate still: SkIRect{}.intersect(a, b) in SkIRect, then SkIRect t = {x, 0, 1, 1}) */
+        bool implicit = true;
+
+        for (cxx_entity *e = set; e && implicit; e = e->next)
+            implicit = e->kind == CXX_ENTITY_VALUE && e->fn_implicit &&
+                       e->ty != CXX_TY_UNKNOWN &&
+                       AST_TYPE_KIND(c->ast, e->ty) == AST_TYPE_FUNCTION &&
+                       !AST_TYPE(c->ast, e->ty)->n;
+        if (implicit)
+            set = NULL;
+    }
     c->ctor_none = !set;
     if (set && braced && nargs) {
         /* T{a, b}: a constructor whose first parameter is std::initializer_list (the rest defaulted); T{}:

@@ -29,7 +29,8 @@ VPRIV bool cxx_gen_aggregate_init(cxx *c, uint32_t target, ast_qualified_type t,
         return false;
     for (cxx_entity *e = cxx_lookup_in(c, cls, cxx_ctor_id(), 0); e;
          e = e->next)
-        if (e->member_of == cls)
+        if (e->member_of == cls &&
+            !e->fn_implicit) /* (T{}'s, made by code generation: none declared) */
             return false;
     r = &a->tags[AST_TYPE(a, AST_QUALIFIED_TYPE_UNQUALIFIED(t))->aux];
     for (uint32_t i = 0; i < r->nfield; i++)
