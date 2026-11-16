@@ -1,5 +1,5 @@
 // [dcl.fct] Example 7, part 2 (paragraph 18), docs/cxx-spec/dcl/dcl.fct.md
-// needs: (the step whose grammar parses it)
+// needs: P7
 // status: well-formed (as far as the example says)
 
 template<C1 T, C2 U> void g1(const T*, U&);

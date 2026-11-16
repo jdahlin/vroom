@@ -30,7 +30,9 @@ namespace
 /*
  * The name at tokens[ahead ...]: ::_opt (identifier ::)* identifier, looked
  * up as [basic.lookup.unqual] and [basic.lookup.qual] say.  *length is how
- * many tokens it has.
+ * many tokens it has.  A name after a class's nested-name-specifier is
+ * looked up in the class when the parser knows its members
+ * ([class.qual]/1), else it is unknown.
  */
 name_class classify(parser &p, unsigned ahead, unsigned *length,
                     bool template_ids)
@@ -43,7 +45,10 @@ name_class classify(parser &p, unsigned ahead, unsigned *length,
         qualified = true;
         i++;
     }
+    /* the class the nested-name-specifier so far names, and whether the
+       parser knows its members (its region is scope) */
     uint32_t class_name = 0;
+    bool class_known = false;
     for (;;) {
         if (!p.at_identifier(i)) {
             *length = i - ahead;
@@ -55,13 +60,15 @@ name_class classify(parser &p, unsigned ahead, unsigned *length,
         }
         uint32_t name = p.tokens.identifier(p.position + i);
         if (class_name) {
-            /* a member of a class: unknown to the parser until P5, except
-               the injected-class-name naming the constructor */
+            /* [class.qual]/2: "the name is instead considered to name the
+               constructor of class C" */
             *length = i + 1 - ahead;
             if (name == class_name &&
-                p.at(preprocessing_op_or_punc::LEFT_PARENTHESIS, i + 1))
+                (p.at(preprocessing_op_or_punc::LEFT_PARENTHESIS, i + 1) ||
+                 p.at_attribute_specifier(i + 1)))
                 return name_class::constructor;
-            return name_class::unknown;
+            if (!class_known)
+                return name_class::unknown;
         }
         scope_index found = 0;
         name_kind kind;
@@ -72,8 +79,13 @@ name_class classify(parser &p, unsigned ahead, unsigned *length,
         if (p.at(preprocessing_op_or_punc::COLON_COLON, i + 1)) {
             if (kind == name_kind::namespace_name) {
                 scope = found;
+                class_name = 0;
             } else if (kind == name_kind::type_name) {
                 class_name = name;
+                class_known =
+                    found && p.names.kind_of(found) == scope_kind::class_;
+                if (class_known)
+                    scope = found;
             } else {
                 *length = i + 1 - ahead;
                 return name_class::unknown;
@@ -98,8 +110,8 @@ name_class classify(parser &p, unsigned ahead, unsigned *length,
 }
 
 /* the decl-specifiers that are no type-specifiers: storage-class-specifier
-   ([dcl.stc]), function-specifier ([dcl.fct.spec]) and the keywords of
-   [dcl.spec]/1 */
+   ([dcl.stc]), function-specifier ([dcl.fct.spec]: virtual,
+   explicit-specifier) and the keywords of [dcl.spec]/1 (friend among them) */
 bool is_non_type_decl_specifier(standard_keyword k)
 {
     switch (k) {
@@ -112,6 +124,9 @@ bool is_non_type_decl_specifier(standard_keyword k)
     case standard_keyword::consteval_:
     case standard_keyword::constinit_:
     case standard_keyword::inline_:
+    case standard_keyword::friend_:
+    case standard_keyword::virtual_:
+    case standard_keyword::explicit_:
         return true;
     default:
         return false;
@@ -306,6 +321,12 @@ node_index parser::decl_specifier_seq(decl_specifier_facts &facts,
             } else {
                 other_specifier = position;
                 has_other_specifier = true;
+                if (k == standard_keyword::friend_) {
+                    facts.friend_ = true;
+                    facts.friend_at = position;
+                }
+                if (k == standard_keyword::static_)
+                    facts.static_ = true;
             }
             /* [dcl.typedef]/1: "The typedef specifier shall not be
                combined in a decl-specifier-seq with any other kind of
@@ -318,7 +339,14 @@ node_index parser::decl_specifier_seq(decl_specifier_facts &facts,
                                 "defining-type-specifiers",
                                 "dcl.typedef", at);
             }
-            add_token();
+            if (k == standard_keyword::explicit_ &&
+                at(preprocessing_op_or_punc::LEFT_PARENTHESIS, 1)) {
+                explicit_specifier();
+                if (failed())
+                    return 0;
+            } else {
+                add_token();
+            }
         } else if (k == standard_keyword::const_ ||
                    k == standard_keyword::volatile_) {
             add_token();
@@ -356,17 +384,21 @@ node_index parser::decl_specifier_seq(decl_specifier_facts &facts,
                 return 0;
             facts.has_defining_type_specifier = true;
         } else if (k == standard_keyword::typename_ ||
-                   k == standard_keyword::friend_ ||
-                   k == standard_keyword::virtual_ ||
-                   k == standard_keyword::explicit_ ||
                    k == standard_keyword::extension) {
-            /* typename-specifier (P7), friend, virtual and explicit
-               (members: P5), an extension's keyword (P9) */
+            /* typename-specifier (P7), an extension's keyword (P9) */
             return beyond_this_step();
         } else if (at_identifier() ||
                    at(preprocessing_op_or_punc::COLON_COLON)) {
             if (facts.has_defining_type_specifier)
                 break; /* [dcl.spec]/3 */
+            /* [class.ctor]/1: "In a constructor declaration, each
+               decl-specifier in the optional decl-specifier-seq shall be
+               friend, inline, constexpr, or an explicit-specifier", and
+               its declarator-id is the injected-class-name */
+            if (facts.constructor_name && at_identifier() &&
+                tokens.identifier(position) == facts.constructor_name &&
+                constructor_parameters_follow(1))
+                break;
             unsigned length = 0;
             name_class c = classify_name(0, &length);
             if (c == name_class::type) {
@@ -503,7 +535,7 @@ node_index parser::simple_type_specifier_with_name()
  *         class-key nested-name-specifier template_opt simple-template-id
  *         elaborated-enum-specifier
  *
- * and, when a '{' follows the head, [class.pre]'s
+ * and, when a '{' or a base-clause follows the head, [class.pre]'s
  *
  *     class-specifier:
  *         class-head { member-specification_opt }
@@ -512,11 +544,33 @@ node_index parser::simple_type_specifier_with_name()
  *         class-key attribute-specifier-seq_opt class-head-name class-virt-specifier_opt base-clause_opt
  *         class-key attribute-specifier-seq_opt base-clause_opt
  *
- * The member-specification is P5's: the braces are kept as their tokens.
- * base-clause is P5's, templates P7's; elaborated-enum-specifier is
- * dcl.enum.cpp's.  [class.name]/2: the identifier becomes a class-name in
- * the current scope; an elaborated-type-specifier that names nothing
- * declared yet declares it ([basic.scope.pdecl]/7, [dcl.type.elab]/3).
+ *     class-head-name:
+ *         nested-name-specifier_opt class-name
+ *
+ *     class-virt-specifier:
+ *         final
+ *
+ *     class-name:
+ *         identifier
+ *         simple-template-id
+ *
+ *     class-key:
+ *         class
+ *         struct
+ *         union
+ *
+ * Templates are P7's; elaborated-enum-specifier is dcl.enum.cpp's.  A
+ * class-specifier makes the class's region in declared_names: its members'
+ * scope ([basic.scope.class]), which the class-name carries.
+ * [basic.scope.pdecl]/3: "The point of declaration for a class or class
+ * template first declared by a class-specifier is immediately after the
+ * identifier or simple-template-id (if any) in its class-head", so before
+ * its base-clause.  [basic.scope.pdecl]/7: an elaborated-type-specifier
+ * that names nothing declared yet declares the class, in the current scope
+ * when it is the declaration "class-key attribute-specifier-seq_opt
+ * identifier ;", else in "the smallest namespace or block scope that
+ * contains the declaration", and as a friend nowhere lookup finds it
+ * ([basic.scope.pdecl]/13).
  */
 node_index parser::elaborated_or_class_specifier(decl_specifier_facts &facts)
 {
@@ -530,6 +584,8 @@ node_index parser::elaborated_or_class_specifier(decl_specifier_facts &facts)
     scope_index scope = 0;
     bool known = false;
     node_index qualifier = 0;
+    size_t name_mark = begin_node();
+    token_index name_first = position;
     if (nested_name_specifier_follows(0)) {
         qualifier = nested_name_specifier(&scope, &known);
         if (failed())
@@ -545,46 +601,75 @@ node_index parser::elaborated_or_class_specifier(decl_specifier_facts &facts)
         return expected("an identifier after the nested-name-specifier",
                         "dcl.type.elab");
     }
-    if (at_identifier() && at(preprocessing_op_or_punc::LEFT_BRACE, 1)) {
-        /* class-virt-specifier: final ([class.pre]); an identifier with a
-           special meaning ([lex.name]/2 Table 4), not checked here */
-        add_token();
-    } else if (at(preprocessing_op_or_punc::COLON)) {
-        return beyond_this_step(); /* base-clause: P5 */
-    }
     /* [dcl.type]/1: a type-specifier-seq (a type-id's) has no
        class-specifier: a '{' after its elaborated-type-specifier is the
        next production's */
-    bool body =
-        at(preprocessing_op_or_punc::LEFT_BRACE) && !facts.type_specifier_seq;
-    if (body) {
-        unparsed_group();
+    bool final_ = name && at_word("final") &&
+                  (at(preprocessing_op_or_punc::LEFT_BRACE, 1) ||
+                   at(preprocessing_op_or_punc::COLON, 1));
+    bool definition = !facts.type_specifier_seq &&
+                      (final_ || at(preprocessing_op_or_punc::LEFT_BRACE) ||
+                       at(preprocessing_op_or_punc::COLON));
+    if (definition) {
+        /* [class.friend]/2: "A class shall not be defined in a friend
+           declaration." */
+        if (facts.friend_)
+            return violates("no class defined in a friend declaration",
+                            "class.friend", facts.friend_at);
+        if (qualifier)
+            finish_node(syntax_kind::class_head_name, name_mark, name_first);
+        if (final_) {
+            /* N3272 (C++11); before it [ext.clang] clang's extension: P9 */
+            if (!tokens.files.behavior.has(language_feature::override_control))
+                return beyond_this_step();
+            add_token();
+        }
+        /* the class's region: in the namespace or class a
+           nested-name-specifier names ([class.mem]/2: a class nested in
+           another is its member), else in the current scope */
+        scope_index outer = names.current();
+        if (qualifier && known)
+            names.reenter(scope);
+        scope_index region = names.enter(scope_kind::class_);
+        names.reenter(outer);
+        if (name && !qualifier)
+            names.declare(name, name_kind::type_name, region);
+        else if (name && known)
+            names.declare_in(scope, name, name_kind::type_name, region);
+        if (at(preprocessing_op_or_punc::COLON)) {
+            base_clause(region);
+            if (failed())
+                return 0;
+        }
+        finish_node(syntax_kind::class_head, mark, first);
+        if (!at(preprocessing_op_or_punc::LEFT_BRACE))
+            return expected("'{' to begin the member-specification",
+                            "class.pre");
+        class_body(name, region);
         if (failed())
             return 0;
-    } else if (!name) {
+        facts.declares_type = true;
+        return finish_node(syntax_kind::class_specifier, mark, first);
+    }
+    if (!name)
         return expected("an identifier or '{'", "dcl.type.elab");
-    }
     facts.declares_type = true;
-    if (!body) {
-        facts.elaborated = true;
-        facts.elaborated_at = first;
-        facts.elaborated_declaring_form = !qualifier;
-        if (attributes) {
-            facts.elaborated_attributes = true;
-            facts.elaborated_attributes_at = attributes_at;
-        }
+    facts.elaborated = true;
+    facts.elaborated_at = first;
+    facts.elaborated_declaring_form = !qualifier;
+    if (attributes) {
+        facts.elaborated_attributes = true;
+        facts.elaborated_attributes_at = attributes_at;
     }
-    if (name && !qualifier) {
-        bool declared = false;
-        if (!body)
-            declared = names.lookup_unqualified(name) == name_kind::type_name;
-        if (body || !declared)
+    if (!qualifier && !facts.friend_ &&
+        names.lookup_unqualified(name) != name_kind::type_name) {
+        if (facts.count == 0 && at(preprocessing_op_or_punc::SEMICOLON))
             names.declare(name, name_kind::type_name);
+        else
+            names.declare_in(names.nearest_namespace_or_block(), name,
+                             name_kind::type_name);
     }
-    syntax_kind kind = syntax_kind::elaborated_type_specifier;
-    if (body)
-        kind = syntax_kind::class_specifier;
-    return finish_node(kind, mark, first);
+    return finish_node(syntax_kind::elaborated_type_specifier, mark, first);
 }
 
 /*

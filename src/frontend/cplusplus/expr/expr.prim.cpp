@@ -58,13 +58,11 @@ node_index parser::primary_expression()
         return beyond_this_step(); /* lambda-expression */
     }
     if (at_identifier() || at(preprocessing_op_or_punc::COLON_COLON) ||
-        at(standard_keyword::decltype_))
+        at(standard_keyword::decltype_) || at(standard_keyword::operator_))
         return id_expression(false);
     switch (keyword_of(peek())) {
     case standard_keyword::requires_:
-    /* operator-function-id, conversion-function-id, literal-operator-id:
-       P5; an extension's keyword (__builtin_va_arg, __is_same, ...): P9 */
-    case standard_keyword::operator_:
+    /* an extension's keyword (__builtin_va_arg, __is_same, ...): P9 */
     case standard_keyword::template_:
     case standard_keyword::extension:
         return beyond_this_step();

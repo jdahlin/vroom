@@ -1,5 +1,5 @@
 // [dcl.fct.def.delete] Example 2 (paragraph 3), docs/cxx-spec/dcl/dcl.fct.def.delete.md
-// needs: P5
+// needs: P6
 // status: annotated
 
 struct sometype {

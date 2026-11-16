@@ -98,6 +98,31 @@ SYNTAX_NODE(designated_initializer_clause, "designated-initializer-clause", "dcl
 SYNTAX_NODE(designator, "designator", "dcl.init")
 SYNTAX_NODE(function_definition, "function-definition", "dcl.fct.def.general")
 SYNTAX_NODE(function_body, "function-body", "dcl.fct.def.general")
+/* [dcl.struct.bind] */
+SYNTAX_NODE(identifier_list, "identifier-list", "cpp.pre")
+/* [class.pre], [class.mem], [class.derived], [class.base.init] */
+SYNTAX_NODE(class_head, "class-head", "class.pre")
+SYNTAX_NODE(class_head_name, "class-head-name", "class.pre")
+SYNTAX_NODE(member_specification, "member-specification", "class.mem")
+SYNTAX_NODE(member_declaration, "member-declaration", "class.mem")
+SYNTAX_NODE(member_declarator_list, "member-declarator-list", "class.mem")
+SYNTAX_NODE(member_declarator, "member-declarator", "class.mem")
+SYNTAX_NODE(virt_specifier_seq, "virt-specifier-seq", "class.mem")
+SYNTAX_NODE(pure_specifier, "pure-specifier", "class.mem")
+SYNTAX_NODE(base_clause, "base-clause", "class.derived")
+SYNTAX_NODE(base_specifier_list, "base-specifier-list", "class.derived")
+SYNTAX_NODE(base_specifier, "base-specifier", "class.derived")
+SYNTAX_NODE(class_or_decltype, "class-or-decltype", "class.derived")
+SYNTAX_NODE(ctor_initializer, "ctor-initializer", "class.base.init")
+SYNTAX_NODE(mem_initializer_list, "mem-initializer-list", "class.base.init")
+SYNTAX_NODE(mem_initializer, "mem-initializer", "class.base.init")
+/* [dcl.fct.spec], [over.oper], [over.literal], [class.conv.fct] */
+SYNTAX_NODE(explicit_specifier, "explicit-specifier", "dcl.fct.spec")
+SYNTAX_NODE(operator_function_id, "operator-function-id", "over.oper")
+SYNTAX_NODE(literal_operator_id, "literal-operator-id", "over.literal")
+SYNTAX_NODE(conversion_function_id, "conversion-function-id", "class.conv.fct")
+SYNTAX_NODE(conversion_type_id, "conversion-type-id", "class.conv.fct")
+SYNTAX_NODE(conversion_declarator, "conversion-declarator", "class.conv.fct")
 /* [stmt]: declaration-statement, init-statement and for-range-initializer
    pass their operand on */
 SYNTAX_NODE(statement, "statement", "stmt.pre")

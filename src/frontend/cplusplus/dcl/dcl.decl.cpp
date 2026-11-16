@@ -47,6 +47,8 @@ node_index parser::init_declarator(const decl_specifier_facts &specifiers,
            complete declarator, before the initializer */
         if (facts.name && !facts.qualified_id) {
             name_kind kind = name_kind::other;
+            if (facts.first == derivation::function)
+                kind = name_kind::function;
             if (specifiers.typedef_)
                 kind = name_kind::type_name;
             names.declare(facts.name, kind);
@@ -54,7 +56,14 @@ node_index parser::init_declarator(const decl_specifier_facts &specifiers,
     }
     if (at(standard_keyword::requires_))
         return beyond_this_step();
-    if (!initializer() && !failed())
+    /* [class.static.data]/3: "The initializer expression in the definition
+       of a static data member is in the scope of its class" */
+    scope_index outer = names.current();
+    if (facts.has_member_of)
+        names.reenter(facts.member_of);
+    node_index init = initializer();
+    names.reenter(outer);
+    if (!init && !failed())
         return 0; /* no initializer: the declarator passes through */
     if (failed())
         return 0;
@@ -215,7 +224,8 @@ node_index parser::noptr_declarator(declarator_form form,
     } else if (form != declarator_form::abstract &&
                (at_identifier() || at(preprocessing_op_or_punc::COLON_COLON) ||
                 at(preprocessing_op_or_punc::TILDE) ||
-                at(preprocessing_op_or_punc::ELLIPSIS))) {
+                at(preprocessing_op_or_punc::ELLIPSIS) ||
+                at(standard_keyword::operator_))) {
         declarator_id(facts);
         if (failed())
             return 0;
@@ -265,7 +275,13 @@ node_index parser::noptr_declarator(declarator_form form,
                 bool parsed = false;
                 {
                     tentative_parse attempt(*this);
+                    /* a member's parameters are in its class's scope
+                       ([basic.scope.class]/1), and so its body */
+                    scope_index outer = names.current();
+                    if (facts.has_member_of)
+                        names.reenter(facts.member_of);
                     parameters_and_qualifiers(&facts.parameters);
+                    names.reenter(outer);
                     if (!failed()) {
                         attempt.commit();
                         parsed = true;
@@ -335,6 +351,9 @@ bool parser::parenthesis_could_be_initializer()
     case standard_keyword::const_:
     case standard_keyword::volatile_:
     case standard_keyword::register_:
+    case standard_keyword::friend_:
+    case standard_keyword::virtual_:
+    case standard_keyword::explicit_:
         return false;
     case standard_keyword::char_:
     case standard_keyword::char8_t_:

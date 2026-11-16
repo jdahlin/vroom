@@ -628,6 +628,62 @@ The first grammar, about 55 nonterminals.
   `cxx0x-override-control-keywords.cpp`, `cxx-friend.cpp`,
   `cxx-default-args.cpp`, `cxx1z-decomposition.cpp`,
   `cxx2a-bitfield-init.cpp`.
+- Status (2026-11-16): done.
+  - A class body is read twice ([class.mem]/6).  The first pass, inside a
+    tentative parse, reads the member-declarations with the
+    complete-class contexts (function bodies, ctor-initializers, default
+    member initializers, default arguments, nested class bodies) kept as
+    tokens, and keeps the names it declared; the second pass reads it all
+    with those names visible from the complete-class contexts.  A class's
+    region in `declared_names` is carried by its class-name; bases join
+    the region's lookup; `S::f` in a declarator-id puts the parameters,
+    body and a static member's initializer in S's region.
+  - The constructor decision: the class's own name before `(` (or an
+    attribute-specifier-seq and `(`) followed by what can begin a
+    parameter-declaration ends the decl-specifier-seq; a constructor does
+    not redeclare the injected-class-name.  `S::S` names the constructor
+    ([class.qual]/2).
+  - Rules clang checks while parsing and the standard states:
+    [class.mem]/12 (only a constructor, destructor or conversion function
+    omits the decl-specifier-seq), /14 (each virt-specifier at most once),
+    [class.friend]/2 (no class defined in a friend declaration), friend
+    only in a member-declaration, [dcl.attr.grammar]/5 (attributes on a
+    friend declaration only on a definition), [dcl.fct.def.default]/1 by
+    the declarator-id (an identifier other than the class's, or an
+    operator other than `=` and the comparisons, is not defaulted),
+    [dcl.array]/7 (no omitted bound on a non-static data member),
+    [over.literal]/1 on every piece of a concatenated string-literal.  In
+    C++20 a function's name before `<` is a template-name ([temp.names]/2,
+    P0846R0): such an expression is P7's (`name_kind::function`).
+  - A later edition's or an extension's, so P9's: C++23's explicit object
+    parameter (`this T self`), C++26's `friend T, U;`, Microsoft's ATL
+    attributes and `= 0 { }`, attributes on a using-declaration.  A
+    declaration kept as tokens that runs into the enclosing `}` is still
+    erroneous (it ends with `;` or `}` in every step).  An undeclared
+    class-or-decltype marks the declaration as naming something unknown.
+  - The keyword table: `private` lexed as an identifier, because
+    `gen-cplusplus-data.py` let an alias with only KEYWORD_OTHER override
+    the keyword's own entry; fixed, `lex.key.inc` regenerated.
+  - Harness fixes: `-verify` was taken as an option with a value, so the
+    option after it was dropped (`-fms-extensions` among others): every
+    harness that reads RUN lines through `cxx-pp.py` now runs those
+    options (cxx-pp: 515 runs instead of 505, tokens 480 instead of 471;
+    the newly run option sets that fail are preprocessor work, not this
+    step's).  `cxx-parse.py` gives a test that includes `<...>` clang's
+    resource directory (`stddef.h`), counts an error just after a part
+    kept as tokens, on its last line, as that part's, and a claim whose
+    type is inaccessible at the probe ("is a private member") as not
+    checkable.
+  - V4a: 2203 runs, 12247 declarations as clang, 0 rejected that clang
+    accepts, 0 accepted that clang rejects, 10194 kept as tokens; 31388
+    `unparsed` and 1032 `erroneous` nodes.  V4b: 0 refuted.  V1: 492
+    citations, 213 productions, 0 wrong; class 25 of 25, over 4 of 4.  V2:
+    155 examples of [class.*], [over.*] and [dcl.struct.bind] extracted
+    and annotated (`needs:`, each error line `// syntax-error` when clang's
+    parser reports it, else `// semantic`).  V6: 121/121.  Known
+    differences: clang's FIXME in `cxx-ambig-init-templ.cpp` (`int k = b
+    < c, unsigned int (x)` is two parameters) and a `_Pragma` from a macro
+    inside a struct.
 
 ### P6. Lambdas, exceptions, coroutines
 

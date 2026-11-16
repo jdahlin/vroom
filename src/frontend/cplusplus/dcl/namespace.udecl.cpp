@@ -34,6 +34,10 @@ node_index parser::using_declaration()
         count++;
         if (accept(preprocessing_op_or_punc::ELLIPSIS))
             ellipsis = true;
+        /* an attribute-specifier-seq after a using-declarator: clang's
+           extension, P9's */
+        if (at_attribute_specifier())
+            return beyond_this_step();
         if (!accept(preprocessing_op_or_punc::COMMA))
             break;
     }
@@ -48,7 +52,8 @@ node_index parser::using_declaration()
  *     using-declarator:
  *         typename_opt nested-name-specifier unqualified-id
  *
- * The unqualified-ids that are operator names are P5's, template-ids P7's.
+ * The unqualified-ids that are operator names are over.oper.cpp's,
+ * template-ids P7's.
  * A using-declarator with typename names a type ([temp.res]/5); a name
  * the parser cannot look up (a class's member) is declared as nothing.
  */
@@ -64,10 +69,14 @@ node_index parser::using_declarator()
         return 0;
     if (!qualifier)
         return expected("a nested-name-specifier", "namespace.udecl");
-    if (at(standard_keyword::operator_) || at(standard_keyword::template_))
+    if (at(standard_keyword::template_))
         return beyond_this_step();
     uint32_t name = 0;
-    if (at(preprocessing_op_or_punc::TILDE)) {
+    if (at(standard_keyword::operator_)) {
+        operator_unqualified_id();
+        if (failed())
+            return 0;
+    } else if (at(preprocessing_op_or_punc::TILDE)) {
         size_t tilde_mark = begin_node();
         token_index tilde_first = position;
         add_token();

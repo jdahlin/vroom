@@ -193,8 +193,10 @@ enum class name_kind : uint8_t {
     type_name,
     template_name,
     namespace_name,
-    /* a variable, function, enumerator, ...: declared, and none of the above */
+    /* a variable, enumerator, ...: declared, and none of the above */
     other,
+    /* a function ([temp.names]/2 tells it from other) */
+    function,
 };
 
 /* [basic.scope]: the declarative regions the syntax makes */
@@ -245,8 +247,32 @@ class declared_names
     }
 
     /* [basic.scope.declarative]/1: the name is introduced into the current
-       declarative region */
-    void declare(uint32_t name, name_kind kind);
+       declarative region; a class-name with the region of its
+       member-specification ([class.pre]/1), when it has one */
+    void declare(uint32_t name, name_kind kind, scope_index region = 0);
+    /* ... into another region: an elaborated-type-specifier's
+       ([basic.scope.pdecl]/7), a class defined by a qualified name */
+    void declare_in(scope_index in, uint32_t name, name_kind kind,
+                    scope_index region = 0);
+    /* [basic.scope.pdecl]/7: "the smallest namespace or block scope that
+       contains the declaration" */
+    scope_index nearest_namespace_or_block() const;
+    scope_kind kind_of(scope_index region) const
+    {
+        return scopes[region].kind;
+    }
+    /* [class.derived]/2, [class.member.lookup]: the members of a base class
+       are found by lookup in the derived class's region, after its own */
+    void add_base(scope_index derived, scope_index base);
+    /* [class.mem]/6: "A complete-class context of a class is a function
+       body, default argument, noexcept-specifier, or default member
+       initializer within the member-specification of the class", where
+       "the class is regarded as complete": complete is a region with every
+       member the member-specification declares, searched after the
+       class's own region in such a context (complete_contexts > 0) */
+    scope_index snapshot(scope_index region);
+    void set_complete(scope_index region, scope_index complete);
+    unsigned complete_contexts = 0;
     /* [namespace.alias]/2: the identifier is a synonym of the namespace */
     void declare_namespace_alias(uint32_t name, scope_index nominated);
     /* [namespace.udir]/2: "the names in the nominated namespace can be
@@ -254,7 +280,8 @@ class declared_names
     void use_namespace(scope_index nominated);
     /* [basic.lookup.unqual]/1: "the scopes are searched for a declaration in
        the order listed ...; name lookup ends as soon as a declaration is
-       found for the name"; *scope is a namespace-name's region */
+       found for the name"; *scope is the region of the namespace-name or
+       class-name found */
     name_kind lookup_unqualified(uint32_t name, scope_index *scope = nullptr);
     /* [basic.lookup.qual]: the name in the namespace a
        nested-name-specifier named */
@@ -284,7 +311,8 @@ class declared_names
     struct declaration {
         uint32_t name;
         name_kind kind;
-        /* the region of a namespace-name */
+        /* the region of a namespace-name, or of a class-name's
+           member-specification (0: none known) */
         scope_index scope;
     };
     struct scope {
@@ -294,6 +322,9 @@ class declared_names
         /* inline and unnamed namespaces of this one, and the namespaces
            using-directives nominated in it: searched with it */
         owned_array<scope_index> searched_with;
+        /* a class's region with all its members ([class.mem]/6), 0 when
+           there is none yet */
+        scope_index complete = 0;
     };
     owned_objects<scope> scopes;
     scope_index current_scope = 0;
@@ -357,6 +388,11 @@ struct declarator_facts {
        parameters-and-qualifiers ([basic.scope.param]/1) */
     bool has_parameters = false;
     scope_index parameters = 0;
+    /* the declarator-id is a qualified-id naming a member of a class the
+       parser knows: the names after it are looked up in that class too
+       ([basic.scope.class]/1, [class.mfct]/2, [class.static.data]/3) */
+    bool has_member_of = false;
+    scope_index member_of = 0;
 };
 
 /* what a decl-specifier-seq said that the rest of the declaration needs */
@@ -382,6 +418,13 @@ struct decl_specifier_facts {
     bool trailing_attributes = false;
     token_index elaborated_attributes_at = 0;
     token_index elaborated_at = 0;
+    /* [dcl.friend], [class.static] */
+    bool friend_ = false, static_ = false;
+    token_index friend_at = 0;
+    /* in: the class whose member-declaration this is, when it has a name:
+       that name before ( is a constructor's declarator-id ([class.ctor]/1),
+       not a decl-specifier */
+    uint32_t constructor_name = 0;
 };
 
 /* what an attribute-specifier-seq holds that the rules on its context
@@ -623,11 +666,20 @@ class parser
     /* ---- [dcl.pre] */
     node_index declaration_seq(bool until_closing_brace);
     node_index declaration();
+    node_index declaration_alternative();
+    /* [intro.compliance]/2.2: a declaration (or member-declaration) that
+       does not parse is kept as its tokens, erroneous or unparsed, and the
+       next one starts after it */
+    node_index recover_declaration(node_index (parser::*alternative)());
     bool starts_module_declaration();
     node_index block_or_function_declaration();
     node_index simple_declaration_rest(size_t mark, token_index first,
                                        const decl_specifier_facts &specifiers,
                                        bool attributes);
+    /* [dcl.struct.bind]: ref-qualifier_opt [ identifier-list ], each
+       identifier declared */
+    bool structured_binding_follows();
+    node_index structured_binding_identifiers();
     node_index static_assert_declaration();
     node_index alias_declaration();
     node_index attribute_declaration();
@@ -663,6 +715,8 @@ class parser
     bool type_name_follows(unsigned ahead);
     node_index simple_type_specifier_with_name();
     node_index elaborated_or_class_specifier(decl_specifier_facts &facts);
+    /* explicit ( constant-expression ) ([dcl.fct.spec]) */
+    node_index explicit_specifier();
     node_index decltype_specifier();
 
     /* ---- [expr.prim.id], [expr.prim.id.qual] */
@@ -695,6 +749,48 @@ class parser
     node_index type_id();
     node_index noexcept_specifier();
 
+    /* ---- [class.pre], [class.mem], [class.derived], [class.base.init] */
+    /* class-head's base-clause_opt, { member-specification_opt }: the
+       class's region is made by the caller */
+    node_index base_clause(scope_index derived);
+    node_index base_specifier(scope_index derived);
+    /* class-or-decltype; *region: the class it names, if the parser knows
+       it (0 if not) */
+    node_index class_or_decltype(scope_index *region);
+    /* { member-specification_opt } of the class name (0: unnamed) whose
+       region is region, in two passes ([class.mem]/6) */
+    node_index class_body(uint32_t name, scope_index region);
+    node_index member_specification();
+    node_index member_declaration();
+    node_index member_declaration_alternative();
+    node_index member_declarator(const decl_specifier_facts &specifiers,
+                                 size_t mark, token_index first, bool first_one,
+                                 bool *definition);
+    /* virt-specifier-seq_opt: 0 when there is none */
+    node_index virt_specifier_seq();
+    bool at_virt_specifier(unsigned ahead = 0);
+    /* an identifier with the special meaning word ([lex.name]/2 Table 4) */
+    bool at_word(const char *word, unsigned ahead = 0);
+    /* ( at tokens[ahead] begins a constructor's parameters ([class.ctor]) */
+    bool constructor_parameters_follow(unsigned ahead);
+    node_index ctor_initializer();
+    node_index mem_initializer();
+    /* the first pass over a member-specification: only the names its
+       member-declarations declare; the complete-class contexts are skipped */
+    bool collecting_members = false;
+    /* a member-declaration's declarator is being parsed: its default
+       arguments are complete-class contexts */
+    bool member_declarator_context = false;
+    /* the class whose member-specification is being parsed directly: what
+       a nested-name-specifier-less constructor name is */
+    uint32_t member_class_name = 0;
+
+    /* ---- [over.oper], [over.literal], [class.conv.fct] */
+    /* operator-function-id, literal-operator-id or conversion-function-id
+       at operator */
+    node_index operator_unqualified_id();
+    node_index conversion_type_id();
+
     /* ---- [dcl.init], [dcl.fct.def.general] */
     node_index initializer();
     node_index initializer_clause();
@@ -709,7 +805,10 @@ class parser
     node_index designated_initializer_list();
     /* the declarator is the function-definition's: its parameters' scope
        goes on through the body ([basic.scope.param]/1) */
-    node_index function_body(const declarator_facts &declarator);
+    void defaultable_declarator(const declarator_facts &declarator,
+                                bool member);
+    node_index function_body(const declarator_facts &declarator,
+                             bool member = false);
 
     /* ---- [stmt] */
     /* statement, with the recovery of [intro.compliance]/2.2: a statement

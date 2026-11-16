@@ -9,9 +9,10 @@
  * only what decides between productions: per declarative region
  * ([basic.scope.declarative]/1), which names it declares and as which kind.
  *
- * This is a stand-in for [basic.lookup], not an implementation of it: no
- * using-directives yet, no class member lookup, no hiding rules beyond the
- * order of the scopes (doc/PLAN-cxx-parse.md lists what each step adds).
+ * This is a stand-in for [basic.lookup], not an implementation of it: a
+ * class's members and its bases' when they are classes it knows, no
+ * hiding rules beyond the order of the scopes, nothing of templates
+ * (doc/PLAN-cxx-parse.md lists what each step adds).
  */
 #include "../cplusplus-internal.h"
 
@@ -104,10 +105,55 @@ void declared_names::leave()
     current_scope = scopes[current_scope].enclosing;
 }
 
-void declared_names::declare(uint32_t name, name_kind kind)
+void declared_names::declare(uint32_t name, name_kind kind, scope_index region)
 {
-    scopes[current_scope].declarations.append({name, kind, 0});
-    journal.append(current_scope);
+    declare_in(current_scope, name, kind, region);
+}
+
+void declared_names::declare_in(scope_index in, uint32_t name, name_kind kind,
+                                scope_index region)
+{
+    scopes[in].declarations.append({name, kind, region});
+    journal.append(in);
+}
+
+scope_index declared_names::nearest_namespace_or_block() const
+{
+    scope_index s = current_scope;
+    while (scopes[s].kind != scope_kind::namespace_ &&
+           scopes[s].kind != scope_kind::block)
+        s = scopes[s].enclosing;
+    return s;
+}
+
+void declared_names::add_base(scope_index derived, scope_index base)
+{
+    /* a class is not its own base ([class.derived]/2: "shall not be an
+       incompletely defined class"): no cycle */
+    if (derived == base)
+        return;
+    scopes[derived].searched_with.append(base);
+    journal.append(derived | 0x80000000u);
+}
+
+scope_index declared_names::snapshot(scope_index region)
+{
+    /* not journaled: the copy is reachable only through set_complete, from
+       the region whose member-specification is parsed again */
+    scope &copy = scopes.make();
+    const scope &s = scopes[region];
+    copy.kind = s.kind;
+    copy.enclosing = s.enclosing;
+    for (const declaration &d : s.declarations)
+        copy.declarations.append(d);
+    for (scope_index other : s.searched_with)
+        copy.searched_with.append(other);
+    return static_cast<scope_index>(scopes.size() - 1);
+}
+
+void declared_names::set_complete(scope_index region, scope_index complete)
+{
+    scopes[region].complete = complete;
 }
 
 void declared_names::declare_namespace_alias(uint32_t name,
@@ -147,9 +193,11 @@ name_kind declared_names::lookup_unqualified(uint32_t name, scope_index *scope)
     name_kind found = name_kind::not_declared;
     for (scope_index s = current_scope;; s = scopes[s].enclosing) {
         const declaration *d = find(s, name);
+        if (!d && complete_contexts && scopes[s].complete)
+            d = find(scopes[s].complete, name);
         if (d) {
             found = d->kind;
-            if (scope && d->kind == name_kind::namespace_name)
+            if (scope)
                 *scope = d->scope;
             break;
         }
@@ -169,9 +217,11 @@ name_kind declared_names::lookup_qualified(scope_index in, uint32_t name,
        or enumeration." */
     name_kind found = name_kind::not_declared;
     const declaration *d = find(in, name);
+    if (!d && complete_contexts && scopes[in].complete)
+        d = find(scopes[in].complete, name);
     if (d) {
         found = d->kind;
-        if (scope && d->kind == name_kind::namespace_name)
+        if (scope)
             *scope = d->scope;
     }
     lookups.append({name, in, true, found});

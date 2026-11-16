@@ -1,6 +1,6 @@
 // [dcl.constexpr] Example 2 (paragraph 3), docs/cxx-spec/dcl/dcl.constexpr.md
-// needs: (the step whose grammar parses it)
-// status: unannotated (mark each error line // syntax-error or // semantic)
+// needs: P5
+// status: annotated
 
 constexpr int square(int x)
   { return x * x; }             // OK
@@ -12,12 +12,12 @@ constexpr int abs(int x) {
   return x;                     // OK
 }
 constexpr int first(int n) {
-  static int value = n;         // error: variable has static storage duration
+  static int value = n;         // error: variable has static storage duration // semantic
   return value;
 }
 constexpr int uninit() {
   struct { int a; } s;
-  return s.a;                   // error: uninitialized read of s.a
+  return s.a;                   // error: uninitialized read of s.a // semantic
 }
 constexpr int prev(int x)
   { return --x; }               // OK

@@ -407,8 +407,9 @@ def check(test, opts, clang, cxxlex, cxxparse):
                 res['syntax']['not_comparable'] += 1
                 continue
             # an error in a part kept as tokens (a body, an initializer) is
-            # about grammar a later step parses
-            inside = [p for p in mine if any(lo <= p <= hi for lo, hi in opaque)]
+            # about grammar a later step parses; so is one just after its
+            # last token, on its line (how the kept construct ends)
+            inside = [p for p in mine if any(lo <= p and (p <= hi or p[0] == hi[0]) for lo, hi in opaque)]
             if mine and len(inside) == len(mine):
                 res['syntax']['not_comparable'] += 1
                 continue
@@ -617,6 +618,10 @@ def check_claims(test, opts, clang, cxxparse, res, error_lines):
                 declarators['unchecked'] += 1
                 if os.environ.get('VCC_PARSE_UNCHECKED'):
                     res['fail'].append(('unchecked', f'{row}: {kind} {declared_name}: {probe[0]}'))
+        elif same_type and all(re.search(r"is a (private|protected) member", x) for x in same_type):
+            # the claim names a type the place of the probe has no access
+            # to ([class.access]): not a different type
+            declarators['unchecked'] += 1
         elif same_type:
             declarators['refuted'] += 1
             res['fail'].append(('claims', f'the declaration before {row}:{column}: `{declared_name}` is no '
@@ -675,6 +680,8 @@ def main():
     clang = cxxpp.find_clang()
     cxxlex = find_tool(a.bin_dir, 'cxxlex')
     cxxparse = find_tool(a.bin_dir, 'cxxparse')
+    resource_include = os.path.join(
+        subprocess.run([clang, '-print-resource-dir'], capture_output=True, text=True).stdout.strip(), 'include')
     jobs = []
     unrunnable = 0
     for t in tests():
@@ -692,8 +699,14 @@ def main():
             continue
         if not sets and (OURS in t):
             sets = [['-std=c++20']]
+        # a test that includes a header of clang's resource directory
+        # (<stddef.h>, ...) finds it as clang -cc1 does; cxxparse has no
+        # system directories of its own
+        extra = []
+        if re.search(r'^\s*#\s*include\s*<', text, re.M):
+            extra = ['-isystem', resource_include]
         for opts in sets:
-            jobs.append((t, opts))
+            jobs.append((t, opts + extra))
     with concurrent.futures.ThreadPoolExecutor(a.j) as ex:
         results = list(ex.map(lambda j: check(j[0], j[1], clang, cxxlex, cxxparse), jobs))
         if a.mutate:

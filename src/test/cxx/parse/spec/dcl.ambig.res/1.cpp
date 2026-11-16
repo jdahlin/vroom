@@ -1,5 +1,5 @@
 // [dcl.ambig.res] Example 1 (paragraph 1), docs/cxx-spec/dcl/dcl.ambig.res.md
-// needs: (the step whose grammar parses it)
+// needs: P5
 // status: well-formed (as far as the example says)
 
 struct S {
