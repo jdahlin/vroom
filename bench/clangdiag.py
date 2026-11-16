@@ -26,7 +26,7 @@ FILES = ['Diagnostic.td', 'DiagnosticASTKinds.td', 'DiagnosticCategories.td', 'D
          'DiagnosticCommonKinds.td', 'DiagnosticCrossTUKinds.td', 'DiagnosticDocs.td', 'DiagnosticDriverKinds.td',
          'DiagnosticFrontendKinds.td', 'DiagnosticGroups.td', 'DiagnosticInstallAPIKinds.td', 'DiagnosticLexKinds.td',
          'DiagnosticParseKinds.td', 'DiagnosticRefactoringKinds.td', 'DiagnosticSemaKinds.td',
-         'DiagnosticSerializationKinds.td', 'DiagnosticTrapKinds.td']
+         'DiagnosticSerializationKinds.td', 'DiagnosticTrapKinds.td', 'TokenKinds.def']
 CLASSES = {'Error': 'error', 'Warning': 'warning', 'Extension': 'extension', 'ExtWarn': 'extension',
            'Note': 'note', 'Remark': 'remark', 'Trap': 'trap'}
 
@@ -176,7 +176,7 @@ def load(d=None):
     diags, groups, subst = {}, {}, {}
     inline_groups = {}
     for f in FILES:
-        if f in ('Diagnostic.td', 'DiagnosticDocs.td', 'DiagnosticCategories.td'):
+        if f in ('Diagnostic.td', 'DiagnosticDocs.td', 'DiagnosticCategories.td', 'TokenKinds.def'):
             continue
         text = _strip_comments(open(f'{d}/{f}', encoding='utf-8').read())
         lets = []
@@ -216,7 +216,7 @@ def load(d=None):
                 ctx.update(kv)
             r = {'name': name, 'class': CLASSES.get(cls, 'warning'), 'text': _strings(hm.group(2)) if hm else '',
                  'file': f, 'component': _strings(ctx.get('Component', '')),
-                 'category': _strings(ctx.get('CategoryName', '')), 'group': None, 'default': None}
+                 'category': _strings(ctx.get('CategoryName', '')), 'group': None, 'default': None, 'extwarn': cls == 'ExtWarn'}
             for p in parents[1:]:
                 gm = re.match(r'InGroup\s*<\s*(.*)>\s*$', p, re.S)
                 if gm:

@@ -109,7 +109,7 @@ $(OUT)/vref: bin/vref/vref.py | $(OUT)
 	cp $< $@
 	chmod +x $@
 
-vcc: $(OUT)/vcc $(OUT)/vsh/sh $(OUT)/vld $(OUT)/vas $(OUT)/var $(OUT)/vcc-nm $(OUT)/vcc-objcopy $(OUT)/vccd $(OUT)/lextest $(OUT)/vpp $(OUT)/vlink $(OUT)/vasm $(OUT)/virtest $(OUT)/viralloc $(OUT)/task-test
+vcc: $(OUT)/vcc $(OUT)/vsh/sh $(OUT)/vld $(OUT)/vas $(OUT)/var $(OUT)/vcc-nm $(OUT)/vcc-objcopy $(OUT)/vccd $(OUT)/lextest $(OUT)/vpp $(OUT)/vlink $(OUT)/vasm $(OUT)/virtest $(OUT)/viralloc $(OUT)/task-test $(if $(filter c++,$(VCC_LANG)),$(OUT)/cxxlex)
 
 o = $(patsubst %.cpp,$(OBJ)/%.o,$(1))
 # WebAssembly is off by default (disabled 2026-11-13, doc/PLAN-wasm.md): its
@@ -179,7 +179,7 @@ $(OBJ)/%.o: %.cpp Makefile $(LANG_STAMP) $(BOOTSTRAP_COMPILER) | $(OBJ)
 	$(VCC_CC) $(VCC_DIALECT) $(VCC_FAST) $(VCC_LTO) $(XFLAGS) -MMD -MP -MF $(@:.o=.dep) -c $< -o $@
 
 # rewritten only when the list of files changes
-UNITY_C = $(patsubst %,$(OBJ)/unity/%.cpp,$(SPLIT_MODS) as obj vir server)
+UNITY_C = $(patsubst %,$(OBJ)/unity/%.cpp,$(SPLIT_MODS) as obj vir server cplusplus)
 $(UNITY_C): $(OBJ)/unity/%.cpp: FORCE
 	@mkdir -p $(dir $@)
 	@(echo '#define VCC_UNITY 1'; for f in $(abspath $($*_SRC)); do echo "#include \"$$f\""; done) > $@.tmp
@@ -225,6 +225,13 @@ $(OUT)/lextest: $(LEXTEST_OBJ) $(LEX_OBJECT)
 	$(VCC_LINK) -O3 $(VCC_SAN) $(VCC_SANLD) $(VCC_PGO) -pthread $^ -o $@
 
 $(OUT)/vasm: $(call o,bin/vasm/vasm.cpp $(LIB_SRC)) $(AS_OBJ)
+	$(VCC_LINK) $(VCC_LDFLAGS) $^ -o $@
+
+# the C++ front end written against the standard (src/frontend/cplusplus,
+# doc/PLAN-cxx-spec.md): C++20 code, so not in a VCC_LANG=c build; cxxlex
+# drives its lexer for bench/cxx-lex.py
+cplusplus_SRC = $(wildcard frontend/cplusplus/*/*.cpp)
+$(OUT)/cxxlex: $(call o,bin/cxxlex/cxxlex.cpp $(LIB_SRC)) $(call mod,cplusplus)
 	$(VCC_LINK) $(VCC_LDFLAGS) $^ -o $@
 
 # virtest: VIR's parser, verifier and printer (SPEC-vir.md 16); depends on nothing else

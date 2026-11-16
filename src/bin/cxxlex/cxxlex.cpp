@@ -1,0 +1,316 @@
+/*
+ * cxxlex: the C++ front end's lexer (src/frontend/cplusplus/lex) on one
+ * source file, printing what clang -cc1 prints for the same command line, so
+ * that bench/cxx-lex.py can compare the two:
+ *
+ *   cxxlex -dump-raw-tokens [OPTIONS] FILE   phase 3: preprocessing tokens,
+ *                                            white space and comments
+ *   cxxlex -dump-tokens [OPTIONS] FILE       phase 7: tokens (FILE should be
+ *                                            preprocessed: line markers are
+ *                                            followed, other directives skipped)
+ *   cxxlex -literal-claims [OPTIONS] FILE    the same tokens' literals as a C++
+ *                                            file of static_asserts: each
+ *                                            literal's type and value as
+ *                                            computed here, for clang to check
+ *
+ * OPTIONS are the clang -cc1 options that change lexing: -std=, -x,
+ * -fms-extensions, -fms-compatibility, -fdollars-in-identifiers,
+ * -fno-dollars-in-identifiers, -fchar8_t, -fno-char8_t, -trigraphs,
+ * -ftrigraphs, -fno-trigraphs, -pedantic, -pedantic-errors, -W..., -w.  Others
+ * are ignored.  Diagnostics go to stderr as clang prints them; the exit status
+ * is 1 if there was an error.
+ */
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "frontend/cplusplus/cplusplus.h"
+
+using namespace cplusplus;
+
+static void write_escaped(vbuffer *out, const char *s, size_t n)
+{
+    for (size_t i = 0; i < n; i++) {
+        unsigned char c = (unsigned char)s[i];
+        if (c == '\\' || c == '"')
+            vbuffer_format_append(out, "\\%c", c);
+        else if (c == '\n')
+            vbuffer_string_append(out, "\\n");
+        else if (c == '\t')
+            vbuffer_string_append(out, "\\t");
+        else if (c < 0x20 || c >= 0x7f)
+            vbuffer_format_append(out, "\\%03o", c);
+        else
+            vbuffer_append(out, &c, 1);
+    }
+}
+
+/*
+ * A literal's type and value as static_asserts clang can check:
+ *   _Static_assert(__is_same(__decltype(LIT), T), "");
+ *   _Static_assert(LIT == (T)V, "");       integer and character literals
+ *   _Static_assert(LIT[k] == (T)V_k, "");  each code unit of a string literal
+ * with #line so that a failed claim names the literal's place (clang's
+ * spellings, which every edition has).
+ */
+static void write_claim(vbuffer *out, const lexer &l, const token &t,
+                        const char *spelling, size_t n, source_position p)
+{
+    if (t.kind != token_kind::literal || !t.value_known ||
+        t.literal == literal_kind::user_defined_literal ||
+        t.type == fundamental_type::bit_precise_int ||
+        t.type == fundamental_type::unsigned_bit_precise_int)
+        return;
+    const char *type = fundamental_type_name(t.type);
+    vbuffer_format_append(out, "#line %u \"%s\"\n", p.line, p.file_name);
+    if (t.literal == literal_kind::floating_point_literal) {
+        /* the bits of the value: __builtin_bit_cast to an unsigned integer
+           of the format's width */
+        const char *bits =
+            t.type == fundamental_type::float16   ? "unsigned short"
+            : t.type == fundamental_type::float_  ? "unsigned int"
+            : t.type == fundamental_type::double_ ? "unsigned long long"
+                                                  : "unsigned __int128";
+        vbuffer_format_append(
+            out,
+            "_Static_assert(__is_same(__decltype(%.*s), %s), \"\"); "
+            "_Static_assert(__builtin_bit_cast(%s, %.*s) == "
+            "(((unsigned __int128)0x%llxull << 64) | 0x%llxull), \"\");\n",
+            (int)n, spelling, type, bits, (int)n, spelling,
+            (unsigned long long)t.floating_bits_high,
+            (unsigned long long)t.floating_bits_low);
+        return;
+    }
+    if (t.literal == literal_kind::string_literal) {
+        vbuffer_format_append(out,
+                              "_Static_assert(__is_same(__decltype(%.*s), "
+                              "const %s(&)[%u]), \"\");",
+                              (int)n, spelling, type, t.string_length + 1);
+        for (uint32_t k = 0; k < t.string_length && k < 64; k++)
+            vbuffer_format_append(
+                out, " _Static_assert(%.*s[%u] == (%s)0x%xu, \"\");", (int)n,
+                spelling, k, type, l.string_code_units()[t.string_offset + k]);
+        vbuffer_string_append(out, "\n");
+        return;
+    }
+    vbuffer_format_append(
+        out,
+        "_Static_assert(__is_same(__decltype(%.*s), %s), \"\"); "
+        "_Static_assert(%.*s == (%s)0x%llxull, \"\");\n",
+        (int)n, spelling, type, (int)n, spelling, type,
+        (unsigned long long)t.value);
+}
+
+static bool parse_edition(const char *s, implementation_defined_behavior *b)
+{
+    static const struct {
+        const char *name;
+        standard_edition edition;
+    } names[] = {{"98", standard_edition::cplusplus_98},
+                 {"03", standard_edition::cplusplus_98},
+                 {"0x", standard_edition::cplusplus_11},
+                 {"11", standard_edition::cplusplus_11},
+                 {"1y", standard_edition::cplusplus_14},
+                 {"14", standard_edition::cplusplus_14},
+                 {"1z", standard_edition::cplusplus_17},
+                 {"17", standard_edition::cplusplus_17},
+                 {"2a", standard_edition::cplusplus_20},
+                 {"20", standard_edition::cplusplus_20},
+                 {"2b", standard_edition::cplusplus_23},
+                 {"23", standard_edition::cplusplus_23},
+                 {"2c", standard_edition::cplusplus_26},
+                 {"26", standard_edition::cplusplus_26}};
+    bool gnu = !strncmp(s, "gnu++", 5);
+    if (!gnu && strncmp(s, "c++", 3))
+        return false;
+    s += gnu ? 5 : 3;
+    for (const auto &n : names)
+        if (!strcmp(s, n.name)) {
+            *b = implementation_defined_behavior::for_edition(n.edition, gnu);
+            return true;
+        }
+    return false;
+}
+
+int main(int argc, char **argv)
+{
+    implementation_defined_behavior behavior =
+        implementation_defined_behavior::for_edition(
+            standard_edition::cplusplus_17, true);
+    diagnostic_options diagnostic_settings;
+    bool raw = false, claims = false, char8_set = false, char8 = false,
+         trigraph_set = false, trigraphs = false;
+    bool dollar_set = false, dollar = true, ms = false, ms_compat = false;
+    const char *path = nullptr;
+
+    for (int i = 1; i < argc; i++) {
+        const char *a = argv[i];
+        if (!strcmp(a, "-dump-raw-tokens"))
+            raw = true;
+        else if (!strcmp(a, "-dump-tokens"))
+            raw = false;
+        else if (!strcmp(a, "-literal-claims"))
+            raw = false, claims = true;
+        else if (!strncmp(a, "-std=", 5)) {
+            if (!parse_edition(a + 5, &behavior)) {
+                fprintf(stderr, "cxxlex: unsupported %s\n", a);
+                return 2;
+            }
+        } else if (!strcmp(a, "-fms-extensions"))
+            ms = true;
+        else if (!strcmp(a, "-fms-compatibility"))
+            ms = ms_compat = true;
+        else if (!strcmp(a, "-fchar8_t") || !strcmp(a, "-fno-char8_t"))
+            char8_set = true, char8 = a[2] == 'c';
+        else if (!strcmp(a, "-trigraphs") || !strcmp(a, "-ftrigraphs") ||
+                 !strcmp(a, "-fno-trigraphs"))
+            trigraph_set = true, trigraphs = strcmp(a, "-fno-trigraphs") != 0;
+        else if (!strcmp(a, "-fdollars-in-identifiers") ||
+                 !strcmp(a, "-fno-dollars-in-identifiers"))
+            dollar_set = true, dollar = a[2] == 'd';
+        else if (diagnostic_settings.parse(a))
+            ;
+        else if (!strcmp(a, "-x") || !strcmp(a, "-triple") || !strcmp(a, "-o"))
+            i++;
+        else if (a[0] != '-' || !a[1])
+            path = a;
+    }
+    if (!path) {
+        fprintf(stderr, "usage: cxxlex [-dump-raw-tokens|-dump-tokens] [clang "
+                        "-cc1 options] FILE\n");
+        return 2;
+    }
+    if (char8_set)
+        behavior.char8_t_keyword = char8;
+    if (trigraph_set)
+        behavior.trigraphs = trigraphs;
+    if (dollar_set)
+        behavior.dollar_in_identifier = dollar;
+    behavior.microsoft_extensions = ms;
+    behavior.microsoft_compatibility = ms_compat;
+
+    source_file file;
+    if (!file.open(path)) {
+        fprintf(stderr, "cxxlex: cannot read %s\n", path);
+        return 2;
+    }
+    diagnostic_consumer diagnostics(diagnostic_settings);
+    diagnostics.file = &file;
+    lexer_options options;
+    options.retain_white_space = options.retain_comments = raw;
+    lexer l(file, behavior, diagnostics, options);
+
+    owned_buffer out, spelling;
+    /* the preprocessing tokens phase 7 sees: all of them for
+       -dump-raw-tokens; for preprocessed input the ones outside directives,
+       a line directive ([cpp.line]/5: # digit-sequence "s-char-sequence")
+       giving the presumed lines */
+    owned_array<preprocessing_token> tokens;
+    for (;;) {
+        preprocessing_token pp = l.next();
+        while (!raw && pp.at_start_of_line &&
+               pp.kind == preprocessing_token_kind::preprocessing_op_or_punc &&
+               preprocessing_op_or_punc_primary(pp.op_or_punc) ==
+                   preprocessing_op_or_punc::HASH) {
+            preprocessing_token number = l.next();
+            if (!number.at_start_of_line &&
+                number.kind == preprocessing_token_kind::pp_number) {
+                preprocessing_token name = l.next();
+                spelling.clear();
+                l.spelling(number, spelling.get());
+                unsigned long line = strtoul(spelling.data(), nullptr, 10);
+                if (!name.at_start_of_line &&
+                    name.kind == preprocessing_token_kind::string_literal) {
+                    spelling.clear();
+                    l.spelling(name, spelling.get());
+                    /* [cpp.line]/4: the line after the directive's new-line */
+                    uint32_t next = name.location + name.extent;
+                    while (next < file.size &&
+                           file.physical_characters[next] != '\n')
+                        next++;
+                    file.add_line_directive(next + 1, (uint32_t)line,
+                                            spelling.data() + 1,
+                                            spelling.size() - 2);
+                }
+                pp = name;
+            } else
+                pp = number;
+            while (!pp.at_start_of_line &&
+                   pp.kind != preprocessing_token_kind::end_of_file)
+                pp = l.next();
+        }
+        tokens.append(pp);
+        if (pp.kind == preprocessing_token_kind::end_of_file)
+            break;
+    }
+
+    auto is_string = [](const preprocessing_token &pp) {
+        return pp.kind == preprocessing_token_kind::string_literal ||
+               pp.kind == preprocessing_token_kind::user_defined_string_literal;
+    };
+    for (size_t i = 0; i < tokens.size(); i++) {
+        const preprocessing_token &pp = tokens[i];
+        if (raw && pp.kind == preprocessing_token_kind::end_of_file)
+            break;
+        /* [lex.phases]/1.6: adjacent string literals become one token; each
+           piece is still printed as clang prints it */
+        size_t pieces = 1;
+        token t;
+        if (!raw && is_string(pp)) {
+            while (i + pieces < tokens.size() && is_string(tokens[i + pieces]))
+                pieces++;
+            t = l.convert_string_literals(&tokens[i], pieces);
+        } else if (!raw)
+            t = l.convert(pp);
+        if (claims) {
+            if (pp.kind != preprocessing_token_kind::end_of_file) {
+                /* the claim is about the concatenation, spelled as its pieces */
+                spelling.clear();
+                for (size_t k = 0; k < pieces; k++) {
+                    if (k)
+                        vbuffer_append(spelling.get(), " ", 1);
+                    l.spelling(tokens[i + k], spelling.get());
+                }
+                write_claim(out.get(), l, t, spelling.data(), spelling.size(),
+                            file.position(pp.location));
+            }
+            i += pieces - 1;
+            continue;
+        }
+        for (size_t k = 0; k < pieces; k++) {
+            const preprocessing_token &piece = tokens[i + k];
+            const char *name = raw || pieces > 1 ? clang_token_name(l, piece)
+                                                 : clang_token_name(l, t);
+            spelling.clear();
+            if (piece.kind != preprocessing_token_kind::end_of_file)
+                l.spelling(piece, spelling.get());
+            source_position p = file.position(piece.location);
+            vbuffer_format_append(out.get(), "%s '", name);
+            write_escaped(out.get(), spelling.data(), spelling.size());
+            vbuffer_format_append(out.get(), "'\tLoc=<%s:%u:%u>", p.file_name,
+                                  p.line, p.column);
+            if (piece.at_start_of_line)
+                vbuffer_string_append(out.get(), " [StartOfLine]");
+            if (piece.after_white_space && !raw)
+                vbuffer_string_append(out.get(), " [LeadingSpace]");
+            if (piece.spelling_differs) {
+                vbuffer_string_append(out.get(), " [UnClean='");
+                write_escaped(
+                    out.get(),
+                    reinterpret_cast<const char *>(file.physical_characters) +
+                        piece.location,
+                    piece.extent);
+                vbuffer_string_append(out.get(), "']");
+            }
+            vbuffer_string_append(out.get(), "\n");
+        }
+        i += pieces - 1;
+    }
+    fwrite(out.data(), 1, out.size(), stdout);
+
+    owned_buffer messages;
+    for (const diagnostic_message &m : diagnostics.messages)
+        diagnostics.render(m, messages.get());
+    fwrite(messages.data(), 1, messages.size(), stderr);
+    return diagnostics.error_count ? 1 : 0;
+}
