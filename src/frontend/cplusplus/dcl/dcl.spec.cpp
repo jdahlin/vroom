@@ -355,10 +355,14 @@ node_index parser::decl_specifier_seq(decl_specifier_facts &facts,
             if (failed())
                 return 0;
             facts.has_defining_type_specifier = true;
+        } else if (k == standard_keyword::enum_) {
+            enum_specifier_or_elaborated(facts);
+            if (failed())
+                return 0;
+            facts.has_defining_type_specifier = true;
         } else if (k == standard_keyword::class_ ||
                    k == standard_keyword::struct_ ||
-                   k == standard_keyword::union_ ||
-                   k == standard_keyword::enum_) {
+                   k == standard_keyword::union_) {
             elaborated_or_class_specifier(facts);
             if (failed())
                 return 0;
@@ -398,6 +402,7 @@ node_index parser::decl_specifier_seq(decl_specifier_facts &facts,
                      at(standard_keyword::const_, length) ||
                      at(standard_keyword::auto_, length) ||
                      at(standard_keyword::decltype_, length) ||
+                     at_attribute_specifier(length) ||
                      at(preprocessing_op_or_punc::COMMA, length) ||
                      at(preprocessing_op_or_punc::RIGHT_PARENTHESIS, length) ||
                      at(preprocessing_op_or_punc::SEMICOLON, length)))
@@ -409,16 +414,35 @@ node_index parser::decl_specifier_seq(decl_specifier_facts &facts,
         } else {
             break;
         }
+        facts.count++;
         if (type_specifier && !count.add(k))
             return violates("at most one defining-type-specifier, except "
                             "the combinations [dcl.type]/2 lists",
                             "dcl.type", specifier);
-        if (at(preprocessing_op_or_punc::LEFT_BRACKET) &&
-            at(preprocessing_op_or_punc::LEFT_BRACKET, 1))
-            return beyond_this_step(); /* attribute-specifier-seq: P2 */
+        /* decl-specifier attribute-specifier-seq_opt: the
+           attribute-specifier-seq ends the sequence ([dcl.spec]/1: it
+           "appertains to the type determined by the preceding
+           decl-specifiers") */
+        if (at_attribute_specifier()) {
+            attribute_specifier_seq(true);
+            if (failed())
+                return 0;
+            facts.trailing_attributes = true;
+            break;
+        }
     }
     if (position == first)
         return 0;
+    /* [dcl.type.elab]/1: "An attribute-specifier-seq shall not appear in
+       an elaborated-type-specifier unless the latter is the sole
+       constituent of a declaration." */
+    if (facts.elaborated_attributes &&
+        !(facts.count == 1 && !facts.trailing_attributes &&
+          !type_specifiers_only && at(preprocessing_op_or_punc::SEMICOLON)))
+        return violates("an attribute-specifier-seq in an "
+                        "elaborated-type-specifier only when it is the sole "
+                        "constituent of a declaration",
+                        "dcl.type.elab", facts.elaborated_attributes_at);
     syntax_kind kind = syntax_kind::decl_specifier_seq;
     if (type_specifiers_only)
         kind = syntax_kind::defining_type_specifier_seq;
@@ -472,9 +496,6 @@ node_index parser::simple_type_specifier_with_name()
  *         class-key nested-name-specifier template_opt simple-template-id
  *         elaborated-enum-specifier
  *
- *     elaborated-enum-specifier:
- *         enum nested-name-specifier_opt identifier
- *
  * and, when a '{' follows the head, [class.pre]'s
  *
  *     class-specifier:
@@ -484,42 +505,21 @@ node_index parser::simple_type_specifier_with_name()
  *         class-key attribute-specifier-seq_opt class-head-name class-virt-specifier_opt base-clause_opt
  *         class-key attribute-specifier-seq_opt base-clause_opt
  *
- * or [dcl.enum]'s
- *
- *     enum-specifier:
- *         enum-head { enumerator-list_opt }
- *         enum-head { enumerator-list , }
- *
- *     enum-head:
- *         enum-key attribute-specifier-seq_opt enum-head-name_opt enum-base_opt
- *
- *     enum-key:
- *         enum
- *         enum class
- *         enum struct
- *
- *     enum-base:
- *         : type-specifier-seq
- *
- * The member-specification is P5's and the enumerator-list P2's: the
- * braces are kept as their tokens.  base-clause is P5's, templates P7's.
- * [class.name]/2 and [dcl.enum]: the identifier becomes a class-name or an
- * enum-name in the current scope; an elaborated-type-specifier that names
- * nothing declared yet declares it ([basic.scope.pdecl]/7, [dcl.type.elab]/3).
+ * The member-specification is P5's: the braces are kept as their tokens.
+ * base-clause is P5's, templates P7's; elaborated-enum-specifier is
+ * dcl.enum.cpp's.  [class.name]/2: the identifier becomes a class-name in
+ * the current scope; an elaborated-type-specifier that names nothing
+ * declared yet declares it ([basic.scope.pdecl]/7, [dcl.type.elab]/3).
  */
 node_index parser::elaborated_or_class_specifier(decl_specifier_facts &facts)
 {
     size_t mark = begin_node();
     token_index first = position;
-    bool is_enum = at(standard_keyword::enum_);
-    add_token();
-    if (is_enum &&
-        (at(standard_keyword::class_) || at(standard_keyword::struct_)))
-        add_token();
-    if ((at(preprocessing_op_or_punc::LEFT_BRACKET) &&
-         at(preprocessing_op_or_punc::LEFT_BRACKET, 1)) ||
-        at(standard_keyword::alignas_))
-        return beyond_this_step();
+    add_token(); /* class-key */
+    token_index attributes_at = position;
+    node_index attributes = attribute_specifier_seq();
+    if (failed())
+        return 0;
     scope_index scope = 0;
     bool known = false;
     node_index qualifier = 0;
@@ -538,29 +538,16 @@ node_index parser::elaborated_or_class_specifier(decl_specifier_facts &facts)
         return expected("an identifier after the nested-name-specifier",
                         "dcl.type.elab");
     }
-    if (is_enum && at(preprocessing_op_or_punc::COLON)) {
-        /* enum-base: : type-specifier-seq */
-        size_t base_mark = begin_node();
-        token_index base_first = position;
-        add_token();
-        decl_specifier_facts base;
-        decl_specifier_seq(base, true);
-        if (failed())
-            return 0;
-        if (!base.node)
-            return expected("a type-specifier-seq after ':'", "dcl.enum");
-        finish_node(syntax_kind::enum_base, base_mark, base_first);
-    } else if (!is_enum && at_identifier() &&
-               at(preprocessing_op_or_punc::LEFT_BRACE, 1)) {
+    if (at_identifier() && at(preprocessing_op_or_punc::LEFT_BRACE, 1)) {
         /* class-virt-specifier: final ([class.pre]); an identifier with a
            special meaning ([lex.name]/2 Table 4), not checked here */
         add_token();
-    } else if (!is_enum && at(preprocessing_op_or_punc::COLON)) {
+    } else if (at(preprocessing_op_or_punc::COLON)) {
         return beyond_this_step(); /* base-clause: P5 */
     }
     /* [dcl.type]/1: a type-specifier-seq (a type-id's) has no
-       class-specifier or enum-specifier: a '{' after its
-       elaborated-type-specifier is the next production's */
+       class-specifier: a '{' after its elaborated-type-specifier is the
+       next production's */
     bool body =
         at(preprocessing_op_or_punc::LEFT_BRACE) && !facts.type_specifier_seq;
     if (body) {
@@ -571,6 +558,15 @@ node_index parser::elaborated_or_class_specifier(decl_specifier_facts &facts)
         return expected("an identifier or '{'", "dcl.type.elab");
     }
     facts.declares_type = true;
+    if (!body) {
+        facts.elaborated = true;
+        facts.elaborated_at = first;
+        facts.elaborated_declaring_form = !qualifier;
+        if (attributes) {
+            facts.elaborated_attributes = true;
+            facts.elaborated_attributes_at = attributes_at;
+        }
+    }
     if (name && !qualifier) {
         bool declared = false;
         if (!body)
@@ -579,9 +575,7 @@ node_index parser::elaborated_or_class_specifier(decl_specifier_facts &facts)
             names.declare(name, name_kind::type_name);
     }
     syntax_kind kind = syntax_kind::elaborated_type_specifier;
-    if (body && is_enum)
-        kind = syntax_kind::enum_specifier;
-    else if (body)
+    if (body)
         kind = syntax_kind::class_specifier;
     return finish_node(kind, mark, first);
 }

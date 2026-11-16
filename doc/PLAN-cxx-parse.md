@@ -399,6 +399,27 @@ The first grammar, about 55 nonterminals.
   `cxx98-enum.cpp`, `cxx20-using-enum.cpp`, `cxx-using-declaration.cpp`,
   `cxx1z-using-declaration.cpp`, `CXX/dcl.dcl/dcl.attr` (17),
   `CXX/dcl.dcl/dcl.enum`.
+- Status (2026-11-16, done): `dcl/dcl.attr.grammar.cpp` (attribute-specifier-seq
+  in every place P1's grammar has one, balanced-token-seq, alignas kept as
+  tokens, the standard attributes' argument forms, [dcl.attr.grammar]/2, /4's
+  ellipsis and keywords as identifiers, /7's `[[`, likely with unlikely),
+  `dcl.enum.cpp` (enum-specifier, opaque-enum-declaration, enumerators,
+  using-enum-declaration), `namespace.udecl.cpp`, `dcl.asm.cpp`,
+  attribute-declaration, and [dcl.type.elab]/1's sole-constituent rules.
+  V4a over the clang corpus (1811 runs): 9556 declarations accepted or rejected
+  as clang does (P1: 9083), none either way against it; 10212 kept as tokens
+  (P1: 10692).  V2: 37 examples of the 13 subclauses, every error line
+  annotated (two [dcl.attr.grammar]/7 errors are inside a function body, P4's;
+  the rest semantic).  V1: 126 productions, dcl 67 of 97 nonterminals, 0 wrong.
+  Surprises: clang's parser rejects a standard attribute or alignas that
+  appertains to a type (after a decl-specifier-seq, ptr-operator, array or
+  parameters), which [dcl.attr.grammar]/5 with each attribute's "may be
+  applied to" makes ill-formed, so the parser checks it too; "at most once in
+  each attribute-list" is not checked (P2156R1, C++23, applied by clang to
+  every edition); known-differences.txt gains clang's attributes on
+  using-declarations, its rejection of `[[...]] asm`, and `enum E;` as a
+  redeclaration.  Not kept: a scoped enumeration's enumerators and the names
+  a using-enum-declaration introduces (no type among them).
 
 ### P3. Expressions and initializers
 

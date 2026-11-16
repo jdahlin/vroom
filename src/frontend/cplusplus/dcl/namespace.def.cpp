@@ -22,8 +22,7 @@
  *     namespace-body:
  *             declaration-seq_opt
  *
- * The attribute-specifier-seqs are P2's.  namespace-body passes its
- * declaration-seq through.
+ * namespace-body passes its declaration-seq through.
  */
 #include "../cplusplus-internal.h"
 
@@ -36,13 +35,19 @@ node_index parser::namespace_definition()
     token_index first = position;
     bool inline_ = accept(standard_keyword::inline_);
     add_token(); /* namespace */
-    if ((at(preprocessing_op_or_punc::LEFT_BRACKET) &&
-         at(preprocessing_op_or_punc::LEFT_BRACKET, 1)) ||
-        at(standard_keyword::extension))
+    token_index attributes_at = position;
+    node_index attributes = attribute_specifier_seq();
+    if (failed())
+        return 0;
+    if (at(standard_keyword::extension))
         return beyond_this_step();
     syntax_kind kind = syntax_kind::unnamed_namespace_definition;
     unsigned entered = 0;
     if (at_identifier() && at(preprocessing_op_or_punc::COLON_COLON, 1)) {
+        if (attributes)
+            return violates("no attribute-specifier-seq in a "
+                            "nested-namespace-definition",
+                            "namespace.def", attributes_at);
         /* [namespace.def]/3 (C++20's nested-namespace-definition):
            namespace A::B::C { } is namespace A { namespace B { namespace
            C { } } }; "inline" may precede each but the first */
@@ -179,6 +184,9 @@ node_index parser::using_directive()
 {
     size_t mark = begin_node();
     token_index first = position;
+    attribute_specifier_seq();
+    if (failed())
+        return 0;
     add_token(); /* using */
     add_token(); /* namespace */
     scope_index scope = 0;

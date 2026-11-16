@@ -360,6 +360,30 @@ struct decl_specifier_facts {
     bool declares_type = false;
     /* in: a type-id's type-specifier-seq, not a defining-type-specifier-seq */
     bool type_specifier_seq = false;
+    /* how many decl-specifiers the sequence has */
+    unsigned count = 0;
+    /* [dcl.type.elab]/1: an elaborated-type-specifier, whether it has the
+       form class-key attribute-specifier-seq_opt identifier, and where its
+       attribute-specifier-seq is (an elaborated-type-specifier may have one
+       only as the sole constituent of a declaration) */
+    bool elaborated = false, elaborated_declaring_form = false;
+    bool elaborated_attributes = false;
+    /* decl-specifier attribute-specifier-seq: the sequence ends with one */
+    bool trailing_attributes = false;
+    token_index elaborated_attributes_at = 0;
+    token_index elaborated_at = 0;
+};
+
+/* what an attribute-specifier-seq holds that the rules on its context
+   check */
+struct attribute_facts {
+    /* [dcl.attr.likelihood]: the attribute-tokens likely and unlikely */
+    bool likely = false, unlikely = false;
+    /* the first of the standard's attributes or an alignment-specifier:
+       where it is and the subclause that says what it applies to */
+    bool standard = false;
+    token_index standard_at = 0;
+    const char *standard_subclause = nullptr;
 };
 
 /* the forms a declarator can take */
@@ -517,15 +541,49 @@ class parser
        unparsed node of all its tokens */
     node_index unparsed_group();
 
+    /* ---- [dcl.attr.grammar] */
+    /* an attribute-specifier starts at tokens[ahead]: [[ or alignas */
+    bool at_attribute_specifier(unsigned ahead = 0);
+    /* the lookahead after an attribute-specifier-seq_opt at tokens[ahead],
+       its brackets balanced, without parsing it */
+    unsigned attribute_specifier_seq_end(unsigned ahead);
+    /* attribute-specifier-seq_opt: 0 when there is none; with
+       appertains_to_type it is one that appertains to a type */
+    node_index attribute_specifier_seq(bool appertains_to_type = false);
+    node_index attribute_specifier(attribute_facts &facts);
+    node_index attribute(bool using_prefix, attribute_facts &facts);
+    bool at_attribute_identifier(unsigned ahead = 0);
+    node_index balanced_token_seq(preprocessing_op_or_punc closing);
+    /* [dcl.attr.grammar]/7: [[ where no attribute-specifier can be */
+    node_index misplaced_attribute_brackets();
+
     /* ---- [dcl.pre] */
     node_index declaration_seq(bool until_closing_brace);
     node_index declaration();
     bool starts_module_declaration();
     node_index block_or_function_declaration();
     node_index simple_declaration_rest(size_t mark, token_index first,
-                                       const decl_specifier_facts &specifiers);
+                                       const decl_specifier_facts &specifiers,
+                                       bool attributes);
     node_index static_assert_declaration();
     node_index alias_declaration();
+    node_index attribute_declaration();
+
+    /* ---- [dcl.enum], [enum.udecl] */
+    /* an opaque-enum-declaration starts here: enum-key
+       attribute-specifier-seq_opt enum-head-name, then ; or an enum-base
+       that ends with ; */
+    bool opaque_enum_declaration_follows();
+    node_index opaque_enum_declaration();
+    /* enum-specifier or elaborated-enum-specifier in a decl-specifier-seq */
+    node_index enum_specifier_or_elaborated(decl_specifier_facts &facts);
+    node_index enumerator_list(bool scoped);
+    node_index using_enum_declaration();
+
+    /* ---- [namespace.udecl], [dcl.asm] */
+    node_index using_declaration();
+    node_index using_declarator();
+    node_index asm_declaration();
 
     /* ---- [dcl.spec], [dcl.type], [dcl.type.simple], [dcl.type.elab] */
     /* unknown_names: a name the parser cannot classify counts as one */
