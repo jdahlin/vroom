@@ -167,8 +167,10 @@ node_index parser::ptr_declarator(declarator_form form, declarator_facts &facts)
  *         noptr-abstract-declarator_opt [ constant-expression_opt ] attribute-specifier-seq_opt
  *         ( ptr-abstract-declarator )
  *
- * The constant-expression is P3's, kept as its tokens; the
- * attribute-specifier-seqs are P2's.
+ * The constant-expression is P3's, kept as its tokens.  An
+ * attribute-specifier-seq follows only a declarator-id or an array's ']':
+ * [[ anywhere else in a declarator is no attribute-specifier, and
+ * [dcl.attr.grammar]/7 forbids it.
  */
 node_index parser::noptr_declarator(declarator_form form,
                                     declarator_facts &facts)
@@ -176,6 +178,9 @@ node_index parser::noptr_declarator(declarator_form form,
     size_t mark = begin_node();
     token_index first = position;
     bool head = false;
+    if (at(preprocessing_op_or_punc::LEFT_BRACKET) &&
+        at(preprocessing_op_or_punc::LEFT_BRACKET, 1))
+        return misplaced_attribute_brackets();
     if (at(preprocessing_op_or_punc::LEFT_BRACKET) &&
         form != declarator_form::abstract)
         /* [ identifier-list ]: a structured binding ([dcl.struct.bind]): P5 */
@@ -208,15 +213,19 @@ node_index parser::noptr_declarator(declarator_form form,
         if (failed())
             return 0;
         head = true;
+        /* declarator-id attribute-specifier-seq_opt */
+        attribute_specifier_seq();
+        if (failed())
+            return 0;
     } else if (form == declarator_form::concrete) {
         return expected("a declarator", "dcl.decl");
     }
-    if (at(preprocessing_op_or_punc::LEFT_BRACKET) &&
-        at(preprocessing_op_or_punc::LEFT_BRACKET, 1))
-        return beyond_this_step(); /* an attribute-specifier-seq: P2 */
 
     unsigned suffixes = 0;
     for (;;) {
+        if (at(preprocessing_op_or_punc::LEFT_BRACKET) &&
+            at(preprocessing_op_or_punc::LEFT_BRACKET, 1))
+            return misplaced_attribute_brackets();
         if (at(preprocessing_op_or_punc::LEFT_BRACKET)) {
             add_token();
             static constexpr preprocessing_op_or_punc stops[] = {
@@ -224,9 +233,9 @@ node_index parser::noptr_declarator(declarator_form form,
             unparsed_until(stops, 1);
             if (!accept(preprocessing_op_or_punc::RIGHT_BRACKET))
                 return expected("']' to close the array bound", "dcl.array");
-            if (at(preprocessing_op_or_punc::LEFT_BRACKET) &&
-                at(preprocessing_op_or_punc::LEFT_BRACKET, 1))
-                return beyond_this_step();
+            attribute_specifier_seq(true);
+            if (failed())
+                return 0;
             if (facts.first == derivation::none)
                 facts.first = derivation::array;
         } else if (at(preprocessing_op_or_punc::LEFT_PARENTHESIS) &&
@@ -395,9 +404,9 @@ node_index parser::ptr_operator(derivation *kind)
             return expected("'*' after the nested-name-specifier", "dcl.mptr");
         *kind = derivation::member_pointer;
     }
-    if (at(preprocessing_op_or_punc::LEFT_BRACKET) &&
-        at(preprocessing_op_or_punc::LEFT_BRACKET, 1))
-        return beyond_this_step();
+    attribute_specifier_seq(true);
+    if (failed())
+        return 0;
     if (qualifiers)
         cv_qualifier_seq();
     return finish_node(syntax_kind::ptr_operator, mark, first);

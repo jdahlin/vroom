@@ -26,3 +26,14 @@ Parser/cxx0x-attributes.cpp:123 class D final alignas ([l) {}]{}); recovered as 
 CXX/dcl.dcl/p4-0x.cpp:21 n4861 [dcl.pre] allows any string-literal in static_assert; clang applies P2361R6 (unevaluated strings, no encoding prefix) as a DR
 # a semantic rule clang reports from its parser
 CXX/drs/cwg30xx.cpp:12 [basic.scope.param]: a parameter declared twice is a redeclaration error, not a syntax error
+# P2, attributes: where clang accepts an attribute-specifier-seq the
+# standard's grammar has no place for (its extension, a warning), or rejects
+# one the grammar has
+Parser/cxx0x-attributes.cpp:158 [dcl.asm] allows attribute-specifier-seq_opt before asm; clang rejects it
+Parser/cxx0x-attributes.cpp:160 [namespace.udecl]: a using-declaration has no attribute-specifier-seq; clang's extension
+Parser/using-if-exists-attr.cpp:11 [namespace.udecl]: a using-declarator has no attribute-specifier-seq; clang's extension
+Parser/using-if-exists-attr.cpp:13 [namespace.udecl]: a using-declaration has no attribute-specifier-seq; clang's extension
+Parser/using-if-exists-attr.cpp:20 [namespace.udecl]: a using-declaration has no attribute-specifier-seq; clang's extension
+Parser/cxx0x-attributes.cpp:227 [dcl.enum]/2, [dcl.type.elab]/1: enum E; is ill-formed; clang accepts it as a redeclaration of an enumeration declared before
+Parser/cxx0x-attributes.cpp:406 #pragma pack inside an attribute-specifier: clang makes the pragma a token there ([cpp.pragma]/1: implementation-defined)
+Parser/cxx0x-attributes.cpp:454 [[__clang__::annotate]]: __clang__ is a predefined macro, [[1::annotate]] after phase 4; clang recovers as _Clang

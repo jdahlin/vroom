@@ -30,11 +30,66 @@ namespace
 {
 
 /*
+ * Whether the ':' at tokens[i] is one this step parses: an enum-base's
+ * ([dcl.enum]: enum-key attribute-specifier-seq_opt nested-name-specifier_opt
+ * identifier :) or an attribute-using-prefix's ([dcl.attr.grammar]:
+ * [[ using attribute-namespace :).  Others are a later step's (bit-fields,
+ * base-clauses, ctor-initializers, labels, the conditional operator).
+ */
+bool colon_of_this_step(parser &p, token_index first, token_index i)
+{
+    if (i < first + 2)
+        return false;
+    if (i >= first + 3 && p.tokens[i - 1].kind == token_kind::identifier &&
+        p.keyword_of(p.tokens[i - 2]) == standard_keyword::using_ &&
+        is_operator(p.tokens[i - 3], preprocessing_op_or_punc::LEFT_BRACKET))
+        return true;
+    /* the enum-head-name, if there is one */
+    token_index j = i;
+    if (p.tokens[j - 1].kind == token_kind::identifier)
+        j--;
+    while (
+        j >= first + 2 &&
+        is_operator(p.tokens[j - 1], preprocessing_op_or_punc::COLON_COLON) &&
+        p.tokens[j - 2].kind == token_kind::identifier)
+        j -= 2;
+    if (j > first &&
+        is_operator(p.tokens[j - 1], preprocessing_op_or_punc::COLON_COLON))
+        j--;
+    /* the enum-head's attribute-specifier-seq, back to its first bracket */
+    while (j > first &&
+           (is_operator(p.tokens[j - 1],
+                        preprocessing_op_or_punc::RIGHT_BRACKET) ||
+            is_operator(p.tokens[j - 1],
+                        preprocessing_op_or_punc::RIGHT_PARENTHESIS))) {
+        unsigned depth = 0;
+        do {
+            j--;
+            const token &t = p.tokens[j];
+            if (is_operator(t, preprocessing_op_or_punc::RIGHT_BRACKET) ||
+                is_operator(t, preprocessing_op_or_punc::RIGHT_PARENTHESIS))
+                depth++;
+            else if (is_operator(t, preprocessing_op_or_punc::LEFT_BRACKET) ||
+                     is_operator(t, preprocessing_op_or_punc::LEFT_PARENTHESIS))
+                depth--;
+        } while (depth && j > first);
+        if (j > first &&
+            p.keyword_of(p.tokens[j - 1]) == standard_keyword::alignas_)
+            j--;
+    }
+    if (j > first &&
+        (p.keyword_of(p.tokens[j - 1]) == standard_keyword::class_ ||
+         p.keyword_of(p.tokens[j - 1]) == standard_keyword::struct_))
+        j--;
+    return j > first &&
+           p.keyword_of(p.tokens[j - 1]) == standard_keyword::enum_;
+}
+
+/*
  * Whether tokens [first, end) use grammar a later step of
  * doc/PLAN-cxx-parse.md writes: then a declaration that did not parse is
  * kept as an unparsed node, not reported.  These are templates, operator
- * names, attributes, class members' syntax and the extensions' keywords
- * (P2-P9).
+ * names, class members' syntax and the extensions' keywords (P3-P9).
  */
 bool uses_later_grammar(parser &p, token_index first, token_index end)
 {
@@ -46,7 +101,6 @@ bool uses_later_grammar(parser &p, token_index first, token_index end)
         case standard_keyword::requires_:
         case standard_keyword::concept_:
         case standard_keyword::typename_:
-        case standard_keyword::alignas_:
         case standard_keyword::asm_:
         case standard_keyword::friend_:
         case standard_keyword::try_:
@@ -61,12 +115,10 @@ bool uses_later_grammar(parser &p, token_index first, token_index end)
         default:
             break;
         }
-        if (is_operator(t, preprocessing_op_or_punc::LESS) ||
-            is_operator(t, preprocessing_op_or_punc::COLON))
+        if (is_operator(t, preprocessing_op_or_punc::LESS))
             return true;
-        if (is_operator(t, preprocessing_op_or_punc::LEFT_BRACKET) &&
-            is_operator(p.tokens[i + 1],
-                        preprocessing_op_or_punc::LEFT_BRACKET))
+        if (is_operator(t, preprocessing_op_or_punc::COLON) &&
+            !colon_of_this_step(p, first, i))
             return true;
         if (t.kind == token_kind::identifier) {
             /* the reserved identifiers ([lex.name]/3) the implementations
@@ -131,8 +183,14 @@ bool parser::starts_module_declaration()
  *     empty-declaration:
  *         ;
  *
- * Which alternative a declaration is follows from its first tokens, except
- * for simple-declaration and function-definition, which share their
+ *     attribute-declaration:
+ *         attribute-specifier-seq ;
+ *
+ * Which alternative a declaration is follows from its first tokens (after
+ * an attribute-specifier-seq, which begins a simple-declaration,
+ * nodeclspec-function-declaration, function-definition,
+ * attribute-declaration, using-directive or asm-declaration), except for
+ * simple-declaration and function-definition, which share their
  * decl-specifier-seq and declarator (block_or_function_declaration).
  *
  * A declaration that does not parse is either erroneous, and its one
@@ -148,7 +206,18 @@ node_index parser::declaration()
         tentative_parse attempt(*this);
         size_t mark = begin_node();
         node_index n = 0;
-        if (at(preprocessing_op_or_punc::SEMICOLON)) {
+        unsigned after_attributes = attribute_specifier_seq_end(0);
+        if (after_attributes) {
+            if (at(preprocessing_op_or_punc::SEMICOLON, after_attributes))
+                n = attribute_declaration();
+            else if (at(standard_keyword::using_, after_attributes) &&
+                     at(standard_keyword::namespace_, after_attributes + 1))
+                n = using_directive();
+            else if (at(standard_keyword::asm_, after_attributes))
+                n = asm_declaration();
+            else
+                n = block_or_function_declaration();
+        } else if (at(preprocessing_op_or_punc::SEMICOLON)) {
             add_token();
             n = finish_node(syntax_kind::empty_declaration, mark, first);
         } else if (at(standard_keyword::namespace_) ||
@@ -161,9 +230,20 @@ node_index parser::declaration()
         } else if (at(standard_keyword::using_) &&
                    at(standard_keyword::namespace_, 1)) {
             n = using_directive();
+        } else if (at(standard_keyword::using_) &&
+                   at(standard_keyword::enum_, 1)) {
+            n = using_enum_declaration();
         } else if (at(standard_keyword::using_) && at_identifier(1) &&
-                   at(preprocessing_op_or_punc::EQUAL, 2)) {
+                   (at(preprocessing_op_or_punc::EQUAL, 2) ||
+                    at_attribute_specifier(2))) {
             n = alias_declaration();
+        } else if (at(standard_keyword::using_)) {
+            n = using_declaration();
+        } else if (at(standard_keyword::asm_)) {
+            n = asm_declaration();
+        } else if (at(standard_keyword::enum_) &&
+                   opaque_enum_declaration_follows()) {
+            n = opaque_enum_declaration();
         } else if (at(standard_keyword::extern_) &&
                    peek(1).literal == literal_kind::string_literal) {
             n = linkage_specification();
@@ -174,16 +254,10 @@ node_index parser::declaration()
             /* module-declaration, module-import-declaration and
                export-declaration ([module]): P8 */
             n = beyond_this_step();
-        } else if (at(standard_keyword::using_) ||
-                   at(standard_keyword::template_) ||
-                   at(standard_keyword::export_) ||
-                   at(standard_keyword::asm_) ||
-                   at(standard_keyword::alignas_) ||
-                   (at(preprocessing_op_or_punc::LEFT_BRACKET) &&
-                    at(preprocessing_op_or_punc::LEFT_BRACKET, 1))) {
-            /* using-declaration, using-enum-declaration (P2),
-               template-declaration and its kin (P7), export-declaration
-               (P8), asm-declaration, attribute-specifier-seq (P2) */
+        } else if (at(standard_keyword::template_) ||
+                   at(standard_keyword::export_)) {
+            /* template-declaration and its kin (P7), export-declaration
+               (P8) */
             n = beyond_this_step();
         } else {
             n = block_or_function_declaration();
@@ -250,8 +324,8 @@ node_index parser::declaration()
  *         attribute-specifier-seq_opt decl-specifier-seq_opt declarator virt-specifier-seq_opt function-body
  *         attribute-specifier-seq_opt decl-specifier-seq_opt declarator requires-clause function-body
  *
- * The attribute-specifier-seqs are P2's, the structured binding
- * declaration (the third alternative, [dcl.struct.bind]) P5's,
+ * The structured binding declaration (the third alternative,
+ * [dcl.struct.bind]) is P5's,
  * virt-specifier-seq and requires-clause P5's and P7's.  A declaration
  * whose first declarator declares a function and is followed by a
  * function-body is a function-definition; a decl-specifier-seq_opt that is
@@ -262,16 +336,20 @@ node_index parser::block_or_function_declaration()
 {
     size_t mark = begin_node();
     token_index first = position;
+    node_index attributes = attribute_specifier_seq();
+    if (failed())
+        return 0;
     decl_specifier_facts specifiers;
     decl_specifier_seq(specifiers, false);
     if (failed())
         return 0;
-    return simple_declaration_rest(mark, first, specifiers);
+    return simple_declaration_rest(mark, first, specifiers, attributes != 0);
 }
 
 node_index
 parser::simple_declaration_rest(size_t mark, token_index first,
-                                const decl_specifier_facts &specifiers)
+                                const decl_specifier_facts &specifiers,
+                                bool attributes)
 {
     if (at(preprocessing_op_or_punc::SEMICOLON)) {
         /* decl-specifier-seq init-declarator-list_opt ; ([dcl.pre]/5:
@@ -279,6 +357,23 @@ parser::simple_declaration_rest(size_t mark, token_index first,
            the program": a semantic rule) */
         if (!specifiers.node)
             return expected("a declaration", "dcl.pre");
+        /* attribute-specifier-seq decl-specifier-seq init-declarator-list ; */
+        if (attributes)
+            return expected("an init-declarator-list after an "
+                            "attribute-specifier-seq and decl-specifier-seq",
+                            "dcl.pre");
+        /* [dcl.type.elab]/1: "If an elaborated-type-specifier is the sole
+           constituent of a declaration, the declaration is ill-formed
+           unless it is an explicit specialization, an explicit
+           instantiation or it has one of the following forms: class-key
+           attribute-specifier-seq_opt identifier ; ..." (the others are
+           friend declarations, P5's) */
+        if (specifiers.elaborated && specifiers.count == 1 &&
+            !specifiers.elaborated_declaring_form)
+            return violates("an elaborated-type-specifier alone only as "
+                            "class-key attribute-specifier-seq_opt "
+                            "identifier ;",
+                            "dcl.type.elab", specifiers.elaborated_at);
         add_token();
         return finish_node(syntax_kind::simple_declaration, mark, first);
     }
@@ -397,7 +492,11 @@ node_index parser::alias_declaration()
     add_token();
     uint32_t name = tokens.identifier(position);
     add_token();
-    add_token(); /* = */
+    attribute_specifier_seq();
+    if (failed())
+        return 0;
+    if (!accept(preprocessing_op_or_punc::EQUAL))
+        return expected("'=' in the alias-declaration", "dcl.pre");
     size_t type_mark = begin_node();
     token_index type_first = position;
     decl_specifier_facts specifiers;
@@ -415,6 +514,25 @@ node_index parser::alias_declaration()
         return expected("';' after the alias-declaration", "dcl.pre");
     names.declare(name, name_kind::type_name);
     return finish_node(syntax_kind::alias_declaration, mark, first);
+}
+
+} // namespace cplusplus
+
+namespace cplusplus
+{
+
+/* attribute-declaration: [dcl.pre]/3 "Except where otherwise specified,
+   the meaning of an attribute-declaration is implementation-defined." */
+node_index parser::attribute_declaration()
+{
+    size_t mark = begin_node();
+    token_index first = position;
+    attribute_specifier_seq();
+    if (failed())
+        return 0;
+    if (!accept(preprocessing_op_or_punc::SEMICOLON))
+        return expected("';' after the attribute-specifier-seq", "dcl.pre");
+    return finish_node(syntax_kind::attribute_declaration, mark, first);
 }
 
 } // namespace cplusplus

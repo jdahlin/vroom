@@ -28,8 +28,7 @@ bool parser::parameters_follow(declarator_form form)
     if (at(preprocessing_op_or_punc::RIGHT_PARENTHESIS, 1) ||
         at(preprocessing_op_or_punc::ELLIPSIS, 1))
         return true;
-    if (at(preprocessing_op_or_punc::LEFT_BRACKET, 1) &&
-        at(preprocessing_op_or_punc::LEFT_BRACKET, 2))
+    if (at_attribute_specifier(1))
         return true; /* a parameter's attribute-specifier-seq */
     /* a type-name, not a name the parser cannot classify: (a) with a
        undeclared is a parenthesized declarator-id */
@@ -67,9 +66,9 @@ node_index parser::parameters_and_qualifiers()
         /* a dynamic-exception-specification (removed in C++20, [diff.cpp17.except]): P6 */
         return beyond_this_step();
     }
-    if (at(preprocessing_op_or_punc::LEFT_BRACKET) &&
-        at(preprocessing_op_or_punc::LEFT_BRACKET, 1))
-        return beyond_this_step();
+    attribute_specifier_seq(true);
+    if (failed())
+        return 0;
     return finish_node(syntax_kind::parameters_and_qualifiers, mark, first);
 }
 
@@ -142,9 +141,9 @@ node_index parser::parameter_declaration()
 {
     size_t mark = begin_node();
     token_index first = position;
-    if (at(preprocessing_op_or_punc::LEFT_BRACKET) &&
-        at(preprocessing_op_or_punc::LEFT_BRACKET, 1))
-        return beyond_this_step();
+    attribute_specifier_seq();
+    if (failed())
+        return 0;
     decl_specifier_facts specifiers;
     decl_specifier_seq(specifiers, false);
     if (failed())
