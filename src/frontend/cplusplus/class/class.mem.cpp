@@ -255,6 +255,8 @@ node_index parser::member_declaration()
  */
 node_index parser::member_declaration_alternative()
 {
+    if (at(extension_keyword::extension)) /* [ext.gnu] */
+        return gnu_extension_prefixed(&parser::member_declaration_alternative);
     /* [temp.res]/5: "a parameter-declaration in a member-declaration,
        unless that parameter-declaration appears in a default argument" */
     flag_set implicit(parameters_implicit_typename, true);
@@ -452,15 +454,8 @@ node_index parser::member_declarator(const decl_specifier_facts &specifiers,
     /* a constructor's declarator-id is the injected-class-name, which
        it does not redeclare ([class.ctor]/1) */
     if (facts.name && !facts.qualified_id && !specifiers.friend_ &&
-        facts.name != member_class_name) {
-        name_kind kind = name_kind::other;
-        if (facts.first == derivation::function)
-            kind = name_kind::function;
-        if (specifiers.typedef_)
-            kind = name_kind::type_name;
-        names.declare(facts.name, declared_kind(kind), 0,
-                      specifiers.typedef_ && specifiers.dependent);
-    }
+        facts.name != member_class_name)
+        declare_declarator(specifiers, facts);
     bool function = facts.first == derivation::function;
     bool virt = false;
     /* [class.mem]/1: member-declarator: declarator requires-clause */

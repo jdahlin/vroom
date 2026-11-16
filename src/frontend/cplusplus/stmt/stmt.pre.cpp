@@ -42,6 +42,17 @@ node_index with_attributes(parser &p, Alternative parse)
     node_index attributes = p.attribute_specifier_seq();
     if (p.failed())
         return 0;
+    /* [ext.gnu] clang takes GCC's attributes before a declaration, a label,
+       an expression statement or a null statement; before a statement
+       with substatements it says "an attribute list cannot appear here" */
+    if (attributes && has_gnu_attribute(p.tree, attributes) &&
+        (p.at(preprocessing_op_or_punc::LEFT_BRACE) ||
+         p.at(standard_keyword::if_) || p.at(standard_keyword::switch_) ||
+         p.at(standard_keyword::while_) || p.at(standard_keyword::do_) ||
+         p.at(standard_keyword::for_) || p.at(standard_keyword::try_)))
+        return p.violates("GCC's attributes only before a declaration, a "
+                          "label, or an expression or null statement",
+                          "ext.gnu", first);
     node_index n = parse();
     if (p.failed())
         return 0;

@@ -26,6 +26,8 @@ namespace cplusplus
 
 node_index parser::block_declaration()
 {
+    if (at(extension_keyword::extension)) /* [ext.gnu] */
+        return gnu_extension_prefixed(&parser::block_declaration);
     flag_set block(block_scope, true);
     unsigned after = attribute_specifier_seq_end(0);
     if (after) {

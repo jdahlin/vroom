@@ -217,6 +217,18 @@ SYNTAX_NODE(compound_requirement, "compound-requirement", "expr.prim.req.compoun
 SYNTAX_NODE(return_type_requirement, "return-type-requirement", "expr.prim.req.compound")
 SYNTAX_NODE(nested_requirement, "nested-requirement", "expr.prim.req.nested")
 
+/* the extensions' (ext/VENDOR/, doc/PLAN-cxx-parse.md P9): the vendor and
+   the name its manual gives the construct, the subclause "ext.VENDOR" */
+SYNTAX_NODE(gnu_attribute_specifier, "gnu-attribute-specifier", "ext.gnu")
+SYNTAX_NODE(gnu_attribute_list, "gnu-attribute-list", "ext.gnu")
+SYNTAX_NODE(gnu_attribute, "gnu-attribute", "ext.gnu")
+SYNTAX_NODE(gnu_asm_label, "gnu-asm-label", "ext.gnu")
+SYNTAX_NODE(gnu_declarator, "gnu-declarator", "ext.gnu")
+SYNTAX_NODE(gnu_extension_declaration, "gnu-extension-declaration", "ext.gnu")
+SYNTAX_NODE(gnu_extension_expression, "gnu-extension-expression", "ext.gnu")
+SYNTAX_NODE(clang_type_trait_expression, "clang-type-trait-expression", "ext.clang")
+SYNTAX_NODE(clang_type_transformation, "clang-type-transformation", "ext.clang")
+
 /*
  * Scaffolding, not grammar: both are counted, and both are at zero on
  * well-formed input when the parser is complete.

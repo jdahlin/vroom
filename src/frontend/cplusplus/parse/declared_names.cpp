@@ -115,6 +115,14 @@ void declared_names::declare(uint32_t name, name_kind kind, scope_index region,
 void declared_names::declare_in(scope_index in, uint32_t name, name_kind kind,
                                 scope_index region, bool dependent)
 {
+    /* [temp.names]/2: a name is a template-name when "name lookup finds
+       ... an overload set that contains a function template": a function
+       declared beside a function template of the same name does not hide
+       it */
+    if (kind == name_kind::function)
+        for (const declaration &d : scopes[in].declarations)
+            if (d.name == name && d.kind == name_kind::function_template)
+                kind = name_kind::function_template;
     scopes[in].declarations.append({name, kind, region, dependent});
     journal.append(in);
 }
@@ -184,6 +192,24 @@ scope_index declared_names::snapshot(scope_index region)
     return static_cast<scope_index>(scopes.size() - 1);
 }
 
+void declared_names::define_class(scope_index in, uint32_t name,
+                                  scope_index region)
+{
+    const scope &s = scopes[in];
+    for (size_t i = s.declarations.size(); i-- > 0;) {
+        const declaration &d = s.declarations[i];
+        if (d.name != name)
+            continue;
+        if ((d.kind == name_kind::type_name ||
+             d.kind == name_kind::template_name) &&
+            d.scope && d.scope != region) {
+            scopes[d.scope].searched_with.append(region);
+            journal.append(d.scope | 0x80000000u);
+        }
+        return;
+    }
+}
+
 void declared_names::set_complete(scope_index region, scope_index complete)
 {
     scopes[region].complete = complete;
@@ -239,9 +265,14 @@ name_kind declared_names::lookup_unqualified(uint32_t name, scope_index *scope,
             if (d)
                 break;
         }
-        d = find(s, name);
-        if (!d && complete_contexts && scopes[s].complete)
+        /* [class.mem]/6: in a complete-class context the class is
+           complete: the region with every member is searched first, so
+           that a member template declared after a function of the same
+           name keeps the overload set a template-name ([temp.names]/2) */
+        if (complete_contexts && scopes[s].complete)
             d = find(scopes[s].complete, name);
+        if (!d)
+            d = find(s, name);
         if (d || s == global_namespace)
             break;
     }
@@ -266,9 +297,11 @@ name_kind declared_names::lookup_qualified(scope_index in, uint32_t name,
        applied to a nested-name-specifier that denotes its class, namespace,
        or enumeration." */
     name_kind found = name_kind::not_declared;
-    const declaration *d = find(in, name);
-    if (!d && complete_contexts && scopes[in].complete)
+    const declaration *d = nullptr;
+    if (complete_contexts && scopes[in].complete)
         d = find(scopes[in].complete, name);
+    if (!d)
+        d = find(in, name);
     if (d) {
         found = d->kind;
         if (scope)

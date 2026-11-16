@@ -19,6 +19,9 @@ namespace cplusplus
  */
 parser::reading parser::reading_at(unsigned ahead)
 {
+    /* [ext.gnu] __extension__ before either: what follows it decides */
+    if (at(extension_keyword::extension, ahead))
+        return reading_at(ahead + 1);
     standard_keyword k = keyword_of(peek(ahead));
     switch (k) {
     case standard_keyword::using_:

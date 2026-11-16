@@ -833,6 +833,36 @@ The first grammar, about 55 nonterminals.
 - clang's tests that were in `known-differences.txt` only for an extension
   come back as each lands.
 
+- Status (2026-11-16): in progress.
+  - The corpus: libstdc++ 14's headers (copied from the Linux container to
+    `work/cxx-sysroot`), each alone, and nlohmann/json (`work/cxx/json`,
+    `json.hpp` with them, `-std=gnu++17`).  `cxxparse -debug-fallbacks`
+    names the file and the token where a declaration stopped.
+  - Extensions: `ext/extension-keywords.inc` maps the lexer's keywords an
+    extension gives grammar (GNU's alternate spellings `__inline__`,
+    `__const__`, `__signed__`, `__volatile__`, `__asm__`, `__alignof__`;
+    `__attribute__`, `__restrict__`, `__extension__`; clang's type traits).
+    `ext/gnu/attribute.cpp` (where `[[ ]]` can be, among decl-specifiers,
+    after a declarator and a namespace name; clang's placement rules),
+    `ext/gnu/asm_label.cpp`, `ext/gnu/extension_keyword.cpp`,
+    `ext/clang/type_traits.cpp` (expression traits, type transformations,
+    and a trait's keyword as a name when no `(` follows: libstdc++'s
+    `__is_signed`).  Declarations with an extension get no claims;
+    `cxx-spec-refs.py` does not check grammar quoted in `ext/`.
+  - Lookup fixes the corpus found: a function beside a function template
+    keeps the name a template-name before C++20 ([temp.names]/2), a
+    complete-class context searches the whole class first, and a typedef or
+    alias of a class names its members, also when made before the class's
+    definition (`gram/temp.names.cpp`, `gram/dcl.typedef.cpp`).
+  - Numbers: libstdc++ declarations kept as tokens 54k -> 20.8k; json.hpp
+    0 erroneous, 3140 kept as tokens (most in libstdc++).  V4a: 21088 as
+    clang, 0 rejected that clang accepts, 32 accepted that clang rejects
+    (new: `__attribute__((aligned(int)))` kept as tokens, an MSVC bit-field
+    case), 1492 kept as tokens.  V1: 0 wrong.
+  - Next: the `(` fallbacks (7.9k), `__int128` and clang's predeclared
+    builtin types, `__complex__`, a switch to turn an extension off for its
+    syntax-error test.
+
 After P9 the tree is complete and the semantic clauses start in the
 standard's order ([basic.lookup] in full, [conv], [expr]'s types,
 [expr.const] evaluation, [over], [temp] instantiation): a separate plan.

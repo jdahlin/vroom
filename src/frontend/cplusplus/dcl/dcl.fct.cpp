@@ -162,7 +162,12 @@ node_index parser::parameter_declaration()
 {
     size_t mark = begin_node();
     token_index first = position;
-    attribute_specifier_seq();
+    {
+        /* [ext.gnu] clang: in a parameter-declaration the standard's
+           attribute-specifiers come before GCC's */
+        flag_set ordered(standard_attributes_first, true);
+        attribute_specifier_seq();
+    }
     if (failed())
         return 0;
     /* C++23's explicit object parameter (P0847R7, "this

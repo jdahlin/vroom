@@ -69,6 +69,8 @@ node_index parser::unary_expression()
 {
     size_t mark = begin_node();
     token_index first = position;
+    if (at(extension_keyword::extension)) /* [ext.gnu] */
+        return gnu_extension_expression();
     if (is_unary_operator(peek()) || at(preprocessing_op_or_punc::PLUS_PLUS) ||
         at(preprocessing_op_or_punc::MINUS_MINUS)) {
         add_token();
