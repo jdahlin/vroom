@@ -37,3 +37,7 @@ Parser/using-if-exists-attr.cpp:20 [namespace.udecl]: a using-declaration has no
 Parser/cxx0x-attributes.cpp:227 [dcl.enum]/2, [dcl.type.elab]/1: enum E; is ill-formed; clang accepts it as a redeclaration of an enumeration declared before
 Parser/cxx0x-attributes.cpp:406 #pragma pack inside an attribute-specifier: clang makes the pragma a token there ([cpp.pragma]/1: implementation-defined)
 Parser/cxx0x-attributes.cpp:454 [[__clang__::annotate]]: __clang__ is a predefined macro, [[1::annotate]] after phase 4; clang recovers as _Clang
+# P3, expressions: n4861's grammar followed where clang's parser decides by
+# what a declaration turns out to be
+Parser/cxx2c-delete-with-message.cpp:45 [dcl.init], [expr.delete]: T a = delete ("hello"); is an initializer whose initializer-clause is a delete-expression; clang's parser takes = delete for a deleted definition (the tests of CWG2876)
+Parser/cxx2c-delete-with-message.cpp:46 as line 45

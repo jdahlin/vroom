@@ -438,6 +438,82 @@ The first grammar, about 55 nonterminals.
   `cxx2a-spaceship.cpp`, `cxx2a-designated-init.cpp`,
   `cxx11-brace-initializers.cpp`, `cxx-ambig-paren-expr.cpp`,
   `cxx-ambig-decl-expr.cpp`, `cxx2b-subscript.cpp`.
+- Status (2026-11-16, grammar and the expression claims done; the
+  declarator claims of V4b and V5 are still open): one file per subclause in
+  `expr/`: `expr.prim.cpp`, `expr.prim.id.cpp` (the id-expression of an
+  expression, decltype-specifier `::`), `expr.post.cpp`, `expr.unary.cpp`
+  (with sizeof, alignof, noexcept), `expr.new.cpp`, `expr.delete.cpp`,
+  `expr.cast.cpp`, `expr.compound.cpp` (the twelve binary productions of
+  [expr.mptr.oper] to [expr.log.or] as one table, [expr.comma],
+  [expr.const]), `expr.ass.cpp` (with [expr.cond]); `dcl/dcl.init.cpp`
+  (initializer, braced-init-list, initializer-list, designated
+  initializers) and `dcl/dcl.ambig.res.cpp`.  Parsed where P1-P2 kept
+  tokens: array bounds, static_assert, enumerator values, alignas,
+  decltype, default arguments, noexcept-specifiers and every initializer.
+  What is left as tokens is a function body (P4), a class body (P5) and
+  whole declarations of later steps.
+  - Ambiguities: [dcl.ambig.res]/2 is one function,
+    `parenthesized_type_id`: a tentative `( type-id )`, for a cast only
+    when a cast-expression can start after the `)` (so `(T())` alone is an
+    expression and `(T()) * 2` a cast; clang reads both the same way).
+    `~` is always the operator ([expr.unary.op]/10), `delete []` the array
+    form ([expr.delete]/1), a new-type-id the longest sequence
+    ([expr.new]/3).  `>` in a template-argument-list is P7's.
+  - Names: an expression's name that `declared_names` does not know (a
+    template, a class's member, a name declared in a part kept as tokens)
+    is parsed as an id-expression, but `<` after it is P7's to read, and a
+    declaration that then fails is kept as tokens, not reported.  Where a
+    type-id is possible only if such a name is a type, the tokens are read
+    a second time with the name as a type; if they are no type-id even
+    then they are an expression (`sizeof(f(x, 0))`), otherwise the
+    declaration is a later step's.  The parameters' scope now lasts to the
+    end of the function declarator ([basic.scope.param]/1), so
+    `noexcept(noexcept(x))` and `-> decltype(x)` find `x`.
+  - Editions: braced-init-lists outside `= { }` before C++11 (N2672) and
+    designators before C++20 (P0329R4) are clang's extensions there, so a
+    later step's; `&&` after a new-type-id is no ptr-operator before
+    C++11; `a[x, y]` is an expression-list from C++23 (P2128R6).  Also
+    left to P9 as extensions: statement expressions, compound literals,
+    `alignof` of an expression, `a ?: b`, C99's nested, array and mixed
+    designators.  throw, co_await and co_yield stay P6's, lambdas P6's,
+    folds, requires-expressions and `sizeof...` P7's, operator names P5's.
+  - V4a (1926 runs: clang's 1724, 196 of the standard's examples, 6 of our
+    own): 9041 declarations accepted or rejected as clang does, none
+    either way against it, 11299 kept as tokens; 40764 unparsed nodes (P1:
+    48749).  Fewer declarations are comparable than after P2 (9556): 625
+    declarations of clang's tests (one C++20 run of each) that P2 accepted
+    with an opaque expression are now kept whole, because the expression
+    has a template-id (most of them), a lambda, a requires-expression, a
+    type-trait keyword or an operator name.  Checked declaration by
+    declaration against a build of P2: none of them is P3's grammar.
+  - V4b for expressions: `cxxparse -expression-claims` prints each
+    expression and the same tokens with the operands of every operator in
+    parentheses; `bench/cxx-parse.py` has clang compile, after the
+    expression's declaration, `static_assert(__is_same(decltype((E)),
+    decltype((P))))` and `static_assert((E) == (P) || (E) != (E))`.  1659
+    expressions verified by value, 838 by type only (no constant, or no
+    number), none refuted, 373 not checkable (E does not compile where the
+    assertion stands).  Swapping two rows of the precedence table is caught
+    by the first test.  The parenthesizer leaves three things as written,
+    because parentheses change them: the operand of decltype, a
+    qualified-id (`&S::m`), and a call's own parentheses (`(T()) * 2`).
+  - V1: 167 quoted productions, 0 wrong; expr 34 of 57 nonterminals (the
+    other 23 are lambdas, requires-expressions, folds, await, yield and
+    throw), dcl 74 of 97.  V2: 72 examples of 25 subclauses extracted and
+    annotated (3 syntax errors, the rest semantic); 15 parse whole now, the
+    others need a function body, a class or a template (their `needs:`
+    line).  V3: `src/test/cxx/parse/gram/`, six files, one per group of
+    productions, written so that a wrong grouping changes a value.  V6:
+    `cxx-lex.py` 121/121.
+  - Measured: 31 ms for the 83378 tokens of `CXX/drs` concatenated, about
+    370 ns per token with phases 1-7 (7184 tentative parses, 2485 rewound).
+  - Surprises: clang's parser rejects `T a = delete ("x");` as a deleted
+    definition where the grammar has an initializer with a
+    delete-expression (known-differences.txt); a braced initializer was a
+    sibling of its declarator, not inside the init-declarator; `[` after a
+    parameter's type was taken for a structured binding.  A cold run of
+    clang's side takes about 50 minutes on this machine (Python reads each
+    `-ast-dump` under one lock); cached, the whole run is 18 s.
 
 ### P4. Statements and function definitions
 

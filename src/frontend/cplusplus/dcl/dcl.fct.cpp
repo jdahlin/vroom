@@ -31,25 +31,38 @@ bool parser::parameters_follow(declarator_form form)
     if (at_attribute_specifier(1))
         return true; /* a parameter's attribute-specifier-seq */
     /* a type-name, not a name the parser cannot classify: (a) with a
-       undeclared is a parenthesized declarator-id */
+       undeclared is a parenthesized declarator-id (unless this is the
+       reading in which such a name is a type) */
     position++;
-    bool specifier = at_decl_specifier(false);
+    bool specifier = at_decl_specifier(unknown_names_are_types);
     position--;
     (void)form;
     return specifier;
 }
 
-node_index parser::parameters_and_qualifiers()
+node_index parser::parameters_and_qualifiers(scope_index *parameters)
 {
     size_t mark = begin_node();
     token_index first = position;
     add_token();
     /* [basic.scope.param]/1: "A function parameter (including one appearing
        in a lambda-declarator) or function-local predefined variable has
-       function parameter scope." */
-    names.enter(scope_kind::function_prototype);
+       function parameter scope. ... If the nearest enclosing function
+       declarator is not the declarator of a function definition, the
+       potential scope ends at the end of that function declarator": the
+       noexcept-specifier is in it, and so is the trailing-return-type
+       (dcl.decl.cpp enters the scope again for it) */
+    struct parameter_scope {
+        declared_names &names;
+        ~parameter_scope()
+        {
+            names.leave();
+        }
+    } scope{names};
+    scope_index made = names.enter(scope_kind::function_prototype);
+    if (parameters)
+        *parameters = made;
     parameter_declaration_clause();
-    names.leave();
     if (failed())
         return 0;
     if (!accept(preprocessing_op_or_punc::RIGHT_PARENTHESIS))
@@ -135,7 +148,9 @@ node_index parser::parameter_declaration_clause()
  *         attribute-specifier-seq_opt decl-specifier-seq abstract-declarator_opt
  *         attribute-specifier-seq_opt decl-specifier-seq abstract-declarator_opt = initializer-clause
  *
- * The initializer-clause (a default argument, [dcl.fct.default]) is P3's.
+ * [dcl.fct.default]/1: "If an initializer-clause is specified in a
+ * parameter-declaration this initializer-clause is used as a default
+ * argument."
  */
 node_index parser::parameter_declaration()
 {
@@ -162,10 +177,11 @@ node_index parser::parameter_declaration()
     if (facts.name && !facts.qualified_id)
         names.declare(facts.name, name_kind::other);
     if (accept(preprocessing_op_or_punc::EQUAL)) {
-        static constexpr preprocessing_op_or_punc stops[] = {
-            preprocessing_op_or_punc::COMMA};
-        if (!unparsed_until(stops, 1))
-            return expected("a default argument after '='", "dcl.fct.default");
+        if (list_initialization_missing())
+            return 0;
+        initializer_clause();
+        if (failed())
+            return 0;
     }
     return finish_node(syntax_kind::parameter_declaration, mark, first);
 }

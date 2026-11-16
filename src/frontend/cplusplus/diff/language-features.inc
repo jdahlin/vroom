@@ -45,6 +45,16 @@ LANGUAGE_FEATURE(raw_string_delimiter_dollar_at_grave, cplusplus_26, never,
                  "P2558R2: $ @ ` in the basic character set")
 LANGUAGE_FEATURE(deleted_function_message, cplusplus_26, never,
                  "P2573R2: = delete(\"should have a reason\")")
+/* [dcl.decl] */
+LANGUAGE_FEATURE(rvalue_references, cplusplus_11, never, "N2118: the ptr-operator &&")
+/* [dcl.init] */
+LANGUAGE_FEATURE(list_initialization, cplusplus_11, never,
+                 "N2672: a braced-init-list outside = { }")
+LANGUAGE_FEATURE(designated_initializers, cplusplus_20, never,
+                 "P0329R4: designated-initializer-list")
+/* [expr] */
+LANGUAGE_FEATURE(multidimensional_subscript, cplusplus_23, never,
+                 "P2128R6: postfix-expression [ expression-list_opt ]")
 /* [cpp] */
 LANGUAGE_FEATURE(long_long, cplusplus_11, never, "N1811: long long, in #if too ([cpp.cond]/12)")
 LANGUAGE_FEATURE(variadic_macros, cplusplus_11, never,

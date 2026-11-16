@@ -281,8 +281,7 @@ node_index parser::enum_specifier_or_elaborated(decl_specifier_facts &facts)
  *     enumerator:
  *         identifier attribute-specifier-seq_opt
  *
- * The constant-expression is P3's, kept as its tokens.  A ',' before the
- * '}' is the enum-specifier's.  [basic.scope.pdecl]/4: "The point of
+ * A ',' before the '}' is the enum-specifier's.  [basic.scope.pdecl]/4: "The point of
  * declaration for an enumerator is immediately after its
  * enumerator-definition."
  */
@@ -306,10 +305,9 @@ node_index parser::enumerator_list(bool scoped)
                         definition_first);
         }
         if (accept(preprocessing_op_or_punc::EQUAL)) {
-            static constexpr preprocessing_op_or_punc stops[] = {
-                preprocessing_op_or_punc::COMMA};
-            if (!unparsed_until(stops, 1))
-                return expected("a constant-expression after '='", "dcl.enum");
+            constant_expression();
+            if (failed())
+                return 0;
             finish_node(syntax_kind::enumerator_definition, definition_mark,
                         definition_first);
         }

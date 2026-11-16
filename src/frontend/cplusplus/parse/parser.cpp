@@ -207,6 +207,24 @@ preprocessing_op_or_punc opening_bracket(preprocessing_op_or_punc closing)
 
 } // namespace
 
+/* the lookahead after the bracketed group at tokens[ahead]: after the
+   bracket that closes it, or the end of the translation unit */
+unsigned parser::group_end(unsigned ahead)
+{
+    if (closing_bracket(peek(ahead)) == preprocessing_op_or_punc::count)
+        return ahead;
+    unsigned depth = 0;
+    for (unsigned i = ahead;; i++) {
+        const token &t = peek(i);
+        if (tokens.at_end(position + i))
+            return i;
+        if (closing_bracket(t) != preprocessing_op_or_punc::count)
+            depth++;
+        else if (is_closing_bracket(t) && !--depth)
+            return i + 1;
+    }
+}
+
 /*
  * Scaffolding (doc/PLAN-cxx-parse.md, "opaque"): the tokens of one
  * declaration, kept as an unparsed node until the step that owns its

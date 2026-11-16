@@ -23,6 +23,19 @@ option sets bench/cxx-pp.py reads), per run:
            more memory than the machine has).
   syntax   (from P1) declarations without an (unparsed) node: accepted or
            rejected as clang does (V4a); counted, not compared, in P0
+  claims   (from P3) cxxparse -expression-claims gives each expression and
+           the same tokens with the operands of every operator in
+           parentheses, as the tree groups them.  After the expression's
+           declaration, clang compiles
+               static_assert(__is_same(decltype((E)), decltype((P))));
+               static_assert((E) == (P) || (E) != (E));     (a NaN)
+           so it checks our reading of precedence, of the casts and of
+           sizeof without anyone comparing trees (V4b).  A claim is verified
+           by value when both hold, by type when E is no constant clang can
+           compare (or no number: two array temporaries are equal in no
+           reading), refuted when one fails or P does not compile where E
+           does, and not checkable when E itself does not compile there
+           (a parameter's name, an erroneous test).  C++11 and later runs.
 
   --mutate N   also N token mutants (a token deleted, duplicated, or a
                bracket inserted) of each test, through cxxparse only: the
@@ -387,6 +400,7 @@ def check(test, opts, clang, cxxlex, cxxparse):
         res['fail'].append(('syntax', f'we reject the declaration at {b[0]}:{b[1]}, clang accepts it'))
     for b in res['syntax']['we_accept']:
         res['fail'].append(('syntax', f'we accept the declaration at {b[0]}:{b[1]}, clang rejects it'))
+    check_claims(test, opts, clang, cxxparse, res)
     if CLANG_SYNTAX_ERROR.search(c[2]):
         res['clang_syntax_error'] = True
         return res
@@ -414,6 +428,89 @@ def check(test, opts, clang, cxxlex, cxxparse):
     if why:
         res['fail'].append(('decls', why))
     return res
+
+
+CLAIMS_FILE = 'cxx-claims'
+
+
+def check_claims(test, opts, clang, cxxparse, res):
+    """V4b for expressions: see the module's docstring.  res['claims'] gets
+    the counts, res['fail'] one entry per refuted claim."""
+    counts = {'value': 0, 'type': 0, 'refuted': 0, 'unchecked': 0}
+    res['claims'] = counts
+    std = next((o[5:] for o in opts if o.startswith('-std=')), 'c++17')
+    if re.fullmatch(r'(c|gnu)\+\+(98|03)', std):
+        return
+    cwd = os.path.dirname(test)
+    name = os.path.basename(test)
+    try:
+        out = subprocess.run([cxxparse, '-expression-claims'] + opts + [name], cwd=cwd, capture_output=True,
+                             timeout=TIMEOUT)
+    except subprocess.TimeoutExpired:
+        return
+    if out.returncode not in (0, 1):
+        return
+    claims = []
+    # bytes as characters, as the test file below
+    for line in out.stdout.decode('latin-1').split('\n'):
+        parts = line.split('\t')
+        if len(parts) != 4:
+            continue
+        if os.path.normpath(os.path.join(cwd, parts[0])) != os.path.normpath(test):
+            continue
+        row, column = map(int, parts[1].split(':'))
+        claims.append((row, column, parts[2].strip(), parts[3].strip()))
+    if not claims:
+        return
+    # bytes as characters: the columns are bytes
+    lines = open(test, 'rb').read().decode('latin-1').split('\n')
+    places = {}
+    for k, c in enumerate(claims):
+        places.setdefault(c[:2], []).append(k)
+    for row, column in sorted(places, reverse=True):
+        if row > len(lines):
+            continue
+        block = ''
+        for k in places[(row, column)]:
+            e, p = claims[k][2], claims[k][3]
+            block += (f'\n#line {4 * k + 1} "{CLAIMS_FILE}"\n'
+                      f'static_assert(__is_same(decltype(({e})), decltype(({e}))));\n'
+                      f'static_assert(__is_same(decltype(({e})), decltype(({p}))));\n'
+                      f'static_assert(({e}) == ({p}) || ({e}) != ({e}));\n'
+                      f'static_assert(__is_arithmetic(__remove_cvref(decltype(({e})))) || '
+                      f'__is_enum(__remove_cvref(decltype(({e})))));')
+        text = lines[row - 1]
+        lines[row - 1] = (text[:column - 1] + block + f'\n#line {row} "{name}"\n' +
+                          ' ' * (column - 1) + text[column - 1:])
+    source = '\n'.join(lines).encode('latin-1')
+
+    def compile_claims():
+        try:
+            r = subprocess.run([clang, '-cc1'] + TRIPLE + ['-x', 'c++'] + opts +
+                               ['-fsyntax-only', '-ferror-limit', '0', '-w', '-'],
+                               cwd=cwd, input=source, capture_output=True, timeout=60)
+        except subprocess.TimeoutExpired:
+            return None
+        return r.stderr.decode('utf-8', 'replace')
+    stderr = cached('claims:' + hashlib.sha256(source).hexdigest(), clang, test, opts, compile_claims)
+    if stderr is None:
+        counts['unchecked'] += len(claims)
+        return
+    errors = {}
+    for m in re.finditer(r'^' + CLAIMS_FILE + r':(\d+):\d+: (?:fatal )?error: (.*)$', stderr, re.M):
+        errors.setdefault(int(m.group(1)), []).append(m.group(2))
+    for k, (row, column, e, p) in enumerate(claims):
+        probe, same_type, same_value, no_number = (errors.get(4 * k + i) for i in (1, 2, 3, 4))
+        if probe:
+            counts['unchecked'] += 1
+        elif same_type or (not no_number and any('static assertion failed' in x for x in same_value or ())):
+            counts['refuted'] += 1
+            res['fail'].append(('claims', f'the expression before {row}:{column}: `{e}` is not `{p}`: '
+                                          f'{(same_type or same_value)[0]}'))
+        elif same_value:
+            counts['type'] += 1
+        else:
+            counts['value'] += 1
 
 
 def mutants(test, n, seed):
@@ -488,7 +585,8 @@ def main():
         if a.mutate:
             results += list(ex.map(lambda j: check_mutants(j[0], j[1], cxxparse, a.mutate),
                                    [j for i, j in enumerate(jobs) if j[0] != jobs[i - 1][0] or i == 0]))
-    counts = {'tokens': 0, 'crash': 0, 'decls': 0, 'syntax': 0}
+    counts = {'tokens': 0, 'crash': 0, 'decls': 0, 'syntax': 0, 'claims': 0}
+    claims = {'value': 0, 'type': 0, 'refuted': 0, 'unchecked': 0}
     syntax = {'agree': 0, 'we_reject': 0, 'we_accept': 0, 'not_comparable': 0}
     compared = agree = syntax_errors = 0
     unparsed = erroneous = skipped = 0
@@ -511,6 +609,8 @@ def main():
             syntax[k] += v if isinstance(v, int) else len(v)
         unparsed += r.get('unparsed', 0)
         erroneous += r.get('erroneous', 0)
+        for k in claims:
+            claims[k] += r.get('claims', {}).get(k, 0)
         if r['fail'] or a.v:
             rel = os.path.relpath(r['test'], os.path.join(cxxpp.work_dir(), 'testsuites', 'llvm', 'clang', 'test'))
             if rel.startswith('..'):
@@ -526,6 +626,8 @@ def main():
     print(f'syntax: {syntax["agree"]} declarations accepted or rejected as clang does, '
           f'{syntax["we_reject"]} we reject and clang accepts, {syntax["we_accept"]} we accept and clang rejects, '
           f'{syntax["not_comparable"]} kept as tokens (a later step\'s grammar)')
+    print(f'claims: {claims["value"]} expressions verified by value, {claims["type"]} by type, '
+          f'{claims["refuted"]} refuted, {claims["unchecked"]} not checkable')
     return 1 if any(counts.values()) else 0
 
 

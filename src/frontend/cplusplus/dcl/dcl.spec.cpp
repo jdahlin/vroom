@@ -27,29 +27,13 @@ namespace cplusplus
 namespace
 {
 
-/* what a name at a place in the tokens is, to the decl-specifier-seq */
-enum class name_class {
-    /* no identifier there */
-    none,
-    /* a type-name: a type-specifier */
-    type,
-    /* declared, not as a type: where a declarator would start */
-    not_a_type,
-    /* not declared, or declared where the parser cannot see (a class's
-       member, a template's): a later step's */
-    unknown,
-    /* C::C or C::~C: the declarator-id of a constructor or destructor
-       ([class.qual]/2: "the name is instead considered to name the
-       constructor of class C") */
-    constructor,
-};
-
 /*
  * The name at tokens[ahead ...]: ::_opt (identifier ::)* identifier, looked
  * up as [basic.lookup.unqual] and [basic.lookup.qual] say.  *length is how
  * many tokens it has.
  */
-name_class classify_name(parser &p, unsigned ahead, unsigned *length)
+name_class classify(parser &p, unsigned ahead, unsigned *length,
+                    bool template_ids)
 {
     unsigned i = ahead;
     scope_index scope = p.names.current();
@@ -99,7 +83,7 @@ name_class classify_name(parser &p, unsigned ahead, unsigned *length)
             continue;
         }
         *length = i + 1 - ahead;
-        if (p.at(preprocessing_op_or_punc::LESS, i + 1))
+        if (template_ids && p.at(preprocessing_op_or_punc::LESS, i + 1))
             return name_class::unknown; /* a template-id: P7 */
         switch (kind) {
         case name_kind::type_name:
@@ -110,29 +94,6 @@ name_class classify_name(parser &p, unsigned ahead, unsigned *length)
         default:
             return name_class::not_a_type;
         }
-    }
-}
-
-bool is_simple_type_keyword(standard_keyword k)
-{
-    switch (k) {
-    case standard_keyword::char_:
-    case standard_keyword::char8_t_:
-    case standard_keyword::char16_t_:
-    case standard_keyword::char32_t_:
-    case standard_keyword::wchar_t_:
-    case standard_keyword::bool_:
-    case standard_keyword::short_:
-    case standard_keyword::int_:
-    case standard_keyword::long_:
-    case standard_keyword::signed_:
-    case standard_keyword::unsigned_:
-    case standard_keyword::float_:
-    case standard_keyword::double_:
-    case standard_keyword::void_:
-        return true;
-    default:
-        return false;
     }
 }
 
@@ -224,10 +185,39 @@ struct type_specifier_count {
 
 } // namespace
 
+VPRIV bool is_simple_type_keyword(standard_keyword k)
+{
+    switch (k) {
+    case standard_keyword::char_:
+    case standard_keyword::char8_t_:
+    case standard_keyword::char16_t_:
+    case standard_keyword::char32_t_:
+    case standard_keyword::wchar_t_:
+    case standard_keyword::bool_:
+    case standard_keyword::short_:
+    case standard_keyword::int_:
+    case standard_keyword::long_:
+    case standard_keyword::signed_:
+    case standard_keyword::unsigned_:
+    case standard_keyword::float_:
+    case standard_keyword::double_:
+    case standard_keyword::void_:
+        return true;
+    default:
+        return false;
+    }
+}
+
+name_class parser::classify_name(unsigned ahead, unsigned *length,
+                                 bool template_ids)
+{
+    return classify(*this, ahead, length, template_ids);
+}
+
 bool parser::type_name_follows(unsigned ahead)
 {
     unsigned length = 0;
-    return classify_name(*this, ahead, &length) == name_class::type;
+    return classify_name(ahead, &length) == name_class::type;
 }
 
 /* whether a decl-specifier-seq starts at the current token (for
@@ -253,7 +243,7 @@ bool parser::at_decl_specifier(bool unknown_names)
         break;
     }
     unsigned length = 0;
-    name_class c = classify_name(*this, 0, &length);
+    name_class c = classify_name(0, &length);
     return c == name_class::type || (unknown_names && c == name_class::unknown);
 }
 
@@ -330,23 +320,9 @@ node_index parser::decl_specifier_seq(decl_specifier_facts &facts,
             facts.has_defining_type_specifier = true;
         } else if (k == standard_keyword::decltype_) {
             /* decltype-specifier :: is a nested-name-specifier
-               ([expr.prim.id.qual]): of a declarator's ptr-operator or
-               declarator-id, or of a type-name (P3) */
-            unsigned close = 1, depth = 0;
-            for (;; close++) {
-                if (at_end())
-                    break;
-                const token &t = peek(close);
-                if (is_operator(t, preprocessing_op_or_punc::LEFT_PARENTHESIS))
-                    depth++;
-                else if (is_operator(
-                             t, preprocessing_op_or_punc::RIGHT_PARENTHESIS) &&
-                         !--depth)
-                    break;
-                if (t.kind == token_kind::end_of_file)
-                    break;
-            }
-            if (at(preprocessing_op_or_punc::COLON_COLON, close + 1)) {
+               ([expr.prim.id.qual]): of a declarator's ptr-operator, or of
+               a type-name that is a class's member (P5) */
+            if (at(preprocessing_op_or_punc::COLON_COLON, group_end(1))) {
                 if (facts.has_defining_type_specifier)
                     break;
                 return beyond_this_step();
@@ -380,11 +356,18 @@ node_index parser::decl_specifier_seq(decl_specifier_facts &facts,
             if (facts.has_defining_type_specifier)
                 break; /* [dcl.spec]/3 */
             unsigned length = 0;
-            name_class c = classify_name(*this, 0, &length);
+            name_class c = classify_name(0, &length);
             if (c == name_class::type) {
                 simple_type_specifier_with_name();
                 if (failed())
                     return 0;
+                facts.has_defining_type_specifier = true;
+            } else if (c == name_class::unknown && unknown_names_are_types &&
+                       !at(preprocessing_op_or_punc::LESS, length) &&
+                       !at(preprocessing_op_or_punc::COLON_COLON, length)) {
+                /* the reading in which the name is a type-name */
+                for (unsigned i = 0; i < length; i++)
+                    add_token();
                 facts.has_defining_type_specifier = true;
             } else if (c == name_class::unknown) {
                 /* a name the parser cannot classify where a type could be:
@@ -407,6 +390,10 @@ node_index parser::decl_specifier_seq(decl_specifier_facts &facts,
                      at(preprocessing_op_or_punc::RIGHT_PARENTHESIS, length) ||
                      at(preprocessing_op_or_punc::SEMICOLON, length)))
                     return beyond_this_step();
+                /* in an expression's type-id (a cast, new T[n]), what
+                   follows is read by what the name is */
+                if (facts.type_specifier_seq)
+                    unknown_name = true;
                 break;
             } else {
                 break; /* a declarator-id, or a constructor's */
@@ -592,7 +579,10 @@ node_index parser::elaborated_or_class_specifier(decl_specifier_facts &facts)
  *       type-constraint_opt auto
  *       type-constraint_opt decltype ( auto )
  *
- * The expression is P3's: the parentheses are kept as their tokens.
+ * [dcl.type.decltype]/1: "For an expression E, the type denoted by
+ * decltype(E) is defined as follows": whether E is an unparenthesized
+ * id-expression or class member access is what the tree says (a
+ * parenthesized one is a primary-expression node).
  */
 node_index parser::decltype_specifier()
 {
@@ -609,9 +599,13 @@ node_index parser::decltype_specifier()
         add_token();
         add_token();
     } else {
-        unparsed_group();
+        add_token();
+        expression();
         if (failed())
             return 0;
+        if (!accept(preprocessing_op_or_punc::RIGHT_PARENTHESIS))
+            return expected("')' to close the operand of decltype",
+                            "dcl.type.decltype");
     }
     return finish_node(kind, mark, first);
 }
