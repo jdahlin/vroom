@@ -321,6 +321,21 @@ VPRIV bool cxx_gen_construct_at(cxx *c, uint32_t target, ast_qualified_type t, c
 	bool value_init = c->gen_value_init;
 
 	c->gen_value_init = 0;
+	if (target && c->nullptr_ty && AST_QUALIFIED_TYPE_UNQUALIFIED(t) == c->nullptr_ty && nargs <= 1) {
+		/* std::nullptr_t n = nullptr (or another nullptr_t, or nothing): the null pointer it holds,
+		   *(void **)&n = v */
+		ast_qualified_type vp = cc_type_pointer(a, cc_type_basic(AST_TYPE_VOID));
+		uint32_t v = !nargs ? cc_conversion_apply(a, cc_node_integer_new(a, 0, cc_type_basic(AST_TYPE_INT), loc), vp) :
+			     AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE_AT(a, args[0])->ty) == c->nullptr_ty ? cxx_gen_bind(c, args[0], vp, loc) :
+			     cxx_gen_is_nullptr_node(c, args[0]) ? cc_conversion_apply(a, cc_node_rvalue(a, args[0]), vp) : 0;
+		uint32_t slot;
+
+		if (!v)
+			return false;
+		slot = cc_dereference_build(a, cc_cast_insert(a, cc_address_of_build(a, target, loc), cc_type_pointer(a, vp), AST_CAST_NOP), loc);
+		cc_id_list_append(a, out, cc_statement_new(a, AST_NODE_EXPRESSION, loc, cc_assignment_build(a, 0, slot, cc_node_rvalue(a, v), loc), 0, 0));
+		return true;
+	}
 	if (!target || !cls || nargs == UINT32_MAX || nargs > CXX_MAX_ARGS)
 		return false;
 	if (value_init && !nargs && (!found || !ctor || ctor->fn_defaulted) && !c->ctor_ilist) {

@@ -610,6 +610,18 @@ VPRIV void cxx_gen_binary(cxx *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 		if (!l || !r)
 			return;
 	}
+	if (c->nullptr_ty) {
+		/* p == n, n != p of a std::nullptr_t object (doctest's CHECK(p == nullptr), the value forwarded): the
+		   null pointer it holds, of the other operand's pointer type (void * when both are nullptr_t) */
+		bool ln = AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE_AT(c->ast, l)->ty) == c->nullptr_ty;
+		bool rn = AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE_AT(c->ast, r)->ty) == c->nullptr_ty;
+		ast_qualified_type vp = cc_type_pointer(c->ast, cc_type_basic(AST_TYPE_VOID));
+
+		if (ln && !(l = cxx_gen_bind(c, l, !rn && AST_TYPE_KIND(c->ast, AST_NODE_AT(c->ast, r)->ty) == AST_TYPE_POINTER ? AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE_AT(c->ast, r)->ty) : vp, loc)))
+			return;
+		if (rn && !(r = cxx_gen_bind(c, r, AST_TYPE_KIND(c->ast, AST_NODE_AT(c->ast, l)->ty) == AST_TYPE_POINTER ? AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE_AT(c->ast, l)->ty) : vp, loc)))
+			return;
+	}
 	if (cc_type_is_record(c->ast, AST_NODE_AT(c->ast, l)->ty) || cc_type_is_record(c->ast, AST_NODE_AT(c->ast, r)->ty))
 		return;	/* (a class operand of a built-in operator: a conversion function, not built yet) */
 	c->enode = cc_binary_build(c->ast, op, l, r, loc);

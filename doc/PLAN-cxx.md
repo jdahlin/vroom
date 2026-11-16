@@ -2811,3 +2811,10 @@ igen via `construct_at` för dess element).  Test:
 `run/call-back-into-instance-being-built.cpp`, som misslyckas utan ändringen;
 `cxx-run-tests.py` tar `// guessed-names: N` (högst N lokala namn får skilja
 sig från clangs).  Sviter gröna (161/161, 38/38, mangle).
+
+## Status 186 (2026-11-16)
+Ett `std::nullptr_t`-objekt (inte bara literalen) i `==`/`!=` med en pekare
+eller ett annat nullptr_t-objekt är nollpekaren det håller (doctests
+`CHECK(p == nullptr)`, där nullptr vidarebefordras som `R&&`), och en lokal
+`nullptr_t n = nullptr;` byggs.  Test: `run/nullptr-object-compare.cpp`.
+Sviter gröna (162/162, 38/38, mangle).
