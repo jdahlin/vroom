@@ -140,6 +140,11 @@ VPRIV int lookup_keyword(const implementation_defined_behavior &behavior,
         if (!c)
             c = n < length ? -1 : n > length ? 1 : 0;
         if (!c) {
+            /* [ext.clang] clang_no_operator_names: -fno-operator-names
+               makes and, or, ... identifiers */
+            if ((keywords[mid].flags & KEYWORD_OPERATOR) &&
+                !behavior.operator_names)
+                return -1;
             keyword_status s = keyword_status_of(behavior, keywords[mid].flags);
             return s == keyword_status::enabled ||
                            s == keyword_status::extension

@@ -86,6 +86,9 @@ struct implementation_defined_behavior {
     bool microsoft_compatibility = false;
     /* [lex.phases]/1.1: trigraphs are part of the phase 1 mapping before C++17 */
     bool trigraphs = false;
+    /* [lex.digraph]/2: and, or, ... are alternative tokens (clang's
+       -fno-operator-names turns that off) */
+    bool operator_names = true;
     /* [lex.name]/1: '$' is an extended character allowed in identifiers */
     bool dollar_in_identifier = true;
     /* [basic.fundamental]/9: char8_t is a keyword from C++20, or by -fchar8_t */
@@ -680,6 +683,7 @@ enum class dynamic_macro : uint8_t {
     is_target_environment,
     building_module,
     is_target_variant,
+    microsoft_pragma,
     flt_eval_method,
     has_constexpr_builtin,
 };
@@ -835,6 +839,7 @@ class preprocessor
     void directive_endif(const preprocessing_token &name);
     void skip_group();
     preprocessing_token directive_token_or_line();
+    void suggest_conditional_directive(const preprocessing_token &name);
     bool evaluate_condition(source_location at);
     bool evaluate_expression(const preprocessing_token *tokens, size_t count,
                              uint64_t *result, bool *negative = nullptr);
@@ -998,6 +1003,8 @@ class preprocessor
     void gnu_define_dynamic_macros();
     bool gnu_dynamic_macro(const macro_definition &m, owned_buffer &text);
     void clang_define_dynamic_macros();
+    void microsoft_define_dynamic_macros();
+    bool microsoft_pragma_operator(const preprocessing_token &name);
     /* 0: not clang's, 1: replaced by text, 2: diagnosed, nothing to read */
     int clang_dynamic_macro(preprocessing_token &name,
                             const macro_definition &m, owned_buffer &text);

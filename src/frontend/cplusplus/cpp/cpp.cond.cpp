@@ -33,6 +33,7 @@
  * choices are followed (its PPExpressions.cpp).
  */
 #include <stdio.h>
+#include <strings.h>
 #include <sys/stat.h>
 
 #include "../cplusplus-internal.h"
@@ -918,12 +919,90 @@ void preprocessor::skip_group()
                 continue;
             }
             break;
+        case directive_kind::unknown:
+            if (is_identifier(name))
+                suggest_conditional_directive(name);
+            break;
         default:
             break;
         }
         diagnostics_suppressed quiet(diagnostics);
         skip_rest_of_directive();
     }
+}
+
+namespace
+{
+
+/* Levenshtein's distance, replacements allowed */
+size_t edit_distance(const char *a, size_t n, const char *b, size_t m)
+{
+    size_t row[32];
+    if (m >= 32)
+        return SIZE_MAX;
+    for (size_t j = 0; j <= m; j++)
+        row[j] = j;
+    for (size_t i = 1; i <= n; i++) {
+        size_t previous = row[0];
+        row[0] = i;
+        for (size_t j = 1; j <= m; j++) {
+            size_t above = row[j];
+            size_t best = previous + (a[i - 1] != b[j - 1]);
+            if (above + 1 < best)
+                best = above + 1;
+            if (row[j - 1] + 1 < best)
+                best = row[j - 1] + 1;
+            row[j] = best;
+            previous = above;
+        }
+    }
+    return row[m];
+}
+
+} // namespace
+
+/* [impl.clang] in a skipped group, a name that is no directive but is close
+   to a conditional one gets a warning with the suggestion (clang's
+   findSimilarStr: the same ignoring case, or within a third of its
+   length) */
+void preprocessor::suggest_conditional_directive(
+    const preprocessing_token &name)
+{
+    owned_buffer s;
+    files.spelling(name, s.get());
+    char first = s.data()[0];
+    if (first >= 'a' && first <= 'z' && first != 'i' && first != 'e')
+        return;
+    if (diagnostics.severity_now(diagnostic_id::warn_pp_invalid_directive) ==
+        diagnostic_severity::ignored)
+        return;
+    static constexpr const char *candidates[] = {"if",      "ifdef",   "ifndef",
+                                                 "elif",    "else",    "endif",
+                                                 "elifdef", "elifndef"};
+    size_t count = behavior.has(language_feature::elifdef_directives) ? 8 : 6;
+    const char *best = nullptr;
+    size_t n = s.size(), best_distance = SIZE_MAX;
+    for (size_t i = 0; i < count; i++)
+        if (strlen(candidates[i]) == n &&
+            !strncasecmp(candidates[i], s.data(), n)) {
+            best = candidates[i];
+            best_distance = 0;
+            break;
+        }
+    if (!best) {
+        size_t limit = n < 3 ? n - 1 : n / 3;
+        for (size_t i = 0; i < count; i++) {
+            size_t d = edit_distance(s.data(), n, candidates[i],
+                                     strlen(candidates[i]));
+            if (d <= limit && d < best_distance)
+                best = candidates[i], best_distance = d;
+        }
+    }
+    if (best)
+        (diagnostics.issue(diagnostic_id::warn_pp_invalid_directive,
+                           name.location)
+         << 1)
+            << best;
 }
 
 /* a skipped line's next token: from the lookahead or the lexer, no

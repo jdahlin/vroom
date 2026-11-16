@@ -44,7 +44,11 @@ EXTENSION(clang_embed, clang,
 EXTENSION(clang_unicode_white_space, clang,
           "white space beyond [lex.charset]/1's (U+00A0, U+2000, ...), with a warning")
 
+EXTENSION(clang_no_operator_names, clang,
+          "-fno-operator-names: and, or, ... are identifiers ([lex.digraph]/2 off)")
+
 /* Microsoft (-fms-extensions) */
+EXTENSION(microsoft_pragma_operator, microsoft, "MSVC: __pragma(pp-tokens), the #pragma operator")
 EXTENSION(microsoft_operator_name_macros, microsoft,
           "MSVC: and, or, ... can be macro names")
 EXTENSION(microsoft_invalid_paste, microsoft,

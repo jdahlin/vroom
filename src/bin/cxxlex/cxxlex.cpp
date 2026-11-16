@@ -179,7 +179,7 @@ int main(int argc, char **argv)
     bool dollar_set = false, dollar = true, ms = false, ms_compat = false;
     /* clang -cc1 -dump-tokens does not convert literals: phase 7's
        diagnostics are not issued (bench/cxx-pp.py) */
-    bool phase4_only = false;
+    bool phase4_only = false, no_operator_names = false;
     const char *path = nullptr;
 
     for (int i = 1; i < argc; i++) {
@@ -253,7 +253,9 @@ int main(int argc, char **argv)
                 fprintf(stderr, "cxxlex: unsupported %s\n", a);
                 return 2;
             }
-        } else if (!strcmp(a, "-fms-extensions"))
+        } else if (!strcmp(a, "-fno-operator-names"))
+            no_operator_names = true;
+        else if (!strcmp(a, "-fms-extensions"))
             ms = true;
         else if (!strcmp(a, "-fms-compatibility"))
             ms = ms_compat = true;
@@ -284,6 +286,7 @@ int main(int argc, char **argv)
     if (dollar_set)
         behavior.dollar_in_identifier = dollar;
     behavior.microsoft_extensions = ms;
+    behavior.operator_names = !no_operator_names;
     behavior.microsoft_compatibility = ms_compat;
 
     diagnostic_consumer diagnostics(diagnostic_settings);

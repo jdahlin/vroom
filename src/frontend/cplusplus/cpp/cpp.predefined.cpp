@@ -112,6 +112,8 @@ void preprocessor::define_dynamic_macros()
         gnu_define_dynamic_macros(); /* [ext.gnu] */
     if (behavior.has(extension::clang_feature_checks))
         clang_define_dynamic_macros(); /* [ext.clang] */
+    if (behavior.has(extension::microsoft_pragma_operator))
+        microsoft_define_dynamic_macros(); /* [ext.microsoft] */
 }
 
 /* a string literal of the characters of s, " and \ escaped */
@@ -237,6 +239,8 @@ bool preprocessor::replace_dynamic(preprocessing_token &name,
         break;
     case dynamic_macro::pragma_operator:
         return pragma_operator(name);
+    case dynamic_macro::microsoft_pragma: /* [ext.microsoft] */
+        return microsoft_pragma_operator(name);
     case dynamic_macro::has_include:
     case dynamic_macro::has_include_next:
     case dynamic_macro::has_embed:
