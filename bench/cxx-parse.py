@@ -77,7 +77,8 @@ def find_tool(bin_dir, name):
     for d in ([bin_dir] if bin_dir else []) + [os.path.join(R, 'build', 'linux', 'src'), os.path.join(R, 'build', 'src')]:
         p = os.path.join(d, name)
         if os.path.exists(p):
-            return p
+            # each run's directory is its test's: the path must not be relative
+            return os.path.abspath(p)
     sys.exit(f'cxx-parse: no {name}; make -C src {name}')
 
 
