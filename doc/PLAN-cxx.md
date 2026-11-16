@@ -2772,3 +2772,9 @@ signatur i mallcachen skrivs inte över med okänd.  Tester:
 `run/ilist-ctor-not-from-pointer.cpp`, `run/explicit-dtor-call-instance.cpp`,
 `run/unnamed-param-pack-detect.cpp`, `run/template-sig-cache-kept.cpp`.
 Sviter gröna (155/155, 38/38).
+
+## Status 181 (2026-11-16)
+Variadiska funktioner får kod (`f(...)`, även mallar), och en trivial klass
+kan skickas genom `...` som i C.  Kvar: `va_list` som lokal variabel
+(`__builtin_va_list` är ingen kodtyp än).  Test: `run/variadic-only-param.cpp`.
+Sviter gröna (156/156, 38/38, mangle).

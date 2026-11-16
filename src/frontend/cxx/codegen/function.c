@@ -33,7 +33,7 @@ VPRIV bool cxx_gen_function_begin(cxx *c, cxx_entity *f, cxx_scope *fs, const cx
 	    AST_TYPE_KIND(a, f->ty) != AST_TYPE_FUNCTION || (f->sym && (a->syms[f->sym].flags & AST_SYMBOL_FLAG_DEFINED)) || c->gen_stack_depth > 48)
 		{ CXX_BEGIN_WHY(); return false; }
 	ft = AST_TYPE(a, f->ty);
-	if ((ft->flags & AST_TYPE_FLAG_VARIADIC) || ft->n != nps || (!cxx_gen_value_ok(c, ft->base) && AST_TYPE_KIND(a, ft->base) != AST_TYPE_VOID))
+	if (ft->n != nps || (!cxx_gen_value_ok(c, ft->base) && AST_TYPE_KIND(a, ft->base) != AST_TYPE_VOID))
 		{ CXX_BEGIN_WHY(); return false; }
 	for (uint32_t i = 0; i < nps; i++)	/* (the parser's record of a parameter may lack its type: the function type has it) */
 		if (!cxx_gen_value_ok(c, ps[i].ty != CXX_TY_UNKNOWN ? ps[i].ty : a->params[ft->aux + i]))

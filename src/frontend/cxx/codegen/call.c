@@ -489,8 +489,9 @@ static void cxx_gen_call_impl(cxx *c, cxx_entity *f, uint32_t object, bool arrow
 		{ CXX_CALL_WHY(); return; }
 	for (uint32_t i = 0; i < nargs; i++)
 		if (!args[i] || (i < ft->n ? !cxx_gen_value_ok(c, a->params[ft->aux + i]) :
-				 cc_type_is_record(a, AST_NODE_AT(a, args[i])->ty) && AST_TYPE_KIND(a, AST_NODE_AT(a, args[i])->ty) != AST_TYPE_ARRAY))
-			{ CXX_CALL_WHY(); return; }	/* (a class through ...: not built yet) */
+				 cc_type_is_record(a, AST_NODE_AT(a, args[i])->ty) && AST_TYPE_KIND(a, AST_NODE_AT(a, args[i])->ty) != AST_TYPE_ARRAY &&
+				 (cxx_gen_by_address(c, AST_NODE_AT(a, args[i])->ty) || !cxx_gen_type_ok(c, AST_NODE_AT(a, args[i])->ty))))
+			{ CXX_CALL_WHY(); return; }	/* (a non-trivial class through ...: not built yet; a trivial one is passed as C passes it) */
 	if (!cxx_gen_on(c) || !cxx_gen_name(c, f) || !f->sym)
 		{ CXX_CALL_WHY(); return; }
 	if (f->name_guess && !(a->syms[f->sym].flags & AST_SYMBOL_FLAG_DEFINED))
