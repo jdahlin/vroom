@@ -663,6 +663,8 @@ typedef struct cxx {
     uint8_t
         carg_const; /* the argument list was one integer constant expression */
     int64_t carg_value; /* ... its value */
+    uint32_t
+        gen_nsdmi_object; /* cxx_gen_nsdmi for an aggregate's member: the object, not *this */
     uint8_t
         gen_parts_move; /* cxx_gen_copy_construct_parts for T(T&&) = default: class members moved */
     uint8_t const_eval,

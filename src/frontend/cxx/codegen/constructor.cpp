@@ -15,9 +15,10 @@ VPRIV void cxx_gen_member_initializer(cxx *c, uint32_t name,
     uint32_t self, target, value;
     ast_qualified_type mt;
 
-    if (!cxx_gen_on(c) || !c->gen_this || !c->gen_pre)
+    if (!cxx_gen_on(c) || (!c->gen_this && !c->gen_nsdmi_object) || !c->gen_pre)
         return;
-    self = cxx_gen_this_object(c, loc);
+    self =
+        c->gen_nsdmi_object ? c->gen_nsdmi_object : cxx_gen_this_object(c, loc);
     if (!self || nargs == UINT32_MAX) {
         cxx_gen_fail(c);
         return;
