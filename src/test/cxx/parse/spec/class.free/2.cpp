@@ -1,5 +1,5 @@
 // [class.free] Example 2 (paragraph 5), docs/cxx-spec/class/class.free.md
-// needs: P6
+// needs: P7 (std::size_t is not declared)
 // status: well-formed (as far as the example says)
 
 class X {

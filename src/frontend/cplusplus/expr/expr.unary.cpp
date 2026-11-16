@@ -62,7 +62,7 @@ bool is_unary_operator(const token &t)
  * begins is [dcl.ambig.res]/2's rule.  [expr.alignof]/1: "The operand shall
  * be a type-id".
  *
- * await-expression is P6's and sizeof ... ( identifier ) P7's.  The first
+ * await-expression is expr.await.cpp's and sizeof ... ( identifier ) P7's.  The first
  * alternative passes its postfix-expression on.
  */
 node_index parser::unary_expression()
@@ -122,7 +122,7 @@ node_index parser::unary_expression()
          at(standard_keyword::delete_, 1)))
         return delete_expression();
     if (at(standard_keyword::co_await_))
-        return beyond_this_step();
+        return await_expression();
     return postfix_expression();
 }
 

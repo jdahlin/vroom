@@ -146,11 +146,12 @@ node_index parser::initializer_list(bool in_braces)
     unsigned count = 0;
     node_index n = 0;
     for (;;) {
+        /* [ext.clang] C99's designators in C++: an initializer-list that
+           mixes clauses with designators, the array designator [n] = (a
+           '[' whose group no '=' follows begins a lambda-expression): P9 */
         if (in_braces && (at(preprocessing_op_or_punc::DOT) ||
-                          at(preprocessing_op_or_punc::LEFT_BRACKET)))
-            /* [ext.clang] C99's designators in C++: an initializer-list
-               that mixes clauses with designators, the array designator
-               [n] = (which here begins a lambda-expression, P6's): P9 */
+                          (at(preprocessing_op_or_punc::LEFT_BRACKET) &&
+                           at(preprocessing_op_or_punc::EQUAL, group_end(0)))))
             return beyond_this_step();
         if (!in_braces && list_initialization_missing())
             return 0;

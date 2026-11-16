@@ -76,8 +76,11 @@ node_index parser::parameters_and_qualifiers(scope_index *parameters)
         if (failed())
             return 0;
     } else if (at(standard_keyword::throw_)) {
-        /* a dynamic-exception-specification (removed in C++20, [diff.cpp17.except]): P6 */
-        return beyond_this_step();
+        /* C++14's parameters-and-qualifiers has exception-specification_opt
+           here, a dynamic-exception-specification or noexcept-specifier */
+        dynamic_exception_specification();
+        if (failed())
+            return 0;
     }
     attribute_specifier_seq(true);
     if (failed())

@@ -32,8 +32,8 @@ namespace
 /*
  * Whether tokens [first, end) use grammar a later step of
  * doc/PLAN-cxx-parse.md writes: then a declaration that did not parse is
- * kept as an unparsed node, not reported.  These are templates,
- * exceptions, coroutines, modules and the extensions' keywords (P6-P9).
+ * kept as an unparsed node, not reported.  These are templates, modules
+ * and the extensions' keywords (P7-P9).
  */
 bool uses_later_grammar(parser &p, token_index first, token_index end,
                         bool statement)
@@ -46,11 +46,7 @@ bool uses_later_grammar(parser &p, token_index first, token_index end,
         case standard_keyword::concept_:
         case standard_keyword::typename_:
         case standard_keyword::asm_:
-        case standard_keyword::try_:
         case standard_keyword::export_:
-        case standard_keyword::co_await_:
-        case standard_keyword::co_yield_:
-        case standard_keyword::co_return_:
         case standard_keyword::extension:
             return true;
         default:
@@ -442,13 +438,14 @@ parser::simple_declaration_rest(size_t mark, token_index first,
     }
     bool function = facts.first == derivation::function;
     /* function-body: ctor-initializer_opt compound-statement (a
-       constructor's ctor-initializer, [class.base.init]), = default ;,
-       = delete ; */
-    if (function && (at(preprocessing_op_or_punc::LEFT_BRACE) ||
-                     at(preprocessing_op_or_punc::COLON) ||
-                     (at(preprocessing_op_or_punc::EQUAL) &&
-                      (at(standard_keyword::default_, 1) ||
-                       at(standard_keyword::delete_, 1))))) {
+       constructor's ctor-initializer, [class.base.init]),
+       function-try-block, = default ;, = delete ; */
+    if (function &&
+        (at(preprocessing_op_or_punc::LEFT_BRACE) ||
+         at(preprocessing_op_or_punc::COLON) || at(standard_keyword::try_) ||
+         (at(preprocessing_op_or_punc::EQUAL) &&
+          (at(standard_keyword::default_, 1) ||
+           at(standard_keyword::delete_, 1))))) {
         /* [dcl.typedef]/1: "nor in the decl-specifier-seq of a
            function-definition" */
         if (specifiers.typedef_)
@@ -465,10 +462,8 @@ parser::simple_declaration_rest(size_t mark, token_index first,
             return 0;
         return finish_node(syntax_kind::function_definition, mark, first);
     }
-    if (function &&
-        (at(standard_keyword::try_) || at(standard_keyword::requires_)))
-        /* function-try-block (P6), requires-clause (P7) */
-        return beyond_this_step();
+    if (function && at(standard_keyword::requires_))
+        return beyond_this_step(); /* requires-clause: P7 */
     if (!specifiers.node && !facts.qualified_id)
         /* nodeclspec-function-declaration is a member's, or an
            explicit-specialization's: a declaration at namespace scope

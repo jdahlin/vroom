@@ -1,5 +1,5 @@
 // [dcl.fct.def.delete] Example 2 (paragraph 3), docs/cxx-spec/dcl/dcl.fct.def.delete.md
-// needs: P6
+// needs: P7 (std::size_t is not declared)
 // status: annotated
 
 struct sometype {

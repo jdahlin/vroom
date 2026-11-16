@@ -23,7 +23,7 @@ namespace cplusplus
  * expression whose type, value, and value category are identical to those
  * of E."
  *
- * lambda-expression is P6's, fold-expression and requires-expression P7's.
+ * lambda-expression is expr.prim.lambda.cpp's, fold-expression and requires-expression P7's.
  */
 node_index parser::primary_expression()
 {
@@ -55,7 +55,7 @@ node_index parser::primary_expression()
            expression begins with one */
         if (at(preprocessing_op_or_punc::LEFT_BRACKET, 1))
             return misplaced_attribute_brackets();
-        return beyond_this_step(); /* lambda-expression */
+        return lambda_expression();
     }
     if (at_identifier() || at(preprocessing_op_or_punc::COLON_COLON) ||
         at(standard_keyword::decltype_) || at(standard_keyword::operator_))

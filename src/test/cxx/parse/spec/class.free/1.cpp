@@ -1,5 +1,5 @@
 // [class.free] Example 1 (paragraph 2), docs/cxx-spec/class/class.free.md
-// needs: P6
+// needs: P7 (std::size_t is not declared)
 // status: annotated
 
 class Arena;

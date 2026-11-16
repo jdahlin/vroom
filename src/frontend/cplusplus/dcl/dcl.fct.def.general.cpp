@@ -13,7 +13,7 @@
  * the compound-statement ("If the nearest enclosing function declarator is
  * not the declarator of a function definition, the potential scope ends at
  * the end of that function declarator"), the ctor-initializer's included
- * ([class.base.init]).  The function-try-block is P6's.
+ * ([class.base.init]), and into a function-try-block's handlers.
  */
 #include "../cplusplus-internal.h"
 
@@ -78,13 +78,17 @@ node_index parser::function_body(const declarator_facts &declarator,
 {
     size_t mark = begin_node();
     token_index first = position;
+    bool function_try = at(standard_keyword::try_);
     if (member && collecting_members &&
         (at(preprocessing_op_or_punc::LEFT_BRACE) ||
-         at(preprocessing_op_or_punc::COLON))) {
+         at(preprocessing_op_or_punc::COLON) || function_try)) {
         /* a complete-class context: the first pass over the
            member-specification (class.mem.cpp) keeps it as its tokens, a
            ctor-initializer's up to the compound-statement, which follows a
-           mem-initializer's ')' or '}' (or its '...') */
+           mem-initializer's ')' or '}' (or its '...'), and a
+           function-try-block's handlers */
+        if (function_try)
+            consume();
         if (at(preprocessing_op_or_punc::COLON)) {
             consume();
             while (!at_end() && !at(preprocessing_op_or_punc::SEMICOLON)) {
@@ -106,14 +110,21 @@ node_index parser::function_body(const declarator_facts &declarator,
                 else
                     consume();
             }
-            add(tree.make(syntax_kind::unparsed, nullptr, 0, first, position));
         }
         if (at(preprocessing_op_or_punc::LEFT_BRACE))
-            unparsed_group();
+            position += group_end(0);
+        while (function_try && at(standard_keyword::catch_)) {
+            consume();
+            if (at(preprocessing_op_or_punc::LEFT_PARENTHESIS))
+                position += group_end(0);
+            if (at(preprocessing_op_or_punc::LEFT_BRACE))
+                position += group_end(0);
+        }
+        add(tree.make(syntax_kind::unparsed, nullptr, 0, first, position));
         return finish_node(syntax_kind::function_body, mark, first);
     }
     if (at(preprocessing_op_or_punc::LEFT_BRACE) ||
-        at(preprocessing_op_or_punc::COLON)) {
+        at(preprocessing_op_or_punc::COLON) || function_try) {
         /* in a class, a complete-class context ([class.mem]/6) */
         unsigned contexts = names.complete_contexts;
         if (member)
@@ -121,6 +132,8 @@ node_index parser::function_body(const declarator_facts &declarator,
         scope_index enclosing = names.current();
         if (declarator.has_parameters)
             names.reenter(declarator.parameters);
+        if (function_try)
+            add_token(); /* try */
         if (at(preprocessing_op_or_punc::COLON))
             ctor_initializer();
         if (!failed()) {
@@ -130,10 +143,18 @@ node_index parser::function_body(const declarator_facts &declarator,
                 expected("'{' to begin the function-body",
                          "dcl.fct.def.general");
         }
+        /* [except.handle]/11: "The scope and lifetime of the parameters
+           of a function or constructor extend into the handlers of a
+           function-try-block." */
+        if (function_try && !failed())
+            handler_seq();
         names.reenter(enclosing);
         names.complete_contexts = contexts;
         if (failed())
             return 0;
+        /* function-body: function-try-block passes it through */
+        if (function_try)
+            return finish_node(syntax_kind::function_try_block, mark, first);
     } else {
         if (at(standard_keyword::default_, 1)) {
             defaultable_declarator(declarator, member);

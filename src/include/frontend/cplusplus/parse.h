@@ -748,6 +748,8 @@ class parser
     node_index trailing_return_type();
     node_index type_id();
     node_index noexcept_specifier();
+    /* [except.spec] of C++17 and earlier: throw ( type-id-list_opt ) */
+    node_index dynamic_exception_specification();
 
     /* ---- [class.pre], [class.mem], [class.derived], [class.base.init] */
     /* class-head's base-clause_opt, { member-specification_opt }: the
@@ -830,6 +832,12 @@ class parser
     node_index selection_statement();
     node_index iteration_statement();
     node_index jump_statement();
+    /* [stmt.return.coroutine], [except.pre] */
+    node_index coroutine_return_statement();
+    node_index try_block();
+    node_index handler_seq();
+    node_index handler();
+    node_index exception_declaration();
     /* declaration-statement: block-declaration */
     node_index block_declaration();
     node_index init_statement();
@@ -884,6 +892,16 @@ class parser
     node_index expression_list();
     node_index unary_expression();
     node_index noexcept_expression();
+    /* [expr.await], [expr.yield], [expr.throw] */
+    node_index await_expression();
+    node_index yield_expression();
+    node_index throw_expression();
+    /* [expr.prim.lambda] */
+    node_index lambda_expression();
+    node_index lambda_introducer();
+    node_index lambda_capture();
+    node_index capture();
+    node_index lambda_declarator(scope_index *parameters);
     node_index new_expression();
     node_index new_type_id();
     node_index new_declarator();

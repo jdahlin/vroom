@@ -454,8 +454,6 @@ node_index parser::member_declarator(const decl_specifier_facts &specifiers,
         if (specifiers.typedef_)
             return violates("no typedef in a function-definition",
                             "dcl.typedef", specifiers.typedef_at);
-        if (at(standard_keyword::try_))
-            return beyond_this_step(); /* function-try-block: P6 */
         function_body(facts, true);
         if (failed())
             return 0;
