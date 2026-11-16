@@ -2754,3 +2754,10 @@ Strikt bänk: pass 29, 85 saknas.
   minskade inte `e`, så valarray:s `__clear` slingade för evigt
   (unit-class_parser hängde).  Test: `run/pseudo-destructor-side-effect.cpp`.
 Sviter gröna (150/150, 38/38, mangle).  Strikt bänk: pass 31, 83 saknas.
+
+## Status 179 (2026-11-16)
+En funktionsmall vars returtyp skulle bli ett fält eller en funktion är inte
+valbar ([temp.deduct]/11.10).  Test: `run/array-return-not-viable.cpp`.
+Kvar: jsons `is_getable<json, char[8]>` blir ändå okänd (from_json-kedjan
+för `char(&)[8]`), så `j.value("k", "default")` saknar kod.  Sviter gröna
+(151/151, 38/38, mangle).  Strikt bänk: pass 31, 83 saknas.

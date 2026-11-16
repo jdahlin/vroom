@@ -31,7 +31,7 @@ VPRIV ast_qualified_type cxx_function_signature_parse(cxx *c, bool any_return, b
 	c->einvalid = 0;	/* (and an expression that is ill-formed for sure: -> decltype(c.begin()) for an int) */
 	c->sig_requires = 1;
 	cxx_attributes_skip(c);
-	bool conv_fn = false;
+	bool conv_fn = false, ret_bad = false;
 
 	if (!(cxx_decl_specifiers_parse(c, ctor_class, false) & (DS_TYPE | DS_MODIFIER)) && !ctor_class && !(conv_fn = cxx_is_kw(c, CXX_KW_operator))) {
 		c->member_missing = missing, c->einvalid = invalid;
@@ -110,13 +110,21 @@ VPRIV ast_qualified_type cxx_function_signature_parse(cxx *c, bool any_return, b
 		c->sig_requires = (int8_t)cxx_requires_clause_value(c);
 		c->scope = saved;
 	}
+	/* a function returning an array or a function: no such type, a substitution failure ([temp.deduct]/11.10:
+	   json's get<char[8]>() in is_getable) */
+	{
+		ast_qualified_type rt = t != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, t) == AST_TYPE_FUNCTION ? AST_TYPE(c->ast, t)->base : c->decl_return;
+
+		if (f && rt != CXX_TY_UNKNOWN && (AST_TYPE_KIND(c->ast, rt) == AST_TYPE_ARRAY || AST_TYPE_KIND(c->ast, rt) == AST_TYPE_FUNCTION))
+			c->einvalid = 1, ret_bad = true;
+	}
 	if ((c->member_missing || c->einvalid) && !any_return && getenv("VCC_CXX_SIG")) {
 		fprintf(stderr, "signature fails: missing %u invalid %u (%u):", c->member_missing, c->einvalid, c->einvalid_at);
 		for (uint32_t i = c->einvalid_at > 12 ? c->einvalid_at - 12 : 0; i < c->einvalid_at + 3 && i < c->ntok; i++)
 			fprintf(stderr, " %.*s", (int)c->tok[i].len, c->tok[i].s);
 		fputc('\n', stderr);
 	}
-	if ((c->member_missing || c->einvalid) && !any_return)
+	if (((c->member_missing || c->einvalid) && !any_return) || ret_bad)
 		c->sig_requires = 0;	/* a substitution failure in the return or a parameter type */
 	c->member_missing = missing, c->einvalid = invalid;
 	/* body: the definition's body too (an instance's), its parameters declared */
