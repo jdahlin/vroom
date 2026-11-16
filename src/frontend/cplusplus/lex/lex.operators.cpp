@@ -88,7 +88,7 @@ uint32_t lexer::scan_preprocessing_op_or_punc(uint32_t at,
             continue;
         /* <=> is C++20's; before it, <= and > ([diff.cpp17.expr]) */
         if (i == static_cast<int>(preprocessing_op_or_punc::SPACESHIP) &&
-            !behavior.at_least(standard_edition::cplusplus_20))
+            !behavior.has(language_feature::three_way_comparison_operator))
             continue;
         /* .* and ->* are operators, but clang's raw lexer forms them too */
         best = i;
@@ -99,7 +99,7 @@ uint32_t lexer::scan_preprocessing_op_or_punc(uint32_t at,
     /* [lex.pptoken]/3.2: <:: not followed by : or > */
     if (best == static_cast<int>(preprocessing_op_or_punc::LESS_COLON) &&
         c[2] == ':' && c[3] != ':' && c[3] != '>' &&
-        behavior.at_least(standard_edition::cplusplus_11)) {
+        behavior.has(language_feature::less_colon_colon_is_less)) {
         best = static_cast<int>(preprocessing_op_or_punc::LESS);
         best_length = 1;
     }

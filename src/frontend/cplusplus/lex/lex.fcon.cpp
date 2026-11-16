@@ -1,49 +1,36 @@
 /*
- * lex.fcon.cpp: [lex.fcon] Floating-point literals.  For now only which
- * pp-numbers are floating-point literals; the value ([lex.fcon]/2-3) is a
- * later step.
+ * lex.fcon.cpp: [lex.fcon] Floating-point literals: the type of a pp-number
+ * that lex.ppnumber.cpp read as a floating-point-literal.  Its value
+ * ([lex.fcon]/2-3) is a later step.
  *
  *     floating-point-literal:
  *         decimal-floating-point-literal
  *         hexadecimal-floating-point-literal
- *
- *     decimal-floating-point-literal:
- *         fractional-constant exponent-part_opt floating-point-suffix_opt
- *         digit-sequence exponent-part floating-point-suffix_opt
- *
- *     hexadecimal-floating-point-literal:
- *         hexadecimal-prefix hexadecimal-fractional-constant binary-exponent-part floating-point-suffix_opt
- *         hexadecimal-prefix hexadecimal-digit-sequence binary-exponent-part floating-point-suffix_opt
  */
 #include "../cplusplus-internal.h"
 
 namespace cplusplus
 {
 
-/* a fractional-constant (a '.') or an exponent-part (e after decimal digits,
-   p after hexadecimal ones) makes a floating-point-literal */
-VPRIV bool is_floating_point_literal_spelling(const char *spelling,
-                                              size_t length)
+/*
+ * [lex.fcon]/1: "The type of a floating-point-literal is determined by its
+ * floating-point-suffix as specified in Table 10":
+ *
+ *     none      double
+ *     f or F    float
+ *     l or L    long double
+ *
+ * and clang's f16 for _Float16, an extended floating-point type
+ * ([basic.fundamental]/12) on this target.
+ */
+void lexer::convert_floating_point_literal(const pp_number_analysis &a,
+                                           token &out)
 {
-    bool hexadecimal = length > 1 && spelling[0] == '0' &&
-                       (spelling[1] == 'x' || spelling[1] == 'X');
-    for (size_t i = hexadecimal ? 2 : 0; i < length; i++) {
-        char c = spelling[i];
-        if (c == '.')
-            return true;
-        if (hexadecimal ? (c == 'p' || c == 'P') : (c == 'e' || c == 'E'))
-            /* an exponent-part: 'e' sign_opt digit-sequence; an e followed by
-               anything else starts a suffix (TODO: clang's
-               err_exponent_has_no_digits for 1e) */
-            return i + 1 < length &&
-                   (is_digit((unsigned char)spelling[i + 1]) ||
-                    spelling[i + 1] == '+' || spelling[i + 1] == '-');
-        if (!(hexadecimal ? is_hexadecimal_digit((unsigned char)c)
-                          : is_digit((unsigned char)c)) &&
-            c != '\'')
-            return false;
-    }
-    return false;
+    out.literal = literal_kind::floating_point_literal;
+    out.type = a.float_suffix     ? fundamental_type::float_
+               : a.long_suffix    ? fundamental_type::long_double
+               : a.float16_suffix ? fundamental_type::float16
+                                  : fundamental_type::double_;
 }
 
 } // namespace cplusplus

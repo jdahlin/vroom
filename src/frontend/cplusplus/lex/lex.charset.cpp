@@ -117,7 +117,8 @@ uint32_t lexer::scan_universal_character_name(uint32_t at, uint32_t *code_point,
             return 0;
         }
         p += close.extent;
-        if (issue && !behavior.at_least(standard_edition::cplusplus_23))
+        if (issue &&
+            !behavior.has(language_feature::delimited_escape_sequences))
             diagnostics.issue(diagnostic_id::ext_delimited_escape_sequence, at)
                 << 0 << 1;
     } else if (found != digits) {

@@ -62,11 +62,19 @@ token lexer::convert(const preprocessing_token &pp)
     case preprocessing_token_kind::pp_number:
         spelling(pp, &spelling_buffer);
         out.kind = token_kind::literal;
-        if (is_floating_point_literal_spelling(spelling_buffer.p,
-                                               spelling_buffer.n))
-            out.literal = literal_kind::floating_point_literal;
+        /* [lex.ppnumber]/2: the pp-number becomes an integer-literal or a
+           floating-point-literal, or a user-defined-integer-literal or
+           user-defined-floating-point-literal ([lex.ext]) */
+        if (pp_number_analysis a; !analyze_pp_number(
+                spelling_buffer.p, spelling_buffer.n, pp.location, a))
+            out.kind = token_kind::invalid;
+        else if (a.ud_suffix) {
+            out.literal = literal_kind::user_defined_literal;
+            out.preprocessing.ud_suffix_offset = (uint32_t)a.suffix_begin;
+        } else if (a.floating)
+            convert_floating_point_literal(a, out);
         else
-            convert_integer_literal(spelling_buffer.p, spelling_buffer.n, out);
+            convert_integer_literal(a, out);
         break;
     case preprocessing_token_kind::character_literal:
         out.kind = token_kind::literal;

@@ -102,8 +102,12 @@ static lexer::translation_character translate(const lexer &l, uint32_t at,
                p[after] == '\f')
             after++;
         uint32_t eol = after < l.file.size ? end_of_line_length(p + after) : 0;
-        if (!eol)
+        if (!eol) {
+            if (issue && length == 3)
+                l.diagnostics.issue(diagnostic_id::trigraph_converted, at)
+                    .text("\\", 1);
             return {'\\', at + length - start};
+        }
         if (issue && after != at + length)
             l.diagnostics.issue(diagnostic_id::backslash_newline_space,
                                 at + length);
@@ -112,6 +116,17 @@ static lexer::translation_character translate(const lexer &l, uint32_t at,
                 .text("\\", 1);
         at = after + eol;
     }
+}
+
+/* A trigraph that phase 1 does not replace (C++17 removed them,
+   [diff.cpp14.lex]/1) still gets clang's warning where a token is formed of
+   it: the caller has read a '?' at `at` as itself. */
+void lexer::diagnose_ignored_trigraph(uint32_t at)
+{
+    const unsigned char *p = file.physical_characters;
+    if (!behavior.trigraphs && p[at] == '?' && p[at + 1] == '?' &&
+        trigraph_replacement(p[at + 2]))
+        diagnostics.issue(diagnostic_id::trigraph_ignored, at);
 }
 
 lexer::translation_character lexer::peek(uint32_t at) const

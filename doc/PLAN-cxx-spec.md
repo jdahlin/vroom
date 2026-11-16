@@ -65,14 +65,11 @@ Now: raw 68/97, tokens 63/97, diags 70/97.
 - Then `[basic]`, `[expr]`, `[stmt]`, `[dcl]`, ... in the order of the
   standard's clauses.
 
-## Questions for review
+## Decisions (review of PR #307, 2026-11-16)
 
-1. Directory name `cplusplus/` and one file per subclause with the dotted
-   stable name (`lex.icon.cpp`), or `lex/icon.cpp`?
-2. Comment density: full quotes of the sentence each check enforces, or only
-   citations?
-3. n4861 (C++20) as the base text, with later papers cited, or regenerate
-   `docs/cxx-spec` from a newer draft (C++26) and cite that?
-4. Performance: the POC reads through `peek()`; the existing SIMD lexer
-   (`src/frontend/lex`) could be transformed into this structure, or stay
-   the fast path with this one as the reference.
+1. Files keep the dotted stable name (`lex/lex.icon.cpp`).
+2. Comments quote the sentence each check enforces, not only cite it.
+3. n4861 (C++20) stays the base text; later papers are cited where clang
+   follows them.
+4. Compliance first: optimize (SIMD, the existing lexer's techniques) only
+   once the tests pass.

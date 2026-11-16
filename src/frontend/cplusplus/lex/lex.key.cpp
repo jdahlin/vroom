@@ -77,15 +77,15 @@ keyword_status flag_status(const implementation_defined_behavior &b,
     case KEYWORD_WCHARSUPPORT:
         return keyword_status::enabled;
     case KEYWORD_KEYCXX11:
-        return b.at_least(standard_edition::cplusplus_11)
+        return b.has(language_feature::cplusplus_11_keywords)
                    ? keyword_status::enabled
                    : keyword_status::future;
     case KEYWORD_KEYCXX20:
-        return b.at_least(standard_edition::cplusplus_20)
+        return b.has(language_feature::cplusplus_20_keywords)
                    ? keyword_status::enabled
                    : keyword_status::future;
     case KEYWORD_KEYCOROUTINES:
-        return b.at_least(standard_edition::cplusplus_20)
+        return b.has(language_feature::cplusplus_20_keywords)
                    ? keyword_status::enabled
                    : keyword_status::unknown;
     case KEYWORD_KEYGNU:
@@ -98,10 +98,9 @@ keyword_status flag_status(const implementation_defined_behavior &b,
         return b.microsoft_compatibility ? keyword_status::enabled
                                          : keyword_status::unknown;
     case KEYWORD_CHAR8SUPPORT:
-        return b.char8_t_keyword ? keyword_status::enabled
-               : b.at_least(standard_edition::cplusplus_20)
-                   ? keyword_status::unknown
-                   : keyword_status::future;
+        return b.char8_t_keyword                       ? keyword_status::enabled
+               : b.has(language_feature::char8_t_type) ? keyword_status::unknown
+                                                       : keyword_status::future;
     default:
         /* KEYC99, KEYC23, KEYNOCXX (C only), KEYMODULES (clang makes import
            and module identifiers and handles them in phase 4), HALFSUPPORT

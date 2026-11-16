@@ -72,29 +72,32 @@ static bool find_literal_start(const lexer &l, uint32_t at,
     for (int i = 0; i < 4; i++) {
         lexer::translation_character t = l.peek(p);
         letters[i] = t.extent ? (char)t.character : 0;
-        positions[i] = p;
+        /* where the character itself is: after any splices before it (a
+           quote is never a trigraph) */
+        positions[i] = p + (t.extent ? t.extent - 1 : 0);
         p += t.extent;
     }
-    bool cplusplus_11 = l.behavior.at_least(standard_edition::cplusplus_11);
+    bool unicode_and_raw =
+        l.behavior.has(language_feature::unicode_and_raw_string_literals);
     int i = 0;
     encoding_prefix prefix = encoding_prefix::none;
-    if (letters[0] == 'u' && letters[1] == '8' && cplusplus_11)
+    if (letters[0] == 'u' && letters[1] == '8' && unicode_and_raw)
         prefix = encoding_prefix::u8, i = 2;
-    else if (letters[0] == 'u' && cplusplus_11)
+    else if (letters[0] == 'u' && unicode_and_raw)
         prefix = encoding_prefix::u, i = 1;
-    else if (letters[0] == 'U' && cplusplus_11)
+    else if (letters[0] == 'U' && unicode_and_raw)
         prefix = encoding_prefix::U, i = 1;
     else if (letters[0] == 'L')
         prefix = encoding_prefix::L, i = 1;
     bool raw = false;
-    if (letters[i] == 'R' && letters[i + 1] == '"' && cplusplus_11)
+    if (letters[i] == 'R' && letters[i + 1] == '"' && unicode_and_raw)
         raw = true, i++;
     if (letters[i] != '"' && letters[i] != '\'')
         return false;
     if (i == 0)
         return false;
     if (letters[i] == '\'' && prefix == encoding_prefix::u8 &&
-        !l.behavior.at_least(standard_edition::cplusplus_17))
+        !l.behavior.has(language_feature::utf8_character_literals))
         return false;
     *start = {prefix, raw, (unsigned char)letters[i], positions[i]};
     return true;
@@ -163,6 +166,15 @@ preprocessing_token lexer::lex(bool header_name_permitted)
             if (second == '/' || second == '*') {
                 position = scan_comment(start);
                 after_white_space = true;
+                /* a splice or trigraph inside: the spelling is the comment
+                   after phases 1 and 2 */
+                for (uint32_t q = start; q < position;) {
+                    translation_character c = peek(q);
+                    if (!c.extent)
+                        break;
+                    token.spelling_differs |= c.extent != 1;
+                    q += c.extent;
+                }
                 if (options.retain_comments) {
                     token.kind = preprocessing_token_kind::comment;
                     token.extent = position - start;
@@ -214,13 +226,10 @@ preprocessing_token lexer::lex(bool header_name_permitted)
         if (literal.raw) {
             bool ok;
             end = scan_raw_string(literal.quote_at, token, &ok);
+            token.kind = ok ? preprocessing_token_kind::string_literal
+                            : preprocessing_token_kind::other_character;
             if (!ok)
-                token.kind = preprocessing_token_kind::other_character;
-            else
-                token.kind = preprocessing_token_kind::string_literal;
-            if (ok)
-                diagnostics.issue(
-                    diagnostic_id::warn_cxx98_compat_raw_string_literal, start);
+                token.raw = false;
         } else {
             token.kind = literal.quote == '"'
                              ? preprocessing_token_kind::string_literal
@@ -244,6 +253,8 @@ preprocessing_token lexer::lex(bool header_name_permitted)
                (end = scan_preprocessing_op_or_punc(start, &op,
                                                     &token.spelling_differs))) {
         token.kind = preprocessing_token_kind::preprocessing_op_or_punc;
+        if (c == '?')
+            diagnose_ignored_trigraph(start);
         token.op_or_punc = op;
     } else {
         /* "each non-white-space character that cannot be one of the above":

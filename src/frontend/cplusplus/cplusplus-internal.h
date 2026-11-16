@@ -45,6 +45,31 @@ struct diagnostics_suppressed {
     }
 };
 
+/* ---- [lex.ppnumber] --------------------------------------------------- */
+
+/* a pp-number read by the grammars of [lex.icon] and [lex.fcon] */
+struct lexer::pp_number_analysis {
+    const char *spelling = nullptr;
+    size_t length = 0;
+    /* [lex.icon]/1 Table 7: the base N of the digits (10 for a decimal
+       floating-point-literal, 16 for a hexadecimal one) */
+    unsigned base = 10;
+    /* the digits without the prefix: [digits_begin, suffix_begin) */
+    size_t digits_begin = 0, suffix_begin = 0;
+    bool period = false, exponent = false, floating = false;
+    /* integer-suffix and floating-point-suffix, and clang's extensions */
+    bool unsigned_suffix = false, long_suffix = false, long_long_suffix = false;
+    bool size_suffix = false, float_suffix = false, float16_suffix = false;
+    bool imaginary = false, bit_precise_suffix = false;
+    uint8_t microsoft_integer_bits = 0;
+    /* [lex.ext]: the suffix is a ud-suffix */
+    bool ud_suffix = false;
+    bool error = false;
+};
+
+VPRIV bool is_valid_ud_suffix(const implementation_defined_behavior &b,
+                              const char *s, size_t n);
+
 /* ---- [lex.charset] ----------------------------------------------------- */
 
 struct code_point_range {
@@ -93,11 +118,6 @@ VPRIV const char *keyword_clang_name(int keyword);
 /* [lex.key]/2: and, or, ...: the operator they stand for */
 VPRIV bool keyword_is_alternative_representation(int keyword,
                                                  preprocessing_op_or_punc *op);
-
-/* ---- [lex.fcon] -------------------------------------------------------- */
-
-VPRIV bool is_floating_point_literal_spelling(const char *spelling,
-                                              size_t length);
 
 } // namespace cplusplus
 

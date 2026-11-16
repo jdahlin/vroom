@@ -40,7 +40,20 @@ enum class standard_edition : uint16_t {
     cplusplus_20 = 2020,
     cplusplus_23 = 2023,
     cplusplus_26 = 2026,
+    never = 0xFFFF,
 };
+
+/* [diff]: the changes between editions the front end asks about, named
+   (frontend/cplusplus/diff/language-features.inc has each one's edition and
+   where the standard records it) */
+enum class language_feature : uint8_t {
+#define LANGUAGE_FEATURE(name, since, until, reference) name,
+#include "../../../frontend/cplusplus/diff/language-features.inc"
+#undef LANGUAGE_FEATURE
+    count
+};
+const char *language_feature_name(language_feature feature);
+const char *language_feature_reference(language_feature feature);
 
 /*
  * [intro.defs] "implementation-defined behavior: behavior, for a well-formed
@@ -72,10 +85,8 @@ struct implementation_defined_behavior {
     /* the choices of clang -cc1 -triple aarch64-unknown-linux-gnu -std=... */
     static implementation_defined_behavior for_edition(standard_edition edition,
                                                        bool gnu_extensions);
-    bool at_least(standard_edition e) const
-    {
-        return edition >= e;
-    }
+    /* whether the edition in effect has a feature ([diff]) */
+    bool has(language_feature feature) const;
 };
 
 /* ---- source files: [lex.separate], [lex.phases], [cpp.line] ------------ */
@@ -295,6 +306,12 @@ enum class fundamental_type : uint8_t {
     double_,
     long_double,
     std_nullptr_t,
+    /* an extended floating-point type ([basic.fundamental]/12): _Float16 */
+    float16,
+    /* an extended integer type ([basic.fundamental]/5): C23's _BitInt(N),
+       clang's extension in C++; N is in the token */
+    bit_precise_int,
+    unsigned_bit_precise_int,
 };
 
 const char *fundamental_type_name(fundamental_type type);
@@ -335,6 +352,8 @@ struct token {
     int16_t keyword = -1; /* index in the keyword table ([lex.key]) */
     preprocessing_token
         preprocessing; /* the preprocessing token it came from */
+    /* N of _BitInt(N) */
+    uint16_t bit_precise_width = 0;
     /* the value of an integer or boolean literal, when value_known */
     uint64_t value = 0;
     bool value_known = false;
@@ -368,6 +387,7 @@ class lexer
     struct translation_character;
     translation_character peek(uint32_t at) const;
     translation_character read(uint32_t at);
+    void diagnose_ignored_trigraph(uint32_t at);
     uint32_t scan_universal_character_name(uint32_t at, uint32_t *code_point,
                                            bool issue);
     uint32_t scan_identifier(uint32_t at, bool *spelling_differs);
@@ -385,8 +405,12 @@ class lexer
     uint32_t scan_ud_suffix(uint32_t at, preprocessing_token &token);
     bool is_identifier_start(uint32_t code_point) const;
     bool is_identifier_continue(uint32_t code_point) const;
-    void convert_integer_literal(const char *spelling, size_t length,
-                                 token &out);
+    struct pp_number_analysis;
+    bool analyze_pp_number(const char *spelling, size_t length,
+                           source_location at, pp_number_analysis &a);
+    void convert_integer_literal(const pp_number_analysis &a, token &out);
+    void convert_floating_point_literal(const pp_number_analysis &a,
+                                        token &out);
 
   private:
     preprocessing_token lex(bool header_name_permitted);

@@ -23,8 +23,8 @@ implementation_defined_behavior::for_edition(standard_edition edition,
     /* [diff.cpp14.lex]/1: "Removal of trigraph support as a required
        feature."  clang keeps trigraphs in the strict modes before C++17. */
     behavior.trigraphs =
-        !gnu_extensions && edition < standard_edition::cplusplus_17;
-    behavior.char8_t_keyword = edition >= standard_edition::cplusplus_20;
+        !gnu_extensions && behavior.has(language_feature::trigraphs);
+    behavior.char8_t_keyword = behavior.has(language_feature::char8_t_type);
     return behavior;
 }
 
@@ -48,6 +48,9 @@ const char *fundamental_type_name(fundamental_type type)
         "double",
         "long double",
         "decltype(nullptr)",
+        "_Float16",
+        "_BitInt",
+        "unsigned _BitInt",
     };
     return names[static_cast<int>(type)];
 }

@@ -50,7 +50,8 @@ uint32_t lexer::scan_character_or_string_literal(uint32_t at,
         if (t.extent != 1) {
             token.spelling_differs = true;
             read(p);
-        }
+        } else if (t.character == '?')
+            diagnose_ignored_trigraph(p);
         p += t.extent;
         if (t.character == quote)
             break;
@@ -95,49 +96,73 @@ uint32_t lexer::scan_raw_string(uint32_t quote, preprocessing_token &token,
                                 bool *ok)
 {
     const unsigned char *p = file.physical_characters;
-    uint32_t delimiter = quote + 1, d = delimiter;
+    uint32_t delimiter = quote + 1, length = 0;
     token.raw = true;
-    while (d < file.size && p[d] != '(') {
-        unsigned char c = p[d];
-        if (c == ' ' || c == ')' || c == '\\' || c == '\t' || c == '\v' ||
-            c == '\f' || c == '\n' || c == '\r' || c == '"' || c < 0x20 ||
-            c >= 0x7f) {
-            if (d - delimiter > 16)
-                diagnostics.issue(diagnostic_id::err_raw_delim_too_long, quote);
-            else if (c == '\n' || c == '\r')
-                diagnostics.issue(diagnostic_id::err_invalid_newline_raw_delim,
-                                  d);
-            else {
-                char text[2] = {(char)c, 0};
-                diagnostics.issue(diagnostic_id::err_invalid_char_raw_delim, d)
-                    .text(text, 1);
-            }
-            *ok = false;
-            return quote + 1;
+    diagnostics.issue(diagnostic_id::warn_cxx98_compat_raw_string_literal,
+                      token.location);
+
+    /* "d-char: any member of the basic source character set except: space,
+       the left parenthesis (, the right parenthesis ), the backslash \, and
+       the control characters representing horizontal tab, vertical tab, form
+       feed, and newline."  C++26 adds $ @ ` (P2558R2), which clang takes in
+       every edition with a warning before C++26. */
+    for (;;) {
+        unsigned char c = p[delimiter + length];
+        bool d_char = c > ' ' && c < 0x7f && c != '(' && c != ')' && c != '\\';
+        if (!d_char || length == 16)
+            break;
+        if (c == '$' || c == '@' || c == '`') {
+            char text = (char)c;
+            diagnostics
+                .issue(
+                    behavior.has(
+                        language_feature::raw_string_delimiter_dollar_at_grave)
+                        ? diagnostic_id::
+                              warn_cxx26_compat_raw_string_literal_character_set
+                        : diagnostic_id::
+                              ext_cxx26_raw_string_literal_character_set,
+                    delimiter + length)
+                .text(&text, 1);
         }
-        d++;
+        length++;
     }
-    uint32_t length = d - delimiter;
-    if (length > 16) {
-        diagnostics.issue(diagnostic_id::err_raw_delim_too_long, quote);
+    uint32_t prefix_end = delimiter + length;
+    if (p[prefix_end] != '(' || prefix_end >= file.size) {
+        /* [lex.string]/1: "A d-char-sequence shall consist of at most 16
+           characters." */
+        if (length == 16)
+            diagnostics.issue(diagnostic_id::err_raw_delim_too_long,
+                              prefix_end);
+        else if (p[prefix_end] == '\n')
+            diagnostics.issue(diagnostic_id::err_invalid_newline_raw_delim,
+                              prefix_end);
+        else {
+            char text = (char)p[prefix_end];
+            diagnostics
+                .issue(diagnostic_id::err_invalid_char_raw_delim, prefix_end)
+                .text(&text, 1);
+        }
+        /* clang's recovery: the token runs to the next double quote */
+        uint32_t r = delimiter;
+        while (r < file.size && p[r] != '"')
+            r++;
         *ok = false;
-        return quote + 1;
+        return r < file.size ? r + 1 : r;
     }
-    if (d >= file.size) {
-        diagnostics.issue(diagnostic_id::err_unterminated_raw_string, quote)
-            .text(reinterpret_cast<const char *>(p + delimiter), length);
-        *ok = false;
-        return file.size;
-    }
-    /* the shortest r-char-sequence: the first ) delimiter " ends it */
-    for (uint32_t r = d + 1; r < file.size; r++)
-        if (p[r] == ')' && r + 1 + length < file.size + 1 &&
-            !memcmp(p + r + 1, p + delimiter, length) &&
+    /* "r-char: any member of the source character set, except a right
+       parenthesis ) followed by the initial d-char-sequence (which may be
+       empty) followed by a double quote ".": the first ) delimiter " ends
+       the raw string */
+    for (uint32_t r = prefix_end + 1; r < file.size; r++)
+        if (p[r] == ')' && !memcmp(p + r + 1, p + delimiter, length) &&
             p[r + 1 + length] == '"') {
             *ok = true;
             return r + 2 + length;
         }
-    diagnostics.issue(diagnostic_id::err_unterminated_raw_string, quote)
+    /* [lex.phases]/1.3: "A source file shall not end in a partial
+       preprocessing token" */
+    diagnostics
+        .issue(diagnostic_id::err_unterminated_raw_string, token.location)
         .text(reinterpret_cast<const char *>(p + delimiter), length);
     *ok = false;
     return file.size;
