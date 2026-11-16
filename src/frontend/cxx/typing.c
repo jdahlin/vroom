@@ -1162,7 +1162,7 @@ VPRIV bool cxx_operator_call_type(cxx *c, uint32_t id, ast_qualified_type obj, c
 	ast_qualified_type all[4], acopy[16];
 	bool have_lv = c->op_lv_set && nargs <= 16;
 	uint8_t lv[17];
-	bool any_class = false;
+	bool any_class = false, any_enum = false;
 
 	/* The member, namespace-scope and friend operator functions are one candidate set in C++; here they
 	   are tried in turn.  An attempt that picks a function decides; one that is only not ruled out (several
@@ -1208,7 +1208,14 @@ VPRIV bool cxx_operator_call_type(cxx *c, uint32_t id, ast_qualified_type obj, c
 	for (uint32_t i = 0; i < nargs && nargs <= 2; i++)
 		any_class |= args[i] != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, args[i]) && AST_TYPE_KIND(c->ast, args[i]) != AST_TYPE_ARRAY &&
 			     cxx_type_class_scope(c, AST_QUALIFIED_TYPE_UNQUALIFIED(args[i]));
-	if (!cls && !any_class)
+	/* (an enumeration operand: its non-member operator functions too, [over.match.oper]/3.2 -- json's
+	   operator<=>(value_t, value_t); with none found, the built-in operator) */
+	for (uint32_t i = 0; !cls && !any_class && i <= nargs && nargs <= 2; i++) {
+		ast_qualified_type t = i ? args[i - 1] : obj;
+
+		any_enum |= t != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, t) == AST_TYPE_ENUM;
+	}
+	if (!cls && !any_class && !any_enum)
 		return false;
 	/* (no candidate fits: the next place, in the end the built-in operator: &x, a = b, a, b) */
 	set = cls ? cxx_lookup_in(c, cls, id, 0) : NULL;
@@ -1301,6 +1308,12 @@ VPRIV bool cxx_operator_call_type(cxx *c, uint32_t id, ast_qualified_type obj, c
 	}
 	if (mpick)
 		return OP_RESTORE_MEMBER();
+	if (any_enum && !cls && !any_class) {
+		/* enumerations only, no operator function picked: the built-in operator (t == value_t::null with
+		   json's operator== templates in scope) */
+		c->call_resolved = 0, c->call_picked = NULL, c->none_viable = 0;
+		return false;
+	}
 	if (pending) {
 		cxx_et(c, pending_type, pending_lval);
 		c->eunsure = 1;

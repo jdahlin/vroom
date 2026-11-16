@@ -3092,3 +3092,17 @@ fick returneras.  `nullptr_t` är en `void *` i båda nu.
 Test: `run/return-class-with-nullptr-member.cpp`.  unit-comparison kommer
 förbi testkroppen; fyra djupare funktioner återstår (`toString` av en
 `__bit_reference`, `value_t <=> value_t`).  Sviter gröna (190/190, 38/38, mangle).
+
+Uppräkningar och C++20:s ordningar (json `value_t`):
+- en operand av uppräkningstyp får nu sina användardeklarerade
+  operatorfunktioner (`operator<(E, E)`, `operator<=>(V, V)`); tidigare togs
+  alltid den inbyggda operatorn, fel kod.  Utan vald funktion: den inbyggda;
+- en vald operatorfunktion viks inte till en konstant när båda operanderna
+  är konstanter (`V::a < V::b`);
+- `a < b` av uppräkningar skrivs om till `(a <=> b) < 0` när en
+  `operator<=>` finns, som clang (GCC tar den inbyggda: jsons kommentar);
+- den inbyggda `<=>`:s resultat är ett objekt, `*(set, &tmp)` som ett
+  anrops klassresultat, så att `strong_ordering` kan omvandlas till
+  `partial_ordering` (`return order[l] <=> order[r];`, `std::is_lt(a <=> b)`).
+Test: `run/enum-user-operators-and-ordering-conversion.cpp` (som clang).
+unit-comparison: 5 -> 2 funktioner.  Sviter gröna (191/191, 38/38, mangle).

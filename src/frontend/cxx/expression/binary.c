@@ -106,7 +106,10 @@ VPRIV void cxx_binary_expression_parse(cxx *c, int min)
 
 			if (!c->tentative && (!found || !c->call_resolved) && !rewritten && l != CXX_TY_UNKNOWN && rt != CXX_TY_UNKNOWN &&
 			    (op == LEX_TOKEN_LESS || op == LEX_TOKEN_GREATER || op == LEX_TOKEN_LESS_EQUAL || op == LEX_TOKEN_GREATER_EQUAL) &&
-			    (cc_type_is_record(c->ast, l) || cc_type_is_record(c->ast, rt))) {
+			    (cc_type_is_record(c->ast, l) || cc_type_is_record(c->ast, rt) ||
+			     AST_TYPE_KIND(c->ast, l) == AST_TYPE_ENUM || AST_TYPE_KIND(c->ast, rt) == AST_TYPE_ENUM)) {
+				/* (an enumeration too: a user operator<=>(E, E) hides the built-in E < E, as clang does --
+				   json's value_t) */
 				ast_qualified_type ra = rt, la = l;
 				uint8_t lvl = ll, lvr = c->op_lv[1];
 
@@ -134,6 +137,9 @@ VPRIV void cxx_binary_expression_parse(cxx *c, int min)
 				    c->etype != CXX_TY_UNKNOWN)
 					ss_reversed = true, ss_pick = c->call_picked, ss_type = c->etype, found = true;
 			}
+			/* (an operator function picked for the operands: its call is the value, not a folded constant) */
+			bool user_op = !c->tentative && found && c->call_resolved && c->call_picked;
+
 			if ((!found || (c->none_viable && !c->call_resolved)) && op != LEX_TOKEN_AMPERSAND_AMPERSAND && op != LEX_TOKEN_PIPE_PIPE && op != CXX_TOKEN_SPACESHIP &&
 			    !c->template_depth && l != CXX_TY_UNKNOWN && rt != CXX_TY_UNKNOWN) {
 				/* a class operand, no operator function that fits, and no conversion of the class to anything:
@@ -208,7 +214,10 @@ VPRIV void cxx_binary_expression_parse(cxx *c, int min)
 				cxx_gen_operator_call(c, ln, &rn, 1, oploc);
 			else if (!c->tentative)
 				cxx_gen_binary(c, op, ln, rn, oploc);	/* (no operator function: x && y through operator bool) */
-			/* constants: both operands, or the left alone when it decides && and || */
+			/* constants: both operands, or the left alone when it decides && and || (not when an operator
+			   function was picked: E::a < E::b with a user operator<(E, E) is that call's value) */
+			if (user_op && !built_in)
+				lk = rk = false;
 			if (lk && rk) {
 				bool uns = c->etype != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, c->etype) >= AST_TYPE_CHAR &&
 					   AST_TYPE_KIND(c->ast, c->etype) <= AST_TYPE_UINT128 && !cc_type_is_signed(c->ast, c->etype);

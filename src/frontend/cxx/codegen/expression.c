@@ -522,8 +522,12 @@ VPRIV void cxx_gen_spaceship(cxx *c, uint32_t l, uint32_t r, ast_qualified_type 
 	v = cc_conditional_build(a, lt, cc_node_integer_new(a, -1, cc_type_basic(AST_TYPE_INT), loc), v, loc);
 	v = cc_assignment_build(a, 0, member(a, cxx_gen_var_node(c, tmp, loc), rec->f[0].name, loc),
 				cc_conversion_apply(a, v, AST_QUALIFIED_TYPE_UNQUALIFIED(rec->f[0].ty)), loc);
-	(void)node;
-	c->enode = cc_node_new_operands(a, AST_NODE_COMMA, AST_QUALIFIED_TYPE_UNQUALIFIED(t), loc, v, cxx_gen_var_node(c, tmp, loc));	/* (the ordering object, a value) */
+	/* the ordering object: *(set, &tmp), an object as a call's class result is (its conversion to another
+	   ordering, strong_ordering to partial_ordering, calls a member function on it) */
+	node = cc_node_new_operands(a, AST_NODE_COMMA, cc_type_pointer(a, AST_QUALIFIED_TYPE_UNQUALIFIED(t)), loc, v,
+				    cc_address_of_build(a, cxx_gen_var_node(c, tmp, loc), loc));
+	c->enode = cc_dereference_build(a, node, loc);
+	cxx_gen_prv_add(c, c->enode, 0, 0, tmp);
 }
 
 /* x, y */
