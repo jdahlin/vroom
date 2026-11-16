@@ -170,7 +170,10 @@ VPRIV void cxx_gen_destroy_object(cxx *c, uint32_t x, bool arrow, uint32_t loc)
 	}
 	t = AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE_AT(a, x)->ty);
 	if (!cc_type_is_record(a, t) || !cxx_gen_needs_destruction(c, t, 0)) {
-		c->enode = cc_cast_insert(a, cc_node_integer_new(a, 0, cc_type_basic(AST_TYPE_INT), loc), cc_type_basic(AST_TYPE_VOID), AST_CAST_VOID);
+		/* nothing destroyed, but the operand evaluated: (--e)->~T() of a scalar still decrements (valarray's __clear) */
+		uint32_t v = (AST_NODE_AT(a, x)->flags & AST_NODE_FLAG_LVALUE) && !cc_node_bitfield(a, x) ? cc_address_of_build(a, x, loc) : cc_node_rvalue(a, x);
+
+		c->enode = cc_cast_insert(a, v, cc_type_basic(AST_TYPE_VOID), AST_CAST_VOID);
 		return;
 	}
 	if (!(d = cxx_gen_effective_destructor(c, t, 0)))

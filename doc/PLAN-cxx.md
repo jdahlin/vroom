@@ -2746,3 +2746,11 @@ Test: `run/typedef-unnamed-class-mangling.cpp`.  Sviter gröna (147/147,
 `*(T *)&x` (libc++:s `is >> (char&)__c` för en unsigned char).  Test:
 `run/cstyle-cast-reference.cpp`.  Sviter gröna (148/148, 38/38, mangle).
 Strikt bänk: pass 29, 85 saknas.
+
+## Status 178 (2026-11-16)
+- `std::initializer_list<E> x = {a, b}` och `x{a, b}`: listan själv, dess
+  fält i blocket.  Test: `run/initializer-list-local.cpp`.
+- `p->~T()` för en skalär förstör inget men beräknar `p`: `(--e)->~T()`
+  minskade inte `e`, så valarray:s `__clear` slingade för evigt
+  (unit-class_parser hängde).  Test: `run/pseudo-destructor-side-effect.cpp`.
+Sviter gröna (150/150, 38/38, mangle).  Strikt bänk: pass 31, 83 saknas.

@@ -120,6 +120,7 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope 
 		cxx_entity *fn_template = NULL;	/* the function template this declarator declares (is it a definition?) */
 		cxx_entity *decl_fn = NULL;	/* the function it declares (= delete, = default follow the declarator) */
 		uint32_t gen_local = 0;		/* code generation: the local variable's symbol */
+		cxx_entity *gen_local_e = NULL;	/* ... its entity */
 		cxx_entity *unsized_e = NULL;	/* ... an array of unknown bound, made after its initializer */
 		bool unsized_static = false;
 		cxx_entity *gen_var = NULL;	/* ... a variable at namespace scope */
@@ -316,7 +317,7 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope 
 				else if (auto_e || (flags & (DS_STATIC | DS_CONSTEXPR)))
 					cxx_gen_fail(c);
 				else
-					gen_local = e->sym = cxx_gen_local(c, name, t, name_loc);
+					gen_local = e->sym = cxx_gen_local(c, name, t, name_loc), gen_local_e = e;
 			}
 			/* a variable template: its initializer, evaluated with arguments (cxx_vtemplate_value); a partial
 			   or explicit specialization joins the primary */
@@ -697,8 +698,27 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope 
 				n = c->ncargs;
 				memcpy(an, c->carg_nodes, sizeof an);
 				memcpy(abr, c->carg_brace, sizeof abr);
+				ast_qualified_type ilty[CXX_MAX_ARGS];
+				uint8_t illv[CXX_MAX_ARGS];
+
+				if (n != UINT32_MAX && n <= CXX_MAX_ARGS && n)
+					memcpy(ilty, c->cargs, n * sizeof *ilty), memcpy(illv, c->cargs_lval, n);
 				cxx_ctor_use(c, t, c->cargs, c->cargs_lval, c->ncargs, true);
-				if (gen_local) {
+				if (gen_local && t != CXX_TY_UNKNOWN && cxx_is_initializer_list(c, t) && n != UINT32_MAX && n <= CXX_MAX_ARGS && c->gen_block) {
+					/* std::initializer_list<E> x = {a, b}: the list itself, its array in this block ([dcl.init.list]/5) */
+					uint32_t arr = 0, il;
+
+					c->ctor_ilist_n = n;
+					if (n)
+						memcpy(c->ctor_ilist_types, ilty, n * sizeof *ilty), memcpy(c->ctor_ilist_lval, illv, n);
+					memcpy(c->ctor_ilist_brace, abr, sizeof c->ctor_ilist_brace);
+					il = cxx_gen_initializer_list(c, AST_QUALIFIED_TYPE_UNQUALIFIED(t), an, n, c->gen_block, name_loc, &arr);
+					if (il && AST_NODE_AT(c->ast, il)->op == AST_NODE_VARIABLE && AST_NODE_AT(c->ast, il)->a && gen_local_e)
+						gen_local_e->sym = AST_NODE_AT(c->ast, il)->a;	/* (the list's own local, declared in this block: the variable) */
+					else
+						cxx_gen_fail(c);
+					gen_declared = true;
+				} else if (gen_local) {
 					c->gen_agg_brace = n <= CXX_MAX_ARGS ? abr : NULL;	/* (an aggregate's elements that are braced lists) */
 					c->gen_value_init = !n;	/* (T x{}, T x = {}: value-initialized) */
 					if (c->ctor_found && c->ctor_picked && n <= CXX_MAX_ARGS)
@@ -855,8 +875,27 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope 
 				n = c->ncargs;
 				memcpy(an, c->carg_nodes, sizeof an);
 				memcpy(abr, c->carg_brace, sizeof abr);
+				ast_qualified_type ilty[CXX_MAX_ARGS];
+				uint8_t illv[CXX_MAX_ARGS];
+
+				if (n != UINT32_MAX && n <= CXX_MAX_ARGS && n)
+					memcpy(ilty, c->cargs, n * sizeof *ilty), memcpy(illv, c->cargs_lval, n);
 				cxx_ctor_use(c, t, c->cargs, c->cargs_lval, c->ncargs, true);
-				if (gen_local) {
+				if (gen_local && t != CXX_TY_UNKNOWN && cxx_is_initializer_list(c, t) && n != UINT32_MAX && n <= CXX_MAX_ARGS && c->gen_block) {
+					/* std::initializer_list<E> x = {a, b}: the list itself, its array in this block ([dcl.init.list]/5) */
+					uint32_t arr = 0, il;
+
+					c->ctor_ilist_n = n;
+					if (n)
+						memcpy(c->ctor_ilist_types, ilty, n * sizeof *ilty), memcpy(c->ctor_ilist_lval, illv, n);
+					memcpy(c->ctor_ilist_brace, abr, sizeof c->ctor_ilist_brace);
+					il = cxx_gen_initializer_list(c, AST_QUALIFIED_TYPE_UNQUALIFIED(t), an, n, c->gen_block, name_loc, &arr);
+					if (il && AST_NODE_AT(c->ast, il)->op == AST_NODE_VARIABLE && AST_NODE_AT(c->ast, il)->a && gen_local_e)
+						gen_local_e->sym = AST_NODE_AT(c->ast, il)->a;	/* (the list's own local, declared in this block: the variable) */
+					else
+						cxx_gen_fail(c);
+					gen_declared = true;
+				} else if (gen_local) {
 					c->gen_agg_brace = n <= CXX_MAX_ARGS ? abr : NULL;	/* (an aggregate's elements that are braced lists) */
 					c->gen_value_init = !n;	/* (T x{}, T x = {}: value-initialized) */
 					if (c->ctor_found && c->ctor_picked && n <= CXX_MAX_ARGS)
