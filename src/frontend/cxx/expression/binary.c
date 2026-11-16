@@ -229,6 +229,13 @@ VPRIV void cxx_binary_expression_parse(cxx *c, int min)
 					c->evalue = v, c->econst = 1;
 			} else if (lk && ((op == LEX_TOKEN_AMPERSAND_AMPERSAND && !lv) || (op == LEX_TOKEN_PIPE_PIPE && lv)))
 				c->evalue = lv != 0, c->econst = 1;
+			else if (rk && (!c->gen || l == CXX_TY_UNKNOWN) && ((op == LEX_TOKEN_AMPERSAND_AMPERSAND && !rv) || (op == LEX_TOKEN_PIPE_PIPE && rv))) {
+				/* x && false, x || true with x not known (a trait vcc cannot decide): the value all the same, as
+				   a constant expression (libc++'s is_trivially_assignable<json&, int&>::value && is_same<...>::value) */
+				if (c->etype == CXX_TY_UNKNOWN)
+					cxx_et(c, cc_type_basic(AST_TYPE_BOOL), false);
+				c->evalue = rv != 0, c->econst = 1;
+			}
 		}
 	}
 }

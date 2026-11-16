@@ -2895,3 +2895,13 @@ som är klammerlistor); nu sparas och återställs de.  Utan det föll jsons
 `json j = {{"foo", 1}, "foo", "baz"}` (16 funktioner, strikt bänk 36 i stället
 för 39).  Test: `run/ilist-mixed-braced-and-converted.cpp` (täcker blandningen;
 felet själv syns i bänken, inte i testet).  Sviter gröna (171/171).
+
+## Status 197 (2026-11-16)
+`x && false` och `x || true` med ett x vcc inte kan avgöra (ett trait) är ändå
+en konstant (falskt, sant), som `false && x` redan var: libc++:s
+`is_trivially_assignable<json&, int&>::value && is_same<int, json>::value` i
+`__uninitialized_allocator_copy_impl` (`std::vector<json>(ints.begin(),
+ints.end())`, unit-bson och unit-ubjson).  Inget eget test: ett trait som vcc
+inte kan avgöra utan bibliotekshuvuden har jag inte hittat (`__is_trivially_assignable`
+på en klass med mall-operator= får en typ men inget värde i en malls villkor,
+ett separat glapp).  Verifierat med jsons fall.  Sviter gröna (171/171, 38/38, mangle).
