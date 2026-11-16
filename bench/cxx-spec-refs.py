@@ -58,10 +58,11 @@ ONE_OF_TEXT = {}
 
 
 def normalize(alternative):
-    a = alternative.replace('ₒₚₜ', '_opt')
     # quotes mark terminals, one each ('#' 'include') or a run of them
-    # ('# include'): the same terminals either way
-    a = a.replace("'", ' ')
+    # ('# include'): the same terminals either way; a quoted terminal's
+    # subscript opt stays on it ('template'ₒₚₜ is template_opt)
+    a = alternative.replace("'ₒₚₜ", "ₒₚₜ'").replace("'_opt", "_opt'").replace("'", ' ')
+    a = a.replace('ₒₚₜ', '_opt')
     return ' '.join(a.split())
 
 

@@ -28,12 +28,17 @@ option sets bench/cxx-pp.py reads), per run:
                bracket inserted) of each test, through cxxparse only: the
                crash check alone (V5)
 
+clang's side is cached in work/cxx-parse-ref (VCC_PARSE_NOCACHE=1 asks it
+again), so a run after the first costs about cxxparse's time.
+
 Usage: bench/cxx-parse.py [-v] [-j N] [--bin-dir DIR] [--mutate N] [PATTERN...]
 Prints one line per failing run (all with -v) and a summary.
 """
 import argparse
 import concurrent.futures
 import glob
+import hashlib
+import json
 import importlib.util
 import os
 import random
@@ -41,6 +46,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import threading
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 spec = importlib.util.spec_from_file_location('cxxpp', os.path.join(HERE, 'cxx-pp.py'))
@@ -71,6 +77,38 @@ def known_differences():
 
 
 KNOWN = known_differences()
+
+
+CACHE = os.path.join(cxxpp.work_dir(), 'cxx-parse-ref')
+CLANG_VERSION = {}
+
+
+def cached(what, clang, test, opts, compute):
+    """clang's answer for a test file and option set, which never changes
+    for the same clang and file: kept in work/cxx-parse-ref/, keyed by
+    clang's version, what was asked, the options and the file's bytes (not
+    those of files it includes: clang's test inputs do not change under
+    it).  VCC_PARSE_NOCACHE=1 asks clang again."""
+    if clang not in CLANG_VERSION:
+        CLANG_VERSION[clang] = subprocess.run([clang, '--version'], capture_output=True,
+                                              text=True).stdout.split('\n')[0]
+    h = hashlib.sha256()
+    for part in (CLANG_VERSION[clang], what, '\0'.join(opts)):
+        h.update(part.encode() + b'\1')
+    h.update(open(test, 'rb').read())
+    path = os.path.join(CACHE, h.hexdigest()[:2], h.hexdigest()[2:] + '.json')
+    if not os.environ.get('VCC_PARSE_NOCACHE') and os.path.exists(path):
+        try:
+            return json.load(open(path))
+        except ValueError:
+            pass
+    value = compute()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = f'{path}.{os.getpid()}.{threading.get_ident()}'
+    with open(tmp, 'w') as f:
+        json.dump(value, f)
+    os.replace(tmp, path)
+    return value
 
 
 def find_tool(bin_dir, name):
@@ -274,8 +312,9 @@ def check(test, opts, clang, cxxlex, cxxparse):
     res['unparsed'] = int(stats.get('unparsed', 0))
     res['erroneous'] = int(stats.get('erroneous', 0))
     # clang's declarations, when it found the syntax well-formed
-    c = run([clang, '-cc1'] + TRIPLE + lang + opts +
-            ['-fsyntax-only', '-fdiagnostics-show-category', 'name', '-ferror-limit', '0', name], cwd, timeout=60)
+    c = cached('diagnostics', clang, test, opts, lambda: list(
+        run([clang, '-cc1'] + TRIPLE + lang + opts +
+            ['-fsyntax-only', '-fdiagnostics-show-category', 'name', '-ferror-limit', '0', name], cwd, timeout=60)))
     if c[0] == 'timeout':
         res['skip'] = 'clang timed out'
         return res
@@ -331,7 +370,11 @@ def check(test, opts, clang, cxxlex, cxxparse):
     if CLANG_SYNTAX_ERROR.search(c[2]):
         res['clang_syntax_error'] = True
         return res
-    theirs = clang_declarations([clang, '-cc1'] + TRIPLE + lang + opts + ['-w', '-ast-dump', name], cwd, test)
+    theirs = cached('declarations', clang, test, opts, lambda: clang_declarations(
+        [clang, '-cc1'] + TRIPLE + lang + opts + ['-w', '-ast-dump', name], cwd, test))
+    if theirs is not None:
+        # JSON gives lists back: the positions are tuples
+        theirs = [(tuple(b), tuple(e) if e else None, k) for b, e, k in theirs]
     if theirs is None:
         res['skip'] = 'clang gave no AST'
         return res
