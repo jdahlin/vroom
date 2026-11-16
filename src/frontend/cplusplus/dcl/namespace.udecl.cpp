@@ -23,13 +23,14 @@ node_index parser::using_declaration()
     size_t mark = begin_node();
     token_index first = position;
     add_token(); /* using */
-    if (!comma_list(syntax_kind::using_declarator_list, [this] { using_declarator(); },
-                    [this] {
-                        /* an attribute-specifier-seq after a
-                           using-declarator: clang's extension, P9's */
-                        if (at_attribute_specifier())
-                            beyond_this_step();
-                    }))
+    if (!comma_list(
+            syntax_kind::using_declarator_list, [this] { using_declarator(); },
+            [this] {
+                /* an attribute-specifier-seq after a
+                   using-declarator: clang's extension, P9's */
+                if (at_attribute_specifier())
+                    beyond_this_step();
+            }))
         return 0;
     if (!accept(preprocessing_op_or_punc::SEMICOLON))
         return expected("';' after the using-declaration", "namespace.udecl");

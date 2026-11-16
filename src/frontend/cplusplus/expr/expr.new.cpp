@@ -69,7 +69,8 @@ node_index parser::new_expression()
     if (at(preprocessing_op_or_punc::LEFT_PARENTHESIS)) {
         size_t initializer_mark = begin_node();
         token_index initializer_first = position;
-        if (!parenthesized_expression_list("')' to close the new-initializer", "expr.new"))
+        if (!parenthesized_expression_list("')' to close the new-initializer",
+                                           "expr.new"))
             return 0;
         finish_node(syntax_kind::new_initializer, initializer_mark,
                     initializer_first);

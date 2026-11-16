@@ -26,7 +26,8 @@ node_index parser::ctor_initializer()
     size_t mark = begin_node();
     token_index first = position;
     add_token(); /* : */
-    if (!comma_list(syntax_kind::mem_initializer_list, [this] { mem_initializer(); }))
+    if (!comma_list(syntax_kind::mem_initializer_list,
+                    [this] { mem_initializer(); }))
         return 0;
     return finish_node(syntax_kind::ctor_initializer, mark, first);
 }
@@ -49,7 +50,8 @@ node_index parser::mem_initializer()
     if (failed())
         return 0;
     if (at(preprocessing_op_or_punc::LEFT_PARENTHESIS)) {
-        if (!parenthesized_expression_list("')' to close the mem-initializer", "class.base.init"))
+        if (!parenthesized_expression_list("')' to close the mem-initializer",
+                                           "class.base.init"))
             return 0;
     } else if (at(preprocessing_op_or_punc::LEFT_BRACE)) {
         if (list_initialization_missing())

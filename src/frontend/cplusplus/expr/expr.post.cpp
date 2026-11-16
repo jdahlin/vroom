@@ -139,7 +139,8 @@ node_index parser::postfix_expression()
         return 0;
     if (type) {
         if (at(preprocessing_op_or_punc::LEFT_PARENTHESIS)) {
-            if (!parenthesized_expression_list("')' to close the expression-list", "expr.type.conv"))
+            if (!parenthesized_expression_list(
+                    "')' to close the expression-list", "expr.type.conv"))
                 return 0;
         } else if (at(preprocessing_op_or_punc::LEFT_BRACE)) {
             if (list_initialization_missing())
@@ -184,7 +185,8 @@ node_index parser::postfix_expression()
             if (!accept(preprocessing_op_or_punc::RIGHT_BRACKET))
                 return expected("']' to close the subscript", "expr.sub");
         } else if (at(preprocessing_op_or_punc::LEFT_PARENTHESIS)) {
-            if (!parenthesized_expression_list("')' to close the expression-list", "expr.call"))
+            if (!parenthesized_expression_list(
+                    "')' to close the expression-list", "expr.call"))
                 return 0;
         } else if (at(preprocessing_op_or_punc::DOT) ||
                    at(preprocessing_op_or_punc::ARROW)) {

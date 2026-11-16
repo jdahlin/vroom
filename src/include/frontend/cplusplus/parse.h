@@ -1025,8 +1025,7 @@ class parser
     node_index expression_list();
     /* ( expression-list_opt ) at the current '(': false after
        expected(what, subclause) or another failure */
-    bool parenthesized_expression_list(const char *what,
-                                       const char *subclause);
+    bool parenthesized_expression_list(const char *what, const char *subclause);
     node_index unary_expression();
     node_index noexcept_expression();
     /* [expr.await], [expr.yield], [expr.throw] */
