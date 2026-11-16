@@ -11,6 +11,7 @@ struct S {
 };
 struct Name { S s; int k; Name(int v = 0) : s(v), k(v * 2) {} };
 struct Person { Name name; int age; };
+struct Contact { Person p; Name addr; };	/* (implicit operator= inside implicit operator=) */
 static Name mk(int v) { return Name(v); }
 template <class T> T get(int v) { return T(v); }
 int main()
@@ -24,5 +25,10 @@ int main()
 	p.name = static_cast<Name &&>(w);
 	int c = p.name.s.v, wv = w.s.v;
 	p.name = q.name;
-	return a == 7 && ak == 14 && b == 8 && p.name.s.v == 5 && p.name.k == 10 && q.name.s.v == 5 && c == 9 && wv == -1 && moves == 3 && copies == 1 ? 0 : 1;
+	Contact x{p, Name(2)}, y{q, Name(3)};
+	x = y;
+	int cx = x.p.name.s.v + x.addr.s.v * 10;
+	x = static_cast<Contact &&>(y);
+	int cy = y.p.name.s.v;
+	return cx == 35 && cy == -1 && a == 7 && ak == 14 && b == 8 && p.name.s.v == 5 && p.name.k == 10 && q.name.s.v == 5 && c == 9 && wv == -1 && moves == 5 && copies == 3 ? 0 : 1;
 }

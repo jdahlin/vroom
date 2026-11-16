@@ -147,8 +147,25 @@ static uint32_t cxx_gen_assign_one(cxx *c, uint32_t tx, uint32_t sx, ast_qualifi
 		if (!cxx_operator_call_type(c, vintern_cstr("operator="), AST_QUALIFIED_TYPE_UNQUALIFIED(t), at, 1) || !c->call_resolved || !c->call_picked) {
 			c->op_lv_set = 0;
 			c->enode = saved;
-			/* (no operator= of its own: its implicit one, a copy of its bytes where that is what it does) */
-			return cxx_gen_defaulted_copy_trivial(c, AST_QUALIFIED_TYPE_UNQUALIFIED(t)) ? cc_assignment_build(a, 0, tx, cc_node_rvalue(a, sx), loc) : 0;
+			/* (no operator= of its own: its implicit one, a copy of its bytes where that is what it does, else
+			   its own members assigned in turn: udt's contact, its person, its name's std::string) */
+			if (cxx_gen_defaulted_copy_trivial(c, AST_QUALIFIED_TYPE_UNQUALIFIED(t)))
+				return cc_assignment_build(a, 0, tx, cc_node_rvalue(a, sx), loc);
+			{
+				static __thread int depth;	/* (a class that contains itself through a member is impossible; a guard) */
+				cc_id_list l;
+				uint32_t r2 = 0;
+
+				cc_id_list_init(&l);
+				if (depth < 8) {
+					depth++;
+					if (cxx_gen_defaulted_assign_parts(c, tx, AST_QUALIFIED_TYPE_UNQUALIFIED(t), sx, move, &l, loc))
+						r2 = cxx_gen_chain(c, &l, cc_address_of_build(a, tx, loc), loc);
+					depth--;
+				}
+				c->enode = saved;
+				return r2 ? cc_dereference_build(a, r2, loc) : 0;
+			}
 		}
 		c->enode = 0;
 		cxx_gen_operator_call(c, tx, &sx, 1, loc);

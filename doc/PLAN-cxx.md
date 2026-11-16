@@ -2855,3 +2855,11 @@ medlem tilldelad med sin egen operator=, flyttad från ett prvalue (som byggs i
 ett temporärt objekt först), kopierad från ett lvalue.  Test:
 `run/implicit-assign-nontrivial-member.cpp` (räknar kopior och flyttar).
 Sviter gröna (167/167, 38/38, mangle).
+
+## Status 192 (2026-11-16)
+Den implicita operator= flyttar från ett xvalue (`std::move(y)`, libc++:s
+`*out = __iter_move(it)`; parsern ger operandens värdekategori) och går ned i
+medlemmar som själva bara har en implicit operator= (udt:s `contact` →
+`person` → `name` → `std::string`).  Testet
+`run/implicit-assign-nontrivial-member.cpp` utökat.  Sviter gröna (167/167,
+38/38, mangle).
