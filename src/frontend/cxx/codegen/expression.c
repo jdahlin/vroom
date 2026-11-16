@@ -684,6 +684,34 @@ VPRIV void cxx_gen_assignment(cxx *c, int op, uint32_t l, uint32_t r, uint32_t l
 		if (!r || AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE_AT(c->ast, r)->ty) != AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE_AT(c->ast, l)->ty))
 			return;
 	}
+	if (!base && cc_type_is_record(c->ast, AST_NODE_AT(c->ast, l)->ty) && AST_TYPE_KIND(c->ast, AST_NODE_AT(c->ast, l)->ty) != AST_TYPE_ARRAY &&
+	    AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE_AT(c->ast, l)->ty) == AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE_AT(c->ast, r)->ty) &&
+	    cxx_gen_trivial_abi(c, AST_NODE_AT(c->ast, l)->ty, 0) != 1 && (AST_NODE_AT(c->ast, l)->flags & AST_NODE_FLAG_LVALUE)) {
+		/* x = y of a class that is not trivially copyable, with no operator= of its own: the implicit one,
+		   each base and member assigned by its own operator= (moved from a prvalue: p.m_name = get<name>()) */
+		cc *a = c->ast;
+		ast_qualified_type t = AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE_AT(a, l)->ty);
+		uint32_t src = r, chain;
+		cxx_prv *p = cxx_gen_prv_find(c, r);	/* (a call's prvalue: its node may be marked an lvalue, its temporary) */
+		bool move = !(AST_NODE_AT(a, r)->flags & AST_NODE_FLAG_LVALUE) || (p && p->call);
+		cc_id_list parts;
+
+		cc_id_list_init(&parts);
+		if (move) {
+			/* (a prvalue: built in a temporary first, once) */
+			uint32_t tmp;
+
+			if (!p || !p->call || !(tmp = cxx_gen_class_temp(c, t, loc)))
+				return;
+			cc_id_list_append(a, &parts, cc_statement_new(a, AST_NODE_EXPRESSION, loc, cxx_gen_prv_aim(c, p, cc_address_of_build(a, cxx_gen_var_node(c, tmp, loc), loc)), 0, 0));
+			src = cxx_gen_var_node(c, tmp, loc);
+		}
+		if (!cxx_gen_defaulted_assign_parts(c, l, t, src, move, &parts, loc))
+			return;
+		chain = cxx_gen_chain(c, &parts, cc_address_of_build(a, l, loc), loc);
+		c->enode = chain ? cc_dereference_build(a, chain, loc) : 0;
+		return;
+	}
 	if (cc_type_is_record(c->ast, AST_NODE_AT(c->ast, l)->ty) &&
 	    (base || AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE_AT(c->ast, l)->ty) != AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE_AT(c->ast, r)->ty) || cxx_gen_trivial_abi(c, AST_NODE_AT(c->ast, l)->ty, 0) != 1))
 		return;	/* (a class whose assignment is not a copy of its bytes: the implicit operator=, not built yet) */

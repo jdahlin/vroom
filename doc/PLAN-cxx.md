@@ -2847,3 +2847,11 @@ misslyckas utan ändringen.  Sviter gröna (165/165, 38/38).
 omvända kandidaten `b == a`, `!(b == a)` (C++20 [over.match.oper]/3.4): jsons
 `nullptr == j` med dess medlem `operator==(ScalarType)`.  Test:
 `run/reversed-equality-candidate.cpp`.  Sviter gröna (166/166, 38/38, mangle).
+
+## Status 191 (2026-11-16)
+`x = y` av en klass utan egen operator= men med medlemmar som har en (jsons
+udt `name` med en `std::string`): den implicita operatorn, varje bas och
+medlem tilldelad med sin egen operator=, flyttad från ett prvalue (som byggs i
+ett temporärt objekt först), kopierad från ett lvalue.  Test:
+`run/implicit-assign-nontrivial-member.cpp` (räknar kopior och flyttar).
+Sviter gröna (167/167, 38/38, mangle).
