@@ -742,8 +742,14 @@ VPRIV void cxx_gen_operator_call(cxx *c, uint32_t obj, const uint32_t *args, uin
 	if (f->fn_static && f->member_of && f->member_of->kind == CXX_SCOPE_CLASS) {
 		/* a static operator() or operator[] (C++23): the object is evaluated, not passed */
 		cxx_gen_call(c, f, 0, false, args, nargs, loc);
-		if (c->enode && AST_NODE_AT(c->ast, obj)->op != AST_NODE_VARIABLE)
-			c->enode = cc_node_new_operands(c->ast, AST_NODE_COMMA, AST_NODE_AT(c->ast, c->enode)->ty, loc, cc_node_rvalue(c->ast, obj), c->enode);
+		if (c->enode && AST_NODE_AT(c->ast, obj)->op != AST_NODE_VARIABLE) {
+			cxx_prv *p = cxx_gen_prv_find(c, c->enode);
+			uint32_t ev = cc_node_rvalue(c->ast, obj);
+
+			c->enode = cc_node_new_operands(c->ast, AST_NODE_COMMA, AST_NODE_AT(c->ast, c->enode)->ty, loc, ev, c->enode);
+			if (p && p->call)	/* (a class prvalue: still built where it goes, after the object, X()(a)) */
+				cxx_gen_prv_add(c, c->enode, cc_node_new_operands(c->ast, AST_NODE_COMMA, AST_NODE_AT(c->ast, p->expr)->ty, loc, ev, p->expr), p->call, p->tmp);
+		}
 		return;
 	}
 	all[0] = obj;

@@ -412,6 +412,18 @@ VPRIV uint32_t cxx_gen_return(cxx *c, uint32_t e, bool has_value, uint32_t loc)
 			cc_id_list_append(a, &l, cc_statement_new(a, AST_NODE_RETURN, loc, cc_node_rvalue(a, cxx_gen_var_node(c, c->gen_sret, loc)), 0, 0));
 			return cc_statement_new(a, AST_NODE_BLOCK, loc, 0, cc_id_list_freeze(a, &l), l.n);
 		}
+		if (AST_QUALIFIED_TYPE_UNQUALIFIED(en->ty) == t && !(en->flags & AST_NODE_FLAG_LVALUE)) {
+			/* return f(); of a class prvalue (X()(first, n, value) through a static operator()): the call
+			   aimed at the caller's object */
+			cxx_prv *p = cxx_gen_prv_find(c, e);
+
+			if (p && p->call) {
+				cc_id_list_init(&l);
+				cc_id_list_append(a, &l, cc_statement_new(a, AST_NODE_EXPRESSION, loc, cxx_gen_prv_aim(c, p, cc_address_of_build(a, target, loc)), 0, 0));
+				cc_id_list_append(a, &l, cc_statement_new(a, AST_NODE_RETURN, loc, cc_node_rvalue(a, cxx_gen_var_node(c, c->gen_sret, loc)), 0, 0));
+				return cc_statement_new(a, AST_NODE_BLOCK, loc, 0, cc_id_list_freeze(a, &l), l.n);
+			}
+		}
 		if (AST_QUALIFIED_TYPE_UNQUALIFIED(en->ty) != t || !(en->flags & AST_NODE_FLAG_LVALUE)) {
 			cxx_gen_fail(c);	/* (a conversion to the class: not built yet) */
 			return 0;

@@ -2778,3 +2778,12 @@ Variadiska funktioner får kod (`f(...)`, även mallar), och en trivial klass
 kan skickas genom `...` som i C.  Kvar: `va_list` som lokal variabel
 (`__builtin_va_list` är ingen kodtyp än).  Test: `run/variadic-only-param.cpp`.
 Sviter gröna (156/156, 38/38, mangle).
+
+## Status 182 (2026-11-16)
+`constexpr auto x = ...;` i en funktionskropp är en vanlig automatisk
+variabel.  `return X()(a, n);` av en klass som returneras via adress, genom en
+statisk `operator()` på ett temporärt objekt, byggs i anroparens objekt
+(libc++:s `__specialized_algorithm`, `vector<bool>`:s `fill_n`;
+`vector<vector<bool>> e = {{...}}` länkar nu).  Tester:
+`run/constexpr-auto-local.cpp`, `run/return-static-call-prvalue.cpp`.
+Sviter gröna (158/158, 38/38, mangle).
