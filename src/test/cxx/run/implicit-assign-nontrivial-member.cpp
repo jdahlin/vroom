@@ -1,5 +1,6 @@
 // x = y of a class with no operator= of its own and a member that has one (json's udt name, a std::string in
-// it): each member assigned by its own operator=, moved from a prvalue or an xvalue, copied from an lvalue
+// it): each member assigned by its own operator=, moved from a prvalue or an xvalue, copied from an lvalue;
+// from another type through a converting constructor (alt_string = "text")
 static int copies, moves;
 struct S {
 	int v;
@@ -25,10 +26,13 @@ int main()
 	p.name = static_cast<Name &&>(w);
 	int c = p.name.s.v, wv = w.s.v;
 	p.name = q.name;
+	Name cv;
+	cv = 11;	/* (Name(int): a temporary, moved from) */
+	int ccv = cv.s.v + cv.k;
 	Contact x{p, Name(2)}, y{q, Name(3)};
 	x = y;
 	int cx = x.p.name.s.v + x.addr.s.v * 10;
 	x = static_cast<Contact &&>(y);
 	int cy = y.p.name.s.v;
-	return cx == 35 && cy == -1 && a == 7 && ak == 14 && b == 8 && p.name.s.v == 5 && p.name.k == 10 && q.name.s.v == 5 && c == 9 && wv == -1 && moves == 5 && copies == 3 ? 0 : 1;
+	return ccv == 33 && cx == 35 && cy == -1 && a == 7 && ak == 14 && b == 8 && p.name.s.v == 5 && p.name.k == 10 && q.name.s.v == 5 && c == 9 && wv == -1 && moves == 6 && copies == 3 ? 0 : 1;
 }

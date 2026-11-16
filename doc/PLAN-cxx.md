@@ -2983,3 +2983,14 @@ libc++:s `__invoke` av jsons lambda med `unsigned char` (unit-json_patch
 länkade inte).  Test: `run/decltype-call-operator-conversion.cpp`, som
 misslyckas utan ändringen.  Kvar (separat): en returtyp `-> decltype(...)`
 manglas som `v`, clang skriver uttrycket.  Sviter gröna (180/180, 38/38, mangle).
+
+## Status 207 (2026-11-16)
+Rättelse till status 205: den extra argumentberoende uppslagningen körs bara
+när en argumentnamnrymd faktiskt deklarerar en icke-mall med det namnet och
+antalet parametrar; att alltid köra den deducerade och instansierade andra
+kandidater mitt i kodgenereringen och lämnade kroppar markerade som misslyckade
+(unit-pointer_access och unit-reference_access föll tillbaka:
+`value.get<const binary_t>()`).  Dessutom: `x = v` av en klass utan egen
+operator= från en annan typ (alt_string = "text"): den konverterande
+konstruktorns temporära objekt, sedan medlem för medlem (flyttat).  Testet
+`run/implicit-assign-nontrivial-member.cpp` utökat.  Sviter gröna (180/180).

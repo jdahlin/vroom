@@ -143,8 +143,26 @@ VPRIV void cxx_postfix_expression_parse1(cxx *c)
 
 					memcpy(abrace, c->carg_brace, sizeof abrace);
 					c->call_obj = call_obj, c->call_obj_rv = call_obj_rv, cxx_call_type(c, set, callee, c->cargs, c->cargs_lval, c->ncargs);
+					bool adl_nontemplate = false;	/* (an argument's namespace declares a non-template function of that name) */
+
 					if (set && c->call_resolved && c->call_picked && c->call_picked->inst_ftmpl && !call_obj && ename && !c->tentative &&
-					    c->ncargs <= 16 && c->etype != CXX_TY_UNKNOWN) {
+					    c->ncargs <= 16 && c->etype != CXX_TY_UNKNOWN)
+						for (uint32_t k = 0; k < c->ncargs && !adl_nontemplate; k++) {
+							ast_qualified_type at = c->cargs[k];
+							cxx_scope *ns;
+
+							if (at != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, at) == AST_TYPE_POINTER && AST_TYPE(c->ast, at)->ext)
+								at = AST_TYPE(c->ast, at)->base;
+							if (at == CXX_TY_UNKNOWN || !cc_type_is_record(c->ast, at) || AST_TYPE_KIND(c->ast, at) == AST_TYPE_ARRAY ||
+							    !(ns = cxx_type_class_scope(c, AST_QUALIFIED_TYPE_UNQUALIFIED(at))))
+								continue;
+							while (ns && ns->kind != CXX_SCOPE_NAMESPACE)
+								ns = ns->parent;
+							for (cxx_entity *e = ns ? cxx_lookup_in(c, ns, ename, 0) : NULL; e && !adl_nontemplate; e = e->next)
+								adl_nontemplate = e->kind == CXX_ENTITY_VALUE && e->ty != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, e->ty) == AST_TYPE_FUNCTION &&
+										  AST_TYPE(c->ast, e->ty)->n == c->ncargs && !e->inst_ftmpl;
+						}
+					if (adl_nontemplate) {
 						/* f(x) resolved to a template by ordinary lookup: a non-template the arguments' namespaces
 						   declare, exact for every argument, is better ([over.match.best]/2.4; alt_string's own
 						   int_to_string(alt_string&, size_t) for json's int_to_string(result, value)) */
