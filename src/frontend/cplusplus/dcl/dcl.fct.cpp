@@ -151,6 +151,11 @@ node_index parser::parameter_declaration()
         return 0;
     if (!specifiers.node)
         return expected("a decl-specifier-seq", "dcl.fct");
+    /* [dcl.typedef]/1: "it shall not be used in the decl-specifier-seq of
+       a parameter-declaration" */
+    if (specifiers.typedef_)
+        return violates("no typedef in a parameter-declaration", "dcl.typedef",
+                        specifiers.typedef_at);
     declarator_facts facts;
     declarator(declarator_form::either, facts);
     if (failed())

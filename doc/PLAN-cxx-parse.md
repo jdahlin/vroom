@@ -373,6 +373,18 @@ The first grammar, about 55 nonterminals.
 - Done when: V1 lists every production above; V2's examples of these
   subclauses pass; V4a has no unexplained disagreement on comparable
   declarations; V4b's claims compile.
+- Status (2026-11-16, grammar done; V4b not written yet): V4a over the
+  whole corpus (1811 runs of 1133 tests): 9083 declarations accepted or
+  rejected as clang does, none rejected that clang accepts, none accepted
+  that clang rejects; 10692 kept as tokens for later steps; 48749 unparsed
+  nodes.  Surprises: V4a counts only clang's Parse errors against an
+  accepted declaration, but any clang error for a rejected one (clang's
+  Parse/Sema split is not the standard's: `i = 4;` at namespace scope is a
+  Sema error to it); [dcl.type]/2 and [dcl.typedef]/1 are checked by the
+  parser, since they constrain the decl-specifier-seq's form; and
+  known-differences.txt holds clang's limits ([implimits]),
+  `#pragma clang attribute`, P2361R6 applied as a DR, and error recovery.
+  With clang's side cached, a full run takes about 2 s.
 
 ### P2. The rest of [dcl] that needs no expressions
 

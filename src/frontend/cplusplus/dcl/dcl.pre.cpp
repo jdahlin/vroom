@@ -208,12 +208,17 @@ node_index parser::declaration()
     node_index n = unparsed_declaration();
     if (failed_with.beyond_step || uses_later_grammar(*this, first, position)) {
         counters.beyond_step++;
-        if (tree[n].kind == syntax_kind::erroneous &&
-            diagnostics.messages.size() > messages) {
+        if (tree[n].kind == syntax_kind::erroneous) {
             /* the splitter's bracket diagnostics are about tokens a later
-               step reads: not reported yet */
-            diagnostics.messages.resize(messages);
-            diagnostics.error_count--;
+               step reads: not reported yet, and the node is unparsed */
+            if (diagnostics.messages.size() > messages) {
+                diagnostics.messages.resize(messages);
+                diagnostics.error_count--;
+            }
+            pending.resize(pending.size() - 1);
+            tree.truncate(n);
+            n = tree.make(syntax_kind::unparsed, nullptr, 0, first, position);
+            add(n);
         }
         return n;
     }
@@ -303,6 +308,11 @@ parser::simple_declaration_rest(size_t mark, token_index first,
                      (at(preprocessing_op_or_punc::EQUAL) &&
                       (at(standard_keyword::default_, 1) ||
                        at(standard_keyword::delete_, 1))))) {
+        /* [dcl.typedef]/1: "nor in the decl-specifier-seq of a
+           function-definition" */
+        if (specifiers.typedef_)
+            return violates("no typedef in a function-definition",
+                            "dcl.typedef", specifiers.typedef_at);
         function_body();
         if (failed())
             return 0;

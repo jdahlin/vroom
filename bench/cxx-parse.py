@@ -321,8 +321,9 @@ def check(test, opts, clang, cxxlex, cxxparse):
     # syntax: per declaration of ours that is neither a fallback nor
     # (fully) a later step's, accepted or rejected as clang does: clang
     # rejects it when one of its Parse or Lexical errors is on its lines
+    # only Parse: phases 1-4's errors are cxx-lex.py's and cxx-pp.py's
     syntax_errors = {(int(m.group(1)), int(m.group(2))) for m in
-                     re.finditer(r'^' + re.escape(name) + r':(\d+):(\d+): (?:fatal )?error: .*\[(?:Parse|Lexical or Preprocessor) Issue\]',
+                     re.finditer(r'^' + re.escape(name) + r':(\d+):(\d+): (?:fatal )?error: .*\[Parse Issue\]',
                                  c[2], re.M)}
     decls = our_declarations(ours[1], test)
     res['syntax'] = {'agree': 0, 'we_reject': [], 'we_accept': [], 'not_comparable': 0}
@@ -336,7 +337,26 @@ def check(test, opts, clang, cxxlex, cxxparse):
     # where the declaration starts to where the next one starts (clang
     # reports a missing ';' after the declaration's last token)
     starts = sorted(d[1] for d in decls)
+    lines = open(test, 'rb').read().decode('utf-8', 'replace').split('\n')
+
+    def recovery(b, e):
+        """an erroneous declaration that is only the closing brackets and ;
+        an earlier erroneous one left (clang's recovery skips them)"""
+        text = '\n'.join(lines[b[0] - 1:e[0]])
+        text = text.split('\n')
+        text[-1] = text[-1][:e[1]]
+        text[0] = text[0][b[1] - 1:]
+        body = re.sub(r'//.*', '', '\n'.join(text))
+        return re.fullmatch(r'[\s)\]};]*', body) is not None
+
+    known_lines = KNOWN.get(os.path.relpath(test, LLVM_TEST), set())
     for kind, b, e, flags, opaque in decls:
+        if any(b[0] <= line <= e[0] for line in known_lines):
+            res['syntax']['not_comparable'] += 1
+            continue
+        if 'erroneous' in flags and recovery(b, e):
+            res['syntax']['not_comparable'] += 1
+            continue
         later = [x for x in starts if x > b]
         until = later[0] if later else (1 << 30, 0)
 
@@ -449,6 +469,12 @@ def main():
     for t in tests():
         if a.patterns and not any(p in t for p in a.patterns):
             continue
+        text = open(t, errors='replace').read()
+        if re.search(r'altivec|power8-vector|-fzvector', text):
+            # PowerPC's and SystemZ's vector keywords: a target's extension
+            # the aarch64 runs cannot have
+            unrunnable += 1
+            continue
         sets = cxxpp.run_lines(t)
         if sets is None:
             unrunnable += 1
@@ -492,7 +518,7 @@ def main():
             for k, why in r['fail'] or [('ok', '')]:
                 print(f'{k:7} {rel} {" ".join(r["opts"])}: {why}')
     runs = len(jobs)
-    print(f'{runs} runs of {len(tests_seen)} tests ({unrunnable} make their inputs at run time, not run): '
+    print(f'{runs} runs of {len(tests_seen)} tests ({unrunnable} not run: inputs made at run time, another target\'s vector keywords): '
           f'tokens {runs - counts["tokens"]}/{runs}, no crash {len(results) - counts["crash"]}/{len(results)}, '
           f'declarations {agree}/{compared} where clang finds no syntax error ({syntax_errors} runs where it does, '
           f'{skipped} skipped); '

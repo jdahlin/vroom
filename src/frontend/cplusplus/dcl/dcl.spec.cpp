@@ -289,6 +289,8 @@ node_index parser::decl_specifier_seq(decl_specifier_facts &facts,
     size_t mark = begin_node();
     token_index first = position;
     type_specifier_count count;
+    token_index other_specifier = 0;
+    bool has_other_specifier = false;
     for (;;) {
         standard_keyword k = keyword_of(peek());
         token_index specifier = position;
@@ -296,8 +298,24 @@ node_index parser::decl_specifier_seq(decl_specifier_facts &facts,
         if (is_non_type_decl_specifier(k)) {
             if (type_specifiers_only)
                 break;
-            if (k == standard_keyword::typedef_)
+            if (k == standard_keyword::typedef_) {
                 facts.typedef_ = true;
+                facts.typedef_at = position;
+            } else {
+                other_specifier = position;
+                has_other_specifier = true;
+            }
+            /* [dcl.typedef]/1: "The typedef specifier shall not be
+               combined in a decl-specifier-seq with any other kind of
+               specifier except a defining-type-specifier" */
+            if (facts.typedef_ && has_other_specifier) {
+                token_index at = position;
+                if (k != standard_keyword::typedef_)
+                    at = other_specifier;
+                return violates("typedef combined only with "
+                                "defining-type-specifiers",
+                                "dcl.typedef", at);
+            }
             add_token();
         } else if (k == standard_keyword::const_ ||
                    k == standard_keyword::volatile_) {

@@ -176,6 +176,20 @@ node_index parser::noptr_declarator(declarator_form form,
     size_t mark = begin_node();
     token_index first = position;
     bool head = false;
+    if (at(preprocessing_op_or_punc::LEFT_BRACKET) &&
+        form != declarator_form::abstract)
+        /* [ identifier-list ]: a structured binding ([dcl.struct.bind]): P5 */
+        return beyond_this_step();
+    if (at(preprocessing_op_or_punc::LEFT_PARENTHESIS) &&
+        form == declarator_form::abstract && !parameters_follow(form) &&
+        !(at_ptr_operator_at(1) ||
+          at(preprocessing_op_or_punc::LEFT_PARENTHESIS, 1) ||
+          at(preprocessing_op_or_punc::LEFT_BRACKET, 1))) {
+        /* ( ptr-abstract-declarator ) needs a ptr-abstract-declarator: a
+           ( before anything else is not this declarator's (int(nullptr) in
+           auto (*p)() -> int(nullptr); is an initializer) */
+        return 0;
+    }
     if (at(preprocessing_op_or_punc::LEFT_PARENTHESIS) &&
         !(form != declarator_form::concrete && parameters_follow(form))) {
         /* ( ptr-declarator ) */
@@ -331,6 +345,14 @@ bool parser::parenthesis_could_be_initializer()
  *         && attribute-specifier-seq_opt
  *         nested-name-specifier * attribute-specifier-seq_opt cv-qualifier-seq_opt
  */
+bool parser::at_ptr_operator_at(unsigned ahead)
+{
+    position += ahead;
+    bool found = at_ptr_operator();
+    position -= ahead;
+    return found;
+}
+
 bool parser::at_ptr_operator()
 {
     if (at(preprocessing_op_or_punc::STAR) ||

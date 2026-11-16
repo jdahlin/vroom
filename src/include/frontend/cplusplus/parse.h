@@ -353,6 +353,7 @@ struct declarator_facts {
 struct decl_specifier_facts {
     node_index node = 0;
     bool typedef_ = false;
+    token_index typedef_at = 0;
     bool has_defining_type_specifier = false;
     /* a class-specifier, enum-specifier or elaborated-type-specifier, which
        may be all a declaration declares ([dcl.pre]/5) */
@@ -555,6 +556,7 @@ class parser
     node_index noptr_declarator(declarator_form form, declarator_facts &facts);
     bool parenthesis_could_be_initializer();
     bool at_ptr_operator();
+    bool at_ptr_operator_at(unsigned ahead);
     node_index ptr_operator(derivation *kind);
     node_index cv_qualifier_seq();
     node_index parameters_and_qualifiers();

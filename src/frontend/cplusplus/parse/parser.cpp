@@ -339,13 +339,20 @@ node_index parser::unparsed_declaration()
             if (outside) {
                 /* the '}' of an enclosing region is not this declaration's:
                    nothing encloses a declaration of the translation unit */
-                diagnostics.issue(diagnostic_id::parse_unmatched_closing,
-                                  tokens.location(position))
-                    << bracket_spelling(closing)
-                    << bracket_spelling(opening_bracket(closing));
+                if (!erroneous)
+                    diagnostics.issue(diagnostic_id::parse_unmatched_closing,
+                                      tokens.location(position))
+                        << bracket_spelling(closing)
+                        << bracket_spelling(opening_bracket(closing));
                 erroneous = true;
+                bool alone = position == first;
                 consume();
-                break;
+                /* a stray bracket on its own is a declaration of its own;
+                   inside a declaration, the declaration still ends at its
+                   ';' */
+                if (alone)
+                    break;
+                continue;
             }
             if (closing_bracket(tokens[open.back()]) != closing) {
                 /* the innermost bracket is not closed here: if an outer one
