@@ -24,6 +24,7 @@
 #include <stdint.h>
 
 #include "common/buffer.h"
+#include "frontend/cplusplus/owned.h"
 
 namespace cplusplus
 {
@@ -116,22 +117,23 @@ struct source_file {
 
     bool open(const char *path);
     void from_memory(const char *name, const char *text, size_t size);
-    void close();
     /* the position a diagnostic reports: physical line and column, or the
-       presumed line and file name a line directive gave ([cpp.line]/3-4) */
+       presumed line and file name a line directive gave ([cpp.line]/3-4);
+       the file name lives until the next add_line_directive */
     source_position position(source_location location) const;
     void add_line_directive(source_location next_line, uint32_t line,
-                            const char *presumed_name);
+                            const char *presumed_name, size_t length);
 
   private:
-    uint32_t *physical_line_starts = nullptr;
-    uint32_t physical_line_count = 0;
+    owned_array<char> characters;
+    owned_array<uint32_t> physical_line_starts;
     struct presumed_line {
         uint32_t physical_line, presumed_line;
-        const char *presumed_name;
-    } *presumed_lines = nullptr;
-    uint32_t presumed_line_count = 0;
-    char *owned = nullptr;
+        size_t name_offset; /* in presumed_names, NUL-terminated */
+    };
+    owned_array<presumed_line> presumed_lines;
+    owned_array<char> presumed_names;
+    void take(owned_array<char> text, size_t length);
     void index_lines();
 };
 
@@ -205,11 +207,10 @@ class diagnostic_consumer
         : options(options)
     {
     }
-    ~diagnostic_consumer();
     const diagnostic_options &options;
     const source_file *file = nullptr;
-    diagnostic_message *messages = nullptr;
-    size_t message_count = 0, error_count = 0, warning_count = 0;
+    owned_array<diagnostic_message> messages;
+    size_t error_count = 0, warning_count = 0;
     /* while positive, issue() discards: the lexer looks ahead without consuming */
     unsigned suppressed = 0;
 
@@ -220,9 +221,7 @@ class diagnostic_consumer
     void render(const diagnostic_message &message, vbuffer *out) const;
 
   private:
-    size_t capacity = 0;
     diagnostic_message discarded;
-    void count_last();
 };
 
 const char *diagnostic_name(diagnostic_id id);
@@ -378,7 +377,6 @@ class lexer
     lexer(const source_file &file,
           const implementation_defined_behavior &behavior,
           diagnostic_consumer &diagnostics, lexer_options options = {});
-    ~lexer();
     lexer(const lexer &) = delete;
     lexer &operator=(const lexer &) = delete;
 
@@ -438,7 +436,7 @@ class lexer
     /* [lex.string]: the code units of the string literals converted so far */
     const uint32_t *string_code_units() const
     {
-        return code_units;
+        return code_units.data();
     }
     struct pp_number_analysis;
     bool analyze_pp_number(const char *spelling, size_t length,
@@ -451,8 +449,7 @@ class lexer
     preprocessing_token lex(bool header_name_permitted);
     void append_code_unit(uint32_t unit);
     void append_encoded(uint32_t code_point, encoding_prefix prefix);
-    uint32_t *code_units = nullptr;
-    size_t code_unit_count = 0, code_unit_capacity = 0;
+    owned_array<uint32_t> code_units;
     uint32_t position = 0;
     bool at_start_of_line = true, after_white_space = false;
     /* where the previous preprocessing token ended, and whether it was an

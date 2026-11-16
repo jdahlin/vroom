@@ -33,11 +33,6 @@ lexer::lexer(const source_file &f, const implementation_defined_behavior &b,
 {
 }
 
-lexer::~lexer()
-{
-    free(code_units);
-}
-
 preprocessing_token lexer::next()
 {
     return lex(false);

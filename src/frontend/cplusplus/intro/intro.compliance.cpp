@@ -193,20 +193,6 @@ diagnostic_message &diagnostic_message::operator<<(const char *t)
     return text(t, strlen(t));
 }
 
-diagnostic_consumer::~diagnostic_consumer()
-{
-    free(messages);
-}
-
-void diagnostic_consumer::count_last()
-{
-    const diagnostic_message &m = messages[message_count - 1];
-    if (m.severity >= diagnostic_severity::error)
-        error_count++;
-    else if (m.severity == diagnostic_severity::warning)
-        warning_count++;
-}
-
 diagnostic_message &diagnostic_consumer::issue(diagnostic_id id,
                                                source_location location)
 {
@@ -215,20 +201,15 @@ diagnostic_message &diagnostic_consumer::issue(diagnostic_id id,
         discarded = diagnostic_message{};
         return discarded;
     }
-    if (message_count == capacity) {
-        capacity = capacity ? 2 * capacity : 16;
-        messages = static_cast<diagnostic_message *>(
-            realloc(messages, capacity * sizeof *messages));
-        if (!messages)
-            abort();
-    }
-    diagnostic_message &m = messages[message_count++];
-    m = diagnostic_message{};
+    diagnostic_message m{};
     m.id = id;
     m.severity = severity;
     m.location = location;
-    count_last();
-    return m;
+    if (severity >= diagnostic_severity::error)
+        error_count++;
+    else if (severity == diagnostic_severity::warning)
+        warning_count++;
+    return messages.append(m);
 }
 
 namespace

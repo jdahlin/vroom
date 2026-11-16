@@ -26,6 +26,10 @@ by step once it covers what that front end does.
   Where clang departs from n4861 (a later paper applied as a DR, an
   extension), the comment says so and names the paper (P1949R7 for
   identifiers, P2290R3 for `\u{}`, P0330R8 for `z`).
+- **Memory is held by owners** (`src/include/frontend/cplusplus/owned.h`:
+  `owned_array`, `owned_buffer`, `owned_string`, RAII): no `free()`,
+  `malloc()`, `realloc()` or `strdup()` outside that header.  The pre-commit
+  hook `no-raw-allocation` enforces it, and CI runs it on every file.
 - **C++20 without exceptions, RTTI or the standard library**: namespace
   `cplusplus`, `enum class`, classes with member functions, RAII.  The module
   is not built with `VCC_LANG=c`.
@@ -78,9 +82,12 @@ Now (2026-11-16): 121 runs of 62 tests, raw, tokens, values and diags all
   the standard's examples (`lex.string.cpp`).
 - **L2** citation checker (`bench/cxx-spec-refs.py`: every `[label]/N`
   exists, every quoted production matches the spec's), in CI.
-- **L3** phase 4: not a new preprocessor.  vcc's C preprocessor
-  (`src/frontend/pp`) stays; the front end takes its output through an
-  adapter when it needs phase 4 (decided 2026-11-16).
+- **L3** phase 4, the preprocessor, written against `[cpp]` like the lexer
+  (`src/frontend/cplusplus/cpp/`, one file per subclause), checked against
+  clang the same way (decided 2026-11-16, replacing the earlier plan of an
+  adapter from vcc's C preprocessor).  The context the lexer needs
+  (header-names after `#include`/`import`, the end of a directive's line)
+  comes from it.
 - Then `[basic]`, `[expr]`, `[stmt]`, `[dcl]`, ... in the order of the
   standard's clauses.
 

@@ -4,3 +4,13 @@ repos:
     hooks:
       - id: clang-format
         files: ^src/.*\.(c|cpp|h)$
+  - repo: local
+    hooks:
+      # The C++ front end holds memory in owners (src/include/frontend/cplusplus/owned.h,
+      # the one file that calls these): no free() or raw allocation anywhere else.
+      - id: no-raw-allocation
+        name: C++ front end allocates through owned.h (no free/malloc/realloc/strdup)
+        language: pygrep
+        entry: '(^|[^_a-zA-Z0-9.>])(free|malloc|calloc|realloc|strdup|strndup)\s*\('
+        files: ^src/(frontend/cplusplus|include/frontend/cplusplus|bin/cxxlex)/.*\.(cpp|h|inc)$
+        exclude: ^src/include/frontend/cplusplus/owned\.h$

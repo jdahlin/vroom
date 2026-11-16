@@ -36,7 +36,7 @@ jobs:
         with:
           python-version: '3.12'
       - run: python -m pip install pre-commit==4.3.0
-      - name: Check formatting of changed vcc sources
+      - name: Check formatting of changed vcc sources, and the C++ front end's allocation rule
         env:
           PR_BASE: ${{ github.event.pull_request.base.sha }}
           PUSH_BASE: ${{ github.event.before }}
@@ -46,6 +46,8 @@ jobs:
             base=${PUSH_BASE:-HEAD^}
           fi
           pre-commit run clang-format --from-ref "$base" --to-ref HEAD --show-diff-on-failure
+          # every file it covers, not only the changed ones: it is a grep
+          pre-commit run no-raw-allocation --all-files
   arm64:
     uses: ./.github/workflows/arm64.yml
   # x86-64 runners: asan, tsan and the x86-host steps

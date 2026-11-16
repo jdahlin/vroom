@@ -170,14 +170,7 @@ uint32_t lexer::scan_raw_string(uint32_t quote, preprocessing_token &token,
 
 void lexer::append_code_unit(uint32_t unit)
 {
-    if (code_unit_count == code_unit_capacity) {
-        code_unit_capacity = code_unit_capacity ? 2 * code_unit_capacity : 256;
-        code_units = static_cast<uint32_t *>(
-            realloc(code_units, code_unit_capacity * sizeof *code_units));
-        if (!code_units)
-            abort();
-    }
-    code_units[code_unit_count++] = unit;
+    code_units.append(unit);
 }
 
 /*
@@ -367,37 +360,37 @@ token lexer::convert_string_literals(const preprocessing_token *pieces,
     out.preprocessing.prefix = prefix;
     out.type = element_type(behavior, prefix);
 
-    vbuffer spelling_buffer = {}, suffix = {};
+    owned_buffer spelling_buffer, suffix;
     size_t suffix_piece = count;
-    out.string_offset = (uint32_t)code_unit_count;
+    out.string_offset = (uint32_t)code_units.size();
     for (size_t k = 0; k < count; k++) {
         const preprocessing_token &piece = pieces[k];
-        spelling_buffer.n = 0;
-        lexer::spelling(piece, &spelling_buffer);
-        size_t length = spelling_buffer.n;
+        spelling_buffer.clear();
+        lexer::spelling(piece, spelling_buffer.get());
+        size_t length = spelling_buffer.size();
         if (piece.kind ==
             preprocessing_token_kind::user_defined_string_literal) {
             /* the ud-suffix follows the closing quote */
             size_t close = length;
-            while (close > 0 && spelling_buffer.p[close - 1] != '"')
+            while (close > 0 && spelling_buffer.data()[close - 1] != '"')
                 close--;
-            const char *s = spelling_buffer.p + close;
+            const char *s = spelling_buffer.data() + close;
             size_t n = length - close;
             if (suffix_piece == count) {
-                vbuffer_append(&suffix, s, n);
+                vbuffer_append(suffix.get(), s, n);
                 suffix_piece = k;
-            } else if (suffix.n != n || memcmp(suffix.p, s, n)) {
+            } else if (suffix.size() != n || memcmp(suffix.data(), s, n)) {
                 diagnostics
                     .issue(diagnostic_id::err_string_concat_mixed_suffix,
                            piece.location)
-                    .text(suffix.p, suffix.n)
+                    .text(suffix.data(), suffix.size())
                     .text(s, n);
                 error = true;
             }
             length = close;
         }
         /* every piece is converted, so that each one's errors are reported */
-        if (!append_string_literal_piece(spelling_buffer.p, length, piece,
+        if (!append_string_literal_piece(spelling_buffer.data(), length, piece,
                                          prefix))
             error = true;
     }
@@ -406,9 +399,7 @@ token lexer::convert_string_literals(const preprocessing_token *pieces,
         out.preprocessing.kind =
             preprocessing_token_kind::user_defined_string_literal;
     }
-    free(spelling_buffer.p);
-    free(suffix.p);
-    out.string_length = (uint32_t)(code_unit_count - out.string_offset);
+    out.string_length = (uint32_t)(code_units.size() - out.string_offset);
     out.value_known = !error;
     return out;
 }

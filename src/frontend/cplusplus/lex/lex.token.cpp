@@ -25,13 +25,14 @@ token lexer::convert(const preprocessing_token &pp)
 {
     token out;
     out.preprocessing = pp;
-    vbuffer spelling_buffer = {};
+    owned_buffer spelling_buffer;
     switch (pp.kind) {
     case preprocessing_token_kind::identifier: {
-        spelling(pp, &spelling_buffer);
+        spelling(pp, spelling_buffer.get());
         /* [lex.key]/1: an identifier of Table 5 is a keyword; [lex.key]/2:
            one of Table 6 is the operator it represents ([lex.digraph]/2) */
-        int k = lookup_keyword(behavior, spelling_buffer.p, spelling_buffer.n);
+        int k = lookup_keyword(behavior, spelling_buffer.data(),
+                               spelling_buffer.size());
         preprocessing_op_or_punc op;
         if (k >= 0 && keyword_is_alternative_representation(k, &op)) {
             out.kind = token_kind::operator_or_punctuator;
@@ -42,17 +43,18 @@ token lexer::convert(const preprocessing_token &pp)
             /* [lex.bool]/1: "The Boolean literals are the keywords false and
                true."  [lex.nullptr]/1: "The pointer literal is the keyword
                nullptr." */
-            if (spelling_buffer.n == 4 && !memcmp(spelling_buffer.p, "true", 4))
+            if (spelling_buffer.size() == 4 &&
+                !memcmp(spelling_buffer.data(), "true", 4))
                 out.literal = literal_kind::boolean_literal,
                 out.type = fundamental_type::bool_, out.value = 1,
                 out.value_known = true;
-            else if (spelling_buffer.n == 5 &&
-                     !memcmp(spelling_buffer.p, "false", 5))
+            else if (spelling_buffer.size() == 5 &&
+                     !memcmp(spelling_buffer.data(), "false", 5))
                 out.literal = literal_kind::boolean_literal,
                 out.type = fundamental_type::bool_, out.value = 0,
                 out.value_known = true;
-            else if (spelling_buffer.n == 7 &&
-                     !memcmp(spelling_buffer.p, "nullptr", 7))
+            else if (spelling_buffer.size() == 7 &&
+                     !memcmp(spelling_buffer.data(), "nullptr", 7))
                 out.literal = literal_kind::pointer_literal,
                 out.type = fundamental_type::std_nullptr_t;
         } else
@@ -60,13 +62,13 @@ token lexer::convert(const preprocessing_token &pp)
         break;
     }
     case preprocessing_token_kind::pp_number:
-        spelling(pp, &spelling_buffer);
+        spelling(pp, spelling_buffer.get());
         out.kind = token_kind::literal;
         /* [lex.ppnumber]/2: the pp-number becomes an integer-literal or a
            floating-point-literal, or a user-defined-integer-literal or
            user-defined-floating-point-literal ([lex.ext]) */
         if (pp_number_analysis a; !analyze_pp_number(
-                spelling_buffer.p, spelling_buffer.n, pp.location, a))
+                spelling_buffer.data(), spelling_buffer.size(), pp.location, a))
             out.kind = token_kind::invalid;
         else if (a.ud_suffix) {
             out.literal = literal_kind::user_defined_literal;
@@ -77,25 +79,25 @@ token lexer::convert(const preprocessing_token &pp)
             convert_integer_literal(a, out);
         break;
     case preprocessing_token_kind::character_literal:
-        spelling(pp, &spelling_buffer);
+        spelling(pp, spelling_buffer.get());
         out.kind = token_kind::literal;
-        convert_character_literal(spelling_buffer.p, spelling_buffer.n, out);
+        convert_character_literal(spelling_buffer.data(),
+                                  spelling_buffer.size(), out);
         break;
     case preprocessing_token_kind::string_literal:
     case preprocessing_token_kind::user_defined_string_literal:
         /* a string literal on its own: a concatenation of one */
-        free(spelling_buffer.p);
         return convert_string_literals(&pp, 1);
     case preprocessing_token_kind::user_defined_character_literal:
         /* [lex.ext]/6: the character-literal before the ud-suffix has its
            value as any other, which the literal operator receives */
-        spelling(pp, &spelling_buffer);
+        spelling(pp, spelling_buffer.get());
         out.kind = token_kind::literal;
         {
-            size_t close = spelling_buffer.n;
-            while (close > 0 && spelling_buffer.p[close - 1] != '\'')
+            size_t close = spelling_buffer.size();
+            while (close > 0 && spelling_buffer.data()[close - 1] != '\'')
                 close--;
-            convert_character_literal(spelling_buffer.p, close, out);
+            convert_character_literal(spelling_buffer.data(), close, out);
         }
         out.literal = literal_kind::user_defined_literal;
         break;
@@ -115,7 +117,6 @@ token lexer::convert(const preprocessing_token &pp)
         out.kind = token_kind::invalid;
         break;
     }
-    free(spelling_buffer.p);
     return out;
 }
 

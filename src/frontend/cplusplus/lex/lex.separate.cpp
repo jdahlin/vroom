@@ -15,88 +15,80 @@ namespace cplusplus
 /* the padding after the physical characters: lookahead never checks the end */
 constexpr uint32_t source_file_padding = 16;
 
+/* the characters (already followed by the padding) become the file's */
+void source_file::take(owned_array<char> text, size_t length)
+{
+    characters = static_cast<owned_array<char> &&>(text);
+    physical_characters =
+        reinterpret_cast<const unsigned char *>(characters.data());
+    size = (uint32_t)length;
+    index_lines();
+}
+
 bool source_file::open(const char *path)
 {
     FILE *f = fopen(path, "rb");
     if (!f)
         return false;
-    size_t capacity = 1 << 16, length = 0, n;
-    char *text = static_cast<char *>(malloc(capacity + source_file_padding));
-    while (text && (n = fread(text + length, 1, capacity - length, f)) > 0) {
+    owned_array<char> text;
+    size_t length = 0;
+    for (;;) {
+        size_t n = fread(text.extend(65536), 1, 65536, f);
         length += n;
-        if (length == capacity)
-            text = static_cast<char *>(
-                realloc(text, (capacity *= 2) + source_file_padding));
+        if (n < 65536)
+            break;
     }
     fclose(f);
-    if (!text || length >= UINT32_MAX - source_file_padding) {
-        free(text);
+    if (length >= UINT32_MAX - source_file_padding)
         return false;
-    }
-    memset(text + length, 0, source_file_padding);
-    owned = text;
+    /* the characters, then the padding */
+    text.resize(length + source_file_padding);
+    memset(text.data() + length, 0, source_file_padding);
     name = path;
-    physical_characters = reinterpret_cast<const unsigned char *>(text);
-    size = (uint32_t)length;
-    index_lines();
+    take(static_cast<owned_array<char> &&>(text), length);
     return true;
 }
 
 void source_file::from_memory(const char *file_name, const char *text,
                               size_t length)
 {
-    owned = static_cast<char *>(malloc(length + source_file_padding));
-    if (!owned)
-        abort();
-    memcpy(owned, text, length);
-    memset(owned + length, 0, source_file_padding);
+    owned_array<char> copy;
+    char *p = copy.extend(length + source_file_padding);
+    memcpy(p, text, length);
+    memset(p + length, 0, source_file_padding);
     name = file_name;
-    physical_characters = reinterpret_cast<const unsigned char *>(owned);
-    size = (uint32_t)length;
-    index_lines();
-}
-
-void source_file::close()
-{
-    free(owned);
-    free(physical_line_starts);
-    free(presumed_lines);
-    *this = source_file{};
+    take(static_cast<owned_array<char> &&>(copy), length);
 }
 
 /* [lex.phases]/1.1: "introducing new-line characters for end-of-line
    indicators": an end-of-line indicator is LF, CR LF or a lone CR */
 void source_file::index_lines()
 {
-    uint32_t capacity = 64;
-    physical_line_starts =
-        static_cast<uint32_t *>(malloc(capacity * sizeof(uint32_t)));
-    physical_line_starts[0] = 0;
-    physical_line_count = 1;
+    physical_line_starts.clear();
+    physical_line_starts.append(0);
     for (uint32_t i = 0; i < size; i++) {
         unsigned char c = physical_characters[i];
         if (c != '\n' && c != '\r')
             continue;
         if (c == '\r' && physical_characters[i + 1] == '\n')
             i++;
-        if (physical_line_count == capacity)
-            physical_line_starts = static_cast<uint32_t *>(realloc(
-                physical_line_starts, (capacity *= 2) * sizeof(uint32_t)));
-        physical_line_starts[physical_line_count++] = i + 1;
+        physical_line_starts.append(i + 1);
     }
 }
 
 void source_file::add_line_directive(source_location next_line, uint32_t line,
-                                     const char *presumed_name)
+                                     const char *presumed_name, size_t length)
 {
-    uint32_t lo = 0, hi = physical_line_count;
+    uint32_t lo = 0, hi = (uint32_t)physical_line_starts.size();
     while (hi - lo > 1) {
         uint32_t mid = (lo + hi) / 2;
         (physical_line_starts[mid] <= next_line ? lo : hi) = mid;
     }
-    presumed_lines = static_cast<presumed_line *>(realloc(
-        presumed_lines, (presumed_line_count + 1) * sizeof(presumed_line)));
-    presumed_lines[presumed_line_count++] = {lo, line, presumed_name};
+    size_t offset = presumed_names.size();
+    char *copy = presumed_names.extend(length + 1);
+    memcpy(copy, presumed_name, length);
+    copy[length] = 0;
+    presumed_lines.append({lo, line, offset});
 }
 
 /*
@@ -108,17 +100,17 @@ void source_file::add_line_directive(source_location next_line, uint32_t line,
  */
 source_position source_file::position(source_location location) const
 {
-    uint32_t lo = 0, hi = physical_line_count;
+    uint32_t lo = 0, hi = (uint32_t)physical_line_starts.size();
     while (hi - lo > 1) {
         uint32_t mid = (lo + hi) / 2;
         (physical_line_starts[mid] <= location ? lo : hi) = mid;
     }
     source_position p = {name, lo + 1, location - physical_line_starts[lo] + 1};
-    for (uint32_t i = presumed_line_count; i-- > 0;)
+    for (size_t i = presumed_lines.size(); i-- > 0;)
         if (presumed_lines[i].physical_line <= lo) {
             p.line = presumed_lines[i].presumed_line +
                      (lo - presumed_lines[i].physical_line);
-            p.file_name = presumed_lines[i].presumed_name;
+            p.file_name = presumed_names.data() + presumed_lines[i].name_offset;
             break;
         }
     return p;

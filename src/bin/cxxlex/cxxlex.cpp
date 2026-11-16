@@ -200,14 +200,12 @@ int main(int argc, char **argv)
     options.retain_white_space = options.retain_comments = raw;
     lexer l(file, behavior, diagnostics, options);
 
-    vbuffer out = {};
-    vbuffer spelling = {};
+    owned_buffer out, spelling;
     /* the preprocessing tokens phase 7 sees: all of them for
        -dump-raw-tokens; for preprocessed input the ones outside directives,
        a line directive ([cpp.line]/5: # digit-sequence "s-char-sequence")
        giving the presumed lines */
-    preprocessing_token *tokens = nullptr;
-    size_t count = 0, capacity = 0;
+    owned_array<preprocessing_token> tokens;
     for (;;) {
         preprocessing_token pp = l.next();
         while (!raw && pp.at_start_of_line &&
@@ -218,20 +216,21 @@ int main(int argc, char **argv)
             if (!number.at_start_of_line &&
                 number.kind == preprocessing_token_kind::pp_number) {
                 preprocessing_token name = l.next();
-                spelling.n = 0;
-                l.spelling(number, &spelling);
-                unsigned long line = strtoul(spelling.p, nullptr, 10);
+                spelling.clear();
+                l.spelling(number, spelling.get());
+                unsigned long line = strtoul(spelling.data(), nullptr, 10);
                 if (!name.at_start_of_line &&
                     name.kind == preprocessing_token_kind::string_literal) {
-                    spelling.n = 0;
-                    l.spelling(name, &spelling);
-                    char *presumed = strndup(spelling.p + 1, spelling.n - 2);
+                    spelling.clear();
+                    l.spelling(name, spelling.get());
                     /* [cpp.line]/4: the line after the directive's new-line */
                     uint32_t next = name.location + name.extent;
                     while (next < file.size &&
                            file.physical_characters[next] != '\n')
                         next++;
-                    file.add_line_directive(next + 1, (uint32_t)line, presumed);
+                    file.add_line_directive(next + 1, (uint32_t)line,
+                                            spelling.data() + 1,
+                                            spelling.size() - 2);
                 }
                 pp = name;
             } else
@@ -240,12 +239,7 @@ int main(int argc, char **argv)
                    pp.kind != preprocessing_token_kind::end_of_file)
                 pp = l.next();
         }
-        if (count == capacity) {
-            capacity = capacity ? 2 * capacity : 1024;
-            tokens = static_cast<preprocessing_token *>(
-                realloc(tokens, capacity * sizeof *tokens));
-        }
-        tokens[count++] = pp;
+        tokens.append(pp);
         if (pp.kind == preprocessing_token_kind::end_of_file)
             break;
     }
@@ -254,7 +248,7 @@ int main(int argc, char **argv)
         return pp.kind == preprocessing_token_kind::string_literal ||
                pp.kind == preprocessing_token_kind::user_defined_string_literal;
     };
-    for (size_t i = 0; i < count; i++) {
+    for (size_t i = 0; i < tokens.size(); i++) {
         const preprocessing_token &pp = tokens[i];
         if (raw && pp.kind == preprocessing_token_kind::end_of_file)
             break;
@@ -263,7 +257,7 @@ int main(int argc, char **argv)
         size_t pieces = 1;
         token t;
         if (!raw && is_string(pp)) {
-            while (i + pieces < count && is_string(tokens[i + pieces]))
+            while (i + pieces < tokens.size() && is_string(tokens[i + pieces]))
                 pieces++;
             t = l.convert_string_literals(&tokens[i], pieces);
         } else if (!raw)
@@ -271,13 +265,13 @@ int main(int argc, char **argv)
         if (claims) {
             if (pp.kind != preprocessing_token_kind::end_of_file) {
                 /* the claim is about the concatenation, spelled as its pieces */
-                spelling.n = 0;
+                spelling.clear();
                 for (size_t k = 0; k < pieces; k++) {
                     if (k)
-                        vbuffer_append(&spelling, " ", 1);
-                    l.spelling(tokens[i + k], &spelling);
+                        vbuffer_append(spelling.get(), " ", 1);
+                    l.spelling(tokens[i + k], spelling.get());
                 }
-                write_claim(&out, l, t, spelling.p, spelling.n,
+                write_claim(out.get(), l, t, spelling.data(), spelling.size(),
                             file.position(pp.location));
             }
             i += pieces - 1;
@@ -287,40 +281,36 @@ int main(int argc, char **argv)
             const preprocessing_token &piece = tokens[i + k];
             const char *name = raw || pieces > 1 ? clang_token_name(l, piece)
                                                  : clang_token_name(l, t);
-            spelling.n = 0;
+            spelling.clear();
             if (piece.kind != preprocessing_token_kind::end_of_file)
-                l.spelling(piece, &spelling);
+                l.spelling(piece, spelling.get());
             source_position p = file.position(piece.location);
-            vbuffer_format_append(&out, "%s '", name);
-            write_escaped(&out, spelling.p ? spelling.p : "", spelling.n);
-            vbuffer_format_append(&out, "'\tLoc=<%s:%u:%u>", p.file_name,
+            vbuffer_format_append(out.get(), "%s '", name);
+            write_escaped(out.get(), spelling.data(), spelling.size());
+            vbuffer_format_append(out.get(), "'\tLoc=<%s:%u:%u>", p.file_name,
                                   p.line, p.column);
             if (piece.at_start_of_line)
-                vbuffer_string_append(&out, " [StartOfLine]");
+                vbuffer_string_append(out.get(), " [StartOfLine]");
             if (piece.after_white_space && !raw)
-                vbuffer_string_append(&out, " [LeadingSpace]");
+                vbuffer_string_append(out.get(), " [LeadingSpace]");
             if (piece.spelling_differs) {
-                vbuffer_string_append(&out, " [UnClean='");
+                vbuffer_string_append(out.get(), " [UnClean='");
                 write_escaped(
-                    &out,
+                    out.get(),
                     reinterpret_cast<const char *>(file.physical_characters) +
                         piece.location,
                     piece.extent);
-                vbuffer_string_append(&out, "']");
+                vbuffer_string_append(out.get(), "']");
             }
-            vbuffer_string_append(&out, "\n");
+            vbuffer_string_append(out.get(), "\n");
         }
         i += pieces - 1;
     }
-    free(tokens);
-    fwrite(out.p, 1, out.n, stdout);
+    fwrite(out.data(), 1, out.size(), stdout);
 
-    vbuffer messages = {};
-    for (size_t i = 0; i < diagnostics.message_count; i++)
-        diagnostics.render(diagnostics.messages[i], &messages);
-    fwrite(messages.p, 1, messages.n, stderr);
-    free(out.p);
-    free(spelling.p);
-    free(messages.p);
+    owned_buffer messages;
+    for (const diagnostic_message &m : diagnostics.messages)
+        diagnostics.render(m, messages.get());
+    fwrite(messages.data(), 1, messages.size(), stderr);
     return diagnostics.error_count ? 1 : 0;
 }
