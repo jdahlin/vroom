@@ -65,6 +65,11 @@ relative to it); `TODO.md` stays at the top.
 - `RESEARCH-cplusplus.md`: whether vroom's architecture (vccd, prefix
   snapshots, direct -O0 emitter) carries to C++, prior compile-server work on
   the LLVM/GCC/kernel lists, and the inputs where it stops paying.
+- `PLAN-cxx-codegen.md`: code generation on the C++ front end written
+  against the standard (`src/frontend/cplusplus/`, `PLAN-cxx-spec.md`):
+  what went wrong in `src/frontend/cxx/`, the three trees (syntax,
+  semantic, shared AST), what the C code generator gains for it, steps
+  CG0-CG9.  Update a step's status there.
 - `PLAN-cxx.md`: the first C++ plan (steps X0-X7): a minimal front end to
   test the instantiation cache and per-symbol codegen on libc++'s tests and
   nlohmann/json.  Update a step's status there.  `bench/cxx-profile.py
