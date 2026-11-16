@@ -2795,3 +2795,10 @@ returnerar 1 och try-satsen returnerar det sparade (jsons `at()`).  Void,
 skalärer och referenser; en klass som returneras via adress och try i en
 lambda byggs inte än.  Test: `run/return-in-try.cpp`.  Sviter gröna (159/159,
 38/38).
+
+## Status 184 (2026-11-16)
+En värdeparameter som mallargument i en malls signatur (`Q<L>` i
+`template <int L> Q(const Q<L> &)`) manglas som clang, `X T_ E`; förut fick
+funktionen inget namn och ingen kod (jsons konvertering `json(ordered_json)`,
+`construct_at` av dess par).  Test: `run/value-param-in-template-arg.cpp`
+(symbolerna lika med clangs).  Sviter gröna (160/160, 38/38, mangle).

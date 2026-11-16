@@ -1313,6 +1313,16 @@ static void mg_template_arg(cxx_mangler *m, const cxx_targ *x, uint32_t i, const
 		else
 			mg_str(m, "T_");
 		mg_str(m, "E");
+	} else if ((*x).kind == 3 && (*x).v >= 0) {
+		/* a value parameter as the argument (Q<L> in template <int L> Q(const Q<L> &)): X <its parameter> E */
+		char num[16];
+
+		mg_str(m, "X");
+		if ((*x).v)
+			mg_text(m, num, (size_t)snprintf(num, sizeof num, "T%d_", (int)(*x).v - 1));
+		else
+			mg_str(m, "T_");
+		mg_str(m, "E");
 	} else if ((*x).kind == 5) {
 		/* a pattern's pack expansion (tuple<Ts...> in a declared signature): Dp <the pack's parameter> */
 		if (!m->ph || (*x).v < 0 || (uint64_t)(*x).v >= m->nph || !m->ph[(*x).v]) {
