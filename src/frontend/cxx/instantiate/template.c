@@ -59,9 +59,14 @@ VPRIV void cxx_template_partial(cxx *c, cxx_entity *e, cxx_scope *params, cxx_sc
 {
 	cxx_template *t;
 
-	if (!e || c->tentative || c->instantiating)
+	/* (inside an instance too: a member template's partial specialization, declared in X<int>'s body, is
+	   that instance's member template's: json_pointer<basic_json<...>>'s string_t_helper) */
+	if (!e || c->tentative)
 		return;
 	t = cxx_template_of(e);
+	for (uint32_t i = 0; i < t->npartials; i++)
+		if (t->partials[i]->less_pos == less_pos && t->partials[i]->home == home)
+			return;	/* (the same declaration parsed again) */
 	t->has_partial = 1;
 	cxx_partial *np = calloc(1, sizeof *np);
 

@@ -2948,3 +2948,12 @@ deduceras inte: argumentet konverterar, vilket rangordningen prövar
 föll bort: jsons `j.template value<std::string>("k", "default")`.  Test:
 `run/explicit-targ-converting-arg.cpp`, som misslyckas utan ändringen.  Sviter
 gröna (176/176, 38/38, mangle).
+
+## Status 203 (2026-11-16)
+En medlemsmalls partiella specialisering registreras också när den
+omgivande klassmallen instansieras (den hör till instansens medlemsmall; förut
+bara mönstrets): jsons `json_pointer<basic_json<...>>::string_t` via
+`string_t_helper<NLOHMANN_BASIC_JSON_TPL>`, och därmed `json_pointer`s
+`operator==` (unit-json_pointer, unit-json_patch).  Test:
+`run/member-template-partial-in-instance.cpp`.  Sviter gröna (177/177, 38/38,
+mangle).
