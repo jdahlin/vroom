@@ -1000,7 +1000,28 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context,
                         c->this_type = qs->owner->ty,
                         c->this_const =
                             decl_fn ? decl_fn->fn_const & 1 : c->decl_const;
+                    /* a constexpr function's body and parameters, for cxx_const_call (its calls in
+                       constant expressions: template<int N> A<f(N)>) */
+                    uint32_t body_at = c->pos;
+                    bool keep_body = context != CXX_CONTEXT_CLASS && decl_fn &&
+                                     decl_fn->fn_constexpr && !c->tentative &&
+                                     !c->template_depth && !decl_fn->body_end;
+                    if (keep_body) {
+                        free(decl_fn->body_params);
+                        decl_fn->body_params =
+                            (cxx_param *)(c->ndecl_params
+                                              ? malloc(c->ndecl_params *
+                                                       sizeof(cxx_param))
+                                              : NULL);
+                        decl_fn->body_nparams = c->ndecl_params;
+                        if (c->ndecl_params)
+                            memcpy(decl_fn->body_params, c->decl_params,
+                                   c->ndecl_params * sizeof(cxx_param));
+                    }
                     cxx_function_body_parse(c);
+                    if (keep_body)
+                        decl_fn->body_begin = body_at,
+                        decl_fn->body_end = c->pos, decl_fn->body_scope = fs;
                     if (ooc_this)
                         c->this_type = this_save,
                         c->this_const = this_const_save;

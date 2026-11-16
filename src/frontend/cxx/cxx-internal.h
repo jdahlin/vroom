@@ -220,6 +220,9 @@ typedef struct cxx_entity {
     uint32_t body_begin,
         body_end; /* a member function defined in its class: its tokens (cxx_late_add), kept */
     cxx_scope *body_scope; /* an enumerator: a prvalue where it is named */
+    struct cxx_param *
+        body_params; /* the definition's parameters (names, types): cxx_const_call binds them */
+    uint32_t body_nparams;
     uint8_t
         has_vtt; /* a constructor or destructor of a class with virtual bases: C2/D2 take a VTT, C1/D1 apart */
     uint8_t c_linkage, global_ns,
@@ -660,6 +663,11 @@ typedef struct cxx {
     uint8_t
         carg_const; /* the argument list was one integer constant expression */
     int64_t carg_value; /* ... its value */
+    uint8_t const_eval,
+        const_eval_gen; /* inside cxx_const_call (and the code generation outside it) */
+    uint8_t
+        carg_kmask; /* the first 8 arguments: bit i, argument i an integer constant ... */
+    int64_t carg_kval[8]; /* ... of this value (a constexpr call's arguments) */
     ast_qualified_type
         constructing; /* the class whose constructors are being tried for a conversion (its copy constructor does not take a converted argument) */
     uint8_t no_literal,
@@ -1395,7 +1403,8 @@ VPRIV void cxx_template_member_definition(cxx *c, cxx_entity *te, uint32_t name,
 VPRIV void cxx_vtemplate_special(cxx *c, struct cxx_ftemplate *f,
                                  cxx_scope *params, cxx_scope *home,
                                  uint32_t less_pos, uint32_t init_pos);
-VPRIV bool cxx_const_call(cxx *c, cxx_entity *f, int64_t *out);
+VPRIV bool cxx_const_call(cxx *c, cxx_entity *f, const int64_t *args,
+                          uint32_t nargs, int64_t *out);
 VPRIV bool cxx_ftemplate_const_call(cxx *c, cxx_entity *e, const cxx_targ *args,
                                     uint32_t n, int64_t *out);
 VPRIV bool cxx_vtemplate_value(cxx *c, cxx_entity *e, const cxx_targ *args,

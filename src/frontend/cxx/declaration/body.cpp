@@ -15,7 +15,15 @@ VPRIV void cxx_late_add(cxx *c, uint32_t begin, uint32_t end, int what)
     c->late[c->nlate].template_depth = c->template_depth;
     if (c->last_fn && !what)
         c->last_fn->body_begin = begin, c->last_fn->body_end = end,
-        c->last_fn->body_scope = c->scope;
+        c->last_fn->body_scope = c->scope, free(c->last_fn->body_params),
+        c->last_fn->body_params =
+            (cxx_param *)(c->ndecl_params
+                              ? malloc(c->ndecl_params * sizeof(cxx_param))
+                              : NULL),
+        c->last_fn->body_nparams = c->ndecl_params,
+        c->ndecl_params ? (void)memcpy(c->last_fn->body_params, c->decl_params,
+                                       c->ndecl_params * sizeof(cxx_param))
+                        : (void)0;
     c->late[c->nlate].fn = c->last_fn, c->last_fn = NULL;
     c->late[c->nlate].params =
         (cxx_param *)(c->ndecl_params

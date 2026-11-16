@@ -19,7 +19,8 @@ VPRIV void cxx_arguments_parse(cxx *c, int open, int close)
     uint32_t nodes[CXX_MAX_ARGS] = {0}, braces[CXX_MAX_ARGS] = {0}, zero = 0;
     cxx_entity *fnsets[16] = {0};
     bool unknown = false, first_const = false;
-    int64_t first_value = 0;
+    int64_t first_value = 0, kval[8] = {0};
+    uint8_t kmask = 0;
 
     cxx_expect(c, open);
     while (!cxx_is(c, close)) {
@@ -128,6 +129,15 @@ VPRIV void cxx_arguments_parse(cxx *c, int open, int close)
                 << n;
         if (!n)
             first_const = c->econst, first_value = c->evalue;
+        if (n < 8) {
+            kmask &= (uint8_t)~(1u << n);
+            if (c->econst && !brace && c->etype != CXX_TY_UNKNOWN &&
+                ((AST_TYPE_KIND(c->ast, c->etype) >= AST_TYPE_BOOL &&
+                  AST_TYPE_KIND(c->ast, c->etype) <=
+                      AST_TYPE_UNSIGNED_LONG_LONG) ||
+                 AST_TYPE_KIND(c->ast, c->etype) == AST_TYPE_ENUM))
+                kmask |= (uint8_t)(1u << n), kval[n] = c->evalue;
+        }
         n++;
         if (cxx_accept(c, LEX_TOKEN_ELLIPSIS))
             unknown = true;
@@ -139,6 +149,8 @@ VPRIV void cxx_arguments_parse(cxx *c, int open, int close)
         unknown = true;
     c->carg_const = n == 1 && !unknown && first_const,
     c->carg_value = first_value;
+    c->carg_kmask = unknown ? 0 : kmask;
+    memcpy(c->carg_kval, kval, sizeof kval);
     memcpy(c->carg_nodes, nodes, sizeof nodes);
     memcpy(c->carg_brace, braces, sizeof braces);
     memcpy(c->carg_fnset, fnsets, sizeof fnsets);

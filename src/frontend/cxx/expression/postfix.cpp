@@ -131,11 +131,34 @@ VPRIV void cxx_postfix_expression_parse1(cxx *c)
                 uint32_t abrace[CXX_MAX_ARGS];
                 cxx_entity *afns[16];
 
+                uint8_t xkmask = c->carg_kmask;
+                int64_t xkval[8];
+
+                memcpy(xkval, c->carg_kval, sizeof xkval);
                 memcpy(abrace, c->carg_brace, sizeof abrace);
                 memcpy(afns, c->carg_fnset, sizeof afns);
                 c->call_obj = call_obj, c->call_obj_rv = call_obj_rv,
                 cxx_call_type_x(c, set, xa, nx, c->cargs, c->cargs_lval,
                                 c->ncargs);
+                if (c->want_constant && an && an <= 8 &&
+                    xkmask == (uint8_t)((1u << an) - 1) && !obj_node &&
+                    c->call_resolved && c->call_picked && !c->econst &&
+                    !c->template_depth && c->etype != CXX_TY_UNKNOWN &&
+                    ((AST_TYPE_KIND(c->ast, c->etype) >= AST_TYPE_BOOL &&
+                      AST_TYPE_KIND(c->ast, c->etype) <=
+                          AST_TYPE_UNSIGNED_LONG_LONG) ||
+                     AST_TYPE_KIND(c->ast, c->etype) == AST_TYPE_ENUM)) {
+                    /* f<args>(constants) of a constexpr function template (SkAlignedSTStorage<RoundUp<T>(N), T>) */
+                    ast_qualified_type rt =
+                        AST_QUALIFIED_TYPE_UNQUALIFIED(c->etype);
+                    int64_t v;
+
+                    if (cxx_const_call(c, c->call_picked, xkval, an, &v)) {
+                        cxx_ec(c, rt,
+                               rt == cc_type_basic(AST_TYPE_BOOL) ? v != 0 : v);
+                        continue;
+                    }
+                }
                 if (!c->ncargs && !c->econst && !c->template_depth &&
                     c->etype != CXX_TY_UNKNOWN &&
                     AST_TYPE_KIND(c->ast, c->etype) >= AST_TYPE_BOOL &&
@@ -189,6 +212,10 @@ VPRIV void cxx_postfix_expression_parse1(cxx *c)
                 memcpy(anodes, c->carg_nodes, sizeof anodes);
                 uint32_t abrace[CXX_MAX_ARGS];
                 cxx_entity *afns[16];
+                uint8_t akmask = c->carg_kmask;
+                int64_t akval[8];
+
+                memcpy(akval, c->carg_kval, sizeof akval);
 
                 memcpy(abrace, c->carg_brace, sizeof abrace);
                 memcpy(afns, c->carg_fnset, sizeof afns);
@@ -311,7 +338,8 @@ VPRIV void cxx_postfix_expression_parse1(cxx *c)
                     cxx_gen_call(c, c->call_picked, obj_node, obj_arrow, anodes,
                                  an, cloc),
                     c->gen_vmode = 0;
-                if (c->want_constant && cpick && !an && !obj_node &&
+                if (c->want_constant && cpick && an <= 8 &&
+                    akmask == (uint8_t)((1u << an) - 1) && !obj_node &&
                     !c->econst && !c->template_depth && cty != CXX_TY_UNKNOWN &&
                     c->etype == cty &&
                     ((AST_TYPE_KIND(c->ast, cty) >= AST_TYPE_BOOL &&
@@ -322,7 +350,7 @@ VPRIV void cxx_postfix_expression_parse1(cxx *c)
                     int64_t cv;
                     uint32_t keep = c->enode;
 
-                    if (cxx_const_call(c, cpick, &cv)) {
+                    if (cxx_const_call(c, cpick, akval, an, &cv)) {
                         c->econst = 1,
                         c->evalue =
                             cty == cc_type_basic(AST_TYPE_BOOL) ? cv != 0 : cv,

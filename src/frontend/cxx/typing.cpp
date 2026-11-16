@@ -1604,14 +1604,21 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set,
         if (called->kind == CXX_ENTITY_VALUE)
             cxx_member_body_use(c, called);
         else if (called->kind == CXX_ENTITY_FUNCTION_TEMPLATE &&
-                 !c->unevaluated && !c->tentative && nargs <= 16) {
+                 (!c->unevaluated || c->const_eval) && !c->tentative &&
+                 nargs <= 16) {
             ast_qualified_type r, et = result;
+            uint8_t gen = c->gen;
 
+            /* (in a constexpr call's evaluation, cxx_const_call: the instance is wanted for its value;
+               its own function is built as the code outside would build it) */
+            if (c->unevaluated)
+                c->gen = c->const_eval_gen;
             c->call_instance = NULL;
             c->deduce_brace = brace_known ? own_brace : NULL;
             cxx_ftemplate_deduce(c, called, xargs, nxargs, args, lval, nargs,
                                  &r, true);
             c->deduce_brace = NULL;
+            c->gen = gen;
             result = et != CXX_TY_UNKNOWN ? et : r;
             called_instance =
                 c->call_instance; /* (code generation: the function this call calls) */
