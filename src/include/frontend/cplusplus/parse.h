@@ -707,7 +707,66 @@ class parser
        the list's */
     node_index initializer_list(bool in_braces);
     node_index designated_initializer_list();
-    node_index function_body();
+    /* the declarator is the function-definition's: its parameters' scope
+       goes on through the body ([basic.scope.param]/1) */
+    node_index function_body(const declarator_facts &declarator);
+
+    /* ---- [stmt] */
+    /* statement, with the recovery of [intro.compliance]/2.2: a statement
+       that does not parse is kept as its tokens, either erroneous (its
+       diagnostic issued) or unparsed (a later step's grammar), and the
+       next statement starts after it.  Only where no tentative parse other
+       than the enclosing statement's or declaration's is open: inside one,
+       the statement's failure is the reading's. */
+    node_index statement();
+    /* the statement without recovery */
+    node_index statement_alternative();
+    /* the tokens of the statement at the current token, to its ';' or the
+       '}' of its last substatement, as one unparsed node; *ended: it
+       stopped at such a ';' or '}', not at an enclosing '}' or the end */
+    node_index unparsed_statement(bool *ended);
+    node_index labeled_statement();
+    node_index expression_statement();
+    node_index compound_statement();
+    node_index selection_statement();
+    node_index iteration_statement();
+    node_index jump_statement();
+    /* declaration-statement: block-declaration */
+    node_index block_declaration();
+    node_index init_statement();
+    /* condition, followed by closing (')', or ';' in a for statement) */
+    node_index condition(preprocessing_op_or_punc closing);
+    node_index for_range_declaration();
+    /* a substatement: in a block scope of its own ([basic.scope.block]/1) */
+    node_index substatement();
+
+    /* ---- [stmt.ambig] */
+    /* what a statement (or init-statement, or condition) that starts at
+       tokens[ahead] can be, by its first tokens */
+    enum class reading : uint8_t {
+        /* nothing but a declaration starts so */
+        declaration,
+        /* nothing but an expression */
+        expression,
+        /* a type-name or a type's keyword: either, a declaration if it can
+           be ([stmt.ambig]/1, [stmt.pre]/7) */
+        either,
+        /* a name the parser cannot classify: what the tokens are may
+           depend on whether it is a type */
+        unknown,
+    };
+    reading reading_at(unsigned ahead);
+    /* parse the tokens as declaration() or expression() by [stmt.ambig] */
+    template <class Declaration, class Expression>
+    node_index declaration_or_expression(reading r, Declaration declaration,
+                                         Expression expression);
+    /* how many tentative parses are open, and how many were open where the
+       innermost statement or declaration that recovers began */
+    unsigned speculation = 0, recovery_level = 0;
+    /* a block-declaration is being parsed: a function-definition is not
+       one ([dcl.fct.def.general]/2: "A function shall be defined only in
+       namespace or class scope") */
+    bool block_scope = false;
 
     /* ---- [dcl.ambig.res] */
     /* ( type-id ) at the current '(' when the tokens can be that

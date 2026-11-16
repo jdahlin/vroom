@@ -564,6 +564,55 @@ The first grammar, about 55 nonterminals.
   `cxx0x-condition.cpp`, `cxx0x-for-range.cpp`, `cxx1z-init-statement.cpp`,
   `cxx2a-init-statement.cpp`, `cxx2b-label.cpp`,
   `cxx11-stmt-attributes.cpp`, `cxx-default-delete.cpp`.
+- Status (2026-11-16, done; V5 is still open): one file per subclause in
+  `stmt/`: `stmt.pre.cpp` (statement, condition, init-statement, the
+  recovery point), `stmt.label.cpp`, `stmt.expr.cpp`, `stmt.block.cpp`,
+  `stmt.select.cpp`, `stmt.iter.cpp` (with range-based for), `stmt.jump.cpp`,
+  `stmt.dcl.cpp` (block-declaration), `stmt.ambig.cpp` and `stmt.ambig.h`;
+  `dcl/dcl.fct.def.general.cpp` parses a function-body.  `= default` and
+  `= delete` were P2's.  A function body re-enters its parameters' scope
+  ([basic.scope.param]/1); a compound statement, a selection or iteration
+  statement and each of their substatements are block scopes.
+  - [stmt.ambig]: what the first tokens allow decides
+    (`reading_at`): a decl-specifier no expression starts with is a
+    declaration; a type-name or a simple type's keyword before `(` or `{` is
+    tried as a declaration and then as an expression; a declared non-type
+    name is an expression.  A name that is not declared is tried both ways
+    with unknown names read as types; when both readings parse, or either
+    needs a later step, the statement is kept as tokens: it is a template's
+    dependent name or a name P5 and P7 will declare.
+  - A statement is a recovery point as a declaration is: one that fails is
+    `unparsed` when it uses a later step's grammar or an undeclared name,
+    else `erroneous` with its diagnostic; a statement that does not end
+    (`case v }`) is erroneous.  Only the outermost tentative parse recovers
+    (`speculation`), so a statement inside a tentative parse still fails
+    the parse.
+  - Rules the grammar does not say and clang checks while parsing:
+    [stmt.pre]/8 (only type-specifiers and constexpr in a condition's
+    declaration), [dcl.ref]/5 (no reference to a reference, `int & &&r`),
+    a function-definition only at namespace or class scope; `auto` is a
+    storage class before C++11 ([diff.cpp03.dcl.dcl]/1) and `auto int x`,
+    clang's extension, is P9's.
+  - V4a: 1951 runs, 9236 declarations as clang, 0 rejected that clang
+    accepts, 0 accepted that clang rejects, 11231 kept as tokens; 40719
+    `unparsed` and 680 `erroneous` nodes.  What is still kept is mostly
+    templates (P7), base clauses and ctor-initializers (P5, the `:`),
+    operator-function-ids (P5) and lambdas (P6).  V4b: 0 refuted.  V1: 440
+    citations, 181 productions, 0 wrong; stmt 13 of 14 nonterminals (the
+    coroutine-return-statement is P6's).  V2: 21 examples of [stmt.*] and
+    [dcl.fct.def.*] extracted; statements the standard shows outside a
+    function (here and in earlier steps' examples) are wrapped in
+    `void example() {` ... `}` on the example's blank first line, which
+    `cxx-spec-examples.py` ignores when it compares.
+  - Surprises: clang's errors after `#pragma` (`#pragma clang attribute
+    push` and the like) are about the pragma, not the declaration before
+    it, so `cxx-parse.py` does not compare a declaration whose only errors
+    are on a pragma's line or the next; clang reads `auto(&a)->n` as an
+    expression (P0849R8), so `auto` before `(` is tried both ways;
+    `if consteval {` and other statements that open a brace without `)`
+    before it needed the token splitter to know which braces are
+    statements'.  Two of clang's tests are known differences
+    (cwg1753's `n.cwg1753::~T()`, gh137861's attribute before a pragma).
 
 ### P5. Classes
 

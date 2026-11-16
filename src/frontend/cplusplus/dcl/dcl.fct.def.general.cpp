@@ -9,20 +9,27 @@
  *         = default ;
  *         = delete ;
  *
- * The compound-statement is P4's: kept as its tokens.  The ctor-initializer
- * is P5's and the function-try-block P6's.
+ * [basic.scope.param]/1: the parameters' potential scope goes on through
+ * the compound-statement ("If the nearest enclosing function declarator is
+ * not the declarator of a function definition, the potential scope ends at
+ * the end of that function declarator").  The ctor-initializer is P5's and
+ * the function-try-block P6's.
  */
 #include "../cplusplus-internal.h"
 
 namespace cplusplus
 {
 
-node_index parser::function_body()
+node_index parser::function_body(const declarator_facts &declarator)
 {
     size_t mark = begin_node();
     token_index first = position;
     if (at(preprocessing_op_or_punc::LEFT_BRACE)) {
-        unparsed_group();
+        scope_index enclosing = names.current();
+        if (declarator.has_parameters)
+            names.reenter(declarator.parameters);
+        compound_statement();
+        names.reenter(enclosing);
         if (failed())
             return 0;
     } else {

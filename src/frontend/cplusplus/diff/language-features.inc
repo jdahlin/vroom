@@ -45,6 +45,9 @@ LANGUAGE_FEATURE(raw_string_delimiter_dollar_at_grave, cplusplus_26, never,
                  "P2558R2: $ @ ` in the basic character set")
 LANGUAGE_FEATURE(deleted_function_message, cplusplus_26, never,
                  "P2573R2: = delete(\"should have a reason\")")
+/* [dcl.spec] */
+LANGUAGE_FEATURE(auto_type_specifier, cplusplus_11, never,
+                 "[diff.cpp03.dcl.dcl]/1: Remove auto as a storage class specifier")
 /* [dcl.decl] */
 LANGUAGE_FEATURE(rvalue_references, cplusplus_11, never, "N2118: the ptr-operator &&")
 /* [dcl.init] */
@@ -52,6 +55,15 @@ LANGUAGE_FEATURE(list_initialization, cplusplus_11, never,
                  "N2672: a braced-init-list outside = { }")
 LANGUAGE_FEATURE(designated_initializers, cplusplus_20, never,
                  "P0329R4: designated-initializer-list")
+/* [stmt] */
+LANGUAGE_FEATURE(range_based_for, cplusplus_11, never, "N2930: the range-based for statement")
+LANGUAGE_FEATURE(selection_init_statement, cplusplus_17, never,
+                 "P0305R1: an init-statement in if and switch")
+LANGUAGE_FEATURE(constexpr_if, cplusplus_17, never, "P0292R2: if constexpr")
+LANGUAGE_FEATURE(range_for_init_statement, cplusplus_20, never,
+                 "P0614R1: an init-statement in the range-based for statement")
+LANGUAGE_FEATURE(labels_anywhere, cplusplus_23, never,
+                 "P2324R2: a label at the end of a compound-statement")
 /* [expr] */
 LANGUAGE_FEATURE(multidimensional_subscript, cplusplus_23, never,
                  "P2128R6: postfix-expression [ expression-list_opt ]")

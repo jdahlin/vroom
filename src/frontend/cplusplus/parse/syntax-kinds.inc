@@ -98,6 +98,18 @@ SYNTAX_NODE(designated_initializer_clause, "designated-initializer-clause", "dcl
 SYNTAX_NODE(designator, "designator", "dcl.init")
 SYNTAX_NODE(function_definition, "function-definition", "dcl.fct.def.general")
 SYNTAX_NODE(function_body, "function-body", "dcl.fct.def.general")
+/* [stmt]: declaration-statement, init-statement and for-range-initializer
+   pass their operand on */
+SYNTAX_NODE(statement, "statement", "stmt.pre")
+SYNTAX_NODE(condition, "condition", "stmt.pre")
+SYNTAX_NODE(labeled_statement, "labeled-statement", "stmt.label")
+SYNTAX_NODE(expression_statement, "expression-statement", "stmt.expr")
+SYNTAX_NODE(compound_statement, "compound-statement", "stmt.block")
+SYNTAX_NODE(statement_seq, "statement-seq", "stmt.block")
+SYNTAX_NODE(selection_statement, "selection-statement", "stmt.select")
+SYNTAX_NODE(iteration_statement, "iteration-statement", "stmt.iter")
+SYNTAX_NODE(for_range_declaration, "for-range-declaration", "stmt.iter")
+SYNTAX_NODE(jump_statement, "jump-statement", "stmt.jump")
 /* [basic.namespace], [dcl.link] */
 SYNTAX_NODE(named_namespace_definition, "named-namespace-definition", "namespace.def")
 SYNTAX_NODE(unnamed_namespace_definition, "unnamed-namespace-definition", "namespace.def")

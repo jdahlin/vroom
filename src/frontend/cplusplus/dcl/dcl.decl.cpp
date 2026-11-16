@@ -133,6 +133,12 @@ node_index parser::ptr_declarator(declarator_form form, declarator_facts &facts)
     ptr_operator(&kind);
     if (failed())
         return 0;
+    /* [dcl.ref]/5: "There shall be no references to references": a
+       reference ptr-operator whose ptr-declarator starts with another */
+    if (kind == derivation::reference &&
+        (at(preprocessing_op_or_punc::AMPERSAND) ||
+         at(preprocessing_op_or_punc::AMPERSAND_AMPERSAND)))
+        return violates("no reference to a reference", "dcl.ref", position);
     bool inner = form != declarator_form::abstract || at_ptr_operator() ||
                  at(preprocessing_op_or_punc::LEFT_PARENTHESIS) ||
                  at(preprocessing_op_or_punc::LEFT_BRACKET);
