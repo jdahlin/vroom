@@ -373,7 +373,8 @@ The first grammar, about 55 nonterminals.
 - Done when: V1 lists every production above; V2's examples of these
   subclauses pass; V4a has no unexplained disagreement on comparable
   declarations; V4b's claims compile.
-- Status (2026-11-16, grammar done; V4b not written yet): V4a over the
+- Status (2026-11-16, grammar done; V4b's declarator claims were written
+  with P3, see there): V4a over the
   whole corpus (1811 runs of 1133 tests): 9083 declarations accepted or
   rejected as clang does, none rejected that clang accepts, none accepted
   that clang rejects; 10692 kept as tokens for later steps; 48749 unparsed
@@ -438,8 +439,8 @@ The first grammar, about 55 nonterminals.
   `cxx2a-spaceship.cpp`, `cxx2a-designated-init.cpp`,
   `cxx11-brace-initializers.cpp`, `cxx-ambig-paren-expr.cpp`,
   `cxx-ambig-decl-expr.cpp`, `cxx2b-subscript.cpp`.
-- Status (2026-11-16, grammar and the expression claims done; the
-  declarator claims of V4b and V5 are still open): one file per subclause in
+- Status (2026-11-16, grammar and both halves of V4b done; V5 is still
+  open): one file per subclause in
   `expr/`: `expr.prim.cpp`, `expr.prim.id.cpp` (the id-expression of an
   expression, decltype-specifier `::`), `expr.post.cpp`, `expr.unary.cpp`
   (with sizeof, alignof, noexcept), `expr.new.cpp`, `expr.delete.cpp`,
@@ -477,9 +478,9 @@ The first grammar, about 55 nonterminals.
     `alignof` of an expression, `a ?: b`, C99's nested, array and mixed
     designators.  throw, co_await and co_yield stay P6's, lambdas P6's,
     folds, requires-expressions and `sizeof...` P7's, operator names P5's.
-  - V4a (1926 runs: clang's 1724, 196 of the standard's examples, 6 of our
-    own): 9041 declarations accepted or rejected as clang does, none
-    either way against it, 11299 kept as tokens; 40764 unparsed nodes (P1:
+  - V4a (1927 runs: clang's 1724, 196 of the standard's examples, 7 of our
+    own): 9163 declarations accepted or rejected as clang does, none
+    either way against it, 11299 kept as tokens; 40771 unparsed nodes (P1:
     48749).  Fewer declarations are comparable than after P2 (9556): 625
     declarations of clang's tests (one C++20 run of each) that P2 accepted
     with an opaque expression are now kept whole, because the expression
@@ -490,19 +491,47 @@ The first grammar, about 55 nonterminals.
     expression and the same tokens with the operands of every operator in
     parentheses; `bench/cxx-parse.py` has clang compile, after the
     expression's declaration, `static_assert(__is_same(decltype((E)),
-    decltype((P))))` and `static_assert((E) == (P) || (E) != (E))`.  1659
-    expressions verified by value, 838 by type only (no constant, or no
+    decltype((P))))` and `static_assert((E) == (P) || (E) != (E))`.  1661
+    expressions verified by value, 840 by type only (no constant, or no
     number), none refuted, 373 not checkable (E does not compile where the
     assertion stands).  Swapping two rows of the precedence table is caught
     by the first test.  The parenthesizer leaves three things as written,
     because parentheses change them: the operand of decltype, a
     qualified-id (`&S::m`), and a call's own parentheses (`(T()) * 2`).
+  - V4b for declarators (P1's open half): `cxxparse -declaration-claims`
+    (`src/bin/cxxparse/declarator-claims.h`) works out, for every name a
+    simple-declaration, function-definition or alias-declaration declares,
+    the type its decl-specifier-seq and declarator give it, as [dcl.meaning]
+    words it: T from the specifiers (Table 14's row found by counting them:
+    `long unsigned int long` is `unsigned long long`), then each form of D
+    applied to T from the outside in, the suffixes of a noptr-declarator
+    from the last to the first.  The claim says how the type is built,
+    `array_of<pointer_to<function<const_<pointer_to<int>>(char, ...)>>,
+    (3)>`, and clang compiles `static_assert(__is_same(decltype(NAME),
+    CLAIM))` after the declaration (NAME itself for a typedef-name;
+    `__remove_extent(...)[]` for an array of unknown bound, which an
+    initializer completes).  Over the corpus: 11874 declared types
+    verified, 439 more as one of an overloaded name's overloads (a
+    `static_cast` to the claimed type selects it), none refuted, 1915 in
+    declarations clang rejects (what it then declares is its recovery's),
+    165 not checkable (deleted and member functions, ambiguous names).
+    Left out: a name with a placeholder type to deduce, of an unnamed class
+    or enumeration, a declaration with a macro's tokens, a type that names
+    one of its own parameters (`-> decltype(x)`), and a declaration with a
+    vendor's attribute (clang's `[[gnu::noreturn]]` is part of its function
+    type).  Checked that it catches mistakes, one at a time: the suffixes
+    applied first to last (3 refuted in `gram/dcl.meaning.cpp`), the
+    ptr-operator applied after its declarator (20), `long long` read as
+    `long` (3), and the parser dropping a ptr-operator's cv-qualifiers (11).
+    An ill-formed claim (an array of arrays of unknown bound) is an error
+    inside the alias template, which the harness finds through clang's
+    "in instantiation of" note.
   - V1: 167 quoted productions, 0 wrong; expr 34 of 57 nonterminals (the
     other 23 are lambdas, requires-expressions, folds, await, yield and
     throw), dcl 74 of 97.  V2: 72 examples of 25 subclauses extracted and
     annotated (3 syntax errors, the rest semantic); 15 parse whole now, the
     others need a function body, a class or a template (their `needs:`
-    line).  V3: `src/test/cxx/parse/gram/`, six files, one per group of
+    line).  V3: `src/test/cxx/parse/gram/`, seven files, one per group of
     productions, written so that a wrong grouping changes a value.  V6:
     `cxx-lex.py` 121/121.
   - [implimits]: expressions and initializers nest at most 1024 levels

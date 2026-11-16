@@ -18,6 +18,10 @@
  *                                            operands parenthesized as the tree
  *                                            has them (bench/cxx-parse.py has
  *                                            clang compare the two)
+ *   cxxparse -declaration-claims ...         one line per declared name: the
+ *                                            type its declarator gives it, in
+ *                                            an encoding clang checks
+ *                                            (declarator-claims.h)
  *   cxxparse -stats ...                      tokens, nodes, tentative parses,
  *                                            lookups, scaffolding nodes
  *   cxxparse -selftest                       the parts no grammar uses yet
@@ -27,6 +31,8 @@
  */
 #include "../cxxlex/command-line.h"
 #include "frontend/cplusplus/parse.h"
+
+#include "declarator-claims.h"
 
 static bool check(bool condition, const char *what)
 {
@@ -262,7 +268,7 @@ int main(int argc, char **argv)
     command_line options("cxxparse");
     bool dump_syntax = false, dump_declarations = false, dump_tokens = false,
          stats = false, phase4_only = false, debug_fallbacks = false,
-         expression_claims = false;
+         expression_claims = false, declaration_claims = false;
     const char *path = nullptr;
 
     for (int i = 1; i < argc; i++) {
@@ -277,6 +283,8 @@ int main(int argc, char **argv)
             dump_tokens = true;
         else if (!strcmp(a, "-expression-claims"))
             expression_claims = true;
+        else if (!strcmp(a, "-declaration-claims"))
+            declaration_claims = true;
         else if (!strcmp(a, "-phase4-diagnostics-only"))
             phase4_only = true;
         else if (!strcmp(a, "-debug-fallbacks"))
@@ -291,10 +299,10 @@ int main(int argc, char **argv)
             path = a;
     }
     if (!path) {
-        fprintf(stderr,
-                "usage: cxxparse [-fsyntax-only|-dump-syntax|"
-                "-dump-declarations|-dump-tokens|-stats] [clang -cc1 options] "
-                "FILE\n       cxxparse -selftest\n");
+        fprintf(stderr, "usage: cxxparse [-fsyntax-only|-dump-syntax|"
+                        "-dump-declarations|-dump-tokens|-expression-claims|"
+                        "-declaration-claims|-stats] [clang -cc1 options] "
+                        "FILE\n       cxxparse -selftest\n");
         return 2;
     }
     options.apply();
@@ -384,6 +392,8 @@ int main(int argc, char **argv)
         tree.dump(tree.root, tokens, out.get());
     if (expression_claims)
         write_expression_claims(tree, tokens, tree.root, 0, false, out.get());
+    if (declaration_claims)
+        declarator_claims(tree, tokens, p, out.get()).write(tree.root);
     if (dump_declarations) {
         /* translation-unit: declaration-seq_opt; per declaration, whether
            it has an erroneous node, and whether a declaration in it was
