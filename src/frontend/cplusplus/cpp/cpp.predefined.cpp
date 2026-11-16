@@ -61,6 +61,12 @@ void preprocessor::write_predefined_macros(vbuffer *out) const
     for (const predefined_macro &m : predefined_macros) {
         if (!(m.variants & bit))
             continue;
+        /* clang's -undef keeps the macros the standards name: __cplusplus,
+           __STDC__ and __STDC_*, __STDCPP_* (not the __cpp_ feature-test
+           macros) */
+        if (!options.predefined_macros && strcmp(m.name, "__cplusplus") &&
+            strncmp(m.name, "__STDC", 6))
+            continue;
         /* [impl.clang] -fms-compatibility (MSVC) drops these */
         if (behavior.microsoft_compatibility &&
             (!strcmp(m.name, "__STDC__") ||
@@ -195,7 +201,8 @@ bool preprocessor::replace_dynamic(preprocessing_token &name,
            source file) of the current source line"; [impl.clang] the line
            of the end of the outermost invocation, which is the last token
            read from the source file */
-        source_position p = files.position(last_file_location);
+        source_position p =
+            files.position(files.first_character(last_file_token));
         vbuffer_format_append(text.get(), "%u", p.line);
         break;
     }

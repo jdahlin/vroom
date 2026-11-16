@@ -117,8 +117,7 @@ bool preprocessor::start(const char *path)
     define_dynamic_macros();
     /* [cpp.predefined]/1-2 and clang's own, as clang's "<built-in>" file */
     owned_buffer text;
-    if (options.predefined_macros)
-        write_predefined_macros(text.get());
+    write_predefined_macros(text.get());
     source_files::entry &built_in =
         files.add_text("<built-in>", text.data(), text.size(), false);
     predefines_file = built_in.index;
@@ -177,7 +176,7 @@ preprocessing_token preprocessor::read_file_token(bool header_name_permitted)
             in.has_lookahead = false;
         } else
             t = files.next(*in.file, header_name_permitted);
-        last_file_location = t.location;
+        last_file_token = t;
         if (at_directive(t)) {
             /* [cpp.replace]/13: "If there are sequences of preprocessing
                tokens within the list of arguments that would otherwise act

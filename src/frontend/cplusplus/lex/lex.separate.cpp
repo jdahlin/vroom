@@ -226,6 +226,16 @@ source_position source_files::position(source_location location) const
     return e->file.position(location - e->base);
 }
 
+source_location
+source_files::first_character(const preprocessing_token &token) const
+{
+    const entry *e = find(token.location);
+    if (!e || e->scratch)
+        return token.location;
+    lexer::translation_character c = e->lex.peek(token.location - e->base);
+    return token.location + (c.extent ? c.extent - 1 : 0);
+}
+
 size_t source_files::spelling(const preprocessing_token &token,
                               vbuffer *out) const
 {

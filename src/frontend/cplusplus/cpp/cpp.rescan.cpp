@@ -47,6 +47,10 @@ void preprocessor::pop_context()
     token_context c = contexts[contexts.size() - 1];
     if (c.macro >= 0)
         macros[c.macro].being_replaced = false;
+    if (c.trailing_space && !c.barrier) {
+        pending_flags = true;
+        pending_white_space = true;
+    }
     context_tokens.resize(c.begin);
     contexts.resize(contexts.size() - 1);
 }
@@ -152,6 +156,8 @@ bool preprocessor::replace_macro(preprocessing_token &name, int32_t index)
     macros[index].used = true;
     finish_replacement(name, result);
     push_tokens(result.data(), result.size(), index, false);
+    if (!result.empty())
+        contexts.back().trailing_space = trailing_space;
     return true;
 }
 

@@ -580,6 +580,8 @@ class source_files
     }
     bool is_scratch(source_location location) const;
     source_position position(source_location location) const;
+    /* where a token's first character is: after any splices before it */
+    source_location first_character(const preprocessing_token &token) const;
     size_t spelling(const preprocessing_token &token, vbuffer *out) const;
     /* phase 7 of tokens from any of the files ([lex.phases]/1.5-1.7) */
     token convert(const preprocessing_token &token);
@@ -615,8 +617,8 @@ struct preprocessor_options {
     /* -D and -U, in command line order, as the #define and #undef lines of
        clang's "<command line>" file */
     owned_array<char> command_line;
-    /* clang's -undef: no predefined macros but [cpp.predefined]/1's dynamic
-       ones (__FILE__, __LINE__, ...) */
+    /* clang's -undef: of the predefined macros only those the standards
+       name (__cplusplus, __STDC*), and the dynamic ones (__FILE__, ...) */
     bool predefined_macros = true;
     /* [cpp.include]/6: "up to an implementation-defined nesting limit" */
     unsigned include_nesting_limit = 200;
@@ -776,7 +778,7 @@ class preprocessor
     /* the end of the directive's last token so far */
     source_location directive_end = 0;
     /* the last token read from a source file (__LINE__) */
-    source_location last_file_location = 0;
+    preprocessing_token last_file_token;
     unsigned collecting_arguments = 0, in_condition = 0;
     bool read_from_file = false;
     /* reading stops at the end of an included file, which is read again */
@@ -854,7 +856,9 @@ class preprocessor
         uint32_t begin, end, next;
         int32_t macro; /* being replaced while the context is read, or -1 */
         bool barrier;  /* reading stops at the end ([cpp.subst]/1) */
-        bool unused;
+        /* white space after the replacement's last token, which the token
+           after it takes ([impl.clang]) */
+        bool trailing_space;
     };
     owned_array<token_context> contexts;
     owned_array<preprocessing_token> context_tokens;
