@@ -855,6 +855,18 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set, ast_qualified_type call
 
 			if (a == b)
 				continue;
+			if (!cand[b].ranked && cand[b].tmpl && !cand[a].tmpl && nargs) {
+				/* a template not ranked against a non-template that matches every argument exactly (by value
+				   or binding a reference that adds nothing): at best as good, and the non-template wins that
+				   tie (std::pow(2.0, -24.0) against libc++'s pow(_A1, _A2) with its __promote_t result) */
+				bool all0 = true;
+
+				for (uint32_t n = 0; n < nargs && all0; n++)
+					all0 = cand[a].rank[n] == 0 && cand[a].pt[n] != CXX_TY_UNKNOWN &&
+					       !(AST_TYPE_KIND(c->ast, cand[a].pt[n]) == AST_TYPE_POINTER && AST_TYPE(c->ast, cand[a].pt[n])->ext);
+				if (all0)
+					continue;
+			}
 			if (!cand[b].ranked) {
 				wins = false;
 				break;

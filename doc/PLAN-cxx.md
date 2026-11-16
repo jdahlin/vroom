@@ -3127,3 +3127,8 @@ namnrymdens funktion för den härledda klassen vägs mot varandra (jsons
 klar på en 64-bitarsvärd, inte heller med clang).
 Tester: `run/braced-from-same-class-not-ilist.cpp`,
 `run/adl-base-friend-vs-namespace-function.cpp`.  json: pass 49, 0 fel.
+
+En icke-mall som matchar varje argument exakt slår en mall som vcc inte kan
+rangordna (resultattypen okänd innan den valts): `std::pow(2.0, -24.0)` mot
+libc++:s `pow(_A1, _A2) -> __promote_t` (json unit-bjdata, unit-cbor).
+Test: `run/nontemplate-exact-beats-unranked-template.cpp`.  json: pass 50 av 69.
