@@ -215,7 +215,8 @@ diagnostic_message &diagnostic_consumer::issue(diagnostic_id id,
                                                source_location location)
 {
     diagnostic_severity severity = options.severity(id);
-    if (suppressed || severity == diagnostic_severity::ignored) {
+    /* clang: after a fatal error no diagnostic is issued */
+    if (suppressed || severity == diagnostic_severity::ignored || fatal_count) {
         discarded = diagnostic_message{};
         return discarded;
     }
@@ -233,6 +234,8 @@ diagnostic_message &diagnostic_consumer::issue(diagnostic_id id,
     }
     if (severity >= diagnostic_severity::error)
         error_count++;
+    if (severity == diagnostic_severity::fatal)
+        fatal_count++;
     else if (severity == diagnostic_severity::warning)
         warning_count++;
     return messages.append(m);

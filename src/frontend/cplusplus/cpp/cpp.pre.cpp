@@ -21,6 +21,7 @@
  * replaced, and executes the directives it meets on the way.
  */
 #include <stdio.h>
+#include <sys/stat.h>
 #include <time.h>
 
 #include "../cplusplus-internal.h"
@@ -130,6 +131,9 @@ bool preprocessor::start(const char *path)
     main_file = files.open(path);
     if (!main_file)
         return false;
+    struct stat st;
+    if (stat(path, &st) == 0)
+        entered_files.append({(uint64_t)st.st_dev, (uint64_t)st.st_ino});
     inclusions.append({main_file, -1, 0, 0, false, false, {}});
 
     /* [cpp.predefined]/1: "The date of translation of the source file" */

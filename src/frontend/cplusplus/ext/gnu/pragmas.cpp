@@ -6,6 +6,7 @@
  *     #pragma once                  the file is not included again
  *     #pragma GCC poison x y        x and y may no longer be used
  *     #pragma GCC system_header     the rest of the file is a system header
+ *     #pragma GCC dependency "f"    the file f must exist
  *     #pragma GCC warning "text"    a warning, an error
  *     #pragma GCC error "text"
  *   [ext.gnu] gnu_push_pop_macro (GCC manual 6.62.13)
@@ -137,6 +138,39 @@ bool preprocessor::gnu_pragma(const preprocessing_token *t, size_t count)
                                   t[i].location);
             identifiers[id].poisoned = true;
         }
+        return true;
+    }
+    if (spelled_as(files, t[1], "dependency")) {
+        /* #pragma GCC dependency "file": the file must exist (GCC warns if
+           it is newer than the current one; clang too, this does not) */
+        owned_buffer header;
+        if (count > 2 && is_string_literal(t[2]) &&
+            t[2].prefix == encoding_prefix::none)
+            files.spelling(t[2], header.get());
+        else if (count > 2 &&
+                 is_operator(t[2], preprocessing_op_or_punc::LESS)) {
+            size_t i = 3;
+            vbuffer_append(header.get(), "<", 1);
+            for (; i < count &&
+                   !is_operator(t[i], preprocessing_op_or_punc::GREATER);
+                 i++)
+                files.spelling(t[i], header.get());
+            vbuffer_append(header.get(), ">", 1);
+        } else {
+            diagnostics.issue(diagnostic_id::err_pp_expects_filename,
+                              count > 2 ? t[2].location : directive_end);
+            return true;
+        }
+        owned_buffer path;
+        int32_t directory;
+        bool system;
+        if (header.size() > 2 &&
+            !find_header(header.data() + 1, header.size() - 2,
+                         header.data()[0] == '<', -1, path, &directory,
+                         &system))
+            diagnostics
+                .issue(diagnostic_id::err_pp_file_not_found, t[2].location)
+                .text(header.data() + 1, header.size() - 2);
         return true;
     }
     if (spelled_as(files, t[1], "system_header")) {

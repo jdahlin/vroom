@@ -218,8 +218,13 @@ void preprocessor::directive_include(const preprocessing_token &name,
         return;
     }
     /* [cpp.include]/6: "up to an implementation-defined nesting limit" */
+    if (include_limit_reached)
+        return;
     if (inclusions.size() > options.include_nesting_limit) {
+        /* [impl.clang] once, and no file is included after it (an
+           inclusion cycle ends) */
         diagnostics.issue(diagnostic_id::err_pp_include_too_deep, at);
+        include_limit_reached = true;
         return;
     }
     struct stat st;
@@ -227,6 +232,13 @@ void preprocessor::directive_include(const preprocessing_token &name,
     for (const included_once &o : once_files)
         if (o.device == (uint64_t)st.st_dev && o.inode == (uint64_t)st.st_ino)
             return;
+    /* [ext.clang] #import: not a file entered before, the main file too */
+    if (kind == directive_kind::import)
+        for (const included_once &o : entered_files)
+            if (o.device == (uint64_t)st.st_dev &&
+                o.inode == (uint64_t)st.st_ino)
+                return;
+    entered_files.append({(uint64_t)st.st_dev, (uint64_t)st.st_ino});
     source_files::entry *file = files.open(path.data());
     if (!file) {
         diagnostics.issue(diagnostic_id::err_pp_file_not_found, at)

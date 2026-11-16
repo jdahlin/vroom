@@ -241,7 +241,7 @@ class diagnostic_consumer
        file, which source_files places in the translation unit's */
     source_location location_base = 0;
     owned_array<diagnostic_message> messages;
-    size_t error_count = 0, warning_count = 0;
+    size_t error_count = 0, warning_count = 0, fatal_count = 0;
     /* while positive, issue() discards: the lexer looks ahead without consuming */
     unsigned suppressed = 0;
 
@@ -830,6 +830,9 @@ class preprocessor
         uint64_t device, inode;
     };
     owned_array<included_once> once_files;
+    /* every file entered, for #import ([ext.clang]) */
+    owned_array<included_once> entered_files;
+    bool include_limit_reached = false;
     void directive_include(const preprocessing_token &name,
                            directive_kind kind);
     bool header_name_from_tokens(const preprocessing_token &first,

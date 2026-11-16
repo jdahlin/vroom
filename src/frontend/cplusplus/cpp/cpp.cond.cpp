@@ -274,11 +274,9 @@ static bool evaluate_value(preprocessor &p, preprocessor::expression_reader &r,
             return true;
         }
         if (live) {
-            owned_buffer s;
-            p.files.spelling(t, s.get());
-            p.diagnostics
-                .issue(diagnostic_id::warn_pp_undef_identifier, t.location)
-                .text(s.data(), s.size());
+            p.quoted(p.diagnostics.issue(
+                         diagnostic_id::warn_pp_undef_identifier, t.location),
+                     t);
         }
         v.identifier = p.identifier(t) + 1;
         v.identifier_token = t;
@@ -405,12 +403,10 @@ static void unexpected_operator(preprocessor &p,
 {
     if (is_operator(t, preprocessing_op_or_punc::LEFT_PARENTHESIS) &&
         left.identifier) {
-        owned_buffer s;
-        p.files.spelling(left.identifier_token, s.get());
-        p.diagnostics
-            .issue(diagnostic_id::err_pp_expr_bad_token_lparen,
-                   left.identifier_token.location)
-            .text(s.data(), s.size());
+        p.quoted(
+            p.diagnostics.issue(diagnostic_id::err_pp_expr_bad_token_lparen,
+                                left.identifier_token.location),
+            left.identifier_token);
     } else
         p.diagnostics.issue(diagnostic_id::err_pp_expr_bad_token_binop,
                             t.location);
