@@ -85,6 +85,19 @@ VPRIV void cxx_binary_expression_parse(cxx *c, int min)
 				if (cxx_operator_call_type(c, vintern_cstr("operator=="), l, &ra, 1) && c->call_resolved)
 					rewritten = true, found = true;
 			}
+			/* a == b, a != b with no operator== (a, b) that fits: the reversed candidate b == a, !(b == a) (C++20,
+			   [over.match.oper]/3.4: nullptr == j of json's member operator==(ScalarType)) */
+			int eq_reversed = 0;	/* 1: b == a, 2: !(b == a) */
+			cxx_entity *eq_pick = NULL;
+
+			if (!c->tentative && (!found || !c->call_resolved) && !rewritten && (op == LEX_TOKEN_EQUAL_EQUAL || op == LEX_TOKEN_EXCLAMATION_EQUAL) &&
+			    l != CXX_TY_UNKNOWN && rt != CXX_TY_UNKNOWN && (cc_type_is_record(c->ast, l) || cc_type_is_record(c->ast, rt))) {
+				ast_qualified_type la = l;
+
+				c->op_lv_set = 1, c->op_lv[0] = r_lval, c->op_lv[1] = ll;
+				if (cxx_operator_call_type(c, vintern_cstr("operator=="), rt, &la, 1) && c->call_resolved && c->call_picked)
+					eq_reversed = op == LEX_TOKEN_EQUAL_EQUAL ? 1 : 2, eq_pick = c->call_picked, found = true;
+			}
 			/* no operator< (<=, >, >=) that fits, a class operand: (a <=> b) @ 0, or 0 @ (b <=> a) (C++20) */
 			int spaceship = 0;	/* 1: a <=> b, 2: b <=> a */
 			cxx_entity *ss_pick = NULL;
@@ -133,7 +146,7 @@ VPRIV void cxx_binary_expression_parse(cxx *c, int min)
 				}
 			}
 			if (!c->tentative && (!found || (!c->call_resolved && !c->call_picked && c->etype == CXX_TY_UNKNOWN)) &&
-			    !rewritten && !spaceship && !ss_reversed && op != LEX_TOKEN_AMPERSAND_AMPERSAND && op != LEX_TOKEN_PIPE_PIPE) {
+			    !rewritten && !eq_reversed && !spaceship && !ss_reversed && op != LEX_TOKEN_AMPERSAND_AMPERSAND && op != LEX_TOKEN_PIPE_PIPE) {
 				/* a class operand of a built-in operator: its conversion function to a scalar, then the
 				   operator ([over.match.oper]/7: atomic<int> == 4) */
 				ast_qualified_type cl = cxx_class_scalar_conversion(c, l), cr = cxx_class_scalar_conversion(c, rt);
@@ -164,6 +177,12 @@ VPRIV void cxx_binary_expression_parse(cxx *c, int min)
 					if (c->enode)
 						cxx_gen_unary(c, LEX_TOKEN_EXCLAMATION, c->enode, oploc);
 				}
+			} else if (eq_reversed) {
+				cxx_et(c, cc_type_basic(AST_TYPE_BOOL), false);	/* (first: it clears the node) */
+				c->call_resolved = 1, c->call_picked = eq_pick;
+				cxx_gen_operator_call(c, rn, &ln, 1, oploc);
+				if (c->enode && eq_reversed == 2)
+					cxx_gen_unary(c, LEX_TOKEN_EXCLAMATION, c->enode, oploc);
 			} else if (spaceship) {
 				cxx_et(c, cc_type_basic(AST_TYPE_BOOL), false);
 				c->call_resolved = 1, c->call_picked = ss_pick;

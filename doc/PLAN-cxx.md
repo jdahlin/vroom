@@ -2841,3 +2841,9 @@ index 16 och senare (gränsen var 16, matrisen rymmer CXX_MAX_ARGS): jsons
 `json j_values = {..., {{"first", 1}, ...}, ...}` med 22 element i
 unit-comparison.  Test: `run/ilist-braced-element-past-16.cpp`, som
 misslyckas utan ändringen.  Sviter gröna (165/165, 38/38).
+
+## Status 190 (2026-11-16)
+`a == b` och `a != b` utan någon operator== (a, b) som passar provar den
+omvända kandidaten `b == a`, `!(b == a)` (C++20 [over.match.oper]/3.4): jsons
+`nullptr == j` med dess medlem `operator==(ScalarType)`.  Test:
+`run/reversed-equality-candidate.cpp`.  Sviter gröna (166/166, 38/38, mangle).
