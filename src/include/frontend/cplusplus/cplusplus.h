@@ -168,6 +168,7 @@ struct source_file {
 enum class diagnostic_id : uint16_t {
 #define DIAGNOSTIC(name, class, mapping, group, format) name,
 #include "../../../frontend/cplusplus/intro/diagnostic-messages.inc"
+#include "../../../frontend/cplusplus/parse/diagnostic-messages.inc"
 #undef DIAGNOSTIC
     count
 };

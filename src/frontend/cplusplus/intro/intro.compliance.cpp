@@ -45,6 +45,7 @@ constexpr diagnostic_description descriptions[] = {
 #define DIAGNOSTIC(name, class, mapping, group, format)                        \
     {#name, diagnostic_class::class, default_mapping::mapping, group, format},
 #include "diagnostic-messages.inc"
+#include "../parse/diagnostic-messages.inc"
 #undef DIAGNOSTIC
 };
 

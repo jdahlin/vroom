@@ -109,7 +109,7 @@ $(OUT)/vref: bin/vref/vref.py | $(OUT)
 	cp $< $@
 	chmod +x $@
 
-vcc: $(OUT)/vcc $(OUT)/vsh/sh $(OUT)/vld $(OUT)/vas $(OUT)/var $(OUT)/vcc-nm $(OUT)/vcc-objcopy $(OUT)/vccd $(OUT)/lextest $(OUT)/vpp $(OUT)/vlink $(OUT)/vasm $(OUT)/virtest $(OUT)/viralloc $(OUT)/task-test $(if $(filter c++,$(VCC_LANG)),$(OUT)/cxxlex)
+vcc: $(OUT)/vcc $(OUT)/vsh/sh $(OUT)/vld $(OUT)/vas $(OUT)/var $(OUT)/vcc-nm $(OUT)/vcc-objcopy $(OUT)/vccd $(OUT)/lextest $(OUT)/vpp $(OUT)/vlink $(OUT)/vasm $(OUT)/virtest $(OUT)/viralloc $(OUT)/task-test $(if $(filter c++,$(VCC_LANG)),$(OUT)/cxxlex $(OUT)/cxxparse)
 
 o = $(patsubst %.cpp,$(OBJ)/%.o,$(1))
 # WebAssembly is off by default (disabled 2026-11-13, doc/PLAN-wasm.md): its
@@ -232,6 +232,9 @@ $(OUT)/vasm: $(call o,bin/vasm/vasm.cpp $(LIB_SRC)) $(AS_OBJ)
 # drives its lexer for bench/cxx-lex.py
 cplusplus_SRC = $(wildcard frontend/cplusplus/*/*.cpp frontend/cplusplus/ext/*/*.cpp)
 $(OUT)/cxxlex: $(call o,bin/cxxlex/cxxlex.cpp $(LIB_SRC)) $(call mod,cplusplus)
+	$(VCC_LINK) $(VCC_LDFLAGS) $^ -o $@
+# cxxparse drives its parser for bench/cxx-parse.py (doc/PLAN-cxx-parse.md)
+$(OUT)/cxxparse: $(call o,bin/cxxparse/cxxparse.cpp $(LIB_SRC)) $(call mod,cplusplus)
 	$(VCC_LINK) $(VCC_LDFLAGS) $^ -o $@
 
 # virtest: VIR's parser, verifier and printer (SPEC-vir.md 16); depends on nothing else
