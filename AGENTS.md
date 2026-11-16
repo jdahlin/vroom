@@ -67,8 +67,9 @@ relative to it); `TODO.md` stays at the top.
   the LLVM/GCC/kernel lists, and the inputs where it stops paying.
 - `PLAN-cxx-codegen.md`: code generation on the C++ front end written
   against the standard (`src/frontend/cplusplus/`, `PLAN-cxx-spec.md`):
-  what went wrong in `src/frontend/cxx/`, the three trees (syntax,
-  semantic, shared AST), what the C code generator gains for it, steps
+  what went wrong in `src/frontend/cxx/`, one typed tree (the parser
+  calls semantic analysis; the shared AST with C++'s kinds), lowering and
+  the route to VIR, what the C code generator gains for it, steps
   CG0-CG9.  Update a step's status there.
 - `PLAN-cxx.md`: the first C++ plan (steps X0-X7): a minimal front end to
   test the instantiation cache and per-symbol codegen on libc++'s tests and
