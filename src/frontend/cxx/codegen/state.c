@@ -285,6 +285,8 @@ VPRIV bool cxx_gen_has_base_bytes(cxx *c, ast_qualified_type t, int depth)
 	uint32_t nb;
 	bool pod, empty;
 
+	if (c->nullptr_ty && AST_QUALIFIED_TYPE_UNQUALIFIED(t) == c->nullptr_ty)
+		return false;	/* (std::nullptr_t: one void *, no class scope) */
 	if (!cls || depth > 8)
 		return true;
 	nb = cxx_class_bases(c, t, bases, 16);
@@ -391,6 +393,8 @@ static bool cxx_gen_has_floating(cxx *c, ast_qualified_type t, int depth)
 	ast_qualified_type bases[16];
 	uint32_t nb;
 
+	if (c->nullptr_ty && AST_QUALIFIED_TYPE_UNQUALIFIED(t) == c->nullptr_ty)
+		return false;	/* (std::nullptr_t: one void *) */
 	if (!cls || depth > 8)
 		return true;
 	nb = cxx_class_bases(c, t, bases, 16);

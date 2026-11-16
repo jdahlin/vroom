@@ -3083,3 +3083,12 @@ prövats.  För jämförelseoperatorerna avgör nu binary.c det när
 omskrivningarna också misslyckats.  Test: `run/rewritten-spaceship-in-decltype.cpp`
 (`le(n, n)` utan jämförelse tar fortfarande `le(...)`).  unit-iterators3
 passerar.  Sviter gröna (189/189, 38/38, mangle).
+
+En klass med en `std::nullptr_t`-medlem som returvärde (doctests
+`Expression_lhs<std::nullptr_t>` för `CHECK(nullptr == j)`):
+`cxx_gen_has_base_bytes` och `cxx_gen_has_floating` gick in i `nullptr_t` som
+en klass, fann inget klassomfång och svarade ja, så att 16-bytesklassen inte
+fick returneras.  `nullptr_t` är en `void *` i båda nu.
+Test: `run/return-class-with-nullptr-member.cpp`.  unit-comparison kommer
+förbi testkroppen; fyra djupare funktioner återstår (`toString` av en
+`__bit_reference`, `value_t <=> value_t`).  Sviter gröna (190/190, 38/38, mangle).
