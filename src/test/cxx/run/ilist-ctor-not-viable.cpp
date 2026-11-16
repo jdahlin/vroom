@@ -11,7 +11,7 @@ public:
   constexpr const E *begin() const noexcept { return __begin_; }
 };
 }
-struct P { float x, y; };
+struct P { float x, y; static P Zero() { return P{}; } }; /* (P{}: the default constructor code generation makes) */
 template <typename T> struct Span {
 	T *p;
 	unsigned long n;
