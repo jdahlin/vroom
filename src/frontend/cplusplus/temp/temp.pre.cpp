@@ -4,38 +4,38 @@
  * which begin with the same keyword.
  *
  *     template-declaration:
- *       template-head declaration
- *       template-head concept-definition
+ *         template-head declaration
+ *         template-head concept-definition
  *
  *     template-head:
- *       template < template-parameter-list > requires-clause_opt
+ *         template < template-parameter-list > requires-clause_opt
  *
  *     template-parameter-list:
- *       template-parameter
- *       template-parameter-list , template-parameter
+ *         template-parameter
+ *         template-parameter-list , template-parameter
  *
  *     requires-clause:
- *       requires constraint-logical-or-expression
+ *         requires constraint-logical-or-expression
  *
  *     constraint-logical-or-expression:
- *       constraint-logical-and-expression
- *       constraint-logical-or-expression || constraint-logical-and-expression
+ *         constraint-logical-and-expression
+ *         constraint-logical-or-expression || constraint-logical-and-expression
  *
  *     constraint-logical-and-expression:
- *       primary-expression
- *       constraint-logical-and-expression && primary-expression
+ *         primary-expression
+ *         constraint-logical-and-expression && primary-expression
  *
  * [temp.expl.spec]/1:
  *
  *     explicit-specialization:
- *       template < > declaration
+ *         template < > declaration
  *
  * [temp.explicit]/2:
  *
  *     explicit-instantiation:
- *       extern_opt template declaration
+ *         extern_opt template declaration
  *
- * Scopes: [basic.scope.temparam]/1, "The declarative region of the name of
+ * Scopes: [basic.scope.temp]/1, "The declarative region of the name of
  * a template parameter of a template template-parameter is the smallest
  * template-parameter-list in which the name was introduced", and /2: "The
  * declarative region of the name of a template parameter of a template is
@@ -127,6 +127,13 @@ node_index parser::template_declaration(node_index (parser::*declaration)())
     template_head();
     if (failed())
         return 0;
+    /* [temp.pre]/2: the declaration of a template-declaration declares
+       something: a static_assert-declaration does not (clang: "a
+       static_assert declaration cannot be a template") */
+    if (at(standard_keyword::static_assert_))
+        return violates("a declaration that declares a name in a "
+                        "template-declaration",
+                        "temp.pre", position);
     template_scope_set scope(template_scope, names.declaring_scope());
     template_scope_set single(single_declarator_scope, names.declaring_scope());
     flag_set not_explicit(explicit_declaration, false);

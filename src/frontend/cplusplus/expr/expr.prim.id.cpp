@@ -345,24 +345,27 @@ node_index parser::id_expression(bool member)
                                  syntax_kind::simple_template_id);
                 if (failed())
                     return 0;
-            } else if ((member || (!known && !dependent_qualifier) ||
-                        (known && !qualifier &&
-                         names_template(kind, false, false))) &&
-                       !dependent_qualifier) {
+            } else if (known && !member && !qualifier &&
+                       names_template(kind, false, false)) {
                 /* [temp.names]/2: "A name is also considered to refer to a
                    template if it is an unqualified-id followed by a < and
                    name lookup either finds one or more functions or finds
-                   nothing" (P0846R0, C++20); a member's name and a name of
-                   a class the parser does not know may be a template's: the
-                   tokens are a template-id when they parse as one and a
-                   call or a '::' follows */
+                   nothing" (P0846R0, C++20) */
+                template_id_rest(id_mark, id_first,
+                                 syntax_kind::simple_template_id);
+                if (failed())
+                    return 0;
+            } else if ((member || (!known && !dependent_qualifier)) &&
+                       !dependent_qualifier) {
+                /* a member's name and a name of a class the parser does not
+                   know may be a template's: the tokens are a template-id
+                   when they parse as one and a call or a '::' follows */
                 tentative_parse attempt(*this);
                 template_id_rest(id_mark, id_first,
                                  syntax_kind::simple_template_id);
                 if (!failed() &&
                     (at(preprocessing_op_or_punc::LEFT_PARENTHESIS) ||
-                     at(preprocessing_op_or_punc::COLON_COLON) ||
-                     (!member && known && !qualifier))) {
+                     at(preprocessing_op_or_punc::COLON_COLON))) {
                     attempt.commit();
                     unknown_name = false;
                 }

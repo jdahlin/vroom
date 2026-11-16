@@ -188,6 +188,14 @@ node_index parser::requires_expression()
         }
         if (failed())
             return 0;
+        /* [expr.prim.req]/? as clang reads it: "varargs not allowed in
+           requires expression" (a local parameter is an object, and the
+           ellipsis declares none) */
+        if (at(preprocessing_op_or_punc::RIGHT_PARENTHESIS) &&
+            is_operator(tokens[position - 1],
+                        preprocessing_op_or_punc::ELLIPSIS))
+            return violates("no ellipsis in a requirement-parameter-list",
+                            "expr.prim.req", position - 1);
         if (!accept(preprocessing_op_or_punc::RIGHT_PARENTHESIS))
             return expected("')' to close the requirement-parameter-list",
                             "expr.prim.req");

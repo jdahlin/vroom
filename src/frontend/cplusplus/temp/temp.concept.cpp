@@ -3,10 +3,10 @@
  * [temp.deduct.guide] Deduction guides.
  *
  *     concept-definition:
- *       concept concept-name = constraint-expression ;
+ *         concept concept-name = constraint-expression ;
  *
  *     concept-name:
- *       identifier
+ *         identifier
  *
  * [temp.constr.decl]:
  *

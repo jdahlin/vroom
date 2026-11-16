@@ -741,6 +741,54 @@ The first grammar, about 55 nonterminals.
 - The last opaque kind goes away; `unparsed` is zero on the whole corpus.
 - Tests: `CXX/temp` (210 files), the 25 `Parser/cxx*template*`,
   `*concept*`, `*requires*`, `*fold*` files, `CXX/drs` (83 files) whole.
+- Status: done (2026-11-16), except the known differences below.
+  - Files: `temp/temp.pre.cpp` (template-declaration, template-head,
+    requires-clause, constraint-logical-or/and, explicit-specialization,
+    explicit-instantiation), `temp/temp.param.cpp`, `temp/temp.names.cpp`
+    (template-ids, the `>` rule with split `>>`/`>=`/`>>=` tokens recorded in
+    `syntax_tree::split_tokens`), `temp/temp.res.cpp` (typename-specifier),
+    `temp/temp.concept.cpp` (concept-definition, deduction-guide),
+    `expr/expr.prim.fold.cpp` (fold-expression, requires-expression and its
+    requirements).
+  - `declared_names`: template-parameter scopes, searched before the
+    enclosing namespace for an out-of-class member ([temp.local]/8); template
+    kinds (class, function, variable template, concept) from
+    `parser::declared_kind`; a `dependent` flag per declaration and
+    `qualifier_dependent` for a nested-name-specifier; a specialization's
+    members are looked up in the primary template.  Implicit typename
+    ([temp.res]/5) in the contexts the paragraph lists, from C++20.
+  - Rules clang treats as syntax and the parser checks: a class template's
+    name before `class X<...>`, `template` before a dependent
+    template-name, a requires-clause only after a function declarator
+    outside classes, parenthesized non-primary operands in a
+    requires-clause, one declarator per template declaration and none after
+    a class template's definition, no enum or attributes in an explicit
+    instantiation, no template-id in a using-declarator, no ellipsis in a
+    requirement-parameter-list.
+  - V4a: 2244 runs, 20261 declarations as clang (12580 after P6), 0
+    rejected that clang accepts, 27 accepted that clang rejects, 2231 kept
+    as tokens (9980); 6363 `unparsed` and 1440 `erroneous` nodes.  What is
+    kept is P8 (modules), P9 (extensions, `throw(...)` after C++17,
+    undeclared names) and the TODO below; `unparsed` is not zero yet.
+    V4b: 0 expressions refuted; 6 declared types refuted, all cwg254's `n`
+    redeclared with clang's error inside the template.  The claims skip a
+    template-name used as a deduced class type.  V1: 616 citations, 267
+    productions, 0 wrong; temp 22 of 22.  V6: cxx-lex 121/121.
+  - Known differences (we accept, clang rejects; 8 declarations): whether
+    `A<U>` is the current instantiation (`temp.res/p3.cpp:28`); a decltype
+    or sizeof operand that is type- or value-dependent
+    (`dcl.spec.auto/p12-1y.cpp`, `cwg5xx.cpp:547`); a member template of a
+    dependent object without `template` (`cwg4xx.cpp:626`,
+    `cwg1xx.cpp:689`); a constrained parameter whose concept takes a
+    template (`cxx2a-constrained-template-param.cpp`); parameter
+    redefinition (`cxx2a-concepts-requires-expr.cpp:25`,
+    `cxx-ambig-decl-expr-xfail.cpp`).
+  - TODO (C++23/C++26, not now; each returns `beyond_this_step()`):
+    pack indexing `T...[N]` (P2662R3), braced-init-list template arguments
+    (CWG2450), variadic friends `friend Ts...;` (P2893R3), `static` lambdas
+    and lambdas without `()` before a specifier (P1169R4, P1102R2),
+    `decltype(auto)(x)` (P0849R8), placeholder-free `auto(x)`, `using enum`
+    with a simple-template-id.
 
 ### P8. Modules
 

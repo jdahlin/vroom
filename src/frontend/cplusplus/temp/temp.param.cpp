@@ -2,24 +2,24 @@
  * temp.param.cpp: [temp.param] Template parameters.
  *
  *     template-parameter:
- *       type-parameter
- *       parameter-declaration
+ *         type-parameter
+ *         parameter-declaration
  *
  *     type-parameter:
- *       type-parameter-key ..._opt identifier_opt
- *       type-parameter-key identifier_opt = type-id
- *       type-constraint ..._opt identifier_opt
- *       type-constraint identifier_opt = type-id
- *       template-head type-parameter-key ..._opt identifier_opt
- *       template-head type-parameter-key identifier_opt = id-expression
+ *         type-parameter-key ..._opt identifier_opt
+ *         type-parameter-key identifier_opt = type-id
+ *         type-constraint ..._opt identifier_opt
+ *         type-constraint identifier_opt = type-id
+ *         template-head type-parameter-key ..._opt identifier_opt
+ *         template-head type-parameter-key identifier_opt = id-expression
  *
  *     type-parameter-key:
- *       class
- *       typename
+ *         class
+ *         typename
  *
  *     type-constraint:
- *       nested-name-specifier_opt concept-name
- *       nested-name-specifier_opt concept-name < template-argument-list_opt >
+ *         nested-name-specifier_opt concept-name
+ *         nested-name-specifier_opt concept-name < template-argument-list_opt >
  *
  * [temp.param]/2: "There is no semantic difference between class and
  * typename in a type-parameter-key. typename followed by an
@@ -125,7 +125,7 @@ node_index parser::template_parameter()
     token_index first = position;
     if (at(standard_keyword::template_)) {
         /* a template template-parameter: its own parameters are in a
-           template-parameter scope of their own ([basic.scope.temparam]/1) */
+           template-parameter scope of their own ([basic.scope.temp]/1) */
         {
             declarative_region inner(names, scope_kind::template_parameter);
             template_head();

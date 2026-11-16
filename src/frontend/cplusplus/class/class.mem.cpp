@@ -459,10 +459,9 @@ node_index parser::member_declarator(const decl_specifier_facts &specifiers,
     }
     bool function = facts.first == derivation::function;
     bool virt = false;
-    /* [class.mem.general]/1: member-declarator: declarator requires-clause */
-    if (at(standard_keyword::requires_) && !function)
-        return violates("a requires-clause only after a function's declarator",
-                            "dcl.decl", position);
+    /* [class.mem]/1: member-declarator: declarator requires-clause */
+    /* a requires-clause after a member that is no function: clang's
+       error is semantic, [dcl.decl]/3 */
     if (at(standard_keyword::requires_)) {
         requires_clause();
         if (failed())

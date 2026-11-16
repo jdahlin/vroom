@@ -329,6 +329,10 @@ bool parser::at_decl_specifier(bool unknown_names)
     }
     unsigned length = 0;
     name_class c = classify_name(0, &length);
+    /* a type-constraint before auto: a placeholder-type-specifier */
+    if (c == name_class::concept_)
+        return at(standard_keyword::auto_, length) ||
+               at(standard_keyword::decltype_, length);
     return c == name_class::type || (unknown_names && c == name_class::unknown);
 }
 
@@ -436,9 +440,13 @@ node_index parser::decl_specifier_seq(decl_specifier_facts &facts,
             if (at(preprocessing_op_or_punc::COLON_COLON, group_end(1))) {
                 if (facts.has_defining_type_specifier)
                     break;
-                return beyond_this_step();
+                /* decltype-specifier :: type-name: no declarator-id is
+                   qualified by a decltype-specifier ([dcl.meaning.general]
+                   /1), so the name is a type's */
+                simple_type_specifier_with_name();
+            } else {
+                decltype_specifier();
             }
-            decltype_specifier();
             if (failed())
                 return 0;
             facts.has_defining_type_specifier = true;
@@ -635,7 +643,7 @@ node_index parser::simple_type_specifier_with_name()
     if (kind == name_kind::template_name &&
         !at(preprocessing_op_or_punc::LESS))
         tree.template_names_as_types.append(name_first);
-    if (at(preprocessing_op_or_punc::LESS) && qualifier && !known &&
+    if (at(preprocessing_op_or_punc::LESS) && qualifier &&
         qualifier_dependent && !template_keyword)
         return violates("template before a dependent template-name",
                         "temp.names", name_first);

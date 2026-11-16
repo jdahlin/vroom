@@ -2,8 +2,8 @@
  * temp.res.cpp: [temp.res] Name resolution.
  *
  *     typename-specifier:
- *       typename nested-name-specifier identifier
- *       typename nested-name-specifier template_opt simple-template-id
+ *         typename nested-name-specifier identifier
+ *         typename nested-name-specifier template_opt simple-template-id
  *
  * [temp.res]/2: "A name used in a template declaration or definition and
  * that is dependent on a template-parameter is assumed not to name a type

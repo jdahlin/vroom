@@ -2,24 +2,24 @@
  * temp.names.cpp: [temp.names] Names of template specializations.
  *
  *     simple-template-id:
- *       template-name < template-argument-list_opt >
+ *         template-name < template-argument-list_opt >
  *
  *     template-id:
- *       simple-template-id
- *       operator-function-id < template-argument-list_opt >
- *       literal-operator-id < template-argument-list_opt >
+ *         simple-template-id
+ *         operator-function-id < template-argument-list_opt >
+ *         literal-operator-id < template-argument-list_opt >
  *
  *     template-name:
- *       identifier
+ *         identifier
  *
  *     template-argument-list:
- *       template-argument ..._opt
- *       template-argument-list , template-argument ..._opt
+ *         template-argument ..._opt
+ *         template-argument-list , template-argument ..._opt
  *
  *     template-argument:
- *       constant-expression
- *       type-id
- *       id-expression
+ *         constant-expression
+ *         type-id
+ *         id-expression
  *
  * Where a name followed by < is a template-id is decided where the name is
  * (dcl.spec.cpp, expr.prim.id.cpp, dcl.decl.cpp, class.derived.cpp, ...),
@@ -76,7 +76,9 @@ name_kind parser::declared_kind(name_kind plain)
  * '>' ([temp.names]/3) from C++11 on.  This is how far a name that is a
  * template-name reaches, for the decisions taken before the parse (what a
  * decl-specifier-seq or a statement starts with); the parse itself is
- * template_argument_list's.
+ * template_argument_list's.  A '>>' (or '>=', '>>=') whose first '>' ends
+ * the group leaves its rest as the next token: the end is that token's
+ * index, so that what follows the group is never taken for '::' or '<'.
  */
 unsigned parser::angle_group_end(unsigned ahead)
 {
@@ -89,16 +91,22 @@ unsigned parser::angle_group_end(unsigned ahead)
         const token &t = peek(i);
         if (is_operator(t, preprocessing_op_or_punc::LESS)) {
             depth++;
-        } else if (is_operator(t, preprocessing_op_or_punc::GREATER) ||
-                   is_operator(t, preprocessing_op_or_punc::GREATER_EQUAL)) {
+        } else if (is_operator(t, preprocessing_op_or_punc::GREATER)) {
             if (!--depth)
                 return i + 1;
+        } else if (is_operator(t, preprocessing_op_or_punc::GREATER_EQUAL)) {
+            if (!--depth)
+                return i;
         } else if (right_angles &&
                    (is_operator(t, preprocessing_op_or_punc::GREATER_GREATER) ||
                     is_operator(
                         t, preprocessing_op_or_punc::GREATER_GREATER_EQUAL))) {
-            if (depth <= 2)
-                return i + 1;
+            if (depth == 1)
+                return i;
+            if (depth == 2)
+                return is_operator(t, preprocessing_op_or_punc::GREATER_GREATER)
+                           ? i + 1
+                           : i;
             depth -= 2;
         } else if (is_operator(t, preprocessing_op_or_punc::LEFT_PARENTHESIS) ||
                    is_operator(t, preprocessing_op_or_punc::LEFT_BRACKET) ||
