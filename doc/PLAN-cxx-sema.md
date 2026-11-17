@@ -87,6 +87,19 @@ smaller reference of the same kind and gets the same treatment:
   `abi-eh.html` at a pinned commit, and `bench/itanium-abi.py` writes the
   committed index `docs/itanium-abi-index.tsv` (label, file, number,
   title: 179 sections) and each section's text to `work/itanium-abi/`;
+- spec-driven like the standard (decided 2026-11-17): the code of a
+  section is written against it and cites it, and its grammar is checked.
+  The mangling grammar's notation (not its prose) is committed as
+  `docs/itanium-abi-grammar.tsv` (section, nonterminal, alternative: 292
+  alternatives in 28 sections), which `bench/itanium-abi.py` extracts
+  with the index.  The mangler has one function per nonterminal, whose
+  comment quotes the productions it writes after the section's citation
+  (`[abi:mangle.name]` then `<unscoped-name> ::= <unqualified-name>`);
+  `cxx-spec-refs.py` checks each quoted alternative is that section's and
+  counts, per section, the alternatives quoted of all (C1), and
+  `--abi-missing LABEL` lists the rest.  A rule in the prose (what is not
+  mangled, when a substitution is made) is cited by its section and said
+  in the comment's own words;
 - its code apart from the clauses, in `abi/itanium/` (and later
   `abi/microsoft/` for Windows x64), so sema never knows a mangled name or
   an offset rule.
@@ -202,6 +215,9 @@ and nobody compares printed ASTs or message texts.
 ### C1. Citations and rule coverage (`bench/cxx-spec-refs.py`, <1 s)
 
 - As today: every `[label]/N` exists, every quote matches the spec.
+- The ABI the same way (section 2): every `[abi:label]` exists, every
+  quoted production of the mangling grammar is the cited section's, and
+  the coverage per section is reported.
 - New: per subclause, its "shall" and "ill-formed" sentences against the
   ones a check quotes.  The table "clause: rules enforced / in the clause /
   in this step's scope" is the measure of how complete analysis is (772

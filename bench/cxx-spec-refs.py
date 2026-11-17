@@ -25,12 +25,21 @@
             /N after a [label]/M of the same file) and quotes, in "...",
             a part of it
   abi       every [abi:anchor] names a section of the Itanium C++ ABI
-            (docs/itanium-abi-index.tsv, bench/itanium-abi.py)
+            (docs/itanium-abi-index.tsv, bench/itanium-abi.py), and every
+            production of its mangling grammar a comment quotes after one,
 
-Usage: bench/cxx-spec-refs.py [-v] [--missing CLAUSE] [--rules CLAUSE] [FILE...]
+                *     <nonterminal> ::= alternative
+                *                   ::= alternative
+
+            is one of that section's (docs/itanium-abi-grammar.tsv; spaces
+            and a `# ...` remark do not count); coverage: per section, the
+            alternatives some comment quotes, of all of the section's
+
+Usage: bench/cxx-spec-refs.py [-v] [--missing CLAUSE] [--rules CLAUSE] [--abi-missing LABEL] [FILE...]
   -v                 every quoted production, not only the wrong ones
   --missing CLAUSE   list the clause's nonterminals no comment quotes yet
   --rules CLAUSE     list the clause's rules no comment quotes yet
+  --abi-missing LABEL  list the ABI section's alternatives no comment quotes yet
 Exit status 1 if a citation or a quoted production is wrong.
 """
 import argparse
@@ -44,6 +53,7 @@ SPEC = os.path.join(R, 'docs', 'cxx-spec')
 FRONTEND = os.path.join(R, 'src', 'frontend', 'cplusplus')
 
 ABI_INDEX = os.path.join(R, 'docs', 'itanium-abi-index.tsv')
+ABI_GRAMMAR = os.path.join(R, 'docs', 'itanium-abi-grammar.tsv')
 ABI_CITATION = re.compile(r'\[abi:([a-z0-9][a-z0-9.-]*)\]')
 # the clauses whose rules analysis enforces
 RULE_CLAUSES = ('basic', 'class', 'dcl', 'except', 'expr', 'module', 'over', 'stmt', 'temp')
@@ -247,11 +257,52 @@ def abi_sections():
     return sections
 
 
+def abi_grammar():
+    """section label -> [(nonterminal, alternative)] in the ABI's order"""
+    grammar = {}
+    if os.path.exists(ABI_GRAMMAR):
+        for line in open(ABI_GRAMMAR, encoding='utf-8'):
+            if line.strip() and not line.startswith('#'):
+                label, nonterminal, alternative = line.rstrip('\n').split('\t')
+                grammar.setdefault(label, []).append((nonterminal, alternative))
+    return grammar
+
+
+def abi_alternative(text):
+    return ' '.join(text.split('#', 1)[0].split())
+
+
+def quoted_abi_productions(path):
+    """(line, section, nonterminal, alternative) for each alternative of the
+    ABI's grammar a comment quotes: `<x> ::= a` and the `::= b` lines right
+    after it, in the section the last [abi:label] before them cites"""
+    found = []
+    section = None
+    nonterminal = None
+    last = 0
+    for n, s in comment_lines(path):
+        for m in ABI_CITATION.finditer(s):
+            section = m.group(1)
+        m = re.match(r'^\s+(<[^>]+>)\s*::=(.*)$', s)
+        if m:
+            nonterminal, alternative = m.group(1), m.group(2)
+        else:
+            m = re.match(r'^\s+::=(.*)$', s)
+            if not m or not nonterminal or n != last + 1:
+                nonterminal = None
+                continue
+            alternative = m.group(1)
+        last = n
+        found.append((n, section, nonterminal, abi_alternative(alternative)))
+    return found
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('-v', action='store_true')
     ap.add_argument('--missing')
     ap.add_argument('--rules')
+    ap.add_argument('--abi-missing')
     ap.add_argument('files', nargs='*')
     a = ap.parse_args()
     files = a.files or sorted(glob.glob(os.path.join(FRONTEND, '**', '*.cpp'), recursive=True) +
@@ -261,6 +312,9 @@ def main():
     grammar = spec_grammar()
     rules = spec_rules(subclauses)
     abi = abi_sections()
+    abi_productions = abi_grammar()
+    abi_quoted = set()
+    abi_quotes = 0
     rules_quoted = set()
     abi_citations = 0
     errors = 0
@@ -287,6 +341,23 @@ def main():
             if m.group(1) not in abi:
                 line = text.count('\n', 0, m.start()) + 1
                 print(f'{rel}:{line}: [abi:{m.group(1)}] is no section of docs/itanium-abi-index.tsv')
+                errors += 1
+        for line, section, nonterminal, alternative in quoted_abi_productions(path):
+            abi_quotes += 1
+            key = (nonterminal, alternative)
+            if section is None:
+                print(f'{rel}:{line}: {nonterminal} ::= {alternative}: no [abi:label] before it says which section it quotes')
+                errors += 1
+            elif key in abi_productions.get(section, ()):
+                abi_quoted.add((section,) + key)
+                if a.v:
+                    print(f'{rel}:{line}: {nonterminal} ::= {alternative} [abi:{section}]')
+            else:
+                elsewhere = [x for x, alts in abi_productions.items() if key in alts]
+                if elsewhere:
+                    print(f'{rel}:{line}: {nonterminal} ::= {alternative} is [abi:{elsewhere[0]}]\'s, not [abi:{section}]\'s')
+                else:
+                    print(f'{rel}:{line}: {nonterminal} ::= {alternative} is none of the alternatives of the ABI\'s grammar')
                 errors += 1
         vendor_grammar = os.path.relpath(path, FRONTEND).split(os.sep)[0] == 'ext'
         for line, name, alternatives in quoted_productions(path):
@@ -320,7 +391,8 @@ def main():
     for name, (label, _, _) in grammar.items():
         clause = os.path.basename(os.path.dirname(os_path(subclauses, label)))
         by_clause.setdefault(clause, set()).add(name)
-    print(f'{citations} citations, {abi_citations} of the ABI, {productions} quoted productions, {errors} wrong')
+    print(f'{citations} citations, {abi_citations} of the ABI, {productions} quoted productions, '
+          f'{abi_quotes} of the ABI\'s grammar, {errors} wrong')
     row = []
     for clause in sorted(by_clause):
         have = sum(1 for n in by_clause[clause] if n in quoted)
@@ -333,6 +405,17 @@ def main():
         have = sum(1 for (x, _, _) in rules_quoted if x in labels)
         row.append(f'{clause} {have}/{total}')
     print('rules quoted, by clause: ' + ', '.join(row))
+    row = []
+    for section, alternatives in abi_productions.items():
+        have = sum(1 for k in alternatives if (section,) + k in abi_quoted)
+        if have:
+            row.append(f'{section} {have}/{len(alternatives)}')
+    total = sum(len(x) for x in abi_productions.values())
+    print(f'ABI alternatives quoted: {len(abi_quoted)}/{total}' + (', by section: ' + ', '.join(row) if row else ''))
+    if a.abi_missing:
+        for nonterminal, alternative in abi_productions.get(a.abi_missing, ()):
+            if (a.abi_missing, nonterminal, alternative) not in abi_quoted:
+                print(f'  {nonterminal} ::= {alternative}')
     if a.rules:
         for label in sorted(rules):
             if os.path.relpath(subclauses[label], SPEC).split(os.sep)[0] != a.rules:
