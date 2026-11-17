@@ -553,7 +553,32 @@ libstdc++ and json), since sema cannot analyse a declaration kept as tokens.
   initialization 3.  A static local is emitted with its function whether
   referred to or not, as clang does (`ast_builder_symbol_keep`).  What
   lowers is bounded by S2-S4 (namespaces, classes, templates), not by the
-  lowering.  Next: S1e, the driver.
+  lowering.
+- Status (2026-11-17, S1e): the driver compiles C++.  `driver/job.cpp`
+  calls `cplusplus_compile` (`frontend/cplusplus/lower/compile.cpp`, a C
+  interface in `include/frontend/cplusplus/compile.h`) where it called C's
+  front end; the error for C++ is gone (a C-hosted vcc, which has no C++
+  front end, still gives one).  The C++ preprocessor takes the driver's
+  resolved predefines (clang++'s for the target, -D, -U, -include) as its
+  command line with its own predefined macros off, less the `__cplusplus`
+  and `__STDC*` lines it defines itself; the search path keeps its quote,
+  angled and system parts; char, wchar_t and long double follow the
+  target.  -fsyntax-only analyses, -S and -c lower and emit with the
+  options C has; a construct not handled is "C++ code generation does not
+  handle WHAT yet" at its location.  vcc, vpp and vccd link the cplusplus
+  module (Makefile `CXX_OBJ`).  `bench/cxx-run.py` now compiles with `vpp
+  -c` (vcc's object writer, not clang's assembler): 16/16 run as clang's
+  at -O0 to -O3, -O0 symbols clang's.  arm64 Darwin: the four programs run
+  natively as clang++'s at -O0 to -O3 (by hand); x86-64 Linux compiles,
+  not run here.  The C suites as C++ (vcc, gcc-torture execute,
+  tcc-tests2, c90: 2199 programs, `vpp -x c++ -O2 -c`, run under qemu
+  against clang++'s build): 59 run as clang's, 0 differ; 79 more compile
+  but reference `abort()` with C++ linkage, which clang -O2 deletes as
+  unreachable; 1505 stop at a declaration the analysis does not handle.
+  What those need, by files: unqualified lookup ([basic.lookup.unqual];
+  the compiler's `__builtin_*` among the names) 738, classes
+  ([class.pre]) 448, files the parser does not finish 369, elaborated
+  type specifiers 256, GNU extensions 169.  Next: C5, then S2-S4.
 
 ### S2. Names and entities in full
 

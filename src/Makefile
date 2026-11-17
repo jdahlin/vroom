@@ -152,7 +152,15 @@ codegen_SRC = $(wildcard codegen/*.cpp codegen/opt/*.cpp codegen/rec/*.cpp codeg
 VCC_UNITY ?= y
 SPLIT_SRC = $(foreach m,$(SPLIT_MODS),$($(m)_SRC))
 SPLIT_OBJ = $(if $(VCC_UNITY),$(patsubst %,$(OBJ)/unity/%.o,$(SPLIT_MODS)),$(call o,$(SPLIT_SRC)))
-PP_OBJ  = $(call o,$(PP_SRC)) $(SPLIT_OBJ) $(call mod,vir) $(call o,$(VIRA_SRC))
+PP_OBJ  = $(call o,$(PP_SRC)) $(SPLIT_OBJ) $(call mod,vir) $(call o,$(VIRA_SRC)) $(CXX_OBJ)
+# the C++ front end written against the standard (src/frontend/cplusplus,
+# doc/PLAN-cxx-spec.md) and its lowering, which the driver calls for C++:
+# C++20 code, so only a C++-hosted vcc (VCC_LANG=c++) has them
+# (the lowering to C's AST needs C's front end and code generator: apart
+# from the cplusplus module, which cxxlex and cxxparse link alone)
+cxxlower_SRC = $(wildcard frontend/cplusplus/lower/*.cpp)
+cplusplus_SRC = $(filter-out $(cxxlower_SRC),$(wildcard frontend/cplusplus/*/*.cpp frontend/cplusplus/ext/*/*.cpp frontend/cplusplus/abi/*/*.cpp))
+CXX_OBJ = $(if $(filter c++,$(VCC_LANG)),$(call mod,cplusplus) $(call o,$(cxxlower_SRC)))
 # one module's objects: its unity TU, or its files
 mod = $(if $(VCC_UNITY),$(OBJ)/unity/$(1).o,$(call o,$($(1)_SRC)))
 AS_SRC  = $(AS_FILES) $(as_SRC) $(obj_SRC)
@@ -226,12 +234,7 @@ $(OUT)/lextest: $(LEXTEST_OBJ) $(LEX_OBJECT)
 $(OUT)/vasm: $(call o,bin/vasm/vasm.cpp $(LIB_SRC)) $(AS_OBJ)
 	$(VCC_LINK) $(VCC_LDFLAGS) $^ -o $@
 
-# the C++ front end written against the standard (src/frontend/cplusplus,
-# doc/PLAN-cxx-spec.md): C++20 code, so not in a VCC_LANG=c build; cxxlex
-# drives its lexer for bench/cxx-lex.py
-cplusplus_SRC = $(filter-out $(cxxlower_SRC),$(wildcard frontend/cplusplus/*/*.cpp frontend/cplusplus/ext/*/*.cpp frontend/cplusplus/abi/*/*.cpp))
-# the lowering to C's AST needs C's front end and code generator: only cxxsema links it
-cxxlower_SRC = $(wildcard frontend/cplusplus/lower/*.cpp)
+# cxxlex drives the C++ front end's lexer for bench/cxx-lex.py
 $(OUT)/cxxlex: $(call o,bin/cxxlex/cxxlex.cpp $(LIB_SRC)) $(call mod,cplusplus)
 	$(VCC_LINK) $(VCC_LDFLAGS) $^ -o $@
 # cxxparse drives its parser for bench/cxx-parse.py (doc/PLAN-cxx-parse.md)
@@ -239,7 +242,7 @@ $(OUT)/cxxparse: $(call o,bin/cxxparse/cxxparse.cpp $(LIB_SRC)) $(call mod,cplus
 	$(VCC_LINK) $(VCC_LDFLAGS) $^ -o $@
 # cxxsema drives its semantic analysis for bench/cxx-sema.py (doc/PLAN-cxx-sema.md);
 # -S lowers it to C's AST (frontend/c/ast-builder.h) for the code generator
-$(OUT)/cxxsema: $(call o,bin/cxxsema/cxxsema.cpp $(cxxlower_SRC) $(LEX_SRC) $(LIB_SRC)) $(call mod,cplusplus) $(LEX_OBJECT) $(AS_OBJ) $(PP_OBJ)
+$(OUT)/cxxsema: $(call o,bin/cxxsema/cxxsema.cpp $(LEX_SRC) $(LIB_SRC)) $(LEX_OBJECT) $(AS_OBJ) $(PP_OBJ)
 	$(VCC_LINK) $(VCC_LDFLAGS) $^ -o $@
 
 # virtest: VIR's parser, verifier and printer (SPEC-vir.md 16); depends on nothing else

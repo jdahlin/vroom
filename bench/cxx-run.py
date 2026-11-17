@@ -2,9 +2,9 @@
 """cxx-run.py: the C++ front end's code against clang's (doc/PLAN-cxx-sema.md S1d).
 
 Each program of src/test/cxx/run is compiled twice for Linux arm64: by
-clang++ -O2, and by cxxsema -S (the semantic tree lowered to C's AST, C's
-code generator) at each -O level asked for, its assembly assembled by
-clang.  Both are linked with the C suites' run time (src/test/rt) and run
+clang++ -O2, and by vcc's driver (vpp -c: frontend/cplusplus, lowered to
+C's AST, C's code generator and object writer; S1e) at each -O level asked
+for, with the same flags.  Both are linked with the C suites' run time (src/test/rt) and run
 under qemu-system-aarch64 with semihosting, as bench/vcc-ctests.py does;
 the exit status and output must be clang's.  The functions and variables
 the -O0 object defines are also clang -O0's, by name and binding (global,
@@ -12,8 +12,8 @@ local, weak).
 
     bench/cxx-run.py [-j N] [-O LEVELS] [-v] [PATTERN]
 
--O takes the levels as one argument (default 0123).  A program that
-cxxsema does not lower is a failure with its reason.
+-O takes the levels as one argument (default 0123).  A program that vcc
+does not compile is a failure with its reason.
 """
 import importlib.util, os, re, subprocess, sys
 from multiprocessing import Pool
@@ -25,7 +25,7 @@ spec.loader.exec_module(ct)
 
 R = os.path.dirname(B)
 TESTS = f'{R}/src/test/cxx/run'
-CXXSEMA = os.path.join(os.environ.get('VCC_BIN') or ct.BUILD, 'cxxsema')
+VPP = ct.VPP
 OUT = f'{ct.BUILD}/cxx-run'
 NM = ct.llvm('llvm-nm')
 TARGET = ['--target=aarch64-linux-gnu', '-nostdinc', '-fno-PIE',
@@ -73,15 +73,10 @@ def one(job):
     rc, _, err = ct.sh([ct.CL] + CXX + ['-O0', '-c', src, '-o', f'{wd}/ref0.o'])
     symbols = defined(f'{wd}/ref0.o') if not rc else None
     for level in levels:
-        s, o, elf = f'{wd}/O{level}.s', f'{wd}/O{level}.o', f'{wd}/O{level}.elf'
-        rc, out, err = ct.sh([CXXSEMA, f'-O{level}', '-S', src])
+        o, elf = f'{wd}/O{level}.o', f'{wd}/O{level}.elf'
+        rc, _, err = ct.sh([VPP] + CXX + [f'-O{level}', '-c', src, '-o', o])
         if rc:
-            results.append((level, 'cxxsema: ' + (err.decode().strip().splitlines() or ['exit %s' % rc])[-1]))
-            continue
-        open(s, 'wb').write(out)
-        rc, _, err = ct.sh([ct.CL] + TARGET + ['-c', s, '-o', o])
-        if rc:
-            results.append((level, 'assemble: ' + ct.first_err(err.decode())))
+            results.append((level, 'vcc: ' + (err.decode().strip().splitlines() or ['exit %s' % rc])[-1]))
             continue
         ours = defined(o)
         # (above -O0 an inlined static function may be gone)
@@ -116,8 +111,8 @@ def main():
             verbose = True
         else:
             pattern = a
-    if not os.path.exists(CXXSEMA):
-        sys.exit(f'cxx-run: no {CXXSEMA} (make -C src {CXXSEMA})')
+    if not os.path.exists(VPP):
+        sys.exit(f'cxx-run: no {VPP} (make -C src vcc)')
     ct.build_rt()
     names = sorted(f[:-4] for f in os.listdir(TESTS)
                    if f.endswith('.cpp') and re.search(pattern, f))

@@ -18,6 +18,7 @@
  *   VPP_TIME=1   report the preprocessing time on the error fd
  */
 #include "driver-internal.h"
+#include "frontend/cplusplus/compile.h"
 
 /* -g's compilation directory: the client's (vccd) or the process' (into buf) */
 static const char *driver_debug_directory(const driver_environment *env,
@@ -204,7 +205,44 @@ static void driver_job_pp_options_finish(struct driver_job *job,
     }
 }
 
-/* -fsyntax-only, -S, -c of C: the front end and code generator, then the output files */
+/* a C++ translation unit (frontend/cplusplus, doc/PLAN-cxx-sema.md S1e):
+   the predefines and search path the driver resolved, the code generator's
+   options C has; the C preprocessor p only reports the code generator's
+   diagnostics */
+static int driver_job_compile_cplusplus(struct driver_job *job, pp *p,
+                                        const driver_environment *env,
+                                        const cc_options *co)
+{
+#ifdef __cplusplus
+    char path[4096];
+    const char *main = job->main_file;
+
+    if (job->stdin_src) {
+        dprintf(job->errfd, "vcc: error: C++ from standard input is not "
+                            "compiled yet\n");
+        return 1;
+    }
+    if (main[0] != '/' && env->cwd) {
+        snprintf(path, sizeof path, "%s/%s", env->cwd, main);
+        main = path;
+    }
+    struct cplusplus_compile_options o = {};
+    o.path = main;
+    o.edition = job->cxx;
+    o.gnu = !job->strict_standard;
+    o.predefines = job->predefines.data;
+    o.predefines_length = job->predefines.length - 1; /* (its '\0') */
+    o.search = &job->pp_options;
+    o.errfd = job->errfd;
+    return cplusplus_compile(&o, p, co) || pp_error_count(p) ? 1 : 0;
+#else
+    (void)job, (void)p, (void)env, (void)co;
+    return 1;
+#endif
+}
+
+/* -fsyntax-only, -S, -c of C and C++: the front end and code generator,
+   then the output files */
 static void driver_job_compile(struct driver_job *job, pp *p,
                                const driver_environment *env)
 {
@@ -226,12 +264,13 @@ static void driver_job_compile(struct driver_job *job, pp *p,
             return;
         }
     }
-    if (job->cxx) { /* the C++ front end is being rewritten (frontend/cplusplus) */
-        dprintf(job->errfd,
-                "vcc: error: C++ compilation is not supported yet\n");
+#ifndef __cplusplus
+    if (job->cxx) { /* the C++ front end is C++: a C-hosted vcc has none */
+        dprintf(job->errfd, "vcc: error: C++ needs a C++-hosted vcc\n");
         job->status = 1;
         return;
     }
+#endif
     cc_options co = {
         .target = job->pp_options.target,
         .unsigned_char = job->pp_options.unsigned_char,
@@ -345,8 +384,11 @@ static void driver_job_compile(struct driver_job *job, pp *p,
         unsigned long long t1 = driver_clock_nanoseconds();
         vperf v1 = vperformance_now();
 
-        job->status =
-            cc_translation_unit_run(p, &co) || pp_error_count(p) ? 1 : 0;
+        if (job->cxx)
+            job->status = driver_job_compile_cplusplus(job, p, env, &co);
+        else
+            job->status =
+                cc_translation_unit_run(p, &co) || pp_error_count(p) ? 1 : 0;
         driver_compile_nanoseconds += driver_clock_nanoseconds() - t1;
         driver_phase_add(DRIVER_PHASE_COMPILE, v1);
         driver_tokens_taken += pp_token_count(p);
