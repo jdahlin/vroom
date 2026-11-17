@@ -724,8 +724,6 @@ gcc/lshrdi-1 -O0
 gcc/lshrdi-1 -O2
 gcc/memcpy-1 -O0
 gcc/memcpy-1 -O2
-gcc/memcpy-bi -O0
-gcc/memcpy-bi -O2
 gcc/multdi-1 -O0
 gcc/multdi-1 -O2
 gcc/nestfunc-4 -O0

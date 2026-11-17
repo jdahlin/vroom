@@ -96,7 +96,8 @@ void ast_builder_type_record_complete(cc *c, ast_qualified_type record,
                                       const ast_qualified_type *fields,
                                       const char *const *names,
                                       const size_t *lengths,
-                                      const uint32_t *aligned, uint32_t count)
+                                      const uint32_t *aligned,
+                                      const uint8_t *packed, uint32_t count)
 {
     tag *r = &c->tags[AST_TYPE(c, record)->aux];
 
@@ -108,7 +109,7 @@ void ast_builder_type_record_complete(cc *c, ast_qualified_type record,
         r->f[i].name = ast_builder_identifier(c, names[i], lengths[i]);
     }
     r->flags |= AST_RECORD_FLAG_COMPLETE;
-    cc_layout_record(c, r, aligned, NULL);
+    cc_layout_record(c, r, aligned, packed);
 }
 
 void ast_builder_type_record_in_memory(cc *c, ast_qualified_type record)

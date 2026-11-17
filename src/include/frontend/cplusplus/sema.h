@@ -294,6 +294,9 @@ struct entity {
     /* a class: its alignment; a non-static data member: the alignment
        its aligned attribute asks for, 0 if none ([ext:gnu_attributes]) */
     uint32_t alignment = 0;
+    /* a non-static data member with the packed attribute: aligned to 1
+       before its aligned attribute ([ext:gnu_attributes]) */
+    bool packed = false;
     /* an unnamed class: [dcl.typedef]/9 "the first typedef-name declared
        by the declaration to be that class type ... is used to denote the
        class type ... for linkage purposes only" */
@@ -310,6 +313,9 @@ struct entity {
     /* [dcl.link]/1: a function or variable with C language linkage,
        whose name is its symbol */
     bool c_language_linkage = false;
+    /* a variable internal only because its type is an unnamed class
+       ([basic.link]/4.3): clang's symbol is its name, without _ZL */
+    bool unnamed_type_linkage = false;
     /* a special member function declared implicitly ([class.default.ctor]/1,
        [class.copy.ctor]/6, [class.dtor]/4) */
     bool implicit = false;
@@ -845,6 +851,9 @@ class semantic_analysis
         /* [ext:gnu_attributes] the alignment an aligned attribute of the
            declarator asks for, 0 if none */
         uint64_t aligned = 0;
+        /* [ext:gnu_attributes] packed (a member's alignment is 1) and used
+           (the variable or function is emitted) */
+        bool packed = false, used = false;
         /* the declarator-id is ~ class-name: a destructor ([class.dtor]/1) */
         bool destructor = false;
     };

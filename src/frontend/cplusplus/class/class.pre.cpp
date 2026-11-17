@@ -575,7 +575,7 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
     uint32_t name = tokens.identifier(m.id);
     bool is_function =
         type_table[type.unqualified()].kind == type_kind::function;
-    if (is_function && m.aligned)
+    if ((is_function && (m.aligned || m.packed)) || m.used)
         return not_supported(declaration, "ext.gnu");
     /* [class.mem]/20: "If T is the name of a class, then each of the
        following shall have a name different from T: every static data
@@ -597,6 +597,12 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
         }
         if (entity_table[prior].kind == entity_kind::none)
             return not_supported(declaration, "over");
+        owned_buffer spelling;
+        tokens.spelling(m.id, spelling.get());
+        if (spelling.size() == 1 && spelling.data()[0] == '_')
+            /* C++26's name-independent declarations (P2169): _ may be
+               declared again */
+            return not_supported(declaration, "basic.scope.scope");
         /* [class.mem]/5: "A member shall not be declared twice in the
            member-specification" */
         return ill_formed_at_token(m.id,
@@ -686,8 +692,10 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
         uint32_t alignment = static_cast<uint32_t>(alignment_of_type(type));
         if (!alignment)
             return not_supported(declaration, "class.mem");
-        /* [ext:gnu_attributes] aligned raises a member's alignment (only
-           packed lowers it) */
+        /* [ext:gnu_attributes] packed lowers a member's alignment to 1,
+           aligned raises it */
+        if (m.packed)
+            alignment = 1;
         if (m.aligned > alignment)
             alignment = static_cast<uint32_t>(m.aligned);
         e = entity_table.make(entity_kind::variable, name, c);
@@ -696,6 +704,7 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
         entity_table[e].defined = true;
         entity_table[e].field = entity_table[c].member_count;
         entity_table[e].alignment = static_cast<uint32_t>(m.aligned);
+        entity_table[e].packed = m.packed;
         /* [class.mem]/19 (Note): "Non-static data members of a (non-union)
            class with the same access control and non-zero size are
            allocated so that later members have higher addresses within a
