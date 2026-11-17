@@ -80,6 +80,8 @@ arm64)
 	step cxx-spec-refs python3 bench/cxx-spec-refs.py
 	step cxxparse-selftest "$BUILD/cxxparse" -selftest
 	step cxxsema-selftest "$BUILD/cxxsema" -selftest
+	# the type claims' path through clang, on claims written by hand (doc/PLAN-cxx-sema.md C4)
+	step cxx-sema-claims env PATH="${LLVM:-/usr/lib/llvm-23}/bin:$PATH" python3 bench/cxx-sema.py selftest
 	# the suites at each code generator (doc/OPTIMIZATION.md): -O2 VIR (the default), -O1 the
 	# direct emitter, -O3 VIR with the vectorizer and its checks (verifier, allocation check)
 	step ctests       python3 bench/vcc-ctests.py -j "$J"

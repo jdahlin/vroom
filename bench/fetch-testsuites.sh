@@ -64,6 +64,7 @@ chibicc|https://github.com/rui314/chibicc.git|90d1f7f199cc55b13c7fdb5839d1409806
 cproc|https://github.com/michaelforney/cproc.git|d1c53ddf56571573a7025324c8dd5c6d547a4d1f|
 kefir|https://git:public@git.protopopov.lv/kefir.git|7c59547068eaa0723b4db83d3fb70f448b0f0cb1|
 TSVC_2|https://github.com/UoB-HPC/TSVC_2.git|911fc639b933df38a7728477ce4b2e68e9c8eeff|
+itanium-abi|https://github.com/itanium-cxx-abi/cxx-abi.git|fae5e46c86147a457a057c6372fa95ec38209fe8|abi.html abi-eh.html
 '
 
 pin() {  # the pinned commit, or HEAD

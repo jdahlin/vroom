@@ -80,9 +80,13 @@ So: the spec covers the part with the most rules and the most lines, and
 its paragraphs give the structure and the tests.  The ABI is a second,
 smaller reference of the same kind and gets the same treatment:
 
-- its text in the tree (`docs/itanium-abi/`, one file per section, generated
-  like `cxx-spec`; licence to check first, otherwise `work/`), cited as
-  `[abi:mangling]/5.1.5`, checked by `bench/cxx-spec-refs.py`;
+- its sections cited by their HTML anchor, `[abi:vtable-components]` (2.5.2),
+  `[abi:mangling-type]` (5.1.5), checked by `bench/cxx-spec-refs.py`.  The
+  text has no licence that allows copying it into the tree (decided
+  2026-11-17): `fetch-testsuites.sh itanium-abi` fetches `abi.html` and
+  `abi-eh.html` at a pinned commit, and `bench/itanium-abi.py` writes the
+  committed index `docs/itanium-abi-index.tsv` (label, file, number,
+  title: 179 sections) and each section's text to `work/itanium-abi/`;
 - its code apart from the clauses, in `abi/itanium/` (and later
   `abi/microsoft/` for Windows x64), so sema never knows a mangled name or
   an offset rule.
@@ -354,9 +358,24 @@ libstdc++ and json), since sema cannot analyse a declaration kept as tokens.
   accepts, 18 we accept and clang rejects (empty declarations under
   `-pedantic-errors`), 54001 unsupported, 9113 not parsed.  The work list:
   [dcl.pre] 23.0k, [namespace.def] 13.1k, [dcl.fct.def.general] 8.1k,
-  [temp.pre] 6.9k.  Left for S0: the type claim of C4 (needs S1's
-  expression types to say anything), the ABI text (`docs/itanium-abi/`,
-  its licence to check), C1's rule-coverage table in `cxx-spec-refs.py`.
+  [temp.pre] 6.9k.
+- Status (2026-11-17, the rest of S0, done):
+  - C4's type claim: `cxxsema -type-claims` and its encoding
+    (`src/bin/cxxsema/type-claims.h`, the declarator claims' alias
+    templates, the value category as decltype((E)) gives it), checked by
+    `cxxsema -selftest`; `cxx-sema.py` has clang check the claims of every
+    run (none until S1 types expressions), and `cxx-sema.py selftest`
+    (in CI) runs that path on claims written by hand: 7 verified, 3
+    refuted, 1 not checkable, as expected.
+  - The ABI: no licence in its repository or its pages, so not in the
+    tree; fetched and indexed as section 2 says.
+  - C1's rule coverage: `cxx-spec-refs.py` counts the sentences that say
+    "shall" or "ill-formed" (out of notes and examples) and those a comment
+    quotes after citing their paragraph; `--rules CLAUSE` lists the rest.
+    Now: basic 1/112, class 5/117, dcl 17/238, except 0/12, expr 7/152,
+    module 2/23, over 2/26, stmt 1/33, temp 1/139 (the parser's syntactic
+    rules).  "In this step's scope" is not counted: a step's scope is its
+    list of subclauses above, which `--rules` per subclause can show.
 
 ### S1. The walking skeleton: C's subset of C++
 

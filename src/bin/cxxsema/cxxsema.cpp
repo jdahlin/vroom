@@ -14,6 +14,9 @@
  *   cxxsema -debug-unsupported ...          one line per construct without
  *                                           rules: [SUBCLAUSE] nonterminal
  *                                           FILE:LINE:COLUMN
+ *   cxxsema -type-claims ...                one line per typed expression:
+ *                                           its type and value category for
+ *                                           clang to check (type-claims.h)
  *   cxxsema -stats ...                      declarations by result, types,
  *                                           entities
  *   cxxsema -selftest                       the tables no rule uses yet
@@ -25,6 +28,7 @@
 #include "../cxxlex/command-line.h"
 #include "frontend/cplusplus/parse.h"
 #include "frontend/cplusplus/sema.h"
+#include "type-claims.h"
 
 static bool check(bool condition, const char *what)
 {
@@ -108,6 +112,55 @@ static int selftest()
                         e.declaration(e[n].first_declaration).node == 5,
                     "[basic.link]/1: an entity's declarations in order");
     }
+    {
+        /* the claims' encoding: what bench/cxx-sema.py has clang check */
+        types t;
+        qualified_type i = qualified_type::make(
+            t.fundamental(fundamental_type::int_), cv_none);
+        qualified_type c = qualified_type::make(
+            t.fundamental(fundamental_type::char_), cv_none);
+        qualified_type ci = qualified_type::make(i.unqualified(), cv_const);
+        qualified_type pci =
+            qualified_type::make(t.pointer_to(ci), cv_const | cv_volatile);
+        qualified_type a3 = qualified_type::make(t.array_of(pci, 3), cv_none);
+        qualified_type parameters[] = {c, i};
+        qualified_type f = qualified_type::make(
+            t.function(qualified_type::make(t.pointer_to(a3), cv_none),
+                       parameters, 2, true),
+            cv_none);
+        qualified_type g =
+            qualified_type::make(t.function(i, nullptr, 0, true), cv_none);
+        qualified_type s = qualified_type::make(
+            t.of_entity(type_kind::class_type, 1), cv_none);
+        owned_buffer out;
+        auto claim = [&](qualified_type type, value_category category,
+                         const char *expected) {
+            out.clear();
+            bool written = write_expression_claim(t, type, category, out.get());
+            if (!expected)
+                return check(!written && !out.size(),
+                             "a type without an encoding writes nothing");
+            return check(written && out.size() == strlen(expected) &&
+                             !memcmp(out.data(), expected, out.size()),
+                         expected);
+        };
+        ok &= claim(i, value_category::prvalue, "int");
+        ok &= claim(i, value_category::lvalue,
+                    "::vcc_claim::lvalue_reference_to<int>");
+        ok &= claim(ci, value_category::xvalue,
+                    "::vcc_claim::rvalue_reference_to<::vcc_claim::const_<"
+                    "int>>");
+        ok &= claim(f, value_category::lvalue,
+                    "::vcc_claim::lvalue_reference_to<::vcc_claim::function<"
+                    "::vcc_claim::pointer_to<::vcc_claim::array_of<::vcc_"
+                    "claim::const_<::vcc_claim::volatile_<::vcc_claim::"
+                    "pointer_to<::vcc_claim::const_<int>>>>, (3)>>(char, int, "
+                    "...)>>");
+        ok &= claim(g, value_category::prvalue,
+                    "::vcc_claim::function<int(...)>");
+        ok &= claim(qualified_type::make(t.pointer_to(s), cv_none),
+                    value_category::prvalue, nullptr);
+    }
     if (ok)
         printf("cxxsema -selftest: ok\n");
     if (ok)
@@ -118,7 +171,8 @@ static int selftest()
 int main(int argc, char **argv)
 {
     command_line options("cxxsema");
-    bool dump_analysis = false, debug_unsupported = false, stats = false;
+    bool dump_analysis = false, debug_unsupported = false, stats = false,
+         type_claims = false;
     const char *path = nullptr;
     for (int i = 1; i < argc; i++) {
         const char *a = argv[i];
@@ -128,6 +182,8 @@ int main(int argc, char **argv)
             dump_analysis = true;
         else if (!strcmp(a, "-debug-unsupported"))
             debug_unsupported = true;
+        else if (!strcmp(a, "-type-claims"))
+            type_claims = true;
         else if (!strcmp(a, "-stats"))
             stats = true;
         else if (!strcmp(a, "-fsyntax-only"))
@@ -138,9 +194,10 @@ int main(int argc, char **argv)
             path = a;
     }
     if (!path) {
-        fprintf(stderr, "usage: cxxsema [-fsyntax-only|-dump-analysis|"
-                        "-debug-unsupported|-stats] [clang -cc1 options] "
-                        "FILE\n       cxxsema -selftest\n");
+        fprintf(stderr,
+                "usage: cxxsema [-fsyntax-only|-dump-analysis|"
+                "-debug-unsupported|-type-claims|-stats] [clang -cc1 options] "
+                "FILE\n       cxxsema -selftest\n");
         return 2;
     }
     options.apply();
@@ -195,6 +252,9 @@ int main(int argc, char **argv)
                                   at.file_name, at.line, at.column);
         }
     }
+    /* -type-claims: no expression has a type before step S1, so there is
+       nothing to write yet; the option is here for bench/cxx-sema.py */
+    (void)type_claims;
     if (stats) {
         vbuffer_format_append(
             out.get(),

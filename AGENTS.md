@@ -335,6 +335,9 @@ bench/vcc-self.py -j 6              # [needs VCC_WASM=1; not maintained] vcc.was
 bench/vcc-darwin-s.py -j 6           # Darwin -S assembled by Apple's as, runs as the direct object (~2 min)
 bench/cxx-pp.py -j 6 [-v] [PAT]     # C++ front end phase 4 (cxxlex) vs clang -cc1 on clang's Preprocessor tests: tokens, diagnostics, -dM (~2 min)
 bench/cxx-sema.py -j 6 [-v] [PAT]   # C++ semantic analysis (cxxsema) vs clang's test/CXX, SemaCXX, SemaTemplate: per declaration accepted/rejected, unsupported by subclause (~70 s cold)
+bench/cxx-sema.py selftest          # the type claims' path through clang on hand-written claims (<1 s)
+bench/cxx-spec-refs.py [--rules CLAUSE]   # citations, quoted grammar, [abi:...] labels; rules quoted per clause (<1 s)
+bench/itanium-abi.py [--check]      # docs/itanium-abi-index.tsv from the fetched ABI (fetch-testsuites.sh itanium-abi); section text in work/itanium-abi/
 bench/vcc-diag.py -j 6             # test/diag: vcc's .stderr snapshots, clang's locations/levels/flags (~2 s)
 bench/vcc-field-uses.py -j 6       # VCC_FIELD_USES: every use of selected struct fields with its bytes, snapshots (src/test/field-uses, <1 s)
 bench/vcc-diag.py lint_naming       # vpp --lint (style checks, off elsewhere; frontend/c/naming-lint.cpp): cases with /* diag-vpp-flags: --lint */

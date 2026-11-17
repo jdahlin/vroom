@@ -18,10 +18,19 @@
             an extension's, from its vendor's manual: not checked.
   coverage  per clause, the nonterminals of docs/cxx-spec/grammar-index.md
             that some comment quotes, of all of the clause's
+  rules     per clause, the rules a comment quotes, of all of the clause's
+            (PLAN-cxx-sema.md C1): a rule is a sentence of a paragraph, out
+            of its notes and examples, that says "shall" or "ill-formed";
+            it is quoted when a comment cites its paragraph ([label]/N, or
+            /N after a [label]/M of the same file) and quotes, in "...",
+            a part of it
+  abi       every [abi:anchor] names a section of the Itanium C++ ABI
+            (docs/itanium-abi-index.tsv, bench/itanium-abi.py)
 
-Usage: bench/cxx-spec-refs.py [-v] [--missing CLAUSE] [FILE...]
+Usage: bench/cxx-spec-refs.py [-v] [--missing CLAUSE] [--rules CLAUSE] [FILE...]
   -v                 every quoted production, not only the wrong ones
   --missing CLAUSE   list the clause's nonterminals no comment quotes yet
+  --rules CLAUSE     list the clause's rules no comment quotes yet
 Exit status 1 if a citation or a quoted production is wrong.
 """
 import argparse
@@ -34,6 +43,10 @@ R = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SPEC = os.path.join(R, 'docs', 'cxx-spec')
 FRONTEND = os.path.join(R, 'src', 'frontend', 'cplusplus')
 
+ABI_INDEX = os.path.join(R, 'docs', 'itanium-abi-index.tsv')
+ABI_CITATION = re.compile(r'\[abi:([a-z0-9][a-z0-9.-]*)\]')
+# the clauses whose rules analysis enforces
+RULE_CLAUSES = ('basic', 'class', 'dcl', 'except', 'expr', 'module', 'over', 'stmt', 'temp')
 CITATION = re.compile(r'\[([a-z][a-z0-9.]*[a-z0-9])\]/(\d+)(?:\.(\d+))?')
 # clang's and other vendors' tags, and the plan's own labels, are no
 # subclauses of the standard
@@ -150,10 +163,95 @@ def quoted_productions(path):
     return found
 
 
+def plain(text):
+    """the words of a sentence: the Markdown's links, emphasis, code marks
+    and quotes taken out, lower case, one space between words"""
+    text = re.sub(r'\[\[([^\]]+)\]\]\([^)]*\)', r'[\1]', text)
+    text = re.sub(r'\[([^\]]+)\]\([^)]*\)', r'\1', text)
+    text = re.sub(r'[*`“”"‘’]', '', text)
+    text = text.replace('ₒₚₜ', '_opt')
+    return ' '.join(text.lower().split())
+
+
+def spec_rules(subclauses):
+    """label -> {paragraph: [the plain text of each rule's sentence]}"""
+    rules = {}
+    for label, path in subclauses.items():
+        rel = os.path.relpath(path, SPEC)
+        if rel.split(os.sep)[0] not in RULE_CLAUSES:
+            continue
+        text = open(path, encoding='utf-8').read()
+        text = re.sub(r'^```.*?^```', ' ', text, flags=re.M | re.S)
+        # notes and examples state no rule
+        text = re.sub(r'\[\*(?:Note|Example)[^*]*\*:.*?— \*end (?:note|example)\*\]', ' ', text, flags=re.S)
+        parts = re.split(r'^\*\*(\d+)\*\*', text, flags=re.M)
+        for k in range(1, len(parts) - 1, 2):
+            body = re.split(r'^#', parts[k + 1], maxsplit=1, flags=re.M)[0]
+            for sentence in re.split(r'(?<=[.:])\s+(?=[A-Z\[*`])', ' '.join(body.split())):
+                if re.search(r'\bshall\b|ill-formed', sentence):
+                    rules.setdefault(label, {}).setdefault(int(parts[k]), []).append(plain(sentence))
+    return rules
+
+
+SHORT_CITATION = re.compile(r'(?<![\w\]/])/(\d+)(?:\.\d+)?\b')
+QUOTE = re.compile(r'"([^"]{8,})"')
+
+
+def quoted_rules(path, rules):
+    """the (label, paragraph, sentence) rules a comment of the file quotes"""
+    found = set()
+    last_label = None
+    block, start = [], None
+    lines = comment_lines(path)
+    blocks = []
+    for n, s in lines + [(None, None)]:
+        if n is not None and block and n == start + len(block):
+            block.append(s)
+            continue
+        if block:
+            blocks.append(' '.join(' '.join(block).split()))
+        if n is None:
+            break
+        block, start = [s], n
+    for text in blocks:
+        marks = []
+        for m in CITATION.finditer(text):
+            if m.group(1) not in NOT_SUBCLAUSES:
+                last_label = m.group(1)
+                marks.append((m.start(), m.group(1), int(m.group(2))))
+        for m in SHORT_CITATION.finditer(text):
+            if last_label and not any(m.start() >= c[0] and m.start() < c[0] + len(c[1]) + 4 for c in marks):
+                marks.append((m.start(), last_label, int(m.group(1))))
+        if not marks:
+            continue
+        for q in QUOTE.finditer(text):
+            quote = plain(q.group(1)).strip(' .,;:…')
+            if len(quote) < 8:
+                continue
+            # the citations nearest the quote first
+            for _, label, para in sorted(marks, key=lambda c: abs(c[0] - q.start())):
+                sentences = rules.get(label, {}).get(para, [])
+                hit = [k for k, x in enumerate(sentences) if quote in x or x.strip(' .') in quote]
+                if hit:
+                    found.update((label, para, k) for k in hit)
+                    break
+    return found
+
+
+def abi_sections():
+    sections = set()
+    if os.path.exists(ABI_INDEX):
+        for line in open(ABI_INDEX, encoding='utf-8'):
+            if line.strip() and not line.startswith('#'):
+                sections.add(line.split('\t')[0])
+    return sections
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('-v', action='store_true')
     ap.add_argument('--missing')
+    ap.add_argument('--rules')
     ap.add_argument('files', nargs='*')
     a = ap.parse_args()
     files = a.files or sorted(glob.glob(os.path.join(FRONTEND, '**', '*.cpp'), recursive=True) +
@@ -161,6 +259,10 @@ def main():
                               glob.glob(os.path.join(FRONTEND, '**', '*.inc'), recursive=True))
     subclauses = subclause_files()
     grammar = spec_grammar()
+    rules = spec_rules(subclauses)
+    abi = abi_sections()
+    rules_quoted = set()
+    abi_citations = 0
     errors = 0
     citations = productions = 0
     quoted = {}
@@ -178,6 +280,13 @@ def main():
                 errors += 1
             elif para not in paragraphs(subclauses[label]):
                 print(f'{rel}:{line}: [{label}] has no paragraph {para}')
+                errors += 1
+        rules_quoted |= quoted_rules(path, rules)
+        for m in ABI_CITATION.finditer(text):
+            abi_citations += 1
+            if m.group(1) not in abi:
+                line = text.count('\n', 0, m.start()) + 1
+                print(f'{rel}:{line}: [abi:{m.group(1)}] is no section of docs/itanium-abi-index.tsv')
                 errors += 1
         vendor_grammar = os.path.relpath(path, FRONTEND).split(os.sep)[0] == 'ext'
         for line, name, alternatives in quoted_productions(path):
@@ -211,12 +320,27 @@ def main():
     for name, (label, _, _) in grammar.items():
         clause = os.path.basename(os.path.dirname(os_path(subclauses, label)))
         by_clause.setdefault(clause, set()).add(name)
-    print(f'{citations} citations, {productions} quoted productions, {errors} wrong')
+    print(f'{citations} citations, {abi_citations} of the ABI, {productions} quoted productions, {errors} wrong')
     row = []
     for clause in sorted(by_clause):
         have = sum(1 for n in by_clause[clause] if n in quoted)
         row.append(f'{clause} {have}/{len(by_clause[clause])}')
     print('nonterminals quoted, by clause: ' + ', '.join(row))
+    row = []
+    for clause in RULE_CLAUSES:
+        labels = [x for x in rules if os.path.relpath(subclauses[x], SPEC).split(os.sep)[0] == clause]
+        total = sum(len(v) for x in labels for v in rules[x].values())
+        have = sum(1 for (x, _, _) in rules_quoted if x in labels)
+        row.append(f'{clause} {have}/{total}')
+    print('rules quoted, by clause: ' + ', '.join(row))
+    if a.rules:
+        for label in sorted(rules):
+            if os.path.relpath(subclauses[label], SPEC).split(os.sep)[0] != a.rules:
+                continue
+            for para, sentences in sorted(rules[label].items()):
+                for k, x in enumerate(sentences):
+                    if (label, para, k) not in rules_quoted:
+                        print(f'  [{label}]/{para}: {x[:150]}')
     if a.missing:
         for n in sorted(by_clause.get(a.missing, ())):
             if n not in quoted:

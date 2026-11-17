@@ -25,11 +25,21 @@ them (work/testsuites), and src/test/cxx/sema/{spec,gram}/*.cpp.  For each
              not parsed   the parser's (an erroneous node, or one kept as
                           tokens), or clang's error there is one of syntax
 
+  types    cxxsema -type-claims gives each expression with a type its type
+           and value category (src/bin/cxxsema/type-claims.h); after the
+           expression's declaration clang compiles
+               static_assert(__is_same(decltype((E)), CLAIM));
+           verified, refuted (a failure), or not checkable (E does not
+           compile at that place).  No claims before step S1;
+           `bench/cxx-sema.py selftest` checks this path on claims written
+           by hand, some of them wrong.
+
 The summary ends with the subclauses most declarations are unsupported for:
 the work list.  clang's side is the cache of bench/cxx-parse.py
 (work/cxx-parse-ref).
 
-Usage: bench/cxx-sema.py [-v] [-j N] [--bin-dir DIR] [--unsupported N] [PATTERN...]
+Usage: bench/cxx-sema.py selftest
+       bench/cxx-sema.py [-v] [-j N] [--bin-dir DIR] [--unsupported N] [PATTERN...]
 A PATTERN is a part of a test's path: `basic.lookup.unqual` runs that
 subclause's tests.  Prints one line per failing run (all with -v) and a
 summary.
@@ -40,9 +50,11 @@ import concurrent.futures
 import glob
 import importlib.util
 import os
+import hashlib
 import re
 import subprocess
 import sys
+import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 spec = importlib.util.spec_from_file_location('cxxparse', os.path.join(HERE, 'cxx-parse.py'))
@@ -96,11 +108,132 @@ CLANG_ERROR = re.compile(r'^([^:\n]+):(\d+):\d+: (?:error|fatal error): .*?(?:\[
 SYNTAX_CATEGORIES = ('Parse Issue', 'Lexical or Preprocessor Issue')
 
 
+TYPES_FILE = 'cxx-type-claims'
+
+
+def check_type_claims(test, opts, clang, claims, cache=True):
+    """claims: (line, column, expression, claim), the place just after the
+    expression's declaration.  Returns {'verified', 'refuted',
+    'unchecked'} counts and the refuted claims."""
+    counts = collections.Counter()
+    refuted = []
+    if not claims:
+        return counts, refuted
+    cwd = os.path.dirname(test)
+    name = os.path.basename(test)
+    lines = open(test, 'rb').read().decode('latin-1').split('\n')
+    places = {}
+    for k, c in enumerate(claims):
+        places.setdefault(c[:2], []).append(k)
+    for row, column in sorted(places, reverse=True):
+        if row > len(lines):
+            continue
+        block = ''
+        for k in places[(row, column)]:
+            e, claim = claims[k][2], claims[k][3]
+            block += (f'\n#line {2 * k + 1} "{TYPES_FILE}"\n'
+                      f'static_assert(__is_same(decltype(({e})), decltype(({e}))));\n'
+                      f'static_assert(__is_same(decltype(({e})), {claim}));')
+        text = lines[row - 1]
+        lines[row - 1] = (text[:column - 1] + block + f'\n#line {row} "{name}"\n' +
+                          ' ' * (column - 1) + text[column - 1:])
+    source = (f'#line 1 "{TYPES_FILE}-prelude"\n' + cxxparse.PRELUDE + f'#line 1 "{name}"\n' +
+              '\n'.join(lines)).encode('latin-1')
+
+    def compile_claims():
+        try:
+            r = subprocess.run([clang, '-cc1'] + cxxparse.TRIPLE + ['-x', 'c++'] + opts +
+                               ['-fsyntax-only', '-ferror-limit', '0', '-w', '-'],
+                               cwd=cwd, input=source, capture_output=True, timeout=60)
+        except subprocess.TimeoutExpired:
+            return None
+        return r.stderr.decode('utf-8', 'replace')
+    if cache:
+        stderr = cxxparse.cached('type-claims:' + hashlib.sha256(source).hexdigest(), clang, test, opts,
+                                 compile_claims)
+    else:
+        stderr = compile_claims()
+    if stderr is None:
+        counts['unchecked'] += len(claims)
+        return counts, refuted
+    errors = {}
+    for m in re.finditer(r'^(.+?):(\d+):\d+: (?:fatal )?error: (.*)$', stderr, re.M):
+        if m.group(1) == TYPES_FILE:
+            errors.setdefault(int(m.group(2)), []).append(m.group(3))
+    for k, (row, column, e, claim) in enumerate(claims):
+        if errors.get(2 * k + 1):
+            counts['unchecked'] += 1
+        elif errors.get(2 * k + 2):
+            counts['refuted'] += 1
+            refuted.append(f'{row}:{column}: `{e}` is no `{claim}`')
+        else:
+            counts['verified'] += 1
+    return counts, refuted
+
+
+def type_claims(cxxsema, opts, test):
+    """cxxsema -type-claims: the claims about the test file itself"""
+    cwd = os.path.dirname(test)
+    r = cxxparse.run([cxxsema, '-type-claims'] + opts + [os.path.basename(test)], cwd)
+    if r[0] not in (0, 1):
+        return []
+    found = []
+    for line in r[1].split('\n'):
+        parts = line.split('\t')
+        if len(parts) == 4 and os.path.normpath(os.path.join(cwd, parts[0])) == os.path.normpath(test):
+            row, column = map(int, parts[1].split(':'))
+            found.append((row, column, parts[2].strip(), parts[3].strip()))
+    return found
+
+
+SELFTEST_SOURCE = """int i;
+const int ci = 1;
+int g(...);
+int *const volatile *(*fp)[3];
+struct S { int m; };
+"""
+# (expression, claim, expected): the encodings cxxsema -selftest checks
+# that its encoder writes, and claims that must be refuted or unchecked
+SELFTEST_CLAIMS = [
+    ('i', '::vcc_claim::lvalue_reference_to<int>', 'verified'),
+    ('i + 1', 'int', 'verified'),
+    ('static_cast<int &&>(i)', '::vcc_claim::rvalue_reference_to<int>', 'verified'),
+    ('ci', '::vcc_claim::lvalue_reference_to<::vcc_claim::const_<int>>', 'verified'),
+    ('g', '::vcc_claim::lvalue_reference_to<::vcc_claim::function<int(...)>>', 'verified'),
+    ('fp', '::vcc_claim::lvalue_reference_to<::vcc_claim::pointer_to<::vcc_claim::array_of<'
+           '::vcc_claim::pointer_to<::vcc_claim::const_<::vcc_claim::volatile_<'
+           '::vcc_claim::pointer_to<int>>>>, (3)>>>', 'verified'),
+    ('S().m', '::vcc_claim::rvalue_reference_to<int>', 'verified'),
+    ('i', 'int', 'refuted'),
+    ('i + 1', '::vcc_claim::lvalue_reference_to<int>', 'refuted'),
+    ('ci', '::vcc_claim::lvalue_reference_to<int>', 'refuted'),
+    ('undeclared', 'int', 'unchecked'),
+]
+
+
+def selftest(clang):
+    """the type claims' path through clang, on claims written by hand"""
+    with tempfile.TemporaryDirectory() as d:
+        test = os.path.join(d, 'claims.cpp')
+        open(test, 'w').write(SELFTEST_SOURCE)
+        claims = [(5, 22, e, c) for e, c, _ in SELFTEST_CLAIMS]
+        counts, refuted = check_type_claims(test, ['-std=c++17'], clang, claims, cache=False)
+    want = collections.Counter(x for _, _, x in SELFTEST_CLAIMS)
+    if counts != want:
+        print(f'cxx-sema selftest: FAILED: {dict(counts)}, expected {dict(want)}')
+        for r in refuted:
+            print(f'  refuted {r}')
+        return 1
+    print(f'cxx-sema selftest: ok ({want["verified"]} verified, {want["refuted"]} refuted, '
+          f'{want["unchecked"]} not checkable, as expected)')
+    return 0
+
+
 def check(test, opts, clang, cxxsema):
     cwd = os.path.dirname(test)
     name = os.path.basename(test)
     res = {'test': test, 'opts': opts, 'fail': [], 'verdict': collections.Counter(),
-           'unsupported': collections.Counter()}
+           'unsupported': collections.Counter(), 'types': collections.Counter()}
     ours = cxxparse.run([cxxsema, '-dump-analysis'] + opts + [name], cwd)
     if ours[0] == 2 and 'unsupported -std' in ours[2]:
         res['skip'] = ours[2].strip()
@@ -151,6 +284,9 @@ def check(test, opts, clang, cxxsema):
                     rejected.append(first)
             else:
                 res['verdict']['we_accept'] += 1
+    res['types'], refuted = check_type_claims(test, opts, clang, type_claims(cxxsema, opts, test))
+    for r in refuted:
+        res['fail'].append(('types', r))
     if rejected:
         res['fail'].append(('verdict', f'ill-formed for us, accepted by clang: line {rejected[0]}'
                                        f' ({len(rejected)} declarations)'))
@@ -158,6 +294,8 @@ def check(test, opts, clang, cxxsema):
 
 
 def main():
+    if sys.argv[1:] == ['selftest']:
+        return selftest(cxxpp.find_clang())
     ap = argparse.ArgumentParser()
     ap.add_argument('-v', action='store_true')
     ap.add_argument('-j', type=int, default=6)
@@ -193,13 +331,14 @@ def main():
             jobs.append((t, opts + extra))
     with concurrent.futures.ThreadPoolExecutor(a.j) as ex:
         results = list(ex.map(lambda j: check(j[0], j[1], clang, cxxsema), jobs))
-    verdict, unsupported = collections.Counter(), collections.Counter()
+    verdict, unsupported, types = collections.Counter(), collections.Counter(), collections.Counter()
     crashes = failures = skipped = 0
     seen = set()
     for r in results:
         seen.add(r['test'])
         verdict.update(r['verdict'])
         unsupported.update(r['unsupported'])
+        types.update(r['types'])
         kinds = {k for k, _ in r['fail']}
         crashes += 'crash' in kinds
         failures += bool(kinds)
@@ -213,6 +352,8 @@ def main():
     print(f'declarations: {verdict["agree"]} as clang, {verdict["we_reject"]} we reject and clang accepts '
           f'({verdict["known"]} known differences), {verdict["we_accept"]} we accept and clang rejects, '
           f'{verdict["unsupported"]} unsupported, {verdict["not_parsed"]} not parsed')
+    print(f'types: {types["verified"]} claims verified, {types["refuted"]} refuted, '
+          f'{types["unchecked"]} not checkable')
     if unsupported and a.unsupported:
         top = ', '.join(f'[{label}] {n}' for label, n in unsupported.most_common(a.unsupported))
         print(f'unsupported by subclause ({len(unsupported)}): {top}')
