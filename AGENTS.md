@@ -73,7 +73,8 @@ relative to it); `TODO.md` stays at the top.
   regenerates the C++ predefines and `__has_*` answers from clang++.  The
   first front end (`src/frontend/cxx/`) was removed on 2026-11-16; the new
   one, written against the standard, is `src/frontend/cplusplus/`
-  (`PLAN-cxx-spec.md`, `PLAN-cxx-parse.md`; `cxxlex`, `cxxparse`).  Until it
+  (`PLAN-cxx-spec.md`, `PLAN-cxx-parse.md`, then `PLAN-cxx-sema.md`: semantics and
+  lowering to codegen, steps S0-S9, a plan under review; `cxxlex`, `cxxparse`).  Until it
   is wired into the driver, a C++ compile job is an error (`-E` works).
 - `src/`: the toolchain; `src/Makefile` builds into `build/src/`.  The tree
   follows PostgreSQL's (`PLAN-tree.md`): generic code in the component
