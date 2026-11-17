@@ -668,8 +668,12 @@ analysis_result semantic_analysis::simple_declaration(node_index n)
 analysis_result semantic_analysis::function_definition(node_index n)
 {
     const syntax_node &node = tree[n];
-    if (!node.child_count ||
+    if (node.child_count &&
         !syntax_is(tree, tree.children(n)[0], syntax_kind::decl_specifier_seq))
+        /* [class.mem]/12: a constructor or destructor (or a conversion
+           function) defined outside its class */
+        return special_member_definition(n);
+    if (!node.child_count)
         return not_supported(n, "dcl.fct.def.general");
     analysis_result r = init_declarators(n, tree.children(n)[0].index(), true);
     if (r != analysis_result::well_formed)
@@ -861,6 +865,33 @@ analysis_result semantic_analysis::declare_with_initializer(
     if (r == analysis_result::well_formed && function_state.active &&
         kind == entity_kind::variable)
         block_variables.append(declared_entity);
+    if (r == analysis_result::well_formed && !initialized &&
+        kind == entity_kind::variable &&
+        entity_table[declared_entity].defined && !s.extern_) {
+        /* [dcl.init]/12: "If no initializer is specified for an object,
+           the object is default-initialized"; [dcl.init]/7.1: "If T is a
+           (possibly cv-qualified) class type, constructors are considered.
+           The applicable constructors are enumerated ([over.match.ctor]),
+           and the best one for the initializer () is chosen through
+           overload resolution" */
+        qualified_type object = type;
+        while (type_table[object.unqualified()].kind == type_kind::array)
+            object = type_table[object.unqualified()].operand;
+        const struct type &record = type_table[object.unqualified()];
+        if (record.kind == type_kind::class_type &&
+            entity_table[record.entity].kind == entity_kind::class_type &&
+            entity_table[record.entity].first_constructor) {
+            if (!(object == type))
+                /* [dcl.init]/7.2: each element default-initialized */
+                return not_supported(declaration, "dcl.init");
+            owned_array<expression_meaning> none;
+            initialized_value value;
+            r = construct(declaration, type, none, 0, value);
+            if (r != analysis_result::well_formed)
+                return r;
+            entity_table[declared_entity].definition = value.node;
+        }
+    }
     if (r != analysis_result::well_formed || !initialized)
         return r;
     /* [stmt.dcl]/3: a local variable with automatic storage duration and an

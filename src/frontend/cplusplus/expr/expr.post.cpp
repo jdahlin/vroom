@@ -280,6 +280,8 @@ analysis_result semantic_analysis::postfix(node_index n, expression_meaning &m)
         const token &t = tokens[children[0].index()];
         if (t.kind == token_kind::identifier) {
             entity_index e = lookup(tokens.identifier(children[0].index()));
+            if (e && entity_table[e].kind == entity_kind::class_type)
+                return class_conversion(n, e, m);
             if (e && entity_table[e].kind == entity_kind::typedef_name)
                 named = entity_table[e].type.unqualified();
             if (e && entity_table[e].kind == entity_kind::typedef_name &&

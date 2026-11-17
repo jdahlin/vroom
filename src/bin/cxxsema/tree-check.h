@@ -55,7 +55,8 @@ struct tree_checker {
     {
         return is_expression(k) || k == semantic_kind::zero ||
                k == semantic_kind::initializer_list ||
-               k == semantic_kind::bind_reference;
+               k == semantic_kind::bind_reference ||
+               k == semantic_kind::construct;
     }
     static bool is_statement(semantic_kind k)
     {
@@ -233,6 +234,13 @@ struct tree_checker {
         case semantic_kind::bind_reference:
             child(n, node.a, tree_sort::expression, false, "referent");
             break;
+        case semantic_kind::construct:
+            child(n, node.a, tree_sort::expression, true, "object");
+            if (!node.b || analysis.entity_table[node.b].special !=
+                               special_member::constructor)
+                problem(n, "no constructor");
+            list(n, tree_sort::initializer, "argument");
+            break;
         case semantic_kind::block:
         case semantic_kind::declarations:
             list(n, tree_sort::statement, "statement");
@@ -298,6 +306,8 @@ struct tree_checker {
                 problem(n, "no outermost block");
             else
                 walk(node.a);
+            child(n, node.b, tree_sort::statement, true,
+                  "member initializations");
             break;
         }
     }
@@ -401,6 +411,10 @@ void dump_node(const semantic_analysis &analysis, token_stream &tokens,
         vbuffer_format_append(out, " entity #%u", node.a);
     vbuffer_string_append(out, "\n");
     uint32_t children[4] = {node.a, node.b, node.c, node.d};
+    /* a member's and a constructor call's b is an entity */
+    if (node.kind == semantic_kind::member ||
+        node.kind == semantic_kind::construct)
+        children[1] = 0;
     for (unsigned i = 0; i < 4; i++) {
         if (i == 0 && a_is_entity)
             continue;

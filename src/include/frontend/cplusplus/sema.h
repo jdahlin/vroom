@@ -215,6 +215,9 @@ enum class linkage : uint8_t {
    value analysis knows, is not one, or analysis cannot tell */
 enum class constness : uint8_t { constant, not_constant, unknown };
 
+/* [special]: a member function a class's objects are made and ended by */
+enum class special_member : uint8_t { none, constructor, destructor };
+
 struct entity {
     entity_kind kind = entity_kind::none;
     linkage linkage_of_name = linkage::none;
@@ -282,6 +285,15 @@ struct entity {
        by the declaration to be that class type ... is used to denote the
        class type ... for linkage purposes only" */
     uint32_t linkage_name = 0;
+    /* a member function that is a constructor ([class.ctor]) or a
+       destructor ([class.dtor]); named by its class's name, not bound in
+       the class's scope */
+    special_member special = special_member::none;
+    /* a constructor: the class's next one, 0 at the last */
+    entity_index next_constructor = 0;
+    /* a class: its user-declared constructors (a chain through
+       next_constructor) and destructor, 0 if none */
+    entity_index first_constructor = 0, destructor = 0;
 };
 
 /* one declaration of an entity: the syntax node that declares it */
@@ -523,6 +535,12 @@ enum class semantic_kind : uint8_t {
     /* a: the glvalue a reference binds to; a prvalue: a temporary
        materialized from it ([conv.rval]) */
     bind_reference,
+    /* [class.ctor]/2: a constructor called: a: the object it initializes
+       (a glvalue; 0 for the object the initializer is of, a declared
+       variable, or a temporary when the node is used as a prvalue), b: the
+       constructor, its arguments (each initialized as its parameter) in
+       list[first .. first + count) */
+    construct,
     /* ---- statements ---- */
     /* the statements in list[first .. first + count) */
     block,
@@ -566,7 +584,9 @@ enum class semantic_kind : uint8_t {
     /* a function definition: a: the outermost block; the parameters'
        entities (0 for an unnamed one) are list[first .. first + count),
        a non-static member function's `this` first (an unnamed variable of
-       pointer type, [class.this]/1) */
+       pointer type, [class.this]/1); b: a constructor's member
+       initializations ([class.base.init]), a block of expression
+       statements, run before a (0: none) */
     function_body,
 };
 
@@ -695,6 +715,9 @@ class semantic_analysis
     owned_array<definition_record> definitions;
     /* the non-static data members of the classes (entity::first_member) */
     owned_array<entity_index> class_members;
+    /* whether a class is trivially copyable and has a trivial destructor:
+       its objects are copied as their bytes, passed in registers */
+    bool trivial_class(entity_index c) const;
     /* the syntax tree analysed */
     const syntax_tree &syntax() const
     {
@@ -768,6 +791,8 @@ class semantic_analysis
         /* [ext:gnu_attributes] the alignment an aligned attribute of the
            declarator asks for, 0 if none */
         uint64_t aligned = 0;
+        /* the declarator-id is ~ class-name: a destructor ([class.dtor]/1) */
+        bool destructor = false;
     };
     analysis_result declarator(node_index declaration, syntax_child d,
                                qualified_type &type, declarator_meaning &m);
@@ -1010,6 +1035,35 @@ class semantic_analysis
                                          entity_index qualifier,
                                          qualified_type type,
                                          const specified &s, bool definition);
+    /* [class.ctor], [class.dtor]: a member-declaration without a
+       decl-specifier-seq: a constructor or destructor of c */
+    analysis_result special_member_declarator(entity_index c,
+                                              node_index declaration,
+                                              syntax_child d, uint8_t access,
+                                              bool definition);
+    /* the function-body of a constructor or destructor definition
+       (last_declared): ctor-initializer_opt compound-statement */
+    analysis_result special_member_body(node_index definition,
+                                        syntax_child body);
+    /* [dcl.meaning]/1: Class::Class or Class::~Class defined outside the
+       class: the function-definition n without a decl-specifier-seq */
+    analysis_result special_member_definition(node_index n);
+    /* whether the declarator d with no decl-specifier-seq declares a
+       constructor or destructor of c */
+    bool declares_special_member(entity_index c, syntax_child d) const;
+    /* [over.match.ctor]: the constructor of class c that initializes an
+       object from the analysed arguments, the construct node made (its
+       object a) */
+    analysis_result construct(node_index at, qualified_type type,
+                              owned_array<expression_meaning> &arguments,
+                              uint32_t object, initialized_value &result);
+    /* [expr.type.conv]: C(expression-list) or C{} of the class c */
+    analysis_result class_conversion(node_index n, entity_index c,
+                                     expression_meaning &m);
+    /* the expressions of an expression-list, analysed */
+    analysis_result
+    expression_list_meanings(syntax_child list,
+                             owned_array<expression_meaning> &out);
     /* the class whose member-specification is analysed, 0 if none, and
        its layout so far */
     entity_index defining_class = 0;
@@ -1072,7 +1126,11 @@ class semantic_analysis
         /* the function whose body it is */
         entity_index function = 0;
     } function_state;
-    analysis_result function_body(node_index definition, syntax_child compound);
+    analysis_result function_body(node_index definition, syntax_child compound,
+                                  syntax_child ctor_initializer = {});
+    /* [class.base.init]: a constructor's member initializations, the
+       statements of a block (function_body's b) */
+    analysis_result ctor_initializer(syntax_child list, uint32_t &built);
     void collect_labels(syntax_child s);
     /* the statement functions give the statement's node in built (when
        well-formed) */
@@ -1134,9 +1192,12 @@ class semantic_analysis
 /* [abi:mangling]: the symbol of entity e, a function or a variable,
    appended to out: its mangled name, or its identifier where the ABI does
    not mangle it; false if the name needs rules not written yet (out may
-   have a part of it) */
+   have a part of it).  A constructor's or destructor's variant
+   ([abi:mangling-special-ctor-dtor]): 1 the complete object's, 2 the base
+   object's */
 bool itanium_symbol_name(const semantic_analysis &analysis,
-                         const preprocessor &pp, entity_index e, vbuffer *out);
+                         const preprocessor &pp, entity_index e, vbuffer *out,
+                         int variant = 2);
 
 } // namespace cplusplus
 

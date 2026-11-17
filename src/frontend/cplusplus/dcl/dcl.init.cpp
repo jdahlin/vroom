@@ -580,8 +580,19 @@ analysis_result semantic_analysis::initialize_with(node_index at,
            implicitly-declared copy constructor ([class.copy.ctor]/6), which
            is trivial for the classes analysis has ([class.copy.ctor]/11):
            it copies the object representation */
-        if (m.type.unqualified() != type.unqualified() ||
-            entity_table[target.entity].kind != entity_kind::class_type)
+        if (entity_table[target.entity].kind != entity_kind::class_type)
+            return not_supported(at, "dcl.init");
+        bool same = m.type.unqualified() == type.unqualified();
+        if (!(same && m.category == value_category::prvalue) &&
+            entity_table[target.entity].first_constructor) {
+            /* /17.6.2 by [over.match.ctor]; /17.6.3: a user-defined
+               conversion by a converting constructor ([class.conv.ctor]),
+               whose result initializes the object (the copy elided) */
+            owned_array<expression_meaning> arguments;
+            arguments.append(m);
+            return construct(at, type, arguments, 0, result);
+        }
+        if (!same)
             return not_supported(at, "dcl.init");
         r = operand_value(at, m);
         if (r != analysis_result::well_formed)
@@ -813,8 +824,20 @@ analysis_result semantic_analysis::initializer(syntax_child init,
             const struct type target = type_table[type.unqualified()];
             if (target.kind == type_kind::array)
                 return not_supported(n, "dcl.init");
-            if (target.kind == type_kind::class_type)
-                return not_supported(n, "dcl.init");
+            if (target.kind == type_kind::class_type) {
+                /* [dcl.init]/17.6.2: the constructor called with the
+                   expression-list as its arguments */
+                if (entity_table[target.entity].kind !=
+                        entity_kind::class_type ||
+                    !entity_table[target.entity].first_constructor)
+                    return not_supported(n, "dcl.init");
+                owned_array<expression_meaning> arguments;
+                analysis_result r =
+                    expression_list_meanings(children[1], arguments);
+                if (r != analysis_result::well_formed)
+                    return r;
+                return construct(n, type, arguments, 0, result);
+            }
             return ill_formed(n,
                               "if the entity being initialized does not have "
                               "class type, the expression-list in a "
@@ -858,8 +881,18 @@ analysis_result semantic_analysis::class_list_initialization(
         /* [dcl.init.list]/3: list-initialization of an incomplete class:
            clang's "incomplete type" error */
         return not_supported(list, "dcl.init.list");
-    if (!is_aggregate(c))
-        return not_supported(list, "class.ctor");
+    if (!is_aggregate(c)) {
+        /* (3.5): "Otherwise, if the initializer list has no elements and T
+           is a class type with a default constructor, the object is
+           value-initialized"; [dcl.init]/8.1: "if T is a (possibly
+           cv-qualified) class type with ... a user-provided ... default
+           constructor, then the object is default-initialized" */
+        if (!clauses.empty() || !entity_table[c].first_constructor)
+            /* (3.7) with narrowing checked ([over.match.list]) */
+            return not_supported(list, "over.match.list");
+        owned_array<expression_meaning> none;
+        return construct(list, type, none, 0, result);
+    }
     if (clauses.size() == 1 &&
         !syntax_is(tree, clauses[0], syntax_kind::braced_init_list)) {
         /* (3.2): an element of the class's own type */

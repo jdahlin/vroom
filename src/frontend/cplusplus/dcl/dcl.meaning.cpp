@@ -476,10 +476,22 @@ analysis_result semantic_analysis::declarator(node_index declaration,
         node_index q = children[0].index();
         const syntax_node &qualified = tree[q];
         const syntax_child *parts = tree.children(q);
+        syntax_child name = {};
+        if (qualified.child_count == 2)
+            name = parts[1];
+        if (qualified.child_count == 2 &&
+            syntax_is(tree, name, syntax_kind::unqualified_id) &&
+            tree[name.index()].child_count == 2 &&
+            syntax_is_punctuator(tokens, tree.children(name.index())[0],
+                                 preprocessing_op_or_punc::TILDE)) {
+            /* [class.dtor]/1: ~ class-name */
+            m.destructor = true;
+            name = tree.children(name.index())[1];
+        }
         if (qualified.child_count != 2 ||
             !syntax_is(tree, parts[0], syntax_kind::nested_name_specifier) ||
-            !parts[1].is_token() ||
-            tokens[parts[1].index()].kind != token_kind::identifier)
+            !name.is_token() ||
+            tokens[name.index()].kind != token_kind::identifier)
             return not_supported(q, "dcl.meaning");
         node_index nested = parts[0].index();
         const syntax_child *names = tree.children(nested);
@@ -493,13 +505,25 @@ analysis_result semantic_analysis::declarator(node_index declaration,
             return not_supported(q, "basic.lookup.qual");
         m.qualifier = c;
         has_head = true;
-        head = parts[1];
+        head = name;
         i = 1;
         /* the suffixes are the member's: a cv-qualifier-seq may follow */
         in_member_declarator = true;
     } else if (node.child_count &&
                syntax_is(tree, children[0], syntax_kind::unqualified_id)) {
-        return not_supported(children[0].index(), "dcl.meaning");
+        /* [class.dtor]/1: ~ class-name, in its class */
+        node_index u = children[0].index();
+        const syntax_child *parts = tree.children(u);
+        if (!in_member_declarator || tree[u].child_count != 2 ||
+            !syntax_is_punctuator(tokens, parts[0],
+                                  preprocessing_op_or_punc::TILDE) ||
+            !parts[1].is_token() ||
+            tokens[parts[1].index()].kind != token_kind::identifier)
+            return not_supported(u, "dcl.meaning");
+        m.destructor = true;
+        has_head = true;
+        head = parts[1];
+        i = 1;
     }
     struct suffix {
         bool function;

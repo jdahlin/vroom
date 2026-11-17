@@ -24,8 +24,8 @@ class itanium_mangler
 {
   public:
     itanium_mangler(const semantic_analysis &analysis, const preprocessor &pp,
-                    vbuffer *out)
-        : analysis(analysis), pp(pp), out(out)
+                    vbuffer *out, int variant)
+        : analysis(analysis), pp(pp), out(out), variant(variant)
     {
     }
 
@@ -35,6 +35,8 @@ class itanium_mangler
     const semantic_analysis &analysis;
     const preprocessor &pp;
     vbuffer *out;
+    /* a constructor's or destructor's: 1 complete, 2 base object */
+    int variant;
     /* [abi:mangling-compression]: the substitution candidates seen so far,
        in order; a type is one candidate however it is spelled, since the
        type table has one record per type */
@@ -59,6 +61,7 @@ class itanium_mangler
     bool unscoped_name(entity_index e);
     bool unqualified_name(entity_index e);
     bool source_name(uint32_t identifier);
+    bool ctor_dtor_name(special_member which);
     void number(uint64_t n);
     bool local_name(entity_index e, entity_index function);
     bool nested_name(entity_index e);
@@ -257,10 +260,38 @@ bool itanium_mangler::unqualified_name(entity_index e)
     const entity &x = analysis.entity_table[e];
     if (x.linkage_of_name == linkage::internal && x.enclosing == 0)
         text("L");
+    if (x.special != special_member::none)
+        return ctor_dtor_name(x.special);
     /* [dcl.typedef]/9: an unnamed class's name for linkage purposes */
     if (!x.name && x.kind == entity_kind::class_type)
         return source_name(x.linkage_name);
     return source_name(x.name);
+}
+
+/*
+ * [abi:mangling-special-ctor-dtor]:
+ *
+ *     <ctor-dtor-name> ::= C1
+ *                      ::= C2
+ *                      ::= D1
+ *                      ::= D2
+ *
+ * C1 and D1 are the complete object's, C2 and D2 the base object's.
+ * The complete object constructor of a class without virtual bases does
+ * what the base object constructor does ([abi:mangling-special-ctor-dtor]);
+ * there are no allocating constructors or deleting destructors yet.
+ */
+bool itanium_mangler::ctor_dtor_name(special_member which)
+{
+    if (which == special_member::constructor)
+        text("C");
+    else
+        text("D");
+    if (variant == 1)
+        text("1");
+    else
+        text("2");
+    return true;
 }
 
 /*
@@ -673,9 +704,10 @@ void itanium_mangler::seq_id(size_t n)
 } // namespace
 
 bool itanium_symbol_name(const semantic_analysis &analysis,
-                         const preprocessor &pp, entity_index e, vbuffer *out)
+                         const preprocessor &pp, entity_index e, vbuffer *out,
+                         int variant)
 {
-    itanium_mangler m(analysis, pp, out);
+    itanium_mangler m(analysis, pp, out, variant);
     return m.mangled_name(e);
 }
 

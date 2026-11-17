@@ -667,8 +667,19 @@ libstdc++ and json), since sema cannot analyse a declaration kept as tokens.
   their subclause: unions, nested and local classes, bases, constructors,
   destructors, static data members, reference members, brace elision.
   `src/test/cxx/run/classes.cpp`; C5.1 848 -> 915 passing, 0 wrong.
-  Next: elaborated-type-specifiers in block and class scope, constructors
-  and destructors, static data members, LLVM's SingleSource/Regression/C++.
+  Then user-declared constructors and destructors (`class/class.ctor.cpp`):
+  in and outside the class, mem-initializers in member order, overload
+  resolution among constructors for exact and standard conversions,
+  `T x;`, `T x(a, b)`, `T x = a`, `T x{}`, `T(args)`; destructors called
+  at block end, return, break and continue; C1/C2 and D1/D2 symbols as
+  clang's.  Unsupported: temporaries with destructors, members of class
+  type with constructors or destructors, classes passed by address, gotos
+  past live objects, static objects with destructors.
+  `src/test/cxx/run/constructors.cpp`.  LLVM's SingleSource/Regression/C++
+  still needs [dcl.link] (`extern "C"` in the run-time headers),
+  [class.derived], dynamic initialization and [dcl.enum].
+  Next: elaborated-type-specifiers in block and class scope, [dcl.link],
+  dynamic initialization of globals, static data members.
 
 ### S5. Conversions by user code, lambdas, the rest of [expr]
 

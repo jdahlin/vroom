@@ -100,7 +100,13 @@ analysis_result semantic_analysis::member_access(token_index at, entity_index e,
            E1.E2 is a prvalue.  The expression designates a non-static
            member function.  The expression can be used only as the
            left-hand operand of a member function call." */
-        if (m.category == value_category::prvalue)
+        /* [basic.lval]/7: "Whenever a prvalue appears as an operand of an
+           operator that expects a glvalue for that operand, the temporary
+           materialization conversion is applied to convert the expression
+           to an xvalue."  One with a destructor is destroyed at the end of
+           the full-expression ([class.temporary]/4), not analysed yet */
+        if (m.category == value_category::prvalue &&
+            entity_table[x.enclosing].destructor)
             return not_supported(current_declaration, "class.temporary");
         /* [class.this]/3: "A member function whose type has a
            cv-qualifier-seq cv1 can be called on an object expression of

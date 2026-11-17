@@ -205,7 +205,8 @@ node_index parser::function_body(const declarator_facts &declarator,
  * anywhere in the function in which they are declared."
  */
 analysis_result semantic_analysis::function_body(node_index definition,
-                                                 syntax_child compound)
+                                                 syntax_child compound,
+                                                 syntax_child ctor_init)
 {
     entity_index f = last_declared;
     qualified_type returns =
@@ -281,12 +282,20 @@ analysis_result semantic_analysis::function_body(node_index definition,
         entity_table.bind(parameters, name, e);
         parameter_entities.back() = e;
     }
+    /* [class.base.init]/2: "Lookup for an unqualified name in a
+       mem-initializer-id ignores the constructor's function parameter
+       scope" (the name is looked up in the class); the expressions are in
+       the function parameter scope */
+    current_scope = parameters;
+    uint32_t members = 0;
+    if (ctor_init.index())
+        result = worse(result, ctor_initializer(ctor_init, members));
     open_scope(parameters, false);
     uint32_t block = 0;
     result = worse(result, block_items(compound.index(), block));
     /* the function's semantic tree: its outermost block and parameters */
     uint32_t body = statement_node(semantic_kind::function_body,
-                                   first_token(compound), block);
+                                   first_token(compound), block, members);
     if (!parameter_entities.empty()) {
         semantics[body].first =
             semantics.list(&parameter_entities[0], parameter_entities.size());

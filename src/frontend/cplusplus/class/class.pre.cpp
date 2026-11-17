@@ -282,6 +282,8 @@ analysis_result semantic_analysis::elaborated_type_specifier(node_index n,
 bool semantic_analysis::is_aggregate(entity_index c) const
 {
     const entity &x = entity_table[c];
+    if (x.first_constructor)
+        return false;
     for (uint32_t i = 0; i < x.member_count; i++)
         if (entity_table[class_members[x.first_member + i]].access)
             return false;
@@ -338,11 +340,29 @@ semantic_analysis::member_declaration(entity_index c, syntax_child member,
         node.kind != syntax_kind::function_definition)
         return not_supported(n);
     if (!node.child_count ||
-        !syntax_is(tree, children[0], syntax_kind::decl_specifier_seq))
+        !syntax_is(tree, children[0], syntax_kind::decl_specifier_seq)) {
         /* [class.mem]/12: "The decl-specifier-seq may be omitted in
            constructor, destructor, and conversion function declarations
            only" */
-        return not_supported(n, "class.ctor");
+        if (!node.child_count || !declares_special_member(c, children[0]))
+            return not_supported(n, "class.ctor");
+        if (node.kind == syntax_kind::member_declaration) {
+            if (node.child_count != 2 ||
+                !syntax_is_punctuator(tokens, children[1],
+                                      preprocessing_op_or_punc::SEMICOLON))
+                /* = default, = delete, a pure-specifier */
+                return not_supported(n, "dcl.fct.def");
+            return special_member_declarator(c, n, children[0], access, false);
+        }
+        if (node.child_count != 2 ||
+            !syntax_is(tree, children[1], syntax_kind::function_body))
+            return not_supported(n, "dcl.fct.def.general");
+        analysis_result r =
+            special_member_declarator(c, n, children[0], access, true);
+        if (r == analysis_result::well_formed)
+            bodies.append(n);
+        return r;
+    }
     specified s;
     analysis_result r = decl_specifier_seq(children[0].index(), s, false);
     if (r != analysis_result::well_formed)
@@ -407,6 +427,9 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
 {
     if (syntax_is(tree, d, syntax_kind::member_declarator))
         return not_supported(d.index(), "class.mem");
+    if (!s.has_type && declares_special_member(c, d))
+        /* a cv-qualifier or another specifier with a constructor */
+        return not_supported(declaration, "class.ctor");
     qualified_type type = s.type;
     declarator_meaning m;
     function_cv = 0;
@@ -505,6 +528,14 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
         uint64_t size = size_of_type(type);
         bool is_void = record.kind == type_kind::fundamental &&
                        record.fundamental == fundamental_type::void_;
+        if (record.kind == type_kind::class_type &&
+            entity_table[record.entity].kind == entity_kind::class_type &&
+            (entity_table[record.entity].first_constructor ||
+             !trivial_class(record.entity)))
+            /* a member constructed or destroyed by its class's own
+               constructor or destructor: the implicitly-defined ones of
+               [class.default.ctor]/4 and [class.dtor]/11 */
+            return not_supported(declaration, "class.ctor");
         if (record.kind == type_kind::class_type && !size)
             /* [class.mem]/15: "The type of a non-static data member shall
                not be an incomplete type" */
@@ -561,6 +592,30 @@ analysis_result semantic_analysis::member_function_body(entity_index c,
 {
     const syntax_child *children = tree.children(definition);
     current_declaration = definition;
+    if (!syntax_is(tree, children[0], syntax_kind::decl_specifier_seq)) {
+        /* a constructor or destructor: the one this definition declared */
+        qualified_type type = qualified_type::make(
+            type_table.fundamental(fundamental_type::void_), cv_none);
+        declarator_meaning m;
+        function_cv = 0;
+        in_member_declarator = true;
+        analysis_result r = declarator(definition, children[0], type, m);
+        in_member_declarator = false;
+        if (r != analysis_result::well_formed)
+            return r;
+        last_declared = 0;
+        if (m.destructor) {
+            last_declared = entity_table[c].destructor;
+        } else {
+            for (entity_index k = entity_table[c].first_constructor; k;
+                 k = entity_table[k].next_constructor)
+                if (declared_by(k, definition))
+                    last_declared = k;
+        }
+        if (!last_declared)
+            return not_supported(definition, "class.ctor");
+        return special_member_body(definition, children[1]);
+    }
     specified s;
     analysis_result r = decl_specifier_seq(children[0].index(), s, false);
     if (r != analysis_result::well_formed)
