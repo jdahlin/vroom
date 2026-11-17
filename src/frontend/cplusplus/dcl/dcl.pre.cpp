@@ -648,11 +648,23 @@ analysis_result semantic_analysis::empty_declaration(node_index)
  */
 analysis_result semantic_analysis::simple_declaration(node_index n)
 {
-    const syntax_node &node = tree[n];
-    if (!node.child_count ||
-        !syntax_is(tree, tree.children(n)[0], syntax_kind::decl_specifier_seq))
+    uint32_t k = leading_gnu_attributes(n);
+    if (k >= tree[n].child_count ||
+        !syntax_is(tree, tree.children(n)[k], syntax_kind::decl_specifier_seq))
         return not_supported(n, "dcl.attr");
-    return init_declarators(n, tree.children(n)[0].index(), false);
+    return init_declarators(n, tree.children(n)[k].index(), false);
+}
+
+/* [ext:gnu_attributes] the number of gnu-attribute-specifiers (or
+   attribute-specifier-seqs of them alone) a declaration begins with: GCC
+   applies them to the declaration, as the decl-specifier-seq's */
+uint32_t semantic_analysis::leading_gnu_attributes(node_index n) const
+{
+    uint32_t k = 0;
+    while (k < tree[n].child_count && !tree.children(n)[k].is_token() &&
+           only_gnu_attributes(tree, tree.children(n)[k].index()))
+        k++;
+    return k;
 }
 
 /*
@@ -668,14 +680,19 @@ analysis_result semantic_analysis::simple_declaration(node_index n)
 analysis_result semantic_analysis::function_definition(node_index n)
 {
     const syntax_node &node = tree[n];
+    uint32_t k = leading_gnu_attributes(n);
+    if (k &&
+        (k >= node.child_count || !syntax_is(tree, tree.children(n)[k],
+                                             syntax_kind::decl_specifier_seq)))
+        return not_supported(n, "dcl.fct.def.general");
     if (node.child_count &&
-        !syntax_is(tree, tree.children(n)[0], syntax_kind::decl_specifier_seq))
+        !syntax_is(tree, tree.children(n)[k], syntax_kind::decl_specifier_seq))
         /* [class.mem]/12: a constructor or destructor (or a conversion
            function) defined outside its class */
         return special_member_definition(n);
     if (!node.child_count)
         return not_supported(n, "dcl.fct.def.general");
-    analysis_result r = init_declarators(n, tree.children(n)[0].index(), true);
+    analysis_result r = init_declarators(n, tree.children(n)[k].index(), true);
     if (r != analysis_result::well_formed)
         return r;
     entity_index f = last_declared;
@@ -710,8 +727,20 @@ analysis_result semantic_analysis::init_declarators(node_index declaration,
     if (r != analysis_result::well_formed)
         return r;
     const syntax_node &node = tree[declaration];
+    uint32_t first = 0;
+    while (first < node.child_count &&
+           !(syntax_is(tree, tree.children(declaration)[first],
+                       syntax_kind::decl_specifier_seq) &&
+             tree.children(declaration)[first].index() == specifiers)) {
+        /* [ext:gnu_attributes] before the decl-specifier-seq */
+        r = gnu_attribute_specifier(tree.children(declaration)[first].index(),
+                                    s);
+        if (r != analysis_result::well_formed)
+            return r;
+        first++;
+    }
     owned_array<syntax_child> items;
-    for (uint32_t i = 1; i < node.child_count; i++) {
+    for (uint32_t i = first + 1; i < node.child_count; i++) {
         syntax_child c = tree.children(declaration)[i];
         if (syntax_is(tree, c, syntax_kind::function_body))
             break;
@@ -816,7 +845,19 @@ analysis_result semantic_analysis::declare_with_initializer(
         return r;
     if (!m.has_id)
         return not_supported(declaration, "dcl.meaning");
-    if (m.aligned)
+    /* [ext:gnu_attributes] the declaration's and the declarator's */
+    uint64_t aligned = m.aligned;
+    if (s.aligned > aligned)
+        aligned = s.aligned;
+    uint32_t gnu_flags =
+        (m.gnu_flags | s.gnu_flags) & ~(gnu_aligned | gnu_packed);
+    token_index section = m.section;
+    if (!section)
+        section = s.section;
+    bool is_function_type =
+        type_table[type.unqualified()].kind == type_kind::function;
+    if ((aligned && (s.typedef_ || is_function_type)) ||
+        ((aligned || gnu_flags) && m.qualifier))
         return not_supported(declaration, "ext.gnu");
     if (m.qualifier &&
         type_table[type.unqualified()].kind == type_kind::function) {
@@ -879,6 +920,21 @@ analysis_result semantic_analysis::declare_with_initializer(
         r = declare(declaration, m.id, kind, type, s, definition, initialized,
                     declared_entity);
     last_declared = declared_entity;
+    if (r == analysis_result::well_formed && !s.typedef_ &&
+        (aligned || gnu_flags)) {
+        entity &x = entity_table[declared_entity];
+        /* GCC: "The section attribute specifies that a function lives in
+           a particular section"; on a variable of automatic storage
+           duration it is an error (clang: "'section' attribute only
+           applies to functions, global variables ...") */
+        if ((gnu_flags & gnu_section) && x.automatic)
+            return not_supported(declaration, "ext.gnu");
+        x.gnu_flags |= gnu_flags;
+        if (section)
+            x.section = section;
+        if (aligned > x.alignment)
+            x.alignment = static_cast<uint32_t>(aligned);
+    }
     /* [dcl.array]/8: the bound of an earlier declaration (declare took it)
        is the one the initializer fills */
     if (r == analysis_result::well_formed && kind == entity_kind::variable &&

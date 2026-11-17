@@ -771,6 +771,24 @@ libstdc++ and json), since sema cannot analyse a declaration kept as tokens.
   integer in a switch on a scoped enumeration is accepted.
   `src/test/cxx/run/enums.cpp`, `local-classes.cpp`, `static-members.cpp`;
   C5.1 1096 -> 1206, 0 wrong.  bench/cxx-sema.py not run (needs clang 23).
+  Then GCC's attributes ([ext:gnu_attributes], `ext/gnu/attribute.cpp`)
+  wherever GCC takes them: before a declaration (the 251 function
+  definitions `__attribute__((noinline))` sent to the constructor path),
+  among the decl-specifiers, after a declarator and after a function's
+  parameters.  noinline (noipa), always_inline, noreturn, weak, used,
+  section("...") and aligned on functions and variables (automatic ones
+  too) lower to the C symbol's flags, section and alignment; packed on a
+  non-static data member gives it alignment 1 in sema's layout and C's
+  (`ast_builder_type_record_complete`'s packed[]); the attributes that
+  change no code (unused, noclone, const, pure, format, ...) are
+  accepted.  Member functions' and static data members' symbol attributes
+  stay unsupported.  Fixed on the way: `ast_builder_integer` sign-extended
+  an unsigned 64-bit constant to C's 128 bits (`(unsigned __int128)
+  0xfedcba9876543210ULL` was negative).  `src/test/cxx/run/gnu-attributes.cpp`;
+  cxx-c-suites reads the C suite's vcc-xfail (autoinit_zero is vcc's
+  arm64 gap, not C++'s).  C5.1 1206 -> 1563, 0 wrong; not yet by what is
+  missing: [basic.lookup.unqual] 666, declarations kept as tokens 441,
+  [ext.gnu] 206, [class.mem] 190, [class.union] 98.
   Next: member functions of local and nested classes, in-class
   initializers of static members, unions, virtual functions.
 

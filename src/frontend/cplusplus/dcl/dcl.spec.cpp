@@ -1021,7 +1021,14 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
                 r = elaborated_enum_specifier(c.index(), class_type);
             else if (syntax_is(tree, c, syntax_kind::simple_type_specifier))
                 r = qualified_type_name(c.index(), class_type);
-            else
+            else if (syntax_is(tree, c, syntax_kind::gnu_attribute_specifier)) {
+                /* [ext:gnu_attributes] a decl-specifier: it applies to
+                   the declaration */
+                r = gnu_attribute_specifier(c.index(), s);
+                if (r != analysis_result::well_formed)
+                    return r;
+                continue;
+            } else
                 return not_supported(c.index());
             if (r != analysis_result::well_formed)
                 return r;

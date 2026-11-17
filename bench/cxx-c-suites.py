@@ -208,8 +208,14 @@ def one(t):
     ref = reference(suite, name, path, flags, wd)
     if not ref['valid']:
         return t, None, ref['why']
-    return t, [(level, *ours(suite, name, path, flags, level, ref, wd))
-               for level in state['levels']], None
+    results = [(level, *ours(suite, name, path, flags, level, ref, wd))
+               for level in state['levels']]
+    # a known bug of vcc's code generation (/* vcc-xfail: */, TODO.md) that
+    # the C suite counts as xfail is not the C++ front end's
+    if suite == 'vcc' and ct.exec_marks(src)[1]:
+        results = [(level, 'not yet', 'the C suite\'s vcc-xfail') if outcome == 'wrong'
+                   else (level, outcome, detail) for level, outcome, detail in results]
+    return t, results, None
 
 
 def init(levels, nocache, rt, rt_names):

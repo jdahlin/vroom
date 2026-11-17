@@ -128,6 +128,7 @@ class c_lowering
     bool without_linkage(qualified_type t) const;
     entity_index enclosing_function(entity_index e) const;
     uint32_t symbol(entity_index e, token_index at, int variant = 2);
+    void gnu_attributes(entity_index e, uint32_t s);
     void spelling(entity_index e, owned_buffer &out);
     /* a constructor or destructor called: its symbol for a call */
     uint32_t special_callee(entity_index e, token_index at);
@@ -414,6 +415,7 @@ ast_qualified_type c_lowering::class_type(entity_index e, token_index at)
     owned_array<const char *> names;
     owned_array<size_t> lengths;
     owned_array<uint32_t> aligned;
+    owned_array<uint8_t> packed;
     owned_buffer base_names;
     for (uint32_t i = 0; i < x.member_count; i++) {
         entity_index member = analysis.class_members[x.first_member + i];
@@ -431,6 +433,7 @@ ast_qualified_type c_lowering::class_type(entity_index e, token_index at)
             lengths.append(length);
         }
         aligned.append(m.alignment);
+        packed.append((m.gnu_flags & gnu_packed) != 0);
     }
     for (size_t i = 0, at_name = 0; i < names.size(); i++) {
         if (names[i])
@@ -446,10 +449,11 @@ ast_qualified_type c_lowering::class_type(entity_index e, token_index at)
         names.append("__empty");
         lengths.append(7);
         aligned.append(0);
+        packed.append(0);
     }
-    ast_builder_type_record_complete(c, made, fields.data(), names.data(),
-                                     lengths.data(), aligned.data(),
-                                     static_cast<uint32_t>(fields.size()));
+    ast_builder_type_record_complete(
+        c, made, fields.data(), names.data(), lengths.data(), aligned.data(),
+        packed.data(), static_cast<uint32_t>(fields.size()));
     for (uint32_t i = 0; i < x.member_count; i++) {
         entity_index member = analysis.class_members[x.first_member + i];
         if (ast_builder_type_record_offset(c, made, i) !=
@@ -568,6 +572,7 @@ uint32_t c_lowering::symbol(entity_index e, token_index at, int variant)
         s = ast_builder_symbol(c, AST_SYMBOL_VARIABLE, name.data(), name.size(),
                                t, AST_STORAGE_AUTO, 0, 1);
         *slot = s;
+        gnu_attributes(e, s);
         return s;
     }
     if (!itanium_symbol_name(analysis, tokens.pp, e, name.get(), variant))
@@ -588,6 +593,7 @@ uint32_t c_lowering::symbol(entity_index e, token_index at, int variant)
                                AST_STORAGE_STATIC, 0, 1);
         ast_builder_symbol_assembler_name(c, s, written.data(), written.size());
         *slot = s;
+        gnu_attributes(e, s);
         return s;
     }
     int storage = AST_STORAGE_NONE;
@@ -611,7 +617,38 @@ uint32_t c_lowering::symbol(entity_index e, token_index at, int variant)
                            0);
     *slot = s;
     ast_builder_toplevel(c, s);
+    gnu_attributes(e, s);
     return s;
+}
+
+/* [ext:gnu_attributes] what the entity's GNU attributes ask of its
+   symbol, as C's front end gives them */
+void c_lowering::gnu_attributes(entity_index e, uint32_t s)
+{
+    const entity &x = analysis.entity_table[e];
+    uint32_t flags = 0;
+    if (x.gnu_flags & gnu_noinline)
+        flags |= AST_SYMBOL_FLAG_NOINLINE;
+    if (x.gnu_flags & gnu_always_inline)
+        flags |= AST_SYMBOL_FLAG_ALWAYS_INLINE;
+    if (x.gnu_flags & gnu_noreturn)
+        flags |= AST_SYMBOL_FLAG_NORETURN;
+    if (x.gnu_flags & gnu_weak)
+        flags |= AST_SYMBOL_FLAG_WEAK;
+    if (flags)
+        ast_builder_symbol_flags_add(c, s, flags);
+    if (x.gnu_flags & gnu_used)
+        ast_builder_symbol_keep(c, s);
+    if (x.section) {
+        /* the string-literal's characters between its quotes (sema took
+           one with no escape sequence) */
+        owned_buffer written;
+        tokens.spelling(x.section, written.get());
+        ast_builder_symbol_section(c, s, written.data() + 1,
+                                   written.size() - 2);
+    }
+    if (x.kind == entity_kind::variable && x.alignment)
+        ast_builder_symbol_align(c, s, x.alignment);
 }
 
 /* [abi:mangling-special-ctor-dtor]: an inline constructor or destructor

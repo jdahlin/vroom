@@ -305,6 +305,10 @@ analysis_result semantic_analysis::function(node_index parameters,
                                  preprocessing_op_or_punc::RIGHT_PARENTHESIS)) {
             closed = true;
         } else if (!closed) {
+            /* [ext:gnu_attributes] after the parameters: the
+               declarator's (declarator takes them) */
+            if (syntax_is(tree, c, syntax_kind::gnu_attribute_specifier))
+                continue;
             /* [dcl.fct]/1: the cv-qualifier-seq of a member function's
                declarator ([class.mfct.non-static]/5) */
             standard_keyword kw = standard_keyword::none;

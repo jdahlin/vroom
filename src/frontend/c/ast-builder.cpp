@@ -96,7 +96,8 @@ void ast_builder_type_record_complete(cc *c, ast_qualified_type record,
                                       const ast_qualified_type *fields,
                                       const char *const *names,
                                       const size_t *lengths,
-                                      const uint32_t *aligned, uint32_t count)
+                                      const uint32_t *aligned,
+                                      const uint8_t *packed, uint32_t count)
 {
     tag *r = &c->tags[AST_TYPE(c, record)->aux];
 
@@ -108,7 +109,7 @@ void ast_builder_type_record_complete(cc *c, ast_qualified_type record,
         r->f[i].name = ast_builder_identifier(c, names[i], lengths[i]);
     }
     r->flags |= AST_RECORD_FLAG_COMPLETE;
-    cc_layout_record(c, r, aligned, NULL);
+    cc_layout_record(c, r, aligned, packed);
 }
 
 void ast_builder_type_record_in_memory(cc *c, ast_qualified_type record)
@@ -173,8 +174,9 @@ void ast_builder_symbol_keep(cc *c, uint32_t s)
         ast_builder_toplevel(c, s);
 }
 
-void ast_builder_symbol_assembler_name(cc *c, uint32_t s, const char *name,
-                                       size_t length)
+/* a string of the symbol's attributes: its index + 1 */
+static uint32_t ast_builder_attribute_string(cc *c, const char *name,
+                                             size_t length)
 {
     char *keep = (char *)cc_heap_allocate(c, length + 1);
     uint32_t i = c->nstr++;
@@ -183,7 +185,27 @@ void ast_builder_symbol_assembler_name(cc *c, uint32_t s, const char *name,
     keep[length] = 0;
     c->strs[i] = VCC_LITERAL(cstr, keep, (uint32_t)length + 1, 1,
                              (uint8_t)LEX_TOKEN_STRING);
-    ast_builder_attributes(c, s)->asmname = i + 1;
+    return i + 1;
+}
+
+void ast_builder_symbol_assembler_name(cc *c, uint32_t s, const char *name,
+                                       size_t length)
+{
+    ast_builder_attributes(c, s)->asmname =
+        ast_builder_attribute_string(c, name, length);
+}
+
+void ast_builder_symbol_section(cc *c, uint32_t s, const char *name,
+                                size_t length)
+{
+    ast_builder_attributes(c, s)->section =
+        ast_builder_attribute_string(c, name, length);
+}
+
+void ast_builder_symbol_align(cc *c, uint32_t s, uint32_t alignment)
+{
+    if (alignment > c->syms[s].align)
+        c->syms[s].align = alignment;
 }
 
 void ast_builder_symbol_flags_add(cc *c, uint32_t s, uint32_t flags)
@@ -242,6 +264,12 @@ uint32_t ast_builder_list(cc *c, const uint32_t *items, uint32_t count)
 
 uint32_t ast_builder_integer(cc *c, ast_qualified_type t, int64_t value)
 {
+    /* the constant's value as C keeps it, in 128 bits: an unsigned type's
+       is the 64 bits zero-extended */
+    int k = AST_TYPE_KIND(c, t);
+    if (k == AST_TYPE_UNSIGNED_LONG || k == AST_TYPE_UNSIGNED_LONG_LONG ||
+        k == AST_TYPE_UINT128)
+        return cc_node_integer_new(c, (i128)(uint64_t)value, t, 0);
     return cc_node_integer_new(c, (i128)value, t, 0);
 }
 

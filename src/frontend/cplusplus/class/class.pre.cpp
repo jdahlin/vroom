@@ -559,6 +559,12 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
         return r;
     if (!m.has_id || m.qualifier)
         return not_supported(declaration, "class.mem");
+    /* [ext:gnu_attributes] the declaration's and the declarator's */
+    if (s.aligned > m.aligned)
+        m.aligned = s.aligned;
+    m.gnu_flags |= s.gnu_flags;
+    if (!m.section)
+        m.section = s.section;
     if (!s.has_type)
         return not_supported(declaration, "dcl.type");
     if (s.typedef_)
@@ -576,6 +582,12 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
     bool is_function =
         type_table[type.unqualified()].kind == type_kind::function;
     if (is_function && m.aligned)
+        return not_supported(declaration, "ext.gnu");
+    /* a member's symbol attributes (a member function's, a static data
+       member's) are not analysed yet; on a non-static data member they
+       are GCC's error */
+    if (m.gnu_flags & (gnu_noinline | gnu_always_inline | gnu_noreturn |
+                       gnu_weak | gnu_used | gnu_section))
         return not_supported(declaration, "ext.gnu");
     /* [class.mem]/20: "If T is the name of a class, then each of the
        following shall have a name different from T: every static data
@@ -686,8 +698,10 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
         uint32_t alignment = static_cast<uint32_t>(alignment_of_type(type));
         if (!alignment)
             return not_supported(declaration, "class.mem");
-        /* [ext:gnu_attributes] aligned raises a member's alignment (only
-           packed lowers it) */
+        /* [ext:gnu_attributes] aligned raises a member's alignment;
+           packed lowers it to one byte, which aligned raises */
+        if (m.gnu_flags & gnu_packed)
+            alignment = 1;
         if (m.aligned > alignment)
             alignment = static_cast<uint32_t>(m.aligned);
         e = entity_table.make(entity_kind::variable, name, c);
@@ -696,6 +710,7 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
         entity_table[e].defined = true;
         entity_table[e].field = entity_table[c].member_count;
         entity_table[e].alignment = static_cast<uint32_t>(m.aligned);
+        entity_table[e].gnu_flags = m.gnu_flags & gnu_packed;
         /* [class.mem]/19 (Note): "Non-static data members of a (non-union)
            class with the same access control and non-zero size are
            allocated so that later members have higher addresses within a

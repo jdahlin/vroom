@@ -218,6 +218,19 @@ enum class constness : uint8_t { constant, not_constant, unknown };
 /* [special]: a member function a class's objects are made and ended by */
 enum class special_member : uint8_t { none, constructor, destructor };
 
+/* [ext:gnu_attributes] the GNU attributes analysis has rules for, as a
+   function's or variable's flags */
+enum gnu_attribute_flag : uint32_t {
+    gnu_noinline = 1,
+    gnu_always_inline = 2,
+    gnu_noreturn = 4,
+    gnu_weak = 8,
+    gnu_used = 16,
+    gnu_section = 32,
+    gnu_aligned = 64,
+    gnu_packed = 128,
+};
+
 struct entity {
     entity_kind kind = entity_kind::none;
     linkage linkage_of_name = linkage::none;
@@ -307,6 +320,12 @@ struct entity {
     /* a class: its user-declared constructors (a chain through
        next_constructor) and destructor, 0 if none */
     entity_index first_constructor = 0, destructor = 0;
+    /* a function or variable: [ext:gnu_attributes] the GNU attributes
+       its declarations gave it (gnu_attribute_flag) and a section
+       attribute's string-literal, 0 if none; its aligned attribute's
+       alignment is alignment */
+    uint32_t gnu_flags = 0;
+    token_index section = 0;
     /* [dcl.link]/1: a function or variable with C language linkage,
        whose name is its symbol */
     bool c_language_linkage = false;
@@ -818,6 +837,11 @@ class semantic_analysis
         bool declares_class = false;
         /* ... and it was an enum-specifier */
         bool declares_enumeration = false;
+        /* [ext:gnu_attributes] the GNU attributes among the
+           decl-specifiers and before them */
+        uint32_t gnu_flags = 0;
+        token_index section = 0;
+        uint64_t aligned = 0;
     };
     analysis_result decl_specifier_seq(node_index seq, specified &s,
                                        bool parameter);
@@ -843,8 +867,12 @@ class semantic_analysis
            a member of it again (a definition outside the class) */
         entity_index qualifier = 0;
         /* [ext:gnu_attributes] the alignment an aligned attribute of the
-           declarator asks for, 0 if none */
+           declarator asks for, 0 if none; the other GNU attributes of the
+           declarator (gnu_attribute_flag) and a section attribute's
+           string-literal */
         uint64_t aligned = 0;
+        uint32_t gnu_flags = 0;
+        token_index section = 0;
         /* the declarator-id is ~ class-name: a destructor ([class.dtor]/1) */
         bool destructor = false;
     };
@@ -870,10 +898,18 @@ class semantic_analysis
                               declarator_meaning &m);
     /* [dcl.fct] */
     analysis_result function(node_index parameters, qualified_type &type);
-    /* [ext:gnu_attributes] the attributes of a declarator analysis has
-       rules for: aligned */
+    /* [ext:gnu_attributes] the attributes of a gnu-attribute-specifier
+       (or a gnu-attribute-specifier-seq) analysis has rules for */
+    struct gnu_attributes {
+        uint64_t aligned = 0;
+        uint32_t flags = 0;
+        token_index section = 0;
+    };
+    analysis_result gnu_attribute_specifier(node_index n, gnu_attributes &g);
     analysis_result gnu_attribute_specifier(node_index n,
                                             declarator_meaning &m);
+    analysis_result gnu_attribute_specifier(node_index n, specified &s);
+    uint32_t leading_gnu_attributes(node_index n) const;
     /* the parameters of the function declarator analysed last: a function
        definition's, with the types they have in its body ([dcl.fct]/5's
        adjustment, top-level cv-qualifiers kept) */
