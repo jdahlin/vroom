@@ -729,8 +729,20 @@ libstdc++ and json), since sema cannot analyse a declaration kept as tokens.
   object of a class with a destructor but no constructor is now lowered.
   `src/test/cxx/run/implicit-members.cpp`; C5.1 unchanged at 1096.
   Unsupported still: arrays of such classes, such classes by value.
-  Next: elaborated-type-specifiers in block and class scope, static data
-  members, classes passed by address.
+  Then classes non-trivial for the purposes of calls as parameters
+  ([abi:calls]): lowered as a pointer parameter (the callee's uses are
+  the object at it); the caller constructs a temporary (by the copy
+  constructor, or a prvalue's constructor in place), passes its address
+  and destroys it at the end of the full-expression (expression
+  statements, returns, declarations; `full_expression`).  Calls between
+  vcc and clang objects agree both ways (checked by hand on a
+  caller/callee pair).  Unsupported: such an argument in a conditional
+  operand or outside a statement, and returning such a class (Itanium
+  returns it through x8 whatever its size: C's code generators need a
+  record flag for that).  `src/test/cxx/run/by-address.cpp`, LLVM's
+  `llvm-2003-09-29-NonPODsByValue.cpp`; C5.1 unchanged at 1096.
+  Next: returning classes by address, elaborated-type-specifiers in block
+  and class scope, static data members.
 
 ### S5. Conversions by user code, lambdas, the rest of [expr]
 
