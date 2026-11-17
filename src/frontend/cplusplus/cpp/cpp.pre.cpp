@@ -42,6 +42,7 @@ preprocessor::preprocessor(source_files &f, const preprocessor_options &o)
         condition_behavior.long_long_width = 64;
     condition_file.from_memory("", "", 0);
     condition_lexer.files = &files;
+    files.cache = o.cache; /* OPTIMIZATION: the header cache */
 }
 
 /* [cpp.pre]: the directive names "appearing after a # in the syntax";
@@ -193,7 +194,8 @@ preprocessing_token preprocessor::read_file_token(bool header_name_permitted)
             size_t depth = contexts.size();
             execute_directive(t);
             /* a directive that made tokens (#embed): they are read first */
-            if (contexts.size() > depth) {
+            /* OPTIMIZATION: or an #include replayed from the header cache */
+            if (contexts.size() > depth || replay_next < replay_tokens.size()) {
                 preprocessing_token none;
                 none.kind = preprocessing_token_kind::placemarker;
                 return none;
@@ -238,6 +240,7 @@ void preprocessor::leave_file()
         conditionals.resize(conditionals.size() - 1);
     }
     guard_end_of_file(); /* OPTIMIZATION: the multiple-include guard */
+    cache_file_end();    /* OPTIMIZATION: the header cache */
     inclusions.resize(inclusions.size() - 1);
 }
 
@@ -309,6 +312,7 @@ void preprocessor::execute_directive(const preprocessing_token &hash)
     if (name.kind == preprocessing_token_kind::pp_number &&
         behavior.has(extension::gnu_line_marker)) {
         guard_directive(directive_kind::line); /* OPTIMIZATION: the guard */
+        cache_spoil(); /* OPTIMIZATION: the header cache */
         gnu_line_marker(name);
         return;
     }
@@ -344,6 +348,7 @@ void preprocessor::execute_directive(const preprocessing_token &hash)
         directive_undef(name);
         return;
     case directive_kind::line:
+        cache_spoil(); /* OPTIMIZATION: the header cache */
         directive_line(name);
         return;
     case directive_kind::error:
@@ -371,6 +376,7 @@ void preprocessor::execute_directive(const preprocessing_token &hash)
         gnu_ident_directive(name);
         return;
     case directive_kind::embed: /* [ext.clang] */
+        cache_spoil();          /* OPTIMIZATION: the header cache */
         clang_embed_directive(name);
         return;
     default:
@@ -389,8 +395,29 @@ void preprocessor::execute_directive(const preprocessing_token &hash)
 preprocessing_token preprocessor::next()
 {
     preprocessing_token t;
+    /* OPTIMIZATION: the tokens of an #include replayed from the header
+       cache, already replaced; the last leaves what a macro replaced by
+       nothing at the header's end left */
+    auto replayed = [this]() {
+        preprocessing_token r = replay_tokens[replay_next++];
+        if (replay_next == replay_tokens.size()) {
+            replay_tokens.clear();
+            replay_next = 0;
+            if (replay_pending_flags) {
+                pending_flags = true;
+                pending_start_of_line = replay_start_of_line;
+                pending_white_space = replay_white_space;
+            }
+        }
+        return r;
+    };
+    if (replay_next < replay_tokens.size())
+        return replayed();
     for (;;) {
         read_unexpanded(t);
+        if (t.kind == preprocessing_token_kind::placemarker &&
+            replay_next < replay_tokens.size())
+            return replayed();
         if (embed_continues_line && read_from_file) {
             t.at_start_of_line = false;
             embed_continues_line = false;
@@ -407,8 +434,10 @@ preprocessing_token preprocessor::next()
         if (t.kind == preprocessing_token_kind::identifier) {
             if (!t.expansion && t.at_start_of_line &&
                 behavior.has(language_feature::modules) &&
-                module_or_import_directive(t))
+                module_or_import_directive(t)) {
+                cache_spoil(); /* OPTIMIZATION: the header cache */
                 break;
+            }
             if (t.not_replaceable)
                 break;
             uint32_t id = identifier(t);
@@ -416,12 +445,13 @@ preprocessing_token preprocessor::next()
             if (identifiers[id].poisoned && !t.expansion)
                 diagnostics.issue(diagnostic_id::err_pp_used_poisoned_id,
                                   t.location);
-            int32_t m = identifiers[id].macro;
+            int32_t m = macro_of(id); /* OPTIMIZATION: the header cache */
             if (m >= 0 && replace_macro(t, m))
                 continue;
         }
         break;
     }
+    cache_output(t); /* OPTIMIZATION: the header cache */
     return t;
 }
 

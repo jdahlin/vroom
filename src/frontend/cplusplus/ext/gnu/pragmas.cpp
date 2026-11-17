@@ -101,6 +101,7 @@ bool preprocessor::gnu_pragma(const preprocessing_token *t, size_t count)
         if (!pragma_macro_name(*this, t, count, at, name))
             return true;
         uint32_t id = identifier(name.data(), name.size());
+        cache_spoil(); /* OPTIMIZATION: the header cache */
         if (spelled_as(files, t[0], "push_macro")) {
             pushed_macros.append({id, identifiers[id].macro});
             return true;
@@ -141,6 +142,9 @@ bool preprocessor::gnu_pragma(const preprocessing_token *t, size_t count)
             uint32_t id = identifier(t[i]);
             if (identifiers[id].poisoned)
                 continue;
+            /* OPTIMIZATION: the header cache is not used from here on */
+            cache_spoil();
+            cache_disabled = true;
             if (identifiers[id].macro >= 0)
                 diagnostics.issue(diagnostic_id::pp_poisoning_existing_macro,
                                   t[i].location);

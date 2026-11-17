@@ -31,6 +31,12 @@ void preprocessor::gnu_define_dynamic_macros()
 bool preprocessor::gnu_dynamic_macro(const macro_definition &m,
                                      owned_buffer &text)
 {
+    /* OPTIMIZATION: the header cache cannot replay these */
+    if (m.dynamic == dynamic_macro::counter ||
+        m.dynamic == dynamic_macro::include_level ||
+        m.dynamic == dynamic_macro::base_file ||
+        m.dynamic == dynamic_macro::timestamp)
+        cache_spoil();
     switch (m.dynamic) {
     case dynamic_macro::counter:
         vbuffer_format_append(text.get(), "%u", counter++);

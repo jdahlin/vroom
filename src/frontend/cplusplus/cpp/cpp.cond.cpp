@@ -254,7 +254,7 @@ static bool evaluate_defined(preprocessor &p,
             << preprocessing_op_or_punc_spelling(alternative);
         return false;
     }
-    int32_t m = p.identifiers[p.identifier(r.token)].macro;
+    int32_t m = p.macro_of(p.identifier(r.token)); /* OPTIMIZATION: cache */
     v.bits = m >= 0;
     v.is_unsigned = false;
     if (m >= 0)
@@ -820,7 +820,7 @@ bool preprocessor::evaluate_defined_condition(const preprocessing_token &name,
         return false;
     }
     uint32_t operand = identifier(t);
-    int32_t m = identifiers[operand].macro;
+    int32_t m = macro_of(operand); /* OPTIMIZATION: the header cache */
     if (m >= 0)
         macros[m].used = true;
     defined_condition_operand = operand; /* OPTIMIZATION: the guard */

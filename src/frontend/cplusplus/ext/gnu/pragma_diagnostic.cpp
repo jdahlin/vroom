@@ -29,6 +29,11 @@ void preprocessor::gnu_pragma_diagnostic(const preprocessing_token *t,
     }
     const preprocessing_token &kind = t[1];
     if (spelled_as(files, kind, "push") || spelled_as(files, kind, "pop")) {
+        /* OPTIMIZATION: the header cache replays the mappings */
+        if (spelled_as(files, kind, "push"))
+            cache_effect(effect_diagnostic_push, 0, 0, 0, nullptr);
+        else
+            cache_effect(effect_diagnostic_pop, 0, 0, 0, nullptr);
         if (spelled_as(files, kind, "push"))
             diagnostics.push_mappings();
         else if (!diagnostics.pop_mappings())
@@ -84,7 +89,10 @@ void preprocessor::gnu_pragma_diagnostic(const preprocessing_token *t,
     char group[64];
     snprintf(group, sizeof group, "%.*s", (int)option.size() - 2,
              option.data() + 2);
-    if (!diagnostics.map_group(group, severity))
+    if (diagnostics.map_group(group, severity))
+        cache_effect(effect_diagnostic_map, (uint64_t)severity, 0, 0,
+                     group); /* OPTIMIZATION: the header cache */
+    else
         diagnostics
             .issue(diagnostic_id::warn_pragma_diagnostic_unknown_warning,
                    t[2].location)

@@ -552,12 +552,26 @@ recorded here:
   | each libstdc++ header alone, after | 398 | 163 | 4.2 s | | 9.6 s | 2.27 |
 
   Phases 1-7 are still 2.5x clang -E on json.hpp, and a sample is now flat
-  (the lexer, `lookup_keyword`, phase 7's `convert`, `stat`).  Next: the
-  old preprocessor's header cache (`frontend/pp/header-cache-*.cpp`:
-  regions recorded with the macros they read and wrote, replayed in a
-  later TU) behind the same kind of hook at `directive_include`; it pays
-  only across TUs, so it comes with a batch or vccd driver for cxxparse
-  (S5).  Gates: `bench/cxx-lex.py` 121/121, `bench/cxx-pp.py` as the base
+  (the lexer, `lookup_keyword`, phase 7's `convert`, `stat`).
+  - the header cache (`cpp/cpp.header_cache.cpp`, after the old
+    preprocessor's `frontend/pp/header-cache-*.cpp`): each top-level
+    `#include` is recorded with its inputs (every macro read before it is
+    written, named by where its definition is; the `#pragma once` table)
+    and effects (definitions, sources entered, the once/guard/#import
+    tables, `#pragma diagnostic`'s mappings, nested regions), its tokens a
+    rope in the cache's own location space; a later TU replays a variant
+    whose inputs hold.  Hooks: `macro_of` at every macro read,
+    `cache_write`, `cache_replay`/`cache_record` in `directive_include`,
+    `cache_file_end` in `leave_file`, `cache_output` in `next()`, and
+    `cache_spoil` where a replay could not repeat what happened.
+    `cxxparse -batch [-header-cache]` runs TUs in one process;
+    `bench/cxx-header-cache.py` checks the tokens and diagnostics are the
+    same both ways.  Each libstdc++ header alone plus json.hpp, 110 TUs,
+    7.5 M tokens: phases 1-7 2.84 s -> 1.84 s, 1457 includes replayed,
+    4.9 M tokens replayed; clang's Preprocessor tests twice (748 TUs):
+    the same tokens, few hits (most of them issue diagnostics).
+  Next: the lexer's SIMD fast paths (the old lexer's NEON/AVX scanning);
+  then the replayed sources' text shared instead of read again.  Gates: `bench/cxx-lex.py` 121/121, `bench/cxx-pp.py` as the base
   (its `-dM` column differs by clang's version string only), and
   `bench/cxx-parse.py` identical.
 - **S1 The parser without build-and-rewind** (3.0 item 3): recovery, the

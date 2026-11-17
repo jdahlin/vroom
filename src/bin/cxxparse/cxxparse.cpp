@@ -32,6 +32,14 @@
  *                                            (bench/cxx-parse-speed.py takes
  *                                            the difference)
  *   cxxparse -selftest                       the parts no grammar uses yet
+ *   cxxparse -batch [-header-cache] ... FILE...
+ *                                            each FILE in turn, as its own
+ *                                            translation unit, in one process;
+ *                                            -header-cache shares the
+ *                                            preprocessor's header cache
+ *                                            between them (OPTIMIZATION,
+ *                                            cpp/cpp.header_cache.cpp; -stats
+ *                                            adds its counters at the end)
  *
  * OPTIONS are cxxlex's (src/bin/cxxlex/command-line.h).  The exit status is
  * 1 if a diagnostic was an error, 2 if the file cannot be read.
@@ -286,6 +294,12 @@ static void write_expression_claims(const syntax_tree &tree,
     }
 }
 
+static int translate(command_line &options, const char *path, bool dump_syntax,
+                     bool dump_declarations, bool dump_tokens, bool stats,
+                     bool phase4_only, bool debug_fallbacks,
+                     bool expression_claims, bool declaration_claims,
+                     bool tokens_only);
+
 int main(int argc, char **argv)
 {
     command_line options("cxxparse");
@@ -293,7 +307,8 @@ int main(int argc, char **argv)
          stats = false, phase4_only = false, debug_fallbacks = false,
          expression_claims = false, declaration_claims = false,
          tokens_only = false;
-    const char *path = nullptr;
+    owned_array<const char *> paths;
+    bool batch = false, use_cache = false;
 
     for (int i = 1; i < argc; i++) {
         const char *a = argv[i];
@@ -317,23 +332,62 @@ int main(int argc, char **argv)
             stats = true;
         else if (!strcmp(a, "-tokens-only"))
             tokens_only = true;
+        else if (!strcmp(a, "-batch"))
+            batch = true;
+        else if (!strcmp(a, "-header-cache"))
+            use_cache = true;
         else if (!strcmp(a, "-fsyntax-only"))
             ;
         else if (options.option(argc, argv, i))
             ;
         else if (a[0] != '-' || !a[1])
-            path = a;
+            paths.append(a);
     }
-    if (!path) {
+    if (paths.empty() || (paths.size() > 1 && !batch)) {
         fprintf(
             stderr,
             "usage: cxxparse [-fsyntax-only|-dump-syntax|"
             "-dump-declarations|-dump-tokens|-expression-claims|"
             "-declaration-claims|-stats [-tokens-only]] [clang -cc1 options] "
-            "FILE\n       cxxparse -selftest\n");
+            "FILE\n       cxxparse -batch [-header-cache] ... FILE...\n"
+            "       cxxparse -selftest\n");
         return 2;
     }
     options.apply();
+    header_cache cache;
+    if (use_cache)
+        options.pp_options.cache = &cache;
+    int status = 0;
+    for (const char *path : paths) {
+        int s = translate(options, path, dump_syntax, dump_declarations,
+                          dump_tokens, stats, phase4_only, debug_fallbacks,
+                          expression_claims, declaration_claims, tokens_only);
+        if (s > status)
+            status = s;
+    }
+    if (stats && use_cache) {
+        owned_buffer out;
+        vbuffer_format_append(
+            out.get(),
+            "header-cache-hits %llu\nheader-cache-misses %llu\n"
+            "header-cache-recorded %llu\nheader-cache-not-kept %llu\n"
+            "header-cache-tokens-replayed %llu\n",
+            (unsigned long long)cache.hits, (unsigned long long)cache.misses,
+            (unsigned long long)cache.recorded,
+            (unsigned long long)cache.spoiled,
+            (unsigned long long)cache.tokens_replayed);
+        fwrite(out.data(), 1, out.size(), stdout);
+    }
+    return status;
+}
+
+/* one translation unit */
+static int translate(command_line &options, const char *path, bool dump_syntax,
+                     bool dump_declarations, bool dump_tokens, bool stats,
+                     bool phase4_only, bool debug_fallbacks,
+                     bool expression_claims, bool declaration_claims,
+                     bool tokens_only)
+{
 
     diagnostic_consumer diagnostics(options.diagnostic_settings);
     source_files files(options.behavior, diagnostics);

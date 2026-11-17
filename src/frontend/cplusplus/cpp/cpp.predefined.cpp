@@ -241,6 +241,7 @@ bool preprocessor::replace_dynamic(preprocessing_token &name,
         /* [cpp.predefined]/1: "The date of translation of the source file",
            "The time of translation" */
         diagnostics.issue(diagnostic_id::warn_pp_date_time, name.location);
+        cache_spoil(); /* OPTIMIZATION: the header cache */
         if (m.dynamic == dynamic_macro::date)
             vbuffer_string_append(text.get(), date);
         else

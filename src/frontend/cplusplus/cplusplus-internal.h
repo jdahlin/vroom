@@ -286,6 +286,19 @@ inline bool is_operator(const token &t, preprocessing_op_or_punc op)
            preprocessing_op_or_punc_primary(t.op_or_punc) == op;
 }
 
+/* OPTIMIZATION: the header cache's effects (cpp/cpp.header_cache.cpp) */
+enum cache_effect_kind : uint8_t {
+    effect_write,
+    effect_source,
+    effect_once,
+    effect_guard,
+    effect_entered,
+    effect_child,
+    effect_diagnostic_push,
+    effect_diagnostic_pop,
+    effect_diagnostic_map,
+};
+
 } // namespace cplusplus
 
 #endif

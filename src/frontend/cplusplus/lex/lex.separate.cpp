@@ -164,6 +164,18 @@ void source_files::place(entry &e)
     e.lex.files = this;
     /* one location past the end: the end of file has a place of its own */
     next_base += e.file.size + 1;
+    /* OPTIMIZATION: the header cache's source of the same text */
+    if (cache) {
+        bool text = e.scratch || e.name.c_str()[0] == '<';
+        e.cache_source =
+            cache->source_of(e.name.c_str(), strlen(e.name.c_str()),
+                             e.file.physical_characters, e.file.size, text);
+        size_t have = cache_bases.size();
+        if (have <= e.cache_source)
+            memset(cache_bases.extend(e.cache_source + 1 - have), 0,
+                   (e.cache_source + 1 - have) * sizeof(source_location));
+        cache_bases[e.cache_source] = e.base;
+    }
 }
 
 source_files::entry *source_files::open(const char *path)

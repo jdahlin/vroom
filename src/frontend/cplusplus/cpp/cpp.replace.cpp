@@ -299,6 +299,7 @@ int32_t preprocessor::add_definition(const macro_definition &m)
     int32_t index = (int32_t)macros.size() - 1;
     identifiers[m.name].macro = index;
     definition_order.append(index);
+    cache_write(m.name, index); /* OPTIMIZATION: the header cache */
     return index;
 }
 
@@ -517,7 +518,7 @@ void preprocessor::directive_define(const preprocessing_token &directive)
        directive provided that the second definition is an object-like macro
        definition and the two replacement lists are identical, otherwise the
        program is ill-formed": [impl.clang] clang warns */
-    int32_t previous = identifiers[m.name].macro;
+    int32_t previous = macro_of(m.name); /* OPTIMIZATION: cache */
     if (previous >= 0 && !system_header_at(name.location)) {
         const macro_definition &old = macros[previous];
         if (is_language_defined(old))
@@ -679,13 +680,14 @@ void preprocessor::directive_undef(const preprocessing_token &directive)
         return;
     }
     uint32_t id = identifier(name);
-    int32_t m = identifiers[id].macro;
+    int32_t m = macro_of(id); /* OPTIMIZATION: the header cache */
     if (m >= 0) {
         if (is_language_defined(macros[m]) && !system_header_at(name.location))
             diagnostics.issue(diagnostic_id::ext_pp_undef_builtin_macro,
                               name.location);
         warn_unused_macro(m);
         identifiers[id].macro = -1;
+        cache_write(id, -1); /* OPTIMIZATION: the header cache */
     }
     expect_end_of_directive("undef");
 }

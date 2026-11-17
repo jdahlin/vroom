@@ -225,13 +225,21 @@ void preprocessor::directive_include(const preprocessing_token &name,
            inclusion cycle ends) */
         diagnostics.issue(diagnostic_id::err_pp_include_too_deep, at);
         include_limit_reached = true;
+        cache_spoil(); /* OPTIMIZATION: the header cache */
         return;
     }
     struct stat st;
     stat(path.data(), &st);
+    bool once = false;
     for (const included_once &o : once_files)
         if (o.device == (uint64_t)st.st_dev && o.inode == (uint64_t)st.st_ino)
-            return;
+            once = true;
+    /* OPTIMIZATION: the header cache */
+    cache_once_read((uint64_t)st.st_dev, (uint64_t)st.st_ino, once);
+    if (once)
+        return;
+    if (kind == directive_kind::import)
+        cache_spoil(); /* OPTIMIZATION: the header cache */
     /* [ext.clang] #import: not a file entered before, the main file too */
     if (kind == directive_kind::import)
         for (const included_once &o : entered_files)
@@ -239,8 +247,13 @@ void preprocessor::directive_include(const preprocessing_token &name,
                 o.inode == (uint64_t)st.st_ino)
                 return;
     entered_files.append({(uint64_t)st.st_dev, (uint64_t)st.st_ino});
+    cache_effect(effect_entered, (uint64_t)st.st_dev, (uint64_t)st.st_ino, 0,
+                 nullptr); /* OPTIMIZATION: the header cache */
     if (guard_skips((uint64_t)st.st_dev, (uint64_t)st.st_ino))
         return; /* OPTIMIZATION: the multiple-include guard */
+    if (cache_replay((uint64_t)st.st_dev, (uint64_t)st.st_ino, directory,
+                     system))
+        return; /* OPTIMIZATION: the header cache */
     source_files::entry *file = files.open(path.data());
     if (!file) {
         diagnostics.issue(diagnostic_id::err_pp_file_not_found, at)
@@ -261,6 +274,7 @@ void preprocessor::directive_include(const preprocessing_token &name,
     entered.guard_state = 1;
     entered.device = (uint64_t)st.st_dev;
     entered.inode = (uint64_t)st.st_ino;
+    cache_record(directory, system); /* OPTIMIZATION: the header cache */
 }
 
 /*
@@ -298,15 +312,19 @@ void preprocessor::guard_directive(directive_kind kind)
 void preprocessor::guard_end_of_file()
 {
     inclusion &in = inclusions.back();
-    if (in.guard_state == 3)
+    if (in.guard_state == 3) {
         guarded_files.append({in.device, in.inode, in.guard_name});
+        if (!recordings.empty()) /* OPTIMIZATION: the header cache */
+            cache_effect(effect_guard, in.device, in.inode,
+                         cache_name(in.guard_name), nullptr);
+    }
 }
 
 bool preprocessor::guard_skips(uint64_t device, uint64_t inode)
 {
     for (const guarded_file &g : guarded_files)
         if (g.device == device && g.inode == inode)
-            return identifiers[g.name].macro >= 0;
+            return macro_of(g.name) >= 0; /* the header cache */
     return false;
 }
 
@@ -314,8 +332,11 @@ bool preprocessor::guard_skips(uint64_t device, uint64_t inode)
 void preprocessor::include_once()
 {
     struct stat st;
-    if (stat(inclusions.back().file->name.c_str(), &st) == 0)
+    if (stat(inclusions.back().file->name.c_str(), &st) == 0) {
         once_files.append({(uint64_t)st.st_dev, (uint64_t)st.st_ino});
+        cache_effect(effect_once, (uint64_t)st.st_dev, (uint64_t)st.st_ino, 0,
+                     nullptr); /* OPTIMIZATION: the header cache */
+    }
 }
 
 } // namespace cplusplus

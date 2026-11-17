@@ -251,7 +251,13 @@ bool diagnostic_consumer::pop_mappings()
 diagnostic_message &diagnostic_consumer::issue(diagnostic_id id,
                                                source_location location)
 {
-    return issue_as(id, location, severity_now(id));
+    diagnostic_severity severity = severity_now(id);
+    /* OPTIMIZATION: the header cache: hidden only by this translation
+       unit's #pragma diagnostic */
+    if (!suppressed && severity == diagnostic_severity::ignored &&
+        options.severity(id) != diagnostic_severity::ignored)
+        issued++;
+    return issue_as(id, location, severity);
 }
 
 diagnostic_severity diagnostic_consumer::severity_now(diagnostic_id id) const
@@ -277,6 +283,8 @@ diagnostic_message &diagnostic_consumer::issue_as(diagnostic_id id,
                                                   diagnostic_severity severity)
 {
     /* clang: after a fatal error no diagnostic is issued */
+    if (!suppressed && severity != diagnostic_severity::ignored && fatal_count)
+        issued++; /* OPTIMIZATION: the header cache */
     if (suppressed || severity == diagnostic_severity::ignored || fatal_count) {
         discarded = diagnostic_message{};
         return discarded;
@@ -293,6 +301,7 @@ diagnostic_message &diagnostic_consumer::issue_as(diagnostic_id id,
             return discarded;
         }
     }
+    issued++; /* OPTIMIZATION: the header cache */
     if (severity >= diagnostic_severity::error)
         error_count++;
     if (severity == diagnostic_severity::fatal)

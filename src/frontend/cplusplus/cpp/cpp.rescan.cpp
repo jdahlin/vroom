@@ -65,7 +65,7 @@ bool preprocessor::read_unexpanded(preprocessing_token &t)
             t = context_tokens[c.next++];
             read_from_file = false;
             if (is_identifier(t) && !t.not_replaceable) {
-                int32_t m = identifiers[identifier(t)].macro;
+                int32_t m = macro_of(identifier(t)); /* OPTIMIZATION: cache */
                 if (m >= 0 && macros[m].being_replaced)
                     t.not_replaceable = true;
             }
@@ -76,6 +76,11 @@ bool preprocessor::read_unexpanded(preprocessing_token &t)
         pop_context();
     }
     t = read_file_token();
+    /* OPTIMIZATION: an #include replayed from the header cache: next()
+       returns its tokens */
+    if (t.kind == preprocessing_token_kind::placemarker &&
+        replay_next < replay_tokens.size())
+        return true;
     if (t.kind == preprocessing_token_kind::placemarker)
         return read_unexpanded(t); /* a directive made tokens to read */
     read_from_file = true;
@@ -89,7 +94,7 @@ bool preprocessor::read_expanded(preprocessing_token &t)
         if (!read_unexpanded(t))
             return false;
         if (is_identifier(t) && !t.not_replaceable) {
-            int32_t m = identifiers[identifier(t)].macro;
+            int32_t m = macro_of(identifier(t)); /* OPTIMIZATION: cache */
             if (m >= 0 && replace_macro(t, m))
                 continue;
         }

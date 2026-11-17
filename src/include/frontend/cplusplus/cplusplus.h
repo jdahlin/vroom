@@ -30,6 +30,7 @@ namespace cplusplus
 {
 
 class source_files;
+class header_cache;
 
 /* ---- [intro.scope], [intro.defs], [intro.compliance] ------------------- */
 
@@ -248,6 +249,10 @@ class diagnostic_consumer
     size_t error_count = 0, warning_count = 0, fatal_count = 0;
     /* while positive, issue() discards: the lexer looks ahead without consuming */
     unsigned suppressed = 0;
+    /* OPTIMIZATION: the header cache (cpp/cpp.header_cache.cpp): the
+       diagnostics issued that another translation unit might not issue
+       alike: every one kept, and those only this one's pragmas ignored */
+    size_t issued = 0;
 
     /* #pragma clang diagnostic ([ext.gnu], ext/gnu/pragma_diagnostic.cpp):
        the severity of a -W group from here on; false if there is no such
@@ -572,6 +577,8 @@ class source_files
         /* found in a system directory, or #pragma GCC system_header: clang
            issues no warnings there */
         bool system_header = false;
+        /* OPTIMIZATION: the header cache's source of the same text */
+        uint32_t cache_source = UINT32_MAX;
     };
 
     source_files(const implementation_defined_behavior &behavior,
@@ -618,6 +625,12 @@ class source_files
     const implementation_defined_behavior &behavior;
     diagnostic_consumer &diagnostics;
 
+    /* OPTIMIZATION: the header cache, if one is shared by the translation
+       units; each source file and text placed is one of its sources, and
+       cache_bases[source] is where its latest copy is here (0: none) */
+    header_cache *cache = nullptr;
+    owned_array<source_location> cache_bases;
+
   private:
     owned_objects<entry> files;
     entry conversion; /* an empty file: its lexer converts any file's tokens */
@@ -649,6 +662,9 @@ struct preprocessor_options {
     unsigned include_nesting_limit = 200;
     /* for clang's -dM: keep definitions in the order made */
     bool keep_definition_order = false;
+    /* OPTIMIZATION: the header cache shared by the translation units
+       preprocessed with these options, one after another (nullptr: none) */
+    header_cache *cache = nullptr;
 };
 
 /* the macros an implementation defines whose replacement is computed where
@@ -775,6 +791,11 @@ class preprocessor
         uint32_t spelling_offset, length, hash;
         int32_t macro;
         bool poisoned;
+        /* OPTIMIZATION: the header cache: the identifier's name there, and
+           the latest recording that has the identifier's macro as an input
+           or wrote it */
+        uint32_t cache_name;
+        uint32_t cache_serial;
     };
     owned_array<identifier_entry> identifiers;
     owned_array<char> identifier_spellings;
@@ -1031,6 +1052,47 @@ class preprocessor
     bool begins_module_directive(const preprocessing_token &next);
     bool names_object_like_macro(const preprocessing_token &token);
 
+    /* ---- OPTIMIZATION: the header cache (cpp/cpp.header_cache.cpp).  The
+       hooks, each marked so where it is called: */
+    /* every read of an identifier's macro */
+    int32_t macro_of(uint32_t id);
+    /* #define and #undef */
+    void cache_write(uint32_t id, int32_t macro);
+    /* an #include whose file is found: true if it was replayed */
+    bool cache_replay(uint64_t device, uint64_t inode, int32_t directory,
+                      bool system);
+    /* the file just entered by an #include */
+    void cache_record(int32_t directory, bool system);
+    /* the end of an included file */
+    void cache_file_end();
+    /* a token next() returns */
+    void cache_output(const preprocessing_token &t);
+    /* what a recording cannot replay: it is not kept */
+    void cache_spoil();
+    /* the once and guard tables and #pragma diagnostic's mappings */
+    void cache_once_read(uint64_t device, uint64_t inode, bool present);
+    void cache_effect(uint8_t kind, uint64_t device, uint64_t inode,
+                      uint32_t name, const char *text);
+    struct cache_recording;
+    owned_array<cache_recording> recordings;
+    uint32_t cache_serial = 0;
+    owned_array<uint32_t> cache_name_ids;
+    owned_array<preprocessing_token> replay_tokens;
+    size_t replay_next = 0;
+    bool replay_pending_flags = false, replay_start_of_line = false,
+         replay_white_space = false;
+    bool cache_disabled = false;
+    unsigned cache_applying = 0;
+    bool cache_top_level() const;
+    uint32_t cache_name(uint32_t id);
+    uint32_t cache_identifier(uint32_t name);
+    uint64_t cache_fingerprint(int32_t macro);
+    bool cache_inputs_hold(const void *entry);
+    void cache_apply(const void *entry);
+    void cache_flatten(const void *entry);
+    void cache_collect_sources(cache_recording &r, size_t end);
+    void cache_child_done(const void *entry);
+
     /* ---- [cpp.predefined] */
     uint32_t counter = 0;
     char date[16] = "", time_of_day[16] = "";
@@ -1042,6 +1104,80 @@ class preprocessor
     bool name_is_has_cpp_attribute(const preprocessing_token &t);
     bool feature_operand(const preprocessing_token &name, owned_buffer &operand,
                          owned_buffer &scope);
+};
+
+/*
+ * OPTIMIZATION: the header cache, after the old preprocessor's
+ * (frontend/pp/header-cache-*.cpp): what an #include did, kept for the
+ * translation units that come after, preprocessed one after another with
+ * the same options.  An #include of the same file, found the same way,
+ * whose inputs (the macros it read, the #pragma once files it looked at)
+ * are as they were, has its effects applied and its tokens returned
+ * without running it.  cpp/cpp.header_cache.cpp has the rules.
+ */
+class header_cache
+{
+  public:
+    header_cache();
+    ~header_cache();
+    header_cache(const header_cache &) = delete;
+    header_cache &operator=(const header_cache &) = delete;
+
+    /* a source: a file (by path and size) or a text (by name and
+       contents), with a place in the cache's own space of locations */
+    struct source {
+        uint32_t key_offset, key_length, size;
+        uint64_t hash;
+        source_location base;
+        bool text;
+    };
+    owned_array<source> sources;
+    uint32_t source_of(const char *name, size_t name_length,
+                       const unsigned char *text, uint32_t size, bool is_text);
+
+    /* identifiers, by spelling (1-based; 0: none) */
+    uint32_t name_of(const char *spelling, size_t length);
+    const char *name_spelling(uint32_t name, size_t *length) const;
+    size_t name_count() const
+    {
+        return names.size();
+    }
+
+    struct entry;
+    /* the entries recorded for an #include of a file (variants, the
+       latest first) */
+    entry *find(uint64_t device, uint64_t inode, int32_t directory,
+                bool system);
+    entry &make();
+    void keep(entry &e, uint64_t device, uint64_t inode, int32_t directory,
+              bool system);
+
+    /* -stats: includes replayed, recorded, run but not kept */
+    uint64_t hits = 0, misses = 0, recorded = 0, spoiled = 0;
+    uint64_t tokens_replayed = 0;
+    const char *debug_key(uint32_t offset) const
+    {
+        return keys.data() + offset;
+    }
+
+  private:
+    owned_array<char> keys;
+    owned_array<uint32_t> source_slots;
+    struct name {
+        uint32_t offset, length, hash;
+    };
+    owned_array<name> names;
+    owned_array<char> name_characters;
+    owned_array<uint32_t> name_slots;
+    source_location next_base = 1;
+    struct key {
+        uint64_t device, inode;
+        int32_t directory;
+        bool system;
+        entry *first;
+    };
+    owned_array<key> entry_keys;
+    owned_objects<entry> entries;
 };
 
 } // namespace cplusplus
