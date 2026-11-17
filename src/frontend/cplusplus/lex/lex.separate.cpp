@@ -277,15 +277,16 @@ size_t source_files::spelling(const preprocessing_token &token,
     return e->lex.spelling_in_file(local, out);
 }
 
-token source_files::convert(const preprocessing_token &token)
+token source_files::convert(const preprocessing_token &token,
+                            literal_value *value)
 {
-    return conversion.lex.convert(token);
+    return conversion.lex.convert(token, value);
 }
 
 token source_files::convert_string_literals(const preprocessing_token *pieces,
-                                            size_t count)
+                                            size_t count, literal_value *value)
 {
-    return conversion.lex.convert_string_literals(pieces, count);
+    return conversion.lex.convert_string_literals(pieces, count, value);
 }
 
 } // namespace cplusplus

@@ -143,8 +143,8 @@ VPRIV const char *keyword_spelling(int keyword);
 VPRIV bool keyword_is_alternative_representation(int keyword,
                                                  preprocessing_op_or_punc *op);
 /* phase 7 of an identifier whose keyword (or -1) is known */
-VPRIV void identifier_token(token &out, int keyword, const char *spelling,
-                            size_t length);
+VPRIV void identifier_token(token &out, literal_value *value, int keyword,
+                            const char *spelling, size_t length);
 
 /* ---- [cpp] ------------------------------------------------------------ */
 

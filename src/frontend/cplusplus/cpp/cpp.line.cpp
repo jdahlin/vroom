@@ -66,7 +66,8 @@ bool preprocessor::string_contents(const preprocessing_token &t,
     if (t.kind != preprocessing_token_kind::string_literal ||
         t.prefix != encoding_prefix::none)
         return false;
-    token converted = files.convert(t);
+    literal_value converted;
+    files.convert(t, &converted);
     const uint32_t *units = files.phase7().string_code_units();
     out.clear();
     for (uint32_t i = 0; i < converted.string_length; i++) {

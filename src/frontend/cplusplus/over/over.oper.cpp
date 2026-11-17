@@ -114,15 +114,21 @@ node_index parser::operator_unqualified_id()
             bool prefixed =
                 spelling.size() < 2 ||
                 (text[0] != '"' && !(text[0] == 'R' && text[1] == '"'));
-            if (prefixed)
+            /* empty: "" or R"d()d", whatever ud-suffix follows */
+            size_t open = 1;
+            if (!prefixed && text[0] == 'R')
+                while (open < spelling.size() && text[open] != '(')
+                    open++;
+            bool empty = !prefixed;
+            if (empty && text[0] == 'R')
+                empty = open + 1 < spelling.size() && text[open + 1] == ')';
+            else if (empty)
+                empty = text[1] == '"';
+            if (!empty)
                 return violates("an empty string-literal with no "
                                 "encoding-prefix after operator",
                                 "over.literal", position);
         }
-        if (t.string_length != 0)
-            return violates("an empty string-literal with no "
-                            "encoding-prefix after operator",
-                            "over.literal", position);
         add_token();
         if (!suffixed) {
             if (!at_identifier())

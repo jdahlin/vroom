@@ -38,13 +38,12 @@ void token_stream::make_through(token_index i)
 {
     while (!complete && tokens.size() <= i) {
         preprocessing_token first = read();
-        first_piece.append(static_cast<uint32_t>(preprocessing_tokens.size()));
-        preprocessing_tokens.append(first);
-        identifiers.append(0);
         if (is_string_literal(first)) {
             /* [lex.phases]/1.6: the string literals that follow are part of
                the same token */
-            size_t begin = preprocessing_tokens.size() - 1;
+            size_t begin = string_pieces.size();
+            string_first.append(static_cast<uint32_t>(begin));
+            string_pieces.append(first);
             for (;;) {
                 preprocessing_token next = read();
                 if (!is_string_literal(next)) {
@@ -52,11 +51,11 @@ void token_stream::make_through(token_index i)
                     has_lookahead = true;
                     break;
                 }
-                preprocessing_tokens.append(next);
+                string_pieces.append(next);
             }
-            tokens.append(files.convert_string_literals(
-                preprocessing_tokens.data() + begin,
-                preprocessing_tokens.size() - begin));
+            token &made = tokens.append(files.convert_string_literals(
+                string_pieces.data() + begin, string_pieces.size() - begin));
+            made.pieces = static_cast<uint32_t>(string_first.size());
         } else if (first.kind == preprocessing_token_kind::identifier &&
                    identifier_converted(first)) {
             /* converted */
@@ -101,7 +100,6 @@ bool token_stream::identifier_converted(const preprocessing_token &first)
         if (memchr(pp.spelling_buffer.data(), '\\', pp.spelling_buffer.size()))
             return false;
     }
-    identifiers.back() = id + 1;
     while (keyword_by_identifier.size() <= id)
         keyword_by_identifier.append(unknown_keyword);
     size_t length;
@@ -111,7 +109,9 @@ bool token_stream::identifier_converted(const preprocessing_token &first)
             lookup_keyword(files.behavior, spelling, length));
     token made;
     made.preprocessing = first;
-    identifier_token(made, keyword_by_identifier[id], spelling, length);
+    made.preprocessing.identifier = id + 1;
+    identifier_token(made, nullptr, keyword_by_identifier[id], spelling,
+                     length);
     tokens.append(made);
     return true;
 }
@@ -135,11 +135,16 @@ const preprocessing_token *token_stream::pieces(token_index i, size_t *count)
     make_through(i);
     if (i >= tokens.size())
         i = static_cast<token_index>(tokens.size() - 1);
-    size_t end = preprocessing_tokens.size();
-    if (i + 1 < tokens.size())
-        end = first_piece[i + 1];
-    *count = end - first_piece[i];
-    return preprocessing_tokens.data() + first_piece[i];
+    uint32_t k = tokens[i].pieces;
+    if (!k) {
+        *count = 1;
+        return &tokens[i].preprocessing;
+    }
+    size_t end = string_pieces.size();
+    if (k < string_first.size())
+        end = string_first[k];
+    *count = end - string_first[k - 1];
+    return string_pieces.data() + string_first[k - 1];
 }
 
 source_location token_stream::location(token_index i)
@@ -176,9 +181,11 @@ uint32_t token_stream::identifier(token_index i)
     const token &t = (*this)[i];
     if (t.kind != token_kind::identifier || i >= tokens.size())
         return 0;
-    if (!identifiers[i])
-        identifiers[i] = pp.identifier(t.preprocessing) + 1;
-    return identifiers[i];
+    /* the identifier's index, kept in the token once known */
+    token &kept = tokens[i];
+    if (!kept.preprocessing.identifier)
+        kept.preprocessing.identifier = pp.identifier(kept.preprocessing) + 1;
+    return kept.preprocessing.identifier;
 }
 
 } // namespace cplusplus

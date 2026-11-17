@@ -336,9 +336,12 @@ static fundamental_type element_type(const implementation_defined_behavior &b,
  * ud-suffix and that suffix is applied to the result of the concatenation."
  */
 token lexer::convert_string_literals(const preprocessing_token *pieces,
-                                     size_t count)
+                                     size_t count, literal_value *value)
 {
     token out;
+    literal_value scratch;
+    if (!value)
+        value = &scratch;
     out.kind = token_kind::literal;
     out.literal = literal_kind::string_literal;
     out.preprocessing = pieces[0];
@@ -362,7 +365,7 @@ token lexer::convert_string_literals(const preprocessing_token *pieces,
 
     owned_buffer spelling_buffer, suffix;
     size_t suffix_piece = count;
-    out.string_offset = (uint32_t)code_units.size();
+    value->string_offset = (uint32_t)code_units.size();
     for (size_t k = 0; k < count; k++) {
         const preprocessing_token &piece = pieces[k];
         spelling_buffer.clear();
@@ -399,8 +402,8 @@ token lexer::convert_string_literals(const preprocessing_token *pieces,
         out.preprocessing.kind =
             preprocessing_token_kind::user_defined_string_literal;
     }
-    out.string_length = (uint32_t)(code_units.size() - out.string_offset);
-    out.value_known = !error;
+    value->string_length = (uint32_t)(code_units.size() - value->string_offset);
+    value->value_known = !error;
     return out;
 }
 

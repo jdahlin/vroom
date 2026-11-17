@@ -335,7 +335,8 @@ static bool evaluate_value(preprocessor &p, preprocessor::expression_reader &r,
         return true;
     }
     case preprocessing_token_kind::pp_number: {
-        token converted = p.condition_lexer.convert(t);
+        literal_value value;
+        token converted = p.condition_lexer.convert(t, &value);
         if (converted.kind == token_kind::invalid)
             return false;
         if (converted.literal == literal_kind::floating_point_literal) {
@@ -346,7 +347,7 @@ static bool evaluate_value(preprocessor &p, preprocessor::expression_reader &r,
         if (converted.literal == literal_kind::user_defined_literal)
             p.diagnostics.issue(diagnostic_id::err_pp_invalid_udl, t.location)
                 << 1;
-        v.bits = converted.value;
+        v.bits = value.value;
         v.is_unsigned =
             !fundamental_type_is_signed(p.condition_behavior, converted.type);
         r.advance();
@@ -357,14 +358,15 @@ static bool evaluate_value(preprocessor &p, preprocessor::expression_reader &r,
         if (t.kind == preprocessing_token_kind::user_defined_character_literal)
             p.diagnostics.issue(diagnostic_id::err_pp_invalid_udl, t.location)
                 << 0;
-        token converted = p.files.convert(t);
-        if (converted.kind == token_kind::invalid || !converted.value_known)
+        literal_value value;
+        token converted = p.files.convert(t, &value);
+        if (converted.kind == token_kind::invalid || !value.value_known)
             return false;
         /* [cpp.cond]/12: "This includes interpreting character-literals";
            the value of its type, as intmax_t or uintmax_t */
         unsigned width = fundamental_type_width(p.behavior, converted.type);
         bool is_signed = fundamental_type_is_signed(p.behavior, converted.type);
-        v.bits = value_of_width(converted.value, width, is_signed);
+        v.bits = value_of_width(value.value, width, is_signed);
         /* [cpp.cond]/12: "whether a single-character character-literal may
            have a negative value is implementation-defined": [impl.clang]
            the literal is unsigned when its type is, and stays so */

@@ -378,7 +378,7 @@ lexer::c_char lexer::evaluate_c_char(const char *s, size_t n, size_t *i,
  * spelling (without a ud-suffix).
  */
 void lexer::convert_character_literal(const char *spelling, size_t length,
-                                      token &out)
+                                      token &out, literal_value &result)
 {
     encoding_prefix prefix = out.preprocessing.prefix;
     source_location at = out.preprocessing.location;
@@ -483,8 +483,8 @@ void lexer::convert_character_literal(const char *spelling, size_t length,
             if (multicharacter_too_long && !error)
                 diagnostics.issue(diagnostic_id::warn_char_constant_too_large,
                                   at);
-            out.value = (uint64_t)(int64_t)(int32_t)multicharacter;
-            out.value_known = !error;
+            result.value = (uint64_t)(int64_t)(int32_t)multicharacter;
+            result.value_known = !error;
             return;
         }
         /* [lex.ccon]/2-4: "A UTF-8 character literal containing multiple
@@ -499,8 +499,8 @@ void lexer::convert_character_literal(const char *spelling, size_t length,
     if (out.type == fundamental_type::char_ && behavior.plain_char_is_signed &&
         (value & 0x80))
         value = (uint64_t)(int64_t)(int8_t)value;
-    out.value = value;
-    out.value_known = !error;
+    result.value = value;
+    result.value_known = !error;
 }
 
 } // namespace cplusplus

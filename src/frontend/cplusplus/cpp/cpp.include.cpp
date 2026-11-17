@@ -45,6 +45,74 @@ bool preprocessor::find_header(const char *name, size_t length, bool angled,
                                int32_t after_directory, owned_buffer &path,
                                int32_t *directory, bool *system)
 {
+    /* a quoted name is searched for first beside the file that names it */
+    const void *includer = nullptr;
+    if (!angled && after_directory < 0 && !inclusions.empty())
+        includer = inclusions.back().file;
+    uint32_t hash = 2166136261u; /* FNV-1a */
+    for (size_t i = 0; i < length; i++)
+        hash = (hash ^ static_cast<unsigned char>(name[i])) * 16777619u;
+    hash = hash ^ static_cast<uint32_t>(after_directory) * 0x9E3779B1u ^
+           static_cast<uint32_t>(angled) ^
+           static_cast<uint32_t>(reinterpret_cast<uintptr_t>(includer) >> 4);
+    if (header_search_slots.size() <= header_searches.size() * 2) {
+        size_t size = 256;
+        if (header_search_slots.size())
+            size = header_search_slots.size() * 2;
+        header_search_slots.resize(size);
+        for (uint32_t &slot : header_search_slots)
+            slot = 0;
+        for (size_t k = 0; k < header_searches.size(); k++) {
+            size_t i = header_searches[k].hash & (size - 1);
+            while (header_search_slots[i])
+                i = (i + 1) & (size - 1);
+            header_search_slots[i] = static_cast<uint32_t>(k + 1);
+        }
+    }
+    size_t mask = header_search_slots.size() - 1;
+    size_t slot = hash & mask;
+    for (; header_search_slots[slot]; slot = (slot + 1) & mask) {
+        const header_search &h = header_searches[header_search_slots[slot] - 1];
+        if (h.hash != hash || h.name_length != length ||
+            h.after_directory != after_directory || h.angled != angled ||
+            h.includer != includer ||
+            memcmp(header_search_text.data() + h.name_offset, name, length))
+            continue;
+        path.clear();
+        vbuffer_append(path.get(), header_search_text.data() + h.path_offset,
+                       h.path_length);
+        *directory = h.directory;
+        *system = h.system;
+        found_device = h.device;
+        found_inode = h.inode;
+        return h.found;
+    }
+    header_search h{};
+    h.hash = hash;
+    h.includer = includer;
+    h.after_directory = after_directory;
+    h.angled = angled;
+    h.found = search_header(name, length, angled, after_directory, path,
+                            directory, system);
+    h.system = *system;
+    h.directory = *directory;
+    h.device = found_device;
+    h.inode = found_inode;
+    h.name_offset = static_cast<uint32_t>(header_search_text.size());
+    h.name_length = static_cast<uint32_t>(length);
+    memcpy(header_search_text.extend(length), name, length);
+    h.path_offset = static_cast<uint32_t>(header_search_text.size());
+    h.path_length = static_cast<uint32_t>(path.size());
+    memcpy(header_search_text.extend(path.size()), path.data(), path.size());
+    header_searches.append(h);
+    header_search_slots[slot] = static_cast<uint32_t>(header_searches.size());
+    return h.found;
+}
+
+bool preprocessor::search_header(const char *name, size_t length, bool angled,
+                                 int32_t after_directory, owned_buffer &path,
+                                 int32_t *directory, bool *system)
+{
     struct stat st;
     *directory = -1;
     *system = false;
@@ -52,7 +120,10 @@ bool preprocessor::find_header(const char *name, size_t length, bool angled,
     if (length && name[0] == '/') {
         vbuffer_append(path.get(), name, length);
         vbuffer_append(path.get(), "", 1);
-        return is_regular_file(path.data(), &st);
+        bool found = is_regular_file(path.data(), &st);
+        found_device = (uint64_t)st.st_dev;
+        found_inode = (uint64_t)st.st_ino;
+        return found;
     }
     if (!angled && after_directory < 0 && !inclusions.empty()) {
         /* the directory of the file containing the directive */
@@ -66,6 +137,8 @@ bool preprocessor::find_header(const char *name, size_t length, bool angled,
         vbuffer_append(path.get(), name, length);
         vbuffer_append(path.get(), "", 1);
         if (is_regular_file(path.data(), &st)) {
+            found_device = (uint64_t)st.st_dev;
+            found_inode = (uint64_t)st.st_ino;
             *system = inclusions.back().system_header;
             return true;
         }
@@ -89,6 +162,8 @@ bool preprocessor::find_header(const char *name, size_t length, bool angled,
             vbuffer_append(path.get(), name, length);
             vbuffer_append(path.get(), "", 1);
             if (is_regular_file(path.data(), &st)) {
+                found_device = (uint64_t)st.st_dev;
+                found_inode = (uint64_t)st.st_ino;
                 *directory = here;
                 *system = dirs[i].search == include_search::system ||
                           dirs[i].search == include_search::after;
@@ -228,8 +303,10 @@ void preprocessor::directive_include(const preprocessing_token &name,
         cache_spoil(); /* OPTIMIZATION: the header cache */
         return;
     }
-    struct stat st;
-    stat(path.data(), &st);
+    /* OPTIMIZATION: the file find_header found, not asked again */
+    struct {
+        uint64_t st_dev, st_ino;
+    } st = {found_device, found_inode};
     bool once = false;
     for (const included_once &o : once_files)
         if (o.device == (uint64_t)st.st_dev && o.inode == (uint64_t)st.st_ino)

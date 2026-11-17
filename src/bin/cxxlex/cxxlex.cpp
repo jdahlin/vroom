@@ -31,9 +31,10 @@
  * spellings, which every edition has).
  */
 static void write_claim(vbuffer *out, const lexer &l, const token &t,
-                        const char *spelling, size_t n, source_position p)
+                        const literal_value &v, const char *spelling, size_t n,
+                        source_position p)
 {
-    if (t.kind != token_kind::literal || !t.value_known ||
+    if (t.kind != token_kind::literal || !v.value_known ||
         t.literal == literal_kind::user_defined_literal ||
         t.type == fundamental_type::bit_precise_int ||
         t.type == fundamental_type::unsigned_bit_precise_int)
@@ -56,19 +57,19 @@ static void write_claim(vbuffer *out, const lexer &l, const token &t,
             "_Static_assert(__builtin_bit_cast(%s, %.*s) == "
             "(((unsigned __int128)0x%llxull << 64) | 0x%llxull), \"\");\n",
             (int)n, spelling, type, bits, (int)n, spelling,
-            (unsigned long long)t.floating_bits_high,
-            (unsigned long long)t.floating_bits_low);
+            (unsigned long long)v.floating_bits_high,
+            (unsigned long long)v.floating_bits_low);
         return;
     }
     if (t.literal == literal_kind::string_literal) {
         vbuffer_format_append(out,
                               "_Static_assert(__is_same(__decltype(%.*s), "
                               "const %s(&)[%u]), \"\");",
-                              (int)n, spelling, type, t.string_length + 1);
-        for (uint32_t k = 0; k < t.string_length && k < 64; k++)
+                              (int)n, spelling, type, v.string_length + 1);
+        for (uint32_t k = 0; k < v.string_length && k < 64; k++)
             vbuffer_format_append(
                 out, " _Static_assert(%.*s[%u] == (%s)0x%xu, \"\");", (int)n,
-                spelling, k, type, l.string_code_units()[t.string_offset + k]);
+                spelling, k, type, l.string_code_units()[v.string_offset + k]);
         vbuffer_string_append(out, "\n");
         return;
     }
@@ -77,7 +78,7 @@ static void write_claim(vbuffer *out, const lexer &l, const token &t,
         "_Static_assert(__is_same(__decltype(%.*s), %s), \"\"); "
         "_Static_assert(%.*s == (%s)0x%llxull, \"\");\n",
         (int)n, spelling, type, (int)n, spelling, type,
-        (unsigned long long)t.value);
+        (unsigned long long)v.value);
 }
 
 static bool is_string(const preprocessing_token &pp)
@@ -222,12 +223,13 @@ int main(int argc, char **argv)
            piece is still printed as clang prints it */
         size_t pieces = 1;
         token t;
+        literal_value value;
         if (is_string(p)) {
             while (i + pieces < tokens.size() && is_string(tokens[i + pieces]))
                 pieces++;
-            t = files.convert_string_literals(&tokens[i], pieces);
+            t = files.convert_string_literals(&tokens[i], pieces, &value);
         } else
-            t = files.convert(p);
+            t = files.convert(p, &value);
         if (claims) {
             if (p.kind != preprocessing_token_kind::end_of_file) {
                 /* the claim is about the concatenation, spelled as its pieces */
@@ -237,8 +239,8 @@ int main(int argc, char **argv)
                         vbuffer_append(spelling.get(), " ", 1);
                     files.spelling(tokens[i + k], spelling.get());
                 }
-                write_claim(out.get(), l, t, spelling.data(), spelling.size(),
-                            files.position(p.location));
+                write_claim(out.get(), l, t, value, spelling.data(),
+                            spelling.size(), files.position(p.location));
             }
             i += pieces - 1;
             continue;

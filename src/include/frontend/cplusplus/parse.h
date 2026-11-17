@@ -70,11 +70,13 @@ class token_stream
     owned_array<bool> revertible_keywords;
 
   private:
+    /* OPTIMIZATION: a token's preprocessing token is its one piece, and its
+       identifier's index (preprocessing_token::identifier); only a string
+       literal keeps its pieces apart: token::pieces k + 1 is
+       string_pieces[string_first[k] .. string_first[k + 1]) */
     owned_array<token> tokens;
-    /* token i is preprocessing_tokens[first_piece[i] .. first_piece[i+1]) */
-    owned_array<uint32_t> first_piece;
-    owned_array<preprocessing_token> preprocessing_tokens;
-    owned_array<uint32_t> identifiers;
+    owned_array<preprocessing_token> string_pieces;
+    owned_array<uint32_t> string_first;
     /* OPTIMIZATION: each identifier's keyword index (-1: none) in this
        translation unit, unknown_keyword until asked */
     static constexpr int16_t unknown_keyword = -2;

@@ -429,14 +429,9 @@ enum class literal_kind : uint8_t {
     user_defined_literal,
 };
 
-struct token {
-    token_kind kind = token_kind::end_of_file;
-    literal_kind literal = literal_kind::none;
-    fundamental_type type = fundamental_type::none; /* of a literal */
-    preprocessing_op_or_punc op_or_punc = preprocessing_op_or_punc::count;
-    int16_t keyword = -1; /* index in the keyword table ([lex.key]) */
-    preprocessing_token
-        preprocessing; /* the preprocessing token it came from */
+/* the value of a literal token ([lex.literal]): what lexer::convert works
+   out besides the token, for the callers that ask (#if, #line, cxxlex) */
+struct literal_value {
     /* a string literal: its code units in lexer::string_code_units(),
        without the terminating '\0' of [lex.string]/12 */
     uint32_t string_offset = 0, string_length = 0;
@@ -448,6 +443,21 @@ struct token {
     /* the value of an integer or boolean literal, when value_known */
     uint64_t value = 0;
     bool value_known = false;
+};
+
+/* OPTIMIZATION: a token is what the parser reads of it (40 bytes): its
+   literal_value is the converter's to give */
+struct token {
+    token_kind kind = token_kind::end_of_file;
+    literal_kind literal = literal_kind::none;
+    fundamental_type type = fundamental_type::none; /* of a literal */
+    preprocessing_op_or_punc op_or_punc = preprocessing_op_or_punc::count;
+    int16_t keyword = -1; /* index in the keyword table ([lex.key]) */
+    /* token_stream: a string literal's concatenated pieces, as an index
+       into its pieces (0: the token's own preprocessing token alone) */
+    uint32_t pieces = 0;
+    preprocessing_token
+        preprocessing; /* the preprocessing token it came from */
 };
 
 /* [lex.phases]/1.3: decomposes a source file into preprocessing tokens */
@@ -474,11 +484,12 @@ class lexer
                             vbuffer *out) const;
     const source_files *files = nullptr;
     /* [lex.phases]/1.7: "Each preprocessing token is converted into a token" */
-    token convert(const preprocessing_token &token);
+    token convert(const preprocessing_token &token,
+                  literal_value *value = nullptr);
     /* [lex.phases]/1.5-1.6: adjacent string-literal preprocessing tokens
        (user-defined ones too) concatenated into one token */
     token convert_string_literals(const preprocessing_token *pieces,
-                                  size_t count);
+                                  size_t count, literal_value *value = nullptr);
 
     const source_file &file;
     const implementation_defined_behavior &behavior;
@@ -514,7 +525,7 @@ class lexer
     c_char evaluate_c_char(const char *spelling, size_t length, size_t *i,
                            source_location at, encoding_prefix prefix);
     void convert_character_literal(const char *spelling, size_t length,
-                                   token &out);
+                                   token &out, literal_value &value);
     bool append_string_literal_piece(const char *spelling, size_t length,
                                      const preprocessing_token &piece,
                                      encoding_prefix prefix);
@@ -526,9 +537,10 @@ class lexer
     struct pp_number_analysis;
     bool analyze_pp_number(const char *spelling, size_t length,
                            source_location at, pp_number_analysis &a);
-    void convert_integer_literal(const pp_number_analysis &a, token &out);
-    void convert_floating_point_literal(const pp_number_analysis &a,
-                                        token &out);
+    void convert_integer_literal(const pp_number_analysis &a, token &out,
+                                 literal_value &value);
+    void convert_floating_point_literal(const pp_number_analysis &a, token &out,
+                                        literal_value &value);
 
   private:
     preprocessing_token lex(bool header_name_permitted);
@@ -620,9 +632,10 @@ class source_files
     source_location first_character(const preprocessing_token &token) const;
     size_t spelling(const preprocessing_token &token, vbuffer *out) const;
     /* phase 7 of tokens from any of the files ([lex.phases]/1.5-1.7) */
-    token convert(const preprocessing_token &token);
+    token convert(const preprocessing_token &token,
+                  literal_value *value = nullptr);
     token convert_string_literals(const preprocessing_token *pieces,
-                                  size_t count);
+                                  size_t count, literal_value *value = nullptr);
     const lexer &phase7() const
     {
         return conversion.lex;
@@ -910,6 +923,26 @@ class preprocessor
     bool find_header(const char *name, size_t length, bool angled,
                      int32_t after_directory, owned_buffer &path,
                      int32_t *directory, bool *system);
+    bool search_header(const char *name, size_t length, bool angled,
+                       int32_t after_directory, owned_buffer &path,
+                       int32_t *directory, bool *system);
+    /* OPTIMIZATION: each header-name's search, once per translation unit:
+       a found header's file is the same file for as long as the
+       translation unit is read; found_device and found_inode are the last
+       one find_header found */
+    struct header_search {
+        uint32_t hash, name_offset, name_length;
+        const void *includer;
+        int32_t after_directory;
+        bool angled, found, system;
+        int32_t directory;
+        uint32_t path_offset, path_length;
+        uint64_t device, inode;
+    };
+    owned_array<header_search> header_searches;
+    owned_array<char> header_search_text;
+    owned_array<uint32_t> header_search_slots;
+    uint64_t found_device = 0, found_inode = 0;
     int32_t include_next_start(const preprocessing_token &name);
     void include_once();
 

@@ -98,7 +98,7 @@ unsigned __int128 round_to_format(const char *s, size_t n,
  * ([basic.fundamental]/12) on this target.
  */
 void lexer::convert_floating_point_literal(const pp_number_analysis &a,
-                                           token &out)
+                                           token &out, literal_value &result)
 {
     out.literal = literal_kind::floating_point_literal;
     if (a.float_suffix)
@@ -169,9 +169,9 @@ void lexer::convert_floating_point_literal(const pp_number_analysis &a,
                        out.preprocessing.location)
                 .text(type_name, (size_t)type_length)
             << f.minimum;
-    out.floating_bits_low = (uint64_t)bits;
-    out.floating_bits_high = (uint64_t)(bits >> 64);
-    out.value_known = true;
+    result.floating_bits_low = (uint64_t)bits;
+    result.floating_bits_high = (uint64_t)(bits >> 64);
+    result.value_known = true;
 }
 
 } // namespace cplusplus

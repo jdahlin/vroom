@@ -73,7 +73,8 @@ fundamental_type first_type_in_list(const implementation_defined_behavior &b,
 
 } // namespace
 
-void lexer::convert_integer_literal(const pp_number_analysis &a, token &out)
+void lexer::convert_integer_literal(const pp_number_analysis &a, token &out,
+                                    literal_value &result)
 {
     source_location at = out.preprocessing.location;
 
@@ -104,8 +105,8 @@ void lexer::convert_integer_literal(const pp_number_analysis &a, token &out)
         value_bits++;
     bool too_large = beyond_128_bits || value_bits > 64;
     out.literal = literal_kind::integer_literal;
-    out.value = (uint64_t)value;
-    out.value_known = true;
+    result.value = (uint64_t)value;
+    result.value_known = true;
 
     if (a.bit_precise_suffix) {
         /* C23 6.4.4.1: the width N of _BitInt(N) is the smallest that holds
@@ -123,11 +124,11 @@ void lexer::convert_integer_literal(const pp_number_analysis &a, token &out)
         if (beyond_128_bits || width > behavior.bit_precise_maximum_width) {
             diagnostics.issue(diagnostic_id::err_integer_literal_too_large, at)
                 << (int)a.unsigned_suffix;
-            out.value_known = false;
+            result.value_known = false;
             return;
         }
-        out.bit_precise_width = (uint16_t)width;
-        out.value_known = value_bits <= 64;
+        result.bit_precise_width = (uint16_t)width;
+        result.value_known = value_bits <= 64;
         return;
     }
     if (too_large) {
@@ -141,7 +142,7 @@ void lexer::convert_integer_literal(const pp_number_analysis &a, token &out)
             too_large_id = diagnostic_id::err_size_t_literal_too_large;
         diagnostics.issue(too_large_id, at) << 1;
         out.type = fundamental_type::unsigned_long_long_int;
-        out.value_known = false;
+        result.value_known = false;
         return;
     }
     if (a.size_suffix) {

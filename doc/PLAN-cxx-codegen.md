@@ -647,6 +647,29 @@ recorded here:
   15 % of the samples with memmove) and malloc/free (S2).
 - **S2 Regions and lookup tables**: `vjob_region` arenas, C's scope
   directory, compact tokens, no `malloc` on the hot path.
+  Status (2026-11-17), started; done:
+  - Compact tokens.  `token` is what the parser reads (40 bytes, was 88):
+    a literal's value, string code units and float bits are a
+    `literal_value` that `lexer::convert` fills for a caller that asks (#if,
+    #line, cxxlex's claims).  `token_stream` keeps no second copy of each
+    preprocessing token or a per-token identifier array: a token's one
+    piece is its own preprocessing token, the identifier's index is in it,
+    only string literals keep their pieces (`token::pieces`); 124 -> 40
+    bytes per token.  over.oper's "empty string-literal" reads the pieces'
+    spellings instead of the value.
+  - Each header-name searched for once per translation unit
+    (`preprocessor::find_header` over `search_header`), its file's device
+    and inode kept, so the #pragma once check asks nothing again: json's
+    4673 stat probes per TU become one search per distinct name; about 1 %.
+  json.hpp: phases 1-7 241 -> 218 ns/token, parser 93 -> 88, cxxparse
+  0.282 s -> 0.259 s (clang 23 -fsyntax-only 0.83 s, 3.2x); peak memory
+  109 MB -> 85 MB; 110 TUs with the header cache 1.58 s -> 1.43 s.
+  Same checks as phase 7 above, all as the base; ASan mutants 3721/3721.
+  Measured, not done yet: malloc/free are about 2 % of the samples and
+  `declared_names::find`'s scope walk about 3 %, so regions and the scope
+  directory are worth more once semantic analysis allocates (S3) than now.
+  The largest costs left are the lexer (`lexer::lex`, about 12 %) and
+  `make_through` with `convert` inlined (about 9 %).
 - **S3 Actions and the first typed nodes**: the class-free programs of
   `src/test/cxx/run/` at -O1 and -O2 (CG1's start).
 - **S4 Bodies on demand** (3.0 item 2), with the share skipped on json.
