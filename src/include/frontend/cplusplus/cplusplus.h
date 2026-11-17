@@ -667,6 +667,10 @@ struct preprocessor_options {
     /* -D and -U, in command line order, as the #define and #undef lines of
        clang's "<command line>" file */
     owned_array<char> command_line;
+    /* #define lines appended to "<built-in>" after the predefined macros:
+       the target's and options' macros a driver computed (clang's
+       InitPreprocessor) */
+    owned_array<char> built_in;
     /* clang's -undef: of the predefined macros only those the standards
        name (__cplusplus, __STDC*), and the dynamic ones (__FILE__, ...) */
     bool predefined_macros = true;

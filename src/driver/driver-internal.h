@@ -77,6 +77,11 @@ struct driver_job {
     const char
         *bad_value_option; /* an option with a value clang would reject */
     const char **warning_arguments;
+    /* the options the C++ front end reads itself, in order
+       (cplusplus_compile_options): warnings, -pedantic, -w, -fms-*,
+       char8_t, trigraphs, dollars, operator names, -fcxx-* */
+    const char **cxx_arguments;
+    int cxx_argument_count;
     char prefix_map_buffer[4096];
     driver_buffer predefines, command_line_defines, include_text,
         include_macros_text;

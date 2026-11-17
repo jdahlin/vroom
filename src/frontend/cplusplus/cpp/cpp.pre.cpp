@@ -120,6 +120,9 @@ bool preprocessor::start(const char *path)
     /* [cpp.predefined]/1-2 and clang's own, as clang's "<built-in>" file */
     owned_buffer text;
     write_predefined_macros(text.get());
+    if (!options.built_in.empty())
+        vbuffer_append(text.get(), options.built_in.data(),
+                       options.built_in.size());
     source_files::entry &built_in =
         files.add_text("<built-in>", text.data(), text.size(), false);
     predefines_file = built_in.index;

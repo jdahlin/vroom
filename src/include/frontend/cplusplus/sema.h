@@ -492,7 +492,7 @@ struct analysed_declaration {
 };
 
 /* a name a declaration declared, with the type analysis gave it: what
-   cxxsema -declaration-claims has clang check */
+   -fcxx-dump=declaration-claims has clang check */
 struct declared_name {
     node_index declaration = 0;
     /* the declaration of the translation unit it is in
@@ -783,7 +783,7 @@ class semantic_tree
     owned_array<uint32_t> lists;
 };
 
-/* one expression analysis gave a type: what cxxsema -type-claims has clang
+/* one expression analysis gave a type: what -fcxx-dump=type-claims has clang
    check */
 struct analysed_expression {
     syntax_child at;
@@ -837,6 +837,16 @@ class semantic_analysis
     bool is_copy_constructor(entity_index c, entity_index k) const;
     /* whether destroying an object of class c runs code */
     bool destroys(entity_index c) const;
+
+    /* the uses of names lookup resolved, each with the entity found:
+       what -fcxx-dump=lookup-claims writes for clang to
+       check */
+    struct name_use {
+        token_index at = 0;
+        entity_index entity = 0;
+        node_index declaration = 0;
+    };
+    owned_array<name_use> name_uses;
 
     /* the syntax tree analysed */
     const syntax_tree &syntax() const
@@ -1032,14 +1042,7 @@ class semantic_analysis
     /* [namespace.udir]/2: "the nearest enclosing namespace which contains
        both the using-directive and the nominated namespace" */
     entity_index common_namespace(entity_index a, entity_index b) const;
-    /* the uses of names lookup resolved, each with the entity found:
-       what cxxsema -lookup-claims has clang check */
-    struct name_use {
-        token_index at = 0;
-        entity_index entity = 0;
-        node_index declaration = 0;
-    };
-    owned_array<name_use> name_uses;
+    /* record a use of a name lookup resolved (name_uses) */
     void used(token_index at, entity_index e)
     {
         name_use u;

@@ -1,138 +1,114 @@
 /*
- * cxxsema: the C++ front end's semantic analysis (src/frontend/cplusplus,
- * doc/PLAN-cxx-sema.md) on one translation unit.
- *
- *   cxxsema [-fsyntax-only] [OPTIONS] FILE  analyse; diagnostics on stderr
- *   cxxsema -dump-analysis [OPTIONS] FILE   one line per declaration of the
- *                                           translation unit: the node's
- *                                           kind, the line:column of its
- *                                           first and of its last token, and
- *                                           the result: well-formed,
- *                                           ill-formed, not-parsed, or
- *                                           unsupported=[SUBCLAUSE] (rules
- *                                           that are not written yet)
- *   cxxsema -debug-unsupported ...          one line per construct without
- *                                           rules: [SUBCLAUSE] nonterminal
- *                                           FILE:LINE:COLUMN
- *   cxxsema -declaration-claims ...         one line per name a declaration
- *                                           declared: the type analysis gave
- *                                           it, in the format of cxxparse
- *                                           -declaration-claims, for clang to
- *                                           check (bench/cxx-sema.py)
- *   cxxsema -type-claims ...                one line per typed expression:
- *                                           its type and value category for
- *                                           clang to check (type-claims.h)
- *   cxxsema -check-tree ...                 the semantic tree of each
- *                                           well-formed definition is
- *                                           complete: a line per problem
- *                                           (tree-check.h)
- *   cxxsema -dump-tree ...                  the semantic tree of each
- *                                           definition, a node per line
- *   cxxsema -symbols ...                    the symbol of each function and
- *                                           variable of a well-formed
- *                                           declaration (write_symbols)
- *   cxxsema -S [-O0..3] ...                 assembly for Linux arm64: the
- *                                           tree lowered to C's AST and
- *                                           C's code generator (emit_assembly)
- *   cxxsema -stats ...                      declarations by result, types,
- *                                           entities
- *   cxxsema -selftest                       the tables no rule uses yet
- *
- * OPTIONS are cxxlex's (src/bin/cxxlex/command-line.h).  The exit status is
- * 1 if a diagnostic was an error, 2 if the file cannot be read; a
- * declaration that is unsupported is no error.
+ * analysis.cpp: the developer outputs of semantic analysis (dump.h):
+ * analysis, unsupported, declaration-claims, type-claims, lookup-claims,
+ * check-tree, tree, symbols and stats, which bench/cxx-sema.py checks with
+ * clang; and the selftest of the tables analysis builds on.
  */
 #include <math.h>
 #include <string.h>
 
-#include "../cxxlex/command-line.h"
-#include "frontend/cplusplus/lower.h"
-#include "frontend/cplusplus/parse.h"
-#include "frontend/cplusplus/sema.h"
+#include "../cplusplus-internal.h"
+#include "dump.h"
+
+namespace cplusplus
+{
+
 #include "type-claims.h"
 #include "tree-check.h"
 
-static bool check(bool condition, const char *what)
+static bool analysis_check(vbuffer *out, bool condition, const char *what)
 {
     if (!condition)
-        fprintf(stderr, "cxxsema -selftest: FAILED: %s\n", what);
+        vbuffer_format_append(out, "selftest: FAILED: %s\n", what);
     return condition;
 }
 
 /* the type and entity tables have no rule that uses them before step S1:
    what they promise is checked here */
-static int selftest()
+bool dump_analysis_selftest(vbuffer *out)
 {
     bool ok = true;
     {
         types t;
         type_index i = t.fundamental(fundamental_type::int_);
         type_index c = t.fundamental(fundamental_type::char_);
-        ok &= check(i && c && i != c, "distinct fundamental types");
-        ok &= check(t.fundamental(fundamental_type::int_) == i,
-                    "a type made again is the same type");
+        ok &=
+            analysis_check(out, i && c && i != c, "distinct fundamental types");
+        ok &= analysis_check(out, t.fundamental(fundamental_type::int_) == i,
+                             "a type made again is the same type");
         qualified_type plain = qualified_type::make(i, cv_none);
         qualified_type constant = qualified_type::make(i, cv_const);
-        ok &= check(plain.unqualified() == constant.unqualified() &&
-                        !(plain == constant) && constant.cv() == cv_const,
-                    "[basic.type.qualifier]/1: cv-qualified versions are "
-                    "distinct types of one record");
+        ok &= analysis_check(
+            out,
+            plain.unqualified() == constant.unqualified() &&
+                !(plain == constant) && constant.cv() == cv_const,
+            "[basic.type.qualifier]/1: cv-qualified versions are "
+            "distinct types of one record");
         type_index p = t.pointer_to(plain), pc = t.pointer_to(constant);
-        ok &= check(p != pc && t.pointer_to(plain) == p,
-                    "int* and const int* differ");
-        ok &=
-            check(t.lvalue_reference_to(plain) != t.rvalue_reference_to(plain),
-                  "[dcl.ref]/1: the two kinds of reference");
-        ok &= check(t.array_of(plain, 3) != t.array_of(plain, 4) &&
-                        t.array_of(plain, 3) == t.array_of(plain, 3) &&
-                        t.array_of_unknown_bound_of(plain) !=
-                            t.array_of(plain, 0),
-                    "[dcl.array]/1: arrays by bound");
+        ok &= analysis_check(out, p != pc && t.pointer_to(plain) == p,
+                             "int* and const int* differ");
+        ok &= analysis_check(
+            out, t.lvalue_reference_to(plain) != t.rvalue_reference_to(plain),
+            "[dcl.ref]/1: the two kinds of reference");
+        ok &= analysis_check(out,
+                             t.array_of(plain, 3) != t.array_of(plain, 4) &&
+                                 t.array_of(plain, 3) == t.array_of(plain, 3) &&
+                                 t.array_of_unknown_bound_of(plain) !=
+                                     t.array_of(plain, 0),
+                             "[dcl.array]/1: arrays by bound");
         qualified_type two[] = {plain, qualified_type::make(c, cv_none)};
         type_index f = t.function(plain, two, 2, false);
-        ok &= check(t.function(plain, two, 2, false) == f &&
-                        t.function(plain, two, 1, false) != f &&
-                        t.function(plain, two, 2, true) != f &&
-                        t.function(constant, two, 2, false) != f,
-                    "[dcl.fct]/1: functions by parameters and return type");
-        ok &= check(t[f].parameter_count == 2 && t.parameters(f)[1] == two[1],
-                    "a function type's parameters");
-        ok &= check(t.of_entity(type_kind::class_type, 1) !=
-                            t.of_entity(type_kind::class_type, 2) &&
-                        t.of_entity(type_kind::class_type, 1) !=
-                            t.of_entity(type_kind::enumeration, 1),
-                    "one type per class and enumeration");
-        ok &= check(t.pointer_to_member(1, plain) !=
-                        t.pointer_to_member(2, plain),
-                    "[dcl.mptr]/1: pointers to members by class");
+        ok &= analysis_check(
+            out,
+            t.function(plain, two, 2, false) == f &&
+                t.function(plain, two, 1, false) != f &&
+                t.function(plain, two, 2, true) != f &&
+                t.function(constant, two, 2, false) != f,
+            "[dcl.fct]/1: functions by parameters and return type");
+        ok &= analysis_check(
+            out, t[f].parameter_count == 2 && t.parameters(f)[1] == two[1],
+            "a function type's parameters");
+        ok &= analysis_check(out,
+                             t.of_entity(type_kind::class_type, 1) !=
+                                     t.of_entity(type_kind::class_type, 2) &&
+                                 t.of_entity(type_kind::class_type, 1) !=
+                                     t.of_entity(type_kind::enumeration, 1),
+                             "one type per class and enumeration");
+        ok &= analysis_check(
+            out, t.pointer_to_member(1, plain) != t.pointer_to_member(2, plain),
+            "[dcl.mptr]/1: pointers to members by class");
         /* enough types for the table to grow several times */
         size_t before = t.size();
         qualified_type chain = plain;
         for (int k = 0; k < 1000; k++)
             chain = qualified_type::make(t.pointer_to(chain), cv_none);
-        ok &= check(t.size() == before + 999, "p was the first of the chain");
+        ok &= analysis_check(out, t.size() == before + 999,
+                             "p was the first of the chain");
         qualified_type again = plain;
         for (int k = 0; k < 1000; k++)
             again = qualified_type::make(t.pointer_to(again), cv_none);
-        ok &= check(again == chain && t.size() == before + 999,
-                    "types are found again after the table grew");
+        ok &= analysis_check(out, again == chain && t.size() == before + 999,
+                             "types are found again after the table grew");
     }
     {
         entities e;
         entity_index n = e.make(entity_kind::namespace_entity, 7, 0);
         entity_index x = e.make(entity_kind::variable, 8, n);
-        ok &= check(n && x && e[x].enclosing == n && e[x].name == 8,
-                    "an entity and its enclosing entity");
+        ok &=
+            analysis_check(out, n && x && e[x].enclosing == n && e[x].name == 8,
+                           "an entity and its enclosing entity");
         e.add_declaration(x, 11);
         e.add_declaration(n, 5);
         e.add_declaration(x, 12);
         uint32_t first = e[x].first_declaration;
-        ok &= check(e.declaration(first).node == 11 &&
-                        e.declaration(e.declaration(first).next).node == 12 &&
-                        e[x].last_declaration == e.declaration(first).next &&
-                        !e.declaration(e[x].last_declaration).next &&
-                        e.declaration(e[n].first_declaration).node == 5,
-                    "[basic.link]/1: an entity's declarations in order");
+        ok &= analysis_check(
+            out,
+            e.declaration(first).node == 11 &&
+                e.declaration(e.declaration(first).next).node == 12 &&
+                e[x].last_declaration == e.declaration(first).next &&
+                !e.declaration(e[x].last_declaration).next &&
+                e.declaration(e[n].first_declaration).node == 5,
+            "[basic.link]/1: an entity's declarations in order");
     }
     {
         /* the claims' encoding: what bench/cxx-sema.py has clang check */
@@ -154,17 +130,21 @@ static int selftest()
             qualified_type::make(t.function(i, nullptr, 0, true), cv_none);
         qualified_type s = qualified_type::make(
             t.of_entity(type_kind::class_type, 1), cv_none);
-        owned_buffer out;
+        owned_buffer encoded;
         auto claim = [&](qualified_type type, value_category category,
                          const char *expected) {
-            out.clear();
-            bool written = write_expression_claim(t, type, category, out.get());
+            encoded.clear();
+            bool written =
+                write_expression_claim(t, type, category, encoded.get());
             if (!expected)
-                return check(!written && !out.size(),
-                             "a type without an encoding writes nothing");
-            return check(written && out.size() == strlen(expected) &&
-                             !memcmp(out.data(), expected, out.size()),
-                         expected);
+                return analysis_check(
+                    out, !written && !encoded.size(),
+                    "a type without an encoding writes nothing");
+            return analysis_check(
+                out,
+                written && encoded.size() == strlen(expected) &&
+                    !memcmp(encoded.data(), expected, encoded.size()),
+                expected);
         };
         ok &= claim(i, value_category::prvalue, "int");
         ok &= claim(i, value_category::lvalue,
@@ -183,28 +163,24 @@ static int selftest()
         ok &= claim(qualified_type::make(t.pointer_to(s), cv_none),
                     value_category::prvalue, nullptr);
     }
-    if (ok)
-        printf("cxxsema -selftest: ok\n");
-    if (ok)
-        return 0;
-    return 1;
+    return ok;
 }
 
 /*
- * -declaration-claims: per declared name
+ * declaration-claims: per declared name
  *
  *     FILE <tab> LINE-LINE <tab> LINE:COLUMN <tab> KIND <tab> NAME <tab> CLAIM
  *
- * as cxxparse writes it (src/bin/cxxparse/declarator-claims.h), so that
+ * as declarator-claims writes it (declarator-claims.h), so that
  * bench/cxx-parse.py's check runs on it: LINE-LINE the declaration's lines
  * (a function-definition's up to its body), LINE:COLUMN just after the
  * declaration, KIND type, function or object ([] appended for an array of
  * unknown bound).  A declaration with a token a macro made is left out: its
  * tokens are not at one place in the file.
  */
-static void write_declaration_claims(const semantic_analysis &analysis,
-                                     const syntax_tree &tree,
-                                     token_stream &tokens, vbuffer *out)
+static void dump_declaration_claims(const semantic_analysis &analysis,
+                                    const syntax_tree &tree,
+                                    token_stream &tokens, vbuffer *out)
 {
     owned_buffer claim;
     for (const declared_name &d : analysis.declared) {
@@ -260,9 +236,9 @@ static void write_declaration_claims(const semantic_analysis &analysis,
  * hexadecimal floating literal; false when there is none (a long double, an
  * infinity or a NaN, a pointer).
  */
-static bool write_value_claim(const semantic_analysis &analysis,
-                              const implementation_defined_behavior &b,
-                              const expression_meaning &m, vbuffer *out)
+static bool dump_value_claim(const semantic_analysis &analysis,
+                             const implementation_defined_behavior &b,
+                             const expression_meaning &m, vbuffer *out)
 {
     const type &record = analysis.type_table[m.type.unqualified()];
     if (m.category != value_category::prvalue ||
@@ -292,15 +268,15 @@ static bool write_value_claim(const semantic_analysis &analysis,
 }
 
 /*
- * -type-claims: a line per expression analysis gave a type, in a
+ * type-claims: a line per expression analysis gave a type, in a
  * declaration that is well-formed or unsupported (type-claims.h); from
  * C++11 on, a fifth field with the value of a constant prvalue, which
  * bench/cxx-sema.py checks as static_assert((E) == VALUE).  An expression
  * with a token a macro made, or one spelled over lines, is left out.
  */
-static void write_type_claims(const semantic_analysis &analysis,
-                              const syntax_tree &tree, token_stream &tokens,
-                              vbuffer *out)
+static void dump_type_claims(const semantic_analysis &analysis,
+                             const syntax_tree &tree, token_stream &tokens,
+                             vbuffer *out)
 {
     const implementation_defined_behavior &b = tokens.files.behavior;
     bool values = b.has(language_feature::list_initialization);
@@ -360,7 +336,7 @@ static void write_type_claims(const semantic_analysis &analysis,
         vbuffer_append(out, claim.data(), claim.size());
         if (values) {
             claim.clear();
-            if (write_value_claim(analysis, b, x.meaning, claim.get())) {
+            if (dump_value_claim(analysis, b, x.meaning, claim.get())) {
                 vbuffer_string_append(out, "\t");
                 vbuffer_append(out, claim.data(), claim.size());
             }
@@ -370,7 +346,7 @@ static void write_type_claims(const semantic_analysis &analysis,
 }
 
 /*
- * -symbols: a line per function or variable a well-formed declaration
+ * symbols: a line per function or variable a well-formed declaration
  * declared that has a symbol, once per entity:
  *
  *     SYMBOL <tab> defined|inline|declared <tab> external|internal|none
@@ -379,8 +355,8 @@ static void write_type_claims(const semantic_analysis &analysis,
  * it accepts and checks each defined one against its object's symbols.
  * An entity whose symbol needs rules not written yet is "unsupported".
  */
-static void write_symbols(const semantic_analysis &analysis,
-                          token_stream &tokens, vbuffer *out)
+static void dump_symbols(const semantic_analysis &analysis,
+                         token_stream &tokens, vbuffer *out)
 {
     owned_array<entity_index> seen;
     owned_buffer symbol;
@@ -425,120 +401,78 @@ static void write_symbols(const semantic_analysis &analysis,
 }
 
 /*
- * -S: the translation unit lowered to C's AST (lower_translation_unit) and
- * compiled by C's code generator for Linux arm64, at -O0 to -O3: assembly
- * on stdout.  A translation unit lowering has no rule for is reported
- * ("cxxsema: not lowered: WHAT at FILE:LINE:COL") and fails.
+ * lookup-claims: a line per name whose lookup analysis resolved
+ * (semantic_analysis::name_uses), with the declaration it found:
+ *
+ *     FILE <tab> LINE:COLUMN <tab> NAME <tab> KIND <tab> FILE:LINE:COLUMN
+ *
+ * the place of the name, its spelling, the kind of entity found, and the
+ * place of the name in that entity's first declaration.  bench/cxx-sema.py
+ * compares each with the declaration clang's AST says the name at that
+ * place refers to (the first of its redeclarations).  A use or a
+ * declaration with a token a macro made is left out, and so is an entity
+ * without a declared name (a namespace, a built-in function).
  */
-static int emit_assembly(const semantic_analysis &analysis,
-                         token_stream &tokens, const char *path, int level)
+static void dump_lookup_claims(const semantic_analysis &analysis,
+                               token_stream &tokens, vbuffer *out)
 {
-    /* C's preprocessor only receives the code generator's diagnostics */
-    pp_opts po = {};
-    po.main = path;
-    po.main_src = "";
-    po.main_len = 0;
-    po.predef = "";
-    po.target = PP_LINUX_AARCH64;
-    pp *p = pp_open(&po);
-    cc_options o = {};
-    o.target = PP_LINUX_AARCH64;
-    o.unsigned_char = 1;
-    o.outfd = 1;
-    o.emit = 1;
-    o.opt = level;
-#define X(field, name, at_level) o.optimize.field = level >= at_level;
-    CC_OPTIMIZATIONS(X)
-#undef X
-    cc *c = ast_builder_open(p, &o);
-    lowering_failure why;
-    int status = 0;
-    if (!lower_translation_unit(analysis, tokens, c, o.target, why, path)) {
-        source_position at = tokens.position(why.at);
-        fprintf(stderr, "cxxsema: not lowered: %s at %s:%u:%u\n", why.what,
-                at.file_name, at.line, at.column);
-        status = 1;
-    } else if (ast_builder_emit(c))
-        status = 1;
-    ast_builder_close(c);
-    pp_close(p);
-    return status;
+    /* each entity's first declared name, in the order they were declared */
+    owned_array<token_index> first;
+    first.resize(analysis.entity_table.size());
+    for (size_t e = 0; e < analysis.entity_table.size(); e++)
+        first[e] = 0;
+    for (const declared_name &d : analysis.declared)
+        if (d.entity && d.id && !first[d.entity])
+            first[d.entity] = d.id;
+    owned_buffer spelling;
+    for (const semantic_analysis::name_use &u : analysis.name_uses) {
+        if (!u.entity || u.entity >= analysis.entity_table.size())
+            continue;
+        token_index declared_at = first[u.entity];
+        if (!declared_at || tokens[u.at].preprocessing.expansion ||
+            tokens[declared_at].preprocessing.expansion)
+            continue;
+        const char *kind = "other";
+        switch (analysis.entity_table[u.entity].kind) {
+        case entity_kind::variable:
+            kind = "variable";
+            break;
+        case entity_kind::function:
+            kind = "function";
+            break;
+        case entity_kind::enumerator:
+            kind = "enumerator";
+            break;
+        case entity_kind::class_type:
+            kind = "class";
+            break;
+        case entity_kind::enumeration:
+            kind = "enumeration";
+            break;
+        case entity_kind::typedef_name:
+            kind = "typedef";
+            break;
+        default:
+            break;
+        }
+        source_position at = tokens.position(u.at);
+        source_position declared = tokens.position(declared_at);
+        spelling.clear();
+        tokens.spelling(u.at, spelling.get());
+        vbuffer_format_append(out, "%s\t%u:%u\t", at.file_name, at.line,
+                              at.column);
+        vbuffer_append(out, spelling.data(), spelling.size());
+        vbuffer_format_append(out, "\t%s\t%s:%u:%u\n", kind, declared.file_name,
+                              declared.line, declared.column);
+    }
 }
-
-int main(int argc, char **argv)
+void dump_analysis(const dump_request &r, const semantic_analysis &analysis,
+                   const syntax_tree &tree, token_stream &tokens, vbuffer *out)
 {
-    command_line options("cxxsema");
-    bool dump_analysis = false, debug_unsupported = false, stats = false,
-         type_claims = false, declaration_claims = false, check = false,
-         dump = false, symbols = false, assembly = false;
-    int level = 0;
-    const char *path = nullptr;
-    for (int i = 1; i < argc; i++) {
-        const char *a = argv[i];
-        if (!strcmp(a, "-selftest"))
-            return selftest();
-        if (!strcmp(a, "-dump-analysis"))
-            dump_analysis = true;
-        else if (!strcmp(a, "-debug-unsupported"))
-            debug_unsupported = true;
-        else if (!strcmp(a, "-declaration-claims"))
-            declaration_claims = true;
-        else if (!strcmp(a, "-type-claims"))
-            type_claims = true;
-        else if (!strcmp(a, "-check-tree"))
-            check = true;
-        else if (!strcmp(a, "-dump-tree"))
-            dump = true;
-        else if (!strcmp(a, "-symbols"))
-            symbols = true;
-        else if (!strcmp(a, "-S"))
-            assembly = true;
-        else if (a[0] == '-' && a[1] == 'O' && a[2] >= '0' && a[2] <= '3' &&
-                 !a[3])
-            level = a[2] - '0';
-        else if (!strcmp(a, "-stats"))
-            stats = true;
-        else if (!strcmp(a, "-fsyntax-only"))
-            ;
-        else if (options.option(argc, argv, i))
-            ;
-        else if (a[0] != '-' || !a[1])
-            path = a;
-    }
-    if (!path) {
-        fprintf(stderr,
-                "usage: cxxsema [-fsyntax-only|-dump-analysis|"
-                "-debug-unsupported|-declaration-claims|-type-claims|-"
-                "check-tree|-dump-tree|-symbols|-stats] [clang -cc1 options] "
-                "FILE\n       cxxsema -selftest\n");
-        return 2;
-    }
-    options.apply();
-    diagnostic_consumer diagnostics(options.diagnostic_settings);
-    source_files files(options.behavior, diagnostics);
-    diagnostics.files = &files;
-    size_t path_length = strlen(path);
-    files.file_options.preprocessed_input =
-        (path_length > 3 && !strcmp(path + path_length - 3, ".ii")) ||
-        (path_length > 2 && !strcmp(path + path_length - 2, ".i"));
-    preprocessor pp(files, options.pp_options);
-    if (!pp.start(path)) {
-        fprintf(stderr, "cxxsema: cannot read %s\n", path);
-        return 2;
-    }
-    token_stream tokens(pp);
-    syntax_tree tree;
-    declared_names names;
-    parser p(tokens, tree, names, diagnostics);
-    p.translation_unit();
-    semantic_analysis analysis(tree, tokens, p, diagnostics);
-    analysis.translation_unit();
-
-    owned_buffer out;
     size_t by_result[4] = {};
     for (const analysed_declaration &d : analysis.declarations) {
         by_result[static_cast<size_t>(d.result)]++;
-        if (!dump_analysis)
+        if (!r.has(dump_output::analysis))
             continue;
         const syntax_node &s = tree[d.node];
         source_position first = tokens.position(s.first_token);
@@ -546,38 +480,40 @@ int main(int argc, char **argv)
         if (s.end_token > s.first_token)
             last = s.end_token - 1;
         source_position end = tokens.position(last);
-        vbuffer_format_append(out.get(), "%s %s:%u:%u %s:%u:%u %s",
+        vbuffer_format_append(out, "%s %s:%u:%u %s:%u:%u %s",
                               syntax_kind_name(s.kind), first.file_name,
                               first.line, first.column, end.file_name, end.line,
                               end.column, analysis_result_name(d.result));
         if (d.result == analysis_result::unsupported)
             vbuffer_format_append(
-                out.get(), "=[%s]",
+                out, "=[%s]",
                 analysis.unsupported[d.first_unsupported].subclause);
-        vbuffer_string_append(out.get(), "\n");
+        vbuffer_string_append(out, "\n");
     }
-    if (debug_unsupported) {
+    if (r.has(dump_output::unsupported)) {
         for (size_t i = 1; i < analysis.unsupported.size(); i++) {
             const unsupported_construct &u = analysis.unsupported[i];
             source_position at = tokens.position(tree[u.node].first_token);
-            vbuffer_format_append(out.get(), "[%s] %s %s:%u:%u\n", u.subclause,
+            vbuffer_format_append(out, "[%s] %s %s:%u:%u\n", u.subclause,
                                   syntax_kind_name(tree[u.node].kind),
                                   at.file_name, at.line, at.column);
         }
     }
-    if (declaration_claims)
-        write_declaration_claims(analysis, tree, tokens, out.get());
-    if (type_claims)
-        write_type_claims(analysis, tree, tokens, out.get());
-    if (check)
-        check_tree(analysis, tree, tokens, out.get());
-    if (dump)
-        dump_tree(analysis, tokens, out.get());
-    if (symbols)
-        write_symbols(analysis, tokens, out.get());
-    if (stats) {
+    if (r.has(dump_output::declaration_claims))
+        dump_declaration_claims(analysis, tree, tokens, out);
+    if (r.has(dump_output::type_claims))
+        dump_type_claims(analysis, tree, tokens, out);
+    if (r.has(dump_output::lookup_claims))
+        dump_lookup_claims(analysis, tokens, out);
+    if (r.has(dump_output::check_tree))
+        check_tree(analysis, tree, tokens, out);
+    if (r.has(dump_output::tree))
+        dump_tree(analysis, tokens, out);
+    if (r.has(dump_output::symbols))
+        dump_symbols(analysis, tokens, out);
+    if (r.has(dump_output::stats)) {
         vbuffer_format_append(
-            out.get(),
+            out,
             "declarations %zu\nwell-formed %zu\nill-formed %zu\n"
             "unsupported %zu\nnot-parsed %zu\ntypes %zu\nentities %zu\n",
             analysis.declarations.size(),
@@ -587,17 +523,6 @@ int main(int argc, char **argv)
             by_result[static_cast<size_t>(analysis_result::not_parsed)],
             analysis.type_table.size() - 1, analysis.entity_table.size() - 1);
     }
-    fwrite(out.data(), 1, out.size(), stdout);
-    int status = 0;
-    if (assembly && !diagnostics.error_count) {
-        fflush(stdout);
-        status = emit_assembly(analysis, tokens, path, level);
-    }
-    owned_buffer messages;
-    for (const diagnostic_message &m : diagnostics.messages)
-        diagnostics.render(m, messages.get());
-    fwrite(messages.data(), 1, messages.size(), stderr);
-    if (diagnostics.error_count)
-        return 1;
-    return status;
 }
+
+} // namespace cplusplus

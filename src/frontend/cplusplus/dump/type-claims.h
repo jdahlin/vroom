@@ -1,7 +1,7 @@
 /*
- * type-claims.h: cxxsema -type-claims (doc/PLAN-cxx-sema.md, C4): for every
+ * type-claims.h: -fcxx-dump=type-claims (doc/PLAN-cxx-sema.md, C4): for every
  * expression analysis gave a type, that type and value category, in the
- * encoding of cxxparse's declarator claims (declarator-claims.h), which
+ * encoding of the declarator claims (declarator-claims.h), which
  * bench/cxx-parse.py's PRELUDE defines:
  *
  *     ::vcc_claim::pointer_to<::vcc_claim::const_<int>>
@@ -18,22 +18,18 @@
  *
  *     FILE <tab> LINE:COLUMN <tab> EXPRESSION <tab> CLAIM [<tab> VALUE]
  *
- * with LINE:COLUMN just after the declaration, as cxxparse
- * -expression-claims writes it, and from C++11 on the value of a constant
+ * with LINE:COLUMN just after the declaration, as
+ * -fcxx-dump=expression-claims writes it, and from C++11 on the value of a constant
  * prvalue of integral, float or double type (an integer literal, or a
  * hexadecimal floating literal), which bench/cxx-sema.py checks as
  *
  *     static_assert((E) == VALUE);
  *
- * The encoding is checked by cxxsema -selftest.
+ * The encoding is checked by -fcxx-dump=selftest.  Included by
+ * analysis.cpp inside namespace cplusplus.
  */
-#ifndef VCC_CXXSEMA_TYPE_CLAIMS_H
-#define VCC_CXXSEMA_TYPE_CLAIMS_H
-
-#include "frontend/cplusplus/sema.h"
-
-/* [basic.lval]/1 */
-using cplusplus::value_category;
+#ifndef VCC_CPLUSPLUS_DUMP_TYPE_CLAIMS_H
+#define VCC_CPLUSPLUS_DUMP_TYPE_CLAIMS_H
 
 /*
  * Appends the encoding of type t to out; false (and out unchanged) when

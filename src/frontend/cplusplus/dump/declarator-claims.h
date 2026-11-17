@@ -1,5 +1,5 @@
 /*
- * declarator-claims.h: cxxparse -declaration-claims (doc/PLAN-cxx-parse.md,
+ * declarator-claims.h: -fcxx-dump=declarator-claims (doc/PLAN-cxx-parse.md,
  * V4b): for every name a declaration declares, the type its
  * decl-specifier-seq and declarator give it, worked out from the syntax tree
  * as [dcl.meaning] says and written in an encoding that says how the type
@@ -36,6 +36,9 @@
  * [dcl.attr.grammar]/6 leaves its meaning to the implementation, and
  * clang's [[gnu::noreturn]] is part of its function types.
  */
+
+#ifndef VCC_CPLUSPLUS_DUMP_DECLARATOR_CLAIMS_H
+#define VCC_CPLUSPLUS_DUMP_DECLARATOR_CLAIMS_H
 
 class declarator_claims
 {
@@ -935,3 +938,5 @@ class declarator_claims
         }
     }
 };
+
+#endif

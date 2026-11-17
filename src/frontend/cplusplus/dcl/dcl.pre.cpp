@@ -201,8 +201,7 @@ node_index parser::recover_declaration(node_index (parser::*alternative)())
         owned_buffer spelling;
         tokens.spelling(failed_with.at, spelling.get());
         source_position at = tokens.position(failed_with.at);
-        fprintf(stderr,
-                "cxxparse: declaration at %s:%u:%u: %s%s at %u:%u `%.*s`\n",
+        fprintf(stderr, "vcc: declaration at %s:%u:%u: %s%s at %u:%u `%.*s`\n",
                 at.file_name, tokens.position(first).line,
                 tokens.position(first).column, why, failed_with.expected,
                 at.line, at.column, (int)spelling.size(), spelling.data());

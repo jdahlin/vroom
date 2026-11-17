@@ -670,7 +670,7 @@ class parser
     /* how many namespace-bodies and linkage-specification braces enclose
        the current declaration: a '}' outside the declaration ends them */
     unsigned enclosing_braces = 0;
-    /* cxxparse -debug-fallbacks: why each declaration was not parsed */
+    /* -fcxx-debug-fallbacks: why each declaration was not parsed */
     bool debug_fallbacks = false;
     /* an expression of the current declaration named something
        declared_names does not know (a template, a class's member, a name

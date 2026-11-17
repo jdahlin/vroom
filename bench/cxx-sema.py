@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""The C++ front end's semantic analysis (src/frontend/cplusplus, through
-cxxsema) against clang, on clang's conformance tests (doc/PLAN-cxx-sema.md,
+"""The C++ front end's semantic analysis (src/frontend/cplusplus, through the
+driver: vpp -fcxx-dump=, src/frontend/cplusplus/dump/dump.h) against clang, on clang's conformance tests (doc/PLAN-cxx-sema.md,
 C3).
 
 Tests: clang/test/CXX/**/*.cpp (organized by the standard's paragraphs),
@@ -8,10 +8,10 @@ clang/test/SemaCXX and SemaTemplate when bench/fetch-testsuites.sh llvm has
 them (work/testsuites), and src/test/cxx/sema/{spec,gram}/*.cpp.  For each
 %clang_cc1 RUN line (the option sets bench/cxx-pp.py reads), per run:
 
-  crash    cxxsema ends with status 0 or 1, within the time limit, never
+  crash    vpp ends with status 0 or 1, within the time limit, never
            by a signal
   verdict  per declaration of the translation unit that starts in the test
-           file, cxxsema -dump-analysis against the lines where clang
+           file, -fcxx-dump=analysis against the lines where clang
            reports an error:
              agree        well-formed and clang has no error in its lines,
                           or ill-formed and clang has one
@@ -25,19 +25,19 @@ them (work/testsuites), and src/test/cxx/sema/{spec,gram}/*.cpp.  For each
              not parsed   the parser's (an erroneous node, or one kept as
                           tokens), or clang's error there is one of syntax
 
-  tree     cxxsema -check-tree: the semantic tree of every well-formed
+  tree     -fcxx-dump=check-tree: the semantic tree of every well-formed
            definition is complete and agrees with each expression's
-           recorded type and value category (src/bin/cxxsema/tree-check.h);
+           recorded type and value category (dump/tree-check.h);
            a problem is a failure
 
-  declared cxxsema -declaration-claims gives each name a declaration
-           declared and the type analysis gave it, in cxxparse's format;
+  declared -fcxx-dump=declaration-claims gives each name a declaration
+           declared and the type analysis gave it, in declarator-claims' format;
            bench/cxx-parse.py's check has clang compile
                static_assert(__is_same(decltype(NAME), CLAIM));
            after the declaration: verified, refuted (a failure), in a
            declaration clang rejects, or not checkable
-  types    cxxsema -type-claims gives each expression with a type its type
-           and value category (src/bin/cxxsema/type-claims.h); after the
+  types    -fcxx-dump=type-claims gives each expression with a type its type
+           and value category (dump/type-claims.h); after the
            expression's declaration clang compiles
                static_assert(__is_same(decltype((E)), CLAIM));
            verified, refuted (a failure), or not checkable (E does not
@@ -46,13 +46,13 @@ them (work/testsuites), and src/test/cxx/sema/{spec,gram}/*.cpp.  For each
                static_assert((E) == VALUE);
            `bench/cxx-sema.py selftest` checks this path on claims written
            by hand, some of them wrong.
-  symbols  on a run clang accepts without an error, cxxsema -symbols gives
+  symbols  on a run clang accepts without an error, -fcxx-dump=symbols gives
            the symbol of each function and variable a well-formed
            declaration defines (src/frontend/cplusplus/abi/itanium/); clang
            -O0 compiles the file and each must be one its object defines
            (llvm-nm): verified, refuted (a failure), or not emitted (clang
            leaves out an unused entity with internal linkage).
-  lowering on the same runs, cxxsema -S -O0 (the tree lowered to C's AST,
+  lowering on the same runs, vpp -S -O0 (the tree lowered to C's AST,
            C's code generator): its assembly must assemble (clang -cc1as)
            and the object define exactly the functions and variables
            clang -O0's does: lowered, refuted (a failure), or not lowered
@@ -91,7 +91,7 @@ R = cxxpp.R
 OURS = os.path.join(R, 'src', 'test', 'cxx', 'sema')
 LLVM_TEST = cxxparse.LLVM_TEST
 # clang -cc1 has plain char signed unless told otherwise; the driver tells
-# it so for aarch64 Linux, the target cxxsema analyses for
+# it so for aarch64 Linux, the target vpp analyses for
 TARGET = cxxparse.TRIPLE + ['-fno-signed-char']
 ALIASES = ['-mconstructor-aliases']
 SUITES = ('CXX', 'SemaCXX', 'SemaTemplate')
@@ -217,10 +217,10 @@ def check_type_claims(test, opts, clang, claims, cache=True):
     return counts, refuted
 
 
-def type_claims(cxxsema, opts, test):
-    """cxxsema -type-claims: the claims about the test file itself"""
+def type_claims(vpp, opts, test):
+    """-fcxx-dump=type-claims: the claims about the test file itself"""
     cwd = os.path.dirname(test)
-    r = cxxparse.run([cxxsema, '-type-claims'] + opts + [os.path.basename(test)], cwd)
+    r = cxxparse.run(cxxpp.vpp_command(vpp, 'type-claims', opts, os.path.basename(test)), cwd)
     if r[0] not in (0, 1):
         return []
     found = []
@@ -239,7 +239,7 @@ int g(...);
 int *const volatile *(*fp)[3];
 struct S { int m; };
 """
-# (expression, claim, value, expected): the encodings cxxsema -selftest
+# (expression, claim, value, expected): the encodings -fcxx-dump=selftest
 # checks that its encoder writes, and claims that must be refuted or
 # unchecked
 SELFTEST_CLAIMS = [
@@ -304,12 +304,12 @@ def clang_defined(test, opts, clang):
     return cxxparse.cached('symbols' + ''.join(TARGET + ALIASES), clang, test, opts, compile_and_list)
 
 
-def check_symbols(test, opts, clang, cxxsema):
-    """cxxsema -symbols against the symbols clang -O0's object defines:
+def check_symbols(test, opts, clang, vpp):
+    """-fcxx-dump=symbols against the symbols clang -O0's object defines:
     a Counter, and the refuted"""
     cwd, name = os.path.dirname(test), os.path.basename(test)
     counts, refuted = collections.Counter(), []
-    ours = cxxparse.run([cxxsema, '-symbols'] + opts + [name], cwd)
+    ours = cxxparse.run(cxxpp.vpp_command(vpp, 'symbols', opts, name), cwd)
     if ours[0] not in (0, 1) or not ours[1].strip():
         return counts, refuted
     defined = clang_defined(test, opts, clang)
@@ -334,7 +334,9 @@ def check_symbols(test, opts, clang, cxxsema):
     return counts, refuted
 
 
-NOT_LOWERED = re.compile(r'^cxxsema: not lowered: (.*?) at ', re.M)
+# the driver's message when lowering has no rule (lower/compile.cpp)
+NOT_LOWERED = re.compile(r'^[^\n]*:\d+:\d+: error: (?:the rules of (\[[^\]]*\]) are not implemented yet|'
+                         r'C\+\+ code generation does not handle (.*) yet)$', re.M)
 
 
 def object_symbols(nm, obj, cwd):
@@ -346,21 +348,22 @@ def object_symbols(nm, obj, cwd):
     return {s for s in listed[1].split() if not s.startswith(('$', '.L'))}
 
 
-def check_lowering(test, opts, clang, cxxsema):
-    """cxxsema -S -O0 on a file clang compiles: the assembly assembles and
+def check_lowering(test, opts, clang, vpp):
+    """vpp -S -O0 on a file clang compiles: the assembly assembles and
     the object defines what clang -O0's does.  A Counter (lowered, refuted,
     incomplete: a declaration not well-formed for us, or the reason
     lowering stopped), and the refuted"""
     cwd, name = os.path.dirname(test), os.path.basename(test)
     counts, refuted = collections.Counter(), []
-    ours = cxxparse.run([cxxsema, '-S', '-O0'] + opts + [name], cwd, timeout=60)
+    ours = cxxparse.run([vpp, '-x', 'c++', '-nostdinc', '--target=' + cxxparse.TRIPLE[1], '-S', '-O0', '-o', '-'] +
+                        opts + [name], cwd, timeout=60)
     if ours[0] not in (0, 1):
-        refuted.append(f'cxxsema -S: status {ours[0]}: {ours[2].strip().splitlines()[-1:]}')
+        refuted.append(f'vpp -S: status {ours[0]}: {ours[2].strip().splitlines()[-1:]}')
         counts['refuted'] += 1
         return counts, refuted
     if ours[0] == 1:
         m = NOT_LOWERED.search(ours[2])
-        counts['not: ' + (m.group(1) if m else 'an error of our parser or analysis')] += 1
+        counts['not: ' + ((m.group(1) or m.group(2)) if m else 'an error of our parser or analysis')] += 1
         return counts, refuted
     defined = clang_defined(test, opts, clang)
     if defined is None:
@@ -373,7 +376,7 @@ def check_lowering(test, opts, clang, cxxsema):
                           '-o', obj, asm], d, timeout=60)
         if r[0] != 0:
             counts['refuted'] += 1
-            refuted.append(f'the assembly of cxxsema -S does not assemble: {r[2].strip().splitlines()[:1]}')
+            refuted.append(f'the assembly of vpp -S does not assemble: {r[2].strip().splitlines()[:1]}')
             return counts, refuted
         made = object_symbols(os.path.join(os.path.dirname(clang), 'llvm-nm'), obj, d)
     if made is None:
@@ -381,20 +384,20 @@ def check_lowering(test, opts, clang, cxxsema):
     expected = {s for s in defined if not s.startswith(('$', '.L'))}
     if made != expected:
         counts['refuted'] += 1
-        refuted.append(f'cxxsema -S defines {sorted(made - expected)[:3]} clang -O0 does not, '
+        refuted.append(f'vpp -S defines {sorted(made - expected)[:3]} clang -O0 does not, '
                        f'not {sorted(expected - made)[:3]}')
         return counts, refuted
     counts['lowered'] += 1
     return counts, refuted
 
 
-def check(test, opts, clang, cxxsema):
+def check(test, opts, clang, vpp):
     cwd = os.path.dirname(test)
     name = os.path.basename(test)
     res = {'test': test, 'opts': opts, 'fail': [], 'verdict': collections.Counter(),
            'unsupported': collections.Counter(), 'types': collections.Counter()}
-    ours = cxxparse.run([cxxsema, '-dump-analysis', '-check-tree'] + opts + [name], cwd)
-    if ours[0] == 2 and 'unsupported -std' in ours[2]:
+    ours = cxxparse.run(cxxpp.vpp_command(vpp, 'analysis,check-tree', opts, name), cwd)
+    if cxxpp.unsupported_edition(ours[0], ours[2]):
         res['skip'] = ours[2].strip()
         return res
     if ours[0] not in (0, 1):
@@ -456,16 +459,17 @@ def check(test, opts, clang, cxxsema):
     for m in CLANG_ERROR.finditer(c[2]):
         if m.group(1) == name:
             every_error_line.add(int(m.group(2)))
-    cxxparse.check_claims(test, opts, clang, cxxsema, res, every_error_line, expression_mode=None,
+    cxxparse.check_claims(test, opts, clang, vpp, res, every_error_line, expression_output=None,
+                          declaration_output='declaration-claims',
                           target=TARGET[len(cxxparse.TRIPLE):])
-    res['types'], refuted = check_type_claims(test, opts, clang, type_claims(cxxsema, opts, test))
+    res['types'], refuted = check_type_claims(test, opts, clang, type_claims(vpp, opts, test))
     for r in refuted:
         res['fail'].append(('types', r))
     if c[0] == 0 and not CLANG_ERROR.search(c[2]):
-        res['symbols'], refuted = check_symbols(test, opts, clang, cxxsema)
+        res['symbols'], refuted = check_symbols(test, opts, clang, vpp)
         for r in refuted:
             res['fail'].append(('symbols', r))
-        res['lowering'], refuted = check_lowering(test, opts, clang, cxxsema)
+        res['lowering'], refuted = check_lowering(test, opts, clang, vpp)
         for r in refuted:
             res['fail'].append(('lower', r))
     if rejected:
@@ -486,7 +490,7 @@ def main():
     ap.add_argument('patterns', nargs='*')
     a = ap.parse_args()
     clang = cxxpp.find_clang()
-    cxxsema = cxxparse.find_tool(a.bin_dir, 'cxxsema')
+    vpp = cxxpp.find_vpp(a.bin_dir or os.environ.get('VCC_BIN'))
     resource_include = os.path.join(
         subprocess.run([clang, '-print-resource-dir'], capture_output=True, text=True).stdout.strip(), 'include')
     missing = [s for s in SUITES if not os.path.isdir(os.path.join(LLVM_TEST, s))]
@@ -511,7 +515,7 @@ def main():
         for opts in sets:
             jobs.append((t, opts + extra))
     with concurrent.futures.ThreadPoolExecutor(a.j) as ex:
-        results = list(ex.map(lambda j: check(j[0], j[1], clang, cxxsema), jobs))
+        results = list(ex.map(lambda j: check(j[0], j[1], clang, vpp), jobs))
     verdict, unsupported, types = collections.Counter(), collections.Counter(), collections.Counter()
     declared, symbols, lowering = collections.Counter(), collections.Counter(), collections.Counter()
     crashes = failures = skipped = 0

@@ -5,6 +5,15 @@ Status: plan, for review before any code (2026-11-17).  Continues
 (layout mirrors the standard, the standard's terms as names, comments cite
 and quote, extensions in `ext/`, owners, no conditional operator).
 
+Since 2026-11-17 the tools this plan names (`cxxlex`, `cxxparse`,
+`cxxsema`) are gone: their outputs are the driver's, `vpp -x c++
+-fsyntax-only -fcxx-dump=WHAT FILE` (`src/frontend/cplusplus/dump/dump.h`;
+`-dump-tokens` is `tokens`, `-dump-raw-tokens` `raw-tokens`, `-E -dM`
+`definitions`, `-dump-declarations` `declarations`, cxxparse's
+`-declaration-claims` `declarator-claims`, `-dump-analysis` `analysis`,
+`-selftest` `selftest`; `-fcxx-dump=help` lists them).  The text below keeps
+the old names.
+
 The parser gives a syntax tree of the grammar's nonterminals with tokens by
 index, and `declared_names`, a stand-in for lookup that knows only whether a
 name is a type, a template or a namespace.  Code generation reads
@@ -124,8 +133,9 @@ src/frontend/cplusplus/
   dcl/dcl.init.list.cpp, dcl.meaning.cpp, ...
   class/, over/, temp/, except/
   abi/itanium/mangling.cpp, layout.cpp, vtable.cpp, rtti.cpp, guard.cpp, calls.cpp
-  lower/                   semantic program -> struct ast
-src/bin/cxxsema/           the tool: -dump-entities, the claims of section 4
+  lower/                   semantic program -> struct ast; compile.cpp the driver's entry
+  dump/                    the developer outputs, the claims of section 4:
+                           vpp -x c++ -fsyntax-only -fcxx-dump=WHAT (dump.h)
 ```
 
 A subclause's file holds its grammar (written) and its rules (new): the

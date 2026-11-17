@@ -1,20 +1,21 @@
 #!/usr/bin/env python3
-"""The C++ front end's lexer (src/frontend/cplusplus/lex, through cxxlex)
+"""The C++ front end's lexer (src/frontend/cplusplus/lex, through the driver:
+vpp -fcxx-dump=, src/frontend/cplusplus/dump/dump.h)
 against clang, on clang's own lexer tests (src/test/cxx/lex/llvm) and ours.
 
 For each %clang_cc1 RUN line of a test, with the RUN line's language options:
 
-  raw     cxxlex -dump-raw-tokens vs clang -cc1 -dump-raw-tokens on the file:
+  raw     -fcxx-dump=raw-tokens vs clang -cc1 -dump-raw-tokens on the file:
           phase 3, every preprocessing token, white space and comment with its
           kind, spelling, location and [StartOfLine]/[UnClean] flags
-  tokens  the file preprocessed by clang -E, then cxxlex -dump-tokens vs
+  tokens  the file preprocessed by clang -E, then -fcxx-dump=tokens vs
           clang -cc1 -dump-tokens on that: phase 7 (keywords, alternative
           tokens, literals), with [LeadingSpace]
-  values  each literal's type and value as cxxlex computes them, written as
-          static_asserts (cxxlex -literal-claims) that clang checks
+  values  each literal's type and value as vcc computes them, written as
+          static_asserts (-fcxx-dump=literal-claims) that clang checks
   diags   the lexical diagnostics: clang -cc1 -fsyntax-only on the file,
           keeping only messages that are one of the diagnostics the lexer
-          issues; cxxlex's from both runs above
+          issues; vcc's from both runs above
 
 Usage: bench/cxx-lex.py [-v] [-j N] [--bin-dir DIR] [PATTERN...]
 Prints one line per test and RUN line that does not match (all with -v) and
@@ -47,12 +48,16 @@ def find_clang():
     sys.exit('cxx-lex: no clang')
 
 
-def find_cxxlex(bin_dir):
-    for d in ([bin_dir] if bin_dir else []) + [os.path.join(R, 'build', 'linux', 'src'), os.path.join(R, 'build', 'src')]:
-        p = os.path.join(d, 'cxxlex')
-        if os.path.exists(p):
-            return p
-    sys.exit('cxx-lex: no cxxlex; make -C src cxxlex')
+def vpp_tools():
+    """cxx-pp.py's find_vpp and vpp_command"""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location('cxxpp', os.path.join(R, 'bench', 'cxx-pp.py'))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+CXXPP = vpp_tools()
 
 
 def run_lines(path):
@@ -236,7 +241,7 @@ def parse_diagnostics(text, regexes, skip_lines=()):
     return out
 
 
-# cxxlex's implementation-defined behavior is clang's for this target
+# vcc's implementation-defined behavior is clang's for this target
 TRIPLE = ['-triple', 'aarch64-unknown-linux-gnu']
 
 
@@ -250,14 +255,14 @@ def run(cmd, cwd=None):
 def first_difference(a, b):
     for i, (x, y) in enumerate(zip(a, b)):
         if x != y:
-            return f'#{i}: cxxlex {x} / clang {y}'
+            return f'#{i}: vcc {x} / clang {y}'
     if len(a) != len(b):
         i = min(len(a), len(b))
-        return f'#{i}: cxxlex {a[i] if i < len(a) else "(end)"} / clang {b[i] if i < len(b) else "(end)"}'
+        return f'#{i}: vcc {a[i] if i < len(a) else "(end)"} / clang {b[i] if i < len(b) else "(end)"}'
     return ''
 
 
-def check(test, opts, clang, cxxlex, regexes, tmp):
+def check(test, opts, clang, vpp, regexes, tmp):
     rel = os.path.relpath(test, TESTS)
     preprocess_only = '#preprocess-only' in opts
     opts = [o for o in opts if o != '#preprocess-only']
@@ -265,7 +270,7 @@ def check(test, opts, clang, cxxlex, regexes, tmp):
     name = os.path.basename(test)
     res = {}
     # raw: phase 3 on the file itself
-    ours, ours_err = run([cxxlex, '-dump-raw-tokens'] + opts + [name], cwd=d)
+    ours, ours_err = run(CXXPP.vpp_command(vpp, 'raw-tokens', opts, name), cwd=d)
     _, theirs = run([clang, '-cc1', '-dump-raw-tokens'] + opts + [name], cwd=d)  # clang dumps to stderr
     a, b = parse_tokens(ours, False), parse_tokens(theirs, False)
     res['raw'] = first_difference(a, b) if a != b else ''
@@ -283,13 +288,13 @@ def check(test, opts, clang, cxxlex, regexes, tmp):
         e_out, _ = run([clang, '-cc1', '-E', '-I', '.', '-I', 'Inputs'] + opts + [name], cwd=d)
     open(ii, 'w').write(e_out)
     if e_out:
-        ours_t, ours_t_err = run([cxxlex, '-dump-tokens'] + opts + [ii])
+        ours_t, ours_t_err = run(CXXPP.vpp_command(vpp, 'tokens', opts, ii))
         _, theirs_t = run([clang, '-cc1', '-dump-tokens'] + opts + [ii])
         a, b = parse_tokens(ours_t, True), parse_tokens(theirs_t, True)
         res['tokens'] = first_difference(a, b) if a != b else ''
-        # values: clang checks each literal's type and value as cxxlex
+        # values: clang checks each literal's type and value as vcc
         # computed them (phases 5 and 7)
-        claims, _ = run([cxxlex, '-literal-claims'] + opts + [ii])
+        claims, _ = run(CXXPP.vpp_command(vpp, 'literal-claims', opts, ii))
         cpp = ii + '.claims.cpp'
         open(cpp, 'w').write(claims)
         # C++98 has no constant expression that reads a string literal's
@@ -338,7 +343,7 @@ def main():
     ap.add_argument('--bin-dir')
     ap.add_argument('patterns', nargs='*')
     args = ap.parse_args()
-    clang, cxxlex = find_clang(), find_cxxlex(args.bin_dir or os.environ.get('VCC_BIN'))
+    clang, vpp = find_clang(), CXXPP.find_vpp(args.bin_dir or os.environ.get('VCC_BIN'))
     tests = sorted(glob.glob(os.path.join(TESTS, '**', '*.cpp'), recursive=True))
     tests = [t for t in tests if '/Inputs/' not in t]
     if args.patterns:
@@ -349,7 +354,7 @@ def main():
     known = known_differences()
     known_runs = 0
     with tempfile.TemporaryDirectory() as tmp, concurrent.futures.ThreadPoolExecutor(args.j) as pool:
-        results = list(pool.map(lambda j: check(j[0], j[1], clang, cxxlex, regexes, tmp), jobs))
+        results = list(pool.map(lambda j: check(j[0], j[1], clang, vpp, regexes, tmp), jobs))
     for rel, opts, res in results:
         bad = {k: v for k, v in res.items() if v}
         excused = bad and set(bad) <= (known.get(f'{rel} [{opts}]') or known.get(rel) or set())

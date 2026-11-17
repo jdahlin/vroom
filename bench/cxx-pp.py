@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""The C++ front end's preprocessor (src/frontend/cplusplus/cpp, through
-cxxlex) against clang, on clang's preprocessor tests and ours.
+"""The C++ front end's preprocessor (src/frontend/cplusplus/cpp, through the
+driver: vpp -fcxx-dump=, src/frontend/cplusplus/dump/dump.h) against clang, on clang's preprocessor tests and ours.
 
 Tests: clang/test/Preprocessor/*.{c,cpp} and clang/test/CXX/cpp of the
 llvm-project checkout bench/fetch-testsuites.sh llvm makes (work/testsuites,
@@ -8,7 +8,7 @@ of the main checkout from a git worktree), run as C++ (a C test with -x c++),
 and src/test/cxx/cpp/spec (the standard's examples).  For each %clang_cc1
 RUN line, with its preprocessor and language options:
 
-  tokens  cxxlex -dump-tokens vs clang -cc1 -dump-tokens: phases 1-7, each
+  tokens  -fcxx-dump=tokens vs clang -cc1 -dump-tokens: phases 1-7, each
           token's kind, spelling, place (the macro invocation's for a
           replaced token), spelling place (not for clang's scratch space)
           and [StartOfLine]/[LeadingSpace]
@@ -19,7 +19,8 @@ RUN line, with its preprocessor and language options:
           are counted but do not fail a run
   diags   the diagnostics the front end issues somewhere (its own, already
           written): place, level and text as clang's, warnings included
-  macros  cxxlex -E -dM vs clang -cc1 -E -dM: the macros defined at the end
+  macros  -fcxx-dump=definitions vs clang -E -dM (the driver: both take its
+          predefined macros): the macros defined at the end
 
 Usage: bench/cxx-pp.py [-v] [-j N] [--bin-dir DIR] [--list] [PATTERN...]
 Prints one line per failing run (all with -v) and a summary.
@@ -64,12 +65,27 @@ def find_clang():
     sys.exit('cxx-pp: no clang')
 
 
-def find_cxxlex(bin_dir):
+def find_vpp(bin_dir):
+    """the driver, which runs the C++ front end (vpp -fcxx-dump=)"""
     for d in ([bin_dir] if bin_dir else []) + [os.path.join(R, 'build', 'linux', 'src'), os.path.join(R, 'build', 'src')]:
-        p = os.path.join(d, 'cxxlex')
+        p = os.path.join(d, 'vpp')
         if os.path.exists(p):
-            return p
-    sys.exit('cxx-pp: no cxxlex; make -C src cxxlex')
+            # each run's directory is its test's: the path must not be relative
+            return os.path.abspath(p)
+    sys.exit('no vpp; make -C src vcc')
+
+
+def vpp_command(vpp, outputs, opts, path, extra=()):
+    """vpp writing the C++ front end's developer outputs OUTPUTS (dump.h)
+    for the clang -cc1 options opts: the target of TRIPLE, no standard
+    include directories (clang -cc1 adds none), no code"""
+    return [vpp, '-x', 'c++', '-fsyntax-only', '-nostdinc', '--target=' + TRIPLE[1],
+            '-fcxx-dump=' + outputs] + list(extra) + list(opts) + [path]
+
+
+def unsupported_edition(status, stderr):
+    """the driver refused the -std= of the run: an edition vcc does not have"""
+    return status not in (0, 'timeout') and "invalid value '" in stderr and "-std=" in stderr
 
 
 def run_lines(path):
@@ -236,22 +252,22 @@ def run(cmd, cwd=None, timeout=20):
 def first_difference(a, b):
     for i, (x, y) in enumerate(zip(a, b)):
         if x != y:
-            return f'#{i}: cxxlex {x} / clang {y}'
+            return f'#{i}: vcc {x} / clang {y}'
     if len(a) != len(b):
         i = min(len(a), len(b))
-        return f'#{i}: cxxlex {a[i] if i < len(a) else "(end)"} / clang {b[i] if i < len(b) else "(end)"}'
+        return f'#{i}: vcc {a[i] if i < len(a) else "(end)"} / clang {b[i] if i < len(b) else "(end)"}'
     return ''
 
 
-def check(test, opts, clang, cxxlex, regexes, issued):
+def check(test, opts, clang, vpp, regexes, issued):
     d, name = os.path.dirname(test), os.path.basename(test)
     lang = ['-x', 'c++'] if not name.endswith('.cpp') else []
     res = {}
-    ours, ours_err, rc = run([cxxlex, '-dump-tokens', '-phase4-diagnostics-only'] + opts + [name], cwd=d)
-    if rc == 2 and 'unsupported -std' in ours_err:
+    ours, ours_err, rc = run(vpp_command(vpp, 'tokens', opts, name, ['-fcxx-phase4-diagnostics-only']), cwd=d)
+    if unsupported_edition(rc, ours_err):
         return test, ' '.join(opts), None  # an edition the front end does not have
     if rc < 0 or rc > 1:
-        res['tokens'] = f'cxxlex failed ({rc}): {ours_err[-200:]}'
+        res['tokens'] = f'vpp failed ({rc}): {ours_err[-200:]}'
         res['errors'] = res['diags'] = res['macros'] = 'not run'
         res['#warnings'] = 0
         return test, ' '.join(opts), res
@@ -262,22 +278,23 @@ def check(test, opts, clang, cxxlex, regexes, issued):
     errors = lambda d: {(f, row) for f, row, _, level, _ in d if level != 'warning'}
     missing, extra = sorted(errors(theirs_d) - errors(mine)), sorted(errors(mine) - errors(theirs_d))
     res['errors'] = '' if not missing and not extra else \
-        f'clang only {len(missing)} {missing[:3]} cxxlex only {len(extra)} {extra[:3]}'
+        f'clang only {len(missing)} {missing[:3]} vcc only {len(extra)} {extra[:3]}'
     warned = lambda d: {(f, row, msg) for f, row, _, level, msg in d if level == 'warning'}
     res['#warnings'] = len(warned(theirs_d) ^ warned(mine))
     own = lambda d: {x for x in d if any(r.fullmatch(x[4]) for r in issued)}
     missing, extra = sorted(own(theirs_d) - own(mine)), sorted(own(mine) - own(theirs_d))
     res['diags'] = '' if not missing and not extra else \
         f'missing {len(missing)} {missing[:2]} extra {len(extra)} {extra[:2]}'
-    ours_m, _, _ = run([cxxlex, '-E', '-dM'] + opts + [name], cwd=d)
-    theirs_m, _, _ = run([clang, '-cc1', '-E', '-dM'] + lang + opts + [name], cwd=d)
+    ours_m, _, _ = run(vpp_command(vpp, 'definitions', opts, name), cwd=d)
+    theirs_m, _, _ = run([clang, '-x', 'c++', '-nostdinc', '--target=' + TRIPLE[1], '-E', '-dM'] + opts + [name],
+                         cwd=d)
     x = sorted(l for l in ours_m.splitlines() if l.startswith('#define'))
     y = sorted(l for l in theirs_m.splitlines() if l.startswith('#define'))
     if x == y:
         res['macros'] = ''
     else:
         sx, sy = set(x), set(y)
-        res['macros'] = f'cxxlex only {sorted(sx - sy)[:2]} clang only {sorted(sy - sx)[:2]}'
+        res['macros'] = f'vcc only {sorted(sx - sy)[:2]} clang only {sorted(sy - sx)[:2]}'
     return test, ' '.join(opts), res
 
 
@@ -308,7 +325,7 @@ def main():
     ap.add_argument('--bin-dir')
     ap.add_argument('patterns', nargs='*')
     args = ap.parse_args()
-    clang, cxxlex = find_clang(), find_cxxlex(args.bin_dir or os.environ.get('VCC_BIN'))
+    clang, vpp = find_clang(), find_vpp(args.bin_dir or os.environ.get('VCC_BIN'))
     found, llvm = tests()
     if args.patterns:
         found = [t for t in found if any(p in t for p in args.patterns)]
@@ -319,7 +336,7 @@ def main():
     found = [t for t in found if runnable[t] is not None]
     jobs = [(t, o) for t in found for o in runnable[t] or [['-std=gnu++17']]]
     with concurrent.futures.ThreadPoolExecutor(args.j) as pool:
-        results = list(pool.map(lambda j: check(j[0], j[1], clang, cxxlex, regexes, issued), jobs))
+        results = list(pool.map(lambda j: check(j[0], j[1], clang, vpp, regexes, issued), jobs))
     known = known_differences()
     kinds = ('tokens', 'errors', 'diags', 'macros')
     warnings_differ = 0
@@ -347,7 +364,7 @@ def main():
     print(f'{n} runs of {len(found)} tests: ' + ', '.join(f'{k} {v}/{n}' for k, v in passed.items()) +
           f'; all three {all_ok}/{n} ({known_runs} known differences); '
           f'tests with every run passing {sum(per_test.values())}/{len(per_test)}' +
-          (f' ({skipped} runs in editions cxxlex lacks)' if skipped else '') +
+          (f' ({skipped} runs in editions vcc lacks)' if skipped else '') +
           f'; warnings differing (not compared): {warnings_differ}' +
           f'; {len(unrunnable)} tests make their inputs at run time (not run)')
     return 0 if all_ok == n else 1
