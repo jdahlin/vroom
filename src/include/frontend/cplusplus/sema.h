@@ -910,6 +910,10 @@ class semantic_analysis
                                             declarator_meaning &m);
     analysis_result gnu_attribute_specifier(node_index n, specified &s);
     uint32_t leading_gnu_attributes(node_index n) const;
+    /* [ext:gnu_library_builtins] the function __builtin_NAME (an
+       identifier) declares at its first use, 0 if it is not one */
+    entity_index library_builtin(uint32_t name);
+    qualified_type builtin_parameter_type(uint8_t t);
     /* the parameters of the function declarator analysed last: a function
        definition's, with the types they have in its body ([dcl.fct]/5's
        adjustment, top-level cv-qualifiers kept) */

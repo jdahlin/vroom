@@ -61,6 +61,8 @@ FLAGS = ['--target=aarch64-linux-gnu', '-nostdinc', '-I', f'{ct.RT}/include', '-
 # programs whose result is not C++'s to give
 CXX_SKIP = {
     ('gcc', '20031003-1'): 'converts a float out of int\'s range (undefined)',
+    ('gcc', 'pr79286'): 'passes an uninitialized int to printf: undefined in C++ '
+                        '([basic.indet]/2), clang++ -O2 deletes main',
 }
 NOT_YET = re.compile(r'error: (?:the rules of \[([^\]]+)\] are not implemented yet|'
                      r'C\+\+ code generation does not handle (.*) yet)')

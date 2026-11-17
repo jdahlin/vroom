@@ -789,6 +789,17 @@ libstdc++ and json), since sema cannot analyse a declaration kept as tokens.
   arm64 gap, not C++'s).  C5.1 1206 -> 1563, 0 wrong; not yet by what is
   missing: [basic.lookup.unqual] 666, declarations kept as tokens 441,
   [ext.gnu] 206, [class.mem] 190, [class.union] 98.
+  Then GCC's library builtins ([ext:gnu_library_builtins],
+  `ext/gnu/library-builtins.cpp`): `__builtin_abort`, `memcpy`, `printf`
+  and the other C library functions' `__builtin_` forms (clang's
+  LibBuiltin prototypes) are declared at their first use, when
+  unqualified lookup finds nothing, as functions of the global namespace
+  with C language linkage named by the library function (its symbol);
+  `__builtin_abort` is noreturn.  The others (`__builtin_expect`,
+  `_constant_p`, `_trap`, the overflow builtins) stay unsupported.
+  gcc/pr79286 is skipped: its uninitialized argument is undefined in C++
+  and clang++ -O2 deletes main.  `src/test/cxx/run/library-builtins.cpp`.
+  C5.1 1563 -> 2033, 0 wrong.
   Next: member functions of local and nested classes, in-class
   initializers of static members, unions, virtual functions.
 

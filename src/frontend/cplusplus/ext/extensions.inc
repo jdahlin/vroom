@@ -37,6 +37,9 @@ EXTENSION(gnu_alternate_keywords, gnu,
           "__volatile__, __asm__, __alignof__ for inline, const, signed, volatile, asm, alignof")
 EXTENSION(gnu_attributes, gnu,
           "GCC manual 6.39, Attribute Syntax: __attribute__ ((attribute-list))")
+EXTENSION(gnu_library_builtins, gnu,
+          "GCC manual 6.63, Other Built-in Functions Provided by GCC: __builtin_ forms "
+          "of the ISO C library functions")
 EXTENSION(gnu_asm_labels, gnu,
           "GCC manual 6.47.4, Controlling Names Used in Assembler Code: T x asm (\"name\")")
 EXTENSION(gnu_restrict, gnu,
