@@ -428,6 +428,8 @@ analysis_result semantic_analysis::reference_binding(node_index at,
 {
     const struct type r = type_table[reference.unqualified()];
     bool rvalue_reference = r.kind == type_kind::rvalue_reference;
+    if (aggregate_prvalue(m))
+        return not_supported(at, "class.temporary");
     /* [dcl.init.ref]/5: a non-const lvalue reference "shall not be bound
        to a bit-field"; a const one is bound to a temporary (not
        analysed) */
@@ -604,6 +606,9 @@ analysis_result semantic_analysis::initialize_from(node_index at,
         analysis_result r = expression(clause, m);
         if (r != analysis_result::well_formed)
             return r;
+        /* a string-literal in parentheses: GCC's and clang's extension */
+        if (m.string_literal)
+            return not_supported(at, "dcl.init.string");
         return ill_formed(at,
                           "an array is initialized by a braced-init-list, or "
                           "by a string-literal if it is an array of "
@@ -791,6 +796,16 @@ semantic_analysis::list_initialization(node_index list, qualified_type &type,
             character_type(fundamental_of(target.operand)))
             return initialize_from(list, clauses[0], type, direct, true,
                                    result);
+        /* ... in parentheses: an extension */
+        if (clauses.size() == 1 && !clauses[0].is_token() &&
+            character_type(fundamental_of(target.operand))) {
+            syntax_child inner = clauses[0];
+            while (syntax_is(tree, inner, syntax_kind::primary_expression) &&
+                   tree[inner.index()].child_count == 3)
+                inner = tree.children(inner.index())[1];
+            if (is_string_literal(tokens, inner))
+                return not_supported(list, "dcl.init.string");
+        }
         /* [dcl.init.aggr]/9: "An array of unknown bound initialized with a
            brace-enclosed initializer-list containing n initializer-clauses
            is defined as having n elements" */

@@ -633,6 +633,32 @@ libstdc++ and json), since sema cannot analyse a declaration kept as tokens.
 - Sema replaces `declared_names` for the parser.
 - Gate: lookup claims 0 wrong on clang's tests and on the libstdc++ headers
   outside templates; C7 (V4a no worse).
+- Status (2026-11-17, done outside templates and overloads): one lookup
+  (`basic/basic.lookup.cpp`) for unqualified names (scopes outward,
+  using-directives placed at the nearest enclosing namespace of both,
+  transitively; class member lookup), qualified names ([namespace.qual]
+  with inline namespaces, nested-name-specifiers through typedefs),
+  argument-dependent lookup in calls, elaborated type specifiers
+  ([basic.lookup.elab], [basic.scope.pdecl]/7) and hiding
+  ([basic.scope.hiding]).  Bindings are per scope, so a name can be bound
+  in several (namespace aliases, using-declarations, block-scope extern
+  declarations with [basic.link]/6,7's linkage).  Namespaces: definitions,
+  extension, inline and unnamed ones, aliases, using-directives,
+  using-declarations at namespace and block scope and as members naming a
+  base's member; qualified definitions of namespace members and nested
+  classes.  Mangling: namespace prefixes as substitutions, `St`,
+  `12_GLOBAL__N_1`, internal `L`, C-linkage names in namespaces.
+  Unsupported with their subclause: a set of overloads found by a
+  using-declaration ([over]), inheriting constructors, names found in two
+  namespaces through directives that are functions.
+  cxx-sema: declarations as clang 8036 -> 24559, 13 -> 0 we reject,
+  declared types, types, constants, symbols and lowering 0 refuted, files
+  lowered 108 -> 206; cxx-parse unchanged (6 refuted declared types as
+  before); cxx-run 116/116 (`namespaces.cpp`, `qualified-names.cpp`,
+  `hiding-and-elaborated.cpp`, `using.cpp`, `block-linkage.cpp`); C5.1
+  2199 -> 2206 passing, 0 wrong.  `declared_names` still serves the parser:
+  sema runs after it, so replacing it waits for parsing and analysis per
+  declaration (S5's templates need the same).
 
 ### S3. Overloading and calls
 

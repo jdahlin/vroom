@@ -229,6 +229,8 @@ enum gnu_attribute_flag : uint32_t {
     gnu_section = 32,
     gnu_aligned = 64,
     gnu_packed = 128,
+    /* nothrow: no code changes, but clang's function type is noexcept */
+    gnu_nothrow = 256,
 };
 
 struct entity {
@@ -249,8 +251,25 @@ struct entity {
     uint64_t value = 0;
     /* [dcl.constexpr]/1 */
     bool constexpr_ = false;
-    /* [dcl.inline]: an inline function or variable */
+    /* [dcl.inline]: an inline function or variable; [namespace.def]/7: an
+       inline namespace */
     bool inline_ = false;
+    /* a scope: a declaration analysis did not follow may have brought
+       names into it that are not held one by one (a using-directive whose
+       namespace is not known, a using-enum-declaration): a name not found
+       in it is not known to be undeclared */
+    bool unknown_names = false;
+    /* a scope (a namespace, 0 the global one, or a block): a
+       using-directive appears in it ([namespace.udir]; an unnamed or
+       inline namespace's implied one in its enclosing namespace) */
+    bool has_using_directive = false;
+    /* [basic.scope.hiding]/2: "If a class name or enumeration name and a
+       variable, data member, function, or enumerator are declared in the same
+       declarative region (in any order) with the same name ..., the class or
+       enumeration name is hidden wherever the variable, data member, function,
+       or enumerator name is visible.": the class or enumeration this entity's
+       name hides in its scope, 0 if none */
+    entity_index hidden_type = 0;
     /* a variable: [basic.stc.auto]/1, a local variable not declared static
        (or a parameter) */
     bool automatic = false;
@@ -342,8 +361,11 @@ struct entity {
     /* [dcl.link]/1: a function or variable with C language linkage,
        whose name is its symbol */
     bool c_language_linkage = false;
-    /* a variable internal only because its type is an unnamed class
-       ([basic.link]/4.3): clang's symbol is its name, without _ZL */
+    /* a variable or function internal only because its type is or is
+       made of a class or enumeration without external linkage (an unnamed
+       class, [basic.link]/4.3; one of an unnamed namespace): [impl.clang]
+       its symbol is local, and mangled as an external name's is, without
+       L */
     bool unnamed_type_linkage = false;
     /* a special member function declared implicitly ([class.default.ctor]/1,
        [class.copy.ctor]/6, [class.dtor]/4) */
@@ -373,11 +395,21 @@ class entities
     entities &operator=(const entities &) = delete;
 
     entity_index make(entity_kind kind, uint32_t name, entity_index enclosing);
-    /* the entity a name declared in a scope refers to, 0 if none: what a
+    /* the entity a name bound in a scope refers to, 0 if none: what a
        declaration in the scope finds of an earlier one
-       ([basic.scope.declarative]/4) */
+       ([basic.scope.declarative]/4).  A name is bound where its entity is
+       declared (entity::enclosing), and an entity can be bound elsewhere
+       too, perhaps under another name: by a using-declaration
+       ([namespace.udecl]/1), as a namespace-alias ([namespace.alias]/2),
+       by a block-scope declaration of a namespace's function or variable
+       ([basic.link]/7), an unscoped enumerator in its enumeration
+       ([dcl.enum]/11) */
     entity_index find(entity_index scope, uint32_t name) const;
-    void bind(entity_index scope, uint32_t name, entity_index e);
+    void bind(entity_index scope, uint32_t name, entity_index e,
+              bool by_using_declaration = false);
+    /* whether the name is bound in the scope by a using-declaration
+       ([namespace.udecl]) and not declared there */
+    bool bound_by_using(entity_index scope, uint32_t name) const;
     /* another declaration of the entity ([basic.link]/1: "A name ... can
        be introduced by declarations in more than one place) */
     void add_declaration(entity_index e, node_index node);
@@ -402,9 +434,16 @@ class entities
   private:
     owned_array<entity> records;
     owned_array<entity_declaration> declarations;
-    /* the names bound in scopes: open addressing over (scope, name), the
-       entity's index, 0 for an empty slot */
-    owned_array<entity_index> slots;
+    /* the names bound in scopes: open addressing over (scope, name); an
+       empty slot has entity 0 */
+    struct binding {
+        entity_index scope = 0;
+        uint32_t name = 0;
+        entity_index entity = 0;
+        bool by_using_declaration = false;
+    };
+    owned_array<binding> slots;
+    size_t used = 0;
     void grow();
 };
 
@@ -885,6 +924,10 @@ class semantic_analysis
         /* a qualified-id's class: [dcl.meaning]/1 the declarator declares
            a member of it again (a definition outside the class) */
         entity_index qualifier = 0;
+        /* ... or its namespace (0: the global one): a member of it
+           declared again outside it ([namespace.memdef]/2) */
+        bool qualified_namespace = false;
+        entity_index namespace_qualifier = 0;
         /* [ext:gnu_attributes] the alignment an aligned attribute of the
            declarator asks for, 0 if none; the other GNU attributes of the
            declarator (gnu_attribute_flag) and a section attribute's
@@ -898,6 +941,10 @@ class semantic_analysis
     analysis_result declarator(node_index declaration, syntax_child d,
                                qualified_type &type, declarator_meaning &m);
     token_index declarator_id(syntax_child d) const;
+    /* [dcl.meaning]/1: the nested-name-specifier of a qualified
+       declarator-id: the class or namespace whose member is declared */
+    analysis_result declarator_qualifier(node_index nested,
+                                         declarator_meaning &m);
     void hold_names(node_index declaration);
     bool declared_by(entity_index e, node_index node) const;
     analysis_result declare_local(node_index declaration, token_index id,
@@ -905,8 +952,175 @@ class semantic_analysis
                                   const specified &s,
                                   entity_index &declared_entity);
     /* [basic.lookup.unqual]/1: the entity an unqualified name finds from
-       the current scope out, 0 if none */
+       the current scope out, 0 if none or if what it finds is not one
+       entity analysis has (lookup_unqualified says which) */
     entity_index lookup(uint32_t name) const;
+    /* ---- name lookup ([basic.lookup], basic/basic.lookup.cpp) ---- */
+    /* which declarations a lookup considers */
+    enum class lookup_filter : uint8_t {
+        /* all ([basic.lookup]/1) */
+        any,
+        /* [basic.lookup.elab]/1: "ignoring any non-type names that have
+           been declared" */
+        types,
+        /* [basic.lookup.qual]/1: "lookup of the name preceding that ::
+           considers only namespaces, types, and templates whose
+           specializations are types" */
+        scopes,
+        /* [basic.lookup.udir]/1: "only namespace names are considered" */
+        namespaces,
+    };
+    /* what a lookup found */
+    struct lookup_result {
+        /* the entity the name denotes, 0 if there is none or more than
+           one */
+        entity_index entity = 0;
+        /* the scope the name was found bound in: a using-declaration's,
+           not the scope of the entity it names */
+        entity_index found_in = 0;
+        /* a declaration analysis did not follow has the name (hold_names),
+           or the declarations found are functions of more than one
+           namespace (an overload set): nothing is concluded */
+        bool unknown = false;
+        /* [namespace.udir]/6: (a note) "If name lookup finds a declaration for
+           a name in two different namespaces, and the declarations do not
+           declare the same entity and do not declare functions or function
+           templates, the use of the name is ill-formed";
+           [class.member.lookup]/6 for a class */
+        bool ambiguous = false;
+    };
+    lookup_result lookup_unqualified(uint32_t name, lookup_filter filter) const;
+    /* [namespace.qual]/2: the name looked up in the namespace n (0: the
+       global namespace) */
+    lookup_result lookup_in_namespace(entity_index n, uint32_t name,
+                                      lookup_filter filter) const;
+    /* [basic.lookup.qual]: the name looked up in the scope a
+       nested-name-specifier nominates */
+    lookup_result lookup_qualified(entity_index scope, uint32_t name,
+                                   lookup_filter filter) const;
+    /* the entity name is bound to in scope itself, as the filter sees
+       it: 0 if none */
+    entity_index declared_in(entity_index scope, uint32_t name,
+                             lookup_filter filter) const;
+    /* one more declaration found for a name: r's entity if it is the same
+       entity or the first, else ambiguous or unknown */
+    void found_also(lookup_result &r, entity_index e, entity_index in) const;
+    /* [basic.lookup.argdep]: the functions named name in the namespaces
+       associated with arguments of these types, added to found (each
+       once); false if one of those namespaces has a declaration of the
+       name that analysis did not follow */
+    bool argument_dependent_lookup(uint32_t name,
+                                   const owned_array<qualified_type> &arguments,
+                                   owned_array<entity_index> &found) const;
+    /* [basic.lookup.argdep]/2: the associated entities (classes) and
+       namespaces of the type t, added to the sets; false if a class of it
+       is one analysis did not follow */
+    bool associated_with(qualified_type t, owned_array<entity_index> &classes,
+                         owned_array<entity_index> &namespaces) const;
+    /* [basic.scope.namespace]: whether s is a namespace (0: the global
+       one), and the innermost namespace that encloses the scope s */
+    bool is_namespace(entity_index s) const;
+    entity_index enclosing_namespace(entity_index s) const;
+    /* whether analysis is at block scope (in a function's body or its
+       parameters) */
+    bool at_block_scope() const
+    {
+        return !is_namespace(current_scope);
+    }
+    /* whether namespace inner is n or is enclosed by it */
+    bool namespace_encloses(entity_index n, entity_index inner) const;
+    /* [namespace.udir]/2: "the nearest enclosing namespace which contains
+       both the using-directive and the nominated namespace" */
+    entity_index common_namespace(entity_index a, entity_index b) const;
+    /* the uses of names lookup resolved, each with the entity found:
+       what cxxsema -lookup-claims has clang check */
+    struct name_use {
+        token_index at = 0;
+        entity_index entity = 0;
+        node_index declaration = 0;
+    };
+    owned_array<name_use> name_uses;
+    void used(token_index at, entity_index e)
+    {
+        name_use u;
+        u.at = at;
+        u.entity = e;
+        u.declaration = current_declaration;
+        name_uses.append(u);
+    }
+    /* [basic.link]/7: a function declared in a block, or a variable
+       declared there with extern: the member of the innermost enclosing
+       namespace it declares */
+    analysis_result
+    declare_in_block_with_linkage(node_index declaration, token_index id,
+                                  entity_kind kind, qualified_type type,
+                                  const specified &s, bool initialized,
+                                  entity_index &declared_entity);
+    /* [basic.link]/7: the functions and variables declared only in
+       blocks: members of their namespaces whose names are not bound
+       there */
+    owned_array<entity_index> block_declared;
+    /* [basic.scope.hiding]/2: the class or enumeration of the scope that
+       the variable or function declare() declares now hides, 0 if none */
+    entity_index declaration_hides = 0;
+    /* [basic.scope.pdecl]/1: "The point of declaration for a name is
+       immediately after its complete declarator": the declarator (an
+       array's bound) may have used the name for an entity of an enclosing
+       scope, which the name no longer denotes where claims about the
+       declaration's expressions are placed: those are not made */
+    void no_claims_after_hiding(uint32_t name);
+    /* [basic.scope.pdecl]/7.1: the elaborated-type-specifier that is all
+       of the declaration analysed now (class-key identifier ;), 0 if
+       none */
+    node_index sole_elaborated = 0;
+    /* [basic.scope.pdecl]/7: the class an elaborated-type-specifier
+       declares in scope, hidden by a non-type of the name if there is
+       one */
+    entity_index declare_class(entity_index scope, uint32_t name,
+                               bool is_union);
+    /* [dcl.meaning]/1: the declarator-id analysed now is a qualified-id
+       that nominates a namespace: the scope whose member declare()
+       declares again */
+    bool qualified_declarator = false;
+    entity_index qualified_scope = 0;
+    /* whether the type is, or is made of, a class or enumeration whose
+       name has no external linkage */
+    bool type_without_external_linkage(qualified_type t) const;
+    /* [basic.link]/4: whether the namespace n is an unnamed namespace or
+       declared directly or indirectly within one */
+    bool within_unnamed_namespace(entity_index n) const;
+    /* [namespace.udir]: the using-directives, each in the scope (a
+       namespace or a block) it appears in; an unnamed namespace's implied
+       one ([namespace.unnamed]/1) and an inline namespace's
+       ([namespace.def]/7) are among them */
+    struct using_directive_record {
+        entity_index scope = 0;
+        entity_index nominated = 0;
+    };
+    owned_array<using_directive_record> using_directives;
+    /* [basic.scope.namespace]/1, [namespace.def] */
+    analysis_result namespace_definition(node_index n);
+    /* [namespace.udir], [namespace.alias], [namespace.udecl] */
+    analysis_result using_directive(node_index n);
+    analysis_result namespace_alias_definition(node_index n);
+    analysis_result using_declaration(node_index n);
+    analysis_result using_declarator(node_index n);
+    /* [basic.lookup.udir]: the namespace a namespace-name, after a
+       nested-name-specifier (0: none), names */
+    analysis_result named_namespace(node_index at, node_index qualifier,
+                                    token_index name, entity_index &n);
+    /* the declarations of a declaration-seq in braces, each analysed as a
+       declaration of the translation unit (its own record in
+       declarations) */
+    void declaration_seq_in(node_index container);
+    /* [basic.lookup.qual]: the scope a nested-name-specifier nominates: a
+       namespace (global: the global namespace, entity 0), a class or an
+       enumeration */
+    struct nominated_scope {
+        entity_index entity = 0;
+        bool global = false;
+    };
+    analysis_result nested_name_specifier(node_index n, nominated_scope &scope);
     /* a block scope in the current one, made current */
     entity_index open_scope(entity_index conflicts, bool parameters);
     analysis_result pointer_operator(node_index op, qualified_type &type,
@@ -987,6 +1201,10 @@ class semantic_analysis
     analysis_result id_expression(token_index t, expression_meaning &m);
     /* [expr.prim.id.qual] */
     analysis_result qualified_id(node_index n, expression_meaning &m);
+    /* [expr.prim.id]: the expression that names the entity e, found by
+       lookup of the identifier t */
+    analysis_result named_entity(token_index t, entity_index e,
+                                 expression_meaning &m);
     /* [expr.prim.this] */
     analysis_result this_pointer(token_index t, expression_meaning &m);
     /* [expr.prim.paren] */
@@ -1145,8 +1363,15 @@ class semantic_analysis
                              entity_index qualifier, qualified_type type,
                              const specified &s, bool definition,
                              entity_index &declared_entity);
-    /* [dcl.type.simple]: class-name :: type-name, the member type */
-    analysis_result qualified_type_name(node_index n, type_index &type);
+    /* a type-name, or nested-name-specifier type-name (the node of a
+       class-or-decltype, class-head-name ...), that shall name a class:
+       the class, a typedef-name's included; the token of its name */
+    analysis_result named_class(syntax_child name, node_index at,
+                                entity_index &c, token_index &id);
+    /* [dcl.type.simple]: nested-name-specifier type-name: the type and,
+       for a typedef-name, its cv-qualifiers */
+    analysis_result qualified_type_name(node_index n, type_index &type,
+                                        uint32_t &cv);
     /* [dcl.enum]: an enum-specifier, the enumeration's type */
     analysis_result enum_specifier(node_index n, type_index &type);
     /* [dcl.type.elab]: enum identifier, the enumeration's type */
@@ -1218,6 +1443,18 @@ class semantic_analysis
        destructors of its members and bases, in the reverse order of
        their construction */
     uint32_t subobject_destructions(entity_index c, token_index at);
+    /* [dcl.init]/7: whether the class is const-default-constructible */
+    bool const_default_constructible(entity_index c) const;
+    /* a class prvalue that is an aggregate's initializer list (T{...})
+       or its value-initialization: as an operand that needs an object (a
+       member access, a reference binding, a conversion to a base) it is a
+       temporary lowering has no rule for yet ([class.temporary]) */
+    bool aggregate_prvalue(const expression_meaning &m) const
+    {
+        return m.category == value_category::prvalue && m.node &&
+               (semantics[m.node].kind == semantic_kind::initializer_list ||
+                semantics[m.node].kind == semantic_kind::zero);
+    }
     /* [dcl.init.aggr]/1: whether the class is an aggregate */
     bool is_aggregate(entity_index c) const;
     /* the class whose member function is analysed now, 0 if none */

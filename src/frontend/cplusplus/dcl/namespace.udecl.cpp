@@ -14,6 +14,7 @@
  * the qualified lookup finds.
  */
 #include "../cplusplus-internal.h"
+#include "frontend/cplusplus/sema.h"
 
 namespace cplusplus
 {
@@ -98,6 +99,195 @@ node_index parser::using_declarator()
             names.declare(name, kind);
     }
     return finish_node(syntax_kind::using_declarator, mark, first);
+}
+
+/* ---- semantic analysis ---------------------------------------------- */
+
+/*
+ * [namespace.udecl]/1: "Each using-declarator in a using-declaration
+ * introduces a set of declarations into the declarative region in which
+ * the using-declaration appears.  The set of declarations introduced by
+ * the using-declarator is found by performing qualified name lookup
+ * ([basic.lookup.qual], [class.member.lookup]) for the name in the
+ * using-declarator, excluding functions that are hidden as described
+ * below."  /2: "Every using-declaration is a declaration and a
+ * member-declaration and can therefore be used in a class definition."
+ */
+analysis_result semantic_analysis::using_declaration(node_index n)
+{
+    const syntax_node &node = tree[n];
+    analysis_result result = analysis_result::well_formed;
+    bool any = false;
+    for (uint32_t i = 0; i < node.child_count; i++) {
+        syntax_child c = tree.children(n)[i];
+        if (syntax_is(tree, c, syntax_kind::using_declarator)) {
+            result = worse(result, using_declarator(c.index()));
+            any = true;
+        } else if (syntax_is(tree, c, syntax_kind::using_declarator_list)) {
+            for (uint32_t k = 0; k < tree[c.index()].child_count; k++) {
+                syntax_child d = tree.children(c.index())[k];
+                if (syntax_is(tree, d, syntax_kind::using_declarator)) {
+                    result = worse(result, using_declarator(d.index()));
+                    any = true;
+                } else if (!syntax_is_punctuator(
+                               tokens, d, preprocessing_op_or_punc::COMMA)) {
+                    /* a pack expansion */
+                    result = worse(result, not_supported(n, "temp.variadic"));
+                }
+            }
+        } else if (!c.is_token()) {
+            result = worse(result, not_supported(n, "namespace.udecl"));
+        }
+    }
+    if (!any)
+        result = worse(result, not_supported(n, "namespace.udecl"));
+    return result;
+}
+
+/*
+ *     using-declarator:
+ *         typename_opt nested-name-specifier unqualified-id
+ *
+ * The name is bound in the scope of the using-declaration to the entity it
+ * names ([namespace.udecl]/1), marked as bound by a using-declaration: a
+ * declaration of the name there does not redeclare the entity
+ * ([dcl.meaning]/1: "the member shall not merely have been introduced by a
+ * using-declaration").  A set of more than one declaration (overloaded
+ * functions, or a class and what hides it found in two namespaces) has no
+ * rules yet.
+ */
+analysis_result semantic_analysis::using_declarator(node_index n)
+{
+    const syntax_node &node = tree[n];
+    const syntax_child *children = tree.children(n);
+    if (node.child_count != 2 ||
+        !syntax_is(tree, children[0], syntax_kind::nested_name_specifier) ||
+        !children[1].is_token() ||
+        tokens[children[1].index()].kind != token_kind::identifier)
+        /* typename, an operator-function-id, a destructor's name, a pack
+           expansion */
+        return not_supported(n, "namespace.udecl");
+    nominated_scope q;
+    analysis_result r = nested_name_specifier(children[0].index(), q);
+    if (r != analysis_result::well_formed)
+        return r;
+    token_index t = children[1].index();
+    uint32_t name = tokens.identifier(t);
+    lookup_result found = lookup_qualified(q.entity, name, lookup_filter::any);
+    if (found.unknown)
+        return not_supported(n, "over");
+    /* the declarations found in more than one namespace, or none (which
+       may be ones analysis has no rules for) */
+    if (found.ambiguous || !found.entity)
+        return not_supported(n, "namespace.udecl");
+    entity_index e = found.entity;
+    entity_kind kind = entity_table[e].kind;
+    bool names_class_member =
+        !is_namespace(q.entity) &&
+        entity_table[q.entity].kind == entity_kind::class_type;
+    if (!is_namespace(q.entity) && !names_class_member)
+        /* an enumerator named through its enumeration (C++20) */
+        return not_supported(n, "namespace.udecl");
+    if (defining_class) {
+        entity_index c = defining_class;
+        /* [namespace.udecl]/3: "In a using-declaration used as a
+           member-declaration, each using-declarator shall either name an
+           enumerator or have a nested-name-specifier naming a base class
+           of the class being defined." */
+        /* (an enumerator of a namespace's enumeration: C++20) */
+        if (is_namespace(q.entity) &&
+            (kind == entity_kind::enumerator || kind == entity_kind::none))
+            return not_supported(n, "namespace.udecl");
+        if (is_namespace(q.entity))
+            return ill_formed_at_token(t,
+                                       "in a using-declaration used as a "
+                                       "member-declaration, each "
+                                       "using-declarator shall have a "
+                                       "nested-name-specifier naming a base "
+                                       "class of the class being defined",
+                                       "namespace.udecl");
+        bool ambiguous = false;
+        if (!base_step(c, q.entity, ambiguous))
+            return not_supported(n, "namespace.udecl");
+        /* [namespace.udecl]/3: "If a using-declarator names a
+           constructor, its nested-name-specifier shall name a direct base
+           class of the class being defined": inheriting constructors */
+        if (name == entity_table[q.entity].name)
+            return not_supported(n, "class.inhctor.init");
+        /* [namespace.udecl]/19: "A synonym created by a using-declaration
+           has the usual accessibility for a member-declaration."  Access
+           is the entity's here, so only a declaration that leaves it as
+           it is has rules; a name the derived class declares too would be
+           an overload or hide the base's */
+        if (kind == entity_kind::none || entity_table.find(c, name) ||
+            entity_table[e].access != declaration_access)
+            return not_supported(n, "namespace.udecl");
+        entity_table.bind(c, name, e, true);
+        used(t, e);
+        return analysis_result::well_formed;
+    }
+    if (names_class_member) {
+        /* [namespace.udecl]/7: "A using-declaration that names a class
+           member other than an enumerator shall be a member-declaration." */
+        if (kind == entity_kind::enumerator || kind == entity_kind::none)
+            return not_supported(n, "namespace.udecl");
+        return ill_formed_at_token(t,
+                                   "a using-declaration that names a class "
+                                   "member other than an enumerator shall "
+                                   "be a member-declaration",
+                                   "namespace.udecl");
+    }
+    /* [namespace.udecl]/6: "A using-declaration shall not name a
+       namespace." */
+    if (kind == entity_kind::namespace_entity)
+        return ill_formed_at_token(t,
+                                   "a using-declaration shall not name a "
+                                   "namespace",
+                                   "namespace.udecl");
+    entity_index scope = current_scope;
+    entity_index prior = entity_table.find(scope, name);
+    if (!prior) {
+        entity_table.bind(scope, name, e, true);
+        used(t, e);
+        return analysis_result::well_formed;
+    }
+    entity_kind prior_kind = entity_table[prior].kind;
+    if (prior_kind == entity_kind::none)
+        return not_supported(n, "basic.scope.declarative");
+    if (prior == e) {
+        /* [namespace.udecl]/9: "A using-declaration is a declaration and can
+           therefore be used repeatedly where (and only where) multiple
+           declarations are allowed." */
+        /* (in a block too: clang, as CWG issue 36 was resolved) */
+        if (is_namespace(scope) || entity_table.bound_by_using(scope, name)) {
+            used(t, e);
+            return analysis_result::well_formed;
+        }
+        return not_supported(n, "namespace.udecl");
+    }
+    /* [namespace.udecl]/12: "Since a using-declaration is a declaration, the
+       restrictions on declarations of the same name in the same declarative
+       region also apply to using-declarations." Two functions are overloads; a
+       class or enumeration and a variable or function hide one another; a
+       typedef-name may name the same type */
+    if (kind == entity_kind::function && prior_kind == entity_kind::function)
+        return not_supported(n, "over");
+    bool plain =
+        (kind == entity_kind::variable || kind == entity_kind::function) &&
+        (prior_kind == entity_kind::variable ||
+         prior_kind == entity_kind::function);
+    if (!plain || entity_table[e].hidden_type ||
+        entity_table[prior].hidden_type)
+        return not_supported(n, "namespace.udecl");
+    /* [basic.scope.declarative]/4: "Given a set of declarations in a
+       single declarative region, each of which specifies the same
+       unqualified name, they shall all refer to the same entity, or all
+       refer to functions and function templates" */
+    return ill_formed_at_token(t,
+                               "declarations of the same name in a "
+                               "declarative region shall all refer to the "
+                               "same entity, or all to functions",
+                               "basic.scope.declarative");
 }
 
 } // namespace cplusplus

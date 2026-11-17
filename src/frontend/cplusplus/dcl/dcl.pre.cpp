@@ -723,7 +723,30 @@ analysis_result semantic_analysis::init_declarators(node_index declaration,
                                                     bool definition)
 {
     specified s;
+    /* [basic.scope.pdecl]/7.1: "for a declaration of the form" class-key
+       attribute-specifier-seq_opt identifier ; "the identifier is declared to
+       be a class-name in the scope that contains the declaration" */
+    sole_elaborated = 0;
+    if (!definition && tree[specifiers].child_count == 1 &&
+        syntax_is(tree, tree.children(specifiers)[0],
+                  syntax_kind::elaborated_type_specifier)) {
+        bool declarators = false;
+        bool after = false;
+        for (uint32_t i = 0; i < tree[declaration].child_count; i++) {
+            syntax_child c = tree.children(declaration)[i];
+            if (!c.is_token() && c.index() == specifiers) {
+                after = true;
+                continue;
+            }
+            if (after && !syntax_is_punctuator(
+                             tokens, c, preprocessing_op_or_punc::SEMICOLON))
+                declarators = true;
+        }
+        if (!declarators)
+            sole_elaborated = tree.children(specifiers)[0].index();
+    }
     analysis_result r = decl_specifier_seq(specifiers, s, false);
+    sole_elaborated = 0;
     if (r != analysis_result::well_formed)
         return r;
     const syntax_node &node = tree[declaration];
@@ -778,19 +801,6 @@ analysis_result semantic_analysis::init_declarators(node_index declaration,
            object (an unnamed struct so, clang's extension) */
         if (declares_unnamed_class(specifiers))
             return not_supported(declaration, "class.union.anon");
-        /* [dcl.type.elab]/2: "class-key attribute-specifier-seq_opt
-           identifier ;" in a block declares a class there, which may hide
-           one found by lookup: not analysed yet */
-        if (current_scope && !s.declares_enumeration) {
-            const syntax_node &seq =
-                tree[tree.children(declaration)[0].index()];
-            for (uint32_t k = 0; k < seq.child_count; k++)
-                if (syntax_is(
-                        tree,
-                        tree.children(tree.children(declaration)[0].index())[k],
-                        syntax_kind::elaborated_type_specifier))
-                    return not_supported(declaration, "dcl.type.elab");
-        }
         return analysis_result::well_formed;
     }
     if (items.empty())
@@ -870,8 +880,21 @@ analysis_result semantic_analysis::declare_with_initializer(
     bool is_function_type =
         type_table[type.unqualified()].kind == type_kind::function;
     if ((aligned && (s.typedef_ || is_function_type)) ||
-        ((aligned || gnu_flags) && m.qualifier))
+        ((aligned || gnu_flags) && (m.qualifier || m.qualified_namespace)))
         return not_supported(declaration, "ext.gnu");
+    /* [basic.lookup.qual]/3: "names following the qualified-id are looked up in
+       the scope of the member's class or namespace": the initializer of a
+       static data member, or of a namespace's variable, defined by a qualified
+       name is analysed there */
+    struct scope_restore {
+        entity_index &scope;
+        entity_index saved;
+        ~scope_restore()
+        {
+            scope = saved;
+        }
+    } restore = {current_scope, current_scope};
+    entity_index declared_in_scope = current_scope;
     if (m.qualifier &&
         type_table[type.unqualified()].kind == type_kind::function) {
         if (initialized)
@@ -905,11 +928,19 @@ analysis_result semantic_analysis::declare_with_initializer(
     if (s.constexpr_ && kind == entity_kind::function)
         /* a constexpr function's rules ([dcl.constexpr]/3) */
         return not_supported(declaration, "dcl.constexpr");
+    /* [ext:gnu_attributes] noreturn on what is no function (a pointer to
+       function, a typedef-name): GCC and clang make it part of the
+       function type pointed to */
+    if ((gnu_flags & gnu_noreturn) && kind != entity_kind::function)
+        return not_supported(declaration, "ext.gnu");
     if (s.constexpr_) {
         /* [dcl.constexpr]/10: "A constexpr specifier used in an object
            declaration declares the object as const.  Such an object shall
            have literal type and shall be initialized." */
-        const struct type record = type_table[type.unqualified()];
+        qualified_type element = type;
+        while (type_table[element.unqualified()].kind == type_kind::array)
+            element = type_table[element.unqualified()].operand;
+        const struct type record = type_table[element.unqualified()];
         if (record.kind == type_kind::class_type ||
             record.kind == type_kind::enumeration ||
             record.kind == type_kind::none)
@@ -925,13 +956,33 @@ analysis_result semantic_analysis::declare_with_initializer(
         /* an initializer for a typedef-name or a function: a rule not found
            yet */
         return not_supported(declaration, "dcl.init");
+    {
+        /* a reference to an array of unknown bound: clang gives it the
+           bound of the braced-init-list it is bound to */
+        const struct type &referred = type_table[type.unqualified()];
+        if (initialized &&
+            (referred.kind == type_kind::lvalue_reference ||
+             referred.kind == type_kind::rvalue_reference) &&
+            type_table[referred.operand.unqualified()].kind ==
+                type_kind::array &&
+            !type_table[referred.operand.unqualified()].bound_known)
+            return not_supported(declaration, "dcl.init.ref");
+    }
     entity_index declared_entity = 0;
-    if (m.qualifier)
+    if (m.qualifier) {
         r = static_member_definition(declaration, m.id, m.qualifier, type, s,
                                      definition, declared_entity);
-    else
+        if (r == analysis_result::well_formed)
+            current_scope = m.qualifier;
+    } else {
+        qualified_declarator = m.qualified_namespace;
+        qualified_scope = m.namespace_qualifier;
         r = declare(declaration, m.id, kind, type, s, definition, initialized,
                     declared_entity);
+        qualified_declarator = false;
+        if (r == analysis_result::well_formed && m.qualified_namespace)
+            current_scope = entity_table[declared_entity].enclosing;
+    }
     last_declared = declared_entity;
     if (r == analysis_result::well_formed && !s.typedef_ &&
         (aligned || gnu_flags)) {
@@ -961,13 +1012,14 @@ analysis_result semantic_analysis::declare_with_initializer(
     /* [dcl.link]/1: "All functions and variables whose names have external
        linkage ... have a language linkage"; /5: the linkage-specification's
        ([dcl.link]/6: a later declaration without one keeps it) */
-    if (r == analysis_result::well_formed && c_language && !current_scope &&
+    if (r == analysis_result::well_formed && c_language && !at_block_scope() &&
         (kind == entity_kind::function || kind == entity_kind::variable) &&
         entity_table[declared_entity].linkage_of_name != linkage::internal)
         entity_table[declared_entity].c_language_linkage = true;
     /* the declaration statement's variables (statement) */
     if (r == analysis_result::well_formed && function_state.active &&
-        kind == entity_kind::variable)
+        kind == entity_kind::variable && declared_in_scope == current_scope &&
+        !is_namespace(entity_table[declared_entity].enclosing))
         block_variables.append(declared_entity);
     if (r == analysis_result::well_formed && !initialized &&
         kind == entity_kind::variable &&

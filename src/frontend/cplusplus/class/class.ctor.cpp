@@ -547,20 +547,40 @@ analysis_result semantic_analysis::ctor_initializer(syntax_child list,
         node_index n = item.index();
         const syntax_node &node = tree[n];
         const syntax_child *children = tree.children(n);
-        if (!node.child_count || !children[0].is_token() ||
-            tokens[children[0].index()].kind != token_kind::identifier)
+        if (!node.child_count)
             return not_supported(n, "class.base.init");
-        token_index id = children[0].index();
-        uint32_t name = tokens.identifier(id);
-        if (name == entity_table[c].name)
-            /* [class.base.init]/6: a delegating constructor */
-            return not_supported(n, "class.base.init");
-        entity_index e = entity_table.find(c, name);
+        token_index id = 0;
+        uint32_t name = 0;
+        entity_index e = 0;
+        /* a class-or-decltype with a nested-name-specifier: the class it
+           names ([basic.lookup.qual]) */
+        entity_index qualified_class = 0;
+        if (syntax_is(tree, children[0], syntax_kind::class_or_decltype)) {
+            analysis_result r =
+                named_class(children[0], n, qualified_class, id);
+            if (r != analysis_result::well_formed)
+                return r;
+            if (qualified_class == c)
+                return not_supported(n, "class.base.init");
+            name = tokens.identifier(id);
+        } else {
+            if (!children[0].is_token() ||
+                tokens[children[0].index()].kind != token_kind::identifier)
+                return not_supported(n, "class.base.init");
+            id = children[0].index();
+            name = tokens.identifier(id);
+            if (name == entity_table[c].name)
+                /* [class.base.init]/6: a delegating constructor */
+                return not_supported(n, "class.base.init");
+            e = entity_table.find(c, name);
+        }
         if (!e) {
             /* [class.base.init]/3: "A mem-initializer-list can initialize
                a base class using any class-or-decltype that denotes that
                base class type" */
-            entity_index base = lookup(name);
+            entity_index base = qualified_class;
+            if (!base)
+                base = lookup(name);
             for (uint32_t i = 0; base && i < entity_table[c].base_count; i++) {
                 entity_index b = class_bases[entity_table[c].first_base + i];
                 if (entity_table[b].type.unqualified() ==
@@ -582,7 +602,7 @@ analysis_result semantic_analysis::ctor_initializer(syntax_child list,
             !entity_table[e].nonstatic_member) {
             if (e && entity_table[e].kind == entity_kind::none)
                 return not_supported(n, "over");
-            if (!e && lookup(name))
+            if (!e && (qualified_class || lookup(name)))
                 /* a name of an enclosing scope */
                 return not_supported(n, "class.base.init");
             return ill_formed_at_token(id,
@@ -943,6 +963,7 @@ analysis_result semantic_analysis::implicit_definitions(entity_index c,
         function_state.returns = qualified_type::make(
             type_table.fundamental(fundamental_type::void_), cv_none);
         function_state.function = f;
+        entity_index outer_scope = current_scope;
         entity_index parameters = open_scope(0, true);
         entity_table[parameters].enclosing = f;
         owned_array<uint32_t> parameter_entities;
@@ -987,7 +1008,7 @@ analysis_result semantic_analysis::implicit_definitions(entity_index c,
         record.declaration = n;
         record.entity = f;
         definitions.append(record);
-        current_scope = 0;
+        current_scope = outer_scope;
         function_state.active = false;
         function_state.function = 0;
         function_state.this_entity = 0;
@@ -1169,7 +1190,7 @@ analysis_result semantic_analysis::special_member_definition(node_index n)
     const syntax_child *children = tree.children(n);
     if (node.child_count != 2 ||
         !syntax_is(tree, children[1], syntax_kind::function_body) ||
-        current_scope || function_state.active)
+        at_block_scope() || function_state.active)
         return not_supported(n, "dcl.fct.def.general");
     qualified_type type = qualified_type::make(
         type_table.fundamental(fundamental_type::void_), cv_none);

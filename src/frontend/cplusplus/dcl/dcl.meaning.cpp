@@ -320,20 +320,73 @@ void semantic_analysis::hold_names(node_index declaration)
         }
         return;
     }
+    /* the declarator-ids of a simple-declaration or function-definition */
+    auto declarator_ids = [&](node_index d) {
+        for (uint32_t i = 0; i < tree[d].child_count; i++) {
+            syntax_child c = tree.children(d)[i];
+            if (syntax_is(tree, c, syntax_kind::init_declarator_list)) {
+                const syntax_node &list = tree[c.index()];
+                for (uint32_t k = 0; k < list.child_count; k++)
+                    ids.append(declarator_id(tree.children(c.index())[k]));
+            } else {
+                ids.append(declarator_id(c));
+            }
+        }
+    };
     bool by_declarator = parsed_completely(declaration) &&
                          (node.kind == syntax_kind::simple_declaration ||
                           node.kind == syntax_kind::function_definition ||
                           node.kind == syntax_kind::condition);
-    if (!by_declarator) {
+    if (node.kind == syntax_kind::using_directive) {
+        /* [namespace.udir]: what it makes visible is not known */
+        entity_table[current_scope].unknown_names = true;
+        return;
+    }
+    if (node.kind == syntax_kind::using_declaration ||
+        node.kind == syntax_kind::namespace_alias_definition) {
+        /* the names they bring into the scope: each using-declarator's
+           last identifier, the alias; not the namespaces and classes
+           named on the way */
+        owned_array<node_index> work;
+        work.append(declaration);
+        while (!work.empty()) {
+            node_index x = work.back();
+            work.resize(work.size() - 1);
+            if (tree[x].kind == syntax_kind::nested_name_specifier ||
+                tree[x].kind == syntax_kind::qualified_namespace_specifier)
+                continue;
+            for (uint32_t i = 0; i < tree[x].child_count; i++) {
+                syntax_child c = tree.children(x)[i];
+                if (!c.is_token())
+                    work.append(c.index());
+                else if (tokens[c.index()].kind == token_kind::identifier &&
+                         (tree[x].kind == syntax_kind::using_declarator ||
+                          (x == declaration && i == 1)))
+                    ids.append(c.index());
+            }
+        }
+    } else if (!by_declarator) {
         /* the declarators are not known (a declaration not parsed, or of
            a kind analysis has no rules for: a template, a
            using-declaration, ...): every identifier outside parentheses,
            brackets and braces, which holds more names than the declaration
            declares and so only makes more declarations unsupported */
         int depth = 0;
+        auto is_scope_operator = [&](token_index at) {
+            const token &x = tokens[at];
+            return x.kind == token_kind::operator_or_punctuator &&
+                   preprocessing_op_or_punc_primary(x.op_or_punc) ==
+                       preprocessing_op_or_punc::COLON_COLON;
+        };
         for (token_index t = node.first_token; t < node.end_token; t++) {
             const token &tok = tokens[t];
-            if (tok.kind == token_kind::identifier && !depth)
+            /* a name before or after :: is a qualifier or a member of
+               another scope declared again ([dcl.meaning]/1), not a name
+               this declaration brings into the scope */
+            bool qualified =
+                (t + 1 < node.end_token && is_scope_operator(t + 1)) ||
+                (t > node.first_token && is_scope_operator(t - 1));
+            if (tok.kind == token_kind::identifier && !depth && !qualified)
                 ids.append(t);
             if (tok.kind != token_kind::operator_or_punctuator)
                 continue;
@@ -356,22 +409,52 @@ void semantic_analysis::hold_names(node_index declaration)
         if (node.child_count > 1)
             ids.append(declarator_id(tree.children(declaration)[1]));
     } else {
-        for (uint32_t i = 0; i < node.child_count; i++) {
-            syntax_child c = tree.children(declaration)[i];
-            if (syntax_is(tree, c, syntax_kind::init_declarator_list)) {
-                const syntax_node &list = tree[c.index()];
-                for (uint32_t k = 0; k < list.child_count; k++)
-                    ids.append(declarator_id(tree.children(c.index())[k]));
-            } else {
-                ids.append(declarator_id(c));
-            }
-        }
+        declarator_ids(declaration);
+    }
+    /* a template's declaration: its declarator-ids too, which may be in
+       parentheses (template<class T> void (f)(T);) */
+    for (node_index inner = declaration;
+         tree[inner].kind == syntax_kind::template_declaration ||
+         tree[inner].kind == syntax_kind::explicit_specialization;) {
+        const syntax_node &t = tree[inner];
+        if (!t.child_count ||
+            tree.children(inner)[t.child_count - 1].is_token())
+            break;
+        inner = tree.children(inner)[t.child_count - 1].index();
+        if ((tree[inner].kind == syntax_kind::simple_declaration ||
+             tree[inner].kind == syntax_kind::function_definition) &&
+            parsed_completely(inner))
+            declarator_ids(inner);
     }
     for (token_index id : ids) {
         if (!id)
             continue;
         uint32_t name = tokens.identifier(id);
         entity_index found = entity_table.find(current_scope, name);
+        bool defines_namespace =
+            node.kind == syntax_kind::named_namespace_definition ||
+            node.kind == syntax_kind::unnamed_namespace_definition ||
+            node.kind == syntax_kind::nested_namespace_definition;
+        if (found && defines_namespace &&
+            entity_table[found].kind == entity_kind::namespace_entity &&
+            entity_table[found].name == name &&
+            entity_table[found].enclosing == current_scope) {
+            /* a namespace-definition that was not analysed: the
+               namespace's members are not all known; the namespace is
+               still the namespace */
+            entity_table[found].unknown_names = true;
+            continue;
+        }
+        if (found &&
+            (entity_table.bound_by_using(current_scope, name) ||
+             entity_table[found].kind == entity_kind::namespace_entity)) {
+            /* the name of another scope's entity, brought here by a
+               using-declaration: here it is not known from now on */
+            entity_index e =
+                entity_table.make(entity_kind::none, name, current_scope);
+            entity_table.bind(current_scope, name, e);
+            continue;
+        }
         if (found) {
             /* a declaration of the name that analysis could not follow
                (an overload, a redeclaration with default arguments ...):
@@ -394,6 +477,37 @@ bool semantic_analysis::declared_by(entity_index e, node_index node) const
         if (entity_table.declaration(d).node == node)
             return true;
     return false;
+}
+
+/*
+ * [dcl.meaning]/1: "When the declarator-id is qualified, the declaration shall
+ * refer to a previously declared member of the class or namespace to which the
+ * qualifier refers (or, in the case of a namespace, of an element of the inline
+ * namespace set of that namespace) or to a specialization thereof; the member
+ * shall not merely have been introduced by a using-declaration in the scope of
+ * the class or namespace nominated by the nested-name-specifier of the
+ * declarator-id."  Such a declaration is one of namespace scope
+ * ([class.mfct]/2, [namespace.memdef]/2).
+ */
+analysis_result semantic_analysis::declarator_qualifier(node_index nested,
+                                                        declarator_meaning &m)
+{
+    nominated_scope scope;
+    analysis_result r = nested_name_specifier(nested, scope);
+    if (r != analysis_result::well_formed)
+        return r;
+    if (at_block_scope() || defining_class || function_state.active)
+        return not_supported(nested, "dcl.meaning");
+    if (is_namespace(scope.entity)) {
+        m.qualified_namespace = true;
+        m.namespace_qualifier = scope.entity;
+        return analysis_result::well_formed;
+    }
+    const entity &c = entity_table[scope.entity];
+    if (c.kind != entity_kind::class_type || !c.size)
+        return not_supported(nested, "basic.lookup.qual");
+    m.qualifier = scope.entity;
+    return analysis_result::well_formed;
 }
 
 /*
@@ -450,17 +564,9 @@ analysis_result semantic_analysis::declarator(node_index declaration,
             !parts[1].is_token() ||
             tokens[parts[1].index()].kind != token_kind::identifier)
             return not_supported(n, "dcl.meaning");
-        node_index nested = parts[0].index();
-        const syntax_child *names = tree.children(nested);
-        if (tree[nested].child_count != 2 || !names[0].is_token() ||
-            tokens[names[0].index()].kind != token_kind::identifier)
-            return not_supported(n, "basic.lookup.qual");
-        entity_index c =
-            entity_table.find(0, tokens.identifier(names[0].index()));
-        if (!c || entity_table[c].kind != entity_kind::class_type ||
-            !entity_table[c].size || current_scope)
-            return not_supported(n, "basic.lookup.qual");
-        m.qualifier = c;
+        analysis_result r = declarator_qualifier(parts[0].index(), m);
+        if (r != analysis_result::well_formed)
+            return r;
         m.has_id = true;
         m.id = parts[1].index();
         return analysis_result::well_formed;
@@ -473,6 +579,7 @@ analysis_result semantic_analysis::declarator(node_index declaration,
     }
     /* the head: ( ptr-declarator ) or the declarator-id, or none in an
        abstract declarator; then the suffixes */
+    entity_index scope_before = current_scope;
     uint32_t i = 0;
     bool has_head = false;
     syntax_child head = {};
@@ -517,22 +624,26 @@ analysis_result semantic_analysis::declarator(node_index declaration,
             !name.is_token() ||
             tokens[name.index()].kind != token_kind::identifier)
             return not_supported(q, "dcl.meaning");
-        node_index nested = parts[0].index();
-        const syntax_child *names = tree.children(nested);
-        if (tree[nested].child_count != 2 || !names[0].is_token() ||
-            tokens[names[0].index()].kind != token_kind::identifier)
-            return not_supported(q, "basic.lookup.qual");
-        entity_index c =
-            entity_table.find(0, tokens.identifier(names[0].index()));
-        if (!c || entity_table[c].kind != entity_kind::class_type ||
-            !entity_table[c].size || current_scope)
-            return not_supported(q, "basic.lookup.qual");
-        m.qualifier = c;
+        analysis_result r = declarator_qualifier(parts[0].index(), m);
+        if (r != analysis_result::well_formed)
+            return r;
+        if (m.destructor && !m.qualifier)
+            return not_supported(q, "class.dtor");
         has_head = true;
         head = name;
         i = 1;
-        /* the suffixes are the member's: a cv-qualifier-seq may follow */
-        in_member_declarator = true;
+        /* the suffixes are the member's: a cv-qualifier-seq may follow one
+           of a class */
+        in_member_declarator = m.qualifier != 0;
+        /* [basic.lookup.qual]/3: "In a declaration in which the declarator-id
+           is a qualified-id, names used before the qualified-id being declared
+           are looked up in the defining namespace scope; names following the
+           qualified-id are looked up in the scope of the member's class or
+           namespace.": the parameters are analysed in that scope */
+        if (m.qualifier)
+            current_scope = m.qualifier;
+        else
+            current_scope = m.namespace_qualifier;
     } else if (node.child_count &&
                syntax_is(tree, children[0], syntax_kind::unqualified_id)) {
         /* [class.dtor]/1: ~ class-name, in its class */
@@ -554,6 +665,16 @@ analysis_result semantic_analysis::declarator(node_index declaration,
         uint32_t child;
         bool has_bound;
     };
+    /* the scope a qualified declarator-id changed is back when the
+       suffixes are done, however this function returns */
+    struct scope_restore {
+        entity_index &scope;
+        entity_index saved;
+        ~scope_restore()
+        {
+            scope = saved;
+        }
+    } restore = {current_scope, scope_before};
     owned_array<suffix> suffixes;
     while (i < node.child_count) {
         if (syntax_is(tree, children[i],
@@ -611,6 +732,7 @@ analysis_result semantic_analysis::declarator(node_index declaration,
         m.reference_made = false;
     }
     in_member_declarator = false;
+    current_scope = scope_before;
     if (!has_head)
         return analysis_result::well_formed;
     return declarator(declaration, head, type, m);

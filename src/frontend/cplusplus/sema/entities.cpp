@@ -19,8 +19,8 @@ entities::entities()
     records.append(entity());
     declarations.append(entity_declaration());
     slots.resize(64);
-    for (entity_index &slot : slots)
-        slot = 0;
+    for (binding &slot : slots)
+        slot = binding();
 }
 
 namespace
@@ -37,52 +37,60 @@ uint32_t scope_hash(entity_index scope, uint32_t name)
 entity_index entities::find(entity_index scope, uint32_t name) const
 {
     size_t mask = slots.size() - 1;
-    for (size_t i = scope_hash(scope, name) & mask; slots[i];
-         i = (i + 1) & mask) {
-        const entity &e = records[slots[i]];
-        if (e.enclosing == scope && e.name == name)
-            return slots[i];
-    }
+    for (size_t i = scope_hash(scope, name) & mask; slots[i].entity;
+         i = (i + 1) & mask)
+        if (slots[i].scope == scope && slots[i].name == name)
+            return slots[i].entity;
     return 0;
+}
+
+bool entities::bound_by_using(entity_index scope, uint32_t name) const
+{
+    size_t mask = slots.size() - 1;
+    for (size_t i = scope_hash(scope, name) & mask; slots[i].entity;
+         i = (i + 1) & mask)
+        if (slots[i].scope == scope && slots[i].name == name)
+            return slots[i].by_using_declaration;
+    return false;
 }
 
 void entities::grow()
 {
-    owned_array<entity_index> old;
+    owned_array<binding> old;
     old.resize(slots.size());
     for (size_t i = 0; i < slots.size(); i++)
         old[i] = slots[i];
     slots.resize(slots.size() * 2);
-    for (entity_index &slot : slots)
-        slot = 0;
+    for (binding &slot : slots)
+        slot = binding();
     size_t mask = slots.size() - 1;
-    for (entity_index e : old) {
-        if (!e)
+    for (const binding &b : old) {
+        if (!b.entity)
             continue;
-        size_t i = scope_hash(records[e].enclosing, records[e].name) & mask;
-        while (slots[i])
+        size_t i = scope_hash(b.scope, b.name) & mask;
+        while (slots[i].entity)
             i = (i + 1) & mask;
-        slots[i] = e;
+        slots[i] = b;
     }
 }
 
-/* the entity e (whose enclosing scope and name are the ones bound) is what
-   the name refers to in the scope from now on */
-void entities::bind(entity_index scope, uint32_t name, entity_index e)
+/* the entity e is what the name refers to in the scope from now on */
+void entities::bind(entity_index scope, uint32_t name, entity_index e,
+                    bool by_using_declaration)
 {
     size_t mask = slots.size() - 1;
     size_t i = scope_hash(scope, name) & mask;
-    for (; slots[i]; i = (i + 1) & mask) {
-        const entity &x = records[slots[i]];
-        if (x.enclosing == scope && x.name == name) {
-            slots[i] = e;
+    for (; slots[i].entity; i = (i + 1) & mask)
+        if (slots[i].scope == scope && slots[i].name == name) {
+            slots[i].entity = e;
+            slots[i].by_using_declaration = by_using_declaration;
             return;
         }
-    }
-    slots[i] = e;
-    size_t used = 0;
-    for (entity_index slot : slots)
-        used += slot != 0;
+    slots[i].scope = scope;
+    slots[i].name = name;
+    slots[i].entity = e;
+    slots[i].by_using_declaration = by_using_declaration;
+    used++;
     if (used * 2 > slots.size())
         grow();
 }

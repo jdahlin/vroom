@@ -39,8 +39,19 @@ class itanium_mangler
     int variant;
     /* [abi:mangling-compression]: the substitution candidates seen so far,
        in order; a type is one candidate however it is spelled, since the
-       type table has one record per type */
-    owned_array<qualified_type> candidates;
+       type table has one record per type.  A namespace as a <prefix> is a
+       candidate too: its entity, with no type */
+    struct candidate {
+        qualified_type type;
+        entity_index scope = 0;
+    };
+    owned_array<candidate> candidates;
+    void add_candidate(qualified_type t)
+    {
+        candidate c;
+        c.type = t;
+        candidates.append(c);
+    }
 
     const struct type &record(qualified_type t) const
     {
@@ -75,7 +86,11 @@ class itanium_mangler
     bool function_type(qualified_type t);
     bool array_type(qualified_type t);
     bool substitution(qualified_type t);
+    bool substitution(entity_index scope);
+    void substitution_at(size_t i);
     void seq_id(size_t n);
+    bool is_std(entity_index scope) const;
+    bool in_unnamed_namespace(entity_index e) const;
 };
 
 /* the function whose definition a block-scope entity is declared in: the
@@ -111,6 +126,8 @@ bool itanium_mangler::mangled_name(entity_index e)
         return false;
     size_t length = 0;
     const char *identifier = spelling(x.name, &length);
+    /* an entity of the global namespace: a variable of another namespace
+       is mangled, as is a function named main there */
     bool global = x.enclosing == 0;
     bool is_main = x.kind == entity_kind::function && length == 4 &&
                    !memcmp(identifier, "main", 4);
@@ -121,8 +138,14 @@ bool itanium_mangler::mangled_name(entity_index e)
                              x.linkage_of_name == linkage::internal;
     if (x.unnamed_type_linkage)
         internal_variable = false;
-    if (global && !internal_variable &&
-        (x.kind == entity_kind::variable || is_main || x.c_language_linkage)) {
+    /* [dcl.link]/7: "At most one function with a particular name can have
+       C language linkage.  Two declarations for a function with C language
+       linkage with the same function name ... that appear in different
+       namespace scopes refer to the same function": its symbol is its
+       name in any namespace, and so a variable's */
+    if (x.c_language_linkage ||
+        (global && !internal_variable &&
+         (x.kind == entity_kind::variable || is_main))) {
         vbuffer_append(out, identifier, length);
         return true;
     }
@@ -155,16 +178,19 @@ bool itanium_mangler::encoding(entity_index e)
  *            ::= <unscoped-name>
  *            ::= <local-name>
  *
- * No namespace or template scope yet.  A member of a class has a
- * <nested-name>; an entity of a function's block scope has a <local-name>
+ * No template scope yet.  An entity of the global namespace or of ::std
+ * has an <unscoped-name>; a member of another namespace or of a class a
+ * <nested-name>; an entity of a function's block scope a <local-name>
  * ([abi:mangling-scope]).
  */
 bool itanium_mangler::name(entity_index e)
 {
     const entities &table = analysis.entity_table;
-    if (table[e].enclosing == 0)
+    entity_index scope = table[e].enclosing;
+    if (scope == 0 || is_std(scope))
         return unscoped_name(e);
-    if (table[table[e].enclosing].kind == entity_kind::class_type)
+    if (table[scope].kind == entity_kind::class_type ||
+        table[scope].kind == entity_kind::namespace_entity)
         return nested_name(e);
     entity_index function = enclosing_function(table, e);
     if (!function)
@@ -202,23 +228,67 @@ bool itanium_mangler::nested_name(entity_index e)
  * [abi:mangle.name]:
  *
  *     <prefix> ::= <unqualified-name>
+ *     <prefix> ::= <prefix> <unqualified-name>
  *     <prefix> ::= <substitution>
  *
- * A class of the global namespace.  [abi:mangling-compression]: a prefix
- * is a substitution candidate, the class's type's: the class named again
- * as a prefix or a type is the same candidate.
+ * A class or a namespace: of the global namespace its name, of another
+ * scope that scope's prefix and its name.  [abi:mangling-compression]: a
+ * prefix is a substitution candidate, a class's being its type's (the
+ * class named again as a prefix or a type is the same candidate), a
+ * namespace's its own; ::std as a prefix is the substitution St, which is
+ * no candidate.  A class of a block scope (a <local-name> as prefix) has
+ * no rule yet.
  */
 bool itanium_mangler::prefix(entity_index scope)
 {
-    const entity &c = analysis.entity_table[scope];
-    if (c.kind != entity_kind::class_type || c.enclosing)
+    const entities &table = analysis.entity_table;
+    const entity &c = table[scope];
+    bool is_class = c.kind == entity_kind::class_type;
+    if (!is_class && c.kind != entity_kind::namespace_entity)
         return false;
-    if (substitution(c.type))
+    if (!is_class && is_std(scope)) {
+        text("St");
         return true;
+    }
+    if (is_class && substitution(c.type))
+        return true;
+    if (!is_class && substitution(scope))
+        return true;
+    if (c.enclosing && !prefix(c.enclosing))
+        return false;
     if (!unqualified_name(scope))
         return false;
-    candidates.append(c.type);
+    if (is_class) {
+        add_candidate(c.type);
+    } else {
+        candidate x;
+        x.scope = scope;
+        candidates.append(x);
+    }
     return true;
+}
+
+/* [abi:mangling-compression]: ::std, which St abbreviates: the namespace
+   std of the global namespace */
+bool itanium_mangler::is_std(entity_index scope) const
+{
+    const entity &n = analysis.entity_table[scope];
+    if (!scope || n.kind != entity_kind::namespace_entity || n.enclosing ||
+        !n.name)
+        return false;
+    size_t length = 0;
+    const char *identifier = spelling(n.name, &length);
+    return length == 3 && !memcmp(identifier, "std", 3);
+}
+
+/* whether e is declared, directly or not, within an unnamed namespace */
+bool itanium_mangler::in_unnamed_namespace(entity_index e) const
+{
+    const entities &table = analysis.entity_table;
+    for (entity_index s = table[e].enclosing; s; s = table[s].enclosing)
+        if (table[s].kind == entity_kind::namespace_entity && !table[s].name)
+            return true;
+    return false;
 }
 
 /*
@@ -226,28 +296,46 @@ bool itanium_mangler::prefix(entity_index scope)
  *
  *     <class-enum-type> ::= <name>
  *
- * A class of the global namespace: its unscoped name.
+ * A class or an enumeration of namespace or class scope: its name, as an
+ * entity's.  One of a block scope (a <local-name>) has no rule yet.
  */
 bool itanium_mangler::class_enum_type(qualified_type t)
 {
     entity_index c = record(t).entity;
-    const entity &x = analysis.entity_table[c];
-    if ((x.kind != entity_kind::class_type &&
-         x.kind != entity_kind::enumeration) ||
-        x.enclosing)
+    const entities &table = analysis.entity_table;
+    const entity &x = table[c];
+    if (x.kind != entity_kind::class_type && x.kind != entity_kind::enumeration)
         return false;
     if (!x.name && !x.linkage_name)
         return false;
-    return unscoped_name(c);
+    if (x.enclosing == 0 || is_std(x.enclosing))
+        return unscoped_name(c);
+    if (table[x.enclosing].kind != entity_kind::class_type &&
+        table[x.enclosing].kind != entity_kind::namespace_entity)
+        return false;
+    /* <nested-name>: the prefix and the name; the type as a whole is the
+       candidate type() adds */
+    text("N");
+    if (!prefix(x.enclosing))
+        return false;
+    if (!unqualified_name(c))
+        return false;
+    text("E");
+    return true;
 }
 
 /*
  * [abi:mangle.name]:
  *
  *     <unscoped-name> ::= <unqualified-name>
+ *                     ::= St <unqualified-name>
+ *
+ * The second for a member of ::std.
  */
 bool itanium_mangler::unscoped_name(entity_index e)
 {
+    if (analysis.entity_table[e].enclosing)
+        text("St");
     return unqualified_name(e);
 }
 
@@ -256,15 +344,27 @@ bool itanium_mangler::unscoped_name(entity_index e)
  *
  *     <unqualified-name> ::= <source-name>
  *
- * [impl.gnu] [impl.clang] Both put L before the source name of an entity
- * of namespace scope with internal linkage (a static function), which the
- * ABI does not have, so that it is not the symbol of an external entity of
- * that name: _ZL2f2v.
+ * [impl.gnu] [impl.clang] Both put L before the source name of a function
+ * or variable of namespace scope with internal linkage (a static
+ * function), which the ABI does not have, so that it is not the symbol of
+ * an external entity of that name: _ZL2f2v, _ZN1NL1fEv.  Not within an
+ * unnamed namespace, whose name already keeps the symbol apart: both name
+ * an unnamed namespace _GLOBAL__N_1 (_ZN12_GLOBAL__N_11fEv).
  */
 bool itanium_mangler::unqualified_name(entity_index e)
 {
-    const entity &x = analysis.entity_table[e];
-    if (x.linkage_of_name == linkage::internal && x.enclosing == 0)
+    const entities &table = analysis.entity_table;
+    const entity &x = table[e];
+    if (x.kind == entity_kind::namespace_entity && !x.name) {
+        text("12_GLOBAL__N_1");
+        return true;
+    }
+    bool namespace_scope =
+        x.enclosing == 0 ||
+        table[x.enclosing].kind == entity_kind::namespace_entity;
+    if (x.linkage_of_name == linkage::internal && namespace_scope &&
+        (x.kind == entity_kind::function || x.kind == entity_kind::variable) &&
+        !in_unnamed_namespace(e) && !x.unnamed_type_linkage)
         text("L");
     if (x.special != special_member::none)
         return ctor_dtor_name(x.special);
@@ -459,7 +559,7 @@ bool itanium_mangler::type(qualified_type t)
         if (substitution(t))
             return true;
         text("St9__va_list");
-        candidates.append(t);
+        add_candidate(t);
         return true;
     }
     if (r.kind == type_kind::fundamental && !t.cv())
@@ -487,7 +587,7 @@ bool itanium_mangler::type(qualified_type t)
         done = class_enum_type(t);
     if (!done)
         return false;
-    candidates.append(t);
+    add_candidate(t);
     return true;
 }
 
@@ -687,14 +787,30 @@ bool itanium_mangler::array_type(qualified_type t)
 bool itanium_mangler::substitution(qualified_type t)
 {
     for (size_t i = 0; i < candidates.size(); i++)
-        if (candidates[i] == t) {
-            text("S");
-            if (i)
-                seq_id(i - 1);
-            text("_");
+        if (!candidates[i].scope && candidates[i].type == t) {
+            substitution_at(i);
             return true;
         }
     return false;
+}
+
+/* a namespace seen as a prefix before */
+bool itanium_mangler::substitution(entity_index scope)
+{
+    for (size_t i = 0; i < candidates.size(); i++)
+        if (candidates[i].scope == scope) {
+            substitution_at(i);
+            return true;
+        }
+    return false;
+}
+
+void itanium_mangler::substitution_at(size_t i)
+{
+    text("S");
+    if (i)
+        seq_id(i - 1);
+    text("_");
 }
 
 /*

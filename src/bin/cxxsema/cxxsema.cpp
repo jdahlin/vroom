@@ -210,6 +210,12 @@ static void write_declaration_claims(const semantic_analysis &analysis,
     for (const declared_name &d : analysis.declared) {
         if (!d.claimable)
             continue;
+        /* [ext:gnu_attributes] noreturn is part of the function's type for
+           clang (void () __attribute__((noreturn))), which the types here
+           do not say */
+        if (d.entity && (analysis.entity_table[d.entity].gnu_flags &
+                         (gnu_noreturn | gnu_nothrow)))
+            continue;
         const syntax_node &node = tree[d.declaration];
         bool from_macro = false;
         for (token_index t = node.first_token; t < node.end_token; t++)
@@ -327,6 +333,11 @@ static void write_type_claims(const semantic_analysis &analysis,
         if (from_macro || memchr(spelling.data(), '\n', spelling.size()) ||
             memchr(spelling.data(), '\t', spelling.size()))
             continue;
+        /* a noreturn function's type (write_declaration_claims) */
+        if (x.meaning.entity &&
+            (analysis.entity_table[x.meaning.entity].gnu_flags &
+             (gnu_noreturn | gnu_nothrow)))
+            continue;
         claim.clear();
         if (!write_expression_claim(analysis.type_table, x.meaning.type,
                                     x.meaning.category, claim.get()))
@@ -442,7 +453,7 @@ static int emit_assembly(const semantic_analysis &analysis,
     cc *c = ast_builder_open(p, &o);
     lowering_failure why;
     int status = 0;
-    if (!lower_translation_unit(analysis, tokens, c, o.target, why)) {
+    if (!lower_translation_unit(analysis, tokens, c, o.target, why, path)) {
         source_position at = tokens.position(why.at);
         fprintf(stderr, "cxxsema: not lowered: %s at %s:%u:%u\n", why.what,
                 at.file_name, at.line, at.column);

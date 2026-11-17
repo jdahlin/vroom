@@ -506,6 +506,18 @@ analysis_result semantic_analysis::statement(syntax_child s, uint32_t &built)
             hold_names(n);
         return r;
     }
+    case syntax_kind::using_directive:
+    case syntax_kind::namespace_alias_definition:
+    case syntax_kind::using_declaration: {
+        /* [stmt.dcl]/1: a block-declaration that declares no object: no
+           code */
+        analysis_result r = declaration_by_kind(n);
+        built =
+            statement_node(semantic_kind::null_statement, tree[n].first_token);
+        if (r != analysis_result::well_formed)
+            hold_names(n);
+        return r;
+    }
     default:
         return not_supported(n);
     }

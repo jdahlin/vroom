@@ -1068,9 +1068,12 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
             } else if (syntax_is(tree, c,
                                  syntax_kind::elaborated_enum_specifier))
                 r = elaborated_enum_specifier(c.index(), class_type);
-            else if (syntax_is(tree, c, syntax_kind::simple_type_specifier))
-                r = qualified_type_name(c.index(), class_type);
-            else if (syntax_is(tree, c, syntax_kind::gnu_attribute_specifier)) {
+            else if (syntax_is(tree, c, syntax_kind::simple_type_specifier)) {
+                uint32_t named_cv = 0;
+                r = qualified_type_name(c.index(), class_type, named_cv);
+                cv |= named_cv;
+            } else if (syntax_is(tree, c,
+                                 syntax_kind::gnu_attribute_specifier)) {
                 /* [ext:gnu_attributes] a decl-specifier: it applies to
                    the declaration */
                 r = gnu_attribute_specifier(c.index(), s);
@@ -1094,9 +1097,22 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
         token_index t = c.index();
         const token &tok = tokens[t];
         if (tok.kind == token_kind::identifier) {
-            /* a type-name ([dcl.type.simple]/1): at global namespace scope,
-               a typedef-name declared there before */
-            entity_index e = lookup(tokens.identifier(t));
+            /* a type-name ([dcl.type.simple]/1), found by unqualified
+               lookup ([basic.lookup.unqual]) */
+            lookup_result found =
+                lookup_unqualified(tokens.identifier(t), lookup_filter::any);
+            if (found.ambiguous)
+                return ill_formed_at_token(
+                    t,
+                    "a name found in two different namespaces whose "
+                    "declarations do not declare the same entity is "
+                    "ill-formed",
+                    "namespace.udir");
+            entity_index e = found.entity;
+            if (e && (entity_table[e].kind == entity_kind::class_type ||
+                      entity_table[e].kind == entity_kind::enumeration ||
+                      entity_table[e].kind == entity_kind::typedef_name))
+                used(t, e);
             if (e && (entity_table[e].kind == entity_kind::class_type ||
                       entity_table[e].kind == entity_kind::enumeration)) {
                 /* [class.name]/1: a class-name; [dcl.enum]/1: an
@@ -1304,40 +1320,121 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
  *     simple-type-specifier:
  *         nested-name-specifier_opt type-name
  *
- * [basic.lookup.qual]/1: a class-name of the global namespace, then a
- * member of that class that is a type: a nested class or enumeration or a
- * member typedef-name ([class.nest]/1, [class.mem]/3).
+ * [basic.lookup.qual]/1: the type-name is looked up in the scope the
+ * nested-name-specifier nominates: a member of a namespace
+ * ([namespace.qual]) or of a class that is a type, a nested class or
+ * enumeration or a member typedef-name ([class.nest]/1, [class.mem]/3).
  */
 analysis_result semantic_analysis::qualified_type_name(node_index n,
-                                                       type_index &type)
+                                                       type_index &type,
+                                                       uint32_t &cv)
 {
     const syntax_node &node = tree[n];
     const syntax_child *parts = tree.children(n);
+    cv = 0;
     if (node.child_count != 2 ||
         !syntax_is(tree, parts[0], syntax_kind::nested_name_specifier) ||
         !parts[1].is_token() ||
         tokens[parts[1].index()].kind != token_kind::identifier)
         return not_supported(n, "dcl.type.simple");
-    node_index nested = parts[0].index();
-    const syntax_child *names = tree.children(nested);
-    if (tree[nested].child_count != 2 || !names[0].is_token() ||
-        tokens[names[0].index()].kind != token_kind::identifier)
-        return not_supported(n, "basic.lookup.qual");
-    entity_index c = lookup(tokens.identifier(names[0].index()));
-    if (!c || entity_table[c].kind != entity_kind::class_type)
-        return not_supported(n, "basic.lookup.qual");
+    nominated_scope scope;
+    analysis_result r = nested_name_specifier(parts[0].index(), scope);
+    if (r != analysis_result::well_formed)
+        return r;
     token_index t = parts[1].index();
-    entity_index e = entity_table.find(c, tokens.identifier(t));
+    lookup_result found = lookup_qualified(scope.entity, tokens.identifier(t),
+                                           lookup_filter::types);
+    if (found.ambiguous)
+        return ill_formed_at_token(t,
+                                   "the use of a name is ill-formed if it "
+                                   "does not allow a unique declaration to "
+                                   "be chosen from those found in the "
+                                   "namespaces",
+                                   "namespace.qual");
+    entity_index e = found.entity;
     if (!e || (entity_table[e].kind != entity_kind::class_type &&
-               entity_table[e].kind != entity_kind::enumeration))
+               entity_table[e].kind != entity_kind::enumeration &&
+               entity_table[e].kind != entity_kind::typedef_name))
         return not_supported(n, "basic.lookup.qual");
-    if (!accessible(e))
+    if (entity_table[e].enclosing &&
+        entity_table[entity_table[e].enclosing].kind ==
+            entity_kind::class_type &&
+        !accessible(e))
         return ill_formed_at_token(t,
                                    "a private or protected member's name can "
                                    "be used only by members and friends of "
                                    "the class in which it is declared",
                                    "class.access");
+    used(t, e);
     type = entity_table[e].type.unqualified();
+    if (entity_table[e].kind == entity_kind::typedef_name)
+        cv = entity_table[e].type.cv();
+    return analysis_result::well_formed;
+}
+
+/*
+ * A name the grammar requires to be a class's: a type-name, or
+ * nested-name-specifier type-name, found by unqualified or qualified lookup
+ * that considers types only ([basic.lookup.elab]/1's and [class.derived]/2's
+ * "non-type names are ignored").  [dcl.typedef]/1: a typedef-name "is thus
+ * a synonym for another type": one that names a class is the class.
+ */
+analysis_result semantic_analysis::named_class(syntax_child name, node_index at,
+                                               entity_index &c, token_index &id)
+{
+    c = 0;
+    lookup_result found;
+    if (name.is_token()) {
+        if (tokens[name.index()].kind != token_kind::identifier)
+            return not_supported(at, "basic.lookup.qual");
+        id = name.index();
+        found = lookup_unqualified(tokens.identifier(id), lookup_filter::types);
+    } else {
+        const syntax_node &node = tree[name.index()];
+        const syntax_child *parts = tree.children(name.index());
+        if (node.child_count != 2 ||
+            !syntax_is(tree, parts[0], syntax_kind::nested_name_specifier) ||
+            !parts[1].is_token() ||
+            tokens[parts[1].index()].kind != token_kind::identifier)
+            /* a simple-template-id, a decltype-specifier */
+            return not_supported(at, "basic.lookup.qual");
+        nominated_scope scope;
+        analysis_result r = nested_name_specifier(parts[0].index(), scope);
+        if (r != analysis_result::well_formed)
+            return r;
+        id = parts[1].index();
+        found = lookup_qualified(scope.entity, tokens.identifier(id),
+                                 lookup_filter::types);
+    }
+    if (found.ambiguous)
+        return ill_formed_at_token(id,
+                                   "a name found in two different namespaces "
+                                   "whose declarations do not declare the "
+                                   "same entity is ill-formed",
+                                   "namespace.udir");
+    entity_index e = found.entity;
+    if (!e)
+        return not_supported(at, "basic.lookup.qual");
+    entity_index named = e;
+    if (entity_table[e].kind == entity_kind::typedef_name) {
+        const struct type &t = type_table[entity_table[e].type.unqualified()];
+        if (t.kind != type_kind::class_type)
+            return not_supported(at, "basic.lookup.qual");
+        named = t.entity;
+    }
+    if (entity_table[named].kind != entity_kind::class_type)
+        return not_supported(at, "basic.lookup.qual");
+    if (entity_table[e].enclosing &&
+        entity_table[entity_table[e].enclosing].kind ==
+            entity_kind::class_type &&
+        !accessible(e))
+        return ill_formed_at_token(id,
+                                   "a private or protected member's name can "
+                                   "be used only by members and friends of "
+                                   "the class in which it is declared",
+                                   "class.access");
+    used(id, e);
+    c = named;
     return analysis_result::well_formed;
 }
 

@@ -70,9 +70,94 @@ bool same_parameters(const types &table, type_index a, type_index b)
 
 } // namespace
 
+/* [basic.link]/4: a class or enumeration of an unnamed namespace has
+   internal linkage, an unnamed one without a typedef name for linkage
+   purposes and a local one none ([basic.link]/8): whether t is such a
+   type or compounded from one */
+bool semantic_analysis::type_without_external_linkage(qualified_type t) const
+{
+    const struct type &record = type_table[t.unqualified()];
+    switch (record.kind) {
+    case type_kind::class_type:
+    case type_kind::enumeration: {
+        const entity &x = entity_table[record.entity];
+        if (x.kind != entity_kind::class_type &&
+            x.kind != entity_kind::enumeration)
+            return false;
+        return x.linkage_of_name != linkage::external;
+    }
+    case type_kind::pointer:
+    case type_kind::array:
+    case type_kind::lvalue_reference:
+    case type_kind::rvalue_reference:
+        return type_without_external_linkage(record.operand);
+    case type_kind::function: {
+        const qualified_type *parameters =
+            type_table.parameters(t.unqualified());
+        for (uint32_t i = 0; i < record.parameter_count; i++)
+            if (type_without_external_linkage(parameters[i]))
+                return true;
+        return type_without_external_linkage(record.operand);
+    }
+    case type_kind::pointer_to_member:
+        return type_without_external_linkage(
+                   entity_table[record.entity].type) ||
+               type_without_external_linkage(record.operand);
+    default:
+        return false;
+    }
+}
+
 /*
- * A name declared at global namespace scope by declaration, or declared
- * again.  definition is whether the declaration is a function-definition;
+ * [dcl.init]/7: "A class type T is const-default-constructible if
+ * default-initialization of T would invoke a user-provided constructor of T
+ * (not inherited from a base class) or if (7.4) each direct non-variant
+ * non-static data member M of T has a default member initializer or, if M
+ * is of class type X (or array thereof), X is const-default-constructible,
+ * (7.5) if T is a union with at least one non-static data member, exactly
+ * one variant member has a default member initializer, (7.6) if T is not a
+ * union, for each anonymous union member with at least one non-static data
+ * member (if any), exactly one non-static data member has a default member
+ * initializer, and (7.7) each potentially constructed base class of T is
+ * const-default-constructible."  No member analysis has has a default
+ * member initializer.
+ */
+bool semantic_analysis::const_default_constructible(entity_index c) const
+{
+    const entity &x = entity_table[c];
+    for (entity_index k = x.first_constructor; k;
+         k = entity_table[k].next_constructor)
+        if (!entity_table[k].implicit &&
+            !type_table[entity_table[k].type.unqualified()].parameter_count)
+            return true;
+    if (x.union_ && x.member_count)
+        return false;
+    for (uint32_t i = 0; i < x.member_count; i++) {
+        const entity &m = entity_table[class_members[x.first_member + i]];
+        /* an unnamed bit-field is not a member ([class.bit]/2) */
+        if (m.bit_field && !m.name)
+            continue;
+        qualified_type t = m.type;
+        while (type_table[t.unqualified()].kind == type_kind::array)
+            t = type_table[t.unqualified()].operand;
+        if (type_table[t.unqualified()].kind != type_kind::class_type ||
+            !const_default_constructible(type_table[t.unqualified()].entity))
+            return false;
+    }
+    for (uint32_t i = 0; i < x.base_count; i++) {
+        const entity &b = entity_table[class_bases[x.first_base + i]];
+        if (!const_default_constructible(
+                type_table[b.type.unqualified()].entity))
+            return false;
+    }
+    return true;
+}
+
+/*
+ * A name declared at namespace scope by declaration, or declared again
+ * ([basic.scope.namespace]/1: "The declarative region of a
+ * namespace-definition is its namespace-body.  Entities declared in a
+ * namespace-body are said to be members of the namespace").  definition is whether the declaration is a function-definition;
  * an object declaration is a definition unless it is extern ([basic.def]/2:
  * "it contains the extern specifier or a linkage-specification and neither
  * an initializer nor a function-body"); a typedef declaration is none.
@@ -87,7 +172,76 @@ analysis_result semantic_analysis::declare(node_index declaration,
     declared_entity = 0;
     uint32_t name = tokens.identifier(id);
     entity_index scope = current_scope;
-    entity_index prior = entity_table.find(scope, name);
+    entity_index prior = 0;
+    bool qualified = qualified_declarator;
+    if (qualified) {
+        /* a typedef-name is no member a qualified declarator-id declares
+           again ([dcl.meaning]/1 has a function or variable in mind):
+           clang's error, by a rule C++20 does not word */
+        if (kind == entity_kind::typedef_name)
+            return not_supported(declaration, "dcl.meaning");
+        scope = qualified_scope;
+        /* [namespace.memdef]/2: "Members of a named namespace can also be
+           defined outside that namespace by explicit qualification of the
+           name being defined, provided that the entity being defined was
+           already declared in the namespace and the definition appears
+           after the point of declaration in a namespace that encloses the
+           declaration's namespace." */
+        if (!namespace_encloses(current_scope, scope))
+            return ill_formed_at_token(id,
+                                       "a member of a namespace defined "
+                                       "outside it shall be defined in a "
+                                       "namespace that encloses the "
+                                       "declaration's namespace",
+                                       "namespace.memdef");
+        /* in its own namespace: clang's extra qualification, an error or a
+           warning by the kind of member */
+        if (current_scope == scope)
+            return not_supported(declaration, "dcl.meaning");
+        /* [dcl.meaning]/1: "the declaration shall refer to a previously
+           declared member of the class or namespace to which the qualifier
+           refers (or, in the case of a namespace, of an element of the
+           inline namespace set of that namespace) ... the member shall not
+           merely have been introduced by a using-declaration in the scope
+           of the class or namespace nominated by the nested-name-specifier
+           of the declarator-id" */
+        lookup_result found =
+            lookup_in_namespace(scope, name, lookup_filter::any);
+        if (found.ambiguous || found.unknown || !found.entity)
+            /* one not found may be a friend's, declared in a class
+               ([namespace.memdef]/3) */
+            return not_supported(declaration, "dcl.meaning");
+        prior = found.entity;
+        entity_index in = entity_table[prior].enclosing;
+        if (entity_table.find(found.found_in, name) != prior ||
+            found.found_in != in)
+            /* named by a using-declaration there, or found through a
+               using-directive */
+            return not_supported(declaration, "dcl.meaning");
+        for (entity_index y = in; y != scope; y = entity_table[y].enclosing)
+            if (!y || !entity_table[y].inline_)
+                return not_supported(declaration, "dcl.meaning");
+        scope = in;
+    } else {
+        prior = entity_table.find(scope, name);
+        /* [basic.link]/7: a member of the namespace declared in a block before,
+           whose name was not bound: this declaration is of that entity, and
+           binds the name */
+        if (!prior && is_namespace(scope) &&
+            (kind == entity_kind::function || kind == entity_kind::variable))
+            for (entity_index e : block_declared)
+                if (entity_table[e].enclosing == scope &&
+                    entity_table[e].name == name) {
+                    /* [dcl.array]/8: a bound given in the block is not
+                       this scope's */
+                    if (!(entity_table[e].type == type) &&
+                        differ_in_major_bound(type_table, entity_table[e].type,
+                                              type))
+                        return not_supported(declaration, "dcl.array");
+                    prior = e;
+                    entity_table.bind(scope, name, e);
+                }
+    }
     /* [dcl.typedef]/3: "In a given non-class scope, a typedef specifier
        can be used to redeclare the name of any type declared in that scope
        to refer to the type to which it already refers": typedef struct s
@@ -99,12 +253,31 @@ analysis_result semantic_analysis::declare(node_index declaration,
         declared_entity = prior;
         return analysis_result::well_formed;
     }
-    /* a variable or function with a class's or enumeration's name hides it
-       ([basic.scope.hiding]/2) */
+    /* a name a using-declaration brought into the scope ([namespace.udecl]/12:
+       "Since a using-declaration is a declaration, the restrictions on
+       declarations of the same name in the same declarative region also apply
+       to using-declarations"): a function beside functions is an overload, the
+       rest conflicts or hides */
+    if (prior && !qualified && entity_table.bound_by_using(scope, name))
+        return not_supported(declaration, "namespace.udecl");
+    /* [basic.scope.hiding]/2: "If a class name or enumeration name and a
+       variable, data member, function, or enumerator are declared in the same
+       declarative region (in any order) with the same name ..., the class or
+       enumeration name is hidden wherever the variable, data member, function,
+       or enumerator name is visible." */
+    entity_index hides = 0;
     if (prior && (entity_table[prior].kind == entity_kind::class_type ||
-                  entity_table[prior].kind == entity_kind::enumeration))
-        return not_supported(declaration, "basic.scope.hiding");
-    if (scope) {
+                  entity_table[prior].kind == entity_kind::enumeration)) {
+        if (kind == entity_kind::typedef_name || qualified ||
+            entity_table[prior].enclosing != scope)
+            /* a typedef-name for another type: [dcl.typedef]/6 */
+            return not_supported(declaration, "basic.scope.hiding");
+        hides = prior;
+        prior = 0;
+    }
+    declaration_hides = hides;
+    bool block = !is_namespace(scope);
+    if (block) {
         /* [dcl.inline]/4: "The inline specifier shall not appear on a block
            scope declaration" */
         if (s.inline_)
@@ -112,10 +285,16 @@ analysis_result semantic_analysis::declare(node_index declaration,
                                        "the inline specifier shall not "
                                        "appear on a block scope declaration",
                                        "dcl.inline");
-        /* a block-scope declaration of a function, or with extern: it
-           declares the namespace's entity of the name ([basic.link]/7),
-           not analysed yet */
-        if (kind == entity_kind::function || s.extern_)
+        /* a block-scope declaration of a function, or of a variable with
+           extern: it declares a member of the namespace ([basic.link]/6) */
+        if (kind == entity_kind::function ||
+            (s.extern_ && kind == entity_kind::variable)) {
+            if (hides)
+                return not_supported(declaration, "basic.scope.hiding");
+            return declare_in_block_with_linkage(declaration, id, kind, type, s,
+                                                 initialized, declared_entity);
+        }
+        if (s.extern_)
             return not_supported(declaration, "basic.link");
     }
     /* [dcl.array]/8: "if there is a preceding declaration of the entity in
@@ -139,7 +318,7 @@ analysis_result semantic_analysis::declare(node_index declaration,
            linkage-specification is treated as if it contains the extern
            specifier ([dcl.stc]) for the purpose of determining the linkage
            of the declared name and whether it is a definition." */
-        if (linkage_without_braces && !scope)
+        if (linkage_without_braces && !block)
             definition = initialized;
         /* [dcl.ref]/5: "The declaration of a reference shall contain an
            initializer except when the declaration contains an explicit
@@ -187,18 +366,9 @@ analysis_result semantic_analysis::declare(node_index declaration,
         qualified_type element = type;
         while (type_table[element.unqualified()].kind == type_kind::array)
             element = type_table[element.unqualified()].operand;
-        if (type_table[element.unqualified()].kind == type_kind::class_type) {
-            /* /7: "A class type T is const-default-constructible if
-               default-initialization of T would invoke a user-provided
-               constructor of T" */
-            entity_index cls = type_table[element.unqualified()].entity;
-            for (entity_index k = entity_table[cls].first_constructor; k;
-                 k = entity_table[k].next_constructor)
-                if (!entity_table[k].implicit &&
-                    !type_table[entity_table[k].type.unqualified()]
-                         .parameter_count)
-                    user_default = true;
-        }
+        if (type_table[element.unqualified()].kind == type_kind::class_type)
+            user_default = const_default_constructible(
+                type_table[element.unqualified()].entity);
         if (definition && !initialized && !user_default &&
             (cv_of(type_table, type) & cv_const))
             return ill_formed_at_token(id,
@@ -242,8 +412,17 @@ analysis_result semantic_analysis::declare(node_index declaration,
     uint32_t cv = cv_of(type_table, type);
     bool const_object = kind == entity_kind::variable && (cv & cv_const) &&
                         !(cv & cv_volatile) && !s.extern_ && !s.inline_;
-    if (scope)
+    if (block)
         return declare_local(declaration, id, kind, type, s, declared_entity);
+    /* [basic.link]/4: "An unnamed namespace or a namespace declared
+       directly or indirectly within an unnamed namespace has internal
+       linkage. ... A name having namespace scope that has not been given
+       internal linkage above and that is the name of a variable; or a
+       function; ... has its linkage determined as follows: if the enclosing
+       namespace has internal linkage, the name has internal linkage" */
+    bool in_unnamed = within_unnamed_namespace(scope);
+    if (in_unnamed && implied == linkage::external)
+        implied = linkage::internal;
     if (prior) {
         entity &e = entity_table[prior];
         /* declared by a declaration not analysed (hold_names) */
@@ -307,7 +486,7 @@ analysis_result semantic_analysis::declare(node_index declaration,
                                        "basic.def.odr");
         /* [dcl.stc]/6: "The linkages implied by successive declarations for
            a given entity shall agree." */
-        if (implied == linkage::internal &&
+        if (implied == linkage::internal && !in_unnamed &&
             e.linkage_of_name == linkage::external &&
             tokens.files.behavior.microsoft_extensions) {
             /* Microsoft's extension: the name keeps its external linkage */
@@ -315,7 +494,7 @@ analysis_result semantic_analysis::declare(node_index declaration,
                 diagnostic_id::sema_static_after_non_static, id, nullptr);
             if (r != analysis_result::well_formed)
                 return r;
-        } else if (implied == linkage::internal &&
+        } else if (implied == linkage::internal && !in_unnamed &&
                    e.linkage_of_name == linkage::external)
             return ill_formed_at_token(id,
                                        "the linkages implied by successive "
@@ -351,13 +530,24 @@ analysis_result semantic_analysis::declare(node_index declaration,
             implied = linkage::internal;
             unnamed_type = true;
         }
-        entity_index e = entity_table.make(kind, name, 0);
+        /* [impl.clang] a function or variable whose type is made of a
+           class or enumeration of an unnamed namespace cannot be named in
+           another translation unit: its symbol is local */
+        if ((kind == entity_kind::variable || kind == entity_kind::function) &&
+            implied == linkage::external && !c_language &&
+            type_without_external_linkage(type)) {
+            implied = linkage::internal;
+            unnamed_type = true;
+        }
+        no_claims_after_hiding(name);
+        entity_index e = entity_table.make(kind, name, scope);
+        entity_table[e].hidden_type = hides;
         entity_table[e].unnamed_type_linkage = unnamed_type;
         entity_table[e].type = type;
         entity_table[e].linkage_of_name = implied;
         entity_table[e].defined = definition;
         entity_table.add_declaration(e, declaration);
-        entity_table.bind(0, name, e);
+        entity_table.bind(scope, name, e);
         declared_entity = e;
     }
     /* [basic.def.odr]/11: "A definition of an inline function or variable
@@ -373,9 +563,233 @@ analysis_result semantic_analysis::declare(node_index declaration,
     d.id = id;
     d.kind = kind;
     d.type = type;
+    /* a qualified name's claim would be looked up where the declaration
+       is, not in its namespace */
+    d.claimable = declarations_claimable && !qualified;
+    declared.append(d);
+    return analysis_result::well_formed;
+}
+
+/*
+ * [basic.link]/6: "The name of a function declared in block scope and the name
+ * of a variable declared by a block scope extern declaration have linkage. ...
+ * If there is a visible declaration of an entity with linkage, ignoring
+ * entities declared outside the innermost enclosing namespace scope, such that
+ * the block scope declaration would be a (possibly ill-formed) redeclaration if
+ * the two declarations appeared in the same declarative region, the block scope
+ * declaration declares that same entity and receives the linkage of the
+ * previous declaration.  If there is more than one such matching entity, the
+ * program is ill-formed. Otherwise, if no matching entity is found, the block
+ * scope entity receives external linkage."  /7: "When a block scope declaration
+ * of an entity with linkage is not found to refer to some other declaration,
+ * then that entity is a member of the innermost enclosing namespace. However
+ * such a declaration does not introduce the member name in its namespace
+ * scope."
+ *
+ * The name is bound in the block to the namespace's entity; an entity
+ * first declared so is kept (block_declared) for the declarations of it
+ * that follow, in a block or in its namespace.
+ */
+analysis_result semantic_analysis::declare_in_block_with_linkage(
+    node_index declaration, token_index id, entity_kind kind,
+    qualified_type type, const specified &s, bool initialized,
+    entity_index &declared_entity)
+{
+    uint32_t name = tokens.identifier(id);
+    entity_index block = current_scope;
+    entity_index space = enclosing_namespace(block);
+    /* [dcl.stc]/4: "There can be no static function declarations within a
+       block" */
+    if (kind == entity_kind::function && s.static_)
+        return ill_formed_at_token(id,
+                                   "there can be no static function "
+                                   "declarations within a block",
+                                   "dcl.stc");
+    /* [dcl.init]/5: "A declaration of a block-scope variable with external
+       or internal linkage that has an initializer is ill-formed." */
+    if (initialized)
+        return ill_formed_at_token(id,
+                                   "a declaration of a block-scope variable "
+                                   "with external or internal linkage that "
+                                   "has an initializer is ill-formed",
+                                   "dcl.init");
+    if (s.constexpr_ || function_cv)
+        return not_supported(declaration, "basic.link");
+    if (kind == entity_kind::variable) {
+        const struct type &record = type_table[type.unqualified()];
+        if (record.kind == type_kind::class_type &&
+            entity_table[record.entity].kind != entity_kind::class_type)
+            return not_supported(declaration, "class.pre");
+        if (record.kind == type_kind::fundamental &&
+            record.fundamental == fundamental_type::void_)
+            return not_supported(declaration, "basic.types");
+    }
+    /* whether the entity e is what this declaration would redeclare */
+    auto matches = [&](entity_index e, analysis_result &r) {
+        const entity &x = entity_table[e];
+        r = analysis_result::well_formed;
+        if (x.kind != kind) {
+            /* [basic.scope.declarative]/4: "they shall all refer to the
+               same entity, or all refer to functions and function
+               templates" */
+            r = ill_formed_at_token(id,
+                                    "declarations of the same name in a "
+                                    "declarative region shall all refer to "
+                                    "the same entity, or all to functions",
+                                    "basic.scope.declarative");
+            return false;
+        }
+        if (kind == entity_kind::function) {
+            if (!same_parameters(type_table, x.type.unqualified(),
+                                 type.unqualified())) {
+                /* another function of the name: an overload */
+                r = not_supported(declaration, "over");
+                return false;
+            }
+            /* [over.load]/2 */
+            if (!(x.type == type)) {
+                r = ill_formed_at_token(id,
+                                        "function declarations that differ "
+                                        "only in the return type cannot be "
+                                        "overloaded",
+                                        "over.load");
+                return false;
+            }
+            return true;
+        }
+        /* [basic.link]/11: "the types specified by all declarations
+           referring to a given variable or function shall be identical,
+           except that declarations for an array object can specify array
+           types that differ by the presence or absence of a major array
+           bound" */
+        if (!(x.type == type) &&
+            !differ_in_major_bound(type_table, x.type, type)) {
+            r = ill_formed_at_token(id,
+                                    "the types specified by all "
+                                    "declarations referring to a given "
+                                    "variable shall be identical",
+                                    "basic.link");
+            return false;
+        }
+        /* [dcl.array]/8: "if there is a preceding declaration of the
+           entity in the same scope in which the bound was specified, an
+           omitted array bound is taken to be the same as in that earlier
+           declaration": a bound this block's declaration gives or omits is
+           the type the name has in this scope only, which an entity's one
+           type does not say */
+        if (!(x.type == type)) {
+            r = not_supported(declaration, "dcl.array");
+            return false;
+        }
+        return true;
+    };
+    entity_index target = 0;
+    entity_index here = entity_table.find(block, name);
+    if (here) {
+        const entity &x = entity_table[here];
+        if (x.kind == entity_kind::none ||
+            entity_table.bound_by_using(block, name))
+            return not_supported(declaration, "basic.scope.declarative");
+        /* a local entity of the block: [basic.scope.declarative]/4 */
+        if (!is_namespace(x.enclosing))
+            return ill_formed_at_token(id,
+                                       "declarations of the same name in a "
+                                       "declarative region shall all refer "
+                                       "to the same entity, or all to "
+                                       "functions",
+                                       "basic.scope.declarative");
+    }
+    lookup_result visible = lookup_unqualified(name, lookup_filter::any);
+    if (visible.unknown || visible.ambiguous)
+        return not_supported(declaration, "basic.link");
+    if (visible.entity) {
+        const entity &x = entity_table[visible.entity];
+        bool has_linkage = (x.kind == entity_kind::function ||
+                            x.kind == entity_kind::variable) &&
+                           is_namespace(x.enclosing);
+        if (has_linkage && x.enclosing == space) {
+            /* found there, or through a block's declaration of it; not
+               through a using-declaration or using-directive */
+            if (entity_table.bound_by_using(visible.found_in, name) ||
+                (is_namespace(visible.found_in) && visible.found_in != space))
+                return not_supported(declaration, "basic.link");
+            analysis_result r;
+            if (!matches(visible.entity, r))
+                return r;
+            target = visible.entity;
+        } else if (!is_namespace(visible.found_in) ||
+                   visible.found_in == space) {
+            /* a local name that hides the namespace's, a using-declaration
+               in a block, or a name of the namespace that is no function
+               or variable: what the declaration then declares has no
+               rules yet */
+            return not_supported(declaration, "basic.link");
+        }
+        /* else: an entity of an outer namespace, which is ignored */
+    }
+    if (!target) {
+        /* the name is not visible: one a block declared before, or (a
+           name hidden by nothing) one of the namespace */
+        for (entity_index e : block_declared)
+            if (entity_table[e].enclosing == space &&
+                entity_table[e].name == name)
+                target = e;
+        entity_index member = entity_table.find(space, name);
+        if (!target && member)
+            /* hidden by an outer namespace's name found first? not so:
+               lookup would have found it */
+            return not_supported(declaration, "basic.link");
+        if (target) {
+            analysis_result r;
+            if (!matches(target, r))
+                return r;
+        }
+    }
+    if (!target) {
+        target = entity_table.make(kind, name, space);
+        entity &made = entity_table[target];
+        made.type = type;
+        made.linkage_of_name = linkage::external;
+        /* [basic.link]/4: within an unnamed namespace, internal */
+        if (within_unnamed_namespace(space))
+            made.linkage_of_name = linkage::internal;
+        /* [dcl.link]/5 */
+        made.c_language_linkage = c_language;
+        block_declared.append(target);
+    }
+    if (s.inline_)
+        return ill_formed_at_token(id,
+                                   "the inline specifier shall not appear on "
+                                   "a block scope declaration",
+                                   "dcl.inline");
+    entity_table.add_declaration(target, declaration);
+    entity_table.bind(block, name, target);
+    declared_entity = target;
+    declared_name d;
+    d.declaration = declaration;
+    d.outermost = current_declaration;
+    d.entity = target;
+    d.id = id;
+    d.kind = kind;
+    d.type = type;
     d.claimable = declarations_claimable;
     declared.append(d);
     return analysis_result::well_formed;
+}
+
+void semantic_analysis::no_claims_after_hiding(uint32_t name)
+{
+    lookup_result outer = lookup_unqualified(name, lookup_filter::any);
+    if (!outer.entity && !outer.unknown && !outer.ambiguous)
+        return;
+    /* the expressions of the declaration (in a block: of the statement)
+       analysed so far */
+    for (size_t i = expressions.size(); i-- > 0;) {
+        analysed_expression &x = expressions[i];
+        if (x.declaration != current_declaration || x.place != claim_place)
+            break;
+        x.placeable = false;
+    }
 }
 
 /*
@@ -390,6 +804,10 @@ analysis_result semantic_analysis::declare_local(
     uint32_t name = tokens.identifier(id);
     entity_index scope = current_scope;
     entity_index prior = entity_table.find(scope, name);
+    /* the class or enumeration of the block the name hides (declare) */
+    entity_index hides = declaration_hides;
+    if (hides)
+        prior = 0;
     if (prior) {
         const entity &e = entity_table[prior];
         if (e.kind == entity_kind::none)
@@ -457,7 +875,9 @@ analysis_result semantic_analysis::declare_local(
                                        "of the controlled statement",
                                        "basic.scope.block");
     }
+    no_claims_after_hiding(name);
     entity_index e = entity_table.make(kind, name, scope);
+    entity_table[e].hidden_type = hides;
     entity_table[e].type = type;
     entity_table[e].linkage_of_name = linkage::none;
     entity_table[e].defined = kind == entity_kind::variable;
@@ -478,32 +898,6 @@ analysis_result semantic_analysis::declare_local(
     d.claimable = declarations_claimable;
     declared.append(d);
     return analysis_result::well_formed;
-}
-
-/* [basic.lookup.unqual]/1: "the scopes are searched for a declaration in
-   the order listed in each of the respective categories; name lookup ends
-   as soon as a declaration is found for the name" (labels are not
-   entities: [basic.funscope]) */
-entity_index semantic_analysis::lookup(uint32_t name) const
-{
-    /* [basic.scope.class]: in a member-specification, the names its
-       members declared before */
-    entity_index first = current_scope;
-    if (!first && defining_class)
-        first = defining_class;
-    for (entity_index s = first;; s = entity_table[s].enclosing) {
-        entity_index e = entity_table.find(s, name);
-        if (!e && s && entity_table[s].kind == entity_kind::class_type) {
-            /* [class.member.lookup]: a class scope's lookup includes its
-               bases'; an ambiguous one finds nothing analysis uses */
-            bool ambiguous = false;
-            e = class_member_lookup(s, name, ambiguous);
-            if (ambiguous)
-                return 0;
-        }
-        if (e || !s)
-            return e;
-    }
 }
 
 entity_index semantic_analysis::open_scope(entity_index conflicts,
