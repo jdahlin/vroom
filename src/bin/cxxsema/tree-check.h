@@ -56,7 +56,7 @@ struct tree_checker {
         return is_expression(k) || k == semantic_kind::zero ||
                k == semantic_kind::initializer_list ||
                k == semantic_kind::bind_reference ||
-               k == semantic_kind::construct;
+               k == semantic_kind::construct || k == semantic_kind::destroy;
     }
     static bool is_statement(semantic_kind k)
     {
@@ -157,6 +157,10 @@ struct tree_checker {
                 analysis.semantics[node.a].category == value_category::prvalue)
                 problem(n, "the operand of an lvalue-to-rvalue conversion is "
                            "a prvalue");
+            if (node.op ==
+                    static_cast<uint8_t>(conversion_kind::derived_to_base) &&
+                (!node.b || !analysis.entity_table[node.b].base_subobject))
+                problem(n, "no base subobject");
             /* the conversions of a glvalue, and the discarding of any
                value ([expr.static.cast]/6) */
             if (node.op !=
@@ -241,6 +245,12 @@ struct tree_checker {
                 problem(n, "no constructor");
             list(n, tree_sort::initializer, "argument");
             break;
+        case semantic_kind::destroy:
+            child(n, node.a, tree_sort::expression, false, "object");
+            if (!node.b || analysis.entity_table[node.b].special !=
+                               special_member::destructor)
+                problem(n, "no destructor");
+            break;
         case semantic_kind::block:
         case semantic_kind::declarations:
             list(n, tree_sort::statement, "statement");
@@ -308,6 +318,8 @@ struct tree_checker {
                 walk(node.a);
             child(n, node.b, tree_sort::statement, true,
                   "member initializations");
+            child(n, node.c, tree_sort::statement, true,
+                  "subobject destructions");
             break;
         }
     }

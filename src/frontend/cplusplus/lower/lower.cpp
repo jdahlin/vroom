@@ -82,9 +82,16 @@ class c_lowering
     owned_array<uint32_t> complete_symbols;
     /* [stmt.dcl]/2: the automatic objects with a destructor that are in
        scope where the lowering is, in the order they were constructed,
-       with the statements a break or continue leaves */
+       with the statements a break or continue leaves; in a destructor,
+       first the destruction of its class's members and bases
+       ([class.dtor]/13), the semantic block in symbol */
     struct scope_record {
-        enum kind_t : uint8_t { object, loop, switch_ } kind = object;
+        enum kind_t : uint8_t {
+            object,
+            loop,
+            switch_,
+            subobjects
+        } kind = object;
         uint32_t symbol = 0;
         ast_qualified_type type = 0;
         entity_index destructor = 0;
@@ -366,18 +373,42 @@ ast_qualified_type c_lowering::class_type(entity_index e, token_index at)
     owned_array<const char *> names;
     owned_array<size_t> lengths;
     owned_array<uint32_t> aligned;
+    owned_buffer base_names;
     for (uint32_t i = 0; i < x.member_count; i++) {
         entity_index member = analysis.class_members[x.first_member + i];
         const entity &m = analysis.entity_table[member];
         fields.append(type(m.type, at));
-        size_t length = 0;
-        names.append(tokens.pp.identifier_spelling(m.name - 1, &length));
-        lengths.append(length);
+        if (m.base_subobject) {
+            /* a base class subobject: a field no C name can refer to */
+            vbuffer_format_append(base_names.get(), "__base%u", i);
+            vbuffer_append(base_names.get(), "", 1);
+            names.append(nullptr);
+            lengths.append(0);
+        } else {
+            size_t length = 0;
+            names.append(tokens.pp.identifier_spelling(m.name - 1, &length));
+            lengths.append(length);
+        }
         aligned.append(m.alignment);
+    }
+    for (size_t i = 0, at_name = 0; i < names.size(); i++) {
+        if (names[i])
+            continue;
+        names[i] = base_names.data() + at_name;
+        lengths[i] = strlen(names[i]);
+        at_name += lengths[i] + 1;
+    }
+    if (!x.member_count) {
+        /* [intro.object]/8: an empty class is one byte, a C struct without
+           members none: a char of padding */
+        fields.append(ast_builder_type_basic(AST_TYPE_CHAR));
+        names.append("__empty");
+        lengths.append(7);
+        aligned.append(0);
     }
     ast_builder_type_record_complete(c, made, fields.data(), names.data(),
                                      lengths.data(), aligned.data(),
-                                     x.member_count);
+                                     static_cast<uint32_t>(fields.size()));
     for (uint32_t i = 0; i < x.member_count; i++) {
         entity_index member = analysis.class_members[x.first_member + i];
         if (ast_builder_type_record_offset(c, made, i) !=
@@ -572,6 +603,12 @@ void c_lowering::destroy(size_t mark, owned_array<uint32_t> &out,
     ast_qualified_type v = ast_builder_type_basic(AST_TYPE_VOID);
     for (size_t i = live.size(); i-- > mark;) {
         const scope_record &r = live[i];
+        if (r.kind == scope_record::subobjects) {
+            uint32_t destructions = statement(r.symbol);
+            if (destructions)
+                out.append(destructions);
+            continue;
+        }
         if (r.kind != scope_record::object)
             continue;
         uint32_t object = make(AST_NODE_VARIABLE, r.type, r.symbol, 0, 0, 0,
@@ -588,7 +625,8 @@ void c_lowering::destroy(size_t mark, owned_array<uint32_t> &out,
 bool c_lowering::leaving_objects() const
 {
     for (const scope_record &r : live)
-        if (r.kind == scope_record::object)
+        if (r.kind == scope_record::object ||
+            r.kind == scope_record::subobjects)
             return true;
     return false;
 }
@@ -609,8 +647,25 @@ size_t c_lowering::leaving(bool is_break) const
    t; }) */
 uint32_t c_lowering::construct(const semantic_node &n)
 {
-    if (n.a)
-        return fail("a constructor call on a subobject", n.at);
+    if (n.a) {
+        /* [class.base.init]: a base or member of *this, constructed in
+           place */
+        uint32_t object = expression(n.a);
+        if (!object)
+            return 0;
+        owned_array<uint32_t> arguments;
+        const uint32_t *items = analysis.semantics.items(n.first);
+        for (uint32_t i = 0; i < n.count; i++) {
+            uint32_t a = expression(items[i]);
+            if (!a)
+                return 0;
+            arguments.append(a);
+        }
+        return special_call(
+            n.b,
+            address_of(object, ast_builder_type_pointer(c, type_of(object))),
+            arguments.data(), n.count, n.at);
+    }
     if (!in_function)
         return fail("dynamic initialization of a variable", n.at);
     entity_index cls = record(n.type).entity;
@@ -865,6 +920,12 @@ uint32_t c_lowering::conversion(const semantic_node &n)
     case conversion_kind::pointer:
     case conversion_kind::qualification_cast:
     case conversion_kind::pointer_cast:
+        return cast(expression(n.a), t, AST_CAST_POINTER_TO_POINTER);
+    case conversion_kind::derived_to_base:
+        /* [conv.ptr]/3: a base at offset 0 (which analysis makes sure
+           of): the same address, a null pointer one too */
+        if (analysis.entity_table[n.b].offset)
+            return fail("a pointer to a base at a nonzero offset", n.at);
         return cast(expression(n.a), t, AST_CAST_POINTER_TO_POINTER);
     case conversion_kind::pointer_to_integral:
         return cast(expression(n.a), t, AST_CAST_POINTER_TO_INTEGER);
@@ -1261,6 +1322,15 @@ uint32_t c_lowering::expression(uint32_t index)
         return bind_reference(n);
     case semantic_kind::construct:
         return construct(n);
+    case semantic_kind::destroy: {
+        uint32_t object = expression(n.a);
+        if (!object)
+            return 0;
+        return special_call(
+            n.b,
+            address_of(object, ast_builder_type_pointer(c, type_of(object))),
+            nullptr, 0, n.at);
+    }
     default:
         return fail("an expression of this kind", n.at);
     }
@@ -1428,6 +1498,7 @@ bool c_lowering::address_constant(uint32_t n) const
         case conversion_kind::pointer:
         case conversion_kind::qualification_cast:
         case conversion_kind::pointer_cast:
+        case conversion_kind::derived_to_base:
             return address_constant(x.a);
         default:
             return false;
@@ -1750,7 +1821,7 @@ uint32_t c_lowering::statement(uint32_t index)
         }
         if (!leaving_objects())
             return ast_builder_node(c, AST_NODE_RETURN, v, value, 0, 0, 0, 0);
-        /* [stmt.return]/4: "The copy-initialization of the result of the
+        /* [stmt.return]/3: "The copy-initialization of the result of the
            call is sequenced before the destruction of temporaries at the
            end of the full-expression established by the operand of the
            return statement, which, in turn, is sequenced before the
@@ -1812,10 +1883,21 @@ bool c_lowering::function_definition(entity_index e)
         parameters.append(p);
     }
     live.clear();
+    if (body.c) {
+        scope_record r;
+        r.kind = scope_record::subobjects;
+        r.symbol = body.c;
+        live.append(r);
+    }
     uint32_t prefix = 0;
     if (body.b)
         prefix = statement(body.b);
     uint32_t block_node = scoped_block(node(body.a), prefix);
+    if (body.c) {
+        /* [class.dtor]/13: after the body, the members and bases */
+        uint32_t items[2] = {block_node, statement(body.c)};
+        block_node = block(items, 2);
+    }
     in_function = false;
     if (failure.what)
         return false;

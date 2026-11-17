@@ -616,9 +616,16 @@ analysis_result semantic_analysis::implicit_conversion(node_index at,
             converts = true;
         }
         if (!converts) {
-            /* a class's pointer to a base, a function pointer conversion:
-               not analysed yet */
             const struct type fp = type_table[pointee.unqualified()];
+            bool ambiguous = false;
+            if (fp.kind == type_kind::class_type &&
+                tp.kind == type_kind::class_type &&
+                entity_table[fp.entity].size &&
+                !(pointee.cv() & ~target_pointee.cv()) &&
+                base_step(fp.entity, tp.entity, ambiguous))
+                return pointer_to_base(tree[at].first_token, fp.entity,
+                                       tp.entity, to, m);
+            /* a function pointer conversion: not analysed yet */
             if (fp.kind == type_kind::class_type ||
                 fp.kind == type_kind::function ||
                 tp.kind == type_kind::class_type ||

@@ -278,6 +278,19 @@ struct entity {
        type ... at the closing } of the class-specifier") */
     uint32_t first_member = 0, member_count = 0;
     uint64_t size = 0;
+    /* a class: [abi:layout] its data size (dsize), the size without the
+       tail padding a derived class may reuse; its direct base classes
+       ([class.derived]/2), in the order of the base-specifier-list, are
+       semantic_analysis::class_bases[first_base .. first_base +
+       base_count) */
+    uint64_t data_size = 0;
+    uint32_t first_base = 0, base_count = 0;
+    /* a base class subobject ([intro.object]/2): an unnamed non-static
+       member of the derived class (enclosing) whose type is the base
+       class, with its offset and access ([class.access.base]/1); one that
+       is not empty is also among the class's non-static data members
+       (field) */
+    bool base_subobject = false;
     /* a class: its alignment; a non-static data member: the alignment
        its aligned attribute asks for, 0 if none ([ext:gnu_attributes]) */
     uint32_t alignment = 0;
@@ -544,6 +557,9 @@ enum class semantic_kind : uint8_t {
        constructor, its arguments (each initialized as its parameter) in
        list[first .. first + count) */
     construct,
+    /* [class.dtor]/13: a destructor called: a: the object (a glvalue), b:
+       the destructor */
+    destroy,
     /* ---- statements ---- */
     /* the statements in list[first .. first + count) */
     block,
@@ -589,7 +605,9 @@ enum class semantic_kind : uint8_t {
        a non-static member function's `this` first (an unnamed variable of
        pointer type, [class.this]/1); b: a constructor's member
        initializations ([class.base.init]), a block of expression
-       statements, run before a (0: none) */
+       statements, run before a (0: none); c: a destructor's destruction
+       of its members and bases ([class.dtor]/13), a block run after a
+       (0: none) */
     function_body,
 };
 
@@ -615,6 +633,10 @@ enum class conversion_kind : uint8_t {
                             /7, /8: the same address, another type */
     pointer_to_integral, /* [expr.reinterpret.cast]/4 */
     integral_to_pointer, /* [expr.reinterpret.cast]/5 */
+    /* [conv.ptr]/3: a pointer to a derived class to a pointer to its base
+       class subobject: b: the base subobject (entity::base_subobject); a
+       null pointer stays one */
+    derived_to_base,
 };
 
 enum class increment_kind : uint8_t {
@@ -718,9 +740,15 @@ class semantic_analysis
     owned_array<definition_record> definitions;
     /* the non-static data members of the classes (entity::first_member) */
     owned_array<entity_index> class_members;
+    /* the direct base class subobjects of the classes (entity::first_base) */
+    owned_array<entity_index> class_bases;
     /* whether a class is trivially copyable and has a trivial destructor:
        its objects are copied as their bytes, passed in registers */
     bool trivial_class(entity_index c) const;
+    bool copies_bytes(entity_index c) const;
+    /* whether destroying an object of class c runs code */
+    bool destroys(entity_index c) const;
+
     /* the syntax tree analysed */
     const syntax_tree &syntax() const
     {
@@ -1002,6 +1030,9 @@ class semantic_analysis
     analysis_result string_initialization(node_index at,
                                           const expression_meaning &string,
                                           qualified_type &type);
+    analysis_result class_reference_binding(node_index at,
+                                            expression_meaning &m,
+                                            qualified_type reference);
     analysis_result reference_binding(node_index at, expression_meaning &m,
                                       qualified_type reference);
     /* [dcl.init.list]/7: whether converting m to to narrows */
@@ -1036,7 +1067,45 @@ class semantic_analysis
                                            expression_meaning &m);
     /* [class.access]: whether a member with this access can be named
        here */
-    bool accessible(entity_index member) const;
+    bool accessible(entity_index member, entity_index object_class = 0) const;
+    /* [class.derived]: class c's base class subobject of class base,
+       found through c's bases (0 if base is no base of c); ambiguous
+       when more than one path leads to it ([class.member.lookup]) */
+    entity_index base_step(entity_index c, entity_index base,
+                           bool &ambiguous) const;
+    /* [class.member.lookup]: name looked up in class c and its bases;
+       ambiguous when found in more than one base */
+    entity_index class_member_lookup(entity_index c, uint32_t name,
+                                     bool &ambiguous) const;
+    /* the glvalue m of a class derived from base converted to its base
+       class subobject ([expr.ref]/6.2 through [class.derived]/1) */
+    analysis_result to_base(token_index at, entity_index base,
+                            expression_meaning &m);
+    /* the base-clause of class c ([class.derived]) */
+    analysis_result base_clause(entity_index c, node_index n,
+                                standard_keyword key);
+    analysis_result empty_base_conflict(entity_index c, node_index n);
+    bool derived_to_base_conversion(const expression_meaning &argument,
+                                    qualified_type parameter) const;
+    /* [conv.ptr]/3: the pointer m to class from as a pointer to its base
+       to, of type type */
+    analysis_result pointer_to_base(token_index at, entity_index from,
+                                    entity_index to, qualified_type type,
+                                    expression_meaning &m);
+    /* the subobject e (a base or a non-static data member) of *this */
+    analysis_result subobject(token_index at, entity_index e,
+                              expression_meaning &m);
+    /* the classes of the bases and members (arrays' elements) of c */
+    void subobject_classes(entity_index c,
+                           owned_array<entity_index> &out) const;
+    /* [class.default.ctor]/4, [class.dtor]/11: what an implicitly
+       defined constructor or destructor of c would do that analysis does
+       not; checked when c is complete */
+    analysis_result implicit_special_members(entity_index c, node_index n);
+    /* [class.dtor]/13: after the body of the destructor of class c, the
+       destructors of its members and bases, in the reverse order of
+       their construction */
+    uint32_t subobject_destructions(entity_index c, token_index at);
     /* [dcl.init.aggr]/1: whether the class is an aggregate */
     bool is_aggregate(entity_index c) const;
     /* the class whose member function is analysed now, 0 if none */

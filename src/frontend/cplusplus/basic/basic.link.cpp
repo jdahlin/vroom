@@ -439,6 +439,14 @@ entity_index semantic_analysis::lookup(uint32_t name) const
 {
     for (entity_index s = current_scope;; s = entity_table[s].enclosing) {
         entity_index e = entity_table.find(s, name);
+        if (!e && s && entity_table[s].kind == entity_kind::class_type) {
+            /* [class.member.lookup]: a class scope's lookup includes its
+               bases'; an ambiguous one finds nothing analysis uses */
+            bool ambiguous = false;
+            e = class_member_lookup(s, name, ambiguous);
+            if (ambiguous)
+                return 0;
+        }
         if (e || !s)
             return e;
     }

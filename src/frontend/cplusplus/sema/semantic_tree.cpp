@@ -48,6 +48,7 @@ const char *semantic_kind_name(semantic_kind kind)
         "initializer_list",
         "bind_reference",
         "construct",
+        "destroy",
         "block",
         "expression_statement",
         "declaration_statement",

@@ -288,14 +288,22 @@ analysis_result semantic_analysis::function_body(node_index definition,
        the function parameter scope */
     current_scope = parameters;
     uint32_t members = 0;
-    if (ctor_init.index())
+    /* [class.base.init]/9: a constructor without a ctor-initializer
+       default-initializes its bases and members as well */
+    if (ctor_init.index() ||
+        entity_table[f].special == special_member::constructor)
         result = worse(result, ctor_initializer(ctor_init, members));
     open_scope(parameters, false);
     uint32_t block = 0;
     result = worse(result, block_items(compound.index(), block));
+    uint32_t destructions = 0;
+    if (entity_table[f].special == special_member::destructor)
+        destructions = subobject_destructions(entity_table[f].enclosing,
+                                              first_token(compound));
     /* the function's semantic tree: its outermost block and parameters */
-    uint32_t body = statement_node(semantic_kind::function_body,
-                                   first_token(compound), block, members);
+    uint32_t body =
+        statement_node(semantic_kind::function_body, first_token(compound),
+                       block, members, destructions);
     if (!parameter_entities.empty()) {
         semantics[body].first =
             semantics.list(&parameter_entities[0], parameter_entities.size());

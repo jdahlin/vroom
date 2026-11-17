@@ -698,8 +698,29 @@ libstdc++ and json), since sema cannot analyse a declaration kept as tokens.
   cannot fold and that needs nothing of the running program (clang folds
   an out-of-range shift) is not lowered as dynamic initialization.
   LLVM import: `llvm-2003-05-14-array-init.cpp`.
-  Next: base classes, elaborated-type-specifiers in block and class
-  scope, static data members.
+  Then non-virtual base classes (`class/class.derived.cpp`): a base is an
+  unnamed member subobject (`entity::base_subobject`; a non-empty one is
+  also a field), laid out as [abi:layout] (empty bases at offset 0, a
+  non-POD base's tail padding reused: lowering then refuses the C
+  struct); member lookup through bases ([class.member.lookup], ambiguity
+  unsupported), [class.access.base] and [class.protected]; [conv.ptr]/3
+  and references to a base ([dcl.init.ref], now for classes generally:
+  copy constructors with `const T&` work), the derived-to-base Conversion
+  in overload resolution; [class.base.init] constructs bases and members
+  of class type (named or default), and a destructor destroys them after
+  its body ([class.dtor]/13, a `return` in it too).  Unsupported: virtual
+  bases, a pointer conversion to a base at a nonzero offset (the null
+  check), an implicitly-defined default constructor, destructor or copy
+  constructor that has to call a subobject's, arrays of such classes,
+  aggregates with an empty base.  An empty class is lowered with one char
+  of padding (Itanium passes an empty class like clang's C does not:
+  not checked across compilers yet).  `src/test/cxx/run/derived.cpp`,
+  LLVM's `llvm-2003-06-08-BaseType.cpp`; C5.1 unchanged at 1096.  The
+  rest of SingleSource/Regression/C++ needs [dcl.mptr], virtual
+  functions, [dcl.enum], [class.local], bit-fields, classes passed by
+  address, __cxa_atexit and exceptions.
+  Next: elaborated-type-specifiers in block and class scope, static data
+  members, the implicitly-defined special members.
 
 ### S5. Conversions by user code, lambdas, the rest of [expr]
 

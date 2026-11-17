@@ -431,6 +431,8 @@ analysis_result semantic_analysis::reference_binding(node_index at,
     qualified_type t1 = r.operand, t2 = m.type;
     const struct type x = type_table[t1.unqualified()];
     const struct type y = type_table[t2.unqualified()];
+    if (x.kind == type_kind::class_type && y.kind == type_kind::class_type)
+        return class_reference_binding(at, m, reference);
     if (x.kind == type_kind::class_type || x.kind == type_kind::enumeration ||
         y.kind == type_kind::class_type || y.kind == type_kind::enumeration ||
         x.kind == type_kind::none || y.kind == type_kind::none)
@@ -493,6 +495,71 @@ analysis_result semantic_analysis::reference_binding(node_index at,
     if (result != analysis_result::well_formed)
         return result;
     return implicit_conversion(at, m, t1, false);
+}
+
+/*
+ * [dcl.init.ref]/5 for a class: "(5.1) If the reference is an lvalue
+ * reference and the initializer expression (5.1.1) is an lvalue (but is
+ * not a bit-field), and "cv1 T1" is reference-compatible with "cv2 T2"
+ * ... then the reference binds to the initializer expression lvalue ...
+ * (5.3) Otherwise, if the initializer expression (5.3.1) is an rvalue (but
+ * not a bit-field) ... and "cv1 T1" is reference-compatible with "cv2
+ * T2" ... the reference is bound to the result of the conversion"; /5.2
+ * an lvalue reference to a non-const type binds to nothing else.  A
+ * reference to a base binds to the base class subobject ([conv.ptr]/3's
+ * pointer conversion makes T1 reference-compatible); the conversions by a
+ * conversion function or constructor (/5.1.2, /5.3.2, /5.4.1) are not
+ * analysed, nor a temporary with a destructor.
+ */
+analysis_result
+semantic_analysis::class_reference_binding(node_index at, expression_meaning &m,
+                                           qualified_type reference)
+{
+    const struct type r = type_table[reference.unqualified()];
+    bool rvalue_reference = r.kind == type_kind::rvalue_reference;
+    qualified_type t1 = r.operand, t2 = m.type;
+    entity_index c1 = type_table[t1.unqualified()].entity;
+    entity_index c2 = type_table[t2.unqualified()].entity;
+    if (entity_table[c1].kind != entity_kind::class_type ||
+        entity_table[c2].kind != entity_kind::class_type ||
+        !entity_table[c2].size)
+        return not_supported(at, "dcl.init.ref");
+    bool ambiguous = false;
+    bool related = c1 == c2 || base_step(c2, c1, ambiguous);
+    if (!related)
+        return not_supported(at, "dcl.init.ref");
+    if (t2.cv() & ~t1.cv()) {
+        if (!rvalue_reference && !(t1.cv() & cv_const))
+            return ill_formed(at,
+                              "an lvalue reference to a type that is not "
+                              "const-qualified or is volatile-qualified binds "
+                              "only to a reference-compatible lvalue",
+                              "dcl.init.ref");
+        return ill_formed(at,
+                          "cv1 shall be the same cv-qualification as, or "
+                          "greater cv-qualification than, cv2",
+                          "dcl.init.ref");
+    }
+    bool lvalue = m.category == value_category::lvalue;
+    if (!rvalue_reference && !lvalue &&
+        (!(t1.cv() & cv_const) || (t1.cv() & cv_volatile)))
+        return ill_formed(at,
+                          "an lvalue reference to a type that is not "
+                          "const-qualified or is volatile-qualified binds "
+                          "only to a reference-compatible lvalue",
+                          "dcl.init.ref");
+    if (rvalue_reference && lvalue)
+        return ill_formed(at,
+                          "if the reference is an rvalue reference, the "
+                          "initializer expression shall not be an lvalue",
+                          "dcl.init.ref");
+    if (!lvalue && destroys(c2))
+        /* [class.temporary]/6: the temporary bound lives as long as the
+           reference */
+        return not_supported(at, "class.temporary");
+    if (c1 == c2)
+        return analysis_result::well_formed;
+    return to_base(tree[at].first_token, c1, m);
 }
 
 /*
@@ -591,6 +658,20 @@ analysis_result semantic_analysis::initialize_with(node_index at,
             owned_array<expression_meaning> arguments;
             arguments.append(m);
             return construct(at, type, arguments, 0, result);
+        }
+        bool ambiguous = false;
+        if (!same &&
+            type_table[m.type.unqualified()].kind == type_kind::class_type &&
+            base_step(type_table[m.type.unqualified()].entity, target.entity,
+                      ambiguous)) {
+            /* the implicit copy constructor's const T& bound to the base
+               class subobject of the derived object */
+            if (!copies_bytes(target.entity))
+                return not_supported(at, "class.copy.ctor");
+            r = to_base(tree[at].first_token, target.entity, m);
+            if (r != analysis_result::well_formed)
+                return r;
+            same = true;
         }
         if (!same)
             return not_supported(at, "dcl.init");

@@ -18,6 +18,7 @@
  * and a name not found in the class is unknown, as before.
  */
 #include "../cplusplus-internal.h"
+#include "frontend/cplusplus/sema.h"
 
 namespace cplusplus
 {
@@ -153,6 +154,404 @@ node_index parser::class_or_decltype(scope_index *region)
     if (!qualifier)
         return 0;
     return finish_node(syntax_kind::class_or_decltype, mark, first);
+}
+
+/* ---- semantic analysis ---------------------------------------------- */
+
+namespace
+{
+
+uint64_t align_to(uint64_t n, uint64_t alignment)
+{
+    return (n + alignment - 1) / alignment * alignment;
+}
+
+} // namespace
+
+/*
+ * [abi:pod]: "POD for the purpose of layout": a class that is a POD in
+ * C++03's sense, whose tail padding a derived class does not reuse.
+ * C++03's POD class is an aggregate (no user-declared constructors, no
+ * private or protected non-static data members, no base classes, no
+ * virtual functions) without a user-declared destructor whose non-static
+ * data members are PODs.
+ */
+static bool pod_for_layout(const semantic_analysis &a, const types &table,
+                           entity_index c)
+{
+    const entity &x = a.entity_table[c];
+    if (x.first_constructor || x.destructor || x.base_count)
+        return false;
+    for (uint32_t i = 0; i < x.member_count; i++) {
+        const entity &m = a.entity_table[a.class_members[x.first_member + i]];
+        if (m.access)
+            return false;
+        qualified_type t = m.type;
+        while (table[t.unqualified()].kind == type_kind::array)
+            t = table[t.unqualified()].operand;
+        if (table[t.unqualified()].kind == type_kind::class_type &&
+            !pod_for_layout(a, table, table[t.unqualified()].entity))
+            return false;
+    }
+    return true;
+}
+
+/* whether class c has a subobject of class type `of` at offset 0: itself,
+   or one of its own at offset 0 ([abi:layout]'s empty base conflicts) */
+static bool at_offset_zero(const semantic_analysis &a, const types &table,
+                           entity_index c, entity_index of)
+{
+    if (c == of)
+        return true;
+    const entity &x = a.entity_table[c];
+    for (uint32_t i = 0; i < x.base_count; i++) {
+        const entity &b = a.entity_table[a.class_bases[x.first_base + i]];
+        if (!b.offset &&
+            at_offset_zero(a, table, table[b.type.unqualified()].entity, of))
+            return true;
+    }
+    for (uint32_t i = 0; i < x.member_count; i++) {
+        const entity &m = a.entity_table[a.class_members[x.first_member + i]];
+        qualified_type t = m.type;
+        while (table[t.unqualified()].kind == type_kind::array)
+            t = table[t.unqualified()].operand;
+        if (!m.offset && table[t.unqualified()].kind == type_kind::class_type &&
+            at_offset_zero(a, table, table[t.unqualified()].entity, of))
+            return true;
+    }
+    return false;
+}
+
+/*
+ * The base-clause of the class c being defined, defined with class-key
+ * key.  [class.derived]/2: "A class-or-decltype shall denote a (possibly
+ * cv-qualified) class type that is not an incompletely defined class
+ * ([class.mem]); any cv-qualifiers are ignored.  The class denoted by the
+ * class-or-decltype of a base-specifier is called a direct base class for
+ * the class being defined."  [class.mi]/3: "A class shall not be specified
+ * as a direct base class of a derived class more than once."
+ * [class.access.base]/2: "In the absence of an access-specifier for a base
+ * class, public is assumed when the derived class is defined with the
+ * class-key struct and private is assumed when the class is defined with
+ * the class-key class."
+ *
+ * [abi:layout] places each non-virtual base in declaration order: an
+ * empty one at offset 0 (if no other subobject of its type is there), any
+ * other at the data size so far rounded up to its alignment, taking its
+ * data size (dsize) unless it is POD for the purpose of layout
+ * ([abi:pod]), whose size it takes.  Virtual bases ([class.mi]/4) are not
+ * analysed.
+ */
+analysis_result semantic_analysis::base_clause(entity_index c, node_index n,
+                                               standard_keyword key)
+{
+    owned_array<syntax_child> specifiers;
+    for (uint32_t i = 1; i < tree[n].child_count; i++) {
+        syntax_child item = tree.children(n)[i];
+        if (syntax_is(tree, item, syntax_kind::base_specifier_list)) {
+            for (uint32_t k = 0; k < tree[item.index()].child_count; k++) {
+                syntax_child one = tree.children(item.index())[k];
+                if (!syntax_is_punctuator(tokens, one,
+                                          preprocessing_op_or_punc::COMMA))
+                    specifiers.append(one);
+            }
+        } else {
+            specifiers.append(item);
+        }
+    }
+    entity_table[c].first_base = static_cast<uint32_t>(class_bases.size());
+    entity_table[c].base_count = 0;
+    for (syntax_child specifier : specifiers) {
+        uint8_t access = 0;
+        if (key == standard_keyword::class_)
+            access = 2;
+        syntax_child name = specifier;
+        if (syntax_is(tree, specifier, syntax_kind::base_specifier)) {
+            const syntax_node &b = tree[specifier.index()];
+            const syntax_child *parts = tree.children(specifier.index());
+            name = parts[b.child_count - 1];
+            for (uint32_t k = 0; k + 1 < b.child_count; k++) {
+                if (!parts[k].is_token())
+                    /* an attribute-specifier-seq */
+                    return not_supported(specifier.index(), "class.derived");
+                switch (p.keyword_of(tokens[parts[k].index()])) {
+                case standard_keyword::public_:
+                    access = 0;
+                    break;
+                case standard_keyword::protected_:
+                    access = 1;
+                    break;
+                case standard_keyword::private_:
+                    access = 2;
+                    break;
+                case standard_keyword::virtual_:
+                    return not_supported(specifier.index(), "class.mi");
+                default:
+                    return not_supported(specifier.index(), "class.derived");
+                }
+            }
+        }
+        if (!name.is_token() ||
+            tokens[name.index()].kind != token_kind::identifier)
+            /* a nested-name-specifier, a simple-template-id, decltype */
+            return not_supported(n, "class.derived");
+        token_index id = name.index();
+        entity_index base = lookup(tokens.identifier(id));
+        if (!base || entity_table[base].kind != entity_kind::class_type)
+            /* a typedef-name, or a class whose definition was not
+               analysed */
+            return not_supported(n, "class.derived");
+        const entity &bx = entity_table[base];
+        if (!bx.size)
+            return ill_formed_at_token(id,
+                                       "the class-or-decltype shall denote a "
+                                       "class type that is not an "
+                                       "incompletely defined class",
+                                       "class.derived");
+        for (uint32_t k = 0; k < entity_table[c].base_count; k++)
+            if (entity_table[class_bases[entity_table[c].first_base + k]]
+                    .type.unqualified() == bx.type.unqualified())
+                return ill_formed_at_token(id,
+                                           "a class shall not be specified as "
+                                           "a direct base class of a derived "
+                                           "class more than once",
+                                           "class.mi");
+        entity_index e = entity_table.make(entity_kind::variable, 0, c);
+        entity_table[e].type = entity_table[base].type;
+        entity_table[e].nonstatic_member = true;
+        entity_table[e].base_subobject = true;
+        entity_table[e].defined = true;
+        entity_table[e].access = access;
+        entity_table.add_declaration(e, current_declaration);
+        uint32_t alignment = entity_table[base].alignment;
+        if (alignment > layout_alignment)
+            layout_alignment = alignment;
+        if (!entity_table[base].member_count) {
+            /* [class.derived]/4 (Note): "A base class subobject may be of
+               zero size"; [abi:layout]: an empty base at offset 0, unless
+               a subobject of its type is already there */
+            for (uint32_t k = 0; k < entity_table[c].base_count; k++)
+                if (at_offset_zero(
+                        *this, type_table,
+                        type_table
+                            [entity_table
+                                 [class_bases[entity_table[c].first_base + k]]
+                                     .type.unqualified()]
+                                .entity,
+                        base))
+                    return not_supported(n, "class.derived");
+            entity_table[e].field = UINT32_MAX;
+            entity_table[e].offset = 0;
+        } else {
+            entity_table[e].field = entity_table[c].member_count;
+            entity_table[e].offset = align_to(layout_size, alignment);
+            uint64_t taken = entity_table[base].data_size;
+            if (pod_for_layout(*this, type_table, base))
+                taken = entity_table[base].size;
+            layout_size = entity_table[e].offset + taken;
+            class_members.append(e);
+            entity_table[c].member_count++;
+        }
+        class_bases.append(e);
+        entity_table[c].base_count++;
+    }
+    return analysis_result::well_formed;
+}
+
+/* [abi:layout]: a data member of class type placed at offset 0 where an
+   empty base of its type (or one it has at offset 0) is: not analysed */
+analysis_result semantic_analysis::empty_base_conflict(entity_index c,
+                                                       node_index n)
+{
+    const entity &x = entity_table[c];
+    if (!x.member_count)
+        return analysis_result::well_formed;
+    const entity &first = entity_table[class_members[x.first_member]];
+    if (first.base_subobject || first.offset)
+        return analysis_result::well_formed;
+    qualified_type t = first.type;
+    while (type_table[t.unqualified()].kind == type_kind::array)
+        t = type_table[t.unqualified()].operand;
+    if (type_table[t.unqualified()].kind != type_kind::class_type)
+        return analysis_result::well_formed;
+    for (uint32_t i = 0; i < x.base_count; i++) {
+        const entity &b = entity_table[class_bases[x.first_base + i]];
+        if (b.field == UINT32_MAX &&
+            at_offset_zero(*this, type_table,
+                           type_table[t.unqualified()].entity,
+                           type_table[b.type.unqualified()].entity))
+            return not_supported(n, "class.derived");
+    }
+    return analysis_result::well_formed;
+}
+
+/*
+ * [class.derived]/2: "A class B is a base class of a class D if it is a
+ * direct base class of D or a direct base class of one of D's base
+ * classes."  The direct base subobject of c through which base is
+ * reached; ambiguous ([class.member.lookup]/6, [conv.ptr]/3) when two of
+ * them lead to it.
+ */
+entity_index semantic_analysis::base_step(entity_index c, entity_index base,
+                                          bool &ambiguous) const
+{
+    const entity &x = entity_table[c];
+    entity_index found = 0;
+    for (uint32_t i = 0; i < x.base_count; i++) {
+        entity_index b = class_bases[x.first_base + i];
+        entity_index of = type_table[entity_table[b].type.unqualified()].entity;
+        bool inner = false;
+        if (of == base || base_step(of, base, inner)) {
+            if (found || inner)
+                ambiguous = true;
+            found = b;
+        }
+    }
+    return found;
+}
+
+/*
+ * [class.member.lookup]/1-/6: "The lookup set for N in C ... If C contains
+ * a declaration of the name N, ... the result is S(N,C).  Otherwise ...
+ * S(N,C) is calculated as follows: ... merge each such lookup set S(N,Bi)
+ * in turn into S(N,C)"; /6: "if the declaration sets differ, the merge is
+ * ambiguous".  A name declared in two bases is ambiguous here even when
+ * it is the same static member ([class.member.lookup]/6.2 allows that).
+ */
+entity_index semantic_analysis::class_member_lookup(entity_index c,
+                                                    uint32_t name,
+                                                    bool &ambiguous) const
+{
+    entity_index e = entity_table.find(c, name);
+    if (e)
+        return e;
+    const entity &x = entity_table[c];
+    entity_index found = 0;
+    for (uint32_t i = 0; i < x.base_count; i++) {
+        entity_index of = type_table[entity_table[class_bases[x.first_base + i]]
+                                         .type.unqualified()]
+                              .entity;
+        entity_index one = class_member_lookup(of, name, ambiguous);
+        if (one && found && one != found)
+            ambiguous = true;
+        if (one)
+            found = one;
+    }
+    return found;
+}
+
+/*
+ * The glvalue m, of a class derived from base, as its base class
+ * subobject: [expr.ref]/6.2 for each base on the way (a base subobject is
+ * a member subobject, [intro.object]/2), the value category kept.
+ * [class.access.base]/4: the base is accessible where an invented public
+ * member of it would be: through a public base anywhere, through a
+ * private or protected one in the derived class's own members (friends
+ * and further derived classes are not analysed).
+ */
+analysis_result semantic_analysis::to_base(token_index at, entity_index base,
+                                           expression_meaning &m)
+{
+    for (;;) {
+        entity_index c = type_table[m.type.unqualified()].entity;
+        if (c == base)
+            return analysis_result::well_formed;
+        bool ambiguous = false;
+        entity_index step = base_step(c, base, ambiguous);
+        if (!step)
+            return not_supported(current_declaration, "class.derived");
+        if (ambiguous)
+            return not_supported(current_declaration, "class.member.lookup");
+        if (entity_table[step].access && current_class() != c) {
+            if (current_class())
+                return not_supported(current_declaration, "class.access.base");
+            return ill_formed_at_token(at,
+                                       "a base class is accessible only if "
+                                       "an invented public member of it is",
+                                       "class.access.base");
+        }
+        expression_meaning result;
+        result.type = qualified_type::make(
+            entity_table[step].type.unqualified(), m.type.cv());
+        /* [expr.ref]/6.2: "If E1 is an lvalue, then E1.E2 is an lvalue;
+           otherwise E1.E2 is an xvalue" */
+        result.category = value_category::xvalue;
+        if (m.category == value_category::lvalue)
+            result.category = value_category::lvalue;
+        result.evaluation = m.evaluation;
+        if (result.evaluation == constness::constant)
+            result.evaluation = constness::unknown;
+        if (entity_table[step].field != UINT32_MAX) {
+            result.node = expression_node(semantic_kind::member, result, at,
+                                          m.node, step);
+        } else if (m.category != value_category::lvalue) {
+            return not_supported(current_declaration, "class.temporary");
+        } else {
+            /* an empty base, at the object's address: *(B *)&object */
+            expression_meaning address;
+            address.type =
+                qualified_type::make(type_table.pointer_to(m.type), cv_none);
+            address.category = value_category::prvalue;
+            address.evaluation = constness::not_constant;
+            address.node =
+                expression_node(semantic_kind::address, address, at, m.node);
+            address.type = qualified_type::make(
+                type_table.pointer_to(result.type), cv_none);
+            converted(address, conversion_kind::derived_to_base);
+            semantics[address.node].b = step;
+            result.node = expression_node(semantic_kind::indirection, result,
+                                          at, address.node);
+        }
+        m = result;
+    }
+}
+
+/*
+ * [conv.ptr]/3: "A prvalue of type "pointer to cv D", where D is a complete
+ * class type, can be converted to a prvalue of type "pointer to cv B",
+ * where B is a base class of D.  If B is an inaccessible or ambiguous base
+ * class of D, a program that necessitates this conversion is ill-formed.
+ * The result of the conversion is a pointer to the base class subobject
+ * of the derived class object.  The null pointer value is converted to the
+ * null pointer value of the destination type."  m, a pointer to class
+ * `from`, to a pointer to its base `to` (to's cv-qualified type in type):
+ * a base at offset 0 only, whose address is the object's.
+ */
+analysis_result semantic_analysis::pointer_to_base(token_index at,
+                                                   entity_index from,
+                                                   entity_index to,
+                                                   qualified_type type,
+                                                   expression_meaning &m)
+{
+    uint64_t offset = 0;
+    entity_index first = 0;
+    for (entity_index c = from; c != to;) {
+        bool ambiguous = false;
+        entity_index step = base_step(c, to, ambiguous);
+        if (ambiguous)
+            return not_supported(current_declaration, "class.member.lookup");
+        if (entity_table[step].access && current_class() != c) {
+            if (current_class())
+                return not_supported(current_declaration, "class.access.base");
+            return ill_formed_at_token(at,
+                                       "if B is an inaccessible base class of "
+                                       "D, a program that necessitates this "
+                                       "conversion is ill-formed",
+                                       "conv.ptr");
+        }
+        if (!first)
+            first = step;
+        offset += entity_table[step].offset;
+        c = type_table[entity_table[step].type.unqualified()].entity;
+    }
+    if (offset)
+        /* the null pointer check before the offset added */
+        return not_supported(current_declaration, "conv.ptr");
+    m.type = type;
+    converted(m, conversion_kind::derived_to_base);
+    if (m.node)
+        semantics[m.node].b = first;
+    return analysis_result::well_formed;
 }
 
 } // namespace cplusplus

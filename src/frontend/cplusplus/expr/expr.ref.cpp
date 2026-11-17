@@ -8,8 +8,9 @@
  *         postfix-expression -> template_opt id-expression
  *
  * The grammar is expr.post.cpp's.  An id-expression that is an identifier,
- * naming a non-static data member or member function of the class (there
- * are no base classes, static data members or overload sets yet).
+ * naming a non-static data member or member function of the class or of
+ * one of its bases (there are no static data members or overload sets
+ * yet).
  */
 #include "../cplusplus-internal.h"
 #include "frontend/cplusplus/sema.h"
@@ -62,7 +63,8 @@ analysis_result semantic_analysis::this_pointer(token_index t,
 analysis_result semantic_analysis::member_access(token_index at, entity_index e,
                                                  expression_meaning &m)
 {
-    if (!accessible(e))
+    entity_index object_class = type_table[m.type.unqualified()].entity;
+    if (!accessible(e, object_class))
         /* [class.access]/1.1: "private; that is, its name can be used only
            by members and friends of the class in which it is declared" */
         return ill_formed_at_token(at,
@@ -71,6 +73,13 @@ analysis_result semantic_analysis::member_access(token_index at, entity_index e,
                                    "the class in which it is declared",
                                    "class.access");
     const entity &x = entity_table[e];
+    if (x.nonstatic_member && x.enclosing != object_class) {
+        /* [class.derived]/1: a member of a base class, of the base class
+           subobject */
+        analysis_result r = to_base(at, x.enclosing, m);
+        if (r != analysis_result::well_formed)
+            return r;
+    }
     if (x.kind == entity_kind::variable && x.nonstatic_member) {
         /* [expr.ref]/6.2: "If E2 is a non-static data member and the type
            of E1 is "cq1 vq1 X", and the type of E2 is "cq2 vq2 T", the
@@ -153,8 +162,10 @@ analysis_result semantic_analysis::implicit_member_access(token_index at,
                                                           entity_index e,
                                                           expression_meaning &m)
 {
+    bool ambiguous = false;
     if (!function_state.this_entity ||
-        entity_table[e].enclosing != current_class())
+        (entity_table[e].enclosing != current_class() &&
+         !base_step(current_class(), entity_table[e].enclosing, ambiguous)))
         /* in a static member function, or unevaluated ([expr.prim.id]/2) */
         return not_supported(current_declaration, "expr.prim.id");
     expression_meaning object;
@@ -242,7 +253,10 @@ analysis_result semantic_analysis::member_reference(node_index n,
                           "member access appears in the definition of that "
                           "class",
                           "expr.ref");
-    entity_index e = entity_table.find(c, tokens.identifier(name));
+    bool ambiguous = false;
+    entity_index e = class_member_lookup(c, tokens.identifier(name), ambiguous);
+    if (ambiguous)
+        return not_supported(n, "class.member.lookup");
     if (e && entity_table[e].kind == entity_kind::none)
         return not_supported(n, "over");
     if (!e)

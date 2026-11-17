@@ -95,8 +95,11 @@ analysis_result semantic_analysis::class_definition(node_index n,
          tokens[head_children[1].index()].kind != token_kind::identifier))
         /* a class-head-name with a nested-name-specifier, attributes */
         return not_supported(n, "class.pre");
-    if (h.child_count > 2)
-        /* a base-clause or a class-virt-specifier */
+    bool has_bases =
+        h.child_count == 3 && !unnamed &&
+        syntax_is(tree, head_children[2], syntax_kind::base_clause);
+    if (h.child_count > 2 && !has_bases)
+        /* a class-virt-specifier, a base-clause of an unnamed class */
         return not_supported(n, "class.derived");
     standard_keyword key = p.keyword_of(tokens[head_children[0].index()]);
     if (key == standard_keyword::union_)
@@ -162,7 +165,17 @@ analysis_result semantic_analysis::class_definition(node_index n,
     defining_class = c;
     layout_size = 0;
     layout_alignment = 1;
+    entity_table[c].first_base = static_cast<uint32_t>(class_bases.size());
+    entity_table[c].base_count = 0;
     analysis_result result = analysis_result::well_formed;
+    if (has_bases)
+        result = base_clause(c, head_children[2].index(), key);
+    if (result != analysis_result::well_formed) {
+        defining_class = 0;
+        entity_table[c].kind = entity_kind::none;
+        entity_table[c].size = 0;
+        return result;
+    }
     owned_array<node_index> bodies;
     for (uint32_t i = 1; i < node.child_count; i++) {
         syntax_child part = children[i];
@@ -199,12 +212,17 @@ analysis_result semantic_analysis::class_definition(node_index n,
     /* [class.mem]/7: complete at the closing } */
     entity &x = entity_table[c];
     x.alignment = layout_alignment;
+    x.data_size = layout_size;
     x.size = align_up(layout_size, layout_alignment);
     /* [intro.object]/8: "Unless it is a bit-field, an object with nonzero
        size shall occupy one or more bytes of storage": an empty class is
        one byte ([abi:layout]: dsize, size 1) */
     if (!x.size)
         x.size = 1;
+    if (result == analysis_result::well_formed)
+        result = empty_base_conflict(c, n);
+    if (result == analysis_result::well_formed)
+        result = implicit_special_members(c, n);
     if (result != analysis_result::well_formed) {
         /* nothing is concluded about the class: its name finds nothing
            later declarations can use, and a type that names it (a typedef
@@ -277,13 +295,19 @@ analysis_result semantic_analysis::elaborated_type_specifier(node_index n,
  * private or protected direct non-static data members ([class.access]),
  * (1.3) no virtual functions ([class.virtual]), and (1.4) no virtual,
  * private, or protected base classes ([class.mi])."  The classes analysis
- * has have no constructor, virtual function or base class.
+ * has have no virtual function or virtual base.  [dcl.init.aggr]/2: "The
+ * elements of an aggregate are: ... for a class, the direct base classes
+ * in declaration order, followed by the direct non-static data members";
+ * an empty base, which is no field, is not analysed as one.
  */
 bool semantic_analysis::is_aggregate(entity_index c) const
 {
     const entity &x = entity_table[c];
     if (x.first_constructor)
         return false;
+    for (uint32_t i = 0; i < x.base_count; i++)
+        if (entity_table[class_bases[x.first_base + i]].field == UINT32_MAX)
+            return false;
     for (uint32_t i = 0; i < x.member_count; i++)
         if (entity_table[class_members[x.first_member + i]].access)
             return false;
@@ -308,14 +332,29 @@ entity_index semantic_analysis::current_class() const
  * members and friends of the class in which it is declared, by classes
  * derived from that class, and by their friends (see [class.protected]).
  * (1.3) public; that is, its name can be used anywhere without access
- * restriction."  There are no friends or derived classes yet.
+ * restriction."  [class.protected]/1: a protected non-static member named
+ * in a member of a derived class D is accessed "through a pointer to,
+ * reference to, or object of the class D itself (or any class derived
+ * from D)": object_class, the class of the object expression (0: *this).
+ * There are no friends yet.
  */
-bool semantic_analysis::accessible(entity_index member) const
+bool semantic_analysis::accessible(entity_index member,
+                                   entity_index object_class) const
 {
     const entity &x = entity_table[member];
     if (!x.access)
         return true;
-    return current_class() == x.enclosing;
+    entity_index here = current_class();
+    if (here == x.enclosing)
+        return true;
+    if (x.access != 1 || !here)
+        return false;
+    bool ambiguous = false;
+    if (!base_step(here, x.enclosing, ambiguous))
+        return false;
+    if (!object_class || !x.nonstatic_member || object_class == here)
+        return true;
+    return base_step(object_class, here, ambiguous) != 0;
 }
 
 /* ---- [class.mem] -------------------------------------------------------- */
@@ -528,14 +567,6 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
         uint64_t size = size_of_type(type);
         bool is_void = record.kind == type_kind::fundamental &&
                        record.fundamental == fundamental_type::void_;
-        if (record.kind == type_kind::class_type &&
-            entity_table[record.entity].kind == entity_kind::class_type &&
-            (entity_table[record.entity].first_constructor ||
-             !trivial_class(record.entity)))
-            /* a member constructed or destroyed by its class's own
-               constructor or destructor: the implicitly-defined ones of
-               [class.default.ctor]/4 and [class.dtor]/11 */
-            return not_supported(declaration, "class.ctor");
         if (record.kind == type_kind::class_type && !size)
             /* [class.mem]/15: "The type of a non-static data member shall
                not be an incomplete type" */

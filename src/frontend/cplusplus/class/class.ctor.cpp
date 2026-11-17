@@ -26,8 +26,8 @@
  * immediately-enclosing entity".
  *
  * What analysis has: user-declared constructors and a destructor of a class
- * without bases, whose members are scalars, pointers and classes with
- * neither; no explicit, defaulted, deleted, constexpr or virtual ones, no
+ * whose non-virtual bases and members they construct and destroy
+ * ([class.base.init], [class.dtor]/13); no explicit, defaulted, deleted, constexpr or virtual ones, no
  * default arguments, no delegating constructor.
  */
 #include "../cplusplus-internal.h"
@@ -75,9 +75,14 @@ bool semantic_analysis::declares_special_member(entity_index c,
  */
 bool semantic_analysis::trivial_class(entity_index c) const
 {
+    return copies_bytes(c) && !destroys(c);
+}
+
+/* whether the copy constructor of class c is the implicit one and
+   trivial: no subobject's class declares one either */
+bool semantic_analysis::copies_bytes(entity_index c) const
+{
     const entity &x = entity_table[c];
-    if (x.destructor)
-        return false;
     for (entity_index k = x.first_constructor; k;
          k = entity_table[k].next_constructor) {
         const struct type &f = type_table[entity_table[k].type.unqualified()];
@@ -92,14 +97,11 @@ bool semantic_analysis::trivial_class(entity_index c) const
             p.operand.unqualified() == x.type.unqualified())
             return false;
     }
-    for (uint32_t i = 0; i < x.member_count; i++) {
-        qualified_type t = entity_table[class_members[x.first_member + i]].type;
-        while (type_table[t.unqualified()].kind == type_kind::array)
-            t = type_table[t.unqualified()].operand;
-        const struct type &r = type_table[t.unqualified()];
-        if (r.kind == type_kind::class_type && !trivial_class(r.entity))
+    owned_array<entity_index> classes;
+    subobject_classes(c, classes);
+    for (entity_index k : classes)
+        if (!copies_bytes(k))
             return false;
-    }
     return true;
 }
 
@@ -283,6 +285,37 @@ int conversion_rank(const types &table, const expression_meaning &argument,
 
 } // namespace
 
+/* whether an argument of a derived class (or a pointer to one) converts
+   to parameter, a reference to (or a pointer to) a base of it
+   ([dcl.init.ref]/5, [conv.ptr]/3) */
+bool semantic_analysis::derived_to_base_conversion(
+    const expression_meaning &argument, qualified_type parameter) const
+{
+    const struct type &p = type_table[parameter.unqualified()];
+    qualified_type from = argument.type;
+    qualified_type to = p.operand;
+    if (p.kind == type_kind::pointer) {
+        if (type_table[from.unqualified()].kind != type_kind::pointer)
+            return false;
+        from = type_table[from.unqualified()].operand;
+    } else if (p.kind == type_kind::lvalue_reference) {
+        if (!(to.cv() & cv_const) &&
+            argument.category != value_category::lvalue)
+            return false;
+    } else if (p.kind != type_kind::rvalue_reference) {
+        return false;
+    }
+    if (from.cv() & ~to.cv())
+        return false;
+    const struct type &a = type_table[from.unqualified()];
+    const struct type &b = type_table[to.unqualified()];
+    if (a.kind != type_kind::class_type || b.kind != type_kind::class_type ||
+        entity_table[a.entity].kind != entity_kind::class_type)
+        return false;
+    bool ambiguous = false;
+    return base_step(a.entity, b.entity, ambiguous) != 0;
+}
+
 /*
  * [dcl.init]/17.6.2: "Otherwise, if the initialization is
  * direct-initialization, or if it is copy-initialization where the
@@ -322,6 +355,11 @@ semantic_analysis::construct(node_index at, qualified_type type,
         size_t first = ranks.size();
         for (size_t i = 0; i < arguments.size() && ok; i++) {
             int rank = conversion_rank(type_table, arguments[i], p[i]);
+            if (rank < 0 && derived_to_base_conversion(arguments[i], p[i]))
+                /* [over.best.ics]/6: "the conversion of a derived class
+                   to a base class ... is a derived-to-base Conversion";
+                   [over.ics.rank]/3.2: of Conversion rank */
+                rank = 1;
             if (rank < 0)
                 ok = false;
             ranks.append(rank);
@@ -355,6 +393,10 @@ semantic_analysis::construct(node_index at, qualified_type type,
     if (implicit_copy) {
         if (!viable.empty())
             return not_supported(at, "over.match.best");
+        if (!copies_bytes(c))
+            /* [class.copy.ctor]/14: the implicitly-defined copy
+               constructor copies each base and member by its own */
+            return not_supported(at, "class.copy.ctor");
         result.evaluation = constness::unknown;
         result.value = 0;
         analysis_result r = operand_value(at, arguments[0]);
@@ -458,8 +500,10 @@ analysis_result semantic_analysis::ctor_initializer(syntax_child list,
                                                     uint32_t &built)
 {
     entity_index c = current_class();
+    token_index at = tree[current_declaration].first_token;
     owned_array<syntax_child> items;
-    for (uint32_t i = 0; i < tree[list.index()].child_count; i++) {
+    for (uint32_t i = 0; list.index() && i < tree[list.index()].child_count;
+         i++) {
         syntax_child item = tree.children(list.index())[i];
         if (syntax_is(tree, item, syntax_kind::mem_initializer_list)) {
             for (uint32_t k = 0; k < tree[item.index()].child_count; k++) {
@@ -474,9 +518,22 @@ analysis_result semantic_analysis::ctor_initializer(syntax_child list,
             items.append(item);
         }
     }
-    const entity &x = entity_table[c];
+    /* [class.base.init]/13: "(13.2) Then, direct base classes are
+       initialized in declaration order as they appear in the
+       base-specifier-list ... (13.3) Then, non-static data members are
+       initialized in the order they were declared": the subobjects in that
+       order */
+    owned_array<entity_index> subobjects;
+    {
+        const entity &x = entity_table[c];
+        for (uint32_t i = 0; i < x.base_count; i++)
+            subobjects.append(class_bases[x.first_base + i]);
+        for (uint32_t i = 0; i < x.member_count; i++)
+            if (!entity_table[class_members[x.first_member + i]].base_subobject)
+                subobjects.append(class_members[x.first_member + i]);
+    }
     owned_array<uint32_t> initialized;
-    initialized.resize(x.member_count);
+    initialized.resize(subobjects.size());
     for (uint32_t &i : initialized)
         i = 0;
     for (syntax_child item : items) {
@@ -488,16 +545,38 @@ analysis_result semantic_analysis::ctor_initializer(syntax_child list,
             return not_supported(n, "class.base.init");
         token_index id = children[0].index();
         uint32_t name = tokens.identifier(id);
-        if (name == x.name)
+        if (name == entity_table[c].name)
             /* [class.base.init]/6: a delegating constructor */
             return not_supported(n, "class.base.init");
         entity_index e = entity_table.find(c, name);
+        if (!e) {
+            /* [class.base.init]/3: "A mem-initializer-list can initialize
+               a base class using any class-or-decltype that denotes that
+               base class type" */
+            entity_index base = lookup(name);
+            for (uint32_t i = 0; base && i < entity_table[c].base_count; i++) {
+                entity_index b = class_bases[entity_table[c].first_base + i];
+                if (entity_table[b].type.unqualified() ==
+                    entity_table[base].type.unqualified())
+                    e = b;
+            }
+            if (!e && base &&
+                entity_table[base].kind == entity_kind::class_type) {
+                bool ambiguous = false;
+                if (base_step(c, base, ambiguous))
+                    return ill_formed_at_token(
+                        id,
+                        "a mem-initializer-id shall name a direct or "
+                        "virtual base of the constructor's class",
+                        "class.base.init");
+            }
+        }
         if (!e || entity_table[e].kind != entity_kind::variable ||
             !entity_table[e].nonstatic_member) {
             if (e && entity_table[e].kind == entity_kind::none)
                 return not_supported(n, "over");
             if (!e && lookup(name))
-                /* a base class, or a name of an enclosing scope */
+                /* a name of an enclosing scope */
                 return not_supported(n, "class.base.init");
             return ill_formed_at_token(id,
                                        "unless the mem-initializer-id names "
@@ -508,13 +587,13 @@ analysis_result semantic_analysis::ctor_initializer(syntax_child list,
                                        "mem-initializer is ill-formed",
                                        "class.base.init");
         }
-        uint32_t field = entity_table[e].field;
-        /* [class.base.init]/4: "A mem-initializer-list can initialize a
-           base class ... ; a non-static data member ... shall not be
-           designated by more than one mem-initializer" (/4: "if a
-           mem-initializer-id designates the same member ... more than
-           once, the program is ill-formed") */
-        if (initialized[field])
+        size_t slot = 0;
+        while (subobjects[slot] != e)
+            slot++;
+        /* [class.base.init]/4: "if a mem-initializer-id designates the
+           same member or base class more than once, the program is
+           ill-formed" (clang's "multiple initializations") */
+        if (initialized[slot])
             return ill_formed_at_token(id,
                                        "a mem-initializer-list shall not "
                                        "designate the same member more than "
@@ -524,8 +603,33 @@ analysis_result semantic_analysis::ctor_initializer(syntax_child list,
         const struct type &record = type_table[type.unqualified()];
         if (record.kind == type_kind::array)
             return not_supported(n, "class.base.init");
+        expression_meaning object;
+        analysis_result r = subobject(id, e, object);
+        if (r != analysis_result::well_formed)
+            return r;
+        if (record.kind == type_kind::class_type &&
+            entity_table[record.entity].first_constructor) {
+            /* [class.base.init]/7: direct-initialization: a constructor */
+            owned_array<expression_meaning> arguments;
+            if (node.child_count == 4)
+                r = expression_list_meanings(children[2], arguments);
+            else if (node.child_count != 3)
+                /* a braced-init-list */
+                return not_supported(n, "class.base.init");
+            if (r != analysis_result::well_formed)
+                return r;
+            initialized_value value;
+            r = construct(n, type, arguments, object.node, value);
+            if (r != analysis_result::well_formed)
+                return r;
+            if (semantics[value.node].kind != semantic_kind::construct)
+                /* the implicit copy constructor */
+                return not_supported(n, "class.copy.ctor");
+            initialized[slot] = statement_node(
+                semantic_kind::expression_statement, id, value.node);
+            continue;
+        }
         initialized_value value;
-        analysis_result r = analysis_result::well_formed;
         if (node.child_count == 2 &&
             syntax_is(tree, children[1], syntax_kind::braced_init_list)) {
             r = list_initialization(children[1].index(), type, true, value);
@@ -550,6 +654,10 @@ analysis_result semantic_analysis::ctor_initializer(syntax_child list,
                                       "dcl.init");
                 return not_supported(n, "dcl.init");
             }
+            if (entity_table[e].base_subobject)
+                /* a base copied from an expression: [conv.ptr]/3's
+                   conversion of the source */
+                return not_supported(n, "class.base.init");
             r = initialize_from(n, init, type, true, false, value);
         } else {
             return not_supported(n, "class.base.init");
@@ -558,31 +666,191 @@ analysis_result semantic_analysis::ctor_initializer(syntax_child list,
             return r;
         /* the member's initialization: its bytes, stored as by an
            assignment to (*this).member */
-        expression_meaning member;
-        r = implicit_member_access(id, e, member);
-        if (r != analysis_result::well_formed)
-            return r;
-        expression_meaning stored = member;
+        expression_meaning stored = object;
         stored.type = qualified_type::make(type.unqualified(), cv_none);
         stored.evaluation = constness::not_constant;
         stored.entity = 0;
         uint32_t assigned = expression_node(
-            semantic_kind::assignment, stored, id, member.node, value.node,
+            semantic_kind::assignment, stored, id, object.node, value.node,
             static_cast<uint8_t>(preprocessing_op_or_punc::EQUAL));
-        initialized[field] =
+        initialized[slot] =
             statement_node(semantic_kind::expression_statement, id, assigned);
+    }
+    /* [class.base.init]/9: "In a non-delegating constructor, if a given
+       potentially constructed subobject is not designated by a
+       mem-initializer-id ... (9.3) otherwise, the entity is
+       default-initialized ([dcl.init])": [dcl.init]/7.1, a class's default
+       constructor */
+    for (size_t i = 0; i < subobjects.size(); i++) {
+        if (initialized[i])
+            continue;
+        const struct type &record =
+            type_table[entity_table[subobjects[i]].type.unqualified()];
+        if (record.kind != type_kind::class_type ||
+            !entity_table[record.entity].first_constructor)
+            continue;
+        expression_meaning object;
+        analysis_result r = subobject(at, subobjects[i], object);
+        if (r != analysis_result::well_formed)
+            return r;
+        owned_array<expression_meaning> none;
+        initialized_value value;
+        r = construct(current_declaration, entity_table[subobjects[i]].type,
+                      none, object.node, value);
+        if (r != analysis_result::well_formed)
+            return r;
+        initialized[i] =
+            statement_node(semantic_kind::expression_statement, at, value.node);
     }
     owned_array<uint32_t> statements;
     for (uint32_t s : initialized)
         if (s)
             statements.append(s);
-    built = statement_node(semantic_kind::block, first_token(list));
+    built = statement_node(semantic_kind::block, at);
     if (!statements.empty()) {
         semantics[built].first =
             semantics.list(&statements[0], statements.size());
         semantics[built].count = static_cast<uint32_t>(statements.size());
     }
     return analysis_result::well_formed;
+}
+
+/* the subobject e (a base or a non-static data member) of *this, an lvalue
+   ([expr.prim.this], [expr.unary.op]/1, [expr.ref]/6.2) */
+analysis_result semantic_analysis::subobject(token_index at, entity_index e,
+                                             expression_meaning &m)
+{
+    if (!entity_table[e].base_subobject)
+        return implicit_member_access(at, e, m);
+    analysis_result r = this_pointer(at, m);
+    if (r != analysis_result::well_formed)
+        return r;
+    m.type = type_table[m.type.unqualified()].operand;
+    m.category = value_category::lvalue;
+    m.evaluation = constness::not_constant;
+    m.node = expression_node(semantic_kind::indirection, m, at, m.node);
+    return to_base(at, type_table[entity_table[e].type.unqualified()].entity,
+                   m);
+}
+
+/* the classes of the subobjects of class c (its bases' and its members',
+   arrays' elements), in the order of their construction */
+void semantic_analysis::subobject_classes(entity_index c,
+                                          owned_array<entity_index> &out) const
+{
+    const entity &x = entity_table[c];
+    for (uint32_t i = 0; i < x.base_count; i++)
+        out.append(type_table[entity_table[class_bases[x.first_base + i]]
+                                  .type.unqualified()]
+                       .entity);
+    for (uint32_t i = 0; i < x.member_count; i++) {
+        const entity &m = entity_table[class_members[x.first_member + i]];
+        if (m.base_subobject)
+            continue;
+        qualified_type t = m.type;
+        while (type_table[t.unqualified()].kind == type_kind::array)
+            t = type_table[t.unqualified()].operand;
+        if (type_table[t.unqualified()].kind == type_kind::class_type)
+            out.append(type_table[t.unqualified()].entity);
+    }
+}
+
+bool semantic_analysis::destroys(entity_index c) const
+{
+    if (entity_table[c].destructor)
+        return true;
+    owned_array<entity_index> classes;
+    subobject_classes(c, classes);
+    for (entity_index k : classes)
+        if (destroys(k))
+            return true;
+    return false;
+}
+
+/*
+ * [class.default.ctor]/4: "an implicitly-defined default constructor
+ * performs the set of initializations of the class that would be performed
+ * by a user-written default constructor for that class with no
+ * ctor-initializer and an empty compound-statement"; [class.dtor]/11 an
+ * implicitly-defined destructor, /13 "the destructor for class X calls the
+ * destructors for X's direct non-variant non-static data members, ... the
+ * destructors for X's non-virtual direct base classes".  Not analysed: a
+ * class without constructors whose subobjects have some, without a
+ * destructor whose subobjects have one, and arrays of classes with either.
+ */
+analysis_result semantic_analysis::implicit_special_members(entity_index c,
+                                                            node_index n)
+{
+    const entity &x = entity_table[c];
+    for (uint32_t i = 0; i < x.member_count; i++) {
+        const entity &m = entity_table[class_members[x.first_member + i]];
+        qualified_type t = m.type;
+        if (type_table[t.unqualified()].kind != type_kind::array)
+            continue;
+        while (type_table[t.unqualified()].kind == type_kind::array)
+            t = type_table[t.unqualified()].operand;
+        const struct type &r = type_table[t.unqualified()];
+        if (r.kind == type_kind::class_type &&
+            (entity_table[r.entity].first_constructor || destroys(r.entity)))
+            return not_supported(n, "class.ctor");
+    }
+    owned_array<entity_index> classes;
+    subobject_classes(c, classes);
+    for (entity_index k : classes) {
+        if (entity_table[k].first_constructor && !x.first_constructor)
+            return not_supported(n, "class.default.ctor");
+        if (destroys(k) && !x.destructor)
+            return not_supported(n, "class.dtor");
+    }
+    return analysis_result::well_formed;
+}
+
+/*
+ * [class.dtor]/13: "After executing the body of the destructor and
+ * destroying any objects with automatic storage duration allocated within
+ * the body, a destructor for class X calls the destructors for X's direct
+ * non-variant non-static data members, the destructors for X's
+ * non-virtual direct base classes ... Bases and members are destroyed in
+ * the reverse order of the completion of their constructor": a block of
+ * the calls, 0 if none.
+ */
+uint32_t semantic_analysis::subobject_destructions(entity_index c,
+                                                   token_index at)
+{
+    const entity &x = entity_table[c];
+    owned_array<entity_index> order;
+    for (uint32_t i = 0; i < x.base_count; i++)
+        order.append(class_bases[x.first_base + i]);
+    for (uint32_t i = 0; i < x.member_count; i++)
+        if (!entity_table[class_members[x.first_member + i]].base_subobject)
+            order.append(class_members[x.first_member + i]);
+    owned_array<uint32_t> statements;
+    for (size_t i = order.size(); i-- > 0;) {
+        const struct type &r =
+            type_table[entity_table[order[i]].type.unqualified()];
+        if (r.kind != type_kind::class_type ||
+            !entity_table[r.entity].destructor)
+            continue;
+        expression_meaning object;
+        if (subobject(at, order[i], object) != analysis_result::well_formed)
+            return 0;
+        expression_meaning call;
+        call.type = qualified_type::make(
+            type_table.fundamental(fundamental_type::void_), cv_none);
+        call.category = value_category::prvalue;
+        call.evaluation = constness::not_constant;
+        uint32_t destroyed =
+            expression_node(semantic_kind::destroy, call, at, object.node,
+                            entity_table[r.entity].destructor);
+        statements.append(
+            statement_node(semantic_kind::expression_statement, at, destroyed));
+    }
+    if (statements.empty())
+        return 0;
+    uint32_t built = statement_node(semantic_kind::block, at);
+    semantics[built].first = semantics.list(&statements[0], statements.size());
+    semantics[built].count = static_cast<uint32_t>(statements.size());
+    return built;
 }
 
 /*
