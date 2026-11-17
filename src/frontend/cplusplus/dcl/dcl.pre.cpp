@@ -774,6 +774,10 @@ analysis_result semantic_analysis::init_declarators(node_index declaration,
         if (s.typedef_ || s.static_ || s.extern_ || s.inline_ || s.constexpr_ ||
             s.type.cv())
             return not_supported(declaration, "dcl.pre");
+        /* [class.union.anon]/1: an anonymous union declares an unnamed
+           object (an unnamed struct so, clang's extension) */
+        if (declares_unnamed_class(specifiers))
+            return not_supported(declaration, "class.union.anon");
         /* [dcl.type.elab]/2: "class-key attribute-specifier-seq_opt
            identifier ;" in a block declares a class there, which may hide
            one found by lookup: not analysed yet */

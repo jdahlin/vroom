@@ -1002,6 +1002,14 @@ analysis_result semantic_analysis::class_list_initialization(
     const entity &x = entity_table[c];
     uint32_t count = x.member_count;
     uint32_t first = x.first_member;
+    /* [dcl.init.aggr]/16: "When a union is initialized with an initializer
+       list, there shall not be more than one explicitly initialized
+       element"; without designators, the first ([dcl.init.aggr]/3.1: "the
+       explicitly initialized elements of the aggregate are the first n
+       elements"); /5's "non-union aggregate": the others are not
+       initialized */
+    if (x.union_ && count > 1)
+        count = 1;
     /* [dcl.init.aggr]/11: "An initializer-list is ill-formed if the number
        of initializer-clauses exceeds the number of elements of the
        aggregate." */

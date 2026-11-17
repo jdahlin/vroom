@@ -58,10 +58,11 @@ ast_qualified_type ast_builder_type_ptrdiff(cc *c);
 ast_qualified_type ast_builder_type_va_list(cc *c);
 /* the target's size of t in bytes */
 uint64_t ast_builder_type_size(cc *c, ast_qualified_type t);
-/* a struct named name, incomplete until ast_builder_type_record_complete
-   gives its fields (so that a field can point to it) */
+/* a struct (a union if is_union) named name, incomplete until
+   ast_builder_type_record_complete gives its fields (so that a field can
+   point to it) */
 ast_qualified_type ast_builder_type_record(cc *c, const char *name,
-                                           size_t length);
+                                           size_t length, bool is_union);
 /* the record's fields in order, laid out by C's rules; names[i] and
    lengths[i] name field i, aligned[i] is its aligned attribute's
    alignment in bytes (0: none), packed[i] whether it has the packed

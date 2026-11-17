@@ -102,6 +102,8 @@ gcc/20001203-1 -O0
 gcc/20001203-1 -O2
 gcc/20001221-1 -O0
 gcc/20001221-1 -O2
+gcc/20001228-1 -O0
+gcc/20001228-1 -O2
 gcc/20001229-1 -O0
 gcc/20001229-1 -O2
 gcc/20010114-1 -O0
@@ -184,6 +186,8 @@ gcc/20020219-1 -O0
 gcc/20020219-1 -O2
 gcc/20020225-1 -O0
 gcc/20020225-1 -O2
+gcc/20020225-2 -O0
+gcc/20020225-2 -O2
 gcc/20020226-1 -O0
 gcc/20020226-1 -O2
 gcc/20020307-1 -O0
@@ -214,6 +218,8 @@ gcc/20020614-1 -O0
 gcc/20020614-1 -O2
 gcc/20020615-1 -O0
 gcc/20020615-1 -O2
+gcc/20020619-1 -O0
+gcc/20020619-1 -O2
 gcc/20020716-1 -O0
 gcc/20020716-1 -O2
 gcc/20020805-1 -O0
@@ -498,6 +504,8 @@ gcc/20101025-1 -O0
 gcc/20101025-1 -O2
 gcc/20110418-1 -O0
 gcc/20110418-1 -O2
+gcc/20111212-1 -O0
+gcc/20111212-1 -O2
 gcc/20111227-1 -O0
 gcc/20111227-1 -O2
 gcc/20120111-1 -O0
@@ -606,6 +614,8 @@ gcc/930622-2 -O0
 gcc/930622-2 -O2
 gcc/930628-1 -O0
 gcc/930628-1 -O2
+gcc/930930-2 -O0
+gcc/930930-2 -O2
 gcc/931004-1 -O0
 gcc/931004-1 -O2
 gcc/931004-11 -O0
@@ -738,6 +748,8 @@ gcc/990525-1 -O0
 gcc/990525-1 -O2
 gcc/990527-1 -O0
 gcc/990527-1 -O2
+gcc/990531-1 -O0
+gcc/990531-1 -O2
 gcc/990604-1 -O0
 gcc/990604-1 -O2
 gcc/990804-1 -O0
@@ -982,8 +994,12 @@ gcc/pr17252 -O0
 gcc/pr17252 -O2
 gcc/pr19005 -O0
 gcc/pr19005 -O2
+gcc/pr19515 -O0
+gcc/pr19515 -O2
 gcc/pr19606 -O0
 gcc/pr19606 -O2
+gcc/pr19687 -O0
+gcc/pr19687 -O2
 gcc/pr20100-1 -O0
 gcc/pr20100-1 -O2
 gcc/pr20187-1 -O0
@@ -1120,6 +1136,8 @@ gcc/pr38048-1 -O0
 gcc/pr38048-1 -O2
 gcc/pr38048-2 -O0
 gcc/pr38048-2 -O2
+gcc/pr38051 -O0
+gcc/pr38051 -O2
 gcc/pr38819 -O0
 gcc/pr38819 -O2
 gcc/pr39100 -O0
@@ -1154,6 +1172,8 @@ gcc/pr42512 -O0
 gcc/pr42512 -O2
 gcc/pr42544 -O0
 gcc/pr42544 -O2
+gcc/pr42691 -O0
+gcc/pr42691 -O2
 gcc/pr42721 -O0
 gcc/pr42721 -O2
 gcc/pr43236 -O0
@@ -1599,6 +1619,10 @@ gcc/shiftdi -O0
 gcc/shiftdi -O2
 gcc/shiftopt-1 -O0
 gcc/shiftopt-1 -O2
+gcc/strcmp-1 -O0
+gcc/strcmp-1 -O2
+gcc/strcpy-1 -O0
+gcc/strcpy-1 -O2
 gcc/strcpy-2 -O0
 gcc/strcpy-2 -O2
 gcc/strct-pack-1 -O0
@@ -1613,6 +1637,10 @@ gcc/string-opt-18 -O0
 gcc/string-opt-18 -O2
 gcc/string-opt-5 -O0
 gcc/string-opt-5 -O2
+gcc/strlen-1 -O0
+gcc/strlen-1 -O2
+gcc/strncmp-1 -O0
+gcc/strncmp-1 -O2
 gcc/struct-ret-1 -O0
 gcc/struct-ret-1 -O2
 gcc/struct-ret-2 -O0
@@ -1679,6 +1707,8 @@ inline/gcc/gcc.dg-ipa-pr108007 -O0
 inline/gcc/gcc.dg-ipa-pr108007 -O2
 inline/gcc/gcc.dg-ipa-pr112616 -O0
 inline/gcc/gcc.dg-ipa-pr112616 -O2
+inline/gcc/gcc.dg-ipa-pr114247 -O0
+inline/gcc/gcc.dg-ipa-pr114247 -O2
 inline/gcc/gcc.dg-ipa-pr118138 -O0
 inline/gcc/gcc.dg-ipa-pr118138 -O2
 inline/gcc/gcc.dg-ipa-pr118535 -O0
@@ -1691,8 +1721,12 @@ inline/gcc/gcc.dg-ipa-pr123543 -O0
 inline/gcc/gcc.dg-ipa-pr123543 -O2
 inline/gcc/gcc.dg-ipa-pr56988 -O0
 inline/gcc/gcc.dg-ipa-pr56988 -O2
+inline/gcc/gcc.dg-ipa-pr63551 -O0
+inline/gcc/gcc.dg-ipa-pr63551 -O2
 inline/gcc/gcc.dg-ipa-pr63747 -O0
 inline/gcc/gcc.dg-ipa-pr63747 -O2
+inline/gcc/gcc.dg-ipa-pr64041 -O0
+inline/gcc/gcc.dg-ipa-pr64041 -O2
 inline/gcc/gcc.dg-ipa-pr68790 -O0
 inline/gcc/gcc.dg-ipa-pr68790 -O2
 inline/gcc/gcc.dg-ipa-pr82808 -O0
@@ -1703,6 +1737,10 @@ inline/gcc/gcc.dg-ipa-pr93385 -O0
 inline/gcc/gcc.dg-ipa-pr93385 -O2
 inline/gcc/gcc.dg-ipa-pr95113 -O0
 inline/gcc/gcc.dg-ipa-pr95113 -O2
+inline/gcc/gcc.dg-ipa-pr96040 -O0
+inline/gcc/gcc.dg-ipa-pr96040 -O2
+inline/gcc/gcc.dg-torture-pr52060 -O0
+inline/gcc/gcc.dg-torture-pr52060 -O2
 inline/llvm/2008-07-13-InlineSetjmp -O0
 inline/llvm/2008-07-13-InlineSetjmp -O2
 tcc/00_assignment -O0
@@ -1733,6 +1771,8 @@ tcc/10_pointer -O0
 tcc/10_pointer -O2
 tcc/110_average -O0
 tcc/110_average -O2
+tcc/111_conversion -O0
+tcc/111_conversion -O2
 tcc/11_precedence -O0
 tcc/11_precedence -O2
 tcc/121_struct_return -O0
@@ -1927,6 +1967,8 @@ vcc/once -O0
 vcc/once -O2
 vcc/once_tri -O0
 vcc/once_tri -O2
+vcc/pow_no_fast -O0
+vcc/pow_no_fast -O2
 vcc/prepass_threaded -O0
 vcc/prepass_threaded -O2
 vcc/register_locals_setjmp -O0
@@ -1971,6 +2013,8 @@ vcc/vir_float_args -O0
 vcc/vir_float_args -O2
 vcc/vir_fp_callee -O0
 vcc/vir_fp_callee -O2
+vcc/vir_fp_mem -O0
+vcc/vir_fp_mem -O2
 vcc/vir_inline_context -O0
 vcc/vir_inline_context -O2
 vcc/vir_inline_large -O0

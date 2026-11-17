@@ -800,6 +800,15 @@ libstdc++ and json), since sema cannot analyse a declaration kept as tokens.
   gcc/pr79286 is skipped: its uninitialized argument is undefined in C++
   and clang++ -O2 deletes main.  `src/test/cxx/run/library-builtins.cpp`.
   C5.1 1563 -> 2033, 0 wrong.
+  Then unions ([class.union]): a class with the class-key union has
+  every non-static data member at offset 0, the largest's size and the
+  strictest alignment; aggregate initialization initializes the first
+  member alone ([dcl.init.aggr]/16, C's union initializer); union in
+  elaborated-type-specifiers, the class-key agreeing with the class's
+  ([dcl.type.elab]/3); lowered to a C union.  Unsupported: members of
+  class type, anonymous unions and unnamed structs ([class.union.anon],
+  they were taken for nested classes before), bases.
+  `src/test/cxx/run/unions.cpp`; C5.1 2033 -> 2077, 0 wrong.
   Next: member functions of local and nested classes, in-class
   initializers of static members, unions, virtual functions.
 

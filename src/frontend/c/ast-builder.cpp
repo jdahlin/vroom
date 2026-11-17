@@ -84,9 +84,9 @@ uint64_t ast_builder_type_size(cc *c, ast_qualified_type t)
 }
 
 ast_qualified_type ast_builder_type_record(cc *c, const char *name,
-                                           size_t length)
+                                           size_t length, bool is_union)
 {
-    uint32_t ti = cc_tag_new(c, AST_TYPE_STRUCT,
+    uint32_t ti = cc_tag_new(c, is_union ? AST_TYPE_UNION : AST_TYPE_STRUCT,
                              ast_builder_identifier(c, name, length), 0);
 
     return AST_QUALIFIED_TYPE(c->tags[ti].ty, 0);

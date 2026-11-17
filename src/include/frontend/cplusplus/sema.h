@@ -320,6 +320,9 @@ struct entity {
     /* a class: its user-declared constructors (a chain through
        next_constructor) and destructor, 0 if none */
     entity_index first_constructor = 0, destructor = 0;
+    /* a class: a union ([class.union]/1: "A union is a class defined
+       with the class-key union") */
+    bool union_ = false;
     /* a function or variable: [ext:gnu_attributes] the GNU attributes
        its declarations gave it (gnu_attribute_flag) and a section
        attribute's string-literal, 0 if none; its aligned attribute's
@@ -910,6 +913,7 @@ class semantic_analysis
                                             declarator_meaning &m);
     analysis_result gnu_attribute_specifier(node_index n, specified &s);
     uint32_t leading_gnu_attributes(node_index n) const;
+    bool declares_unnamed_class(node_index seq) const;
     /* [ext:gnu_library_builtins] the function __builtin_NAME (an
        identifier) declares at its first use, 0 if it is not one */
     entity_index library_builtin(uint32_t name);

@@ -406,7 +406,7 @@ ast_qualified_type c_lowering::class_type(entity_index e, token_index at)
         vbuffer_append(name.get(), s, length);
     }
     ast_qualified_type made =
-        ast_builder_type_record(c, name.data(), name.size());
+        ast_builder_type_record(c, name.data(), name.size(), x.union_);
     records[e] = made;
     if (!x.size)
         /* incomplete: a pointer to it is all a program can have */
@@ -1464,8 +1464,13 @@ uint32_t c_lowering::initializer_list(const semantic_node &n)
                 return 0;
             values.append(e);
         }
+        /* a union's: the value of field a (C's aux 2), the first */
+        uint16_t aux = 0;
+        if (analysis.entity_table[record(n.type).entity].union_)
+            aux = 2;
         return make(AST_NODE_INITIALIZER, type(n.type, n.at), 0,
-                    ast_builder_list(c, values.data(), n.count), n.count, 0, 0);
+                    ast_builder_list(c, values.data(), n.count), n.count, aux,
+                    0);
     }
     owned_array<uint32_t> runs;
     const uint32_t *items = analysis.semantics.items(n.first);
