@@ -232,7 +232,11 @@ bool itanium_mangler::class_enum_type(qualified_type t)
 {
     entity_index c = record(t).entity;
     const entity &x = analysis.entity_table[c];
-    if (x.kind != entity_kind::class_type || x.enclosing)
+    if ((x.kind != entity_kind::class_type &&
+         x.kind != entity_kind::enumeration) ||
+        x.enclosing)
+        return false;
+    if (!x.name && !x.linkage_name)
         return false;
     return unscoped_name(c);
 }
@@ -265,7 +269,8 @@ bool itanium_mangler::unqualified_name(entity_index e)
     if (x.special != special_member::none)
         return ctor_dtor_name(x.special);
     /* [dcl.typedef]/9: an unnamed class's name for linkage purposes */
-    if (!x.name && x.kind == entity_kind::class_type)
+    if (!x.name && (x.kind == entity_kind::class_type ||
+                    x.kind == entity_kind::enumeration))
         return source_name(x.linkage_name);
     return source_name(x.name);
 }
@@ -477,7 +482,8 @@ bool itanium_mangler::type(qualified_type t)
         done = function_type(t);
     else if (r.kind == type_kind::array)
         done = array_type(t);
-    else if (r.kind == type_kind::class_type)
+    else if (r.kind == type_kind::class_type ||
+             r.kind == type_kind::enumeration)
         done = class_enum_type(t);
     if (!done)
         return false;

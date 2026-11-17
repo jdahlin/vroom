@@ -768,8 +768,29 @@ libstdc++ and json), since sema cannot analyse a declaration kept as tokens.
   linkage has internal linkage under its plain name, as in clang.  The
   harness's clang -O0 symbol list uses the driver's
   `-mconstructor-aliases`.  C5.1 1094 passing, 0 wrong.
-  Next: elaborated-type-specifiers in block and class scope, static data
-  members, enumerations, virtual functions.
+  Then enumerations ([dcl.enum], `dcl/dcl.enum.cpp`): scoped and
+  unscoped, fixed underlying types, clang's underlying and promoted types
+  for the others, enumerators as constants bound in the enclosing scope
+  (and in the enumeration's, for `E::e`), in any scope and in classes;
+  [conv.prom]/4-5 for the operands of the built-in operators, switch,
+  case, subscripts and ellipsis arguments; [conv.integral] to integers
+  only implicitly; casts both ways, `static_cast` between arithmetic and
+  enumeration types; mangled as a <class-enum-type>; lowered as the
+  underlying type.  `typedef struct s {...} s;` and `typedef enum e {...}
+  e;` ([dcl.typedef]/3).  Then local and nested classes with data members
+  only ([class.local], [class.nest]; member functions in them unsupported:
+  they need a <local-name> or a deeper <nested-name>), class names found
+  by elaborated-type-specifiers in block and class scope
+  ([basic.lookup.elab]), `Outer::Inner` as a type, and static data members
+  of classes of namespace scope ([class.static.data]: declared in the
+  class, defined outside it, `S::m`).  Known laxness: a `case` of an
+  integer in a switch on a scoped enumeration is accepted.
+  `src/test/cxx/run/enums.cpp`, `local-classes.cpp`, `static-members.cpp`;
+  C5.1 1206 passing, 1204 after the merge with main (which made a
+  variable's `aligned` unsupported), 0 wrong.  bench/cxx-sema.py not run
+  (needs clang 23).
+  Next: member functions of local and nested classes, in-class
+  initializers of static members, unions, virtual functions.
 
 ### S5. Conversions by user code, lambdas, the rest of [expr]
 

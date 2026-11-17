@@ -206,6 +206,9 @@ analysis_result semantic_analysis::array(node_index at,
     r = operand_value(at, m);
     if (r != analysis_result::well_formed)
         return r;
+    /* [expr.const]/10: an integral promotion of an unscoped
+       enumeration */
+    promote_enumeration(m);
     const struct type of_bound = type_table[m.type.unqualified()];
     if (of_bound.kind == type_kind::enumeration ||
         of_bound.kind == type_kind::class_type ||
@@ -437,10 +440,31 @@ analysis_result semantic_analysis::declarator(node_index declaration,
     case syntax_kind::noptr_declarator:
     case syntax_kind::noptr_abstract_declarator:
         break;
-    case syntax_kind::qualified_id:
-        /* a member of a namespace or a class declared again
-           ([dcl.meaning]/1) */
-        return not_supported(n, "dcl.meaning");
+    case syntax_kind::qualified_id: {
+        /* [dcl.meaning]/1: a member of a class declared again, the
+           declarator-id alone (a static data member's definition,
+           [class.static.data]): class-name :: identifier */
+        const syntax_child *parts = children;
+        if (node.child_count != 2 ||
+            !syntax_is(tree, parts[0], syntax_kind::nested_name_specifier) ||
+            !parts[1].is_token() ||
+            tokens[parts[1].index()].kind != token_kind::identifier)
+            return not_supported(n, "dcl.meaning");
+        node_index nested = parts[0].index();
+        const syntax_child *names = tree.children(nested);
+        if (tree[nested].child_count != 2 || !names[0].is_token() ||
+            tokens[names[0].index()].kind != token_kind::identifier)
+            return not_supported(n, "basic.lookup.qual");
+        entity_index c =
+            entity_table.find(0, tokens.identifier(names[0].index()));
+        if (!c || entity_table[c].kind != entity_kind::class_type ||
+            !entity_table[c].size || current_scope)
+            return not_supported(n, "basic.lookup.qual");
+        m.qualifier = c;
+        m.has_id = true;
+        m.id = parts[1].index();
+        return analysis_result::well_formed;
+    }
     case syntax_kind::declarator:
         /* a trailing-return-type */
         return not_supported(n, "dcl.fct");

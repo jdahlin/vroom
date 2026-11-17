@@ -684,7 +684,7 @@ analysis_result semantic_analysis::initialize_with(node_index at,
         return analysis_result::well_formed;
     }
     if (target.kind != type_kind::fundamental &&
-        target.kind != type_kind::pointer)
+        target.kind != type_kind::pointer && !enumeration_of(type))
         return not_supported(at, "dcl.init");
     if (target.kind == type_kind::fundamental &&
         target.fundamental == fundamental_type::void_)
@@ -808,7 +808,7 @@ semantic_analysis::list_initialization(node_index list, qualified_type &type,
            (nor a string-literal for an array of characters) */
         const struct type of_element = type_table[element.unqualified()];
         if (of_element.kind != type_kind::fundamental &&
-            of_element.kind != type_kind::pointer)
+            of_element.kind != type_kind::pointer && !enumeration_of(element))
             for (syntax_child clause : clauses)
                 if (!syntax_is(tree, clause, syntax_kind::braced_init_list) &&
                     !is_string_literal(tokens, clause))

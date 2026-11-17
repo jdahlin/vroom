@@ -16,6 +16,7 @@
  * enumeration's own, which declared_names does not keep.
  */
 #include "../cplusplus-internal.h"
+#include "frontend/cplusplus/sema.h"
 
 namespace cplusplus
 {
@@ -375,6 +376,473 @@ node_index parser::using_enum_declaration()
     if (!accept(preprocessing_op_or_punc::SEMICOLON))
         return expected("';' after the using-enum-declaration", "enum.udecl");
     return finish_node(syntax_kind::using_enum_declaration, mark, first);
+}
+
+} // namespace cplusplus
+
+/* ---- semantic analysis ---------------------------------------------- */
+
+namespace cplusplus
+{
+
+namespace
+{
+
+/* the bits a value needs: as an unsigned number (0 for 0), or as a
+   two's complement one, sign bit included */
+unsigned active_bits(__int128 v)
+{
+    unsigned n = 0;
+    for (unsigned __int128 u = static_cast<unsigned __int128>(v); u; u >>= 1)
+        n++;
+    return n;
+}
+
+unsigned signed_bits(__int128 v)
+{
+    return active_bits(~v) + 1;
+}
+
+} // namespace
+
+/*
+ * [dcl.enum]/1: "An enumeration is a distinct type ([basic.compound]) with
+ * named constants.  Its name becomes an enum-name within its scope."
+ *
+ *     enum-specifier:
+ *         enum-head { enumerator-list_opt }
+ *         enum-head { enumerator-list , }
+ *
+ * What analysis has rules for: an enum-head without attributes or a
+ * nested-name-specifier, in any scope; the enumeration is defined there
+ * once.  The underlying type of an enumeration whose underlying type is
+ * not fixed is clang's ([dcl.enum]/7, "implementation-defined"): unsigned
+ * int, unsigned long or unsigned long long when no enumerator is negative,
+ * else int, long or long long, the first that holds every value, and the
+ * promoted type of such an enumeration ([conv.prom]/4) is int when every
+ * value fits in it.
+ */
+analysis_result semantic_analysis::enum_specifier(node_index n,
+                                                  type_index &type)
+{
+    const implementation_defined_behavior &b = tokens.files.behavior;
+    const syntax_node &node = tree[n];
+    const syntax_child *children = tree.children(n);
+    owned_array<syntax_child> head;
+    uint32_t i = 0;
+    if (node.child_count &&
+        syntax_is(tree, children[0], syntax_kind::enum_head)) {
+        const syntax_node &h = tree[children[0].index()];
+        for (uint32_t k = 0; k < h.child_count; k++)
+            head.append(tree.children(children[0].index())[k]);
+        i = 1;
+    } else {
+        for (; i < node.child_count &&
+               !syntax_is_punctuator(tokens, children[i],
+                                     preprocessing_op_or_punc::LEFT_BRACE);
+             i++)
+            head.append(children[i]);
+    }
+    bool scoped = false;
+    uint32_t name = 0;
+    token_index name_at = node.first_token;
+    node_index base = 0;
+    for (syntax_child c : head) {
+        if (syntax_is(tree, c, syntax_kind::enum_key)) {
+            scoped = true;
+            continue;
+        }
+        if (syntax_is(tree, c, syntax_kind::enum_base)) {
+            base = c.index();
+            continue;
+        }
+        if (c.is_token() &&
+            p.keyword_of(tokens[c.index()]) == standard_keyword::enum_)
+            continue;
+        if (c.is_token() && tokens[c.index()].kind == token_kind::identifier) {
+            name = tokens.identifier(c.index());
+            name_at = c.index();
+            continue;
+        }
+        /* an attribute-specifier-seq, a nested-name-specifier */
+        return not_supported(n, "dcl.enum");
+    }
+    if (i >= node.child_count ||
+        !syntax_is_punctuator(tokens, children[i],
+                              preprocessing_op_or_punc::LEFT_BRACE))
+        return not_supported(n, "dcl.enum");
+    owned_array<syntax_child> enumerators;
+    for (i++; i < node.child_count; i++) {
+        syntax_child c = children[i];
+        if (syntax_is(tree, c, syntax_kind::enumerator_list)) {
+            const syntax_node &list = tree[c.index()];
+            for (uint32_t k = 0; k < list.child_count; k++) {
+                syntax_child item = tree.children(c.index())[k];
+                if (!syntax_is_punctuator(tokens, item,
+                                          preprocessing_op_or_punc::COMMA))
+                    enumerators.append(item);
+            }
+            continue;
+        }
+        if (syntax_is_punctuator(tokens, c, preprocessing_op_or_punc::COMMA) ||
+            syntax_is_punctuator(tokens, c,
+                                 preprocessing_op_or_punc::RIGHT_BRACE))
+            continue;
+        enumerators.append(c);
+    }
+
+    /* [dcl.enum]/5: "For a scoped enumeration type, the underlying type is
+       int if it is not explicitly specified.  In both of these cases, the
+       underlying type is said to be fixed." */
+    fundamental_type fixed = fundamental_type::none;
+    if (scoped)
+        fixed = fundamental_type::int_;
+    if (base) {
+        const syntax_node &bn = tree[base];
+        if (bn.child_count != 2 || !syntax_is(tree, tree.children(base)[1],
+                                              syntax_kind::type_specifier_seq))
+            return not_supported(n, "dcl.enum");
+        specified s;
+        analysis_result r =
+            decl_specifier_seq(tree.children(base)[1].index(), s, true);
+        if (r != analysis_result::well_formed)
+            return r;
+        /* [dcl.enum]/2: "The type-specifier-seq of an enum-base shall name
+           an integral type; any cv-qualification is ignored." */
+        if (!s.has_type)
+            return not_supported(n, "dcl.enum");
+        if (!is_integral(s.type)) {
+            if (fundamental_of(s.type) == fundamental_type::none &&
+                type_table[s.type.unqualified()].kind != type_kind::pointer)
+                return not_supported(n, "dcl.enum");
+            return ill_formed(base,
+                              "the type-specifier-seq of an enum-base shall "
+                              "name an integral type",
+                              "dcl.enum");
+        }
+        fixed = fundamental_of(s.type);
+    }
+
+    /* the scope the enumeration is declared in: [basic.scope.enum]/1 the
+       unscoped enumerators are declared there too */
+    entity_index scope = current_scope;
+    if (defining_class)
+        scope = defining_class;
+    entity_index e = 0;
+    if (name) {
+        entity_index prior = entity_table.find(scope, name);
+        if (prior) {
+            if (entity_table[prior].kind == entity_kind::enumeration)
+                /* [basic.def.odr]/1: "No translation unit shall contain
+                   more than one definition of any variable, function, class
+                   type, enumeration type, template, default argument for a
+                   parameter (for a function in a given scope), or default
+                   template argument." */
+                return ill_formed_at_token(name_at,
+                                           "no translation unit shall "
+                                           "contain more than one definition "
+                                           "of any enumeration type",
+                                           "basic.def.odr");
+            return not_supported(n, "basic.scope.declarative");
+        }
+    }
+    bool is_fixed = fixed != fundamental_type::none;
+    e = entity_table.make(entity_kind::enumeration, name, scope);
+    entity &x = entity_table[e];
+    x.scoped = scoped;
+    x.fixed_underlying = is_fixed;
+    x.access = declaration_access;
+    if (!scope)
+        x.linkage_of_name = linkage::external;
+    x.type = qualified_type::make(
+        type_table.of_entity(type_kind::enumeration, e), cv_none);
+    entity_table.add_declaration(e, current_declaration);
+    if (name)
+        entity_table.bind(scope, name, e);
+    type = entity_table[e].type.unqualified();
+    /* [dcl.enum]/6: "An enumeration whose underlying type is fixed is an
+       incomplete type from its point of declaration
+       ([basic.scope.pdecl]) to immediately after its enum-base (if any),
+       at which point it becomes a complete type." */
+    entity_table[e].underlying = fixed;
+
+    owned_array<entity_index> enumerators_declared;
+    __int128 previous = -1;
+    fundamental_type previous_type = fundamental_type::int_;
+    if (is_fixed)
+        previous_type = fixed;
+    bool any = false;
+    unsigned positive_bits = 0, negative_bits = 0;
+    for (syntax_child c : enumerators) {
+        syntax_child id = c;
+        syntax_child init;
+        bool has_init = false;
+        if (syntax_is(tree, c, syntax_kind::enumerator_definition)) {
+            const syntax_node &d = tree[c.index()];
+            if (d.child_count != 3)
+                return not_supported(n, "dcl.enum");
+            id = tree.children(c.index())[0];
+            init = tree.children(c.index())[2];
+            has_init = true;
+        }
+        if (!id.is_token() || tokens[id.index()].kind != token_kind::identifier)
+            /* an attribute-specifier-seq on the enumerator */
+            return not_supported(n, "dcl.enum");
+        token_index at = id.index();
+        __int128 value;
+        fundamental_type value_type = previous_type;
+        if (has_init) {
+            expression_meaning m;
+            analysis_result r = expression(init, m);
+            if (r == analysis_result::well_formed)
+                r = operand_value(node_of(init), m);
+            if (r != analysis_result::well_formed)
+                return r;
+            /* "If the expression has unscoped enumeration type, the
+               enumerator has the underlying type of that enumeration
+               type" */
+            entity_index other = enumeration_of(m.type);
+            if (other && !entity_table[other].scoped)
+                enumeration_as_underlying(m);
+            if (!is_integral(m.type)) {
+                if (fundamental_of(m.type) == fundamental_type::none &&
+                    !is_pointer(m.type))
+                    return not_supported(n, "dcl.enum");
+                /* [dcl.enum]/5: "the constant-expression shall be an
+                   integral constant expression" (or a converted constant
+                   expression of the fixed underlying type) */
+                return ill_formed_at_token(
+                    first_token(init),
+                    "the constant-expression shall be an "
+                    "integral constant expression",
+                    "dcl.enum");
+            }
+            if (m.evaluation != constness::constant ||
+                (!b.has(language_feature::list_initialization) &&
+                 m.beyond_integral_constant))
+                return not_supported(n, "expr.const");
+            fundamental_type f = fundamental_of(m.type);
+            value = integer_value(b, f, m.value);
+            if (is_fixed) {
+                /* "the constant-expression in the enumerator-definition
+                   shall be a converted constant expression of the
+                   underlying type": [expr.const]/10, no narrowing */
+                if (!integer_holds(b, fixed, value) ||
+                    (f == fundamental_type::bool_) !=
+                        (fixed == fundamental_type::bool_))
+                    return ill_formed_at_token(
+                        first_token(init),
+                        "the constant-expression in the "
+                        "enumerator-definition shall be a "
+                        "converted constant expression of the "
+                        "underlying type",
+                        "dcl.enum");
+            } else {
+                value_type = f;
+            }
+        } else {
+            /* "If the first enumerator has no initializer, the value of
+               the corresponding constant is zero.  An enumerator-definition
+               without an initializer gives the enumerator the value
+               obtained by increasing the value of the previous enumerator
+               by one." */
+            value = previous + 1;
+            if (!integer_holds(b, value_type, value)) {
+                if (is_fixed)
+                    return ill_formed_at_token(at,
+                                               "an enumerator's value shall "
+                                               "be representable in the "
+                                               "fixed underlying type",
+                                               "dcl.enum");
+                /* "in which case the type is an unspecified integral type
+                   sufficient to contain the incremented value.  If no such
+                   type exists, the program is ill-formed." */
+                static const fundamental_type wider[] = {
+                    fundamental_type::int_,
+                    fundamental_type::unsigned_int,
+                    fundamental_type::long_int,
+                    fundamental_type::unsigned_long_int,
+                    fundamental_type::long_long_int,
+                    fundamental_type::unsigned_long_long_int};
+                value_type = fundamental_type::none;
+                for (fundamental_type w : wider)
+                    if (integer_holds(b, w, value)) {
+                        value_type = w;
+                        break;
+                    }
+                if (value_type == fundamental_type::none)
+                    return not_supported(n, "dcl.enum");
+            }
+        }
+        if (value < 0) {
+            unsigned bits = signed_bits(value);
+            if (bits > negative_bits)
+                negative_bits = bits;
+        } else if (active_bits(value) > positive_bits) {
+            positive_bits = active_bits(value);
+        }
+        any = true;
+        previous = value;
+        previous_type = value_type;
+        uint32_t enumerator_name = tokens.identifier(at);
+        entity_index conflict = entity_table.find(scope, enumerator_name);
+        if (scoped)
+            conflict = entity_table.find(e, enumerator_name);
+        if (conflict) {
+            if (entity_table[conflict].kind == entity_kind::none)
+                return not_supported(n, "basic.scope.declarative");
+            /* [basic.scope.declarative]/4: "Given a set of declarations
+               in a single declarative region, each of which specifies the
+               same unqualified name, they shall all refer to the same
+               entity" */
+            if (entity_table[conflict].kind == entity_kind::enumerator ||
+                entity_table[conflict].kind == entity_kind::variable ||
+                entity_table[conflict].kind == entity_kind::function)
+                return ill_formed_at_token(at,
+                                           "the enumerator's name is "
+                                           "declared in the scope already",
+                                           "basic.scope.declarative");
+            return not_supported(n, "basic.scope.declarative");
+        }
+        entity_index enumerator_scope = scope;
+        if (scoped)
+            enumerator_scope = e;
+        entity_index en = entity_table.make(entity_kind::enumerator,
+                                            enumerator_name, enumerator_scope);
+        entity &y = entity_table[en];
+        /* "If the underlying type is fixed, the type of each enumerator
+           prior to the closing brace is the underlying type" */
+        y.type =
+            qualified_type::make(type_table.fundamental(value_type), cv_none);
+        y.value =
+            integer_wrap(b, value_type, static_cast<unsigned __int128>(value));
+        y.usable = constness::constant;
+        y.defined = true;
+        y.access = declaration_access;
+        entity_table.add_declaration(en, current_declaration);
+        /* [basic.scope.pdecl]/5: "The point of declaration for an
+           enumerator is immediately after its enumerator-definition."
+           [expr.prim.id.qual]/4: an unscoped enumerator is also named by
+           a qualified-id of its enumeration */
+        if (scoped) {
+            entity_table.bind(e, enumerator_name, en);
+        } else {
+            entity_table.bind(scope, enumerator_name, en);
+            entity_table.bind(e, enumerator_name, en);
+        }
+        enumerators_declared.append(en);
+    }
+    if (!any)
+        positive_bits = 1;
+    fundamental_type underlying = fixed;
+    fundamental_type promoted = fixed;
+    if (!is_fixed) {
+        unsigned int_width = fundamental_type_width(b, fundamental_type::int_);
+        unsigned long_width =
+            fundamental_type_width(b, fundamental_type::long_int);
+        unsigned long_long_width =
+            fundamental_type_width(b, fundamental_type::long_long_int);
+        if (negative_bits) {
+            if (negative_bits <= int_width && positive_bits < int_width)
+                underlying = fundamental_type::int_;
+            else if (negative_bits <= long_width && positive_bits < long_width)
+                underlying = fundamental_type::long_int;
+            else if (negative_bits <= long_long_width &&
+                     positive_bits < long_long_width)
+                underlying = fundamental_type::long_long_int;
+            promoted = underlying;
+        } else if (positive_bits <= int_width) {
+            underlying = fundamental_type::unsigned_int;
+            promoted = fundamental_type::int_;
+            if (positive_bits == int_width)
+                promoted = underlying;
+        } else if (positive_bits <= long_width) {
+            underlying = fundamental_type::unsigned_long_int;
+            promoted = fundamental_type::long_int;
+            if (positive_bits == long_width)
+                promoted = underlying;
+        } else if (positive_bits <= long_long_width) {
+            underlying = fundamental_type::unsigned_long_long_int;
+            promoted = fundamental_type::long_long_int;
+            if (positive_bits == long_long_width)
+                promoted = underlying;
+        }
+        if (underlying == fundamental_type::none)
+            /* [dcl.enum]/7: "If no integral type can represent all the
+               enumerator values, the enumeration is ill-formed." (clang's
+               extension: __int128) */
+            return not_supported(n, "dcl.enum");
+    }
+    /* [dcl.enum]/5: "Following the closing brace of an enum-specifier,
+       each enumerator has the type of its enumeration." */
+    entity &z = entity_table[e];
+    z.underlying = underlying;
+    z.promoted = promoted;
+    z.defined = true;
+    for (entity_index en : enumerators_declared) {
+        entity &y = entity_table[en];
+        __int128 v = integer_value(b, fundamental_of(y.type), y.value);
+        y.value =
+            integer_wrap(b, underlying, static_cast<unsigned __int128>(v));
+        y.type = z.type;
+    }
+    return analysis_result::well_formed;
+}
+
+/*
+ * [dcl.type.elab]:
+ *
+ *     elaborated-enum-specifier:
+ *         enum nested-name-specifier_opt identifier
+ *
+ * [basic.lookup.elab]/2: the identifier is looked up; an enumeration found
+ * is the type.  [dcl.type.elab]/3: "The class-key or enum keyword present
+ * in the elaborated-type-specifier shall agree in kind with the
+ * declaration to which the name in the elaborated-type-specifier refers":
+ * an enumeration not declared yet is not declared by it.
+ */
+analysis_result semantic_analysis::elaborated_enum_specifier(node_index n,
+                                                             type_index &type)
+{
+    const syntax_node &node = tree[n];
+    const syntax_child *children = tree.children(n);
+    if (node.child_count != 2 || !children[1].is_token() ||
+        tokens[children[1].index()].kind != token_kind::identifier)
+        return not_supported(n, "dcl.type.elab");
+    entity_index e = lookup(tokens.identifier(children[1].index()));
+    if (!e || entity_table[e].kind != entity_kind::enumeration)
+        return not_supported(n, "basic.lookup.elab");
+    type = entity_table[e].type.unqualified();
+    return analysis_result::well_formed;
+}
+
+/*
+ * [expr.prim.id.unqual]/2: an enumerator: "The expression is an lvalue if
+ * the entity is a function, variable, structured binding, data member, or
+ * template parameter object and a prvalue otherwise"; its value is a
+ * constant ([dcl.enum]/2: "The identifiers in an enumerator-list are
+ * declared as constants, and can appear wherever constants are
+ * required.").
+ */
+analysis_result semantic_analysis::enumerator_value(token_index t,
+                                                    entity_index e,
+                                                    expression_meaning &m)
+{
+    const entity &x = entity_table[e];
+    if (x.enclosing &&
+        entity_table[x.enclosing].kind == entity_kind::class_type &&
+        !accessible(e))
+        return ill_formed_at_token(t,
+                                   "a private or protected member's name can "
+                                   "be used only by members and friends of "
+                                   "the class in which it is declared",
+                                   "class.access");
+    m.category = value_category::prvalue;
+    m.type = x.type;
+    m.evaluation = constness::constant;
+    m.value = x.value;
+    m.node = expression_node(semantic_kind::constant, m, t);
+    return analysis_result::well_formed;
 }
 
 } // namespace cplusplus

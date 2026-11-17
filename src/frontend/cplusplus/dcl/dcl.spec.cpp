@@ -993,7 +993,7 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
     unsigned const_ = 0, volatile_ = 0, typedef_ = 0, static_ = 0, extern_ = 0,
              inline_ = 0, constexpr_ = 0;
     type_index named = 0;
-    bool declares_class = false;
+    bool declares_class = false, declares_enumeration = false;
     token_index named_at = 0, duplicate = 0;
     const char *duplicate_spelling = nullptr;
     auto count = [&](unsigned &n, token_index t, const char *spelling) {
@@ -1007,7 +1007,10 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
     for (uint32_t i = 0; i < node.child_count; i++) {
         syntax_child c = tree.children(seq)[i];
         if (c.is_token() || syntax_is(tree, c, syntax_kind::class_specifier) ||
-            syntax_is(tree, c, syntax_kind::elaborated_type_specifier))
+            syntax_is(tree, c, syntax_kind::elaborated_type_specifier) ||
+            syntax_is(tree, c, syntax_kind::enum_specifier) ||
+            syntax_is(tree, c, syntax_kind::elaborated_enum_specifier) ||
+            syntax_is(tree, c, syntax_kind::simple_type_specifier))
             continue;
         /* the class names the declaration would define are held, as
            hold_names holds its declarators' */
@@ -1049,6 +1052,14 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
                 r = class_specifier(c.index(), class_type);
             else if (syntax_is(tree, c, syntax_kind::elaborated_type_specifier))
                 r = elaborated_type_specifier(c.index(), class_type);
+            else if (syntax_is(tree, c, syntax_kind::enum_specifier)) {
+                r = enum_specifier(c.index(), class_type);
+                declares_enumeration = true;
+            } else if (syntax_is(tree, c,
+                                 syntax_kind::elaborated_enum_specifier))
+                r = elaborated_enum_specifier(c.index(), class_type);
+            else if (syntax_is(tree, c, syntax_kind::simple_type_specifier))
+                r = qualified_type_name(c.index(), class_type);
             else
                 return not_supported(c.index());
             if (r != analysis_result::well_formed)
@@ -1059,7 +1070,8 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
                 k.alone++;
             named = class_type;
             named_at = tree[c.index()].first_token;
-            declares_class = true;
+            if (!syntax_is(tree, c, syntax_kind::simple_type_specifier))
+                declares_class = true;
             continue;
         }
         token_index t = c.index();
@@ -1068,8 +1080,10 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
             /* a type-name ([dcl.type.simple]/1): at global namespace scope,
                a typedef-name declared there before */
             entity_index e = lookup(tokens.identifier(t));
-            if (e && entity_table[e].kind == entity_kind::class_type) {
-                /* [class.name]/1: a class-name */
+            if (e && (entity_table[e].kind == entity_kind::class_type ||
+                      entity_table[e].kind == entity_kind::enumeration)) {
+                /* [class.name]/1: a class-name; [dcl.enum]/1: an
+                   enum-name */
                 if (named || !k.first)
                     k.first = t;
                 if (named)
@@ -1256,6 +1270,7 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
     }
     s.has_type = type != 0;
     s.declares_class = declares_class;
+    s.declares_enumeration = declares_enumeration;
     s.typedef_ = typedef_;
     s.static_ = static_;
     s.extern_ = extern_;
@@ -1263,6 +1278,49 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
     s.constexpr_ = constexpr_;
     if (type)
         s.type = add_cv(qualified_type::make(type, cv_none), cv);
+    return analysis_result::well_formed;
+}
+
+/*
+ * [dcl.type.simple]/1:
+ *
+ *     simple-type-specifier:
+ *         nested-name-specifier_opt type-name
+ *
+ * [basic.lookup.qual]/1: a class-name of the global namespace, then a
+ * member of that class that is a type: a nested class or enumeration or a
+ * member typedef-name ([class.nest]/1, [class.mem]/3).
+ */
+analysis_result semantic_analysis::qualified_type_name(node_index n,
+                                                       type_index &type)
+{
+    const syntax_node &node = tree[n];
+    const syntax_child *parts = tree.children(n);
+    if (node.child_count != 2 ||
+        !syntax_is(tree, parts[0], syntax_kind::nested_name_specifier) ||
+        !parts[1].is_token() ||
+        tokens[parts[1].index()].kind != token_kind::identifier)
+        return not_supported(n, "dcl.type.simple");
+    node_index nested = parts[0].index();
+    const syntax_child *names = tree.children(nested);
+    if (tree[nested].child_count != 2 || !names[0].is_token() ||
+        tokens[names[0].index()].kind != token_kind::identifier)
+        return not_supported(n, "basic.lookup.qual");
+    entity_index c = lookup(tokens.identifier(names[0].index()));
+    if (!c || entity_table[c].kind != entity_kind::class_type)
+        return not_supported(n, "basic.lookup.qual");
+    token_index t = parts[1].index();
+    entity_index e = entity_table.find(c, tokens.identifier(t));
+    if (!e || (entity_table[e].kind != entity_kind::class_type &&
+               entity_table[e].kind != entity_kind::enumeration))
+        return not_supported(n, "basic.lookup.qual");
+    if (!accessible(e))
+        return ill_formed_at_token(t,
+                                   "a private or protected member's name can "
+                                   "be used only by members and friends of "
+                                   "the class in which it is declared",
+                                   "class.access");
+    type = entity_table[e].type.unqualified();
     return analysis_result::well_formed;
 }
 

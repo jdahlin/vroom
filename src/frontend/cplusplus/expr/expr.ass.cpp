@@ -123,7 +123,8 @@ analysis_result semantic_analysis::assignment(node_index n,
     if (record.kind == type_kind::class_type)
         return class_assignment(n, op, left, right, m);
     if (record.kind != type_kind::fundamental &&
-        record.kind != type_kind::pointer)
+        record.kind != type_kind::pointer &&
+        !(record.kind == type_kind::enumeration && enumeration_of(left.type)))
         return not_supported(n, "expr.ass");
     /* [basic.lval]/10: "An lvalue is modifiable unless its type is
        const-qualified or is a function type." */
@@ -189,6 +190,14 @@ analysis_result semantic_analysis::assignment(node_index n,
         }
         bool additive = arithmetic_op == preprocessing_op_or_punc::PLUS ||
                         arithmetic_op == preprocessing_op_or_punc::MINUS;
+        /* [expr.ass]/6: "E1 shall have arithmetic type": an enumeration
+           has none */
+        if (record.kind == type_kind::enumeration)
+            return ill_formed(n,
+                              "in all cases other than += and -=, E1 shall "
+                              "have arithmetic type",
+                              "expr.ass");
+        promote_enumeration(right);
         if (is_pointer(left.type)) {
             if (!additive)
                 return ill_formed(n,

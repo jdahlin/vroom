@@ -108,12 +108,53 @@ analysis_result semantic_analysis::explicit_conversion(node_index at,
         converted(m, conversion_kind::to_void);
         return analysis_result::well_formed;
     }
+    if (target.kind == type_kind::enumeration) {
+        /* [expr.static.cast]/10: "A value of integral or enumeration type
+           can be explicitly converted to a complete enumeration type. ...
+           If the enumeration type does not have a fixed underlying type,
+           the value is unchanged if the original value is within the
+           range of the enumeration values ([dcl.enum]), and otherwise,
+           the behavior is undefined.  A value of floating-point type can
+           also be explicitly converted to an enumeration type.  The
+           resulting value is the same as converting the original value to
+           the underlying type of the enumeration ([conv.fpint]), and
+           subsequently to the enumeration type." */
+        entity_index e = enumeration_of(to);
+        if (!e)
+            return not_supported(at, "dcl.enum");
+        analysis_result r = operand_value(at, m);
+        if (r != analysis_result::well_formed)
+            return r;
+        if (m.type.unqualified() == to.unqualified())
+            return analysis_result::well_formed;
+        if (type_table[m.type.unqualified()].kind == type_kind::enumeration &&
+            !enumeration_as_underlying(m))
+            return not_supported(at, "dcl.enum");
+        if (!is_arithmetic(m.type)) {
+            if (fundamental_of(m.type) == fundamental_type::none &&
+                !is_pointer(m.type))
+                return not_supported(at, "expr.cast");
+            return ill_formed(at, cast_rule, "expr.cast");
+        }
+        convert_arithmetic(m, entity_table[e].underlying);
+        m.type = qualified_type::make(to.unqualified(), cv_none);
+        converted(m, conversion_kind::integral);
+        return analysis_result::well_formed;
+    }
     if (target.kind != type_kind::fundamental &&
         target.kind != type_kind::pointer)
         return not_supported(at, "expr.cast");
     analysis_result r = operand_value(at, m);
     if (r != analysis_result::well_formed)
         return r;
+    /* [expr.static.cast]/9: "A value of a scoped enumeration type can be
+       explicitly converted to an integral type"; and to a floating-point
+       type; an unscoped one converts so implicitly */
+    if (target.kind == type_kind::fundamental &&
+        type_table[m.type.unqualified()].kind == type_kind::enumeration) {
+        if (!enumeration_as_underlying(m))
+            return not_supported(at, "dcl.enum");
+    }
     if (is_arithmetic(to) && is_arithmetic(m.type)) {
         convert_arithmetic(m, target.fundamental);
         return analysis_result::well_formed;

@@ -363,9 +363,17 @@ ast_qualified_type c_lowering::type(qualified_type t, token_index at)
     case type_kind::class_type:
         made = class_type(r.entity, at);
         break;
-    case type_kind::enumeration:
-        fail("an enumeration type", at);
-        return ast_builder_type_basic(AST_TYPE_INT);
+    case type_kind::enumeration: {
+        /* [dcl.enum]/8: an enumeration is its underlying type's values,
+           and has its representation ([basic.fundamental]/10) */
+        fundamental_type u = analysis.entity_table[r.entity].underlying;
+        if (u == fundamental_type::none) {
+            fail("an incomplete enumeration type", at);
+            return ast_builder_type_basic(AST_TYPE_INT);
+        }
+        made = fundamental(u, at);
+        break;
+    }
     default:
         fail("a pointer to member type", at);
         return ast_builder_type_basic(AST_TYPE_INT);
@@ -870,11 +878,14 @@ uint32_t c_lowering::constant(const semantic_node &n)
         return cast(
             ast_builder_integer(c, ast_builder_type_basic(AST_TYPE_INT), 0),
             AST_QUALIFIED_TYPE_UNQUALIFIED(t), AST_CAST_NULL_POINTER);
-    if (r.kind != type_kind::fundamental)
+    fundamental_type f = r.fundamental;
+    if (r.kind == type_kind::enumeration)
+        f = analysis.entity_table[r.entity].underlying;
+    else if (r.kind != type_kind::fundamental)
         return fail("a constant of this type", n.at);
     if (n.evaluation != constness::constant)
         return fail("a constant whose value analysis does not know", n.at);
-    switch (r.fundamental) {
+    switch (f) {
     case fundamental_type::float_:
     case fundamental_type::double_: {
         double d;

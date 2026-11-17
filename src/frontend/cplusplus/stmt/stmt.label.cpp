@@ -182,6 +182,10 @@ analysis_result semantic_analysis::case_label(node_index n, syntax_child value,
     const char *rule = "the constant-expression shall be a converted "
                        "constant expression of the adjusted type of the "
                        "switch condition";
+    /* (a scoped enumeration's switch is on its underlying type: the
+       condition's) */
+    if (!promote_enumeration(m))
+        enumeration_as_underlying(m);
     if (!is_integral(m.type)) {
         if (fundamental_of(m.type) == fundamental_type::none &&
             !is_pointer(m.type))
