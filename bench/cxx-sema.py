@@ -52,6 +52,12 @@ them (work/testsuites), and src/test/cxx/sema/{spec,gram}/*.cpp.  For each
            -O0 compiles the file and each must be one its object defines
            (llvm-nm): verified, refuted (a failure), or not emitted (clang
            leaves out an unused entity with internal linkage).
+  lowering on the same runs, cxxsema -S -O0 (the tree lowered to C's AST,
+           C's code generator): its assembly must assemble (clang -cc1as)
+           and the object define exactly the functions and variables
+           clang -O0's does: lowered, refuted (a failure), or not lowered
+           with the reason (a declaration not well-formed for us, or the
+           first construct lowering has no rule for), most frequent first.
 
 The summary ends with the subclauses most declarations are unsupported for:
 the work list.  clang's side is the cache of bench/cxx-parse.py
@@ -276,14 +282,9 @@ def selftest(clang):
     return 0
 
 
-def check_symbols(test, opts, clang, cxxsema):
-    """cxxsema -symbols against the symbols clang -O0's object defines:
-    a Counter, and the refuted"""
+def clang_defined(test, opts, clang):
+    """the symbols clang -O0's object of the test defines (cached), or None"""
     cwd, name = os.path.dirname(test), os.path.basename(test)
-    counts, refuted = collections.Counter(), []
-    ours = cxxparse.run([cxxsema, '-symbols'] + opts + [name], cwd)
-    if ours[0] not in (0, 1) or not ours[1].strip():
-        return counts, refuted
 
     def compile_and_list():
         with tempfile.TemporaryDirectory() as d:
@@ -297,7 +298,18 @@ def check_symbols(test, opts, clang, cxxsema):
             if listed[0] != 0:
                 return None
             return listed[1].split()
-    defined = cxxparse.cached('symbols' + ''.join(TARGET), clang, test, opts, compile_and_list)
+    return cxxparse.cached('symbols' + ''.join(TARGET), clang, test, opts, compile_and_list)
+
+
+def check_symbols(test, opts, clang, cxxsema):
+    """cxxsema -symbols against the symbols clang -O0's object defines:
+    a Counter, and the refuted"""
+    cwd, name = os.path.dirname(test), os.path.basename(test)
+    counts, refuted = collections.Counter(), []
+    ours = cxxparse.run([cxxsema, '-symbols'] + opts + [name], cwd)
+    if ours[0] not in (0, 1) or not ours[1].strip():
+        return counts, refuted
+    defined = clang_defined(test, opts, clang)
     if defined is None:
         return counts, refuted
     defined = set(defined)
@@ -316,6 +328,60 @@ def check_symbols(test, opts, clang, cxxsema):
         else:
             counts['refuted'] += 1
             refuted.append(f'{symbol} is not a symbol clang -O0 defines')
+    return counts, refuted
+
+
+NOT_LOWERED = re.compile(r'^cxxsema: not lowered: (.*?) at ', re.M)
+
+
+def object_symbols(nm, obj, cwd):
+    """the functions and variables an object defines, without the
+    assembler's local labels and mapping symbols"""
+    listed = cxxparse.run([nm, '--defined-only', '--just-symbol-name', obj], cwd)
+    if listed[0] != 0:
+        return None
+    return {s for s in listed[1].split() if not s.startswith(('$', '.L'))}
+
+
+def check_lowering(test, opts, clang, cxxsema):
+    """cxxsema -S -O0 on a file clang compiles: the assembly assembles and
+    the object defines what clang -O0's does.  A Counter (lowered, refuted,
+    incomplete: a declaration not well-formed for us, or the reason
+    lowering stopped), and the refuted"""
+    cwd, name = os.path.dirname(test), os.path.basename(test)
+    counts, refuted = collections.Counter(), []
+    ours = cxxparse.run([cxxsema, '-S', '-O0'] + opts + [name], cwd, timeout=60)
+    if ours[0] not in (0, 1):
+        refuted.append(f'cxxsema -S: status {ours[0]}: {ours[2].strip().splitlines()[-1:]}')
+        counts['refuted'] += 1
+        return counts, refuted
+    if ours[0] == 1:
+        m = NOT_LOWERED.search(ours[2])
+        counts['not: ' + (m.group(1) if m else 'an error of our parser or analysis')] += 1
+        return counts, refuted
+    defined = clang_defined(test, opts, clang)
+    if defined is None:
+        return counts, refuted
+    with tempfile.TemporaryDirectory() as d:
+        asm, obj = os.path.join(d, 'out.s'), os.path.join(d, 'out.o')
+        with open(asm, 'w') as f:
+            f.write(ours[1])
+        r = cxxparse.run([clang, '-cc1as', '-triple', 'aarch64-unknown-linux-gnu', '-filetype', 'obj',
+                          '-o', obj, asm], d, timeout=60)
+        if r[0] != 0:
+            counts['refuted'] += 1
+            refuted.append(f'the assembly of cxxsema -S does not assemble: {r[2].strip().splitlines()[:1]}')
+            return counts, refuted
+        made = object_symbols(os.path.join(os.path.dirname(clang), 'llvm-nm'), obj, d)
+    if made is None:
+        return counts, refuted
+    expected = {s for s in defined if not s.startswith(('$', '.L'))}
+    if made != expected:
+        counts['refuted'] += 1
+        refuted.append(f'cxxsema -S defines {sorted(made - expected)[:3]} clang -O0 does not, '
+                       f'not {sorted(expected - made)[:3]}')
+        return counts, refuted
+    counts['lowered'] += 1
     return counts, refuted
 
 
@@ -396,6 +462,9 @@ def check(test, opts, clang, cxxsema):
         res['symbols'], refuted = check_symbols(test, opts, clang, cxxsema)
         for r in refuted:
             res['fail'].append(('symbols', r))
+        res['lowering'], refuted = check_lowering(test, opts, clang, cxxsema)
+        for r in refuted:
+            res['fail'].append(('lower', r))
     if rejected:
         res['fail'].append(('verdict', f'ill-formed for us, accepted by clang: line {rejected[0]}'
                                        f' ({len(rejected)} declarations)'))
@@ -441,7 +510,7 @@ def main():
     with concurrent.futures.ThreadPoolExecutor(a.j) as ex:
         results = list(ex.map(lambda j: check(j[0], j[1], clang, cxxsema), jobs))
     verdict, unsupported, types = collections.Counter(), collections.Counter(), collections.Counter()
-    declared, symbols = collections.Counter(), collections.Counter()
+    declared, symbols, lowering = collections.Counter(), collections.Counter(), collections.Counter()
     crashes = failures = skipped = 0
     seen = set()
     for r in results:
@@ -451,6 +520,7 @@ def main():
         types.update(r['types'])
         declared.update(r.get('declarators', {}))
         symbols.update(r.get('symbols', {}))
+        lowering.update(r.get('lowering', {}))
         kinds = {k for k, _ in r['fail']}
         crashes += 'crash' in kinds
         failures += bool(kinds)
@@ -473,6 +543,10 @@ def main():
           f'{types["value_refuted"]} refuted')
     print(f'symbols: {symbols["verified"]} verified, {symbols["refuted"]} refuted, '
           f'{symbols["not_emitted"]} not emitted by clang, {symbols["unsupported"]} unsupported')
+    reasons = sorted(((n, k[5:]) for k, n in lowering.items() if k.startswith('not: ')), reverse=True)
+    print(f'lowering: {lowering["lowered"]} files lowered as clang -O0 compiles them, '
+          f'{lowering["refuted"]} refuted, {sum(n for n, _ in reasons)} not lowered'
+          + (': ' + ', '.join(f'{why} {n}' for n, why in reasons[:a.unsupported]) if reasons else ''))
     if unsupported and a.unsupported:
         top = ', '.join(f'[{label}] {n}' for label, n in unsupported.most_common(a.unsupported))
         print(f'unsupported by subclause ({len(unsupported)}): {top}')

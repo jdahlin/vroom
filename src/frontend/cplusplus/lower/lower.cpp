@@ -956,6 +956,11 @@ uint32_t c_lowering::declaration(const semantic_node &n)
     }
     if (!x.automatic) {
         ast_builder_symbol_flags_add(c, s, AST_SYMBOL_FLAG_DEFINED);
+        /* [impl.clang]: a static local is emitted with its function,
+           referred to or not; an inline function's only where the
+           function is (not yet: its function's COMDAT group) */
+        if (!analysis.entity_table[enclosing_function(e)].inline_)
+            ast_builder_symbol_keep(c, s);
         ast_builder_symbol_body(c, s, init);
         return ast_builder_node(c, AST_NODE_EXPRESSION,
                                 ast_builder_type_basic(AST_TYPE_VOID), 0, 0, 0,

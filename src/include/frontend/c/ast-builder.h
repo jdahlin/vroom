@@ -65,6 +65,9 @@ uint32_t ast_builder_symbol(cc *c, int kind, const char *name, size_t length,
                             uint32_t depth);
 void ast_builder_symbol_assembler_name(cc *c, uint32_t s, const char *name,
                                        size_t length);
+/* emitted though nothing refers to it (attribute used); a static local
+   is then a top-level symbol too */
+void ast_builder_symbol_keep(cc *c, uint32_t s);
 void ast_builder_symbol_flags_add(cc *c, uint32_t s, uint32_t flags);
 /* a function's body block, or a variable's initializer */
 void ast_builder_symbol_body(cc *c, uint32_t s, uint32_t node);

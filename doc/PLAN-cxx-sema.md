@@ -544,9 +544,16 @@ libstdc++ and json), since sema cannot analyse a declaration kept as tokens.
   conversions, data and linkage) with it and with clang++ -O2, runs both
   under qemu: 16/16 runs as clang's at -O0 to -O3, and the -O0 objects
   define clang -O0's symbols with its bindings (in `ci/premerge.sh`).
-  `cxx-sema.py` otherwise unchanged (C3, C4, 0 tree problems).  Next: a
-  lowering claim over the clang tests (which well-formed files lower,
-  assemble and define clang's symbols), then S1e, the driver.
+  `cxx-sema.py` otherwise unchanged (C3, C4, 0 tree problems).
+  The lowering claim: on every run clang accepts, `cxx-sema.py` has
+  `cxxsema -S -O0` assemble (clang -cc1as) and checks that the object
+  defines exactly clang -O0's functions and variables: 65 files lowered,
+  0 refuted; 1340 not lowered, by reason: a declaration not well-formed
+  for us 1307, an error of our parser or analysis 30, dynamic
+  initialization 3.  A static local is emitted with its function whether
+  referred to or not, as clang does (`ast_builder_symbol_keep`).  What
+  lowers is bounded by S2-S4 (namespaces, classes, templates), not by the
+  lowering.  Next: S1e, the driver.
 
 ### S2. Names and entities in full
 

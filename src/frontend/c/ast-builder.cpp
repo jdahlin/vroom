@@ -104,6 +104,24 @@ uint32_t ast_builder_symbol(cc *c, int kind, const char *name, size_t length,
     return s;
 }
 
+/* the symbol's attribute record, made at its first use */
+static attrs *ast_builder_attributes(cc *c, uint32_t s)
+{
+    if (!c->syms[s].attrs) {
+        c->syms[s].attrs = c->nattr++;
+        memset(&c->attr[c->syms[s].attrs], 0, sizeof(attrs));
+    }
+    return &c->attr[c->syms[s].attrs];
+}
+
+void ast_builder_symbol_keep(cc *c, uint32_t s)
+{
+    ast_builder_attributes(c, s)->used = 1;
+    /* (codegen's roots are the top-level symbols, a block's static too) */
+    if (c->syms[s].depth)
+        ast_builder_toplevel(c, s);
+}
+
 void ast_builder_symbol_assembler_name(cc *c, uint32_t s, const char *name,
                                        size_t length)
 {
@@ -114,11 +132,7 @@ void ast_builder_symbol_assembler_name(cc *c, uint32_t s, const char *name,
     keep[length] = 0;
     c->strs[i] = VCC_LITERAL(cstr, keep, (uint32_t)length + 1, 1,
                              (uint8_t)LEX_TOKEN_STRING);
-    if (!c->syms[s].attrs) {
-        c->syms[s].attrs = c->nattr++;
-        memset(&c->attr[c->syms[s].attrs], 0, sizeof(attrs));
-    }
-    c->attr[c->syms[s].attrs].asmname = i + 1;
+    ast_builder_attributes(c, s)->asmname = i + 1;
 }
 
 void ast_builder_symbol_flags_add(cc *c, uint32_t s, uint32_t flags)
