@@ -28,6 +28,8 @@ void ast_builder_close(cc *c)
     cc_translation_unit_close(c);
 }
 
+static uint32_t ast_builder_identifier(cc *c, const char *name, size_t length);
+
 /* ---- types ---- */
 
 ast_qualified_type ast_builder_type_basic(int kind)
@@ -74,6 +76,40 @@ ast_qualified_type ast_builder_type_ptrdiff(cc *c)
 uint64_t ast_builder_type_size(cc *c, ast_qualified_type t)
 {
     return cc_type_size(c, t);
+}
+
+ast_qualified_type ast_builder_type_record(cc *c, const char *name,
+                                           size_t length)
+{
+    uint32_t ti = cc_tag_new(c, AST_TYPE_STRUCT,
+                             ast_builder_identifier(c, name, length), 0);
+
+    return AST_QUALIFIED_TYPE(c->tags[ti].ty, 0);
+}
+
+void ast_builder_type_record_complete(cc *c, ast_qualified_type record,
+                                      const ast_qualified_type *fields,
+                                      const char *const *names,
+                                      const size_t *lengths,
+                                      const uint32_t *aligned, uint32_t count)
+{
+    tag *r = &c->tags[AST_TYPE(c, record)->aux];
+
+    r->nfield = count;
+    r->f = (field *)(cc_heap_allocate(c, (count ? count : 1) * sizeof(field)));
+    memset(r->f, 0, (count ? count : 1) * sizeof(field));
+    for (uint32_t i = 0; i < count; i++) {
+        r->f[i].ty = fields[i];
+        r->f[i].name = ast_builder_identifier(c, names[i], lengths[i]);
+    }
+    r->flags |= AST_RECORD_FLAG_COMPLETE;
+    cc_layout_record(c, r, aligned, NULL);
+}
+
+uint64_t ast_builder_type_record_offset(cc *c, ast_qualified_type record,
+                                        uint32_t field)
+{
+    return c->tags[AST_TYPE(c, record)->aux].f[field].off / 8;
 }
 
 /* ---- symbols ---- */
@@ -162,6 +198,20 @@ uint32_t ast_builder_node(cc *c, int op, ast_qualified_type t, uint32_t a,
     c->nodes[n].c = c_;
     c->nodes[n].aux = aux;
     c->nodes[n].flags = flags;
+    return n;
+}
+
+uint32_t ast_builder_member(cc *c, uint32_t object, uint32_t field,
+                            ast_qualified_type t)
+{
+    uint32_t n = cc_node_new(c, AST_NODE_MEMBER, t, 0);
+    ast_qualified_type record =
+        AST_QUALIFIED_TYPE_UNQUALIFIED(c->nodes[object].ty);
+
+    c->nodes[n].a = object;
+    c->nodes[n].b = AST_TYPE(c, record)->aux;
+    c->nodes[n].c = field;
+    c->nodes[n].flags = c->nodes[object].flags & AST_NODE_FLAG_LVALUE;
     return n;
 }
 

@@ -41,6 +41,9 @@ class c_lowering
         symbols.resize(analysis.entity_table.size());
         for (uint32_t &s : symbols)
             s = 0;
+        records.resize(analysis.entity_table.size());
+        for (ast_qualified_type &r : records)
+            r = 0;
     }
 
     bool translation_unit();
@@ -54,6 +57,8 @@ class c_lowering
     int target;
     /* the C symbol of each entity, 0 until made */
     owned_array<uint32_t> symbols;
+    /* the C struct of each class, 0 until made */
+    owned_array<ast_qualified_type> records;
     /* the labels of the function being lowered: identifier, C label */
     struct label_record {
         uint32_t identifier = 0, label = 0;
@@ -86,7 +91,10 @@ class c_lowering
     /* types and symbols */
     ast_qualified_type type(qualified_type t, token_index at);
     ast_qualified_type fundamental(fundamental_type f, token_index at);
+    ast_qualified_type class_type(entity_index e, token_index at);
+    ast_qualified_type entity_type(entity_index e, token_index at);
     bool is_reference(qualified_type t) const;
+    bool without_linkage(qualified_type t) const;
     entity_index enclosing_function(entity_index e) const;
     uint32_t symbol(entity_index e, token_index at);
     void spelling(entity_index e, owned_buffer &out);
@@ -203,6 +211,38 @@ bool c_lowering::is_reference(qualified_type t) const
     return k == type_kind::lvalue_reference || k == type_kind::rvalue_reference;
 }
 
+/* whether t is made from a class with no linkage (an unnamed class no
+   typedef names, [basic.link]/4) */
+bool c_lowering::without_linkage(qualified_type t) const
+{
+    for (;;) {
+        const struct type &r = record(t);
+        switch (r.kind) {
+        case type_kind::class_type: {
+            const entity &x = analysis.entity_table[r.entity];
+            return !x.name && !x.linkage_name;
+        }
+        case type_kind::pointer:
+        case type_kind::lvalue_reference:
+        case type_kind::rvalue_reference:
+        case type_kind::array:
+            t = r.operand;
+            continue;
+        case type_kind::function: {
+            const qualified_type *p =
+                analysis.type_table.parameters(t.unqualified());
+            for (uint32_t i = 0; i < r.parameter_count; i++)
+                if (without_linkage(p[i]))
+                    return true;
+            t = r.operand;
+            continue;
+        }
+        default:
+            return false;
+        }
+    }
+}
+
 /* the C type of a C++ type; a reference is a pointer to what it refers to */
 ast_qualified_type c_lowering::type(qualified_type t, token_index at)
 {
@@ -233,8 +273,8 @@ ast_qualified_type c_lowering::type(qualified_type t, token_index at)
         break;
     }
     case type_kind::class_type:
-        fail("a class type", at);
-        return ast_builder_type_basic(AST_TYPE_INT);
+        made = class_type(r.entity, at);
+        break;
     case type_kind::enumeration:
         fail("an enumeration type", at);
         return ast_builder_type_basic(AST_TYPE_INT);
@@ -246,6 +286,79 @@ ast_qualified_type c_lowering::type(qualified_type t, token_index at)
     if (t.cv())
         made = ast_builder_type_qualified(c, made, static_cast<int>(t.cv()));
     return made;
+}
+
+/* a class as a C struct of its non-static data members, in order: the
+   Itanium layout of the classes analysis has is C's ([abi:layout] for a
+   POD), which is checked against the offsets analysis gave */
+ast_qualified_type c_lowering::class_type(entity_index e, token_index at)
+{
+    if (records[e])
+        return records[e];
+    const entity &x = analysis.entity_table[e];
+    if (x.kind != entity_kind::class_type) {
+        fail("a class whose definition was not analysed", at);
+        return ast_builder_type_basic(AST_TYPE_INT);
+    }
+    owned_buffer name;
+    spelling(e, name);
+    if (!x.name && x.linkage_name) {
+        size_t length = 0;
+        const char *s =
+            tokens.pp.identifier_spelling(x.linkage_name - 1, &length);
+        vbuffer_append(name.get(), s, length);
+    }
+    ast_qualified_type made =
+        ast_builder_type_record(c, name.data(), name.size());
+    records[e] = made;
+    if (!x.size)
+        /* incomplete: a pointer to it is all a program can have */
+        return made;
+    owned_array<ast_qualified_type> fields;
+    owned_array<const char *> names;
+    owned_array<size_t> lengths;
+    owned_array<uint32_t> aligned;
+    for (uint32_t i = 0; i < x.member_count; i++) {
+        entity_index member = analysis.class_members[x.first_member + i];
+        const entity &m = analysis.entity_table[member];
+        fields.append(type(m.type, at));
+        size_t length = 0;
+        names.append(tokens.pp.identifier_spelling(m.name - 1, &length));
+        lengths.append(length);
+        aligned.append(m.alignment);
+    }
+    ast_builder_type_record_complete(c, made, fields.data(), names.data(),
+                                     lengths.data(), aligned.data(),
+                                     x.member_count);
+    for (uint32_t i = 0; i < x.member_count; i++) {
+        entity_index member = analysis.class_members[x.first_member + i];
+        if (ast_builder_type_record_offset(c, made, i) !=
+            analysis.entity_table[member].offset)
+            fail("a class whose layout is not C's", at);
+    }
+    if (ast_builder_type_size(c, made) != x.size)
+        fail("a class whose size is not C's", at);
+    return made;
+}
+
+/* the C type of a function or variable: a non-static member function has
+   the object's address first ([class.this]) */
+ast_qualified_type c_lowering::entity_type(entity_index e, token_index at)
+{
+    const entity &x = analysis.entity_table[e];
+    if (x.kind != entity_kind::function || !x.nonstatic_member)
+        return type(x.type, at);
+    const struct type &f = record(x.type);
+    owned_array<ast_qualified_type> parameters;
+    qualified_type object = qualified_type::make(
+        analysis.entity_table[x.enclosing].type.unqualified(), x.member_cv);
+    parameters.append(ast_builder_type_pointer(c, type(object, at)));
+    const qualified_type *p =
+        analysis.type_table.parameters(x.type.unqualified());
+    for (uint32_t i = 0; i < f.parameter_count; i++)
+        parameters.append(type(p[i], at));
+    return ast_builder_type_function(c, type(f.operand, at), parameters.data(),
+                                     f.parameter_count + 1, f.variadic);
 }
 
 /* ---- symbols -------------------------------------------------------- */
@@ -283,7 +396,9 @@ uint32_t c_lowering::symbol(entity_index e, token_index at)
     const entity &x = analysis.entity_table[e];
     if (x.kind != entity_kind::function && x.kind != entity_kind::variable)
         return fail("an entity that is not a function or variable", at);
-    ast_qualified_type t = type(x.type, at);
+    if (x.kind == entity_kind::variable && x.nonstatic_member)
+        return fail("a non-static data member as an object", at);
+    ast_qualified_type t = entity_type(e, at);
     owned_buffer name;
     uint32_t s = 0;
     if (x.kind == entity_kind::variable && x.automatic) {
@@ -315,6 +430,11 @@ uint32_t c_lowering::symbol(entity_index e, token_index at)
     }
     int storage = AST_STORAGE_NONE;
     if (x.linkage_of_name == linkage::internal)
+        storage = AST_STORAGE_STATIC;
+    /* [impl.clang]: an entity whose type has no linkage (an unnamed
+       class's) cannot be named in another translation unit, so its symbol
+       is local, its name unmangled as an external one's */
+    else if (x.defined && without_linkage(x.type))
         storage = AST_STORAGE_STATIC;
     else if (!x.defined && kind == AST_SYMBOL_VARIABLE)
         storage = AST_STORAGE_EXTERN;
@@ -698,6 +818,14 @@ uint32_t c_lowering::call(const semantic_node &n)
         callee = cast(callee, ast_builder_type_pointer(c, type_of(callee)),
                       AST_CAST_FUNCTION_DECAY);
     owned_array<uint32_t> arguments;
+    if (n.b) {
+        /* the implicit object argument: the object's address, the
+           function's first parameter */
+        uint32_t object = expression(n.b);
+        if (!object)
+            return 0;
+        arguments.append(object);
+    }
     const uint32_t *items = analysis.semantics.items(n.first);
     for (uint32_t i = 0; i < n.count; i++) {
         uint32_t a = expression(items[i]);
@@ -707,9 +835,10 @@ uint32_t c_lowering::call(const semantic_node &n)
     }
     qualified_type result = record(function_type).operand;
     ast_qualified_type t = AST_QUALIFIED_TYPE_UNQUALIFIED(type(result, n.at));
+    uint32_t count = static_cast<uint32_t>(arguments.size());
     uint32_t made =
         make(AST_NODE_CALL, t, callee,
-             ast_builder_list(c, arguments.data(), n.count), n.count, 0, 0);
+             ast_builder_list(c, arguments.data(), count), count, 0, 0);
     if (!is_reference(result))
         return made;
     return make(AST_NODE_DEREFERENCE, type(n.type, n.at), made, 0, 0, 0,
@@ -747,6 +876,19 @@ uint32_t c_lowering::bind_reference(const semantic_node &n)
 /* [dcl.init.aggr]: an array's elements in order, the rest zero */
 uint32_t c_lowering::initializer_list(const semantic_node &n)
 {
+    if (record(n.type).kind == type_kind::class_type) {
+        /* a struct's initializer: a value per field, in order */
+        owned_array<uint32_t> values;
+        const uint32_t *items = analysis.semantics.items(n.first);
+        for (uint32_t i = 0; i < n.count; i++) {
+            uint32_t e = expression(items[i]);
+            if (!e)
+                return 0;
+            values.append(e);
+        }
+        return make(AST_NODE_INITIALIZER, type(n.type, n.at), 0,
+                    ast_builder_list(c, values.data(), n.count), n.count, 0, 0);
+    }
     owned_array<uint32_t> runs;
     const uint32_t *items = analysis.semantics.items(n.first);
     for (uint32_t i = 0; i < n.count; i++) {
@@ -902,6 +1044,14 @@ uint32_t c_lowering::expression(uint32_t index)
             return 0;
         return make(AST_NODE_INDEX, type(n.type, n.at), a, to_ptrdiff(b), 0, 0,
                     AST_NODE_FLAG_LVALUE);
+    }
+    case semantic_kind::member: {
+        /* [expr.ref]/6.2: the member subobject */
+        uint32_t object = expression(n.a);
+        if (!object)
+            return 0;
+        return ast_builder_member(c, object, analysis.entity_table[n.b].field,
+                                  type(n.type, n.at));
     }
     case semantic_kind::zero:
         return make(AST_NODE_ZERO, type(n.type, n.at), 0, 0, 0, 0, 0);
@@ -1292,6 +1442,15 @@ bool c_lowering::translation_unit()
             if (!variable_definition(d.entity))
                 return false;
         }
+    }
+    /* the member functions defined, in the order of their definitions */
+    for (const semantic_analysis::definition_record &d : analysis.definitions) {
+        const entity &x = analysis.entity_table[d.entity];
+        if (x.kind != entity_kind::function || !x.enclosing ||
+            analysis.entity_table[x.enclosing].kind != entity_kind::class_type)
+            continue;
+        if (!function_definition(d.entity))
+            return false;
     }
     return !failure.what;
 }

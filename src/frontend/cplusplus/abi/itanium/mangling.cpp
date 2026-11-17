@@ -61,6 +61,9 @@ class itanium_mangler
     bool source_name(uint32_t identifier);
     void number(uint64_t n);
     bool local_name(entity_index e, entity_index function);
+    bool nested_name(entity_index e);
+    bool prefix(entity_index scope);
+    bool class_enum_type(qualified_type t);
     void discriminator(uint64_t n);
     bool bare_function_type(qualified_type t);
     bool type(qualified_type t);
@@ -143,21 +146,90 @@ bool itanium_mangler::encoding(entity_index e)
 /*
  * [abi:mangle.name]:
  *
- *     <name> ::= <unscoped-name>
+ *     <name> ::= <nested-name>
+ *            ::= <unscoped-name>
  *            ::= <local-name>
  *
- * Only these two: S1 has no namespace, class or template scope.  An entity
- * of a function's block scope has a <local-name> ([abi:mangling-scope]).
+ * No namespace or template scope yet.  A member of a class has a
+ * <nested-name>; an entity of a function's block scope has a <local-name>
+ * ([abi:mangling-scope]).
  */
 bool itanium_mangler::name(entity_index e)
 {
     const entities &table = analysis.entity_table;
     if (table[e].enclosing == 0)
         return unscoped_name(e);
+    if (table[table[e].enclosing].kind == entity_kind::class_type)
+        return nested_name(e);
     entity_index function = enclosing_function(table, e);
     if (!function)
         return false;
     return local_name(e, function);
+}
+
+/*
+ * [abi:mangle.name]:
+ *
+ *     <nested-name> ::= N [<CV-qualifiers>] [<ref-qualifier>] <prefix> <unqualified-name> E
+ *
+ * The CV-qualifiers are a non-static member function's (the ones of its
+ * declarator, which qualify `this`); there is no ref-qualifier yet.
+ */
+bool itanium_mangler::nested_name(entity_index e)
+{
+    const entity &x = analysis.entity_table[e];
+    text("N");
+    if (x.kind == entity_kind::function && x.nonstatic_member) {
+        if (x.member_cv & cv_volatile)
+            text("V");
+        if (x.member_cv & cv_const)
+            text("K");
+    }
+    if (!prefix(x.enclosing))
+        return false;
+    if (!unqualified_name(e))
+        return false;
+    text("E");
+    return true;
+}
+
+/*
+ * [abi:mangle.name]:
+ *
+ *     <prefix> ::= <unqualified-name>
+ *     <prefix> ::= <substitution>
+ *
+ * A class of the global namespace.  [abi:mangling-compression]: a prefix
+ * is a substitution candidate, the class's type's: the class named again
+ * as a prefix or a type is the same candidate.
+ */
+bool itanium_mangler::prefix(entity_index scope)
+{
+    const entity &c = analysis.entity_table[scope];
+    if (c.kind != entity_kind::class_type || c.enclosing)
+        return false;
+    if (substitution(c.type))
+        return true;
+    if (!unqualified_name(scope))
+        return false;
+    candidates.append(c.type);
+    return true;
+}
+
+/*
+ * [abi:mangling.named]:
+ *
+ *     <class-enum-type> ::= <name>
+ *
+ * A class of the global namespace: its unscoped name.
+ */
+bool itanium_mangler::class_enum_type(qualified_type t)
+{
+    entity_index c = record(t).entity;
+    const entity &x = analysis.entity_table[c];
+    if (x.kind != entity_kind::class_type || x.enclosing)
+        return false;
+    return unscoped_name(c);
 }
 
 /*
@@ -185,6 +257,9 @@ bool itanium_mangler::unqualified_name(entity_index e)
     const entity &x = analysis.entity_table[e];
     if (x.linkage_of_name == linkage::internal && x.enclosing == 0)
         text("L");
+    /* [dcl.typedef]/9: an unnamed class's name for linkage purposes */
+    if (!x.name && x.kind == entity_kind::class_type)
+        return source_name(x.linkage_name);
     return source_name(x.name);
 }
 
@@ -322,6 +397,7 @@ bool itanium_mangler::bare_function_type(qualified_type t)
  *     <type> ::= <builtin-type>
  *            ::= <qualified-type>
  *            ::= <function-type>
+ *            ::= <class-enum-type>
  *            ::= <array-type>
  *            ::= P <type>
  *            ::= R <type>
@@ -357,6 +433,8 @@ bool itanium_mangler::type(qualified_type t)
         done = function_type(t);
     else if (r.kind == type_kind::array)
         done = array_type(t);
+    else if (r.kind == type_kind::class_type)
+        done = class_enum_type(t);
     if (!done)
         return false;
     candidates.append(t);

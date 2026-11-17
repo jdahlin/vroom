@@ -237,6 +237,25 @@ analysis_result semantic_analysis::function_body(node_index definition,
        ([abi:mangling-scope]) */
     entity_table[parameters].enclosing = f;
     owned_array<uint32_t> parameter_entities;
+    function_state.function = f;
+    function_state.this_entity = 0;
+    if (entity_table[f].nonstatic_member) {
+        /* [class.this]/1: "The type of this in a member function whose
+           type has a cv-qualifier-seq cv and whose class is X is "pointer
+           to cv X"."  An unnamed variable lowering makes the first
+           parameter */
+        entity_index c = entity_table[f].enclosing;
+        qualified_type object = qualified_type::make(
+            entity_table[c].type.unqualified(), entity_table[f].member_cv);
+        entity_index t =
+            entity_table.make(entity_kind::variable, 0, parameters);
+        entity_table[t].type =
+            qualified_type::make(type_table.pointer_to(object), cv_none);
+        entity_table[t].defined = true;
+        entity_table[t].automatic = true;
+        parameter_entities.append(t);
+        function_state.this_entity = t;
+    }
     for (const parameter_meaning &parameter : function_parameters) {
         parameter_entities.append(0);
         if (!parameter.id)
@@ -309,6 +328,8 @@ analysis_result semantic_analysis::function_body(node_index definition,
     claim_place = 0;
     claim_scope = 0;
     function_state.active = false;
+    function_state.function = 0;
+    function_state.this_entity = 0;
     return result;
 }
 

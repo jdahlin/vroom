@@ -48,7 +48,7 @@ struct tree_checker {
     static bool is_expression(semantic_kind k)
     {
         return (k >= semantic_kind::constant &&
-                k <= semantic_kind::subscript) ||
+                k <= semantic_kind::bound_member_function) ||
                k == semantic_kind::condition_declaration;
     }
     static bool is_initializer(semantic_kind k)
@@ -213,7 +213,19 @@ struct tree_checker {
             break;
         case semantic_kind::call:
             child(n, node.a, tree_sort::expression, false, "function");
+            child(n, node.b, tree_sort::expression, true, "object address");
+            if (node.b)
+                prvalue(n, node.b, "object address");
             list(n, tree_sort::initializer, "argument");
+            break;
+        case semantic_kind::member:
+            child(n, node.a, tree_sort::expression, false, "object");
+            if (!node.b)
+                problem(n, "no member");
+            break;
+        case semantic_kind::bound_member_function:
+            /* only a call's function, which the call replaces */
+            problem(n, "a bound member function outside a call");
             break;
         case semantic_kind::initializer_list:
             list(n, tree_sort::initializer, "element");

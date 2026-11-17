@@ -42,6 +42,8 @@ const char *semantic_kind_name(semantic_kind kind)
         "comma",
         "call",
         "subscript",
+        "member",
+        "bound_member_function",
         "zero",
         "initializer_list",
         "bind_reference",

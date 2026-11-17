@@ -160,4 +160,71 @@ VPRIV bool only_gnu_attributes(const syntax_tree &tree, node_index n)
     return true;
 }
 
+/* ---- semantic analysis ---------------------------------------------- */
+
+/*
+ * The attributes of a gnu-attribute-specifier after a declarator-id.  Only
+ * one has rules yet, GCC manual 6.34.1 Common Variable Attributes:
+ * "aligned (alignment): The aligned attribute specifies a minimum
+ * alignment for the variable or structure field, measured in bytes. When
+ * specified, alignment must be an integer constant power of 2.  Specifying
+ * no alignment argument implies the ideal alignment for the target." (the
+ * target's largest, 16 on aarch64 and x86-64, as clang's).  The others are
+ * unsupported with ext.gnu.
+ */
+analysis_result
+semantic_analysis::gnu_attribute_specifier(node_index n, declarator_meaning &m)
+{
+    owned_array<node_index> attributes;
+    owned_array<node_index> work;
+    work.append(n);
+    while (!work.empty()) {
+        node_index next = work.back();
+        work.resize(work.size() - 1);
+        for (uint32_t i = 0; i < tree[next].child_count; i++) {
+            syntax_child c = tree.children(next)[i];
+            if (syntax_is(tree, c, syntax_kind::gnu_attribute))
+                attributes.append(c.index());
+            else if (syntax_is(tree, c, syntax_kind::gnu_attribute_list))
+                work.append(c.index());
+            else if (!c.is_token())
+                return not_supported(n, "ext.gnu");
+        }
+    }
+    for (node_index a : attributes) {
+        const syntax_node &node = tree[a];
+        const syntax_child *children = tree.children(a);
+        if (!node.child_count || !children[0].is_token())
+            return not_supported(a, "ext.gnu");
+        owned_buffer spelling;
+        tokens.spelling(children[0].index(), spelling.get());
+        bool aligned =
+            (spelling.size() == 7 && !memcmp(spelling.data(), "aligned", 7)) ||
+            (spelling.size() == 11 &&
+             !memcmp(spelling.data(), "__aligned__", 11));
+        if (!aligned)
+            return not_supported(a, "ext.gnu");
+        uint64_t alignment = 16;
+        if (node.child_count == 4) {
+            expression_meaning e;
+            analysis_result r = expression(children[2], e);
+            if (r != analysis_result::well_formed)
+                return r;
+            if (!is_integral(e.type) || e.category != value_category::prvalue ||
+                e.evaluation != constness::constant)
+                return not_supported(a, "ext.gnu");
+            alignment = e.value;
+            if (!alignment || (alignment & (alignment - 1)) ||
+                alignment > (1u << 28))
+                /* clang: "requested alignment is not a power of 2" */
+                return not_supported(a, "ext.gnu");
+        } else if (node.child_count != 1 && node.child_count != 3) {
+            return not_supported(a, "ext.gnu");
+        }
+        if (alignment > m.aligned)
+            m.aligned = alignment;
+    }
+    return analysis_result::well_formed;
+}
+
 } // namespace cplusplus

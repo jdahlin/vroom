@@ -254,6 +254,34 @@ struct entity {
     /* an array of unknown bound whose initializer would give the bound
        ([dcl.array]/7) and was not analysed: its type is not known */
     bool bound_unknown = false;
+    /* a member of a class (enclosing is the class): [class.mem]/3 a
+       non-static data member or a non-static member function, which has
+       a `this` ([class.this]) */
+    bool nonstatic_member = false;
+    /* [class.access]: a member's access (0 public, 1 protected, 2
+       private) */
+    uint8_t access = 0;
+    /* a non-static member function: [class.mfct.non-static]/5 the
+       cv-qualifier-seq of its declarator, which qualifies `this` */
+    uint32_t member_cv = 0;
+    /* a non-static data member: its number among the class's and its
+       offset in bytes ([class.mem]/19, [abi:layout]) */
+    uint32_t field = 0;
+    uint64_t offset = 0;
+    /* a class: its non-static data members, in declaration order, are
+       semantic_analysis::class_members[first_member .. first_member +
+       member_count); its size and alignment once it is complete
+       ([class.mem]/6: "A class is considered a completely-defined object
+       type ... at the closing } of the class-specifier") */
+    uint32_t first_member = 0, member_count = 0;
+    uint64_t size = 0;
+    /* a class: its alignment; a non-static data member: the alignment
+       its aligned attribute asks for, 0 if none ([ext:gnu_attributes]) */
+    uint32_t alignment = 0;
+    /* an unnamed class: [dcl.typedef]/9 "the first typedef-name declared
+       by the declaration to be that class type ... is used to denote the
+       class type ... for linkage purposes only" */
+    uint32_t linkage_name = 0;
 };
 
 /* one declaration of an entity: the syntax node that declares it */
@@ -473,11 +501,19 @@ enum class semantic_kind : uint8_t {
     /* a, b */
     comma,
     /* a: the function lvalue or pointer prvalue; the arguments, each
-       initialized as its parameter, are list[first .. first + count) */
+       initialized as its parameter, are list[first .. first + count); b:
+       for a non-static member function, the object's address, its
+       implicit object argument ([over.match.funcs]/4: `this`), else 0 */
     call,
     /* a: the pointer prvalue, b: the integer prvalue (E1[E2] with the
        operands in that order) */
     subscript,
+    /* [expr.ref]: a: the object (a glvalue of class type), b: the
+       non-static data member; an lvalue if the object is one */
+    member,
+    /* [expr.ref]/6.3.2: a: the object's address (a prvalue), b: the
+       non-static member function; only the postfix-expression of a call */
+    bound_member_function,
     /* ---- initializers ---- */
     /* value- or zero-initialization: a scalar's 0, an array's all zero */
     zero,
@@ -528,7 +564,9 @@ enum class semantic_kind : uint8_t {
        variable's value converted as the condition ([stmt.pre]/6, /7) */
     condition_declaration,
     /* a function definition: a: the outermost block; the parameters'
-       entities (0 for an unnamed one) are list[first .. first + count) */
+       entities (0 for an unnamed one) are list[first .. first + count),
+       a non-static member function's `this` first (an unnamed variable of
+       pointer type, [class.this]/1) */
     function_body,
 };
 
@@ -655,6 +693,8 @@ class semantic_analysis
         entity_index entity = 0;
     };
     owned_array<definition_record> definitions;
+    /* the non-static data members of the classes (entity::first_member) */
+    owned_array<entity_index> class_members;
     /* the syntax tree analysed */
     const syntax_tree &syntax() const
     {
@@ -697,6 +737,10 @@ class semantic_analysis
         bool has_type = false;
         bool typedef_ = false, static_ = false, extern_ = false,
              inline_ = false, constexpr_ = false;
+        /* a class-specifier or elaborated-type-specifier was there: a
+           declaration with no declarator declares the class
+           ([dcl.pre]/5) */
+        bool declares_class = false;
     };
     analysis_result decl_specifier_seq(node_index seq, specified &s,
                                        bool parameter);
@@ -718,6 +762,12 @@ class semantic_analysis
         /* a reference the declarator made, rather than a typedef-name's
            ([dcl.ref]/5 and /6) */
         bool reference_made = false;
+        /* a qualified-id's class: [dcl.meaning]/1 the declarator declares
+           a member of it again (a definition outside the class) */
+        entity_index qualifier = 0;
+        /* [ext:gnu_attributes] the alignment an aligned attribute of the
+           declarator asks for, 0 if none */
+        uint64_t aligned = 0;
     };
     analysis_result declarator(node_index declaration, syntax_child d,
                                qualified_type &type, declarator_meaning &m);
@@ -741,6 +791,10 @@ class semantic_analysis
                               declarator_meaning &m);
     /* [dcl.fct] */
     analysis_result function(node_index parameters, qualified_type &type);
+    /* [ext:gnu_attributes] the attributes of a declarator analysis has
+       rules for: aligned */
+    analysis_result gnu_attribute_specifier(node_index n,
+                                            declarator_meaning &m);
     /* the parameters of the function declarator analysed last: a function
        definition's, with the types they have in its body ([dcl.fct]/5's
        adjustment, top-level cv-qualifiers kept) */
@@ -749,6 +803,12 @@ class semantic_analysis
         qualified_type type;
     };
     owned_array<parameter_meaning> function_parameters;
+    /* the cv-qualifier-seq of the function declarator analysed last
+       ([dcl.fct]/6: only a member function's) */
+    uint32_t function_cv = 0;
+    /* a declarator analysed now may have a cv-qualifier-seq: a member
+       declarator, or one whose declarator-id is a qualified-id */
+    bool in_member_declarator = false;
     analysis_result parameter_declaration(node_index n, qualified_type &type,
                                           bool &unnamed, token_index &id);
     /* cv-qualifiers added to a type: to an array's elements
@@ -786,6 +846,10 @@ class semantic_analysis
     analysis_result literal(token_index t, expression_meaning &m);
     /* [expr.prim.id.unqual] */
     analysis_result id_expression(token_index t, expression_meaning &m);
+    /* [expr.prim.id.qual] */
+    analysis_result qualified_id(node_index n, expression_meaning &m);
+    /* [expr.prim.this] */
+    analysis_result this_pointer(token_index t, expression_meaning &m);
     /* [expr.prim.paren] */
     analysis_result parenthesized(node_index n, expression_meaning &m);
     /* [expr.unary] */
@@ -797,6 +861,8 @@ class semantic_analysis
                               expression_meaning &m);
     /* [expr.post] */
     analysis_result postfix(node_index n, expression_meaning &m);
+    /* [expr.ref]: E1.E2 and E1->E2 */
+    analysis_result member_reference(node_index n, expression_meaning &m);
     /* [expr.cast], [expr.type.conv] */
     analysis_result cast(node_index n, expression_meaning &m);
     /* explicit_conversion's pointer to pointer conversions */
@@ -828,6 +894,11 @@ class semantic_analysis
     analysis_result conditional(node_index n, expression_meaning &m);
     /* [expr.ass] */
     analysis_result assignment(node_index n, expression_meaning &m);
+    /* [expr.ass]/4: = of a class */
+    analysis_result class_assignment(node_index n, preprocessing_op_or_punc op,
+                                     expression_meaning &left,
+                                     expression_meaning &right,
+                                     expression_meaning &m);
     /* [expr.comma] */
     analysis_result comma(node_index n, expression_meaning &m);
     /* a type-id ([dcl.name]) */
@@ -885,6 +956,12 @@ class semantic_analysis
                                     bool list, initialized_value &result);
     analysis_result list_initialization(node_index list, qualified_type &type,
                                         bool direct, initialized_value &result);
+    /* [dcl.init.list]/3 for a class: an aggregate's elements, each from
+       its clause or from an empty list */
+    analysis_result
+    class_list_initialization(node_index list,
+                              const owned_array<syntax_child> &clauses,
+                              qualified_type type, initialized_value &result);
     analysis_result string_initialization(node_index at,
                                           const expression_meaning &string,
                                           qualified_type &type);
@@ -896,6 +973,48 @@ class semantic_analysis
     /* the type's size in bytes ([expr.sizeof]), 0 if not complete */
     uint64_t size_of_type(qualified_type t) const;
     uint64_t alignment_of_type(qualified_type t) const;
+
+    /* ---- classes ([class]) ---- */
+    /* [class.pre]: a class-specifier, the class's type */
+    analysis_result class_specifier(node_index n, type_index &type);
+    analysis_result class_definition(node_index n, type_index &type);
+    /* [dcl.type.elab]: class-key identifier, the class's type */
+    analysis_result elaborated_type_specifier(node_index n, type_index &type);
+    /* [class.mem]: one member-declaration of the class being defined */
+    analysis_result member_declaration(entity_index c, syntax_child n,
+                                       uint8_t access,
+                                       owned_array<node_index> &bodies);
+    analysis_result member_declarator(entity_index c, node_index declaration,
+                                      syntax_child d, const specified &s,
+                                      uint8_t access, bool definition);
+    /* the body of a member function defined in its class, analysed at the
+       end of the class ([class.mem]/6: a complete-class context) */
+    analysis_result member_function_body(entity_index c, node_index definition);
+    /* [expr.ref]: the member e of the object m (a glvalue of class type) */
+    analysis_result member_access(token_index at, entity_index e,
+                                  expression_meaning &m);
+    /* [class.mfct.non-static]/2: a name of a non-static member used in a
+       member function: (*this).name */
+    analysis_result implicit_member_access(token_index at, entity_index e,
+                                           expression_meaning &m);
+    /* [class.access]: whether a member with this access can be named
+       here */
+    bool accessible(entity_index member) const;
+    /* [dcl.init.aggr]/1: whether the class is an aggregate */
+    bool is_aggregate(entity_index c) const;
+    /* the class whose member function is analysed now, 0 if none */
+    entity_index current_class() const;
+    /* [dcl.meaning]/1: a member function of qualifier defined outside its
+       class */
+    analysis_result member_redeclaration(node_index declaration, token_index id,
+                                         entity_index qualifier,
+                                         qualified_type type,
+                                         const specified &s, bool definition);
+    /* the class whose member-specification is analysed, 0 if none, and
+       its layout so far */
+    entity_index defining_class = 0;
+    uint64_t layout_size = 0;
+    uint32_t layout_alignment = 1;
 
     /* the declaration analysed now, for the expressions' records */
     node_index current_declaration = 0;
@@ -947,6 +1066,11 @@ class semantic_analysis
         owned_array<jump_point> initialized;
         owned_array<switch_record> switches;
         owned_array<uint64_t> case_values;
+        /* a non-static member function's `this` ([class.this]): the
+           variable lowering makes its first parameter */
+        entity_index this_entity = 0;
+        /* the function whose body it is */
+        entity_index function = 0;
     } function_state;
     analysis_result function_body(node_index definition, syntax_child compound);
     void collect_labels(syntax_child s);

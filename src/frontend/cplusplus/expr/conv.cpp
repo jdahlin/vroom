@@ -65,7 +65,15 @@ bool semantic_analysis::is_object_pointer(qualified_type t) const
 analysis_result semantic_analysis::operand_value(node_index at,
                                                  expression_meaning &m)
 {
-    (void)at;
+    if (m.node &&
+        semantics[m.node].kind == semantic_kind::bound_member_function)
+        /* [expr.ref]/6.3.2: "The expression can be used only as the
+           left-hand operand of a member function call." */
+        return ill_formed(at,
+                          "a non-static member function named by a class "
+                          "member access can be used only as the left-hand "
+                          "operand of a member function call",
+                          "expr.ref");
     if (m.category == value_category::prvalue)
         return analysis_result::well_formed;
     const struct type record = type_table[m.type.unqualified()];

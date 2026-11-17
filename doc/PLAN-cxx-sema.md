@@ -657,6 +657,18 @@ libstdc++ and json), since sema cannot analyse a declaration kept as tokens.
   nameable so far.
 - Gate: layout, vtable and symbols claims 0 wrong; C5.3 without exceptions;
   run tests.
+- Status (2026-11-17): started.  Classes without bases, constructors or
+  destructors: data members with the Itanium layout (and GNU `aligned`),
+  member functions in and outside the class, `this`, const member
+  functions, static member functions, access, `.`/`->`, aggregate
+  initialization, the trivial copy and assignment, classes by value;
+  mangling of members (`class/class.pre.cpp`, `expr/expr.ref.cpp`; lowered
+  to C structs whose layout is checked against sema's).  Unsupported with
+  their subclause: unions, nested and local classes, bases, constructors,
+  destructors, static data members, reference members, brace elision.
+  `src/test/cxx/run/classes.cpp`; C5.1 848 -> 915 passing, 0 wrong.
+  Next: elaborated-type-specifiers in block and class scope, constructors
+  and destructors, static data members, LLVM's SingleSource/Regression/C++.
 
 ### S5. Conversions by user code, lambdas, the rest of [expr]
 

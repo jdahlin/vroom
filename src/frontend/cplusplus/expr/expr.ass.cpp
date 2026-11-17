@@ -120,6 +120,8 @@ analysis_result semantic_analysis::assignment(node_index n,
     if (r != analysis_result::well_formed)
         return r;
     const struct type record = type_table[left.type.unqualified()];
+    if (record.kind == type_kind::class_type)
+        return class_assignment(n, op, left, right, m);
     if (record.kind != type_kind::fundamental &&
         record.kind != type_kind::pointer)
         return not_supported(n, "expr.ass");
@@ -225,6 +227,66 @@ analysis_result semantic_analysis::assignment(node_index n,
     m.node = expression_node(semantic_kind::assignment, m, children[1].index(),
                              assigned, right.node, static_cast<uint8_t>(op));
     semantics[m.node].computation = computation;
+    return analysis_result::well_formed;
+}
+
+/*
+ * [expr.ass]/4: "If the left operand is of class type, the class shall be
+ * complete.  Assignment to objects of a class is defined by the copy/move
+ * assignment operator ([class.copy.assign], [over.ass])."  The
+ * implicitly-declared copy assignment operator ([class.copy.assign]/2) of
+ * the classes analysis has is trivial ([class.copy.assign]/9): it copies
+ * the object representation; /7: it is defined as deleted if the class has
+ * "a non-static data member of const non-class type (or array thereof)".
+ * Its result is the left operand, an lvalue ([class.copy.assign]/12:
+ * "returns an lvalue reference to the object assigned to").
+ */
+analysis_result semantic_analysis::class_assignment(node_index n,
+                                                    preprocessing_op_or_punc op,
+                                                    expression_meaning &left,
+                                                    expression_meaning &right,
+                                                    expression_meaning &m)
+{
+    if (op != preprocessing_op_or_punc::EQUAL)
+        return not_supported(n, "over.match.oper");
+    entity_index c = type_table[left.type.unqualified()].entity;
+    if (entity_table[c].kind != entity_kind::class_type)
+        return not_supported(n, "class.pre");
+    if (!entity_table[c].size)
+        return ill_formed(n,
+                          "if the left operand is of class type, the class "
+                          "shall be complete",
+                          "expr.ass");
+    if (right.type.unqualified() != left.type.unqualified())
+        return not_supported(n, "over.match.oper");
+    const entity &x = entity_table[c];
+    for (uint32_t i = 0; i < x.member_count; i++)
+        if (cv_of(type_table,
+                  entity_table[class_members[x.first_member + i]].type) &
+            cv_const)
+            return not_supported(n, "class.copy.assign");
+    /* [over.match.viable]: the implicit object parameter of the copy
+       assignment operator, which is not const, binds only to a non-const
+       object; an rvalue binds to it too ([over.match.funcs]/5) */
+    if (left.type.cv() & cv_const)
+        return ill_formed(n,
+                          "the copy assignment operator of a class cannot be "
+                          "called on a const object",
+                          "over.match.viable");
+    if (left.category != value_category::lvalue ||
+        (left.type.cv() & cv_volatile))
+        return not_supported(n, "class.copy.assign");
+    analysis_result r = operand_value(n, right);
+    if (r != analysis_result::well_formed)
+        return r;
+    uint32_t assigned = left.node;
+    m = left;
+    m.evaluation = constness::not_constant;
+    m.entity = 0;
+    m.beyond_integral_constant = true;
+    m.node = expression_node(semantic_kind::assignment, m, tree[n].first_token,
+                             assigned, right.node, static_cast<uint8_t>(op));
+    semantics[m.node].computation = left.type;
     return analysis_result::well_formed;
 }
 

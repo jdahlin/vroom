@@ -262,6 +262,12 @@ analysis_result semantic_analysis::postfix(node_index n, expression_meaning &m)
     }
     if (node.child_count < 2)
         return not_supported(n, "expr.post");
+    if (node.child_count == 3 &&
+        (syntax_is_punctuator(tokens, children[1],
+                              preprocessing_op_or_punc::DOT) ||
+         syntax_is_punctuator(tokens, children[1],
+                              preprocessing_op_or_punc::ARROW)))
+        return member_reference(n, m);
     /* [expr.type.conv]/1: "A simple-type-specifier or typename-specifier
        followed by a parenthesized optional expression-list or by a
        braced-init-list (the initializer) constructs a value of the
@@ -490,8 +496,18 @@ analysis_result semantic_analysis::call(node_index n, expression_meaning &m)
     if (r != analysis_result::well_formed)
         return r;
     qualified_type function_type = f.type;
-    if (type_table[f.type.unqualified()].kind != type_kind::function ||
-        f.category != value_category::lvalue) {
+    /* [expr.call]/2: "For a call to a non-static member function, the
+       postfix expression shall be an implicit ([class.mfct.non-static],
+       [class.static]) or explicit class member access whose id-expression
+       is a function member name" */
+    uint32_t object = 0;
+    entity_index member = 0;
+    if (f.node &&
+        semantics[f.node].kind == semantic_kind::bound_member_function) {
+        object = semantics[f.node].a;
+        member = semantics[f.node].b;
+    } else if (type_table[f.type.unqualified()].kind != type_kind::function ||
+               f.category != value_category::lvalue) {
         r = operand_value(n, f);
         if (r != analysis_result::well_formed)
             return r;
@@ -635,7 +651,20 @@ analysis_result semantic_analysis::call(node_index n, expression_meaning &m)
     /* [expr.const]/5.2: "an invocation of a non-constexpr function": no
        function analysis has a declaration of is constexpr */
     m.evaluation = constness::not_constant;
-    m.node = expression_node(semantic_kind::call, m, node.first_token, f.node);
+    uint32_t callee = f.node;
+    if (member) {
+        /* the member function, as an lvalue of its type; the object's
+           address is its implicit object argument ([over.match.funcs]/4) */
+        expression_meaning named;
+        named.type = function_type;
+        named.category = value_category::lvalue;
+        named.evaluation = constness::constant;
+        named.entity = member;
+        callee = expression_node(semantic_kind::entity, named, node.first_token,
+                                 member);
+    }
+    m.node = expression_node(semantic_kind::call, m, node.first_token, callee,
+                             object);
     semantics[m.node].first =
         semantics.list(argument_nodes.data(), argument_nodes.size());
     semantics[m.node].count = static_cast<uint32_t>(argument_nodes.size());

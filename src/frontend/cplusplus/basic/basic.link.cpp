@@ -88,6 +88,10 @@ analysis_result semantic_analysis::declare(node_index declaration,
     uint32_t name = tokens.identifier(id);
     entity_index scope = current_scope;
     entity_index prior = entity_table.find(scope, name);
+    /* a variable or function with a class's name hides it
+       ([basic.scope.hiding]/2) */
+    if (prior && entity_table[prior].kind == entity_kind::class_type)
+        return not_supported(declaration, "basic.scope.hiding");
     if (scope) {
         /* [dcl.inline]/4: "The inline specifier shall not appear on a block
            scope declaration" */
@@ -145,6 +149,19 @@ analysis_result semantic_analysis::declare(node_index declaration,
            yet */
         if (is_void)
             return not_supported(declaration, "basic.types");
+        if (record.kind == type_kind::class_type) {
+            const entity &c = entity_table[record.entity];
+            if (c.kind != entity_kind::class_type)
+                /* a class whose definition was not analysed */
+                return not_supported(declaration, "class.pre");
+            /* [basic.def]/5 */
+            if (definition && !c.size)
+                return ill_formed_at_token(id,
+                                           "in the definition of an object, "
+                                           "the type of that object shall "
+                                           "not be an incomplete type",
+                                           "basic.def");
+        }
         /* [dcl.init]/7: "If a program calls for the default-initialization
            of an object of a const-qualified type T, T shall be a
            const-default-constructible class type or array thereof." */
@@ -158,6 +175,19 @@ analysis_result semantic_analysis::declare(node_index declaration,
     }
     if (kind == entity_kind::typedef_name && definition)
         return not_supported(declaration, "dcl.fct.def.general");
+    /* [dcl.typedef]/9: "If the typedef declaration defines an unnamed
+       class (or enumeration), the first typedef-name declared by the
+       declaration to be that class type (or enumeration type) is used to
+       denote the class type (or enumeration type) for linkage purposes
+       only" */
+    if (kind == entity_kind::typedef_name && !type.cv() &&
+        record.kind == type_kind::class_type) {
+        entity &c = entity_table[record.entity];
+        if (!c.name && !c.linkage_name) {
+            c.linkage_name = name;
+            c.linkage_of_name = linkage::external;
+        }
+    }
     if (kind != entity_kind::function && s.inline_ &&
         kind != entity_kind::variable)
         return not_supported(declaration, "dcl.inline");

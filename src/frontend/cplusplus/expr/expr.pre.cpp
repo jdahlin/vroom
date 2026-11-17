@@ -71,13 +71,15 @@ analysis_result semantic_analysis::expression_kind(syntax_child e,
             return id_expression(e.index(), m);
         if (t.kind == token_kind::keyword &&
             p.keyword_of(t) == standard_keyword::this_)
-            return not_supported(current_declaration, "expr.prim.this");
+            return this_pointer(e.index(), m);
         return not_supported(current_declaration, "expr.prim");
     }
     node_index n = e.index();
     switch (tree[n].kind) {
     case syntax_kind::primary_expression:
         return parenthesized(n, m);
+    case syntax_kind::qualified_id:
+        return qualified_id(n, m);
     case syntax_kind::unary_expression:
         return unary(n, m);
     case syntax_kind::postfix_expression:

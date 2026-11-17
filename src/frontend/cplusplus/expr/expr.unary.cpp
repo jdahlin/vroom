@@ -212,6 +212,9 @@ uint64_t semantic_analysis::size_of_type(qualified_type t) const
         if (!record.bound_known)
             return 0;
         return record.bound * size_of_type(record.operand);
+    case type_kind::class_type:
+        /* [class.mem]/6: 0 until the class is complete */
+        return entity_table[record.entity].size;
     default:
         return 0;
     }
@@ -225,6 +228,8 @@ uint64_t semantic_analysis::alignment_of_type(qualified_type t) const
     case type_kind::rvalue_reference:
     case type_kind::array:
         return alignment_of_type(record.operand);
+    case type_kind::class_type:
+        return entity_table[record.entity].alignment;
     default:
         /* the fundamental types and pointers are aligned to their size on
            aarch64 (AAPCS64 5.1) */

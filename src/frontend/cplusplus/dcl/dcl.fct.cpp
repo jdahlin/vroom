@@ -297,17 +297,37 @@ analysis_result semantic_analysis::function(node_index parameters,
     owned_array<node_index> declarations;
     bool variadic = false, closed = false;
     owned_array<syntax_child> work;
+    uint32_t cv = cv_none;
+    bool may_qualify = in_member_declarator;
     for (uint32_t i = node.child_count; i-- > 0;) {
         syntax_child c = tree.children(parameters)[i];
         if (syntax_is_punctuator(tokens, c,
-                                 preprocessing_op_or_punc::RIGHT_PARENTHESIS))
+                                 preprocessing_op_or_punc::RIGHT_PARENTHESIS)) {
             closed = true;
-        else if (!closed)
-            /* cv-qualifier-seq, ref-qualifier, noexcept-specifier,
-               attributes: a member function's, or a type's that analysis
-               has no rules for yet */
+        } else if (!closed) {
+            /* [dcl.fct]/1: the cv-qualifier-seq of a member function's
+               declarator ([class.mfct.non-static]/5) */
+            standard_keyword kw = standard_keyword::none;
+            if (c.is_token())
+                kw = p.keyword_of(tokens[c.index()]);
+            if (may_qualify && kw == standard_keyword::const_ &&
+                !(cv & cv_const)) {
+                cv |= cv_const;
+                continue;
+            }
+            if (may_qualify && kw == standard_keyword::volatile_ &&
+                !(cv & cv_volatile)) {
+                cv |= cv_volatile;
+                continue;
+            }
+            /* a ref-qualifier, a noexcept-specifier, attributes, a
+               cv-qualifier-seq of a type that is not a member
+               function's */
             return not_supported(parameters, "dcl.fct");
+        }
     }
+    /* a function declarator of the parameters is not the member's */
+    in_member_declarator = false;
     for (uint32_t i = 0; i < node.child_count; i++) {
         syntax_child c = tree.children(parameters)[i];
         if (syntax_is_punctuator(tokens, c,
@@ -384,6 +404,7 @@ analysis_result semantic_analysis::function(node_index parameters,
     function_parameters.clear();
     for (const parameter_meaning &parameter : named)
         function_parameters.append(parameter);
+    function_cv = cv;
     type = qualified_type::make(
         type_table.function(type, list.data(), list.size(), variadic), cv_none);
     return analysis_result::well_formed;

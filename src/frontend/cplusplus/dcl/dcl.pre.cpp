@@ -734,6 +734,15 @@ analysis_result semantic_analysis::init_declarators(node_index declaration,
        when declaring a class or enumeration": the decl-specifier-seq has
        neither (it would be unsupported), and clang accepts it with a
        warning */
+    if (items.empty() && s.declares_class) {
+        /* [dcl.pre]/5: a class declared: a storage class or other
+           specifier with it is [dcl.pre]/5's "ill-formed" or clang's
+           warning, not analysed */
+        if (s.typedef_ || s.static_ || s.extern_ || s.inline_ || s.constexpr_ ||
+            s.type.cv())
+            return not_supported(declaration, "dcl.pre");
+        return analysis_result::well_formed;
+    }
     if (items.empty())
         return extension_used(diagnostic_id::sema_no_declarator,
                               tree[declaration].first_token, nullptr);
@@ -784,11 +793,29 @@ analysis_result semantic_analysis::declare_with_initializer(
     last_declared = 0;
     qualified_type type = s.type;
     declarator_meaning m;
+    function_cv = 0;
     analysis_result r = declarator(declaration, d, type, m);
     if (r != analysis_result::well_formed)
         return r;
     if (!m.has_id)
         return not_supported(declaration, "dcl.meaning");
+    if (m.aligned)
+        return not_supported(declaration, "ext.gnu");
+    if (m.qualifier) {
+        if (initialized)
+            return not_supported(declaration, "class.static.data");
+        return member_redeclaration(declaration, m.id, m.qualifier, type, s,
+                                    definition);
+    }
+    /* [dcl.fct]/6: "A function type with a cv-qualifier-seq or a
+       ref-qualifier ... shall appear only as the function type for a
+       non-static member function" */
+    if (function_cv)
+        return ill_formed_at_token(m.id,
+                                   "a function type with a cv-qualifier-seq "
+                                   "shall appear only as the function type "
+                                   "for a non-static member function",
+                                   "dcl.fct");
     /* [stmt.pre]/4: "The declarator shall not specify a function or an
        array." */
     if (in_condition &&

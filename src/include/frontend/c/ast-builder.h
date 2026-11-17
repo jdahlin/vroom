@@ -56,6 +56,21 @@ ast_builder_type_function(cc *c, ast_qualified_type result,
 ast_qualified_type ast_builder_type_ptrdiff(cc *c);
 /* the target's size of t in bytes */
 uint64_t ast_builder_type_size(cc *c, ast_qualified_type t);
+/* a struct named name, incomplete until ast_builder_type_record_complete
+   gives its fields (so that a field can point to it) */
+ast_qualified_type ast_builder_type_record(cc *c, const char *name,
+                                           size_t length);
+/* the record's fields in order, laid out by C's rules; names[i] and
+   lengths[i] name field i, aligned[i] is its aligned attribute's
+   alignment in bytes (0: none) */
+void ast_builder_type_record_complete(cc *c, ast_qualified_type record,
+                                      const ast_qualified_type *fields,
+                                      const char *const *names,
+                                      const size_t *lengths,
+                                      const uint32_t *aligned, uint32_t count);
+/* the offset of field i of a complete record, in bytes */
+uint64_t ast_builder_type_record_offset(cc *c, ast_qualified_type record,
+                                        uint32_t field);
 
 /* ---- symbols ---- */
 /* kind AST_SYMBOL_*, storage AST_STORAGE_*, flags AST_SYMBOL_FLAG_*; depth
@@ -78,6 +93,10 @@ void ast_builder_toplevel(cc *c, uint32_t s);
 uint32_t ast_builder_node(cc *c, int op, ast_qualified_type t, uint32_t a,
                           uint32_t b, uint32_t c_, uint16_t aux, uint8_t flags);
 uint32_t ast_builder_list(cc *c, const uint32_t *items, uint32_t count);
+/* field `field` of object, a node of record type: an lvalue if object is
+   one */
+uint32_t ast_builder_member(cc *c, uint32_t object, uint32_t field,
+                            ast_qualified_type t);
 uint32_t ast_builder_integer(cc *c, ast_qualified_type t, int64_t value);
 uint32_t ast_builder_floating(cc *c, ast_qualified_type t, double value);
 /* a string literal of count elements of size bytes each, terminator
