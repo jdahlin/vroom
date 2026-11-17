@@ -64,7 +64,8 @@ ast_qualified_type ast_builder_type_record(cc *c, const char *name,
                                            size_t length);
 /* the record's fields in order, laid out by C's rules; names[i] and
    lengths[i] name field i, aligned[i] is its aligned attribute's
-   alignment in bytes (0: none) */
+   alignment in bytes (0: none), packed[i] whether it has the packed
+   attribute */
 /* a C++ class non-trivial for the purposes of calls: returned through the
    result address (x8 on AArch64, memory on x86-64) whatever its size */
 void ast_builder_type_record_in_memory(cc *c, ast_qualified_type record);
@@ -72,7 +73,8 @@ void ast_builder_type_record_complete(cc *c, ast_qualified_type record,
                                       const ast_qualified_type *fields,
                                       const char *const *names,
                                       const size_t *lengths,
-                                      const uint32_t *aligned, uint32_t count);
+                                      const uint32_t *aligned,
+                                      const uint8_t *packed, uint32_t count);
 /* the offset of field i of a complete record, in bytes */
 uint64_t ast_builder_type_record_offset(cc *c, ast_qualified_type record,
                                         uint32_t field);

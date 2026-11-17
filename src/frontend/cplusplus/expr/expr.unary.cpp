@@ -403,6 +403,11 @@ analysis_result semantic_analysis::unary(node_index n, expression_meaning &m)
         /* [expr.unary.op]/3: "The operand shall be an lvalue or a
            qualified-id. ... if the type of the expression is T, the result
            has type "pointer to T" and is a prvalue" */
+        if (m.category != value_category::lvalue &&
+            type_table[m.type.unqualified()].kind == type_kind::class_type)
+            /* [impl.clang] the address of a class temporary: an error
+               clang makes a warning (-Waddress-of-temporary) */
+            return not_supported(n, "expr.unary.op");
         if (m.category != value_category::lvalue)
             return ill_formed(n,
                               "the operand of the unary & operator shall "

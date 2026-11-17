@@ -1002,6 +1002,42 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
             duplicate_spelling = spelling;
         }
     };
+    /* a specifier with no rules yet (an attribute after a class-specifier
+       may change the class's layout) before any class is defined */
+    for (uint32_t i = 0; i < node.child_count; i++) {
+        syntax_child c = tree.children(seq)[i];
+        if (c.is_token() || syntax_is(tree, c, syntax_kind::class_specifier) ||
+            syntax_is(tree, c, syntax_kind::elaborated_type_specifier))
+            continue;
+        /* the class names the declaration would define are held, as
+           hold_names holds its declarators' */
+        for (uint32_t k = 0; k < node.child_count; k++) {
+            syntax_child spec = tree.children(seq)[k];
+            if (!syntax_is(tree, spec, syntax_kind::class_specifier) ||
+                !tree[spec.index()].child_count ||
+                !syntax_is(tree, tree.children(spec.index())[0],
+                           syntax_kind::class_head))
+                continue;
+            node_index head = tree.children(spec.index())[0].index();
+            for (uint32_t h = 0; h < tree[head].child_count; h++) {
+                syntax_child t = tree.children(head)[h];
+                if (!t.is_token() ||
+                    tokens[t.index()].kind != token_kind::identifier)
+                    continue;
+                uint32_t name = tokens.identifier(t.index());
+                entity_index found = entity_table.find(current_scope, name);
+                if (found) {
+                    entity_table[found].kind = entity_kind::none;
+                } else {
+                    found = entity_table.make(entity_kind::none, name,
+                                              current_scope);
+                    entity_table.bind(current_scope, name, found);
+                }
+                break;
+            }
+        }
+        return not_supported(c.index());
+    }
     for (uint32_t i = 0; i < node.child_count; i++) {
         syntax_child c = tree.children(seq)[i];
         if (!c.is_token()) {

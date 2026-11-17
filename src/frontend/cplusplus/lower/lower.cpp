@@ -406,6 +406,7 @@ ast_qualified_type c_lowering::class_type(entity_index e, token_index at)
     owned_array<const char *> names;
     owned_array<size_t> lengths;
     owned_array<uint32_t> aligned;
+    owned_array<uint8_t> packed;
     owned_buffer base_names;
     for (uint32_t i = 0; i < x.member_count; i++) {
         entity_index member = analysis.class_members[x.first_member + i];
@@ -423,6 +424,7 @@ ast_qualified_type c_lowering::class_type(entity_index e, token_index at)
             lengths.append(length);
         }
         aligned.append(m.alignment);
+        packed.append(m.packed);
     }
     for (size_t i = 0, at_name = 0; i < names.size(); i++) {
         if (names[i])
@@ -438,10 +440,11 @@ ast_qualified_type c_lowering::class_type(entity_index e, token_index at)
         names.append("__empty");
         lengths.append(7);
         aligned.append(0);
+        packed.append(0);
     }
-    ast_builder_type_record_complete(c, made, fields.data(), names.data(),
-                                     lengths.data(), aligned.data(),
-                                     static_cast<uint32_t>(fields.size()));
+    ast_builder_type_record_complete(
+        c, made, fields.data(), names.data(), lengths.data(), aligned.data(),
+        packed.data(), static_cast<uint32_t>(fields.size()));
     for (uint32_t i = 0; i < x.member_count; i++) {
         entity_index member = analysis.class_members[x.first_member + i];
         if (ast_builder_type_record_offset(c, made, i) !=

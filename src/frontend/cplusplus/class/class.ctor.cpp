@@ -133,7 +133,7 @@ analysis_result semantic_analysis::special_member_declarator(
     in_member_declarator = false;
     if (r != analysis_result::well_formed)
         return r;
-    if (!m.has_id || m.qualifier || m.aligned)
+    if (!m.has_id || m.qualifier || m.aligned || m.packed || m.used)
         return not_supported(declaration, "class.ctor");
     if (function_cv)
         /* [class.ctor]/5: "A constructor shall not be declared const,
@@ -821,6 +821,33 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
         if (!copies_bytes(k))
             copy = true;
     }
+    /* [class.default.ctor]/2, [class.copy.ctor]/10, [class.dtor]/7: an
+       implicitly-declared one that would call a subobject's constructor
+       or destructor that does not exist or is not accessible is defined
+       as deleted, an error only where it is used: not analysed */
+    bool declares_copy = false;
+    for (entity_index q = x.first_constructor; q;
+         q = entity_table[q].next_constructor)
+        if (is_copy_constructor(c, q))
+            declares_copy = true;
+    for (entity_index k : classes) {
+        const entity &sub = entity_table[k];
+        bool default_ok = !sub.first_constructor, copy_ok = copies_bytes(k);
+        for (entity_index q = sub.first_constructor; q;
+             q = entity_table[q].next_constructor) {
+            if (entity_table[q].access)
+                continue;
+            if (!type_table[entity_table[q].type.unqualified()].parameter_count)
+                default_ok = true;
+            if (is_copy_constructor(k, q))
+                copy_ok = true;
+        }
+        if ((construction && !default_ok && !x.first_constructor) ||
+            (!copy_ok && !declares_copy) ||
+            (sub.destructor && entity_table[sub.destructor].access &&
+             !x.destructor))
+            return not_supported(n, "class.default.ctor");
+    }
     bool user_constructors = x.first_constructor != 0;
     bool user_copy = false;
     for (entity_index k = x.first_constructor; k;
@@ -1152,7 +1179,7 @@ analysis_result semantic_analysis::special_member_definition(node_index n)
     if (r != analysis_result::well_formed)
         return r;
     entity_index c = m.qualifier;
-    if (!c || !m.has_id || m.aligned)
+    if (!c || !m.has_id || m.aligned || m.packed || m.used)
         return not_supported(n, "dcl.fct.def.general");
     if (tokens.identifier(m.id) != entity_table[c].name)
         /* a conversion function, or ~ with another name */

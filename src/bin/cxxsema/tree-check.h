@@ -49,7 +49,9 @@ struct tree_checker {
     {
         return (k >= semantic_kind::constant &&
                 k <= semantic_kind::bound_member_function) ||
-               k == semantic_kind::condition_declaration;
+               k == semantic_kind::condition_declaration ||
+               /* T(args), a prvalue of class type ([expr.type.conv]/2) */
+               k == semantic_kind::construct;
     }
     static bool is_initializer(semantic_kind k)
     {
