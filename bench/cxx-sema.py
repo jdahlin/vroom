@@ -36,7 +36,9 @@ them (work/testsuites), and src/test/cxx/sema/{spec,gram}/*.cpp.  For each
            expression's declaration clang compiles
                static_assert(__is_same(decltype((E)), CLAIM));
            verified, refuted (a failure), or not checkable (E does not
-           compile at that place).  No claims before step S1;
+           compile at that place).  From C++11 on, a constant prvalue's
+           claim has its value too, which clang checks with
+               static_assert((E) == VALUE);
            `bench/cxx-sema.py selftest` checks this path on claims written
            by hand, some of them wrong.
 
@@ -118,9 +120,11 @@ TYPES_FILE = 'cxx-type-claims'
 
 
 def check_type_claims(test, opts, clang, claims, cache=True):
-    """claims: (line, column, expression, claim), the place just after the
-    expression's declaration.  Returns {'verified', 'refuted',
-    'unchecked'} counts and the refuted claims."""
+    """claims: (line, column, expression, claim, value), the place just
+    after the expression's declaration; value is None or the constant the
+    expression's value is claimed to equal.  Returns {'verified',
+    'refuted', 'unchecked', 'value_verified', 'value_refuted'} counts and
+    the refuted claims."""
     counts = collections.Counter()
     refuted = []
     if not claims:
@@ -136,10 +140,12 @@ def check_type_claims(test, opts, clang, claims, cache=True):
             continue
         block = ''
         for k in places[(row, column)]:
-            e, claim = claims[k][2], claims[k][3]
-            block += (f'\n#line {2 * k + 1} "{TYPES_FILE}"\n'
+            e, claim, value = claims[k][2], claims[k][3], claims[k][4]
+            block += (f'\n#line {3 * k + 1} "{TYPES_FILE}"\n'
                       f'static_assert(__is_same(decltype(({e})), decltype(({e}))));\n'
                       f'static_assert(__is_same(decltype(({e})), {claim}));')
+            if value is not None:
+                block += f'\nstatic_assert(({e}) == {value});'
         text = lines[row - 1]
         lines[row - 1] = (text[:column - 1] + block + f'\n#line {row} "{name}"\n' +
                           ' ' * (column - 1) + text[column - 1:])
@@ -166,14 +172,22 @@ def check_type_claims(test, opts, clang, claims, cache=True):
     for m in re.finditer(r'^(.+?):(\d+):\d+: (?:fatal )?error: (.*)$', stderr, re.M):
         if m.group(1) == TYPES_FILE:
             errors.setdefault(int(m.group(2)), []).append(m.group(3))
-    for k, (row, column, e, claim) in enumerate(claims):
-        if errors.get(2 * k + 1):
+    for k, (row, column, e, claim, value) in enumerate(claims):
+        if errors.get(3 * k + 1):
             counts['unchecked'] += 1
-        elif errors.get(2 * k + 2):
+            continue
+        if errors.get(3 * k + 2):
             counts['refuted'] += 1
             refuted.append(f'{row}:{column}: `{e}` is no `{claim}`')
         else:
             counts['verified'] += 1
+        if value is None:
+            continue
+        if errors.get(3 * k + 3):
+            counts['value_refuted'] += 1
+            refuted.append(f'{row}:{column}: `{e}` is not the constant {value}')
+        else:
+            counts['value_verified'] += 1
     return counts, refuted
 
 
@@ -186,9 +200,10 @@ def type_claims(cxxsema, opts, test):
     found = []
     for line in r[1].split('\n'):
         parts = line.split('\t')
-        if len(parts) == 4 and os.path.normpath(os.path.join(cwd, parts[0])) == os.path.normpath(test):
+        if len(parts) in (4, 5) and os.path.normpath(os.path.join(cwd, parts[0])) == os.path.normpath(test):
             row, column = map(int, parts[1].split(':'))
-            found.append((row, column, parts[2].strip(), parts[3].strip()))
+            value = parts[4].strip() if len(parts) == 5 else None
+            found.append((row, column, parts[2].strip(), parts[3].strip(), value))
     return found
 
 
@@ -198,22 +213,28 @@ int g(...);
 int *const volatile *(*fp)[3];
 struct S { int m; };
 """
-# (expression, claim, expected): the encodings cxxsema -selftest checks
-# that its encoder writes, and claims that must be refuted or unchecked
+# (expression, claim, value, expected): the encodings cxxsema -selftest
+# checks that its encoder writes, and claims that must be refuted or
+# unchecked
 SELFTEST_CLAIMS = [
-    ('i', '::vcc_claim::lvalue_reference_to<int>', 'verified'),
-    ('i + 1', 'int', 'verified'),
-    ('static_cast<int &&>(i)', '::vcc_claim::rvalue_reference_to<int>', 'verified'),
-    ('ci', '::vcc_claim::lvalue_reference_to<::vcc_claim::const_<int>>', 'verified'),
-    ('g', '::vcc_claim::lvalue_reference_to<::vcc_claim::function<int(...)>>', 'verified'),
+    ('i', '::vcc_claim::lvalue_reference_to<int>', None, 'verified'),
+    ('i + 1', 'int', None, 'verified'),
+    ('ci + 1', 'int', '2ULL', 'verified value_verified'),
+    ('-ci', 'int', '(-1LL)', 'verified value_verified'),
+    ('1.0 / 4', 'double', '0x1p-2', 'verified value_verified'),
+    ('ci * 3', 'int', '4ULL', 'verified value_refuted'),
+    ('i * 3', 'int', '0ULL', 'verified value_refuted'),
+    ('static_cast<int &&>(i)', '::vcc_claim::rvalue_reference_to<int>', None, 'verified'),
+    ('ci', '::vcc_claim::lvalue_reference_to<::vcc_claim::const_<int>>', None, 'verified'),
+    ('g', '::vcc_claim::lvalue_reference_to<::vcc_claim::function<int(...)>>', None, 'verified'),
     ('fp', '::vcc_claim::lvalue_reference_to<::vcc_claim::pointer_to<::vcc_claim::array_of<'
            '::vcc_claim::pointer_to<::vcc_claim::const_<::vcc_claim::volatile_<'
-           '::vcc_claim::pointer_to<int>>>>, (3)>>>', 'verified'),
-    ('S().m', '::vcc_claim::rvalue_reference_to<int>', 'verified'),
-    ('i', 'int', 'refuted'),
-    ('i + 1', '::vcc_claim::lvalue_reference_to<int>', 'refuted'),
-    ('ci', '::vcc_claim::lvalue_reference_to<int>', 'refuted'),
-    ('undeclared', 'int', 'unchecked'),
+           '::vcc_claim::pointer_to<int>>>>, (3)>>>', None, 'verified'),
+    ('S().m', '::vcc_claim::rvalue_reference_to<int>', None, 'verified'),
+    ('i', 'int', None, 'refuted'),
+    ('i + 1', '::vcc_claim::lvalue_reference_to<int>', None, 'refuted'),
+    ('ci', '::vcc_claim::lvalue_reference_to<int>', None, 'refuted'),
+    ('undeclared', 'int', None, 'unchecked'),
 ]
 
 
@@ -222,16 +243,17 @@ def selftest(clang):
     with tempfile.TemporaryDirectory() as d:
         test = os.path.join(d, 'claims.cpp')
         open(test, 'w').write(SELFTEST_SOURCE)
-        claims = [(5, 22, e, c) for e, c, _ in SELFTEST_CLAIMS]
+        claims = [(5, 22, e, c, v) for e, c, v, _ in SELFTEST_CLAIMS]
         counts, refuted = check_type_claims(test, ['-std=c++17'], clang, claims, cache=False)
-    want = collections.Counter(x for _, _, x in SELFTEST_CLAIMS)
+    want = collections.Counter(w for _, _, _, x in SELFTEST_CLAIMS for w in x.split())
     if counts != want:
         print(f'cxx-sema selftest: FAILED: {dict(counts)}, expected {dict(want)}')
         for r in refuted:
             print(f'  refuted {r}')
         return 1
     print(f'cxx-sema selftest: ok ({want["verified"]} verified, {want["refuted"]} refuted, '
-          f'{want["unchecked"]} not checkable, as expected)')
+          f'{want["unchecked"]} not checkable; values {want["value_verified"]} verified, '
+          f'{want["value_refuted"]} refuted, as expected)')
     return 0
 
 
@@ -369,7 +391,8 @@ def main():
           f'{declared["refuted"]} refuted, {declared["rejected"]} in declarations clang rejects, '
           f'{declared["unchecked"]} not checkable')
     print(f'types: {types["verified"]} claims verified, {types["refuted"]} refuted, '
-          f'{types["unchecked"]} not checkable')
+          f'{types["unchecked"]} not checkable; constants: {types["value_verified"]} verified, '
+          f'{types["value_refuted"]} refuted')
     if unsupported and a.unsupported:
         top = ', '.join(f'[{label}] {n}' for label, n in unsupported.most_common(a.unsupported))
         print(f'unsupported by subclause ({len(unsupported)}): {top}')

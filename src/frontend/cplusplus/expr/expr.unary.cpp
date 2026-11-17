@@ -21,6 +21,7 @@
  *         * & + - ! ~
  */
 #include "../cplusplus-internal.h"
+#include "frontend/cplusplus/sema.h"
 
 namespace cplusplus
 {
@@ -168,6 +169,328 @@ node_index parser::noexcept_expression()
         return expected("')' to close the operand of noexcept",
                         "expr.unary.noexcept");
     return finish_node(syntax_kind::noexcept_expression, mark, first);
+}
+
+/* ---- semantic analysis ---------------------------------------------- */
+
+/* the size in bytes of an object of type t on the target (aarch64 Linux,
+   LP64), 0 if t is not a complete object type analysis knows the size of */
+uint64_t semantic_analysis::size_of_type(qualified_type t) const
+{
+    const implementation_defined_behavior &b = tokens.files.behavior;
+    const struct type record = type_table[t.unqualified()];
+    switch (record.kind) {
+    case type_kind::fundamental:
+        switch (record.fundamental) {
+        case fundamental_type::bool_:
+            return 1;
+        case fundamental_type::float_:
+            return 4;
+        case fundamental_type::double_:
+            return 8;
+        case fundamental_type::long_double:
+            if (b.long_double_fraction_bits == 112)
+                return 16;
+            return 8;
+        case fundamental_type::std_nullptr_t:
+            return b.long_width / 8;
+        default:
+            if (fundamental_type_is_integral(record.fundamental))
+                return fundamental_type_width(b, record.fundamental) / 8;
+            return 0;
+        }
+    case type_kind::pointer:
+        return b.long_width / 8;
+    case type_kind::lvalue_reference:
+    case type_kind::rvalue_reference:
+        return size_of_type(record.operand);
+    case type_kind::array:
+        if (!record.bound_known)
+            return 0;
+        return record.bound * size_of_type(record.operand);
+    default:
+        return 0;
+    }
+}
+
+uint64_t semantic_analysis::alignment_of_type(qualified_type t) const
+{
+    const struct type record = type_table[t.unqualified()];
+    switch (record.kind) {
+    case type_kind::lvalue_reference:
+    case type_kind::rvalue_reference:
+    case type_kind::array:
+        return alignment_of_type(record.operand);
+    default:
+        /* the fundamental types and pointers are aligned to their size on
+           aarch64 (AAPCS64 5.1) */
+        return size_of_type(t);
+    }
+}
+
+/*
+ * [expr.sizeof]/1: "The sizeof operator yields the number of bytes occupied
+ * by a non-potentially-overlapping object of the type of its operand.  The
+ * operand is either an expression, which is an unevaluated operand, or a
+ * parenthesized type-id."  [expr.alignof]/1: "An alignof expression yields
+ * the alignment requirement of its operand type."  [expr.sizeof]/5 and
+ * [expr.alignof]/2: "The result ... is a prvalue of type std::size_t."
+ */
+analysis_result semantic_analysis::size_of(node_index n, bool alignment,
+                                           expression_meaning &m)
+{
+    const syntax_node &node = tree[n];
+    const syntax_child *children = tree.children(n);
+    qualified_type operand;
+    if (node.child_count == 4 &&
+        syntax_is(tree, children[2], syntax_kind::type_id)) {
+        analysis_result r = type_id(children[2].index(), operand);
+        if (r != analysis_result::well_formed)
+            return r;
+    } else if (node.child_count == 2 && !alignment) {
+        /* [expr.sizeof]/3: "The lvalue-to-rvalue, array-to-pointer, and
+           function-to-pointer standard conversions are not applied to the
+           operand of sizeof." */
+        expression_meaning e;
+        analysis_result r = expression(children[1], e);
+        if (r != analysis_result::well_formed)
+            return r;
+        operand = e.type;
+    } else {
+        /* sizeof...; alignof of an expression (GCC's) */
+        return not_supported(n, "expr.sizeof");
+    }
+    const struct type record = type_table[operand.unqualified()];
+    if (record.kind == type_kind::function ||
+        (record.kind == type_kind::fundamental &&
+         record.fundamental == fundamental_type::void_))
+        /* GCC's sizeof(void) and sizeof of a function type, extensions
+           clang has too */
+        return not_supported(n, "expr.sizeof");
+    if (record.kind == type_kind::array && !record.bound_known) {
+        if (alignment)
+            /* "or an array thereof": alignof(T[]) */
+            operand = record.operand;
+        else
+            return ill_formed(n,
+                              "the sizeof operator shall not be applied to an "
+                              "expression that has function or incomplete "
+                              "type, or to the parenthesized name of such "
+                              "types",
+                              "expr.sizeof");
+    }
+    uint64_t size = size_of_type(operand);
+    if (alignment)
+        size = alignment_of_type(operand);
+    if (!size)
+        return not_supported(n, "expr.sizeof");
+    m.type = qualified_type::make(
+        type_table.fundamental(fundamental_type::unsigned_long_int), cv_none);
+    m.category = value_category::prvalue;
+    m.evaluation = constness::constant;
+    m.value = size;
+    return analysis_result::well_formed;
+}
+
+/*
+ * [expr.pre.incr]/1: "The operand shall be a modifiable lvalue.  The type
+ * of the operand shall be an arithmetic type other than cv bool, or a
+ * pointer to a completely-defined object type. ... The result is the
+ * updated operand; it is an lvalue".  [expr.post.incr]/1: "The result is
+ * a prvalue.  The type of the result is the cv-unqualified version of the
+ * type of the operand."  The operand is modified: never a constant
+ * expression here ([expr.const]/5.16).
+ */
+analysis_result semantic_analysis::increment(node_index n, syntax_child operand,
+                                             bool decrement, bool postfix,
+                                             expression_meaning &m)
+{
+    analysis_result r = expression(operand, m);
+    if (r != analysis_result::well_formed)
+        return r;
+    const char *subclause = "expr.pre.incr";
+    if (postfix)
+        subclause = "expr.post.incr";
+    /* [basic.lval]/10: "An lvalue is modifiable unless its type is
+       const-qualified or is a function type." */
+    if (m.category != value_category::lvalue || (m.type.cv() & cv_const))
+        return ill_formed(n, "the operand shall be a modifiable lvalue",
+                          subclause);
+    fundamental_type t = fundamental_of(m.type);
+    /* [diff.cpp14.expr]/1: ++ of a bool operand, deprecated, removed in
+       C++17 */
+    bool bool_allowed = !decrement && tokens.files.behavior.has(
+                                          language_feature::bool_increment);
+    if ((t == fundamental_type::bool_ && !bool_allowed) ||
+        (!is_arithmetic(m.type) && !is_pointer(m.type)))
+        return ill_formed(n,
+                          "the type of the operand shall be an arithmetic "
+                          "type other than cv bool, or a pointer to a "
+                          "completely-defined object type",
+                          subclause);
+    if (is_pointer(m.type) &&
+        (!is_object_pointer(m.type) ||
+         !size_of_type(type_table[m.type.unqualified()].operand)))
+        return not_supported(n, subclause);
+    m.evaluation = constness::not_constant;
+    m.entity = 0;
+    if (postfix) {
+        m.category = value_category::prvalue;
+        m.type = qualified_type::make(m.type.unqualified(), cv_none);
+    }
+    return analysis_result::well_formed;
+}
+
+/*
+ * [expr.unary.op]: the unary operators *, &, +, -, ! and ~; [expr.pre.incr]
+ * prefix ++ and --; [expr.sizeof] and [expr.alignof].
+ */
+analysis_result semantic_analysis::unary(node_index n, expression_meaning &m)
+{
+    const syntax_node &node = tree[n];
+    const syntax_child *children = tree.children(n);
+    if (node.child_count < 2 || !children[0].is_token())
+        return not_supported(n, "expr.unary");
+    const token &op = tokens[children[0].index()];
+    if (op.kind == token_kind::keyword) {
+        standard_keyword kw = p.keyword_of(op);
+        if (kw == standard_keyword::sizeof_)
+            return size_of(n, false, m);
+        if (kw == standard_keyword::alignof_)
+            return size_of(n, true, m);
+        return not_supported(n, "expr.unary");
+    }
+    if (op.kind != token_kind::operator_or_punctuator || node.child_count != 2)
+        return not_supported(n, "expr.unary");
+    preprocessing_op_or_punc o =
+        preprocessing_op_or_punc_primary(op.op_or_punc);
+    if (o == preprocessing_op_or_punc::PLUS_PLUS ||
+        o == preprocessing_op_or_punc::MINUS_MINUS)
+        return increment(n, children[1],
+                         o == preprocessing_op_or_punc::MINUS_MINUS, false, m);
+    analysis_result r = expression(children[1], m);
+    if (r != analysis_result::well_formed)
+        return r;
+    const implementation_defined_behavior &b = tokens.files.behavior;
+    switch (o) {
+    case preprocessing_op_or_punc::AMPERSAND: {
+        /* [expr.unary.op]/3: "The operand shall be an lvalue or a
+           qualified-id. ... if the type of the expression is T, the result
+           has type "pointer to T" and is a prvalue" */
+        if (m.category != value_category::lvalue)
+            return ill_formed(n,
+                              "the operand of the unary & operator shall "
+                              "be an lvalue",
+                              "expr.unary.op");
+        m.type = qualified_type::make(type_table.pointer_to(m.type), cv_none);
+        m.category = value_category::prvalue;
+        if (m.evaluation == constness::constant)
+            m.evaluation = constness::unknown;
+        m.entity = 0;
+        m.string_literal = 0;
+        return analysis_result::well_formed;
+    }
+    case preprocessing_op_or_punc::STAR: {
+        /* [expr.unary.op]/1: "the expression to which it is applied shall
+           be a pointer to an object type, or a pointer to a function type
+           and the result is an lvalue referring to the object or function
+           to which the expression points.  If the type of the expression
+           is "pointer to T", the type of the result is "T"." */
+        r = operand_value(n, m);
+        if (r != analysis_result::well_formed)
+            return r;
+        if (!is_pointer(m.type)) {
+            if (fundamental_of(m.type) == fundamental_type::none)
+                return not_supported(n, "expr.unary.op");
+            return ill_formed(n,
+                              "the operand of unary * shall be a pointer to an "
+                              "object type, or a pointer to a function type",
+                              "expr.unary.op");
+        }
+        qualified_type pointee = type_table[m.type.unqualified()].operand;
+        if (fundamental_of(pointee) == fundamental_type::void_)
+            /* clang's extension, a warning */
+            return not_supported(n, "expr.unary.op");
+        m.type = pointee;
+        m.category = value_category::lvalue;
+        if (m.evaluation != constness::not_constant)
+            m.evaluation = constness::unknown;
+        return analysis_result::well_formed;
+    }
+    case preprocessing_op_or_punc::PLUS:
+    case preprocessing_op_or_punc::MINUS:
+    case preprocessing_op_or_punc::TILDE: {
+        r = operand_value(n, m);
+        if (r != analysis_result::well_formed)
+            return r;
+        if (o == preprocessing_op_or_punc::PLUS && is_pointer(m.type)) {
+            /* [expr.unary.op]/7: "or pointer type" */
+            return analysis_result::well_formed;
+        }
+        bool allowed = is_arithmetic(m.type);
+        if (o == preprocessing_op_or_punc::TILDE)
+            allowed = is_integral(m.type);
+        if (!allowed) {
+            if (fundamental_of(m.type) == fundamental_type::none &&
+                !is_pointer(m.type))
+                return not_supported(n, "expr.unary.op");
+            if (o == preprocessing_op_or_punc::PLUS)
+                return ill_formed(n,
+                                  "the operand of the unary + operator shall "
+                                  "have arithmetic, unscoped enumeration, or "
+                                  "pointer type",
+                                  "expr.unary.op");
+            if (o == preprocessing_op_or_punc::MINUS)
+                return ill_formed(n,
+                                  "the operand of the unary - operator shall "
+                                  "have arithmetic or unscoped enumeration "
+                                  "type",
+                                  "expr.unary.op");
+            return ill_formed(n,
+                              "the operand of ~ shall have integral or "
+                              "unscoped enumeration type",
+                              "expr.unary.op");
+        }
+        /* "Integral promotion is performed on integral or enumeration
+           operands." */
+        promote(m);
+        fundamental_type t = fundamental_of(m.type);
+        if (m.evaluation != constness::constant ||
+            o == preprocessing_op_or_punc::PLUS)
+            return analysis_result::well_formed;
+        if (fundamental_type_is_floating(t)) {
+            double d = floating_value(m.value);
+            m.value = floating_kept(-d);
+            return analysis_result::well_formed;
+        }
+        __int128 v = integer_value(b, t, m.value);
+        if (o == preprocessing_op_or_punc::TILDE) {
+            m.value = integer_wrap(b, t, ~static_cast<unsigned __int128>(v));
+            return analysis_result::well_formed;
+        }
+        /* [expr.unary.op]/8: "The negative of an unsigned quantity is
+           computed by subtracting its value from 2^n"; a signed one that
+           overflows is undefined ([expr.pre]/4) */
+        if (fundamental_type_is_signed(b, t) && !integer_holds(b, t, -v))
+            m.evaluation = constness::not_constant;
+        else
+            m.value = integer_wrap(b, t, static_cast<unsigned __int128>(-v));
+        return analysis_result::well_formed;
+    }
+    case preprocessing_op_or_punc::EXCLAMATION: {
+        /* [expr.unary.op]/9: "The operand of the logical negation operator
+           ! is contextually converted to bool; its value is true if the
+           converted operand is false and false otherwise.  The type of the
+           result is bool." */
+        r = contextual_bool(n, m);
+        if (r != analysis_result::well_formed)
+            return r;
+        m.value = !m.value;
+        return analysis_result::well_formed;
+    }
+    default:
+        return not_supported(n, "expr.unary");
+    }
 }
 
 } // namespace cplusplus

@@ -25,6 +25,7 @@
  *         typeid ( type-id )
  */
 #include "../cplusplus-internal.h"
+#include "frontend/cplusplus/sema.h"
 
 namespace cplusplus
 {
@@ -228,6 +229,231 @@ bool parser::parenthesized_expression_list(const char *what,
         return false;
     }
     return true;
+}
+
+/* ---- semantic analysis ---------------------------------------------- */
+
+/*
+ * The postfix expressions analysis has rules for: [expr.sub] subscripting,
+ * [expr.post.incr] postfix ++ and --, and [expr.type.conv] the functional
+ * notation T(e), T() and T{e} of a fundamental type.  A function call
+ * ([expr.call]) needs overload resolution and is not analysed yet.
+ */
+analysis_result semantic_analysis::postfix(node_index n, expression_meaning &m)
+{
+    const syntax_node &node = tree[n];
+    const syntax_child *children = tree.children(n);
+    if (node.child_count == 2 && children[1].is_token()) {
+        preprocessing_op_or_punc op = preprocessing_op_or_punc_primary(
+            tokens[children[1].index()].op_or_punc);
+        if (op == preprocessing_op_or_punc::PLUS_PLUS ||
+            op == preprocessing_op_or_punc::MINUS_MINUS)
+            return increment(n, children[0],
+                             op == preprocessing_op_or_punc::MINUS_MINUS, true,
+                             m);
+        return not_supported(n, "expr.post");
+    }
+    if (node.child_count < 2)
+        return not_supported(n, "expr.post");
+    /* [expr.type.conv]/1: "A simple-type-specifier or typename-specifier
+       followed by a parenthesized optional expression-list or by a
+       braced-init-list (the initializer) constructs a value of the
+       specified type given the initializer." */
+    bool parenthesized = syntax_is_punctuator(
+        tokens, children[1], preprocessing_op_or_punc::LEFT_PARENTHESIS);
+    bool braced = syntax_is(tree, children[1], syntax_kind::braced_init_list);
+    type_index named = 0;
+    if ((parenthesized || braced) && children[0].is_token()) {
+        const token &t = tokens[children[0].index()];
+        if (t.kind == token_kind::identifier) {
+            entity_index e =
+                entity_table.find(0, tokens.identifier(children[0].index()));
+            if (e && entity_table[e].kind == entity_kind::typedef_name)
+                named = entity_table[e].type.unqualified();
+            if (e && entity_table[e].kind == entity_kind::typedef_name &&
+                entity_table[e].type.cv())
+                return not_supported(n, "expr.type.conv");
+        } else if (t.kind == token_kind::keyword) {
+            simple_type_keywords k;
+            switch (p.keyword_of(t)) {
+            case standard_keyword::signed_:
+                k.signed_ = 1;
+                break;
+            case standard_keyword::unsigned_:
+                k.unsigned_ = 1;
+                break;
+            case standard_keyword::short_:
+                k.short_ = 1;
+                break;
+            case standard_keyword::long_:
+                k.long_ = 1;
+                break;
+            case standard_keyword::char_:
+                k.char_ = 1;
+                break;
+            case standard_keyword::int_:
+                k.int_ = 1;
+                break;
+            case standard_keyword::double_:
+                k.double_ = 1;
+                break;
+            case standard_keyword::bool_:
+                k.alone = 1;
+                k.alone_type = fundamental_type::bool_;
+                break;
+            case standard_keyword::float_:
+                k.alone = 1;
+                k.alone_type = fundamental_type::float_;
+                break;
+            case standard_keyword::void_:
+                k.alone = 1;
+                k.alone_type = fundamental_type::void_;
+                break;
+            case standard_keyword::wchar_t_:
+                k.alone = 1;
+                k.alone_type = fundamental_type::wchar_t_;
+                break;
+            case standard_keyword::char8_t_:
+                k.alone = 1;
+                k.alone_type = fundamental_type::char8_t_;
+                break;
+            case standard_keyword::char16_t_:
+                k.alone = 1;
+                k.alone_type = fundamental_type::char16_t_;
+                break;
+            case standard_keyword::char32_t_:
+                k.alone = 1;
+                k.alone_type = fundamental_type::char32_t_;
+                break;
+            default:
+                return not_supported(n, "expr.type.conv");
+            }
+            analysis_result r = simple_type(n, k, named);
+            if (r != analysis_result::well_formed)
+                return r;
+        }
+    }
+    if (named) {
+        qualified_type to = qualified_type::make(named, cv_none);
+        const struct type record = type_table[named];
+        if (record.kind != type_kind::fundamental &&
+            record.kind != type_kind::pointer)
+            return not_supported(n, "expr.type.conv");
+        bool is_void = record.kind == type_kind::fundamental &&
+                       record.fundamental == fundamental_type::void_;
+        if (parenthesized && node.child_count == 3) {
+            /* [expr.type.conv]/2: "Otherwise, if the type is cv void and the
+               initializer is () or {}, the expression is a prvalue of the
+               specified type that performs no initialization.  Otherwise,
+               the expression is a prvalue of the specified type whose result
+               object is direct-initialized with the initializer."  T() of a
+               scalar: value-initialized ([dcl.init]/11), zero */
+            m = expression_meaning();
+            m.type = to;
+            m.evaluation = constness::constant;
+            m.value = 0;
+            return analysis_result::well_formed;
+        }
+        if (parenthesized && node.child_count == 4) {
+            if (syntax_is(tree, children[2], syntax_kind::initializer_list)) {
+                /* [dcl.init]/14: "If the entity being initialized does not
+                   have class type, the expression-list in a parenthesized
+                   initializer shall be a single expression." */
+                return ill_formed(n,
+                                  "if the entity being initialized does not "
+                                  "have class type, the expression-list in a "
+                                  "parenthesized initializer shall be a "
+                                  "single expression",
+                                  "dcl.init");
+            }
+            /* "If the initializer is a parenthesized single expression, the
+               type conversion expression is equivalent to the corresponding
+               cast expression." */
+            analysis_result r = expression(children[2], m);
+            if (r != analysis_result::well_formed)
+                return r;
+            return explicit_conversion(n, to, m);
+        }
+        if (braced && node.child_count == 2) {
+            if (is_void)
+                return not_supported(n, "expr.type.conv");
+            initialized_value result;
+            analysis_result r =
+                list_initialization(children[1].index(), to, true, result);
+            if (r != analysis_result::well_formed)
+                return r;
+            m = expression_meaning();
+            m.type = to;
+            m.evaluation = result.evaluation;
+            m.value = result.value;
+            return analysis_result::well_formed;
+        }
+        return not_supported(n, "expr.type.conv");
+    }
+    if (parenthesized)
+        return not_supported(n, "expr.call");
+    if (node.child_count == 4 &&
+        syntax_is_punctuator(tokens, children[1],
+                             preprocessing_op_or_punc::LEFT_BRACKET)) {
+        /* [expr.sub]/1: "One of the expressions shall be a glvalue of type
+           "array of T" or a prvalue of type "pointer to T" and the other
+           shall be a prvalue of unscoped enumeration or integral type.  The
+           result is of type "T". ... The expression E1[E2] is identical (by
+           definition) to *((E1)+(E2)), except that in the case of an array
+           operand, the result is an lvalue if that operand is an lvalue and
+           an xvalue otherwise." */
+        if (syntax_is(tree, children[2], syntax_kind::braced_init_list) ||
+            syntax_is(tree, children[2], syntax_kind::initializer_list))
+            return not_supported(n, "expr.sub");
+        expression_meaning a, i;
+        analysis_result r = expression(children[0], a);
+        if (r == analysis_result::well_formed)
+            r = expression(children[2], i);
+        if (r != analysis_result::well_formed)
+            return r;
+        expression_meaning *base = &a, *index = &i;
+        auto is_array = [&](const expression_meaning &x) {
+            return type_table[x.type.unqualified()].kind == type_kind::array;
+        };
+        if (!is_array(a) && !is_pointer(a.type) &&
+            (is_array(i) || is_pointer(i.type))) {
+            base = &i;
+            index = &a;
+        }
+        if (is_array(*base) && base->category != value_category::lvalue)
+            return not_supported(n, "expr.sub");
+        r = operand_value(n, *base);
+        if (r == analysis_result::well_formed)
+            r = operand_value(n, *index);
+        if (r != analysis_result::well_formed)
+            return r;
+        if (!is_pointer(base->type) || !is_integral(index->type)) {
+            if ((fundamental_of(base->type) == fundamental_type::none &&
+                 !is_pointer(base->type)) ||
+                (fundamental_of(index->type) == fundamental_type::none &&
+                 !is_pointer(index->type)))
+                return not_supported(n, "expr.sub");
+            return ill_formed(n,
+                              "one of the expressions shall be a glvalue of "
+                              "type array of T or a prvalue of type pointer "
+                              "to T and the other shall be a prvalue of "
+                              "unscoped enumeration or integral type",
+                              "expr.sub");
+        }
+        qualified_type element = type_table[base->type.unqualified()].operand;
+        if (!is_object_pointer(base->type) || !size_of_type(element))
+            return not_supported(n, "expr.sub");
+        constness evaluation =
+            combined_constness(base->evaluation, index->evaluation);
+        m = expression_meaning();
+        m.type = element;
+        m.category = value_category::lvalue;
+        m.evaluation = evaluation;
+        if (m.evaluation == constness::constant)
+            m.evaluation = constness::unknown;
+        return analysis_result::well_formed;
+    }
+    return not_supported(n, "expr.post");
 }
 
 } // namespace cplusplus

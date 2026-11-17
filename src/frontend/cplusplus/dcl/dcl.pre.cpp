@@ -725,21 +725,7 @@ analysis_result semantic_analysis::init_declarators(node_index declaration,
                               tree[declaration].first_token, nullptr);
     analysis_result result = analysis_result::well_formed;
     for (syntax_child item : items) {
-        if (syntax_is(tree, item, syntax_kind::init_declarator))
-            return not_supported(item.index(), "dcl.init");
-        qualified_type type = s.type;
-        declarator_meaning m;
-        r = declarator(declaration, item, type, m);
-        if (r == analysis_result::well_formed && !m.has_id)
-            r = not_supported(declaration, "dcl.meaning");
-        if (r == analysis_result::well_formed) {
-            entity_kind kind = entity_kind::variable;
-            if (s.typedef_)
-                kind = entity_kind::typedef_name;
-            else if (type_table[type.unqualified()].kind == type_kind::function)
-                kind = entity_kind::function;
-            r = declare(declaration, m.id, kind, type, s, definition);
-        }
+        r = init_declarator(declaration, item, s, definition);
         if (r == analysis_result::ill_formed)
             result = r;
         else if (r == analysis_result::unsupported &&
@@ -747,6 +733,133 @@ analysis_result semantic_analysis::init_declarators(node_index declaration,
             result = r;
     }
     return result;
+}
+
+/*
+ * One init-declarator: its declarator, the name it declares, and the
+ * initializer.  [basic.scope.pdecl]/1: "The point of declaration for a name
+ * is immediately after its complete declarator and before its initializer
+ * (if any)".
+ */
+analysis_result semantic_analysis::init_declarator(node_index declaration,
+                                                   syntax_child item,
+                                                   const specified &s,
+                                                   bool definition)
+{
+    syntax_child d = item;
+    syntax_child init;
+    bool initialized = false;
+    if (syntax_is(tree, item, syntax_kind::init_declarator)) {
+        const syntax_node &node = tree[item.index()];
+        if (node.child_count != 2 ||
+            syntax_is(tree, tree.children(item.index())[1],
+                      syntax_kind::requires_clause))
+            return not_supported(item.index(), "dcl.decl");
+        d = tree.children(item.index())[0];
+        init = tree.children(item.index())[1];
+        initialized = true;
+    }
+    qualified_type type = s.type;
+    declarator_meaning m;
+    analysis_result r = declarator(declaration, d, type, m);
+    if (r != analysis_result::well_formed)
+        return r;
+    if (!m.has_id)
+        return not_supported(declaration, "dcl.meaning");
+    entity_kind kind = entity_kind::variable;
+    if (s.typedef_)
+        kind = entity_kind::typedef_name;
+    else if (type_table[type.unqualified()].kind == type_kind::function)
+        kind = entity_kind::function;
+    if (s.constexpr_ && kind == entity_kind::function)
+        /* a constexpr function's rules ([dcl.constexpr]/3) */
+        return not_supported(declaration, "dcl.constexpr");
+    if (s.constexpr_) {
+        /* [dcl.constexpr]/10: "A constexpr specifier used in an object
+           declaration declares the object as const.  Such an object shall
+           have literal type and shall be initialized." */
+        const struct type record = type_table[type.unqualified()];
+        if (record.kind == type_kind::class_type ||
+            record.kind == type_kind::enumeration ||
+            record.kind == type_kind::none)
+            return not_supported(declaration, "basic.types");
+        if (!initialized)
+            return ill_formed_at_token(m.id,
+                                       "a constexpr object shall be "
+                                       "initialized",
+                                       "dcl.constexpr");
+        type = add_cv(type, cv_const);
+    }
+    if (initialized && kind != entity_kind::variable)
+        /* an initializer for a typedef-name or a function: a rule not found
+           yet */
+        return not_supported(declaration, "dcl.init");
+    entity_index declared_entity = 0;
+    r = declare(declaration, m.id, kind, type, s, definition, initialized,
+                declared_entity);
+    if (r != analysis_result::well_formed || !initialized)
+        return r;
+    /* until the initializer is analysed (and if it is unsupported) the
+       value of a variable that may be usable in constant expressions is
+       unknown */
+    {
+        uint32_t cv = cv_of(type_table, type);
+        if (s.constexpr_ ||
+            ((cv & cv_const) && !(cv & cv_volatile) && is_integral(type)))
+            entity_table[declared_entity].usable = constness::unknown;
+    }
+    initialized_value value;
+    value.evaluation = constness::unknown;
+    value.value = 0;
+    qualified_type before = type;
+    r = initializer(init, type, value);
+    if (r != analysis_result::well_formed)
+        return r;
+    const struct type record = type_table[type.unqualified()];
+    /* [basic.def]/5: "In the definition of an object, the type of that
+       object shall not be an incomplete type" */
+    if (record.kind == type_kind::array && !record.bound_known)
+        return ill_formed_at_token(m.id,
+                                   "in the definition of an object, the type "
+                                   "of that object shall not be an "
+                                   "incomplete type",
+                                   "basic.def");
+    entity &e = entity_table[declared_entity];
+    if (!(before == type)) {
+        /* [dcl.array]/7: an array of unknown bound completed by its
+           initializer */
+        e.type = type;
+        declared.back().type = type;
+    }
+    /* [dcl.constexpr]/10: "In any constexpr variable declaration, the
+       full-expression of the initialization shall be a constant
+       expression" */
+    if (s.constexpr_) {
+        if (value.evaluation == constness::not_constant)
+            return ill_formed_at_token(m.id,
+                                       "in any constexpr variable "
+                                       "declaration, the full-expression of "
+                                       "the initialization shall be a "
+                                       "constant expression",
+                                       "dcl.constexpr");
+        if (value.evaluation == constness::unknown)
+            return not_supported(declaration, "expr.const");
+    }
+    /* [expr.const]/3: "A variable is usable in constant expressions after
+       its initializing declaration is encountered if it is a constexpr
+       variable, or it is a constant-initialized variable of
+       const-qualified integral or enumeration type." */
+    uint32_t cv = cv_of(type_table, type);
+    bool integral_const = (cv & cv_const) && !(cv & cv_volatile) &&
+                          record.kind == type_kind::fundamental &&
+                          is_integral(type);
+    e.usable = constness::not_constant;
+    if (s.constexpr_ || integral_const) {
+        e.usable = value.evaluation;
+        e.value = value.value;
+        e.constexpr_ = s.constexpr_;
+    }
+    return analysis_result::well_formed;
 }
 
 } // namespace cplusplus

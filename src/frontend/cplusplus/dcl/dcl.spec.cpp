@@ -977,7 +977,7 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
     simple_type_keywords k;
     uint32_t cv = cv_none;
     unsigned const_ = 0, volatile_ = 0, typedef_ = 0, static_ = 0, extern_ = 0,
-             inline_ = 0;
+             inline_ = 0, constexpr_ = 0;
     type_index named = 0;
     token_index named_at = 0, duplicate = 0;
     const char *duplicate_spelling = nullptr;
@@ -1013,7 +1013,9 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
             kw != standard_keyword::volatile_ &&
             kw != standard_keyword::typedef_ &&
             kw != standard_keyword::static_ &&
-            kw != standard_keyword::extern_ && kw != standard_keyword::inline_)
+            kw != standard_keyword::extern_ &&
+            kw != standard_keyword::inline_ &&
+            kw != standard_keyword::constexpr_)
             k.first = t;
         switch (kw) {
         case standard_keyword::const_:
@@ -1085,11 +1087,14 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
         case standard_keyword::inline_:
             count(inline_, t, "inline");
             break;
+        case standard_keyword::constexpr_:
+            count(constexpr_, t, "constexpr");
+            break;
         default:
             return not_supported(seq, specifier_subclause(kw));
         }
     }
-    if (parameter && (typedef_ || static_ || extern_ || inline_))
+    if (parameter && (typedef_ || static_ || extern_ || inline_ || constexpr_))
         return not_supported(seq, "dcl.fct");
     /* [dcl.stc]/1: "At most one storage-class-specifier shall appear in a
        given decl-specifier-seq, except that thread_local may appear with
@@ -1117,6 +1122,15 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
                           "decl-specifier-seq with any other kind of "
                           "specifier except a defining-type-specifier",
                           "dcl.typedef");
+    /* [dcl.constexpr]/1: "The constexpr specifier shall be applied only to
+       the definition of a variable or variable template or the declaration
+       of a function or function template." */
+    if (typedef_ && constexpr_)
+        return ill_formed(seq,
+                          "the constexpr specifier shall be applied only to "
+                          "the definition of a variable or the declaration "
+                          "of a function",
+                          "dcl.constexpr");
     type_index type = 0;
     bool keywords = k.signed_ || k.unsigned_ || k.short_ || k.long_ ||
                     k.char_ || k.int_ || k.double_ ||
@@ -1157,6 +1171,7 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
     s.static_ = static_;
     s.extern_ = extern_;
     s.inline_ = inline_;
+    s.constexpr_ = constexpr_;
     if (type)
         s.type = add_cv(qualified_type::make(type, cv_none), cv);
     return analysis_result::well_formed;

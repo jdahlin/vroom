@@ -423,6 +423,29 @@ libstdc++ and json), since sema cannot analyse a declaration kept as tokens.
   [namespace.def] 13.1k, [class.pre] 8.4k, [temp.pre] 6.9k,
   [dcl.fct.def.general] 4.9k, [dcl.pre] 3.8k (attributes),
   [basic.lookup.unqual] 2.8k.
+- Status (2026-11-17, S1b done): initializers and constant expressions at
+  global namespace scope.  Expressions are typed with their value category
+  (`expr/expr.pre.cpp` dispatches; literals, names, the built-in unary,
+  multiplicative to comma operators, casts to arithmetic and pointer types,
+  functional casts, subscripts, `sizeof`/`alignof`), with the standard
+  conversions and usual arithmetic conversions (`expr/conv.cpp`) and
+  constant evaluation in three states (constant, not constant, unknown:
+  an ill-formed verdict rests only on the first two; long double and
+  floating-point under an FENV/`float_control`/`clang fp` pragma are
+  unknown).  Array bounds are converted constant expressions; initializers
+  are copy, direct and list ([dcl.init], [dcl.init.list] with narrowing,
+  [dcl.init.aggr] for arrays without brace elision, [dcl.init.string],
+  [dcl.init.ref]); `constexpr` variables, and const integral variables are
+  usable in constant expressions.  New extension diagnostics: narrowing
+  (an error by default, as clang's) and a string literal to `char *`.
+  `cxxsema -type-claims` writes each expression's type and, from C++11, a
+  constant's value, which `cxx-sema.py` has clang check with
+  `static_assert((E) == V)`.  C3: 4189 runs, no crash; 2723 declarations
+  as clang, 0 we reject and clang accepts, 59 we accept and clang rejects,
+  51950 unsupported, 9072 not parsed.  C4: 6474 declared types verified, 0
+  refuted; 1098 expression types verified, 0 refuted, 118 not checkable;
+  757 constants verified, 0 refuted.  Rule coverage: basic 4/112, dcl
+  38/238, expr 18/152.
 
 ### S2. Names and entities in full
 

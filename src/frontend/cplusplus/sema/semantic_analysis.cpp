@@ -107,6 +107,7 @@ analysis_result semantic_analysis::declaration(node_index n)
 {
     analysed_declaration d;
     d.node = n;
+    current_declaration = n;
     size_t unsupported_before = unsupported.size();
     if (!parsed_completely(n)) {
         d.result = analysis_result::not_parsed;
@@ -128,8 +129,7 @@ analysis_result semantic_analysis::declaration(node_index n)
     }
     if (d.result == analysis_result::unsupported)
         d.first_unsupported = static_cast<uint32_t>(unsupported_before);
-    if (d.result == analysis_result::unsupported ||
-        d.result == analysis_result::not_parsed)
+    if (d.result != analysis_result::well_formed)
         hold_names(n);
     declarations.append(d);
     return d.result;

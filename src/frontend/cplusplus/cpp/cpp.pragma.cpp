@@ -97,6 +97,12 @@ void preprocessor::execute_pragma(const preprocessing_token *t, size_t count,
     /* [ext.gnu] gnu_pragmas, gnu_push_pop_macro, gnu_pragma_message */
     if (gnu_pragma(t, count))
         return;
+    if (spelled_as(files, t[0], "STDC") ||
+        spelled_as(files, t[0], "float_control") ||
+        spelled_as(files, t[0], "fenv_access") ||
+        (count > 1 && spelled_as(files, t[0], "clang") &&
+         spelled_as(files, t[1], "fp")))
+        files.floating_point_pragma = true;
     if (!known_pragma(*this, t[0]))
         diagnostics.issue(diagnostic_id::warn_pragma_ignored, t[0].location);
 }

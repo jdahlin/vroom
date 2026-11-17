@@ -8,6 +8,7 @@
  *         qualified-id
  */
 #include "../cplusplus-internal.h"
+#include "frontend/cplusplus/sema.h"
 
 namespace cplusplus
 {
@@ -499,6 +500,48 @@ node_index parser::declarator_id(declarator_facts &facts)
         return 0; /* an unqualified-id passes through */
     facts.qualified_id = true;
     return finish_node(syntax_kind::qualified_id, mark, first);
+}
+
+/* ---- semantic analysis ---------------------------------------------- */
+
+/*
+ * [expr.prim.id.unqual]/2: "The result is the entity denoted by the
+ * identifier. ... Otherwise, the type of the expression is the type of the
+ * result. ... The expression is an lvalue if the
+ * entity is a function, variable, structured binding, data member, or
+ * template parameter object and a prvalue otherwise".  At global namespace
+ * scope, unqualified lookup ([basic.lookup.unqual]) finds the declaration
+ * of the name there before; a name it does not find may be one a
+ * namespace or a using-directive analysis has no rules for declares.
+ */
+analysis_result semantic_analysis::id_expression(token_index t,
+                                                 expression_meaning &m)
+{
+    entity_index e = entity_table.find(0, tokens.identifier(t));
+    if (!e || entity_table[e].kind == entity_kind::none)
+        return not_supported(current_declaration, "basic.lookup.unqual");
+    const entity &x = entity_table[e];
+    if (x.kind != entity_kind::variable && x.kind != entity_kind::function)
+        return not_supported(current_declaration, "expr.prim.id");
+    m.category = value_category::lvalue;
+    m.type = x.type;
+    m.entity = e;
+    /* the address of an object or function with static storage duration
+       is a constant ([expr.const]/11) */
+    m.evaluation = constness::constant;
+    const struct type record = type_table[x.type.unqualified()];
+    if (record.kind == type_kind::lvalue_reference ||
+        record.kind == type_kind::rvalue_reference) {
+        /* [expr.type]/1: "If an expression initially has the type
+           "reference to T", the type is adjusted to T prior to any further
+           analysis." */
+        m.type = record.operand;
+        m.entity = 0;
+        /* [expr.const]/5.12: a reference is usable only with "a preceding
+           initialization": not modelled */
+        m.evaluation = constness::unknown;
+    }
+    return analysis_result::well_formed;
 }
 
 } // namespace cplusplus

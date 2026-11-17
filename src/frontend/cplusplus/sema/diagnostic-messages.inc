@@ -18,3 +18,11 @@ DIAGNOSTIC(sema_no_declarator, EXTENSION_WARNING, WARNING, "missing-declarations
 /* [intro.compliance]/8: Microsoft's extensions (-fms-extensions) */
 DIAGNOSTIC(sema_static_after_non_static, EXTENSION_WARNING, WARNING, "microsoft-redeclare-static",
            "a name declared static after a declaration with external linkage: the linkages implied by successive declarations shall agree ([dcl.stc]/6)")
+/* [dcl.init.list]/7: an error by default in C++11 and later, as clang's
+   -Wc++11-narrowing (none before C++11) */
+DIAGNOSTIC(sema_narrowing, EXTENSION_WARNING, ERROR, "c++11-narrowing",
+           "a narrowing conversion is required: it is ill-formed in a list-initialization ([dcl.init.list]/3)")
+/* [diff.lex]/3: a string literal to a pointer to non-const characters,
+   clang's -Wwritable-strings from C++11 on */
+DIAGNOSTIC(sema_writable_string, EXTENSION_WARNING, WARNING, "writable-strings",
+           "a string literal converts to a pointer to const characters: the conversion to char * was removed in C++11 ([diff.lex]/3)")

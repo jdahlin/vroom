@@ -13,6 +13,7 @@
  *         = *= /= %= += -= >>= <<= &= ^= |=
  */
 #include "../cplusplus-internal.h"
+#include "frontend/cplusplus/sema.h"
 
 namespace cplusplus
 {
@@ -91,6 +92,133 @@ node_index parser::assignment_expression()
     if (failed())
         return 0;
     return finish_node(syntax_kind::assignment_expression, mark, first);
+}
+
+/* ---- semantic analysis ---------------------------------------------- */
+
+/*
+ * [expr.ass]/1: "The assignment operator (=) and the compound assignment
+ * operators all group right-to-left.  All require a modifiable lvalue as
+ * their left operand; their result is an lvalue referring to the left
+ * operand."  The left operand is modified: no constant expression here
+ * ([expr.const]/5.16).
+ */
+analysis_result semantic_analysis::assignment(node_index n,
+                                              expression_meaning &m)
+{
+    const syntax_node &node = tree[n];
+    const syntax_child *children = tree.children(n);
+    if (node.child_count != 3 || !children[1].is_token() ||
+        syntax_is(tree, children[2], syntax_kind::braced_init_list))
+        return not_supported(n, "expr.ass");
+    preprocessing_op_or_punc op = preprocessing_op_or_punc_primary(
+        tokens[children[1].index()].op_or_punc);
+    expression_meaning left, right;
+    analysis_result r = expression(children[0], left);
+    if (r == analysis_result::well_formed)
+        r = expression(children[2], right);
+    if (r != analysis_result::well_formed)
+        return r;
+    const struct type record = type_table[left.type.unqualified()];
+    if (record.kind != type_kind::fundamental &&
+        record.kind != type_kind::pointer)
+        return not_supported(n, "expr.ass");
+    /* [basic.lval]/10: "An lvalue is modifiable unless its type is
+       const-qualified or is a function type." */
+    if (left.category != value_category::lvalue || (left.type.cv() & cv_const))
+        return ill_formed(n,
+                          "the assignment operators require a modifiable "
+                          "lvalue as their left operand",
+                          "expr.ass");
+    r = operand_value(n, right);
+    if (r != analysis_result::well_formed)
+        return r;
+    qualified_type target =
+        qualified_type::make(left.type.unqualified(), cv_none);
+    if (op == preprocessing_op_or_punc::EQUAL) {
+        /* [expr.ass]/3: "If the right operand is an expression, it is
+           implicitly converted to the cv-unqualified type of the left
+           operand." */
+        r = implicit_conversion(n, right, target, false);
+        if (r != analysis_result::well_formed)
+            return r;
+    } else {
+        /* [expr.ass]/6: "The behavior of an expression of the form E1 op= E2
+           is equivalent to E1 = E1 op E2 except that E1 is evaluated only
+           once. ... For += and -=, E1 shall either have arithmetic type or
+           be a pointer to a possibly cv-qualified completely-defined object
+           type.  In all other cases, E1 shall have arithmetic type." */
+        preprocessing_op_or_punc arithmetic_op;
+        switch (op) {
+        case preprocessing_op_or_punc::PLUS_EQUAL:
+            arithmetic_op = preprocessing_op_or_punc::PLUS;
+            break;
+        case preprocessing_op_or_punc::MINUS_EQUAL:
+            arithmetic_op = preprocessing_op_or_punc::MINUS;
+            break;
+        case preprocessing_op_or_punc::STAR_EQUAL:
+            arithmetic_op = preprocessing_op_or_punc::STAR;
+            break;
+        case preprocessing_op_or_punc::SLASH_EQUAL:
+            arithmetic_op = preprocessing_op_or_punc::SLASH;
+            break;
+        case preprocessing_op_or_punc::PERCENT_EQUAL:
+            arithmetic_op = preprocessing_op_or_punc::PERCENT;
+            break;
+        case preprocessing_op_or_punc::LESS_LESS_EQUAL:
+            arithmetic_op = preprocessing_op_or_punc::LESS_LESS;
+            break;
+        case preprocessing_op_or_punc::GREATER_GREATER_EQUAL:
+            arithmetic_op = preprocessing_op_or_punc::GREATER_GREATER;
+            break;
+        case preprocessing_op_or_punc::AMPERSAND_EQUAL:
+            arithmetic_op = preprocessing_op_or_punc::AMPERSAND;
+            break;
+        case preprocessing_op_or_punc::CARET_EQUAL:
+            arithmetic_op = preprocessing_op_or_punc::CARET;
+            break;
+        case preprocessing_op_or_punc::BAR_EQUAL:
+            arithmetic_op = preprocessing_op_or_punc::BAR;
+            break;
+        default:
+            return not_supported(n, "expr.ass");
+        }
+        bool additive = arithmetic_op == preprocessing_op_or_punc::PLUS ||
+                        arithmetic_op == preprocessing_op_or_punc::MINUS;
+        if (is_pointer(left.type)) {
+            if (!additive)
+                return ill_formed(n,
+                                  "in all cases other than += and -=, E1 "
+                                  "shall have arithmetic type",
+                                  "expr.ass");
+            if (!is_object_pointer(left.type) ||
+                !size_of_type(type_table[left.type.unqualified()].operand))
+                return not_supported(n, "expr.ass");
+            if (!is_integral(right.type)) {
+                if (fundamental_of(right.type) == fundamental_type::none &&
+                    !is_pointer(right.type))
+                    return not_supported(n, "expr.ass");
+                return ill_formed(n,
+                                  "for += and -= of a pointer, E2 shall have "
+                                  "integral or unscoped enumeration type",
+                                  "expr.add");
+            }
+        } else {
+            expression_meaning value = left, result;
+            r = operand_value(n, value);
+            if (r == analysis_result::well_formed)
+                r = arithmetic(n, arithmetic_op, value, right, result);
+            if (r == analysis_result::well_formed)
+                r = implicit_conversion(n, result, target, false);
+            if (r != analysis_result::well_formed)
+                return r;
+        }
+    }
+    m = left;
+    m.evaluation = constness::not_constant;
+    m.entity = 0;
+    m.beyond_integral_constant = true;
+    return analysis_result::well_formed;
 }
 
 } // namespace cplusplus

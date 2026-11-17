@@ -89,6 +89,10 @@ LANGUAGE_FEATURE(range_for_init_statement, cplusplus_20, never,
 LANGUAGE_FEATURE(labels_anywhere, cplusplus_23, never,
                  "P2324R2: a label at the end of a compound-statement")
 /* [expr] */
+LANGUAGE_FEATURE(bool_increment, cplusplus_98, cplusplus_17,
+                 "[diff.cpp14.expr]/1: Remove increment operator with bool operand")
+LANGUAGE_FEATURE(modular_left_shift, cplusplus_20, never,
+                 "P1236R1: signed integers are two's complement; E1 << E2 is E1 x 2^E2 modulo 2^N")
 LANGUAGE_FEATURE(multidimensional_subscript, cplusplus_23, never,
                  "P2128R6: postfix-expression [ expression-list_opt ]")
 /* [cpp] */

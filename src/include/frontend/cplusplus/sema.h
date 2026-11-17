@@ -207,6 +207,10 @@ enum class linkage : uint8_t {
     external,
 };
 
+/* whether an evaluation is a constant expression ([expr.const]/11) with a
+   value analysis knows, is not one, or analysis cannot tell */
+enum class constness : uint8_t { constant, not_constant, unknown };
+
 struct entity {
     entity_kind kind = entity_kind::none;
     linkage linkage_of_name = linkage::none;
@@ -218,6 +222,13 @@ struct entity {
        class, a function); 0 at global namespace scope */
     entity_index enclosing = 0;
     qualified_type type;
+    /* [expr.const]/4: a variable usable in constant expressions: whether
+       it is (constant, with its value as expression_meaning keeps one),
+       is not, or analysis could not tell (unknown) */
+    constness usable = constness::not_constant;
+    uint64_t value = 0;
+    /* [dcl.constexpr]/1 */
+    bool constexpr_ = false;
     /* [basic.link]: its declarations, in order, are a chain through
        `declarations`: the first and the last */
     uint32_t first_declaration = 0, last_declaration = 0;
@@ -313,6 +324,71 @@ struct declared_name {
     qualified_type type;
 };
 
+/* ---- values of constant expressions (expr/expr.const.cpp) ---- */
+
+/* [basic.fundamental]/2: the integer types; [basic.fundamental]/12: the
+   floating-point types (_BitInt and _Float16 are neither here: analysis
+   has no rules for them yet) */
+bool fundamental_type_is_integral(fundamental_type t);
+bool fundamental_type_is_floating(fundamental_type t);
+/* [conv.integral]/3: "the unique value of the destination type that is
+   congruent to the source integer modulo 2^N": as an expression_meaning
+   keeps it, sign-extended for a signed type ([conv.bool] for bool) */
+uint64_t integer_wrap(const implementation_defined_behavior &behavior,
+                      fundamental_type t, unsigned __int128 v);
+/* whether the integer type t can represent v */
+bool integer_holds(const implementation_defined_behavior &behavior,
+                   fundamental_type t, __int128 v);
+/* the value an expression_meaning keeps for the integer type t */
+__int128 integer_value(const implementation_defined_behavior &behavior,
+                       fundamental_type t, uint64_t kept);
+/* the constness of an operation on operands of the given constnesses,
+   before it is evaluated */
+constness combined_constness(constness a, constness b);
+/* a floating-point value as an expression_meaning keeps it */
+double floating_value(uint64_t kept);
+uint64_t floating_kept(double v);
+
+/* the cv-qualifiers of a type, an array's those of its elements
+   ([basic.type.qualifier]/3) */
+uint32_t cv_of(const types &table, qualified_type t);
+
+/* [basic.lval]/1: "Every expression belongs to exactly one of the
+   fundamental classifications in this taxonomy: lvalue, xvalue, or
+   prvalue." */
+enum class value_category : uint8_t { prvalue, lvalue, xvalue };
+
+/* what analysis found an expression to be ([expr.pre]/1: "An expression
+   is a sequence of operators and operands that specifies a computation") */
+struct expression_meaning {
+    /* [expr.type]/1: never a reference type */
+    qualified_type type;
+    value_category category = value_category::prvalue;
+    /* a prvalue: whether it is a constant expression and its value: an
+       integral value sign- or zero-extended to 64 bits, or a float or
+       double value as binary64 bits.  A glvalue: whether evaluating it
+       (not reading the object) is constant */
+    constness evaluation = constness::unknown;
+    uint64_t value = 0;
+    /* [conv.ptr]/1: an integer literal with value zero */
+    bool zero_literal = false;
+    /* a string-literal, perhaps parenthesized ([dcl.init.string]) */
+    token_index string_literal = 0;
+    /* an id-expression, perhaps parenthesized: the variable or function */
+    entity_index entity = 0;
+    /* a floating-point operand or a comma operator inside: not an integral
+       constant expression before C++11 (C++03 [expr.const]/1) */
+    bool beyond_integral_constant = false;
+};
+
+/* one expression analysis gave a type: what cxxsema -type-claims has clang
+   check */
+struct analysed_expression {
+    syntax_child at;
+    node_index declaration = 0;
+    expression_meaning meaning;
+};
+
 class semantic_analysis
 {
   public:
@@ -331,6 +407,7 @@ class semantic_analysis
     owned_array<analysed_declaration> declarations;
     owned_array<unsupported_construct> unsupported;
     owned_array<declared_name> declared;
+    owned_array<analysed_expression> expressions;
 
   private:
     /* the node needs rules that are not written: those of the subclause
@@ -367,7 +444,7 @@ class semantic_analysis
            cv-qualifier was there */
         bool has_type = false;
         bool typedef_ = false, static_ = false, extern_ = false,
-             inline_ = false;
+             inline_ = false, constexpr_ = false;
     };
     analysis_result decl_specifier_seq(node_index seq, specified &s,
                                        bool parameter);
@@ -409,11 +486,126 @@ class semantic_analysis
        ([dcl.ref]/1, [dcl.fct]/7) */
     qualified_type add_cv(qualified_type t, uint32_t cv);
 
+    analysis_result init_declarator(node_index declaration, syntax_child item,
+                                    const specified &s, bool definition);
+
     /* [basic.link], [basic.scope.declarative]: the name of a declarator
-       declared at global namespace scope, or redeclared */
+       declared at global namespace scope, or redeclared; the entity */
     analysis_result declare(node_index declaration, token_index id,
                             entity_kind kind, qualified_type type,
-                            const specified &s, bool definition);
+                            const specified &s, bool definition,
+                            bool initialized, entity_index &declared_entity);
+
+    /* ---- expressions ([expr]) ---- */
+    /* [expr.pre]: an expression's type, value category and value; the
+       expression is recorded in expressions */
+    analysis_result expression(syntax_child e, expression_meaning &m);
+    analysis_result expression_kind(syntax_child e, expression_meaning &m);
+    /* [expr.prim.literal], [lex.literal] */
+    analysis_result literal(token_index t, expression_meaning &m);
+    /* [expr.prim.id.unqual] */
+    analysis_result id_expression(token_index t, expression_meaning &m);
+    /* [expr.prim.paren] */
+    analysis_result parenthesized(node_index n, expression_meaning &m);
+    /* [expr.unary] */
+    analysis_result unary(node_index n, expression_meaning &m);
+    analysis_result size_of(node_index n, bool alignment,
+                            expression_meaning &m);
+    analysis_result increment(node_index n, syntax_child operand,
+                              bool decrement, bool postfix,
+                              expression_meaning &m);
+    /* [expr.post] */
+    analysis_result postfix(node_index n, expression_meaning &m);
+    /* [expr.cast], [expr.type.conv] */
+    analysis_result cast(node_index n, expression_meaning &m);
+    analysis_result explicit_conversion(node_index at, qualified_type to,
+                                        expression_meaning &m);
+    /* [expr.mul] to [expr.log.or] */
+    analysis_result binary(node_index n, expression_meaning &m);
+    analysis_result arithmetic(node_index n, preprocessing_op_or_punc op,
+                               expression_meaning &left,
+                               expression_meaning &right,
+                               expression_meaning &m);
+    analysis_result comparison(node_index n, preprocessing_op_or_punc op,
+                               expression_meaning &left,
+                               expression_meaning &right,
+                               expression_meaning &m);
+    /* [expr.type]/3: the composite pointer type of two operands, one a
+       pointer and the other a pointer or a null pointer constant, both
+       converted to it; unsupported where analysis has no rule */
+    analysis_result composite_pointer_type(node_index at, expression_meaning &a,
+                                           expression_meaning &b);
+    /* [expr.cond] */
+    analysis_result conditional(node_index n, expression_meaning &m);
+    /* [expr.ass] */
+    analysis_result assignment(node_index n, expression_meaning &m);
+    /* [expr.comma] */
+    analysis_result comma(node_index n, expression_meaning &m);
+    /* a type-id ([dcl.name]) */
+    analysis_result type_id(node_index n, qualified_type &type);
+
+    /* ---- standard conversions ([conv]) ---- */
+    /* the fundamental type of t, none if t is no fundamental type */
+    fundamental_type fundamental_of(qualified_type t) const;
+    bool is_integral(qualified_type t) const;
+    bool is_floating(qualified_type t) const;
+    bool is_arithmetic(qualified_type t) const;
+    bool is_pointer(qualified_type t) const;
+    bool is_object_pointer(qualified_type t) const;
+    /* [basic.lval]/6: the lvalue-to-rvalue, array-to-pointer and
+       function-to-pointer conversions of an operand that is to be a
+       prvalue */
+    analysis_result operand_value(node_index at, expression_meaning &m);
+    /* [conv.prom] */
+    void promote(expression_meaning &m);
+    /* a prvalue converted to the arithmetic type to, its value with it */
+    void convert_arithmetic(expression_meaning &m, fundamental_type to);
+    /* [expr.arith.conv]: the operands' common type, both converted */
+    fundamental_type usual_arithmetic_conversions(expression_meaning &a,
+                                                  expression_meaning &b);
+    /* [conv.qual]/2 */
+    bool similar(qualified_type a, qualified_type b) const;
+    /* [conv.qual]/3: whether a prvalue of type from converts to type to by
+       a qualification conversion */
+    bool qualification_convertible(qualified_type from,
+                                   qualified_type to) const;
+    /* [dcl.init]/17.9: the standard conversion sequence of an implicit
+       conversion of the prvalue m to to (cv-unqualified); ill-formed
+       without one */
+    analysis_result implicit_conversion(node_index at, expression_meaning &m,
+                                        qualified_type to, bool direct);
+    /* [conv.bool], [expr.context]/1: contextually converted to bool */
+    analysis_result contextual_bool(node_index at, expression_meaning &m);
+
+    /* ---- initialization ([dcl.init]) ---- */
+    struct initialized_value {
+        constness evaluation = constness::unknown;
+        uint64_t value = 0;
+    };
+    /* the object or reference of type type (an array of unknown bound gets
+       its bound) initialized by the initializer node (a
+       brace-or-equal-initializer, initializer or braced-init-list) */
+    analysis_result initializer(syntax_child init, qualified_type &type,
+                                initialized_value &result);
+    analysis_result initialize_from(node_index at, syntax_child clause,
+                                    qualified_type &type, bool direct,
+                                    bool list, initialized_value &result);
+    analysis_result list_initialization(node_index list, qualified_type &type,
+                                        bool direct, initialized_value &result);
+    analysis_result string_initialization(node_index at,
+                                          const expression_meaning &string,
+                                          qualified_type &type);
+    analysis_result reference_binding(node_index at, expression_meaning &m,
+                                      qualified_type reference);
+    /* [dcl.init.list]/7: whether converting m to to narrows */
+    analysis_result narrowing(node_index at, const expression_meaning &m,
+                              qualified_type to, bool &narrows);
+    /* the type's size in bytes ([expr.sizeof]), 0 if not complete */
+    uint64_t size_of_type(qualified_type t) const;
+    uint64_t alignment_of_type(qualified_type t) const;
+
+    /* the declaration analysed now, for the expressions' records */
+    node_index current_declaration = 0;
 
     const syntax_tree &tree;
     token_stream &tokens;

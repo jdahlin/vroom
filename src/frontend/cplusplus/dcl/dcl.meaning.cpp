@@ -29,7 +29,7 @@ qualified_type semantic_analysis::add_cv(qualified_type t, uint32_t cv)
 {
     if (!cv)
         return t;
-    const struct type &record = type_table[t.unqualified()];
+    const struct type record = type_table[t.unqualified()];
     switch (record.kind) {
     case type_kind::lvalue_reference:
     case type_kind::rvalue_reference:
@@ -59,7 +59,7 @@ analysis_result semantic_analysis::reference(node_index at, bool rvalue,
                                              qualified_type &type,
                                              declarator_meaning &m)
 {
-    const struct type &referred = type_table[type.unqualified()];
+    const struct type referred = type_table[type.unqualified()];
     if (referred.kind == type_kind::lvalue_reference ||
         referred.kind == type_kind::rvalue_reference) {
         /* [dcl.ref]/5: "There shall be no references to references" */
@@ -177,7 +177,7 @@ analysis_result semantic_analysis::array(node_index at,
     /* [dcl.array]/4: "U is called the array element type; this type shall
        not be a placeholder type, a reference type, a function type, an
        array of unknown bound, or cv void." */
-    const struct type &element = type_table[type.unqualified()];
+    const struct type element = type_table[type.unqualified()];
     const char *rule = "the array element type shall not be a reference "
                        "type, a function type, an array of unknown bound, or "
                        "cv void";
@@ -194,22 +194,62 @@ analysis_result semantic_analysis::array(node_index at,
         return analysis_result::well_formed;
     }
     /* "The constant-expression shall be a converted constant expression of
-       type std::size_t": until [expr.const] is written, an
-       integer-literal */
-    if (!bound->is_token())
+       type std::size_t" ([expr.const]/10: "A converted constant expression
+       of type T is an expression, implicitly converted to type T, where the
+       converted expression is a constant expression and the implicit
+       conversion sequence contains only ... integral conversions other than
+       narrowing conversions") */
+    expression_meaning m;
+    analysis_result r = expression(*bound, m);
+    if (r != analysis_result::well_formed)
+        return r;
+    r = operand_value(at, m);
+    if (r != analysis_result::well_formed)
+        return r;
+    const struct type of_bound = type_table[m.type.unqualified()];
+    if (of_bound.kind == type_kind::enumeration ||
+        of_bound.kind == type_kind::class_type ||
+        of_bound.kind == type_kind::none)
         return not_supported(at, "expr.const");
-    const token &t = tokens[bound->index()];
-    if (t.kind != token_kind::literal ||
-        t.literal != literal_kind::integer_literal || !t.value_known)
+    if (!is_integral(m.type))
+        return ill_formed(at,
+                          "the constant-expression shall be a converted "
+                          "constant expression of type std::size_t",
+                          "dcl.array");
+    /* a bound that is not a constant expression: a variable length array
+       (C99's, clang's extension), or one clang folds */
+    if (m.evaluation != constness::constant)
         return not_supported(at, "expr.const");
+    /* [expr.const]/1 of C++03: "An integral constant-expression can involve
+       only literals, enumerators, const variables or static data members of
+       integral or enumeration types initialized with constant expressions
+       ... Floating literals can appear only if they are cast to integral or
+       enumeration types." */
+    if (!tokens.files.behavior.has(language_feature::list_initialization) &&
+        m.beyond_integral_constant)
+        return not_supported(at, "expr.const");
+    const implementation_defined_behavior &b = tokens.files.behavior;
+    fundamental_type f = fundamental_of(m.type);
+    __int128 value = integer_value(b, f, m.value);
+    /* a negative value narrows: clang's "array size is negative" */
+    if (value < 0)
+        return ill_formed(at,
+                          "the constant-expression shall be a converted "
+                          "constant expression of type std::size_t, whose "
+                          "conversion is not narrowing",
+                          "dcl.array");
+    /* an array too large for the address space: clang's error, by size */
+    if (value > (__int128(1) << 40))
+        return not_supported(at, "dcl.array");
     /* "N shall be greater than zero": zero is clang's extension */
-    if (!t.value) {
-        analysis_result r = extension_used(
-            diagnostic_id::sema_zero_length_array, bound->index(), nullptr);
+    if (!value) {
+        r = extension_used(diagnostic_id::sema_zero_length_array,
+                           tree[at].first_token, nullptr);
         if (r != analysis_result::well_formed)
             return r;
     }
-    type = qualified_type::make(type_table.array_of(type, t.value), cv_none);
+    type = qualified_type::make(type_table.array_of(type, uint64_t(value)),
+                                cv_none);
     return analysis_result::well_formed;
 }
 

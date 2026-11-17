@@ -31,9 +31,6 @@ node_index parser::translation_unit()
     return tree.root;
 }
 
-namespace
-{
-
 /* [basic.type.qualifier]/3: "An array type whose elements are
    cv-qualified is also considered to have the same cv-qualifications as its
    elements." */
@@ -44,6 +41,9 @@ uint32_t cv_of(const types &table, qualified_type t)
         return cv_of(table, record.operand);
     return t.cv();
 }
+
+namespace
+{
 
 /* [basic.link]/11: "declarations for an array object can specify array
    types that differ by the presence or absence of a major array bound" */
@@ -80,8 +80,11 @@ bool same_parameters(const types &table, type_index a, type_index b)
 analysis_result semantic_analysis::declare(node_index declaration,
                                            token_index id, entity_kind kind,
                                            qualified_type type,
-                                           const specified &s, bool definition)
+                                           const specified &s, bool definition,
+                                           bool initialized,
+                                           entity_index &declared_entity)
 {
+    declared_entity = 0;
     uint32_t name = tokens.identifier(id);
     entity_index prior = entity_table.find(0, name);
     /* [dcl.array]/8: "if there is a preceding declaration of the entity in
@@ -97,11 +100,14 @@ analysis_result semantic_analysis::declare(node_index declaration,
     bool is_reference = record.kind == type_kind::lvalue_reference ||
                         record.kind == type_kind::rvalue_reference;
     if (kind == entity_kind::variable) {
-        definition = !s.extern_;
+        /* [basic.def]/2: a declaration is a definition unless "it
+           contains the extern specifier ... and neither an initializer nor
+           a function-body" */
+        definition = !s.extern_ || initialized;
         /* [dcl.ref]/5: "The declaration of a reference shall contain an
            initializer except when the declaration contains an explicit
            extern specifier" */
-        if (is_reference && !s.extern_)
+        if (is_reference && !s.extern_ && !initialized)
             return ill_formed_at_token(id,
                                        "the declaration of a reference shall "
                                        "contain an initializer except when "
@@ -112,8 +118,9 @@ analysis_result semantic_analysis::declare(node_index declaration,
                        record.fundamental == fundamental_type::void_;
         /* [basic.def]/5: "In the definition of an object, the type of that
            object shall not be an incomplete type" */
-        if (definition && (is_void || (record.kind == type_kind::array &&
-                                       !record.bound_known)))
+        if (definition && !initialized &&
+            (is_void ||
+             (record.kind == type_kind::array && !record.bound_known)))
             return ill_formed_at_token(id,
                                        "in the definition of an object, the "
                                        "type of that object shall not be an "
@@ -126,7 +133,7 @@ analysis_result semantic_analysis::declare(node_index declaration,
         /* [dcl.init]/7: "If a program calls for the default-initialization
            of an object of a const-qualified type T, T shall be a
            const-default-constructible class type or array thereof." */
-        if (definition && (cv_of(type_table, type) & cv_const))
+        if (definition && !initialized && (cv_of(type_table, type) & cv_const))
             return ill_formed_at_token(id,
                                        "the default-initialization of an "
                                        "object of a const-qualified type "
@@ -181,9 +188,12 @@ analysis_result semantic_analysis::declare(node_index declaration,
                                            "dcl.typedef");
         } else if (kind == entity_kind::function) {
             if (!same_parameters(type_table, e.type.unqualified(),
-                                 type.unqualified()))
-                /* another function of the name: an overload set */
+                                 type.unqualified())) {
+                /* another function of the name: an overload set, which
+                   expressions cannot name yet */
+                e.kind = entity_kind::none;
                 return not_supported(declaration, "over");
+            }
             /* [over.load]/2: "Function declarations that differ only in the
                return type, the exception specification, or both cannot be
                overloaded." */
@@ -236,6 +246,7 @@ analysis_result semantic_analysis::declare(node_index declaration,
             type_table[type.unqualified()].bound_known)
             e.type = type;
         entity_table.add_declaration(prior, declaration);
+        declared_entity = prior;
     } else {
         if (const_object)
             implied = linkage::internal;
@@ -245,6 +256,7 @@ analysis_result semantic_analysis::declare(node_index declaration,
         entity_table[e].defined = definition;
         entity_table.add_declaration(e, declaration);
         entity_table.bind(0, name, e);
+        declared_entity = e;
     }
     declared_name d;
     d.declaration = declaration;

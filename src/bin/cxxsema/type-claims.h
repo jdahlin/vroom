@@ -16,11 +16,16 @@
  *
  * A line per expression:
  *
- *     FILE <tab> LINE:COLUMN <tab> EXPRESSION <tab> CLAIM
+ *     FILE <tab> LINE:COLUMN <tab> EXPRESSION <tab> CLAIM [<tab> VALUE]
  *
  * with LINE:COLUMN just after the declaration, as cxxparse
- * -expression-claims writes it.  Until analysis types expressions (step S1)
- * there are no lines; the encoding is checked by cxxsema -selftest.
+ * -expression-claims writes it, and from C++11 on the value of a constant
+ * prvalue of integral, float or double type (an integer literal, or a
+ * hexadecimal floating literal), which bench/cxx-sema.py checks as
+ *
+ *     static_assert((E) == VALUE);
+ *
+ * The encoding is checked by cxxsema -selftest.
  */
 #ifndef VCC_CXXSEMA_TYPE_CLAIMS_H
 #define VCC_CXXSEMA_TYPE_CLAIMS_H
@@ -28,7 +33,7 @@
 #include "frontend/cplusplus/sema.h"
 
 /* [basic.lval]/1 */
-enum class value_category : uint8_t { prvalue, lvalue, xvalue };
+using cplusplus::value_category;
 
 /*
  * Appends the encoding of type t to out; false (and out unchanged) when

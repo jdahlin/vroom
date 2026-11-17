@@ -30,6 +30,9 @@
  * 1 if a diagnostic was an error, 2 if the file cannot be read; a
  * declaration that is unsupported is no error.
  */
+#include <math.h>
+#include <string.h>
+
 #include "../cxxlex/command-line.h"
 #include "frontend/cplusplus/parse.h"
 #include "frontend/cplusplus/sema.h"
@@ -229,6 +232,108 @@ static void write_declaration_claims(const semantic_analysis &analysis,
     }
 }
 
+/*
+ * The value of a constant prvalue as a C++ literal clang compares it with:
+ * an integer as unsigned long long or long long, a float or double as a
+ * hexadecimal floating literal; false when there is none (a long double, an
+ * infinity or a NaN, a pointer).
+ */
+static bool write_value_claim(const semantic_analysis &analysis,
+                              const implementation_defined_behavior &b,
+                              const expression_meaning &m, vbuffer *out)
+{
+    const type &record = analysis.type_table[m.type.unqualified()];
+    if (m.category != value_category::prvalue ||
+        m.evaluation != constness::constant ||
+        record.kind != type_kind::fundamental)
+        return false;
+    fundamental_type t = record.fundamental;
+    if (fundamental_type_is_integral(t)) {
+        __int128 v = integer_value(b, t, m.value);
+        if (v < 0 && v == -(__int128(1) << 63))
+            vbuffer_string_append(out, "(-9223372036854775807LL - 1)");
+        else if (v < 0)
+            vbuffer_format_append(out, "(-%lluLL)",
+                                  static_cast<unsigned long long>(-v));
+        else
+            vbuffer_format_append(out, "%lluULL",
+                                  static_cast<unsigned long long>(v));
+        return true;
+    }
+    if (t != fundamental_type::float_ && t != fundamental_type::double_)
+        return false;
+    double d = floating_value(m.value);
+    if (!isfinite(d))
+        return false;
+    vbuffer_format_append(out, "%a", d);
+    return true;
+}
+
+/*
+ * -type-claims: a line per expression analysis gave a type, in a
+ * declaration that is well-formed or unsupported (type-claims.h); from
+ * C++11 on, a fifth field with the value of a constant prvalue, which
+ * bench/cxx-sema.py checks as static_assert((E) == VALUE).  An expression
+ * with a token a macro made, or one spelled over lines, is left out.
+ */
+static void write_type_claims(const semantic_analysis &analysis,
+                              const syntax_tree &tree, token_stream &tokens,
+                              vbuffer *out)
+{
+    const implementation_defined_behavior &b = tokens.files.behavior;
+    bool values = b.has(language_feature::list_initialization);
+    owned_buffer claim, spelling;
+    size_t j = 0;
+    for (const analysed_expression &x : analysis.expressions) {
+        while (j < analysis.declarations.size() &&
+               analysis.declarations[j].node != x.declaration)
+            j++;
+        if (j == analysis.declarations.size())
+            break;
+        analysis_result result = analysis.declarations[j].result;
+        if (result != analysis_result::well_formed &&
+            result != analysis_result::unsupported)
+            continue;
+        token_index first = x.at.index(), end = x.at.index() + 1;
+        if (!x.at.is_token()) {
+            first = tree[x.at.index()].first_token;
+            end = tree[x.at.index()].end_token;
+        }
+        bool from_macro = false;
+        spelling.clear();
+        for (token_index t = first; t < end; t++) {
+            if (tokens[t].preprocessing.expansion)
+                from_macro = true;
+            if (t > first)
+                vbuffer_string_append(spelling.get(), " ");
+            tokens.spelling(t, spelling.get());
+        }
+        if (from_macro || memchr(spelling.data(), '\n', spelling.size()) ||
+            memchr(spelling.data(), '\t', spelling.size()))
+            continue;
+        claim.clear();
+        if (!write_expression_claim(analysis.type_table, x.meaning.type,
+                                    x.meaning.category, claim.get()))
+            continue;
+        const syntax_node &node = tree[x.declaration];
+        source_position at = tokens.position(node.end_token - 1);
+        uint32_t extent = tokens[node.end_token - 1].preprocessing.extent;
+        vbuffer_format_append(out, "%s\t%u:%u\t", at.file_name, at.line,
+                              at.column + extent);
+        vbuffer_append(out, spelling.data(), spelling.size());
+        vbuffer_string_append(out, "\t");
+        vbuffer_append(out, claim.data(), claim.size());
+        if (values) {
+            claim.clear();
+            if (write_value_claim(analysis, b, x.meaning, claim.get())) {
+                vbuffer_string_append(out, "\t");
+                vbuffer_append(out, claim.data(), claim.size());
+            }
+        }
+        vbuffer_string_append(out, "\n");
+    }
+}
+
 int main(int argc, char **argv)
 {
     command_line options("cxxsema");
@@ -317,9 +422,8 @@ int main(int argc, char **argv)
     }
     if (declaration_claims)
         write_declaration_claims(analysis, tree, tokens, out.get());
-    /* -type-claims: no expression has a type before step S1, so there is
-       nothing to write yet; the option is here for bench/cxx-sema.py */
-    (void)type_claims;
+    if (type_claims)
+        write_type_claims(analysis, tree, tokens, out.get());
     if (stats) {
         vbuffer_format_append(
             out.get(),

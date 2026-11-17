@@ -1,0 +1,41 @@
+// Initializers and constant expressions S1b finds ill-formed, one per line,
+// and their near misses that are well-formed: bench/cxx-sema.py compares
+// each verdict with clang's.
+int counter;
+const int one = 1;
+int narrowed{3.5};
+int not_narrowed{3.0 == 3};
+char narrowed_char{300};
+char fits_char{100};
+unsigned narrowed_unsigned{-1};
+float narrowed_float{1.0};
+float exact_float{1.0f};
+int too_many(1, 2);
+int scalar_list{1, 2};
+int excess[2] = {1, 2, 3};
+char short_text[3] = "four";
+char from_wide[] = L"wide";
+int from_int_array[] = "text";
+int not_array[3] = 5;
+int &unbound_ref = 3;
+const int &const_ref = 3;
+int &&rvalue_from_lvalue = counter;
+volatile const int &volatile_ref = 3;
+constexpr int not_constant = counter;
+constexpr int constant_ = one + 2;
+constexpr int uninitialized;
+int negative[-1];
+int negative_expression[one - 2];
+int float_bound[2.5];
+int *pointer_from_int = 1;
+int *pointer_from_zero = one - 1;
+void *pointer_from_double = 0.0;
+int from_pointer = &counter;
+const char *string_ = "text";
+char *mutable_string = "text";
+bool from_null{nullptr};
+int shift_too_far = 1 << 40;
+int sum = &counter + &counter;
+int not_lvalue = ++one;
+int decremented_bool = --counter;
+int empty_array[] = {};
