@@ -752,6 +752,22 @@ libstdc++ and json), since sema cannot analyse a declaration kept as tokens.
   object (clang's NRVO).  Results agree with clang's in both directions at
   -O0 and -O2 (by hand, a split caller/callee pair).  Unsupported: such a
   result in a conditional operand.  `src/test/cxx/run/returns.cpp`.
+  cxx-sema.py against main: the 60 declarations we rejected that clang
+  accepts are back to 0, and nothing is refuted.  Now unsupported: an
+  implicit special member whose subobject's constructor or destructor is
+  missing or inaccessible, `&` of a class prvalue (clang's
+  -Waddress-of-temporary), any non-class child of a decl-specifier-seq
+  before the class it defines (`} __attribute__((packed))`; the class name
+  is held), a second `_` member (C++26), MS `sealed`/`abstract`, and a
+  GNU attribute in a declarator other than `aligned`, `packed` (a member's
+  alignment is 1, lowered with C's per-field packed), `unused` and `used`
+  (not on an internal name): one without arguments was ignored before,
+  which let `packed` members pass with the wrong layout.  A variable's
+  `aligned` is unsupported (gcc/memcpy-bi leaves the passing list).  A
+  variable whose type is an unnamed class with no typedef name for
+  linkage has internal linkage under its plain name, as in clang.  The
+  harness's clang -O0 symbol list uses the driver's
+  `-mconstructor-aliases`.  C5.1 1094 passing, 0 wrong.
   Then enumerations ([dcl.enum], `dcl/dcl.enum.cpp`): scoped and
   unscoped, fixed underlying types, clang's underlying and promoted types
   for the others, enumerators as constants bound in the enclosing scope

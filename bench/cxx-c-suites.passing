@@ -504,8 +504,6 @@ gcc/20100209-1 -O0
 gcc/20100209-1 -O2
 gcc/20100316-1 -O0
 gcc/20100316-1 -O2
-gcc/20100430-1 -O0
-gcc/20100430-1 -O2
 gcc/20100708-1 -O0
 gcc/20100708-1 -O2
 gcc/20100805-1 -O0
@@ -556,12 +554,8 @@ gcc/20150611-1 -O0
 gcc/20150611-1 -O2
 gcc/20170111-1 -O0
 gcc/20170111-1 -O2
-gcc/20170401-1 -O0
-gcc/20170401-1 -O2
 gcc/20170419-1 -O0
 gcc/20170419-1 -O2
-gcc/20171008-1 -O0
-gcc/20171008-1 -O2
 gcc/20180112-1 -O0
 gcc/20180112-1 -O2
 gcc/20180226-1 -O0
@@ -932,8 +926,6 @@ gcc/packed-1 -O0
 gcc/packed-1 -O2
 gcc/packed-2 -O0
 gcc/packed-2 -O2
-gcc/packed-aligned -O0
-gcc/packed-aligned -O2
 gcc/postmod-1 -O0
 gcc/postmod-1 -O2
 gcc/pr101188 -O0
@@ -1266,8 +1258,6 @@ gcc/pr44858 -O0
 gcc/pr44858 -O2
 gcc/pr45034 -O0
 gcc/pr45034 -O2
-gcc/pr45070 -O0
-gcc/pr45070 -O2
 gcc/pr45262 -O0
 gcc/pr45262 -O2
 gcc/pr46019 -O0
@@ -2147,8 +2137,6 @@ vcc/vir_float_args -O0
 vcc/vir_float_args -O2
 vcc/vir_fp_callee -O0
 vcc/vir_fp_callee -O2
-vcc/vir_fp_mem -O0
-vcc/vir_fp_mem -O2
 vcc/vir_inline_context -O0
 vcc/vir_inline_context -O2
 vcc/vir_inline_large -O0

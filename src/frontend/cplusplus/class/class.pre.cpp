@@ -633,7 +633,8 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
     uint32_t name = tokens.identifier(m.id);
     bool is_function =
         type_table[type.unqualified()].kind == type_kind::function;
-    if (is_function && m.aligned)
+    if ((is_function && (m.aligned || (m.gnu_flags & gnu_packed))) ||
+        (m.gnu_flags & gnu_used))
         return not_supported(declaration, "ext.gnu");
     /* a member's symbol attributes (a member function's, a static data
        member's) are not analysed yet; on a non-static data member they
@@ -661,6 +662,12 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
         }
         if (entity_table[prior].kind == entity_kind::none)
             return not_supported(declaration, "over");
+        owned_buffer spelling;
+        tokens.spelling(m.id, spelling.get());
+        if (spelling.size() == 1 && spelling.data()[0] == '_')
+            /* C++26's name-independent declarations (P2169): _ may be
+               declared again */
+            return not_supported(declaration, "basic.scope.scope");
         /* [class.mem]/5: "A member shall not be declared twice in the
            member-specification" */
         return ill_formed_at_token(m.id,

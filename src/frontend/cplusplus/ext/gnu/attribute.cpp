@@ -274,6 +274,8 @@ analysis_result semantic_analysis::gnu_attribute_specifier(node_index n,
         work.resize(work.size() - 1);
         for (uint32_t i = 0; i < tree[next].child_count; i++) {
             syntax_child c = tree.children(next)[i];
+            if (next == n && i == 0)
+                continue; /* __attribute__ */
             if (syntax_is(tree, c, syntax_kind::gnu_attribute))
                 attributes.append(c);
             else if (syntax_is(tree, c, syntax_kind::gnu_attribute_list) ||

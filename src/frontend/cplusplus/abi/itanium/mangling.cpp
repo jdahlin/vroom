@@ -119,6 +119,8 @@ bool itanium_mangler::mangled_name(entity_index e)
        with an extern "C" name of the translation unit; GCC writes x */
     bool internal_variable = x.kind == entity_kind::variable &&
                              x.linkage_of_name == linkage::internal;
+    if (x.unnamed_type_linkage)
+        internal_variable = false;
     if (global && !internal_variable &&
         (x.kind == entity_kind::variable || is_main || x.c_language_linkage)) {
         vbuffer_append(out, identifier, length);

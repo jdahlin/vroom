@@ -849,6 +849,15 @@ analysis_result semantic_analysis::declare_with_initializer(
         return r;
     if (!m.has_id)
         return not_supported(declaration, "dcl.meaning");
+    if (tokens.files.behavior.microsoft_extensions && s.declares_class) {
+        /* Microsoft's class-virt-specifiers, struct X sealed { }: the
+           parser takes the word for a declarator-id */
+        owned_buffer spelling;
+        tokens.spelling(m.id, spelling.get());
+        if ((spelling.size() == 6 && !memcmp(spelling.data(), "sealed", 6)) ||
+            (spelling.size() == 8 && !memcmp(spelling.data(), "abstract", 8)))
+            return not_supported(declaration, "dcl.type.elab");
+    }
     /* [ext:gnu_attributes] the declaration's and the declarator's */
     uint64_t aligned = m.aligned;
     if (s.aligned > aligned)
