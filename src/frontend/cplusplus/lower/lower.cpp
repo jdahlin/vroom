@@ -184,6 +184,7 @@ class c_lowering
     bool variable_definition(entity_index e);
     bool constant_initializer(uint32_t n) const;
     bool address_constant(uint32_t n) const;
+    bool needs_run_time(uint32_t n) const;
     bool static_lvalue(uint32_t n) const;
 };
 
@@ -244,6 +245,8 @@ ast_qualified_type c_lowering::fundamental(fundamental_type f, token_index at)
            null pointer constant"; it has a pointer's size */
         return ast_builder_type_pointer(c,
                                         ast_builder_type_basic(AST_TYPE_VOID));
+    case fundamental_type::builtin_va_list:
+        return ast_builder_type_va_list(c);
     default:
         fail("a bit-precise integer type", at);
         return ast_builder_type_basic(AST_TYPE_INT);
@@ -1443,6 +1446,42 @@ bool c_lowering::address_constant(uint32_t n) const
     }
 }
 
+/* whether evaluating n reads or does something only the running program
+   has: a call, a constructor, an assignment, a variable's value.  An
+   initializer without any that analysis could not fold (clang folds an
+   out-of-range shift, say) is not lowered as dynamic initialization */
+bool c_lowering::needs_run_time(uint32_t n) const
+{
+    if (!n)
+        return false;
+    const semantic_node &x = node(n);
+    switch (x.kind) {
+    case semantic_kind::call:
+    case semantic_kind::construct:
+    case semantic_kind::assignment:
+    case semantic_kind::increment:
+        return true;
+    case semantic_kind::conversion:
+        if (static_cast<conversion_kind>(x.op) ==
+                conversion_kind::lvalue_to_rvalue &&
+            !constant_initializer(n))
+            return true;
+        break;
+    default:
+        break;
+    }
+    if (x.kind == semantic_kind::entity || x.kind == semantic_kind::member)
+        return false;
+    if (needs_run_time(x.a) || needs_run_time(x.b) || needs_run_time(x.c) ||
+        needs_run_time(x.d))
+        return true;
+    const uint32_t *items = analysis.semantics.items(x.first);
+    for (uint32_t i = 0; i < x.count; i++)
+        if (needs_run_time(items[i]))
+            return true;
+    return false;
+}
+
 /* whether an initializer is a constant C emits as data */
 bool c_lowering::constant_initializer(uint32_t n) const
 {
@@ -1837,6 +1876,10 @@ bool c_lowering::variable_definition(entity_index e)
     if (x.definition) {
         /* [basic.start.static]/2: constant initialization; anything else is
            dynamic initialization, which needs code before main */
+        if (!constant_initializer(x.definition) &&
+            !needs_run_time(x.definition))
+            return fail("a constant whose value analysis does not know",
+                        node(x.definition).at);
         if (!constant_initializer(x.definition)) {
             /* [basic.start.static]/2: zero-initialized, then initialized
                by dynamic_initialization */

@@ -608,6 +608,20 @@ analysis_result semantic_analysis::initialize_with(node_index at,
     if (target.kind == type_kind::fundamental &&
         target.fundamental == fundamental_type::void_)
         return not_supported(at, "dcl.init");
+    if (target.kind == type_kind::fundamental &&
+        target.fundamental == fundamental_type::builtin_va_list) {
+        /* [impl.clang] a va_list is initialized from a va_list only (a
+           copy, as va_copy's) */
+        if (m.type.unqualified() != type.unqualified())
+            return not_supported(at, "dcl.init");
+        r = operand_value(at, m);
+        if (r != analysis_result::well_formed)
+            return r;
+        result.evaluation = constness::not_constant;
+        result.value = 0;
+        result.node = m.node;
+        return analysis_result::well_formed;
+    }
     r = operand_value(at, m);
     if (r != analysis_result::well_formed)
         return r;

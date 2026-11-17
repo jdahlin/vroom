@@ -139,6 +139,17 @@ analysis_result semantic_analysis::declaration_by_kind(node_index n)
 
 void semantic_analysis::translation_unit()
 {
+    /* [impl.clang] a typedef-name every translation unit starts with
+       (the parser's names know it too) */
+    {
+        static const char name[] = "__builtin_va_list";
+        uint32_t id = tokens.pp.identifier(name, sizeof name - 1) + 1;
+        entity_index e = entity_table.make(entity_kind::typedef_name, id, 0);
+        entity_table[e].type = qualified_type::make(
+            type_table.fundamental(fundamental_type::builtin_va_list), cv_none);
+        entity_table[e].defined = true;
+        entity_table.bind(0, id, e);
+    }
     owned_array<node_index> all;
     tree.declarations(&all);
     for (node_index n : all)

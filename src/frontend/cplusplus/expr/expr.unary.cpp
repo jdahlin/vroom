@@ -198,6 +198,8 @@ uint64_t semantic_analysis::size_of_type(qualified_type t) const
             return 8;
         case fundamental_type::std_nullptr_t:
             return b.long_width / 8;
+        case fundamental_type::builtin_va_list:
+            return 32;
         default:
             if (fundamental_type_is_integral(record.fundamental))
                 return fundamental_type_width(b, record.fundamental) / 8;
@@ -230,6 +232,10 @@ uint64_t semantic_analysis::alignment_of_type(qualified_type t) const
         return alignment_of_type(record.operand);
     case type_kind::class_type:
         return entity_table[record.entity].alignment;
+    case type_kind::fundamental:
+        if (record.fundamental == fundamental_type::builtin_va_list)
+            return 8;
+        return size_of_type(t);
     default:
         /* the fundamental types and pointers are aligned to their size on
            aarch64 (AAPCS64 5.1) */

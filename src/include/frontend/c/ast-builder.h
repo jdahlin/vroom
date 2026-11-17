@@ -54,6 +54,8 @@ ast_builder_type_function(cc *c, ast_qualified_type result,
                           const ast_qualified_type *parameters, uint32_t count,
                           bool variadic);
 ast_qualified_type ast_builder_type_ptrdiff(cc *c);
+/* the target's __builtin_va_list */
+ast_qualified_type ast_builder_type_va_list(cc *c);
 /* the target's size of t in bytes */
 uint64_t ast_builder_type_size(cc *c, ast_qualified_type t);
 /* a struct named name, incomplete until ast_builder_type_record_complete

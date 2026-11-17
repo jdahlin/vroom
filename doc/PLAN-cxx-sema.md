@@ -690,7 +690,15 @@ libstdc++ and json), since sema cannot analyse a declaration kept as tokens.
   [dcl.enum], [class.local], __cxa_atexit.  Open: gcc/pr58277-2's static
   referenced only from unreachable code is dropped by vcc's -O0 code
   generator, kept by clang (symbols).
-  Next: `__builtin_va_list`, elaborated-type-specifiers in block and class
+  Then `__builtin_va_list` (a predeclared typedef of AAPCS64's
+  std::__va_list: 32 bytes, mangled St9__va_list, lowered to C's
+  va_list; copied only from a va_list), so programs include the run
+  time's <stdio.h>: C5.1 950 -> 1096.  [dcl.array]/8's earlier bound is
+  the one an initializer fills; a namespace-scope initializer analysis
+  cannot fold and that needs nothing of the running program (clang folds
+  an out-of-range shift) is not lowered as dynamic initialization.
+  LLVM import: `llvm-2003-05-14-array-init.cpp`.
+  Next: base classes, elaborated-type-specifiers in block and class
   scope, static data members.
 
 ### S5. Conversions by user code, lambdas, the rest of [expr]

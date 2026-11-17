@@ -444,6 +444,17 @@ bool itanium_mangler::bare_function_type(qualified_type t)
 bool itanium_mangler::type(qualified_type t)
 {
     const struct type &r = record(t);
+    if (r.kind == type_kind::fundamental && !t.cv() &&
+        r.fundamental == fundamental_type::builtin_va_list) {
+        /* [impl.clang] AAPCS64's std::__va_list (C++ ABI for the Arm 64-bit
+           Architecture, 4.2.2), a <substitution> candidate as a
+           <class-enum-type> */
+        if (substitution(t))
+            return true;
+        text("St9__va_list");
+        candidates.append(t);
+        return true;
+    }
     if (r.kind == type_kind::fundamental && !t.cv())
         return builtin_type(r.fundamental);
     if (substitution(t))

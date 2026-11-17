@@ -861,6 +861,16 @@ analysis_result semantic_analysis::declare_with_initializer(
     r = declare(declaration, m.id, kind, type, s, definition, initialized,
                 declared_entity);
     last_declared = declared_entity;
+    /* [dcl.array]/8: the bound of an earlier declaration (declare took it)
+       is the one the initializer fills */
+    if (r == analysis_result::well_formed && kind == entity_kind::variable &&
+        type_table[type.unqualified()].kind == type_kind::array &&
+        !type_table[type.unqualified()].bound_known) {
+        qualified_type known = entity_table[declared_entity].type;
+        const struct type &k = type_table[known.unqualified()];
+        if (k.kind == type_kind::array && k.bound_known)
+            type = known;
+    }
     /* [dcl.link]/1: "All functions and variables whose names have external
        linkage ... have a language linkage"; /5: the linkage-specification's
        ([dcl.link]/6: a later declaration without one keeps it) */

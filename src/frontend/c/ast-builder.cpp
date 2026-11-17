@@ -73,6 +73,11 @@ ast_qualified_type ast_builder_type_ptrdiff(cc *c)
     return c->t_ptrdiff;
 }
 
+ast_qualified_type ast_builder_type_va_list(cc *c)
+{
+    return c->t_valist;
+}
+
 uint64_t ast_builder_type_size(cc *c, ast_qualified_type t)
 {
     return cc_type_size(c, t);
