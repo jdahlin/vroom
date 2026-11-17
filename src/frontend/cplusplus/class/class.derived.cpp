@@ -27,22 +27,9 @@ node_index parser::base_clause(scope_index derived)
     size_t mark = begin_node();
     token_index first = position;
     add_token(); /* : */
-    size_t list_mark = begin_node();
-    token_index list_first = position;
-    unsigned count = 0;
-    bool ellipsis = false;
-    for (;;) {
-        base_specifier(derived);
-        if (failed())
-            return 0;
-        count++;
-        if (accept(preprocessing_op_or_punc::ELLIPSIS))
-            ellipsis = true;
-        if (!accept(preprocessing_op_or_punc::COMMA))
-            break;
-    }
-    if (count > 1 || ellipsis)
-        finish_node(syntax_kind::base_specifier_list, list_mark, list_first);
+    if (!comma_list(syntax_kind::base_specifier_list,
+                    [this, derived] { base_specifier(derived); }))
+        return 0;
     return finish_node(syntax_kind::base_clause, mark, first);
 }
 

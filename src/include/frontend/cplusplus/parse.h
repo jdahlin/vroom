@@ -699,6 +699,38 @@ class parser
        in their place */
     node_index finish_node(syntax_kind kind, size_t mark,
                            token_index first_token);
+    /* item ..._opt , item ..._opt , ...: each item parsed by item(),
+       then after(), which may fail the parse (both return false when
+       failed()); the list is a node of kind list only if it has more than
+       one item or an ellipsis, a lone item passes through */
+    template <typename Item, typename After>
+    bool comma_list(syntax_kind list, Item item, After after)
+    {
+        size_t mark = begin_node();
+        token_index first = position;
+        unsigned count = 0;
+        bool ellipsis = false;
+        for (;;) {
+            item();
+            if (failed())
+                return false;
+            count++;
+            if (accept(preprocessing_op_or_punc::ELLIPSIS))
+                ellipsis = true;
+            after();
+            if (failed())
+                return false;
+            if (!accept(preprocessing_op_or_punc::COMMA))
+                break;
+        }
+        if (count > 1 || ellipsis)
+            finish_node(list, mark, first);
+        return true;
+    }
+    template <typename Item> bool comma_list(syntax_kind list, Item item)
+    {
+        return comma_list(list, item, [] {});
+    }
 
     /* ---- failure: the first place the tokens were not the grammar */
     struct failure_state {
@@ -988,6 +1020,11 @@ class parser
     node_index exception_declaration();
     /* declaration-statement: block-declaration */
     node_index block_declaration();
+    /* the alternatives every declaration context shares, chosen by their
+       first tokens: alias-declaration, using-enum-declaration,
+       using-declaration, static_assert-declaration and
+       opaque-enum-declaration; false, *n untouched, if none starts here */
+    bool shared_declaration_alternative(node_index *n);
     node_index init_statement();
     /* condition, followed by closing (')', or ';' in a for statement) */
     node_index condition(preprocessing_op_or_punc closing);
@@ -1038,6 +1075,9 @@ class parser
     node_index id_expression(bool member);
     node_index postfix_expression();
     node_index expression_list();
+    /* ( expression-list_opt ) at the current '(': false after
+       expected(what, subclause) or another failure */
+    bool parenthesized_expression_list(const char *what, const char *subclause);
     node_index unary_expression();
     node_index noexcept_expression();
     /* [expr.await], [expr.yield], [expr.throw] */

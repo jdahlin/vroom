@@ -266,17 +266,9 @@ node_index parser::member_declaration_alternative()
         add_token();
         return finish_node(syntax_kind::empty_declaration, mark, first);
     }
-    if (at(standard_keyword::using_) && at(standard_keyword::enum_, 1))
-        return using_enum_declaration();
-    if (at(standard_keyword::using_) && at_identifier(1) &&
-        (at(preprocessing_op_or_punc::EQUAL, 2) || at_attribute_specifier(2)))
-        return alias_declaration();
-    if (at(standard_keyword::using_))
-        return using_declaration();
-    if (at(standard_keyword::static_assert_))
-        return static_assert_declaration();
-    if (at(standard_keyword::enum_) && opaque_enum_declaration_follows())
-        return opaque_enum_declaration();
+    node_index shared = 0;
+    if (shared_declaration_alternative(&shared))
+        return shared;
     if (at(standard_keyword::template_))
         return template_declaration(&parser::member_declaration_alternative);
     if (deduction_guide_follows())

@@ -247,25 +247,6 @@ void parser::tentative_parse::commit()
 namespace
 {
 
-/* the bracket that closes an opening one ([lex.operators]; none: count) */
-preprocessing_op_or_punc closing_bracket(const token &t)
-{
-    if (is_operator(t, preprocessing_op_or_punc::LEFT_PARENTHESIS))
-        return preprocessing_op_or_punc::RIGHT_PARENTHESIS;
-    if (is_operator(t, preprocessing_op_or_punc::LEFT_BRACKET))
-        return preprocessing_op_or_punc::RIGHT_BRACKET;
-    if (is_operator(t, preprocessing_op_or_punc::LEFT_BRACE))
-        return preprocessing_op_or_punc::RIGHT_BRACE;
-    return preprocessing_op_or_punc::count;
-}
-
-bool is_closing_bracket(const token &t)
-{
-    return is_operator(t, preprocessing_op_or_punc::RIGHT_PARENTHESIS) ||
-           is_operator(t, preprocessing_op_or_punc::RIGHT_BRACKET) ||
-           is_operator(t, preprocessing_op_or_punc::RIGHT_BRACE);
-}
-
 const char *bracket_spelling(preprocessing_op_or_punc op)
 {
     switch (op) {

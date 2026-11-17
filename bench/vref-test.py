@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Run each vref command in C and C++, apply its patch and execute the result."""
+"""Run each vref command in C, apply its patch and execute the result.
+
+C only since frontend/cxx was removed (7283c431): vref has no C++ front end
+until frontend/cplusplus has the semantics it needs."""
 
 import argparse
 import os
@@ -49,7 +52,7 @@ def run(directory, file, source, op, where, *params, fail=False):
 with tempfile.TemporaryDirectory() as td:
     directory = Path(td)
     (directory / "local.h").write_text("#if TEST != 1\n#error missing flag\n#endif\n")
-    for file in ("sample.c", "sample.cpp"):
+    for file in ("sample.c",):
         for op, where, params, expected in [
             ("rename", "6:5", ["total"], "return mix(total, 3, 9);"),
             ("change-type", "4:9", ["long"], "long first;"),
@@ -91,7 +94,7 @@ with tempfile.TemporaryDirectory() as td:
     fixtures = Path(__file__).resolve().parents[1] / "src/test/vref"
     source = (fixtures / "pair-columns.c").read_text()
     recipe = fixtures / "pair-columns.toml"
-    for file in ("columns.c", "columns.cpp"):
+    for file in ("columns.c",):
         changed = run(directory, file, source, "recipe", recipe)
         assert "right[row] = pairs[row].second;" in changed
         subprocess.run(
@@ -148,7 +151,7 @@ static int fill(Box *p)
 }
 int main(void) { Box b = {2}; return fill(&b) != 6; }
 """
-    for file in ("outline.c", "outline.cpp"):
+    for file in ("outline.c",):
         changed = run(directory, file, source, "recipe", outline)
         assert (
             "static void increment(Box *p)" in changed
@@ -199,6 +202,4 @@ int main(void) { return f(-1) != 1 || f(1) != 0 || f(0) != 2; }
             outline,
             fail=True,
         )
-    cpp = "namespace ns { int f(int p) { int n(p); n++; return n; } }\n"
-    assert len(run(directory, "ns.cpp", cpp, "refs", "1:35")) == 3
 print(f"vref: {count} cases passed")
