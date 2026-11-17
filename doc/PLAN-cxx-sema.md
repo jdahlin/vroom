@@ -666,7 +666,15 @@ libstdc++ and json), since sema cannot analyse a declaration kept as tokens.
   lowered 108 -> 206; cxx-parse unchanged (6 refuted declared types as
   before); cxx-run 116/116 (`namespaces.cpp`, `qualified-names.cpp`,
   `hiding-and-elaborated.cpp`, `using.cpp`, `block-linkage.cpp`); C5.1
-  2199 -> 2206 passing, 0 wrong.  `declared_names` still serves the parser:
+  2199 -> 2206 passing, 0 wrong.  Lookup claims (`-fcxx-dump=lookup-claims`:
+  each name's use and the first declaration of what it finds, against the
+  declaration clang's `-ast-dump=json` refers to, followed back through its
+  redeclaration chain): 9388 as clang, 0 refuted, 3332 not checkable (no
+  DeclRefExpr in clang's AST, a line clang rejects, or clang's first
+  declaration in one we do not analyse); [dcl.link]/7's C-linkage functions
+  and variables shared across namespaces.  The developer tools cxxlex,
+  cxxparse and cxxsema are gone: their outputs are `vpp -x c++
+  -fsyntax-only -fcxx-dump=...`.  `declared_names` still serves the parser:
   sema runs after it, so replacing it waits for parsing and analysis per
   declaration (S5's templates need the same).
 

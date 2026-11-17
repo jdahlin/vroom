@@ -241,6 +241,26 @@ analysis_result semantic_analysis::declare(node_index declaration,
                     prior = e;
                     entity_table.bind(scope, name, e);
                 }
+        /* [dcl.link]/7: "Two declarations for a function with C language
+           linkage with the same function name (ignoring the namespace names
+           that qualify it) that appear in different namespace scopes refer
+           to the same function.  Two declarations for a variable with C
+           language linkage with the same name (ignoring the namespace names
+           that qualify it) that appear in different namespace scopes refer
+           to the same variable." */
+        if (!prior && c_language && is_namespace(scope) &&
+            (kind == entity_kind::function || kind == entity_kind::variable))
+            for (entity_index e = 1; e < entity_table.size(); e++) {
+                const entity &x = entity_table[e];
+                if (!x.c_language_linkage || x.kind != kind || x.name != name ||
+                    !is_namespace(x.enclosing))
+                    continue;
+                if (!(x.type == type))
+                    return not_supported(declaration, "dcl.link");
+                prior = e;
+                entity_table.bind(scope, name, e);
+                break;
+            }
     }
     /* [dcl.typedef]/3: "In a given non-class scope, a typedef specifier
        can be used to redeclare the name of any type declared in that scope
