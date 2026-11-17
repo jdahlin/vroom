@@ -51,6 +51,11 @@ const char *fundamental_type_name(fundamental_type type)
         "_Float16",
         "_BitInt",
         "unsigned _BitInt",
+        "void",
+        "signed char",
+        "unsigned char",
+        "short",
+        "unsigned short",
     };
     return names[static_cast<int>(type)];
 }
@@ -65,8 +70,13 @@ unsigned fundamental_type_width(const implementation_defined_behavior &behavior,
     case fundamental_type::bool_:
         return 1;
     case fundamental_type::char_:
+    case fundamental_type::signed_char:
+    case fundamental_type::unsigned_char:
     case fundamental_type::char8_t_:
         return 8;
+    case fundamental_type::short_int:
+    case fundamental_type::unsigned_short_int:
+        return 16;
     case fundamental_type::char16_t_:
         return 16;
     case fundamental_type::char32_t_:
@@ -97,6 +107,8 @@ bool fundamental_type_is_signed(const implementation_defined_behavior &behavior,
         return behavior.plain_char_is_signed;
     case fundamental_type::wchar_t_:
         return behavior.wchar_t_is_signed;
+    case fundamental_type::signed_char:
+    case fundamental_type::short_int:
     case fundamental_type::int_:
     case fundamental_type::long_int:
     case fundamental_type::long_long_int:

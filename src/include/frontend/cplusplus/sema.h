@@ -22,6 +22,30 @@
 namespace cplusplus
 {
 
+/* ---- the syntax tree, as analysis reads it -------------------------------- */
+
+inline bool syntax_is(const syntax_tree &tree, syntax_child c, syntax_kind kind)
+{
+    return !c.is_token() && tree[c.index()].kind == kind;
+}
+
+inline bool syntax_is_attribute(const syntax_tree &tree, syntax_child c)
+{
+    return syntax_is(tree, c, syntax_kind::attribute_specifier) ||
+           syntax_is(tree, c, syntax_kind::attribute_specifier_seq) ||
+           syntax_is(tree, c, syntax_kind::alignment_specifier);
+}
+
+inline bool syntax_is_punctuator(token_stream &tokens, syntax_child c,
+                                 preprocessing_op_or_punc op)
+{
+    if (!c.is_token())
+        return false;
+    const token &t = tokens[c.index()];
+    return t.kind == token_kind::operator_or_punctuator &&
+           preprocessing_op_or_punc_primary(t.op_or_punc) == op;
+}
+
 /* ---- types -------------------------------------------------------------- */
 
 /* a type of the translation unit's type table; 0 is no type */
@@ -176,8 +200,18 @@ enum class entity_kind : uint8_t {
     pack,
 };
 
+/* [basic.link]/2 */
+enum class linkage : uint8_t {
+    none,
+    internal,
+    external,
+};
+
 struct entity {
     entity_kind kind = entity_kind::none;
+    linkage linkage_of_name = linkage::none;
+    /* [basic.def]/2: a declaration of it was a definition */
+    bool defined = false;
     /* the preprocessor's identifier number, 0 for an unnamed entity */
     uint32_t name = 0;
     /* the entity whose scope the name is declared in (a namespace, a
@@ -204,6 +238,11 @@ class entities
     entities &operator=(const entities &) = delete;
 
     entity_index make(entity_kind kind, uint32_t name, entity_index enclosing);
+    /* the entity a name declared in a scope refers to, 0 if none: what a
+       declaration in the scope finds of an earlier one
+       ([basic.scope.declarative]/4) */
+    entity_index find(entity_index scope, uint32_t name) const;
+    void bind(entity_index scope, uint32_t name, entity_index e);
     /* another declaration of the entity ([basic.link]/1: "A name ... can
        be introduced by declarations in more than one place) */
     void add_declaration(entity_index e, node_index node);
@@ -228,6 +267,10 @@ class entities
   private:
     owned_array<entity> records;
     owned_array<entity_declaration> declarations;
+    /* the names bound in scopes: open addressing over (scope, name), the
+       entity's index, 0 for an empty slot */
+    owned_array<entity_index> slots;
+    void grow();
 };
 
 /* ---- analysis ----------------------------------------------------------- */
@@ -261,11 +304,20 @@ struct analysed_declaration {
     uint32_t first_unsupported = 0;
 };
 
+/* a name a declaration declared, with the type analysis gave it: what
+   cxxsema -declaration-claims has clang check */
+struct declared_name {
+    node_index declaration = 0;
+    token_index id = 0;
+    entity_kind kind = entity_kind::none;
+    qualified_type type;
+};
+
 class semantic_analysis
 {
   public:
     semantic_analysis(const syntax_tree &tree, token_stream &tokens,
-                      diagnostic_consumer &diagnostics);
+                      const parser &p, diagnostic_consumer &diagnostics);
     semantic_analysis(const semantic_analysis &) = delete;
     semantic_analysis &operator=(const semantic_analysis &) = delete;
 
@@ -278,6 +330,7 @@ class semantic_analysis
     entities entity_table;
     owned_array<analysed_declaration> declarations;
     owned_array<unsupported_construct> unsupported;
+    owned_array<declared_name> declared;
 
   private:
     /* the node needs rules that are not written: those of the subclause
@@ -287,11 +340,84 @@ class semantic_analysis
     /* whether the parser gave up on a part of the declaration */
     bool parsed_completely(node_index n) const;
 
+    /* the node at, or its first token, violates a rule: the diagnostic,
+       naming the subclause */
+    analysis_result ill_formed(node_index at, const char *rule,
+                               const char *subclause);
+    analysis_result ill_formed_at_token(token_index at, const char *rule,
+                                        const char *subclause);
+
+    /* a rule clang enforces only when asked: ill-formed when the
+       diagnostic is an error on this command line, else well-formed with
+       the warning (or nothing) */
+    analysis_result extension_used(diagnostic_id id, token_index at,
+                                   const char *argument);
+
     /* [dcl.pre] */
     analysis_result empty_declaration(node_index n);
+    analysis_result simple_declaration(node_index n);
+    analysis_result function_definition(node_index n);
+    analysis_result init_declarators(node_index declaration,
+                                     node_index specifiers, bool definition);
+
+    /* [dcl.spec]: what a decl-specifier-seq says */
+    struct specified {
+        qualified_type type;
+        /* [dcl.type]/3: a defining-type-specifier that is not a
+           cv-qualifier was there */
+        bool has_type = false;
+        bool typedef_ = false, static_ = false, extern_ = false,
+             inline_ = false;
+    };
+    analysis_result decl_specifier_seq(node_index seq, specified &s,
+                                       bool parameter);
+    /* [dcl.type.simple] Table 14: the type of the simple-type-specifier
+       keywords of a decl-specifier-seq */
+    struct simple_type_keywords {
+        unsigned signed_ = 0, unsigned_ = 0, short_ = 0, long_ = 0, char_ = 0,
+                 int_ = 0, double_ = 0, alone = 0;
+        fundamental_type alone_type = fundamental_type::none;
+        token_index first = 0;
+    };
+    analysis_result simple_type(node_index seq, const simple_type_keywords &k,
+                                type_index &type);
+
+    /* [dcl.meaning]: the type a declarator gives its declarator-id */
+    struct declarator_meaning {
+        bool has_id = false;
+        token_index id = 0;
+        /* a reference the declarator made, rather than a typedef-name's
+           ([dcl.ref]/5 and /6) */
+        bool reference_made = false;
+    };
+    analysis_result declarator(node_index declaration, syntax_child d,
+                               qualified_type &type, declarator_meaning &m);
+    token_index declarator_id(syntax_child d) const;
+    void hold_names(node_index declaration);
+    analysis_result pointer_operator(node_index op, qualified_type &type,
+                                     declarator_meaning &m);
+    analysis_result array(node_index at, const syntax_child *bound,
+                          qualified_type &type);
+    analysis_result reference(node_index at, bool rvalue, qualified_type &type,
+                              declarator_meaning &m);
+    /* [dcl.fct] */
+    analysis_result function(node_index parameters, qualified_type &type);
+    analysis_result parameter_declaration(node_index n, qualified_type &type,
+                                          bool &unnamed);
+    /* cv-qualifiers added to a type: to an array's elements
+       ([basic.type.qualifier]/3), none to a reference or a function type
+       ([dcl.ref]/1, [dcl.fct]/7) */
+    qualified_type add_cv(qualified_type t, uint32_t cv);
+
+    /* [basic.link], [basic.scope.declarative]: the name of a declarator
+       declared at global namespace scope, or redeclared */
+    analysis_result declare(node_index declaration, token_index id,
+                            entity_kind kind, qualified_type type,
+                            const specified &s, bool definition);
 
     const syntax_tree &tree;
     token_stream &tokens;
+    const parser &p;
     diagnostic_consumer &diagnostics;
 };
 

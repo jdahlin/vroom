@@ -25,6 +25,12 @@ them (work/testsuites), and src/test/cxx/sema/{spec,gram}/*.cpp.  For each
              not parsed   the parser's (an erroneous node, or one kept as
                           tokens), or clang's error there is one of syntax
 
+  declared cxxsema -declaration-claims gives each name a declaration
+           declared and the type analysis gave it, in cxxparse's format;
+           bench/cxx-parse.py's check has clang compile
+               static_assert(__is_same(decltype(NAME), CLAIM));
+           after the declaration: verified, refuted (a failure), in a
+           declaration clang rejects, or not checkable
   types    cxxsema -type-claims gives each expression with a type its type
            and value category (src/bin/cxxsema/type-claims.h); after the
            expression's declaration clang compiles
@@ -284,6 +290,11 @@ def check(test, opts, clang, cxxsema):
                     rejected.append(first)
             else:
                 res['verdict']['we_accept'] += 1
+    every_error_line = set()
+    for m in CLANG_ERROR.finditer(c[2]):
+        if m.group(1) == name:
+            every_error_line.add(int(m.group(2)))
+    cxxparse.check_claims(test, opts, clang, cxxsema, res, every_error_line, expression_mode=None)
     res['types'], refuted = check_type_claims(test, opts, clang, type_claims(cxxsema, opts, test))
     for r in refuted:
         res['fail'].append(('types', r))
@@ -332,6 +343,7 @@ def main():
     with concurrent.futures.ThreadPoolExecutor(a.j) as ex:
         results = list(ex.map(lambda j: check(j[0], j[1], clang, cxxsema), jobs))
     verdict, unsupported, types = collections.Counter(), collections.Counter(), collections.Counter()
+    declared = collections.Counter()
     crashes = failures = skipped = 0
     seen = set()
     for r in results:
@@ -339,6 +351,7 @@ def main():
         verdict.update(r['verdict'])
         unsupported.update(r['unsupported'])
         types.update(r['types'])
+        declared.update(r.get('declarators', {}))
         kinds = {k for k, _ in r['fail']}
         crashes += 'crash' in kinds
         failures += bool(kinds)
@@ -352,6 +365,9 @@ def main():
     print(f'declarations: {verdict["agree"]} as clang, {verdict["we_reject"]} we reject and clang accepts '
           f'({verdict["known"]} known differences), {verdict["we_accept"]} we accept and clang rejects, '
           f'{verdict["unsupported"]} unsupported, {verdict["not_parsed"]} not parsed')
+    print(f'declared types: {declared["verified"]} verified, {declared["overload"]} as one of a name\'s overloads, '
+          f'{declared["refuted"]} refuted, {declared["rejected"]} in declarations clang rejects, '
+          f'{declared["unchecked"]} not checkable')
     print(f'types: {types["verified"]} claims verified, {types["refuted"]} refuted, '
           f'{types["unchecked"]} not checkable')
     if unsupported and a.unsupported:

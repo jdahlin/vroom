@@ -169,6 +169,7 @@ enum class diagnostic_id : uint16_t {
 #define DIAGNOSTIC(name, class, mapping, group, format) name,
 #include "../../../frontend/cplusplus/intro/diagnostic-messages.inc"
 #include "../../../frontend/cplusplus/parse/diagnostic-messages.inc"
+#include "../../../frontend/cplusplus/sema/diagnostic-messages.inc"
 #undef DIAGNOSTIC
     count
 };
@@ -361,7 +362,8 @@ struct lexer_options {
 
 /* ---- [lex.token], phase 7 --------------------------------------------- */
 
-/* [basic.fundamental]: the types a literal can have */
+/* [basic.fundamental]: the fundamental types, the ones a literal can have
+   first */
 enum class fundamental_type : uint8_t {
     none,
     bool_,
@@ -386,6 +388,12 @@ enum class fundamental_type : uint8_t {
        clang's extension in C++; N is in the token */
     bit_precise_int,
     unsigned_bit_precise_int,
+    /* the rest of [basic.fundamental], which no literal has */
+    void_,
+    signed_char,
+    unsigned_char,
+    short_int,
+    unsigned_short_int,
 };
 
 const char *fundamental_type_name(fundamental_type type);

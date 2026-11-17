@@ -9,6 +9,7 @@
  * declarations."
  */
 #include "../cplusplus-internal.h"
+#include "frontend/cplusplus/sema.h"
 
 namespace cplusplus
 {
@@ -28,6 +29,230 @@ node_index parser::translation_unit()
     tree.root = finish_node(syntax_kind::translation_unit, mark, first);
     pending.resize(mark);
     return tree.root;
+}
+
+namespace
+{
+
+/* [basic.type.qualifier]/3: "An array type whose elements are
+   cv-qualified is also considered to have the same cv-qualifications as its
+   elements." */
+uint32_t cv_of(const types &table, qualified_type t)
+{
+    const type &record = table[t.unqualified()];
+    if (record.kind == type_kind::array)
+        return cv_of(table, record.operand);
+    return t.cv();
+}
+
+/* [basic.link]/11: "declarations for an array object can specify array
+   types that differ by the presence or absence of a major array bound" */
+bool differ_in_major_bound(const types &table, qualified_type a,
+                           qualified_type b)
+{
+    const type &x = table[a.unqualified()];
+    const type &y = table[b.unqualified()];
+    return x.kind == type_kind::array && y.kind == type_kind::array &&
+           x.operand == y.operand && x.bound_known != y.bound_known;
+}
+
+bool same_parameters(const types &table, type_index a, type_index b)
+{
+    const type &x = table[a];
+    const type &y = table[b];
+    if (x.variadic != y.variadic || x.parameter_count != y.parameter_count)
+        return false;
+    for (uint32_t i = 0; i < x.parameter_count; i++)
+        if (!(table.parameters(a)[i] == table.parameters(b)[i]))
+            return false;
+    return true;
+}
+
+} // namespace
+
+/*
+ * A name declared at global namespace scope by declaration, or declared
+ * again.  definition is whether the declaration is a function-definition;
+ * an object declaration is a definition unless it is extern ([basic.def]/2:
+ * "it contains the extern specifier or a linkage-specification and neither
+ * an initializer nor a function-body"); a typedef declaration is none.
+ */
+analysis_result semantic_analysis::declare(node_index declaration,
+                                           token_index id, entity_kind kind,
+                                           qualified_type type,
+                                           const specified &s, bool definition)
+{
+    uint32_t name = tokens.identifier(id);
+    entity_index prior = entity_table.find(0, name);
+    /* [dcl.array]/8: "if there is a preceding declaration of the entity in
+       the same scope in which the bound was specified, an omitted array
+       bound is taken to be the same as in that earlier declaration" */
+    if (prior && kind == entity_kind::variable &&
+        entity_table[prior].kind == kind &&
+        type_table[type.unqualified()].kind == type_kind::array &&
+        !type_table[type.unqualified()].bound_known &&
+        differ_in_major_bound(type_table, entity_table[prior].type, type))
+        type = entity_table[prior].type;
+    const struct type &record = type_table[type.unqualified()];
+    bool is_reference = record.kind == type_kind::lvalue_reference ||
+                        record.kind == type_kind::rvalue_reference;
+    if (kind == entity_kind::variable) {
+        definition = !s.extern_;
+        /* [dcl.ref]/5: "The declaration of a reference shall contain an
+           initializer except when the declaration contains an explicit
+           extern specifier" */
+        if (is_reference && !s.extern_)
+            return ill_formed_at_token(id,
+                                       "the declaration of a reference shall "
+                                       "contain an initializer except when "
+                                       "the declaration contains an explicit "
+                                       "extern specifier",
+                                       "dcl.ref");
+        bool is_void = record.kind == type_kind::fundamental &&
+                       record.fundamental == fundamental_type::void_;
+        /* [basic.def]/5: "In the definition of an object, the type of that
+           object shall not be an incomplete type" */
+        if (definition && (is_void || (record.kind == type_kind::array &&
+                                       !record.bound_known)))
+            return ill_formed_at_token(id,
+                                       "in the definition of an object, the "
+                                       "type of that object shall not be an "
+                                       "incomplete type",
+                                       "basic.def");
+        /* an extern object of type cv void: clang's error, a rule not found
+           yet */
+        if (is_void)
+            return not_supported(declaration, "basic.types");
+        /* [dcl.init]/7: "If a program calls for the default-initialization
+           of an object of a const-qualified type T, T shall be a
+           const-default-constructible class type or array thereof." */
+        if (definition && (cv_of(type_table, type) & cv_const))
+            return ill_formed_at_token(id,
+                                       "the default-initialization of an "
+                                       "object of a const-qualified type "
+                                       "needs a const-default-constructible "
+                                       "class type",
+                                       "dcl.init");
+    }
+    if (kind == entity_kind::typedef_name && definition)
+        return not_supported(declaration, "dcl.fct.def.general");
+    if (kind != entity_kind::function && s.inline_ &&
+        kind != entity_kind::variable)
+        return not_supported(declaration, "dcl.inline");
+    /* [basic.link]/3: "A name having namespace scope has internal linkage
+       if it is the name of a variable, variable template, function, or
+       function template that is explicitly declared static; or a
+       non-template variable of non-volatile const-qualified type, unless it
+       is explicitly declared extern, or it is inline or exported, or it was
+       previously declared and the prior declaration did not have internal
+       linkage" */
+    linkage implied = linkage::external;
+    if (kind == entity_kind::typedef_name)
+        implied = linkage::none;
+    else if (s.static_)
+        implied = linkage::internal;
+    uint32_t cv = cv_of(type_table, type);
+    bool const_object = kind == entity_kind::variable && (cv & cv_const) &&
+                        !(cv & cv_volatile) && !s.extern_ && !s.inline_;
+    if (prior) {
+        entity &e = entity_table[prior];
+        /* declared by a declaration not analysed (hold_names) */
+        if (e.kind == entity_kind::none)
+            return not_supported(declaration, "basic.scope.declarative");
+        /* [basic.scope.declarative]/4: "Given a set of declarations in a
+           single declarative region, each of which specifies the same
+           unqualified name, they shall all refer to the same entity, or all
+           refer to functions and function templates" */
+        if (e.kind != kind)
+            return ill_formed_at_token(id,
+                                       "declarations of the same name in a "
+                                       "declarative region shall all refer to "
+                                       "the same entity, or all to functions",
+                                       "basic.scope.declarative");
+        if (kind == entity_kind::typedef_name) {
+            /* [dcl.typedef]/6: "In a given scope, a typedef specifier shall
+               not be used to redeclare the name of any type declared in
+               that scope to refer to a different type." */
+            if (!(e.type == type))
+                return ill_formed_at_token(id,
+                                           "a typedef specifier shall not be "
+                                           "used to redeclare the name of a "
+                                           "type to refer to a different type",
+                                           "dcl.typedef");
+        } else if (kind == entity_kind::function) {
+            if (!same_parameters(type_table, e.type.unqualified(),
+                                 type.unqualified()))
+                /* another function of the name: an overload set */
+                return not_supported(declaration, "over");
+            /* [over.load]/2: "Function declarations that differ only in the
+               return type, the exception specification, or both cannot be
+               overloaded." */
+            if (!(e.type == type))
+                return ill_formed_at_token(id,
+                                           "function declarations that differ "
+                                           "only in the return type cannot be "
+                                           "overloaded",
+                                           "over.load");
+        } else if (!(e.type == type) &&
+                   !differ_in_major_bound(type_table, e.type, type)) {
+            /* [basic.link]/11: "the types specified by all declarations
+               referring to a given variable or function shall be
+               identical" */
+            return ill_formed_at_token(id,
+                                       "the types specified by all "
+                                       "declarations referring to a given "
+                                       "variable shall be identical",
+                                       "basic.link");
+        }
+        /* [basic.def.odr]/1: "No translation unit shall contain more than
+           one definition of any variable, function" */
+        if (definition && e.defined)
+            return ill_formed_at_token(id,
+                                       "no translation unit shall contain "
+                                       "more than one definition of any "
+                                       "variable or function",
+                                       "basic.def.odr");
+        /* [dcl.stc]/6: "The linkages implied by successive declarations for
+           a given entity shall agree." */
+        if (implied == linkage::internal &&
+            e.linkage_of_name == linkage::external &&
+            tokens.files.behavior.microsoft_extensions) {
+            /* Microsoft's extension: the name keeps its external linkage */
+            analysis_result r = extension_used(
+                diagnostic_id::sema_static_after_non_static, id, nullptr);
+            if (r != analysis_result::well_formed)
+                return r;
+        } else if (implied == linkage::internal &&
+                   e.linkage_of_name == linkage::external)
+            return ill_formed_at_token(id,
+                                       "the linkages implied by successive "
+                                       "declarations for a given entity "
+                                       "shall agree",
+                                       "dcl.stc");
+        if (definition)
+            e.defined = true;
+        /* the bound a later declaration gives an array */
+        if (type_table[type.unqualified()].kind == type_kind::array &&
+            type_table[type.unqualified()].bound_known)
+            e.type = type;
+        entity_table.add_declaration(prior, declaration);
+    } else {
+        if (const_object)
+            implied = linkage::internal;
+        entity_index e = entity_table.make(kind, name, 0);
+        entity_table[e].type = type;
+        entity_table[e].linkage_of_name = implied;
+        entity_table[e].defined = definition;
+        entity_table.add_declaration(e, declaration);
+        entity_table.bind(0, name, e);
+    }
+    declared_name d;
+    d.declaration = declaration;
+    d.id = id;
+    d.kind = kind;
+    d.type = type;
+    declared.append(d);
+    return analysis_result::well_formed;
 }
 
 } // namespace cplusplus

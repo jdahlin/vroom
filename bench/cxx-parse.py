@@ -490,11 +490,12 @@ def claim_lines(cxxparse, mode, opts, test, fields):
     return found
 
 
-def check_claims(test, opts, clang, cxxparse, res, error_lines):
+def check_claims(test, opts, clang, cxxparse, res, error_lines, expression_mode='-expression-claims'):
     """V4b: see the module's docstring.  res['claims'] and
     res['declarators'] get the counts, res['fail'] one entry per refuted
     claim.  error_lines: the lines clang reports an error on in the test as
-    it is."""
+    it is.  cxxparse is any tool that writes the claims (cxxsema too, with
+    expression_mode None)."""
     counts = {'value': 0, 'type': 0, 'refuted': 0, 'unchecked': 0}
     declarators = {'verified': 0, 'overload': 0, 'refuted': 0, 'rejected': 0, 'unchecked': 0}
     res['claims'] = counts
@@ -505,7 +506,7 @@ def check_claims(test, opts, clang, cxxparse, res, error_lines):
     cwd = os.path.dirname(test)
     name = os.path.basename(test)
     claims = []
-    for place, e, p in claim_lines(cxxparse, '-expression-claims', opts, test, 4):
+    for place, e, p in (claim_lines(cxxparse, expression_mode, opts, test, 4) if expression_mode else []):
         row, column = map(int, place.split(':'))
         claims.append((row, column, e.strip(), p.strip()))
     declared = []

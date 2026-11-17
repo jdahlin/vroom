@@ -14,6 +14,11 @@
  *   cxxsema -debug-unsupported ...          one line per construct without
  *                                           rules: [SUBCLAUSE] nonterminal
  *                                           FILE:LINE:COLUMN
+ *   cxxsema -declaration-claims ...         one line per name a declaration
+ *                                           declared: the type analysis gave
+ *                                           it, in the format of cxxparse
+ *                                           -declaration-claims, for clang to
+ *                                           check (bench/cxx-sema.py)
  *   cxxsema -type-claims ...                one line per typed expression:
  *                                           its type and value category for
  *                                           clang to check (type-claims.h)
@@ -168,11 +173,67 @@ static int selftest()
     return 1;
 }
 
+/*
+ * -declaration-claims: per declared name
+ *
+ *     FILE <tab> LINE-LINE <tab> LINE:COLUMN <tab> KIND <tab> NAME <tab> CLAIM
+ *
+ * as cxxparse writes it (src/bin/cxxparse/declarator-claims.h), so that
+ * bench/cxx-parse.py's check runs on it: LINE-LINE the declaration's lines
+ * (a function-definition's up to its body), LINE:COLUMN just after the
+ * declaration, KIND type, function or object ([] appended for an array of
+ * unknown bound).  A declaration with a token a macro made is left out: its
+ * tokens are not at one place in the file.
+ */
+static void write_declaration_claims(const semantic_analysis &analysis,
+                                     const syntax_tree &tree,
+                                     token_stream &tokens, vbuffer *out)
+{
+    owned_buffer claim;
+    for (const declared_name &d : analysis.declared) {
+        const syntax_node &node = tree[d.declaration];
+        bool from_macro = false;
+        for (token_index t = node.first_token; t < node.end_token; t++)
+            if (tokens[t].preprocessing.expansion)
+                from_macro = true;
+        claim.clear();
+        if (from_macro ||
+            !write_type_claim(analysis.type_table, d.type, claim.get()))
+            continue;
+        token_index last = node.end_token - 1;
+        for (uint32_t i = 0; i < node.child_count; i++) {
+            syntax_child c = tree.children(d.declaration)[i];
+            if (syntax_is(tree, c, syntax_kind::function_body))
+                last = tree[c.index()].first_token - 1;
+        }
+        source_position end = tokens.position(node.end_token - 1);
+        uint32_t extent = tokens[node.end_token - 1].preprocessing.extent;
+        vbuffer_format_append(out, "%s\t%u-%u\t%u:%u\t", end.file_name,
+                              tokens.position(node.first_token).line,
+                              tokens.position(last).line, end.line,
+                              end.column + extent);
+        const type &record = analysis.type_table[d.type.unqualified()];
+        if (d.kind == entity_kind::typedef_name)
+            vbuffer_string_append(out, "type");
+        else if (d.kind == entity_kind::function)
+            vbuffer_string_append(out, "function");
+        else
+            vbuffer_string_append(out, "object");
+        if (record.kind == type_kind::array && !record.bound_known)
+            vbuffer_string_append(out, "[]");
+        vbuffer_string_append(out, "\t");
+        tokens.spelling(d.id, out);
+        vbuffer_string_append(out, "\t");
+        vbuffer_append(out, claim.data(), claim.size());
+        vbuffer_string_append(out, "\n");
+    }
+}
+
 int main(int argc, char **argv)
 {
     command_line options("cxxsema");
     bool dump_analysis = false, debug_unsupported = false, stats = false,
-         type_claims = false;
+         type_claims = false, declaration_claims = false;
     const char *path = nullptr;
     for (int i = 1; i < argc; i++) {
         const char *a = argv[i];
@@ -182,6 +243,8 @@ int main(int argc, char **argv)
             dump_analysis = true;
         else if (!strcmp(a, "-debug-unsupported"))
             debug_unsupported = true;
+        else if (!strcmp(a, "-declaration-claims"))
+            declaration_claims = true;
         else if (!strcmp(a, "-type-claims"))
             type_claims = true;
         else if (!strcmp(a, "-stats"))
@@ -194,10 +257,10 @@ int main(int argc, char **argv)
             path = a;
     }
     if (!path) {
-        fprintf(stderr,
-                "usage: cxxsema [-fsyntax-only|-dump-analysis|"
-                "-debug-unsupported|-type-claims|-stats] [clang -cc1 options] "
-                "FILE\n       cxxsema -selftest\n");
+        fprintf(stderr, "usage: cxxsema [-fsyntax-only|-dump-analysis|"
+                        "-debug-unsupported|-declaration-claims|-type-claims|-"
+                        "stats] [clang -cc1 options] "
+                        "FILE\n       cxxsema -selftest\n");
         return 2;
     }
     options.apply();
@@ -218,7 +281,7 @@ int main(int argc, char **argv)
     declared_names names;
     parser p(tokens, tree, names, diagnostics);
     p.translation_unit();
-    semantic_analysis analysis(tree, tokens, diagnostics);
+    semantic_analysis analysis(tree, tokens, p, diagnostics);
     analysis.translation_unit();
 
     owned_buffer out;
@@ -252,6 +315,8 @@ int main(int argc, char **argv)
                                   at.file_name, at.line, at.column);
         }
     }
+    if (declaration_claims)
+        write_declaration_claims(analysis, tree, tokens, out.get());
     /* -type-claims: no expression has a type before step S1, so there is
        nothing to write yet; the option is here for bench/cxx-sema.py */
     (void)type_claims;

@@ -31,9 +31,9 @@ const char *analysis_result_name(analysis_result result)
 }
 
 semantic_analysis::semantic_analysis(const syntax_tree &tree,
-                                     token_stream &tokens,
+                                     token_stream &tokens, const parser &p,
                                      diagnostic_consumer &diagnostics)
-    : tree(tree), tokens(tokens), diagnostics(diagnostics)
+    : tree(tree), tokens(tokens), p(p), diagnostics(diagnostics)
 {
     unsupported.append(unsupported_construct());
 }
@@ -51,6 +51,35 @@ analysis_result semantic_analysis::not_supported(node_index n,
     u.subclause = subclause;
     unsupported.append(u);
     return analysis_result::unsupported;
+}
+
+analysis_result semantic_analysis::ill_formed(node_index at, const char *rule,
+                                              const char *subclause)
+{
+    return ill_formed_at_token(tree[at].first_token, rule, subclause);
+}
+
+analysis_result semantic_analysis::ill_formed_at_token(token_index at,
+                                                       const char *rule,
+                                                       const char *subclause)
+{
+    diagnostics.issue(diagnostic_id::sema_violation, tokens.location(at))
+        << rule << subclause;
+    return analysis_result::ill_formed;
+}
+
+analysis_result semantic_analysis::extension_used(diagnostic_id id,
+                                                  token_index at,
+                                                  const char *argument)
+{
+    diagnostic_severity severity = diagnostics.severity_now(id);
+    diagnostic_message &m = diagnostics.issue(id, tokens.location(at));
+    if (argument)
+        m << argument;
+    if (severity == diagnostic_severity::error ||
+        severity == diagnostic_severity::fatal)
+        return analysis_result::ill_formed;
+    return analysis_result::well_formed;
 }
 
 bool semantic_analysis::parsed_completely(node_index n) const
@@ -86,6 +115,12 @@ analysis_result semantic_analysis::declaration(node_index n)
         case syntax_kind::empty_declaration:
             d.result = empty_declaration(n);
             break;
+        case syntax_kind::simple_declaration:
+            d.result = simple_declaration(n);
+            break;
+        case syntax_kind::function_definition:
+            d.result = function_definition(n);
+            break;
         default:
             d.result = not_supported(n);
             break;
@@ -93,6 +128,9 @@ analysis_result semantic_analysis::declaration(node_index n)
     }
     if (d.result == analysis_result::unsupported)
         d.first_unsupported = static_cast<uint32_t>(unsupported_before);
+    if (d.result == analysis_result::unsupported ||
+        d.result == analysis_result::not_parsed)
+        hold_names(n);
     declarations.append(d);
     return d.result;
 }

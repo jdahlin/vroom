@@ -637,4 +637,116 @@ analysis_result semantic_analysis::empty_declaration(node_index)
     return analysis_result::well_formed;
 }
 
+/*
+ *     simple-declaration:
+ *         decl-specifier-seq init-declarator-list_opt ;
+ *         attribute-specifier-seq decl-specifier-seq init-declarator-list ;
+ *         attribute-specifier-seq_opt decl-specifier-seq ref-qualifier_opt [ identifier-list ] initializer ;
+ *
+ * At global namespace scope, the declarations S1 of doc/PLAN-cxx-sema.md
+ * has rules for: declarators with no initializer, no attributes.
+ */
+analysis_result semantic_analysis::simple_declaration(node_index n)
+{
+    const syntax_node &node = tree[n];
+    if (!node.child_count ||
+        !syntax_is(tree, tree.children(n)[0], syntax_kind::decl_specifier_seq))
+        return not_supported(n, "dcl.attr");
+    return init_declarators(n, tree.children(n)[0].index(), false);
+}
+
+/*
+ * [dcl.fct.def.general]/1:
+ *
+ *     function-definition:
+ *         attribute-specifier-seq_opt decl-specifier-seq_opt declarator virt-specifier-seq_opt function-body
+ *         attribute-specifier-seq_opt decl-specifier-seq_opt declarator requires-clause function-body
+ *
+ * The declarator's type and name are analysed as a declaration's; the
+ * function-body is not yet ([stmt]).
+ */
+analysis_result semantic_analysis::function_definition(node_index n)
+{
+    const syntax_node &node = tree[n];
+    if (!node.child_count ||
+        !syntax_is(tree, tree.children(n)[0], syntax_kind::decl_specifier_seq))
+        return not_supported(n, "dcl.fct.def.general");
+    analysis_result r = init_declarators(n, tree.children(n)[0].index(), true);
+    if (r != analysis_result::well_formed)
+        return r;
+    return not_supported(n, "dcl.fct.def.general");
+}
+
+/*
+ * The declarators of a simple-declaration, or the one of a
+ * function-definition.  [dcl.decl]/3: "Each init-declarator in a declaration
+ * is analyzed separately as if it was in a declaration by itself."  The
+ * declaration is ill-formed if one of them is, and unsupported if one is.
+ */
+analysis_result semantic_analysis::init_declarators(node_index declaration,
+                                                    node_index specifiers,
+                                                    bool definition)
+{
+    specified s;
+    analysis_result r = decl_specifier_seq(specifiers, s, false);
+    if (r != analysis_result::well_formed)
+        return r;
+    const syntax_node &node = tree[declaration];
+    owned_array<syntax_child> items;
+    for (uint32_t i = 1; i < node.child_count; i++) {
+        syntax_child c = tree.children(declaration)[i];
+        if (syntax_is(tree, c, syntax_kind::function_body))
+            break;
+        /* a declarator that is only its identifier is the token */
+        if (c.is_token()) {
+            if (tokens[c.index()].kind != token_kind::identifier)
+                break;
+            items.append(c);
+            continue;
+        }
+        if (syntax_is(tree, c, syntax_kind::init_declarator_list)) {
+            const syntax_node &list = tree[c.index()];
+            for (uint32_t k = 0; k < list.child_count; k++) {
+                syntax_child item = tree.children(c.index())[k];
+                if (!item.is_token() ||
+                    tokens[item.index()].kind == token_kind::identifier)
+                    items.append(item);
+            }
+        } else {
+            items.append(c);
+        }
+    }
+    /* [dcl.pre]/5: "the optional init-declarator-list can be omitted only
+       when declaring a class or enumeration": the decl-specifier-seq has
+       neither (it would be unsupported), and clang accepts it with a
+       warning */
+    if (items.empty())
+        return extension_used(diagnostic_id::sema_no_declarator,
+                              tree[declaration].first_token, nullptr);
+    analysis_result result = analysis_result::well_formed;
+    for (syntax_child item : items) {
+        if (syntax_is(tree, item, syntax_kind::init_declarator))
+            return not_supported(item.index(), "dcl.init");
+        qualified_type type = s.type;
+        declarator_meaning m;
+        r = declarator(declaration, item, type, m);
+        if (r == analysis_result::well_formed && !m.has_id)
+            r = not_supported(declaration, "dcl.meaning");
+        if (r == analysis_result::well_formed) {
+            entity_kind kind = entity_kind::variable;
+            if (s.typedef_)
+                kind = entity_kind::typedef_name;
+            else if (type_table[type.unqualified()].kind == type_kind::function)
+                kind = entity_kind::function;
+            r = declare(declaration, m.id, kind, type, s, definition);
+        }
+        if (r == analysis_result::ill_formed)
+            result = r;
+        else if (r == analysis_result::unsupported &&
+                 result == analysis_result::well_formed)
+            result = r;
+    }
+    return result;
+}
+
 } // namespace cplusplus

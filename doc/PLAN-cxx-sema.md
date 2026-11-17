@@ -392,6 +392,37 @@ libstdc++ and json), since sema cannot analyse a declaration kept as tokens.
   overload set of more than one.
 - Gate: C5.1 and C5.2 run; type, constant, layout and symbols claims 0 wrong
   on those files.
+- S1 goes in increments, each with its own gate on C3 and C4: S1a
+  declarations and their types at global namespace scope; S1b initializers
+  and integral constant expressions; S1c function bodies, statements and
+  block scope; S1d lowering to `struct ast` and mangling; S1e the driver,
+  then C5.
+- Status (2026-11-17, S1a done): declarators to types and entities at
+  global namespace scope, no initializers.  The fundamental types of
+  Table 14 (`dcl/dcl.type.simple.cpp`), the decl-specifier rules of
+  [dcl.spec], [dcl.stc] and [dcl.typedef], typedef-names; declarators
+  ([dcl.meaning], `dcl/dcl.meaning.cpp`: pointers, references with
+  collapsing, arrays with an integer-literal bound, functions with the
+  parameter adjustments of [dcl.fct]/5); redeclarations and linkage
+  ([basic.link], [basic.def], [basic.def.odr], [dcl.array]/8's bound taken
+  from an earlier declaration).  clang's extensions are diagnostics of
+  their own (`sema/diagnostic-messages.inc`: duplicate decl-specifiers,
+  zero-length arrays, a declaration that declares nothing, Microsoft's
+  `static` after a non-static declaration), errors only under
+  `-pedantic-errors` as clang's are.  A name declared by a declaration that
+  is unsupported or not parsed is held (`hold_names`), so its later
+  declarations are unsupported rather than taken as the first.
+  `cxxsema -declaration-claims` writes the declared types in the parser's
+  claim format and `cxx-sema.py` has clang check them;
+  `src/test/cxx/sema/gram/` has the cases.  C3: 4187 runs, no crash; 2137
+  declarations as clang (470 at S0), 0 we reject and clang accepts, 49 we
+  accept and clang rejects (rules not written yet), 52396 unsupported, 9121
+  not parsed.  C4: 5460 declared types verified by clang, 0 refuted, 54 as
+  one of an overload set's, 117 in declarations clang rejects, 29 not
+  checkable.  Rule coverage: basic 4/112, dcl 26/238.  The work list:
+  [namespace.def] 13.1k, [class.pre] 8.4k, [temp.pre] 6.9k,
+  [dcl.fct.def.general] 4.9k, [dcl.pre] 3.8k (attributes),
+  [basic.lookup.unqual] 2.8k.
 
 ### S2. Names and entities in full
 
