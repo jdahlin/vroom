@@ -341,6 +341,22 @@ libstdc++ and json), since sema cannot analyse a declaration kept as tokens.
 - `sema/` tables, `cxxsema`, `unsupported`, `bench/cxx-sema.py` with C3 and
   the type claim, the extra suites fetched, the ABI text and its citations.
 - Gate: every C3 test runs and reports "unsupported"; C7.
+- Status (2026-11-17, done): `src/include/frontend/cplusplus/sema.h` and
+  `sema/` (the type table, hash-consed with cv-qualifiers in the handle;
+  entities with their declaration chains; `semantic_analysis` per
+  declaration with the `unsupported` result naming the subclause), the
+  first rule ([dcl.pre]/7, an empty-declaration), `syntax_tree::
+  declarations` shared by `cxxparse` and `cxxsema`; `cxxsema`
+  (`-dump-analysis`, `-debug-unsupported`, `-stats`, `-selftest`, in CI);
+  `bench/cxx-sema.py` (C3); `fetch-testsuites.sh llvm` adds SemaCXX,
+  SemaTemplate, CodeGenCXX and `libcxx/test/std`.  C3: 4185 runs of 2618
+  tests, no crash; 470 declarations as clang, 0 we reject and clang
+  accepts, 18 we accept and clang rejects (empty declarations under
+  `-pedantic-errors`), 54001 unsupported, 9113 not parsed.  The work list:
+  [dcl.pre] 23.0k, [namespace.def] 13.1k, [dcl.fct.def.general] 8.1k,
+  [temp.pre] 6.9k.  Left for S0: the type claim of C4 (needs S1's
+  expression types to say anything), the ABI text (`docs/itanium-abi/`,
+  its licence to check), C1's rule-coverage table in `cxx-spec-refs.py`.
 
 ### S1. The walking skeleton: C's subset of C++
 

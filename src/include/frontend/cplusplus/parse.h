@@ -183,6 +183,11 @@ class syntax_tree
     /* the tree under n as indented lines: a nonterminal and where it
        starts, then its children; a token as its spelling in quotes */
     void dump(node_index n, token_stream &tokens, vbuffer *out) const;
+    /* [basic.link]: the declarations of the translation unit in order:
+       those of its declaration-seq, or of a module unit's global module
+       fragment, purview and private module fragment (and its
+       module-declaration) */
+    void declarations(owned_array<node_index> *out) const;
 
     node_index root = 0;
 

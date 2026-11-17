@@ -417,36 +417,7 @@ int main(int argc, char **argv)
            fragment, its module-declaration, its purview and its private
            module fragment, in order */
         owned_array<node_index> declarations;
-        auto add_seq = [&](node_index seq) {
-            for (uint32_t i = 0; i < tree[seq].child_count; i++) {
-                syntax_child c = tree.children(seq)[i];
-                if (!c.is_token())
-                    declarations.append(c.index());
-            }
-        };
-        const syntax_node &unit = tree[tree.root];
-        for (uint32_t u = 0; u < unit.child_count; u++) {
-            syntax_child part = tree.children(tree.root)[u];
-            if (part.is_token())
-                continue;
-            const syntax_node &x = tree[part.index()];
-            if (x.kind == syntax_kind::declaration_seq) {
-                add_seq(part.index());
-            } else if (x.kind == syntax_kind::global_module_fragment ||
-                       x.kind == syntax_kind::private_module_fragment) {
-                for (uint32_t k = 0; k < x.child_count; k++) {
-                    syntax_child y = tree.children(part.index())[k];
-                    if (y.is_token())
-                        continue;
-                    if (tree[y.index()].kind == syntax_kind::declaration_seq)
-                        add_seq(y.index());
-                    else
-                        declarations.append(y.index());
-                }
-            } else {
-                declarations.append(part.index());
-            }
-        }
+        tree.declarations(&declarations);
         {
             for (node_index declaration : declarations) {
                 syntax_child c = syntax_child::node(declaration);

@@ -109,7 +109,7 @@ $(OUT)/vref: bin/vref/vref.py | $(OUT)
 	cp $< $@
 	chmod +x $@
 
-vcc: $(OUT)/vcc $(OUT)/vsh/sh $(OUT)/vld $(OUT)/vas $(OUT)/var $(OUT)/vcc-nm $(OUT)/vcc-objcopy $(OUT)/vccd $(OUT)/lextest $(OUT)/vpp $(OUT)/vlink $(OUT)/vasm $(OUT)/virtest $(OUT)/viralloc $(OUT)/task-test $(if $(filter c++,$(VCC_LANG)),$(OUT)/cxxlex $(OUT)/cxxparse)
+vcc: $(OUT)/vcc $(OUT)/vsh/sh $(OUT)/vld $(OUT)/vas $(OUT)/var $(OUT)/vcc-nm $(OUT)/vcc-objcopy $(OUT)/vccd $(OUT)/lextest $(OUT)/vpp $(OUT)/vlink $(OUT)/vasm $(OUT)/virtest $(OUT)/viralloc $(OUT)/task-test $(if $(filter c++,$(VCC_LANG)),$(OUT)/cxxlex $(OUT)/cxxparse $(OUT)/cxxsema)
 
 o = $(patsubst %.cpp,$(OBJ)/%.o,$(1))
 # WebAssembly is off by default (disabled 2026-11-13, doc/PLAN-wasm.md): its
@@ -234,6 +234,9 @@ $(OUT)/cxxlex: $(call o,bin/cxxlex/cxxlex.cpp $(LIB_SRC)) $(call mod,cplusplus)
 	$(VCC_LINK) $(VCC_LDFLAGS) $^ -o $@
 # cxxparse drives its parser for bench/cxx-parse.py (doc/PLAN-cxx-parse.md)
 $(OUT)/cxxparse: $(call o,bin/cxxparse/cxxparse.cpp $(LIB_SRC)) $(call mod,cplusplus)
+	$(VCC_LINK) $(VCC_LDFLAGS) $^ -o $@
+# cxxsema drives its semantic analysis for bench/cxx-sema.py (doc/PLAN-cxx-sema.md)
+$(OUT)/cxxsema: $(call o,bin/cxxsema/cxxsema.cpp $(LIB_SRC)) $(call mod,cplusplus)
 	$(VCC_LINK) $(VCC_LDFLAGS) $^ -o $@
 
 # virtest: VIR's parser, verifier and printer (SPEC-vir.md 16); depends on nothing else

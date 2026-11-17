@@ -6,6 +6,7 @@
  *         declaration-seq declaration
  */
 #include "../cplusplus-internal.h"
+#include "frontend/cplusplus/sema.h"
 
 namespace cplusplus
 {
@@ -623,6 +624,17 @@ node_index parser::attribute_declaration()
     if (!accept(preprocessing_op_or_punc::SEMICOLON))
         return expected("';' after the attribute-specifier-seq", "dcl.pre");
     return finish_node(syntax_kind::attribute_declaration, mark, first);
+}
+
+/*
+ *     empty-declaration:
+ *         ';'
+ *
+ * [dcl.pre]/7: "An empty-declaration has no effect."
+ */
+analysis_result semantic_analysis::empty_declaration(node_index)
+{
+    return analysis_result::well_formed;
 }
 
 } // namespace cplusplus

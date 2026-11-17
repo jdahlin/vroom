@@ -53,7 +53,7 @@ mkdir -p "$DST"
 
 # name | url | pinned commit | sparse paths (empty: whole repo)
 SUITES='
-llvm|https://github.com/llvm/llvm-project.git|bb04dac04a0f9e9b99ffc2e28b4806d4f98e7966|clang/test/C clang/test/Sema clang/test/Preprocessor clang/test/Lexer clang/test/CXX clang/test/Parser clang/lib/Lex clang/include/clang/Lex clang/utils/ABITest clang/LICENSE.TXT
+llvm|https://github.com/llvm/llvm-project.git|bb04dac04a0f9e9b99ffc2e28b4806d4f98e7966|clang/test/C clang/test/Sema clang/test/Preprocessor clang/test/Lexer clang/test/CXX clang/test/Parser clang/test/SemaCXX clang/test/SemaTemplate clang/test/CodeGenCXX libcxx/test/std libcxx/test/support libcxx/LICENSE.TXT clang/lib/Lex clang/include/clang/Lex clang/utils/ABITest clang/LICENSE.TXT
 gcc|https://github.com/gcc-mirror/gcc.git|917da9c6e019407c9d469455ad4c50c062470d6c|gcc/testsuite/gcc.c-torture gcc/testsuite/gcc.dg gcc/testsuite/c-c++-common gcc/testsuite/gcc.target/aarch64 gcc/testsuite/lib COPYING3
 c-testsuite|https://github.com/c-testsuite/c-testsuite.git|5c7275656d751de0e68b2d340a95b5681858ed07|
 llvm-test-suite|https://github.com/llvm/llvm-test-suite.git|2ecf20c22c4c25051026fa450e0b0beb7d922209|SingleSource LICENSE.TXT
