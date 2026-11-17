@@ -380,6 +380,7 @@ void preprocessor::cache_write(uint32_t id, int32_t macro)
         d.length = m.length;
         for (uint32_t i = 0; i < m.length; i++) {
             replacement_element x = elements[m.first_element + i];
+            x.token.identifier = 0;
             source_location at = x.token.location,
                             expansion = x.token.expansion;
             x.token.location = to_cache(files, at);
@@ -535,6 +536,7 @@ void preprocessor::cache_output(const preprocessing_token &t)
         return;
     cache_recording &r = recordings.back();
     preprocessing_token c = t;
+    c.identifier = 0;
     c.location = to_cache(files, t.location);
     c.expansion = to_cache(files, t.expansion);
     if ((t.location && !c.location) || (t.expansion && !c.expansion))

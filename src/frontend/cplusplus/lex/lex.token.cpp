@@ -21,46 +21,56 @@
 namespace cplusplus
 {
 
+/* [lex.key]/1: an identifier of Table 5 is a keyword (keyword: its index,
+   or -1); [lex.key]/2: one of Table 6 is the operator it represents
+   ([lex.digraph]/2) */
+VPRIV void identifier_token(token &out, int keyword, const char *spelling,
+                            size_t length)
+{
+    preprocessing_op_or_punc op;
+    if (keyword < 0) {
+        out.kind = token_kind::identifier;
+        return;
+    }
+    if (keyword_is_alternative_representation(keyword, &op)) {
+        out.kind = token_kind::operator_or_punctuator;
+        out.op_or_punc = op;
+        return;
+    }
+    out.kind = token_kind::keyword;
+    out.keyword = (int16_t)keyword;
+    /* [lex.bool]/1: "The Boolean literals are the keywords false and
+       true."  [lex.nullptr]/1: "The pointer literal is the keyword
+       nullptr." */
+    if (length == 4 && !memcmp(spelling, "true", 4)) {
+        out.literal = literal_kind::boolean_literal;
+        out.type = fundamental_type::bool_;
+        out.value = 1;
+        out.value_known = true;
+    } else if (length == 5 && !memcmp(spelling, "false", 5)) {
+        out.literal = literal_kind::boolean_literal;
+        out.type = fundamental_type::bool_;
+        out.value = 0;
+        out.value_known = true;
+    } else if (length == 7 && !memcmp(spelling, "nullptr", 7)) {
+        out.literal = literal_kind::pointer_literal;
+        out.type = fundamental_type::std_nullptr_t;
+    }
+}
+
 token lexer::convert(const preprocessing_token &pp)
 {
     token out;
     out.preprocessing = pp;
     owned_buffer spelling_buffer;
     switch (pp.kind) {
-    case preprocessing_token_kind::identifier: {
+    case preprocessing_token_kind::identifier:
         spelling(pp, spelling_buffer.get());
-        /* [lex.key]/1: an identifier of Table 5 is a keyword; [lex.key]/2:
-           one of Table 6 is the operator it represents ([lex.digraph]/2) */
-        int k = lookup_keyword(behavior, spelling_buffer.data(),
-                               spelling_buffer.size());
-        preprocessing_op_or_punc op;
-        if (k >= 0 && keyword_is_alternative_representation(k, &op)) {
-            out.kind = token_kind::operator_or_punctuator;
-            out.op_or_punc = op;
-        } else if (k >= 0) {
-            out.kind = token_kind::keyword;
-            out.keyword = (int16_t)k;
-            /* [lex.bool]/1: "The Boolean literals are the keywords false and
-               true."  [lex.nullptr]/1: "The pointer literal is the keyword
-               nullptr." */
-            if (spelling_buffer.size() == 4 &&
-                !memcmp(spelling_buffer.data(), "true", 4))
-                out.literal = literal_kind::boolean_literal,
-                out.type = fundamental_type::bool_, out.value = 1,
-                out.value_known = true;
-            else if (spelling_buffer.size() == 5 &&
-                     !memcmp(spelling_buffer.data(), "false", 5))
-                out.literal = literal_kind::boolean_literal,
-                out.type = fundamental_type::bool_, out.value = 0,
-                out.value_known = true;
-            else if (spelling_buffer.size() == 7 &&
-                     !memcmp(spelling_buffer.data(), "nullptr", 7))
-                out.literal = literal_kind::pointer_literal,
-                out.type = fundamental_type::std_nullptr_t;
-        } else
-            out.kind = token_kind::identifier;
+        identifier_token(out,
+                         lookup_keyword(behavior, spelling_buffer.data(),
+                                        spelling_buffer.size()),
+                         spelling_buffer.data(), spelling_buffer.size());
         break;
-    }
     case preprocessing_token_kind::pp_number:
         spelling(pp, spelling_buffer.get());
         out.kind = token_kind::literal;

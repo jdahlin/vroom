@@ -157,6 +157,8 @@ size_t universal_character_name(const char *s, size_t n, size_t i, uint32_t *c)
    identifier: the table keys on its UTF-8 */
 uint32_t preprocessor::identifier(const preprocessing_token &t)
 {
+    if (t.identifier)
+        return t.identifier - 1;
     spelling_buffer.clear();
     files.spelling(t, spelling_buffer.get());
     const char *s = spelling_buffer.data();
@@ -174,6 +176,17 @@ uint32_t preprocessor::identifier(const preprocessing_token &t)
             vbuffer_append(canonical.get(), s + i++, 1);
     }
     return identifier(canonical.data(), canonical.size());
+}
+
+/* OPTIMIZATION: interned once per token, not once per look at it */
+uint32_t preprocessor::interned(preprocessing_token &t)
+{
+    if (t.identifier)
+        return t.identifier - 1;
+    uint32_t id = identifier(t);
+    if (!memchr(spelling_buffer.data(), '\\', spelling_buffer.size()))
+        t.identifier = id + 1;
+    return id;
 }
 
 const char *preprocessor::identifier_spelling(uint32_t id, size_t *n) const
@@ -366,7 +379,7 @@ void preprocessor::directive_define(const preprocessing_token &directive)
             e.token.after_white_space = false;
         e.token.at_start_of_line = false;
         if (is_identifier(t)) {
-            uint32_t id = identifier(t);
+            uint32_t id = interned(e.token);
             for (uint16_t i = 0; i < names.size(); i++)
                 if (names[i] == id)
                     e.parameter = (int16_t)i;

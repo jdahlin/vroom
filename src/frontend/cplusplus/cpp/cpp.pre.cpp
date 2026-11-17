@@ -440,7 +440,7 @@ preprocessing_token preprocessor::next()
             }
             if (t.not_replaceable)
                 break;
-            uint32_t id = identifier(t);
+            uint32_t id = interned(t);
             /* [impl.clang] only as written in a source file */
             if (identifiers[id].poisoned && !t.expansion)
                 diagnostics.issue(diagnostic_id::err_pp_used_poisoned_id,

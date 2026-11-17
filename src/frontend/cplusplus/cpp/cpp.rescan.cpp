@@ -65,7 +65,7 @@ bool preprocessor::read_unexpanded(preprocessing_token &t)
             t = context_tokens[c.next++];
             read_from_file = false;
             if (is_identifier(t) && !t.not_replaceable) {
-                int32_t m = macro_of(identifier(t)); /* OPTIMIZATION: cache */
+                int32_t m = macro_of(interned(t)); /* OPTIMIZATION: cache */
                 if (m >= 0 && macros[m].being_replaced)
                     t.not_replaceable = true;
             }
@@ -94,7 +94,7 @@ bool preprocessor::read_expanded(preprocessing_token &t)
         if (!read_unexpanded(t))
             return false;
         if (is_identifier(t) && !t.not_replaceable) {
-            int32_t m = macro_of(identifier(t)); /* OPTIMIZATION: cache */
+            int32_t m = macro_of(interned(t)); /* OPTIMIZATION: cache */
             if (m >= 0 && replace_macro(t, m))
                 continue;
         }

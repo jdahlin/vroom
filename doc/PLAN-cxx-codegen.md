@@ -582,8 +582,25 @@ recorded here:
     -> 1.73 s with it.  The old lexer's 64-byte block classification
     (`lex_bytes_classify`) would need the lexer rebuilt around masks: not
     ported.
-  Next: the replayed sources' text shared instead of read again, and phase
-  7 (`convert`, `lookup_keyword`) per token.  Gates: `bench/cxx-lex.py` 121/121, `bench/cxx-pp.py` as the base
+  Phase 7 (2026-11-17): an identifier is interned once and keeps its index
+  in the preprocessing token (`preprocessing_token::identifier`, set by
+  `preprocessor::interned` where the preprocessor looks it up, cleared in
+  what the header cache records); `token_stream` converts it through the
+  table, its keyword looked up once per identifier and translation unit
+  (`keyword_by_identifier`), instead of spelling it into a buffer and
+  searching the keyword table for each token.  A spelling with a '\' (a
+  universal-character-name) goes through `lexer::convert` as before.
+  json.hpp: phases 1-7 276 -> 241 ns/token after S1's 313 (the identifier
+  half alone 313 -> 276), the parser 106 -> 93 (its identifier() is free
+  now), cxxparse 0.355 s -> 0.282 s (clang 23 -fsyntax-only 0.83 s, 2.95x);
+  the 110 TUs with the header cache 1.73 s -> 1.58 s.  -dump-tokens and
+  -dump-syntax identical on json and on every Parser/ and CXX/ test (c++98,
+  c++20); cxx-lex 121/121, cxx-pp as the base, cxx-header-cache the same
+  with and without the cache, cxx-parse.py the base's, ASan mutants
+  3721/3721.
+  Next: the replayed sources' text shared instead of read again; the
+  floating-point literals' values parsed eagerly (vsoftfloat, ~2 % of
+  phases 1-7) could be parsed on demand.  Gates: `bench/cxx-lex.py` 121/121, `bench/cxx-pp.py` as the base
   (its `-dM` column differs by clang's version string only), and
   `bench/cxx-parse.py` identical.
 - **S1 The parser without build-and-rewind** (3.0 item 3): recovery, the

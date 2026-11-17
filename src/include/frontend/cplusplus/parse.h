@@ -75,6 +75,11 @@ class token_stream
     owned_array<uint32_t> first_piece;
     owned_array<preprocessing_token> preprocessing_tokens;
     owned_array<uint32_t> identifiers;
+    /* OPTIMIZATION: each identifier's keyword index (-1: none) in this
+       translation unit, unknown_keyword until asked */
+    static constexpr int16_t unknown_keyword = -2;
+    owned_array<int16_t> keyword_by_identifier;
+    bool identifier_converted(const preprocessing_token &first);
     /* the preprocessing token read ahead to see whether a string literal is
        followed by another */
     preprocessing_token lookahead;

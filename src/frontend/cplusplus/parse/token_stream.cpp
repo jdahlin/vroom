@@ -57,8 +57,13 @@ void token_stream::make_through(token_index i)
             tokens.append(files.convert_string_literals(
                 preprocessing_tokens.data() + begin,
                 preprocessing_tokens.size() - begin));
+        } else if (first.kind == preprocessing_token_kind::identifier &&
+                   identifier_converted(first)) {
+            /* converted */
         } else {
             tokens.append(files.convert(first));
+        }
+        if (!is_string_literal(first)) {
             token &made = tokens.back();
             if (made.kind == token_kind::keyword && made.keyword >= 0 &&
                 static_cast<size_t>(made.keyword) <
@@ -77,6 +82,38 @@ void token_stream::make_through(token_index i)
         if (first.kind == preprocessing_token_kind::end_of_file)
             complete = true;
     }
+}
+
+/*
+ * OPTIMIZATION: phase 7 of an identifier through the preprocessor's
+ * identifier table: interned once (the parser's identifier() then has it),
+ * its keyword looked up once per identifier and translation unit.  A
+ * spelling with a universal-character-name is interned as the character it
+ * names, which no keyword is spelled with: lexer::convert decides that one.
+ */
+bool token_stream::identifier_converted(const preprocessing_token &first)
+{
+    uint32_t id;
+    if (first.identifier) {
+        id = first.identifier - 1;
+    } else {
+        id = pp.identifier(first);
+        if (memchr(pp.spelling_buffer.data(), '\\', pp.spelling_buffer.size()))
+            return false;
+    }
+    identifiers.back() = id + 1;
+    while (keyword_by_identifier.size() <= id)
+        keyword_by_identifier.append(unknown_keyword);
+    size_t length;
+    const char *spelling = pp.identifier_spelling(id, &length);
+    if (keyword_by_identifier[id] == unknown_keyword)
+        keyword_by_identifier[id] = static_cast<int16_t>(
+            lookup_keyword(files.behavior, spelling, length));
+    token made;
+    made.preprocessing = first;
+    identifier_token(made, keyword_by_identifier[id], spelling, length);
+    tokens.append(made);
+    return true;
 }
 
 const token &token_stream::operator[](token_index i)

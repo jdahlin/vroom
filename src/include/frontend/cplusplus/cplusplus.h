@@ -355,6 +355,11 @@ struct preprocessing_token {
     source_location expansion = 0;
     /* [lex.ext]: where the ud-suffix starts in the physical characters (0: none) */
     uint32_t ud_suffix_offset = 0;
+    /* OPTIMIZATION: an identifier's index + 1 in the identifier table of
+       the preprocessor that read it (0: not interned yet, or spelled with a
+       '\\'); never kept in the header cache, whose tokens are another
+       translation unit's */
+    uint32_t identifier = 0;
 };
 
 struct lexer_options {
@@ -804,6 +809,8 @@ class preprocessor
     owned_buffer spelling_buffer;
     uint32_t identifier(const char *spelling, size_t length);
     uint32_t identifier(const preprocessing_token &token);
+    /* the same, kept in the token (preprocessing_token::identifier) */
+    uint32_t interned(preprocessing_token &token);
     const char *identifier_spelling(uint32_t id, size_t *length) const;
     diagnostic_message &quoted(diagnostic_message &m,
                                const preprocessing_token &token);
