@@ -1,5 +1,5 @@
 /*
- * pragma_diagnostic.cpp: [ext.gnu] gnu_pragmas: #pragma GCC diagnostic, also
+ * pragma_diagnostic.cpp: [ext:gnu_pragmas]: #pragma GCC diagnostic, also
  * spelled #pragma clang diagnostic (GCC manual 6.62.11, Diagnostic Pragmas):
  *
  *     #pragma GCC diagnostic ignored "-Wgroup"   (or warning, error, fatal)

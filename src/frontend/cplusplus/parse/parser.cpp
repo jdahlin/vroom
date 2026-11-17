@@ -63,7 +63,7 @@ parser::parser(token_stream &tokens, syntax_tree &tree, declared_names &names,
                 behavior.has(o.from))
                 extension_kinds[i] = o.keyword;
     }
-    /* [ext.clang] clang_type_trait_names: the token stream makes a trait's
+    /* [ext:clang_type_trait_names]: the token stream makes a trait's
        keyword an identifier when no '(' follows */
     if (behavior.has(extension::clang_type_trait_names)) {
         tokens.revertible_keywords.resize(static_cast<size_t>(size));

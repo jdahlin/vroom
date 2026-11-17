@@ -15,8 +15,12 @@
  *         a '(' character not immediately preceded by white-space
  *
  * [impl.clang] Which diagnostics a malformed definition gets is clang's
- * choice (its PPDirectives.cpp).  [ext.gnu] gnu_named_variadic_macro:
- * #define f(args...).
+ * choice (its PPDirectives.cpp).  [ext:gnu_named_variadic_macro] (GCC
+ * manual 6.21, Variadic Macros):
+ *
+ *     control-line:
+ *         # define identifier lparen identifier ... ) replacement-list new-line
+ *         # define identifier lparen identifier-list , identifier ... ) replacement-list new-line
  */
 #include <stdio.h>
 
@@ -591,7 +595,7 @@ bool preprocessor::parameter_list(macro_definition &m,
         }
         if (is_operator(t, preprocessing_op_or_punc::ELLIPSIS)) {
             /* [cpp.replace]/12: '# define' identifier lparen '...' ')';
-               C++11's (N1653), [ext.clang] clang_later_edition_features in
+               C++11's (N1653), [ext:clang_later_edition_features] in
                C++98 */
             if (behavior.has(language_feature::variadic_macros))
                 diagnostics.issue(
@@ -640,7 +644,7 @@ bool preprocessor::parameter_list(macro_definition &m,
             continue;
         if (is_operator(t, preprocessing_op_or_punc::ELLIPSIS) &&
             behavior.has(extension::gnu_named_variadic_macro)) {
-            /* [ext.gnu] gnu_named_variadic_macro: the variable arguments
+            /* [ext:gnu_named_variadic_macro] the variable arguments
                named by the last parameter */
             diagnostics.issue(diagnostic_id::ext_named_variadic_macro,
                               t.location);
@@ -781,7 +785,7 @@ bool preprocessor::collect_arguments(const preprocessing_token &name,
     if (n < m.parameter_count) {
         if (m.variadic && n + 1 == m.parameter_count) {
             /* the variable arguments left out: C++20's [cpp.replace]/5;
-               [ext.clang] clang_later_edition_features before C++20 */
+               [ext:clang_later_edition_features] before C++20 */
             if (!behavior.has(
                     language_feature::variadic_arguments_may_be_omitted))
                 diagnostics.issue(diagnostic_id::ext_cxx_missing_varargs_arg,

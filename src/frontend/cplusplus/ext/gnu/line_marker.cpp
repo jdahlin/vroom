@@ -1,13 +1,15 @@
 /*
- * line_marker.cpp: [ext.gnu] GNU's line markers, the line control GCC's
- * and clang's -E write (GNU cpp manual 9, Preprocessor Output):
+ * line_marker.cpp: [ext:gnu_line_marker] GNU's line markers, the line
+ * control GCC's and clang's -E write (GNU cpp manual 9, Preprocessor
+ * Output):
  *
- *     # digit-sequence "s-char-sequence" flags_opt new-line
+ *     control-line:
+ *         # digit-sequence " s-char-sequence_opt " pp-tokens_opt new-line
  *
  * a # followed by a pp-number where a directive name would be, which
- * [cpp.pre]/2 makes a conditionally-supported-directive.  The flags: 1 a
- * file is entered, 2 one is left, 3 the following text is a system
- * header, 4 it is in an extern "C" block.
+ * [cpp.pre]/2 makes a conditionally-supported-directive.  The pp-tokens are
+ * the flags: 1 a file is entered, 2 one is left, 3 the following text is a
+ * system header, 4 it is in an extern "C" block.
  */
 #include "../../cplusplus-internal.h"
 

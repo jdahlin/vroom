@@ -14,14 +14,45 @@
             alternatives of that nonterminal's bnf block (spaces, the
             subscript opt written _opt, and quotes around terminals do not
             count).  Quoting some alternatives is allowed (a comment may
-            say which are not written yet).  The grammar quoted in ext/ is
-            an extension's, from its vendor's manual: not checked.
+            say which are not written yet).  A production quoted after an
+            [ext:NAME] citation in the same comment may also be one the
+            extension NAME adds (ext).
   coverage  per clause, the nonterminals of docs/cxx-spec/grammar-index.md
             that some comment quotes, of all of the clause's
+  rules     per clause, the rules a comment quotes, of all of the clause's
+            (PLAN-cxx-sema.md C1): a rule is a sentence of a paragraph, out
+            of its notes and examples, that says "shall" or "ill-formed";
+            it is quoted when a comment cites its paragraph ([label]/N, or
+            /N after a [label]/M of the same file) and quotes, in "...",
+            a part of it
+  abi       every [abi:anchor] names a section of the Itanium C++ ABI
+            (docs/itanium-abi-index.tsv, bench/itanium-abi.py), and every
+            production of its mangling grammar a comment quotes after one,
 
-Usage: bench/cxx-spec-refs.py [-v] [--missing CLAUSE] [FILE...]
+                *     <nonterminal> ::= alternative
+                *                   ::= alternative
+
+            is one of that section's (docs/itanium-abi-grammar.tsv; spaces
+            and a `# ...` remark do not count); coverage: per section, the
+            alternatives some comment quotes, of all of the section's
+
+  ext       the extensions' grammar (src/frontend/cplusplus/ext/grammar.inc):
+            each row's extension is a row of ext/extensions.inc; an
+            alternative added to a standard nonterminal is not already
+            one of its own; any other nonterminal begins with the
+            extension's vendor (gnu-, clang-, microsoft-), is defined by a
+            row and used by another; every nonterminal an alternative uses
+            is the standard's or one of these.  Every [ext:NAME] names an
+            extension, and a production quoted after one is the
+            standard's or one of NAME's rows; coverage: per extension, the
+            rows some comment quotes, of all of its rows
+
+Usage: bench/cxx-spec-refs.py [-v] [--missing CLAUSE] [--rules CLAUSE] [--abi-missing LABEL] [--ext-missing NAME] [FILE...]
   -v                 every quoted production, not only the wrong ones
   --missing CLAUSE   list the clause's nonterminals no comment quotes yet
+  --rules CLAUSE     list the clause's rules no comment quotes yet
+  --abi-missing LABEL  list the ABI section's alternatives no comment quotes yet
+  --ext-missing NAME   list the extension's productions no comment quotes yet
 Exit status 1 if a citation or a quoted production is wrong.
 """
 import argparse
@@ -34,6 +65,15 @@ R = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SPEC = os.path.join(R, 'docs', 'cxx-spec')
 FRONTEND = os.path.join(R, 'src', 'frontend', 'cplusplus')
 
+ABI_INDEX = os.path.join(R, 'docs', 'itanium-abi-index.tsv')
+ABI_GRAMMAR = os.path.join(R, 'docs', 'itanium-abi-grammar.tsv')
+ABI_CITATION = re.compile(r'\[abi:([a-z0-9][a-z0-9.-]*)\]')
+# the clauses whose rules analysis enforces
+RULE_CLAUSES = ('basic', 'class', 'dcl', 'except', 'expr', 'module', 'over', 'stmt', 'temp')
+EXT_INDEX = os.path.join(FRONTEND, 'ext', 'extensions.inc')
+EXT_GRAMMAR = os.path.join(FRONTEND, 'ext', 'grammar.inc')
+EXT_CITATION = re.compile(r'\[ext:([a-z][a-z0-9_]*)\]')
+NONTERMINAL_SHAPE = re.compile(r'^[a-z][a-z0-9]*(-[a-z0-9]+)+$')
 CITATION = re.compile(r'\[([a-z][a-z0-9.]*[a-z0-9])\]/(\d+)(?:\.(\d+))?')
 # clang's and other vendors' tags, and the plan's own labels, are no
 # subclauses of the standard
@@ -150,10 +190,209 @@ def quoted_productions(path):
     return found
 
 
+def plain(text):
+    """the words of a sentence: the Markdown's links, emphasis, code marks
+    and quotes taken out, lower case, one space between words"""
+    text = re.sub(r'\[\[([^\]]+)\]\]\([^)]*\)', r'[\1]', text)
+    text = re.sub(r'\[([^\]]+)\]\([^)]*\)', r'\1', text)
+    text = re.sub(r'[*`“”"‘’]', '', text)
+    text = text.replace('ₒₚₜ', '_opt')
+    return ' '.join(text.lower().split())
+
+
+def spec_rules(subclauses):
+    """label -> {paragraph: [the plain text of each rule's sentence]}"""
+    rules = {}
+    for label, path in subclauses.items():
+        rel = os.path.relpath(path, SPEC)
+        if rel.split(os.sep)[0] not in RULE_CLAUSES:
+            continue
+        text = open(path, encoding='utf-8').read()
+        text = re.sub(r'^```.*?^```', ' ', text, flags=re.M | re.S)
+        # notes and examples state no rule
+        text = re.sub(r'\[\*(?:Note|Example)[^*]*\*:.*?— \*end (?:note|example)\*\]', ' ', text, flags=re.S)
+        parts = re.split(r'^\*\*(\d+)\*\*', text, flags=re.M)
+        for k in range(1, len(parts) - 1, 2):
+            body = re.split(r'^#', parts[k + 1], maxsplit=1, flags=re.M)[0]
+            for sentence in re.split(r'(?<=[.:])\s+(?=[A-Z\[*`])', ' '.join(body.split())):
+                if re.search(r'\bshall\b|ill-formed', sentence):
+                    rules.setdefault(label, {}).setdefault(int(parts[k]), []).append(plain(sentence))
+    return rules
+
+
+SHORT_CITATION = re.compile(r'(?<![\w\]/])/(\d+)(?:\.\d+)?\b')
+QUOTE = re.compile(r'"([^"]{8,})"')
+
+
+def quoted_rules(path, rules):
+    """the (label, paragraph, sentence) rules a comment of the file quotes"""
+    found = set()
+    last_label = None
+    block, start = [], None
+    lines = comment_lines(path)
+    blocks = []
+    for n, s in lines + [(None, None)]:
+        if n is not None and block and n == start + len(block):
+            block.append(s)
+            continue
+        if block:
+            blocks.append(' '.join(' '.join(block).split()))
+        if n is None:
+            break
+        block, start = [s], n
+    for text in blocks:
+        marks = []
+        for m in CITATION.finditer(text):
+            if m.group(1) not in NOT_SUBCLAUSES:
+                last_label = m.group(1)
+                marks.append((m.start(), m.group(1), int(m.group(2))))
+        for m in SHORT_CITATION.finditer(text):
+            if last_label and not any(m.start() >= c[0] and m.start() < c[0] + len(c[1]) + 4 for c in marks):
+                marks.append((m.start(), last_label, int(m.group(1))))
+        if not marks:
+            continue
+        for q in QUOTE.finditer(text):
+            quote = plain(q.group(1)).strip(' .,;:…')
+            if len(quote) < 8:
+                continue
+            # the citations nearest the quote first
+            for _, label, para in sorted(marks, key=lambda c: abs(c[0] - q.start())):
+                sentences = rules.get(label, {}).get(para, [])
+                hit = [k for k, x in enumerate(sentences) if quote in x or x.strip(' .') in quote]
+                if hit:
+                    found.update((label, para, k) for k in hit)
+                    break
+    return found
+
+
+def abi_sections():
+    sections = set()
+    if os.path.exists(ABI_INDEX):
+        for line in open(ABI_INDEX, encoding='utf-8'):
+            if line.strip() and not line.startswith('#'):
+                sections.add(line.split('\t')[0])
+    return sections
+
+
+def abi_grammar():
+    """section label -> [(nonterminal, alternative)] in the ABI's order"""
+    grammar = {}
+    if os.path.exists(ABI_GRAMMAR):
+        for line in open(ABI_GRAMMAR, encoding='utf-8'):
+            if line.strip() and not line.startswith('#'):
+                label, nonterminal, alternative = line.rstrip('\n').split('\t')
+                grammar.setdefault(label, []).append((nonterminal, alternative))
+    return grammar
+
+
+def abi_alternative(text):
+    return ' '.join(text.split('#', 1)[0].split())
+
+
+def quoted_abi_productions(path):
+    """(line, section, nonterminal, alternative) for each alternative of the
+    ABI's grammar a comment quotes: `<x> ::= a` and the `::= b` lines right
+    after it, in the section the last [abi:label] before them cites"""
+    found = []
+    section = None
+    nonterminal = None
+    last = 0
+    for n, s in comment_lines(path):
+        for m in ABI_CITATION.finditer(s):
+            section = m.group(1)
+        m = re.match(r'^\s+(<[^>]+>)\s*::=(.*)$', s)
+        if m:
+            nonterminal, alternative = m.group(1), m.group(2)
+        else:
+            m = re.match(r'^\s+::=(.*)$', s)
+            if not m or not nonterminal or n != last + 1:
+                nonterminal = None
+                continue
+            alternative = m.group(1)
+        last = n
+        found.append((n, section, nonterminal, abi_alternative(alternative)))
+    return found
+
+
+def extension_index():
+    """extension name -> vendor, from ext/extensions.inc"""
+    text = open(EXT_INDEX, encoding='utf-8').read()
+    return dict(re.findall(r'^EXTENSION\((\w+),\s*(\w+),', text, re.M))
+
+
+def extension_grammar():
+    """(line, extension, nonterminal, alternative or None for TERMINALS)
+    for each row of ext/grammar.inc"""
+    text = open(EXT_GRAMMAR, encoding='utf-8').read()
+    rows = []
+    row = re.compile(r'^(PRODUCTION|TERMINALS)\(\s*(\w+),\s*"([^"]+)",\s*((?:"(?:[^"\\]|\\.)*"\s*)+)\)',
+                     re.M | re.S)
+    for m in row.finditer(text):
+        line = text.count('\n', 0, m.start()) + 1
+        value = ''.join(re.findall(r'"((?:[^"\\]|\\.)*)"', m.group(4))).replace('\\"', '"')
+        rows.append((line, m.group(2), m.group(3), value if m.group(1) == 'PRODUCTION' else None))
+    return rows
+
+
+def check_extension_grammar(rows, index, grammar):
+    """the rows' errors; extension -> set of (nonterminal, alternative)"""
+    rel = os.path.relpath(EXT_GRAMMAR, R)
+    errors = []
+    defined = {nonterminal for _, _, nonterminal, _ in rows}
+    used = {}
+    by_extension = {}
+    for line, name, nonterminal, alternative in rows:
+        where = f'{rel}:{line}'
+        if name not in index:
+            errors.append(f'{where}: {name} is no extension of ext/extensions.inc')
+            continue
+        if nonterminal not in grammar and not nonterminal.startswith(index[name] + '-'):
+            errors.append(f'{where}: {nonterminal} is neither the standard\'s nor begins with {index[name]}-')
+        if alternative is None:
+            continue
+        a = normalize(alternative)
+        by_extension.setdefault(name, set()).add((nonterminal, a))
+        if nonterminal in grammar and a in grammar[nonterminal][1]:
+            errors.append(f'{where}: {nonterminal}: "{alternative}" is the standard\'s already')
+        for symbol in a.split():
+            symbol = re.sub(r'_opt$', '', symbol)
+            if symbol in defined and symbol not in grammar:
+                if symbol != nonterminal:
+                    used[symbol] = True
+            elif symbol not in grammar and NONTERMINAL_SHAPE.match(symbol):
+                errors.append(f'{where}: {symbol} is no nonterminal of the standard or of ext/grammar.inc')
+    for nonterminal in sorted(defined - set(grammar) - set(used)):
+        errors.append(f'{rel}: {nonterminal} is defined but no other production uses it')
+    return errors, by_extension
+
+
+def extension_contexts(path):
+    """comment line -> the extension the last [ext:NAME] of its comment
+    before it (or on it) names"""
+    contexts = {}
+    inside = False
+    current = None
+    for n, line in enumerate(open(path, encoding='utf-8', errors='replace'), 1):
+        start = line.find('/*')
+        if not inside and start >= 0:
+            inside, current = True, None
+        if inside:
+            for m in EXT_CITATION.finditer(line):
+                current = m.group(1)
+            if current:
+                contexts[n] = current
+            if '*/' in line[start + 2 if start >= 0 else 0:]:
+                inside = False
+    return contexts
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('-v', action='store_true')
     ap.add_argument('--missing')
+    ap.add_argument('--rules')
+    ap.add_argument('--abi-missing')
+    ap.add_argument('--ext-missing')
     ap.add_argument('files', nargs='*')
     a = ap.parse_args()
     files = a.files or sorted(glob.glob(os.path.join(FRONTEND, '**', '*.cpp'), recursive=True) +
@@ -161,7 +400,21 @@ def main():
                               glob.glob(os.path.join(FRONTEND, '**', '*.inc'), recursive=True))
     subclauses = subclause_files()
     grammar = spec_grammar()
-    errors = 0
+    rules = spec_rules(subclauses)
+    abi = abi_sections()
+    abi_productions = abi_grammar()
+    abi_quoted = set()
+    extensions = extension_index()
+    ext_rows = extension_grammar()
+    ext_errors, ext_productions = check_extension_grammar(ext_rows, extensions, grammar)
+    for e in ext_errors:
+        print(e)
+    ext_quoted = set()
+    ext_citations = 0
+    abi_quotes = 0
+    rules_quoted = set()
+    abi_citations = 0
+    errors = len(ext_errors)
     citations = productions = 0
     quoted = {}
     for path in files:
@@ -179,11 +432,52 @@ def main():
             elif para not in paragraphs(subclauses[label]):
                 print(f'{rel}:{line}: [{label}] has no paragraph {para}')
                 errors += 1
-        vendor_grammar = os.path.relpath(path, FRONTEND).split(os.sep)[0] == 'ext'
+        rules_quoted |= quoted_rules(path, rules)
+        for m in ABI_CITATION.finditer(text):
+            abi_citations += 1
+            if m.group(1) not in abi:
+                line = text.count('\n', 0, m.start()) + 1
+                print(f'{rel}:{line}: [abi:{m.group(1)}] is no section of docs/itanium-abi-index.tsv')
+                errors += 1
+        for line, section, nonterminal, alternative in quoted_abi_productions(path):
+            abi_quotes += 1
+            key = (nonterminal, alternative)
+            if section is None:
+                print(f'{rel}:{line}: {nonterminal} ::= {alternative}: no [abi:label] before it says which section it quotes')
+                errors += 1
+            elif key in abi_productions.get(section, ()):
+                abi_quoted.add((section,) + key)
+                if a.v:
+                    print(f'{rel}:{line}: {nonterminal} ::= {alternative} [abi:{section}]')
+            else:
+                elsewhere = [x for x, alts in abi_productions.items() if key in alts]
+                if elsewhere:
+                    print(f'{rel}:{line}: {nonterminal} ::= {alternative} is [abi:{elsewhere[0]}]\'s, not [abi:{section}]\'s')
+                else:
+                    print(f'{rel}:{line}: {nonterminal} ::= {alternative} is none of the alternatives of the ABI\'s grammar')
+                errors += 1
+        for m in EXT_CITATION.finditer(text):
+            ext_citations += 1
+            if m.group(1) not in extensions:
+                line = text.count('\n', 0, m.start()) + 1
+                print(f'{rel}:{line}: [ext:{m.group(1)}] is no extension of ext/extensions.inc')
+                errors += 1
+        contexts = extension_contexts(path)
         for line, name, alternatives in quoted_productions(path):
-            if vendor_grammar:
-                continue
             productions += 1
+            extension = contexts.get(line)
+            if extension in extensions:
+                added = ext_productions.get(extension, set())
+                standard = grammar[name][1] if name in grammar else set()
+                for x in alternatives:
+                    if x == '...':
+                        continue
+                    if (name, normalize(x)) in added:
+                        ext_quoted.add((extension, name, normalize(x)))
+                    elif normalize(x) not in standard:
+                        print(f'{rel}:{line}: {name}: "{x}" is neither the standard\'s nor one [ext:{extension}] adds (ext/grammar.inc)')
+                        errors += 1
+                continue
             if name not in grammar:
                 # a nonterminal a later paper added, named near the quote
                 near = '\n'.join(t for n, t in comment_lines(path) if line - 15 <= n <= line + 15)
@@ -211,12 +505,49 @@ def main():
     for name, (label, _, _) in grammar.items():
         clause = os.path.basename(os.path.dirname(os_path(subclauses, label)))
         by_clause.setdefault(clause, set()).add(name)
-    print(f'{citations} citations, {productions} quoted productions, {errors} wrong')
+    print(f'{citations} citations, {abi_citations} of the ABI, {ext_citations} of extensions, '
+          f'{productions} quoted productions, {abi_quotes} of the ABI\'s grammar, {errors} wrong')
     row = []
     for clause in sorted(by_clause):
         have = sum(1 for n in by_clause[clause] if n in quoted)
         row.append(f'{clause} {have}/{len(by_clause[clause])}')
     print('nonterminals quoted, by clause: ' + ', '.join(row))
+    row = []
+    for clause in RULE_CLAUSES:
+        labels = [x for x in rules if os.path.relpath(subclauses[x], SPEC).split(os.sep)[0] == clause]
+        total = sum(len(v) for x in labels for v in rules[x].values())
+        have = sum(1 for (x, _, _) in rules_quoted if x in labels)
+        row.append(f'{clause} {have}/{total}')
+    print('rules quoted, by clause: ' + ', '.join(row))
+    row = []
+    for section, alternatives in abi_productions.items():
+        have = sum(1 for k in alternatives if (section,) + k in abi_quoted)
+        if have:
+            row.append(f'{section} {have}/{len(alternatives)}')
+    total = sum(len(x) for x in abi_productions.values())
+    print(f'ABI alternatives quoted: {len(abi_quoted)}/{total}' + (', by section: ' + ', '.join(row) if row else ''))
+    row = []
+    for extension in sorted(ext_productions):
+        have = sum(1 for k in ext_productions[extension] if (extension,) + k in ext_quoted)
+        row.append(f'{extension} {have}/{len(ext_productions[extension])}')
+    total = sum(len(x) for x in ext_productions.values())
+    print(f'extension productions quoted: {len(ext_quoted)}/{total}' + (', by extension: ' + ', '.join(row) if row else ''))
+    if a.ext_missing:
+        for nonterminal, alternative in sorted(ext_productions.get(a.ext_missing, ())):
+            if (a.ext_missing, nonterminal, alternative) not in ext_quoted:
+                print(f'  {nonterminal}: {alternative}')
+    if a.abi_missing:
+        for nonterminal, alternative in abi_productions.get(a.abi_missing, ()):
+            if (a.abi_missing, nonterminal, alternative) not in abi_quoted:
+                print(f'  {nonterminal} ::= {alternative}')
+    if a.rules:
+        for label in sorted(rules):
+            if os.path.relpath(subclauses[label], SPEC).split(os.sep)[0] != a.rules:
+                continue
+            for para, sentences in sorted(rules[label].items()):
+                for k, x in enumerate(sentences):
+                    if (label, para, k) not in rules_quoted:
+                        print(f'  [{label}]/{para}: {x[:150]}')
     if a.missing:
         for n in sorted(by_clause.get(a.missing, ())):
             if n not in quoted:

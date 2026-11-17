@@ -12,6 +12,9 @@
  *         requires-expression
  */
 #include "../cplusplus-internal.h"
+#include "frontend/cplusplus/sema.h"
+
+#include <string.h>
 
 namespace cplusplus
 {
@@ -75,6 +78,110 @@ node_index parser::primary_expression()
         break;
     }
     return expected("an expression", "expr.prim");
+}
+
+/* ---- semantic analysis ---------------------------------------------- */
+
+/*
+ * [expr.prim.literal]/1: "A literal is a primary expression.  The type of
+ * a literal is determined based on its form as specified in [lex.literal].
+ * A string-literal is an lvalue, a user-defined-literal has the same value
+ * category as the corresponding operator call expression described in
+ * [lex.ext], and any other literal is a prvalue."  The lexer found each
+ * literal's type ([lex.icon] Table 8, [lex.ccon], [lex.fcon]) and value.
+ */
+analysis_result semantic_analysis::literal(token_index t, expression_meaning &m)
+{
+    const implementation_defined_behavior &b = tokens.files.behavior;
+    const token &k = tokens[t];
+    m.category = value_category::prvalue;
+    switch (k.literal) {
+    case literal_kind::integer_literal:
+    case literal_kind::character_literal:
+        if (!fundamental_type_is_integral(k.type))
+            return not_supported(current_declaration, "lex.icon");
+        m.type = qualified_type::make(type_table.fundamental(k.type), cv_none);
+        if (!k.value_known)
+            return not_supported(current_declaration, "lex.icon");
+        m.evaluation = constness::constant;
+        m.value = integer_wrap(b, k.type, k.value);
+        m.zero_literal =
+            k.literal == literal_kind::integer_literal && k.value == 0;
+        return analysis_result::well_formed;
+    case literal_kind::floating_point_literal:
+        if (!fundamental_type_is_floating(k.type))
+            return not_supported(current_declaration, "lex.fcon");
+        m.type = qualified_type::make(type_table.fundamental(k.type), cv_none);
+        m.beyond_integral_constant = true;
+        if (!k.value_known || k.type == fundamental_type::long_double)
+            return analysis_result::well_formed;
+        m.evaluation = constness::constant;
+        if (k.type == fundamental_type::float_) {
+            uint32_t bits = static_cast<uint32_t>(k.floating_bits_low);
+            float f;
+            memcpy(&f, &bits, sizeof f);
+            m.value = floating_kept(f);
+        } else {
+            m.value = k.floating_bits_low;
+        }
+        return analysis_result::well_formed;
+    case literal_kind::boolean_literal:
+        /* [lex.bool]/1: "The Boolean literals are the keywords false and
+           true.  Such literals are prvalues and have type bool." */
+        m.type = qualified_type::make(
+            type_table.fundamental(fundamental_type::bool_), cv_none);
+        m.evaluation = constness::constant;
+        m.value = integer_wrap(b, fundamental_type::bool_, k.value);
+        return analysis_result::well_formed;
+    case literal_kind::pointer_literal:
+        /* [lex.nullptr]/1: "The pointer-literal is the keyword nullptr.
+           It is a prvalue of type std::nullptr_t." */
+        m.type = qualified_type::make(
+            type_table.fundamental(fundamental_type::std_nullptr_t), cv_none);
+        m.evaluation = constness::constant;
+        m.value = 0;
+        return analysis_result::well_formed;
+    case literal_kind::string_literal: {
+        /* [lex.string]/5: "An ordinary string literal has type "array of n
+           const char" where n is the size of the string", and so on for
+           u8, u, U and L ([lex.string]/6-10); /12: the size counts the
+           terminating '\0' */
+        fundamental_type element = k.type;
+        if (element != fundamental_type::char_ &&
+            element != fundamental_type::char8_t_ &&
+            element != fundamental_type::char16_t_ &&
+            element != fundamental_type::char32_t_ &&
+            element != fundamental_type::wchar_t_)
+            return not_supported(current_declaration, "lex.string");
+        qualified_type e =
+            qualified_type::make(type_table.fundamental(element), cv_const);
+        m.type = qualified_type::make(
+            type_table.array_of(e, uint64_t(k.string_length) + 1), cv_none);
+        m.category = value_category::lvalue;
+        m.evaluation = constness::constant;
+        m.string_literal = t;
+        return analysis_result::well_formed;
+    }
+    default:
+        return not_supported(current_declaration, "lex.ext");
+    }
+}
+
+/*
+ * [expr.prim.paren]/1: "A parenthesized expression (E) is a primary
+ * expression whose type, value, and value category are identical to those
+ * of E."
+ */
+analysis_result semantic_analysis::parenthesized(node_index n,
+                                                 expression_meaning &m)
+{
+    const syntax_node &node = tree[n];
+    const syntax_child *children = tree.children(n);
+    if (node.child_count != 3 ||
+        !syntax_is_punctuator(tokens, children[0],
+                              preprocessing_op_or_punc::LEFT_PARENTHESIS))
+        return not_supported(n, "expr.prim");
+    return expression(children[1], m);
 }
 
 } // namespace cplusplus

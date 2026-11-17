@@ -151,7 +151,7 @@ VPRIV int lookup_keyword(const implementation_defined_behavior &behavior,
         else if (!c && n > length)
             c = 1;
         if (!c) {
-            /* [ext.clang] clang_no_operator_names: -fno-operator-names
+            /* [ext:clang_no_operator_names]: -fno-operator-names
                makes and, or, ... identifiers */
             if ((keywords[mid].flags & KEYWORD_OPERATOR) &&
                 !behavior.operator_names)

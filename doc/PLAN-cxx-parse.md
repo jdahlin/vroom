@@ -28,7 +28,13 @@ and instantiation are later plans.
    no extension.  Each extension is a row of `ext/extensions.inc`, its code
    in `ext/VENDOR/`, entered through one call at the place in the grammar
    where it applies and only when `behavior.has(extension::NAME)`.  None is
-   written before a test corpus needs it (P9).
+   written before a test corpus needs it (P9).  The syntax an extension adds
+   is explicit, as the standard's is: productions in `ext/grammar.inc`
+   (an alternative added to a standard nonterminal, or a nonterminal of the
+   extension's own named with its vendor's prefix, `gnu-attribute-list`),
+   which the code that parses it cites as `[ext:NAME]` and quotes;
+   `cxx-spec-refs.py` checks the quotes against the rows and reports which
+   rows are quoted.
 4. **Designed for speed, tuned later.**  The data layout and interfaces
    are chosen now so that they can be micro-optimized and cached without a
    rewrite (below), but no tuning is done until the whole pipeline runs and
@@ -847,8 +853,10 @@ The first grammar, about 55 nonterminals.
     `ext/gnu/asm_label.cpp`, `ext/gnu/extension_keyword.cpp`,
     `ext/clang/type_traits.cpp` (expression traits, type transformations,
     and a trait's keyword as a name when no `(` follows: libstdc++'s
-    `__is_signed`).  Declarations with an extension get no claims;
-    `cxx-spec-refs.py` does not check grammar quoted in `ext/`.
+    `__is_signed`).  Declarations with an extension get no claims.
+  - The extensions' grammar (2026-11-17): `ext/grammar.inc`, 41
+    productions of 12 extensions, every one quoted where it is parsed;
+    `[ext:NAME]` citations (44) checked against `extensions.inc`.
   - Lookup fixes the corpus found: a function beside a function template
     keeps the name a template-name before C++20 ([temp.names]/2), a
     complete-class context searches the whole class first, and a typedef or

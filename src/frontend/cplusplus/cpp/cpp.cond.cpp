@@ -301,7 +301,7 @@ static bool evaluate_value(preprocessor &p, preprocessor::expression_reader &r,
     case preprocessing_token_kind::identifier: {
         if (condition_word(p, t, "defined"))
             return evaluate_defined(p, r, v);
-        /* [ext.clang] clang_has_include_next, clang_embed (__has_embed) */
+        /* [ext:clang_has_include_next], clang_embed (__has_embed) */
         if (condition_word(p, t, "__has_include") ||
             (condition_word(p, t, "__has_include_next") &&
              p.behavior.has(extension::clang_has_include_next)) ||
@@ -840,7 +840,7 @@ static int elif_select(directive_kind kind)
     return 0;
 }
 
-/* #elifdef and #elifndef: C++23's; [ext.clang] clang_later_edition_features
+/* #elifdef and #elifndef: C++23's; [ext:clang_later_edition_features]
    before */
 static void diagnose_elifdef_edition(preprocessor &p,
                                      const preprocessing_token &name,
@@ -1171,7 +1171,7 @@ bool preprocessor::has_include(expression_reader &r,
     bool embed = condition_word(*this, name, "__has_embed");
     owned_array<preprocessing_token> parameter_tokens;
     if (embed) {
-        /* [ext.clang] clang_embed: the embed-parameters up to the ) */
+        /* [ext:clang_embed]: the embed-parameters up to the ) */
         unsigned depth = 0;
         while (!is_end(r.token) &&
                (depth ||

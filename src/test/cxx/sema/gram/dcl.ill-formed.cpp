@@ -1,0 +1,44 @@
+// Declarations the rules of S1a find ill-formed, one per line, and their
+// near misses that are well-formed: bench/cxx-sema.py compares each
+// verdict with clang's.
+static extern int h;
+int &r;
+const int k;
+void v;
+int arr[];
+int (&ar)[3][];
+int f2(void, int);
+int f3(const void);
+int f5(void x);
+int f6()[3];
+int (f6b())(int);
+int x;
+long x;
+int y;
+int y;
+int f7();
+long f7();
+int f8();
+static int f8();
+int w;
+void w();
+typedef int T2;
+typedef long T2;
+extern int u3;
+static int u3;
+typedef int &RR;
+int &&*p;
+int &&&rrr;
+int &a5[3];
+extern RR *pr;
+void fa[2];
+short long sl;
+int int ii;
+char int ci;
+double int di;
+short short ss;
+signed double sd;
+long long long lll;
+unsigned short int usi;
+long long int lli;
+long double ldd;

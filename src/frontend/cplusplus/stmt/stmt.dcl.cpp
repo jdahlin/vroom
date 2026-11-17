@@ -19,6 +19,7 @@
  *         alias-declaration
  *         opaque-enum-declaration
  */
+#include "frontend/cplusplus/sema.h"
 #include "stmt.ambig.h"
 
 namespace cplusplus
@@ -58,6 +59,39 @@ node_index parser::block_declaration()
            class scope declaration"): P7 says so */
         return beyond_this_step();
     return block_or_function_declaration();
+}
+
+/* ---- semantic analysis ---------------------------------------------- */
+
+/* whether the variable declared at variable is in scope at at: declared
+   before it, in its scope or one enclosing it */
+bool semantic_analysis::in_scope(jump_point variable, jump_point at) const
+{
+    if (variable.at >= at.at)
+        return false;
+    for (entity_index s = at.scope;; s = entity_table[s].enclosing) {
+        if (s == variable.scope)
+            return true;
+        if (!s)
+            return false;
+    }
+}
+
+/*
+ * [stmt.dcl]/3: "It is possible to transfer into a block, but not in a way
+ * that bypasses declarations with initialization (including ones in
+ * conditions and init-statements).  A program that jumps from a point where
+ * a variable with automatic storage duration is not in scope to a point
+ * where it is in scope is ill-formed unless the variable has vacuous
+ * initialization".  The variables analysis has types for have vacuous
+ * initialization exactly when they have no initializer.
+ */
+bool semantic_analysis::jump_bypasses(jump_point from, jump_point to) const
+{
+    for (const jump_point &v : function_state.initialized)
+        if (in_scope(v, to) && !in_scope(v, from))
+            return true;
+    return false;
 }
 
 } // namespace cplusplus

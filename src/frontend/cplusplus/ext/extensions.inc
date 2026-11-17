@@ -4,8 +4,12 @@
  * well-formed program") the front end has, each with the implementation it
  * comes from and where that one documents it.  Code that implements one is
  * in ext/VENDOR/ where it can be, and asks behavior.has(extension::NAME);
- * where it cannot be moved out of the standard's code, its comment starts
- * with the tag [ext.VENDOR].  A choice the standard leaves to the
+ * its comment cites the extension as [ext:NAME], which
+ * bench/cxx-spec-refs.py checks names a row here.  The syntax an extension
+ * adds is in grammar.inc, and code that parses it quotes those productions
+ * as it quotes the standard's.  Where the code cannot be moved out of the
+ * standard's, a comment about the extension in general carries the tag
+ * [ext.VENDOR].  A choice the standard leaves to the
  * implementation (implementation-defined or undefined behavior), made as
  * that implementation makes it, is no extension: its tag is [impl.VENDOR].
  *
@@ -39,6 +43,16 @@ EXTENSION(gnu_restrict, gnu,
           "GCC manual 7.3, Restricting Pointer Aliasing: __restrict__ as a cv-qualifier")
 EXTENSION(gnu_extension_keyword, gnu,
           "GCC manual 6.48, Alternate Keywords: __extension__ before a declaration or expression")
+EXTENSION(gnu_int128, gnu,
+          "GCC manual 6.9, 128-bit Integers: __int128 and unsigned __int128, an extended "
+          "integer type ([basic.fundamental]/2)")
+EXTENSION(gnu_labels_as_values, gnu,
+          "GCC manual 6.3, Labels as Values: &&label and goto *expression;")
+EXTENSION(gnu_designated_initializers, gnu,
+          "GCC manual 6.29, Designated Initializers: C99's [index] =, .a.b =, a list that "
+          "mixes clauses with designators, [first ... last] =, and the obsolete field:")
+EXTENSION(gnu_compound_literals, gnu,
+          "GCC manual 6.30, Compound Literals: C99's (type-id) { initializer-list } in C++")
 
 /* clang */
 EXTENSION(clang_feature_checks, clang,

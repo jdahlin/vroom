@@ -14,6 +14,7 @@
  * has no class-specifier or enum-specifier is a semantic one.
  */
 #include "../cplusplus-internal.h"
+#include "frontend/cplusplus/sema.h"
 
 namespace cplusplus
 {
@@ -42,6 +43,38 @@ node_index parser::type_id()
     if (failed())
         return 0;
     return finish_node(syntax_kind::type_id, mark, first);
+}
+
+/* ---- semantic analysis ---------------------------------------------- */
+
+/*
+ * [dcl.name]/1: "It is possible to identify uniquely the location in the
+ * abstract-declarator where the identifier would appear if the
+ * construction were a declarator in a declaration.  The named type is then
+ * the same as the type of the hypothetical identifier."
+ */
+analysis_result semantic_analysis::type_id(node_index n, qualified_type &type)
+{
+    const syntax_node &node = tree[n];
+    const syntax_child *children = tree.children(n);
+    if (!node.child_count ||
+        !syntax_is(tree, children[0], syntax_kind::type_specifier_seq) ||
+        node.child_count > 2)
+        return not_supported(n, "dcl.name");
+    specified s;
+    analysis_result r = decl_specifier_seq(children[0].index(), s, false);
+    if (r != analysis_result::well_formed)
+        return r;
+    if (!s.has_type)
+        return not_supported(n, "dcl.name");
+    type = s.type;
+    if (node.child_count == 1)
+        return analysis_result::well_formed;
+    declarator_meaning m;
+    r = declarator(current_declaration, children[1], type, m);
+    if (r == analysis_result::well_formed && m.has_id)
+        return not_supported(n, "dcl.name");
+    return r;
 }
 
 } // namespace cplusplus

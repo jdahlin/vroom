@@ -520,8 +520,12 @@ node_index parser::ptr_operator(derivation *kind)
  *         const
  *         volatile
  *
- * [ext.gnu] gnu_restrict: __restrict__ is a cv-qualifier too (GCC manual
- * 7.3, C99's restrict in C++).
+ * [ext:gnu_restrict] C99's restrict in C++ (GCC manual 7.3, Restricting
+ * Pointer Aliasing):
+ *
+ *     cv-qualifier:
+ *         __restrict
+ *         __restrict__
  */
 node_index parser::cv_qualifier_seq()
 {

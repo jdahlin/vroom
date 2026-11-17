@@ -66,6 +66,8 @@ bool syntax_kind_is_expression(syntax_kind kind)
     case syntax_kind::assignment_expression:
     case syntax_kind::expression:
     case syntax_kind::gnu_extension_expression:
+    case syntax_kind::gnu_compound_literal:
+    case syntax_kind::gnu_label_address:
     case syntax_kind::clang_type_trait_expression:
         return true;
     default:
@@ -191,6 +193,40 @@ void syntax_tree::dump(node_index n, token_stream &tokens, vbuffer *out) const
         } else {
             write_line(c.index(), path.size());
             path.append({c.index(), 0});
+        }
+    }
+}
+
+void syntax_tree::declarations(owned_array<node_index> *out) const
+{
+    auto add_seq = [&](node_index seq) {
+        for (uint32_t i = 0; i < nodes[seq].child_count; i++) {
+            syntax_child c = children(seq)[i];
+            if (!c.is_token())
+                out->append(c.index());
+        }
+    };
+    const syntax_node &unit = nodes[root];
+    for (uint32_t u = 0; u < unit.child_count; u++) {
+        syntax_child part = children(root)[u];
+        if (part.is_token())
+            continue;
+        const syntax_node &x = nodes[part.index()];
+        if (x.kind == syntax_kind::declaration_seq) {
+            add_seq(part.index());
+        } else if (x.kind == syntax_kind::global_module_fragment ||
+                   x.kind == syntax_kind::private_module_fragment) {
+            for (uint32_t k = 0; k < x.child_count; k++) {
+                syntax_child y = children(part.index())[k];
+                if (y.is_token())
+                    continue;
+                if (nodes[y.index()].kind == syntax_kind::declaration_seq)
+                    add_seq(y.index());
+                else
+                    out->append(y.index());
+            }
+        } else {
+            out->append(part.index());
         }
     }
 }

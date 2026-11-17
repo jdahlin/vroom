@@ -10,6 +10,7 @@
  * label."  P2324R2 (C++23) lets a label end a compound-statement; before
  * it that is [ext.clang] clang's extension, P9's.
  */
+#include "frontend/cplusplus/sema.h"
 #include "stmt.ambig.h"
 
 namespace cplusplus
@@ -43,6 +44,187 @@ node_index parser::labeled_statement()
             return 0;
     }
     return finish_node(syntax_kind::labeled_statement, mark, first);
+}
+
+/* ---- semantic analysis ---------------------------------------------- */
+
+/* the identifier labels of a function body, before its statements are
+   analysed: a goto can name a label that follows it ([stmt.label]/1); a
+   lambda's or a local class's body is another function's */
+void semantic_analysis::collect_labels(syntax_child s)
+{
+    if (s.is_token())
+        return;
+    const syntax_node &node = tree[s.index()];
+    if (node.kind == syntax_kind::lambda_expression ||
+        node.kind == syntax_kind::class_specifier)
+        return;
+    const syntax_child *children = tree.children(s.index());
+    if (node.kind == syntax_kind::labeled_statement && node.child_count &&
+        children[0].is_token() &&
+        tokens[children[0].index()].kind == token_kind::identifier) {
+        label_record l;
+        l.name = tokens.identifier(children[0].index());
+        l.point.at = children[0].index();
+        function_state.labels.append(l);
+    }
+    for (uint32_t i = 0; i < node.child_count; i++)
+        collect_labels(children[i]);
+}
+
+/*
+ * [stmt.label]/1:
+ *
+ *     labeled-statement:
+ *         attribute-specifier-seq_opt identifier : statement
+ *         attribute-specifier-seq_opt case constant-expression : statement
+ *         attribute-specifier-seq_opt default : statement
+ */
+analysis_result semantic_analysis::labeled_statement(node_index n,
+                                                     uint32_t &built)
+{
+    const syntax_node &node = tree[n];
+    const syntax_child *children = tree.children(n);
+    if (!node.child_count || !children[0].is_token())
+        return not_supported(n, "dcl.attr");
+    token_index first = children[0].index();
+    const token &t = tokens[first];
+    syntax_child last = children[node.child_count - 1];
+    if (t.kind == token_kind::identifier) {
+        if (node.child_count != 3)
+            return not_supported(n, "stmt.label");
+        for (label_record &l : function_state.labels)
+            if (l.point.at == first) {
+                l.point.scope = current_scope;
+                l.analysed = true;
+            }
+        uint32_t labelled = 0;
+        analysis_result r = statement(last, labelled);
+        built =
+            statement_node(semantic_kind::identifier_label, first, labelled);
+        semantics[built].value = tokens.identifier(first);
+        return r;
+    }
+    standard_keyword k = p.keyword_of(t);
+    if (k != standard_keyword::case_ && k != standard_keyword::default_)
+        return not_supported(n, "stmt.label");
+    jump_point here;
+    here.scope = current_scope;
+    here.at = first;
+    analysis_result result = analysis_result::well_formed;
+    /* [stmt.label]/2: "Case labels and default labels shall occur only in
+       switch statements." */
+    if (function_state.switches.empty()) {
+        result = ill_formed(n,
+                            "case labels and default labels shall occur only "
+                            "in switch statements",
+                            "stmt.label");
+        uint32_t ignored = 0;
+        return worse(result, statement(last, ignored));
+    }
+    size_t innermost = function_state.switches.size() - 1;
+    semantic_kind kind = semantic_kind::default_label;
+    uint64_t value = 0;
+    if (k == standard_keyword::default_) {
+        if (node.child_count != 3)
+            return not_supported(n, "stmt.label");
+        /* [stmt.switch]/3: "There shall be at most one label of the form
+           default : within a switch statement." */
+        if (function_state.switches[innermost].has_default)
+            result = ill_formed(n,
+                                "there shall be at most one label of the form "
+                                "default : within a switch statement",
+                                "stmt.switch");
+        function_state.switches[innermost].has_default = true;
+    } else {
+        /* case constant-expression : statement; GNU's case ranges
+           (case a ... b) are not analysed */
+        if (node.child_count != 4)
+            return not_supported(n, "stmt.switch");
+        result = case_label(n, children[1], innermost);
+        kind = semantic_kind::case_label;
+        if (result == analysis_result::well_formed)
+            value = function_state.case_values.back();
+    }
+    if (result != analysis_result::ill_formed &&
+        jump_bypasses(function_state.switches[innermost].point, here))
+        result = ill_formed(n,
+                            "it is possible to transfer into a block, but not "
+                            "in a way that bypasses declarations with "
+                            "initialization",
+                            "stmt.dcl");
+    uint32_t labelled = 0;
+    result = worse(result, statement(last, labelled));
+    built = statement_node(kind, first, labelled);
+    semantics[built].value = value;
+    return result;
+}
+
+/*
+ * [stmt.switch]/2: "case constant-expression : where the
+ * constant-expression shall be a converted constant expression of the
+ * adjusted type of the switch condition.  No two of the case constants in
+ * the same switch shall have the same value after conversion."
+ */
+analysis_result semantic_analysis::case_label(node_index n, syntax_child value,
+                                              size_t innermost)
+{
+    expression_meaning m;
+    analysis_result r = expression(value, m);
+    if (r != analysis_result::well_formed)
+        return r;
+    fundamental_type adjusted = function_state.switches[innermost].type;
+    if (adjusted == fundamental_type::none)
+        return not_supported(n, "stmt.switch");
+    r = operand_value(n, m);
+    if (r != analysis_result::well_formed)
+        return r;
+    const char *rule = "the constant-expression shall be a converted "
+                       "constant expression of the adjusted type of the "
+                       "switch condition";
+    if (!is_integral(m.type)) {
+        if (fundamental_of(m.type) == fundamental_type::none &&
+            !is_pointer(m.type))
+            return not_supported(n, "stmt.switch");
+        return ill_formed(n, rule, "stmt.switch");
+    }
+    if (m.evaluation == constness::not_constant)
+        return ill_formed(n, rule, "stmt.switch");
+    if (m.evaluation == constness::unknown)
+        return not_supported(n, "expr.const");
+    bool cplusplus11 =
+        tokens.files.behavior.has(language_feature::list_initialization);
+    /* C++03's integral constant-expression ([expr.const]/1 there) */
+    if (!cplusplus11 && m.beyond_integral_constant)
+        return not_supported(n, "expr.const");
+    qualified_type to =
+        qualified_type::make(type_table.fundamental(adjusted), cv_none);
+    if (cplusplus11) {
+        /* [expr.const]/10: no narrowing conversion in a converted constant
+           expression: clang's -Wc++11-narrowing, an error by default */
+        bool narrows = false;
+        r = narrowing(n, m, to, narrows);
+        if (r != analysis_result::well_formed)
+            return r;
+        if (narrows) {
+            r = extension_used(diagnostic_id::sema_narrowing,
+                               tree[n].first_token, nullptr);
+            if (r != analysis_result::well_formed)
+                return r;
+        }
+    }
+    convert_arithmetic(m, adjusted);
+    if (m.evaluation != constness::constant)
+        return not_supported(n, "expr.const");
+    for (size_t i = function_state.switches[innermost].first_value;
+         i < function_state.case_values.size(); i++)
+        if (function_state.case_values[i] == m.value)
+            return ill_formed(n,
+                              "no two of the case constants in the same switch "
+                              "shall have the same value after conversion",
+                              "stmt.switch");
+    function_state.case_values.append(m.value);
+    return analysis_result::well_formed;
 }
 
 } // namespace cplusplus

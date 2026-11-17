@@ -34,7 +34,7 @@ void preprocessor::rest_of_line(source_location from, owned_buffer &out)
 void preprocessor::directive_error(const preprocessing_token &name,
                                    bool warning)
 {
-    /* C++23's; [ext.clang] clang_later_edition_features before */
+    /* C++23's; [ext:clang_later_edition_features] before */
     diagnostic_id id = diagnostic_id::err_pp_hash_error;
     if (warning) {
         diagnostic_id edition = diagnostic_id::ext_pp_warning_directive;

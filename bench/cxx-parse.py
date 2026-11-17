@@ -490,11 +490,21 @@ def claim_lines(cxxparse, mode, opts, test, fields):
     return found
 
 
-def check_claims(test, opts, clang, cxxparse, res, error_lines):
+LINE_DIRECTIVE = re.compile(r'^\s*#\s*(?:line\s+)?\d')
+
+
+def has_line_directive(lines):
+    """whether a #line or a line marker makes the places the tool reports
+    (presumed) differ from the lines the claims are put on (physical)"""
+    return any(LINE_DIRECTIVE.match(line) for line in lines)
+
+
+def check_claims(test, opts, clang, cxxparse, res, error_lines, expression_mode='-expression-claims', target=()):
     """V4b: see the module's docstring.  res['claims'] and
     res['declarators'] get the counts, res['fail'] one entry per refuted
     claim.  error_lines: the lines clang reports an error on in the test as
-    it is."""
+    it is.  cxxparse is any tool that writes the claims (cxxsema too, with
+    expression_mode None); target: options for clang after the triple."""
     counts = {'value': 0, 'type': 0, 'refuted': 0, 'unchecked': 0}
     declarators = {'verified': 0, 'overload': 0, 'refuted': 0, 'rejected': 0, 'unchecked': 0}
     res['claims'] = counts
@@ -505,7 +515,7 @@ def check_claims(test, opts, clang, cxxparse, res, error_lines):
     cwd = os.path.dirname(test)
     name = os.path.basename(test)
     claims = []
-    for place, e, p in claim_lines(cxxparse, '-expression-claims', opts, test, 4):
+    for place, e, p in (claim_lines(cxxparse, expression_mode, opts, test, 4) if expression_mode else []):
         row, column = map(int, place.split(':'))
         claims.append((row, column, e.strip(), p.strip()))
     declared = []
@@ -516,6 +526,10 @@ def check_claims(test, opts, clang, cxxparse, res, error_lines):
         return
     # bytes as characters: the columns are bytes
     lines = open(test, 'rb').read().decode('latin-1').split('\n')
+    if has_line_directive(lines):
+        counts['unchecked'] += len(claims)
+        declarators['unchecked'] += len(declared)
+        return
     places = {}
     for k, c in enumerate(claims):
         places.setdefault(c[:2], ([], []))[0].append(k)
@@ -560,13 +574,13 @@ def check_claims(test, opts, clang, cxxparse, res, error_lines):
 
     def compile_claims():
         try:
-            r = subprocess.run([clang, '-cc1'] + TRIPLE + ['-x', 'c++'] + opts +
+            r = subprocess.run([clang, '-cc1'] + TRIPLE + list(target) + ['-x', 'c++'] + opts +
                                ['-fsyntax-only', '-ferror-limit', '0', '-w', '-'],
                                cwd=cwd, input=source, capture_output=True, timeout=60)
         except subprocess.TimeoutExpired:
             return None
         return r.stderr.decode('utf-8', 'replace')
-    stderr = cached('claims:' + hashlib.sha256(source).hexdigest(), clang, test, opts, compile_claims)
+    stderr = cached('claims:' + ''.join(target) + hashlib.sha256(source).hexdigest(), clang, test, opts, compile_claims)
     if stderr is None:
         counts['unchecked'] += len(claims)
         declarators['unchecked'] += len(declared)

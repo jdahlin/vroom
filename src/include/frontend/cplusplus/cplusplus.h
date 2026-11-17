@@ -169,6 +169,7 @@ enum class diagnostic_id : uint16_t {
 #define DIAGNOSTIC(name, class, mapping, group, format) name,
 #include "../../../frontend/cplusplus/intro/diagnostic-messages.inc"
 #include "../../../frontend/cplusplus/parse/diagnostic-messages.inc"
+#include "../../../frontend/cplusplus/sema/diagnostic-messages.inc"
 #undef DIAGNOSTIC
     count
 };
@@ -361,7 +362,8 @@ struct lexer_options {
 
 /* ---- [lex.token], phase 7 --------------------------------------------- */
 
-/* [basic.fundamental]: the types a literal can have */
+/* [basic.fundamental]: the fundamental types, the ones a literal can have
+   first */
 enum class fundamental_type : uint8_t {
     none,
     bool_,
@@ -386,6 +388,16 @@ enum class fundamental_type : uint8_t {
        clang's extension in C++; N is in the token */
     bit_precise_int,
     unsigned_bit_precise_int,
+    /* the rest of [basic.fundamental], which no literal has */
+    void_,
+    signed_char,
+    unsigned_char,
+    short_int,
+    unsigned_short_int,
+    /* an extended signed integer type and its unsigned one
+       ([basic.fundamental]/2): GCC's __int128 */
+    int128,
+    unsigned_int128,
 };
 
 const char *fundamental_type_name(fundamental_type type);
@@ -584,6 +596,10 @@ class source_files
     entry *open(const char *path, lexer_options options);
     /* the options of the files open() reads */
     lexer_options file_options;
+    /* a pragma that changes the floating-point environment or its
+       evaluation was seen (#pragma STDC, float_control, fenv_access,
+       clang fp): constant evaluation leaves floating-point values unknown */
+    bool floating_point_pragma = false;
     /* text that is not a file: the predefined macros, the command line's,
        or a preprocessing token phase 4 spelled ("<scratch space>") */
     entry &add_text(const char *name, const char *text, size_t length,

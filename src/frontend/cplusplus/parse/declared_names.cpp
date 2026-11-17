@@ -35,9 +35,15 @@ declared_names::find(scope_index in, uint32_t name, unsigned depth) const
     const scope &s = scopes[in];
     /* the latest declaration first: a later one of another kind is the one
        in effect ([basic.scope.hiding] is not modelled further) */
-    for (size_t i = s.declarations.size(); i-- > 0;)
-        if (s.declarations[i].name == name)
-            return &s.declarations[i];
+    for (size_t i = s.declarations.size(); i-- > 0;) {
+        const declaration &d = s.declarations[i];
+        if (d.name != name)
+            continue;
+        if (ignoring_non_types && d.kind != name_kind::type_name &&
+            d.kind != name_kind::template_name)
+            continue;
+        return &d;
+    }
     /* a using-directive can nominate a namespace that encloses this one:
        the depth stops a cycle */
     if (depth > 16)
@@ -286,6 +292,14 @@ name_kind declared_names::lookup_unqualified(uint32_t name, scope_index *scope,
             dependent_found++;
     }
     lookups.append({name, current_scope, false, found});
+    return found;
+}
+
+name_kind declared_names::lookup_elaborated(uint32_t name)
+{
+    ignoring_non_types = true;
+    name_kind found = lookup_unqualified(name);
+    ignoring_non_types = false;
     return found;
 }
 

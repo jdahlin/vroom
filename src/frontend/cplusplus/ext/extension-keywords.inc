@@ -35,8 +35,9 @@ EXTENSION_KEYWORD(attribute, "__attribute__", gnu_attributes)
 EXTENSION_KEYWORD(restrict, "__restrict", gnu_restrict)
 EXTENSION_KEYWORD(restrict, "__restrict__", gnu_restrict)
 EXTENSION_KEYWORD(extension, "__extension__", gnu_extension_keyword)
+EXTENSION_KEYWORD(int128, "__int128", gnu_int128)
 
-/* [ext.clang] clang_type_traits (clang Language Extensions, Type Trait
+/* [ext:clang_type_traits] (clang Language Extensions, Type Trait
  * Primitives): an expression trait ( type-id, ... ) and a type
  * transformation ( type-id ); with clang_type_trait_names each is an
  * identifier when no ( follows it */

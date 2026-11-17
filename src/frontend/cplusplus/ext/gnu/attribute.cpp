@@ -1,23 +1,44 @@
 /*
- * attribute.cpp: [ext.gnu] gnu_attributes: GCC's attribute syntax (GCC
- * manual 6.39, Attribute Syntax), which clang accepts as GCC does.
+ * attribute.cpp: [ext:gnu_attributes] GCC's attribute syntax (GCC manual
+ * 6.39, Attribute Syntax), which clang accepts as GCC does:
  *
- *     attribute-specifier:
- *         __attribute__ ( ( attribute-list ) )
+ *     gnu-attribute-specifier:
+ *         __attribute__ ( ( gnu-attribute-list ) )
  *
- *     attribute-list:
- *         attribute_opt
- *         attribute-list , attribute_opt
+ *     gnu-attribute-specifier-seq:
+ *         gnu-attribute-specifier-seq_opt gnu-attribute-specifier
  *
- *     attribute:
- *         attribute-name
- *         attribute-name ( parameters )
+ *     gnu-attribute-list:
+ *         gnu-attribute_opt
+ *         gnu-attribute-list , gnu-attribute_opt
  *
- *     parameters:
+ *     gnu-attribute:
+ *         identifier
+ *         identifier ( gnu-attribute-arguments_opt )
+ *
+ *     gnu-attribute-arguments:
  *         identifier
  *         identifier , expression-list
  *         expression-list
- *         (nothing)
+ *
+ * An attribute's identifier may be a keyword, as an attribute-token's
+ * ([dcl.attr.grammar]/5).  Where it goes:
+ *
+ *     attribute-specifier:
+ *         gnu-attribute-specifier
+ *
+ *     decl-specifier:
+ *         gnu-attribute-specifier
+ *
+ *     declarator:
+ *         ptr-declarator gnu-attribute-specifier-seq
+ *         noptr-declarator parameters-and-qualifiers trailing-return-type gnu-attribute-specifier-seq
+ *
+ *     named-namespace-definition:
+ *         inline_opt namespace attribute-specifier-seq_opt identifier gnu-attribute-specifier-seq { namespace-body }
+ *
+ *     unnamed-namespace-definition:
+ *         inline_opt namespace attribute-specifier-seq_opt gnu-attribute-specifier-seq { namespace-body }
  *
  * "An attribute specifier list may appear as part of a struct, union or
  * enum specifier", "immediately before a declarator", "immediately before

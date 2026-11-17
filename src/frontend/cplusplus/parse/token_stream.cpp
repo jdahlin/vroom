@@ -64,7 +64,7 @@ void token_stream::make_through(token_index i)
                 static_cast<size_t>(made.keyword) <
                     revertible_keywords.size() &&
                 revertible_keywords[made.keyword]) {
-                /* [ext.clang] clang_type_trait_names */
+                /* [ext:clang_type_trait_names] */
                 lookahead = read();
                 has_lookahead = true;
                 if (!(lookahead.kind ==

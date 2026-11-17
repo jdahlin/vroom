@@ -16,7 +16,7 @@ namespace cplusplus
 
 /* left becomes the concatenation of left and right; false if they do not
    form one preprocessing token: [impl.clang] an error, both kept
-   ([ext.microsoft] microsoft_invalid_paste: a warning) */
+   ([ext:microsoft_invalid_paste]: a warning) */
 bool preprocessor::concatenate(preprocessing_token &left,
                                const preprocessing_token &right,
                                source_location at)

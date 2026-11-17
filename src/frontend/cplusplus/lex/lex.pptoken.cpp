@@ -126,6 +126,12 @@ preprocessing_token lexer::lex(bool header_name_permitted)
 {
     preprocessing_token token;
     const unsigned char *p = file.physical_characters;
+    /* [lex.phases]/1.1 maps the physical characters in an
+       implementation-defined manner: [impl.clang] a UTF-8 byte order mark
+       (EF BB BF) at the start of a file is no character */
+    if (position == 0 && file.size >= 3 && p[0] == 0xEF && p[1] == 0xBB &&
+        p[2] == 0xBF)
+        position = 3;
 
     for (;;) {
         uint32_t start = position;
@@ -200,7 +206,7 @@ preprocessing_token lexer::lex(bool header_name_permitted)
             uint32_t code_point,
                 n = decode_utf8(p + start + t.extent - 1, file.size - start,
                                 &code_point);
-            /* [ext.clang] clang_unicode_white_space */
+            /* [ext:clang_unicode_white_space] */
             if (n && is_unicode_white_space(code_point) &&
                 !options.preprocessed_input &&
                 behavior.has(extension::clang_unicode_white_space)) {

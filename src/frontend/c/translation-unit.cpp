@@ -316,6 +316,28 @@ static void cc_tables_init(void)
     cc_attribute_table_init();
 }
 
+/* a translation unit's tables for a front end that builds the AST itself
+   (frontend/c/ast-builder.cpp): no tokens, no parse */
+CC_PRIVATE cc *cc_translation_unit_open(pp *p, const cc_options *o)
+{
+    static pthread_once_t once = PTHREAD_ONCE_INIT;
+    cc *c = (cc *)(malloc(sizeof(cc)));
+
+    if (!c)
+        vout_of_memory();
+    pthread_once(&once, cc_tables_init);
+    cc_keyword_map = cc_keyword_map_gnu;
+    cc_translation_unit_init(c, p, o);
+    return c;
+}
+
+CC_PRIVATE void cc_translation_unit_close(cc *c)
+{
+    cc_translation_unit_free(c);
+    free(c->tyb);
+    free(c);
+}
+
 int cc_translation_unit_run(pp *p, const cc_options *o)
 {
     static pthread_once_t once = PTHREAD_ONCE_INIT;

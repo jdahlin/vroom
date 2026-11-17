@@ -2,7 +2,7 @@
  * pragmas.cpp: the pragmas of phase 4 that GCC and clang have ([cpp.pragma]:
  * each behaves "in an implementation-defined manner"):
  *
- *   [ext.gnu] gnu_pragmas (GNU cpp manual 7, Pragmas)
+ *   [ext:gnu_pragmas] (GNU cpp manual 7, Pragmas)
  *     #pragma once                  the file is not included again
  *     #pragma GCC poison x y        x and y may no longer be used
  *     #pragma GCC system_header     the rest of the file is a system header
@@ -10,10 +10,10 @@
  *     #pragma GCC diagnostic ...    pragma_diagnostic.cpp
  *     #pragma GCC warning "text"    a warning, an error
  *     #pragma GCC error "text"
- *   [ext.gnu] gnu_push_pop_macro (GCC manual 6.62.13)
+ *   [ext:gnu_push_pop_macro] (GCC manual 6.62.13)
  *     #pragma push_macro("x")       the definition of x saved, restored
  *     #pragma pop_macro("x")
- *   [ext.gnu] gnu_pragma_message (GCC manual 6.62.11)
+ *   [ext:gnu_pragma_message] (GCC manual 6.62.11)
  *     #pragma message("text")       a warning
  *
  * clang spells GCC's also #pragma clang ...

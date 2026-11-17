@@ -20,6 +20,7 @@
  *         decl-specifier decl-specifier-seq
  */
 #include "../cplusplus-internal.h"
+#include "frontend/cplusplus/sema.h"
 
 namespace cplusplus
 {
@@ -222,9 +223,17 @@ struct type_specifier_count {
     /* char, int, double, and every other defining-type-specifier */
     unsigned char_ = 0, int_ = 0, double_ = 0, other = 0;
 
+    /* [ext:gnu_int128]: __int128, with signed or unsigned only */
+    unsigned int128 = 0;
+
     /* adds the specifier: false if the sequence now breaks the rule */
-    bool add(standard_keyword k)
+    bool add(standard_keyword k, bool is_int128)
     {
+        if (is_int128) {
+            int128++;
+            return int128 == 1 && !char_ && !int_ && !double_ && !other &&
+                   !short_ && !long_;
+        }
         switch (k) {
         case standard_keyword::const_:
             return ++const_ == 1;
@@ -253,13 +262,13 @@ struct type_specifier_count {
             other++;
             break;
         }
-        unsigned base = char_ + int_ + double_ + other;
+        unsigned base = char_ + int_ + double_ + other + int128;
         if (base > 1 || sign > 1 || short_ > 1 || long_ > 2 ||
             (short_ && long_))
             return false;
         if (sign && (double_ || other))
             return false;
-        if ((short_ || long_) && (char_ || other))
+        if ((short_ || long_) && (char_ || other || int128))
             return false;
         if (short_ && double_)
             return false;
@@ -382,7 +391,7 @@ node_index parser::decl_specifier_seq(decl_specifier_facts &facts,
                 return 0;
             continue;
         }
-        /* [ext.gnu] gnu_restrict: a cv-qualifier ([dcl.decl]) */
+        /* [ext:gnu_restrict] a cv-qualifier ([dcl.decl]) */
         if (accept(extension_keyword::restrict))
             continue;
         standard_keyword k = keyword_of(peek());
@@ -491,6 +500,10 @@ node_index parser::decl_specifier_seq(decl_specifier_facts &facts,
             if (failed())
                 return 0;
             facts.has_defining_type_specifier = true;
+        } else if (at(extension_keyword::int128)) {
+            /* [ext:gnu_int128] a simple-type-specifier */
+            add_token();
+            facts.has_defining_type_specifier = true;
         } else if (k == standard_keyword::extension) {
             /* an extension's keyword (P9) */
             return beyond_this_step();
@@ -579,7 +592,9 @@ node_index parser::decl_specifier_seq(decl_specifier_facts &facts,
         facts.count++;
         if (k == standard_keyword::auto_ && !storage_class_auto)
             has_auto = true;
-        if (type_specifier && !count.add(k)) {
+        if (type_specifier &&
+            !count.add(k, extension_keyword_of(tokens[specifier]) ==
+                              extension_keyword::int128)) {
             /* auto int x: C++03's storage-class-specifier auto
                ([diff.cpp03.dcl.dcl]/1), in a later edition [ext.clang]
                clang's extension: P9 */
@@ -865,7 +880,7 @@ node_index parser::elaborated_or_class_specifier(decl_specifier_facts &facts)
     }
     name_kind found = name_kind::not_declared;
     if (!qualifier && !template_id)
-        found = names.lookup_unqualified(name);
+        found = names.lookup_elaborated(name);
     if (!qualifier && !template_id && !facts.friend_ &&
         found != name_kind::type_name && found != name_kind::template_name) {
         /* the class's region, empty until a class-specifier defines it
@@ -927,6 +942,260 @@ node_index parser::decltype_specifier()
                             "dcl.type.decltype");
     }
     return finish_node(kind, mark, first);
+}
+
+namespace
+{
+
+/* the subclause whose rules a decl-specifier keyword needs, for the ones
+   analysis has none for yet */
+const char *specifier_subclause(standard_keyword k)
+{
+    switch (k) {
+    case standard_keyword::auto_:
+        return "dcl.spec.auto";
+    case standard_keyword::constexpr_:
+    case standard_keyword::consteval_:
+        return "dcl.constexpr";
+    case standard_keyword::constinit_:
+        return "dcl.constinit";
+    case standard_keyword::thread_local_:
+    case standard_keyword::register_:
+    case standard_keyword::mutable_:
+        return "dcl.stc";
+    case standard_keyword::virtual_:
+    case standard_keyword::explicit_:
+        return "dcl.fct.spec";
+    case standard_keyword::friend_:
+        return "class.friend";
+    case standard_keyword::extension:
+        return "ext";
+    default:
+        return "dcl.spec";
+    }
+}
+
+} // namespace
+
+/*
+ * [dcl.spec]/1: the decl-specifiers of a declaration (or of a
+ * parameter-declaration, when parameter): its type ([dcl.meaning]/4:
+ * "First, the decl-specifier-seq determines a type") and the specifiers
+ * that apply to the names it declares.
+ */
+analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
+                                                      specified &s,
+                                                      bool parameter)
+{
+    const syntax_node &node = tree[seq];
+    simple_type_keywords k;
+    uint32_t cv = cv_none;
+    unsigned const_ = 0, volatile_ = 0, typedef_ = 0, static_ = 0, extern_ = 0,
+             inline_ = 0, constexpr_ = 0;
+    type_index named = 0;
+    token_index named_at = 0, duplicate = 0;
+    const char *duplicate_spelling = nullptr;
+    auto count = [&](unsigned &n, token_index t, const char *spelling) {
+        if (n++ && !duplicate) {
+            duplicate = t;
+            duplicate_spelling = spelling;
+        }
+    };
+    for (uint32_t i = 0; i < node.child_count; i++) {
+        syntax_child c = tree.children(seq)[i];
+        if (!c.is_token())
+            return not_supported(c.index());
+        token_index t = c.index();
+        const token &tok = tokens[t];
+        if (tok.kind == token_kind::identifier) {
+            /* a type-name ([dcl.type.simple]/1): at global namespace scope,
+               a typedef-name declared there before */
+            entity_index e = lookup(tokens.identifier(t));
+            if (!e || entity_table[e].kind != entity_kind::typedef_name)
+                return not_supported(seq, "basic.lookup.unqual");
+            if (named || !k.first)
+                k.first = t;
+            if (named)
+                k.alone++;
+            named = entity_table[e].type.unqualified();
+            cv |= entity_table[e].type.cv();
+            named_at = t;
+            continue;
+        }
+        if (p.extension_keyword_of(tok) == extension_keyword::int128) {
+            /* [ext:gnu_int128] */
+            if (!k.first)
+                k.first = t;
+            k.int128++;
+            continue;
+        }
+        standard_keyword kw = p.keyword_of(tok);
+        if (!k.first && kw != standard_keyword::const_ &&
+            kw != standard_keyword::volatile_ &&
+            kw != standard_keyword::typedef_ &&
+            kw != standard_keyword::static_ &&
+            kw != standard_keyword::extern_ &&
+            kw != standard_keyword::inline_ &&
+            kw != standard_keyword::constexpr_)
+            k.first = t;
+        switch (kw) {
+        case standard_keyword::const_:
+            count(const_, t, "const");
+            cv |= cv_const;
+            break;
+        case standard_keyword::volatile_:
+            count(volatile_, t, "volatile");
+            cv |= cv_volatile;
+            break;
+        case standard_keyword::signed_:
+            k.signed_++;
+            break;
+        case standard_keyword::unsigned_:
+            k.unsigned_++;
+            break;
+        case standard_keyword::short_:
+            k.short_++;
+            break;
+        case standard_keyword::long_:
+            k.long_++;
+            break;
+        case standard_keyword::char_:
+            k.char_++;
+            break;
+        case standard_keyword::int_:
+            k.int_++;
+            break;
+        case standard_keyword::double_:
+            k.double_++;
+            break;
+        case standard_keyword::bool_:
+            k.alone++;
+            k.alone_type = fundamental_type::bool_;
+            break;
+        case standard_keyword::float_:
+            k.alone++;
+            k.alone_type = fundamental_type::float_;
+            break;
+        case standard_keyword::void_:
+            k.alone++;
+            k.alone_type = fundamental_type::void_;
+            break;
+        case standard_keyword::wchar_t_:
+            k.alone++;
+            k.alone_type = fundamental_type::wchar_t_;
+            break;
+        case standard_keyword::char8_t_:
+            k.alone++;
+            k.alone_type = fundamental_type::char8_t_;
+            break;
+        case standard_keyword::char16_t_:
+            k.alone++;
+            k.alone_type = fundamental_type::char16_t_;
+            break;
+        case standard_keyword::char32_t_:
+            k.alone++;
+            k.alone_type = fundamental_type::char32_t_;
+            break;
+        case standard_keyword::typedef_:
+            count(typedef_, t, "typedef");
+            break;
+        case standard_keyword::static_:
+            count(static_, t, "static");
+            break;
+        case standard_keyword::extern_:
+            count(extern_, t, "extern");
+            break;
+        case standard_keyword::inline_:
+            count(inline_, t, "inline");
+            break;
+        case standard_keyword::constexpr_:
+            count(constexpr_, t, "constexpr");
+            break;
+        default:
+            return not_supported(seq, specifier_subclause(kw));
+        }
+    }
+    if (parameter && (typedef_ || static_ || extern_ || inline_ || constexpr_))
+        return not_supported(seq, "dcl.fct");
+    /* [dcl.stc]/1: "At most one storage-class-specifier shall appear in a
+       given decl-specifier-seq, except that thread_local may appear with
+       static or extern." */
+    if (static_ && extern_)
+        return ill_formed(seq,
+                          "at most one storage-class-specifier shall appear "
+                          "in a given decl-specifier-seq",
+                          "dcl.stc");
+    /* [dcl.stc]/1: "If a storage-class-specifier appears in a
+       decl-specifier-seq, there can be no typedef specifier in the same
+       decl-specifier-seq" */
+    if (typedef_ && (static_ || extern_))
+        return ill_formed(seq,
+                          "if a storage-class-specifier appears in a "
+                          "decl-specifier-seq, there can be no typedef "
+                          "specifier in the same decl-specifier-seq",
+                          "dcl.stc");
+    /* [dcl.typedef]/1: "The typedef specifier shall not be combined in a
+       decl-specifier-seq with any other kind of specifier except a
+       defining-type-specifier" */
+    if (typedef_ && inline_)
+        return ill_formed(seq,
+                          "the typedef specifier shall not be combined in a "
+                          "decl-specifier-seq with any other kind of "
+                          "specifier except a defining-type-specifier",
+                          "dcl.typedef");
+    /* [dcl.constexpr]/1: "The constexpr specifier shall be applied only to
+       the definition of a variable or variable template or the declaration
+       of a function or function template." */
+    if (typedef_ && constexpr_)
+        return ill_formed(seq,
+                          "the constexpr specifier shall be applied only to "
+                          "the definition of a variable or the declaration "
+                          "of a function",
+                          "dcl.constexpr");
+    type_index type = 0;
+    bool keywords = k.signed_ || k.unsigned_ || k.short_ || k.long_ ||
+                    k.char_ || k.int_ || k.double_ || k.int128 ||
+                    k.alone_type != fundamental_type::none;
+    if (named && keywords)
+        /* [dcl.type]/2: "As a general rule, at most one
+           defining-type-specifier is allowed in the complete
+           decl-specifier-seq of a declaration" */
+        return ill_formed_at_token(named_at,
+                                   "at most one defining-type-specifier is "
+                                   "allowed in the complete decl-specifier-seq "
+                                   "of a declaration",
+                                   "dcl.type");
+    if (named && k.alone)
+        return ill_formed_at_token(named_at,
+                                   "at most one defining-type-specifier is "
+                                   "allowed in the complete decl-specifier-seq "
+                                   "of a declaration",
+                                   "dcl.type");
+    if (named) {
+        type = named;
+    } else if (keywords) {
+        analysis_result r = simple_type(seq, k, type);
+        if (r != analysis_result::well_formed)
+            return r;
+    }
+    /* [dcl.spec]/2: "Each decl-specifier shall appear at most once in a
+       complete decl-specifier-seq, except that long may appear twice." */
+    if (duplicate) {
+        analysis_result r =
+            extension_used(diagnostic_id::sema_duplicate_specifier, duplicate,
+                           duplicate_spelling);
+        if (r != analysis_result::well_formed)
+            return r;
+    }
+    s.has_type = type != 0;
+    s.typedef_ = typedef_;
+    s.static_ = static_;
+    s.extern_ = extern_;
+    s.inline_ = inline_;
+    s.constexpr_ = constexpr_;
+    if (type)
+        s.type = add_cv(qualified_type::make(type, cv_none), cv);
+    return analysis_result::well_formed;
 }
 
 } // namespace cplusplus

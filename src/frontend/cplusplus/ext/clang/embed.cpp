@@ -1,9 +1,12 @@
 /*
- * embed.cpp: [ext.clang] clang_embed: C23's #embed (6.10.4), which C++26
- * adopted as [cpp.embed] (P1967R14), in every edition, with a warning:
+ * embed.cpp: [ext:clang_embed] C23's #embed (6.10.4), which C++26 adopted
+ * as [cpp.embed] (P1967R14), in every edition, with a warning:
  *
- *     # embed header-name embed-parameter-sequence_opt new-line
- *     # embed pp-tokens new-line
+ *     control-line:
+ *         # embed pp-tokens new-line
+ *
+ * whose pp-tokens are, after macro replacement where they are not already,
+ * a header-name and the embed parameters:
  *
  * replaced by the bytes of the resource as a comma-delimited list of
  * integer literals, between the prefix and suffix parameters' tokens, or

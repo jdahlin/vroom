@@ -168,8 +168,11 @@ bool preprocessor::header_name_from_tokens(const preprocessing_token &first,
  * [cpp.include]/2: "# include < h-char-sequence > new-line ... causes the
  * replacement of that directive by the entire contents of the header";
  * /3 the same for "q-char-sequence"; /4 the form with pp-tokens.  The
- * extensions #include_next ([ext.gnu]) and #import ([ext.clang]) go
- * through here too.
+ * extensions [ext:gnu_include_next] (include_next.cpp) and
+ * [ext:clang_import_directive] go through here too:
+ *
+ *     control-line:
+ *         # import pp-tokens new-line
  */
 void preprocessor::directive_include(const preprocessing_token &name,
                                      directive_kind kind)
@@ -179,7 +182,7 @@ void preprocessor::directive_include(const preprocessing_token &name,
     char directive_text[16];
     snprintf(directive_text, sizeof directive_text, "%.*s",
              (int)directive.size(), directive.data());
-    /* [ext.gnu] gnu_include_next, [ext.clang] clang_import_directive */
+    /* [ext:gnu_include_next], [ext:clang_import_directive] */
     if (kind == directive_kind::include_next)
         diagnostics.issue(diagnostic_id::ext_pp_include_next_directive,
                           name.location);

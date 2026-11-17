@@ -1,0 +1,50 @@
+// [dcl.meaning] and its subclauses: the types declarators give names at
+// global namespace scope (doc/PLAN-cxx-sema.md S1a).  bench/cxx-sema.py has
+// clang check every declared type and every verdict.
+typedef unsigned long T, *P;
+int f(void), (*g(int a[3], char))[2];
+extern int &r;
+void h(int, ...) { }
+extern const int *const q;
+typedef int A[3];
+extern const A cb;
+typedef int &R;
+extern R &rr;
+extern R &&rv;
+typedef int &&RV;
+extern RV &rl;
+extern RV &&rvv;
+signed char sc; unsigned short us; long double ld; unsigned long long ull;
+unsigned u; signed s; short int si; long int li; char c; unsigned char uc;
+wchar_t wc; char16_t c16; char32_t c32; bool b; float fl; double d;
+void k(const int, int(int), float[]);
+extern volatile T *const vp[2][3];
+int (*pf)(int, char);
+int (&rf(int))[4];
+void (*signal_like(int, void (*)(int)))(int);
+extern int ua[];
+extern int ua[10];
+extern int ub[3][4];
+typedef void V;
+int fv(V);
+int redeclared(int);
+int redeclared(int x);
+int adjusted(int a[3]);
+int adjusted(int *p);
+int adjusted_fn(int(char));
+int adjusted_fn(int (*)(char));
+int top_cv(const int);
+int top_cv(int);
+static int internal_then(int);
+int internal_then(int);
+static int si2;
+extern int si2;
+typedef int same;
+typedef int same;
+extern const int k2;
+inline int iv;
+int z[0];
+extern int bound_later[10];
+int bound_later[];
+void __attribute__((noreturn)) held(int);
+void held(int);

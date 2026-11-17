@@ -7,6 +7,7 @@
  *             ref-qualifier_opt noexcept-specifier_opt attribute-specifier-seq_opt
  */
 #include "../cplusplus-internal.h"
+#include "frontend/cplusplus/sema.h"
 
 namespace cplusplus
 {
@@ -221,6 +222,171 @@ node_index parser::parameter_declaration()
             return 0;
     }
     return finish_node(syntax_kind::parameter_declaration, mark, first);
+}
+
+/*
+ *     parameter-declaration:
+ *         attribute-specifier-seq_opt decl-specifier-seq declarator
+ *         attribute-specifier-seq_opt decl-specifier-seq declarator = initializer-clause
+ *         attribute-specifier-seq_opt decl-specifier-seq abstract-declarator_opt
+ *         attribute-specifier-seq_opt decl-specifier-seq abstract-declarator_opt = initializer-clause
+ *
+ * [dcl.fct]/5: "The type of each parameter (including function parameter
+ * packs) is determined from its own decl-specifier-seq and declarator."
+ */
+analysis_result semantic_analysis::parameter_declaration(node_index n,
+                                                         qualified_type &type,
+                                                         bool &unnamed,
+                                                         token_index &id)
+{
+    id = 0;
+    const syntax_node &node = tree[n];
+    const syntax_child *children = tree.children(n);
+    if (!node.child_count ||
+        !syntax_is(tree, children[0], syntax_kind::decl_specifier_seq))
+        return not_supported(n, "dcl.attr");
+    specified s;
+    analysis_result r = decl_specifier_seq(children[0].index(), s, true);
+    if (r != analysis_result::well_formed)
+        return r;
+    /* [dcl.type]/3: "at least one defining-type-specifier that is not a
+       cv-qualifier shall appear in a complete type-specifier-seq or a
+       complete decl-specifier-seq" */
+    if (!s.has_type)
+        return ill_formed(n,
+                          "at least one defining-type-specifier that is not a "
+                          "cv-qualifier shall appear in a complete "
+                          "decl-specifier-seq",
+                          "dcl.type");
+    type = s.type;
+    unnamed = true;
+    if (node.child_count == 1)
+        return analysis_result::well_formed;
+    if (node.child_count > 2)
+        return not_supported(n, "dcl.fct.default");
+    declarator_meaning m;
+    r = declarator(n, children[1], type, m);
+    unnamed = !m.has_id;
+    if (m.has_id)
+        id = m.id;
+    return r;
+}
+
+/*
+ * [dcl.fct]/1: "In a declaration T D where D has the form
+ *     D1 ( parameter-declaration-clause ) cv-qualifier-seq_opt
+ *         ref-qualifier_opt noexcept-specifier_opt attribute-specifier-seq_opt
+ * ... the type of the declarator-id in D is derived-declarator-type-list
+ * noexcept_opt function of parameter-type-list cv-qualifier-seq_opt
+ * ref-qualifier_opt returning T".
+ */
+analysis_result semantic_analysis::function(node_index parameters,
+                                            qualified_type &type)
+{
+    /* [dcl.fct]/11: "Functions shall not have a return type of type array or
+       function" */
+    type_kind returned = type_table[type.unqualified()].kind;
+    if (returned == type_kind::array || returned == type_kind::function)
+        return ill_formed(parameters,
+                          "functions shall not have a return type of type "
+                          "array or function",
+                          "dcl.fct");
+    const syntax_node &node = tree[parameters];
+    /* the parameter-declarations and the ellipsis, from the clause and its
+       list: ( clause ) is the first and last child */
+    owned_array<node_index> declarations;
+    bool variadic = false, closed = false;
+    owned_array<syntax_child> work;
+    for (uint32_t i = node.child_count; i-- > 0;) {
+        syntax_child c = tree.children(parameters)[i];
+        if (syntax_is_punctuator(tokens, c,
+                                 preprocessing_op_or_punc::RIGHT_PARENTHESIS))
+            closed = true;
+        else if (!closed)
+            /* cv-qualifier-seq, ref-qualifier, noexcept-specifier,
+               attributes: a member function's, or a type's that analysis
+               has no rules for yet */
+            return not_supported(parameters, "dcl.fct");
+    }
+    for (uint32_t i = 0; i < node.child_count; i++) {
+        syntax_child c = tree.children(parameters)[i];
+        if (syntax_is_punctuator(tokens, c,
+                                 preprocessing_op_or_punc::RIGHT_PARENTHESIS))
+            break;
+        if (!syntax_is_punctuator(tokens, c,
+                                  preprocessing_op_or_punc::LEFT_PARENTHESIS))
+            work.append(c);
+    }
+    for (size_t k = 0; k < work.size(); k++) {
+        syntax_child c = work[k];
+        if (syntax_is_punctuator(tokens, c, preprocessing_op_or_punc::COMMA))
+            continue;
+        if (syntax_is_punctuator(tokens, c,
+                                 preprocessing_op_or_punc::ELLIPSIS)) {
+            variadic = true;
+            continue;
+        }
+        if (syntax_is(tree, c, syntax_kind::parameter_declaration_clause) ||
+            syntax_is(tree, c, syntax_kind::parameter_declaration_list)) {
+            const syntax_node &list = tree[c.index()];
+            for (uint32_t i = 0; i < list.child_count; i++)
+                work.append(tree.children(c.index())[i]);
+            continue;
+        }
+        if (!syntax_is(tree, c, syntax_kind::parameter_declaration))
+            return not_supported(parameters, "dcl.fct");
+        declarations.append(c.index());
+    }
+    owned_array<qualified_type> list;
+    owned_array<parameter_meaning> named;
+    for (size_t k = 0; k < declarations.size(); k++) {
+        qualified_type t;
+        bool unnamed = true;
+        token_index id = 0;
+        analysis_result r =
+            parameter_declaration(declarations[k], t, unnamed, id);
+        if (r != analysis_result::well_formed)
+            return r;
+        const struct type &record = type_table[t.unqualified()];
+        bool is_void = record.kind == type_kind::fundamental &&
+                       record.fundamental == fundamental_type::void_;
+        if (is_void) {
+            /* [dcl.fct]/4: "A parameter list consisting of a single unnamed
+               parameter of non-dependent type void is equivalent to an
+               empty parameter list.  Except for this special case, a
+               parameter shall not have type cv void." */
+            if (declarations.size() == 1 && unnamed && !t.cv() && !variadic)
+                break;
+            return ill_formed(declarations[k],
+                              "except for a parameter list consisting of a "
+                              "single unnamed parameter of non-dependent type "
+                              "void, a parameter shall not have type cv void",
+                              "dcl.fct");
+        }
+        /* [dcl.fct]/5: "After determining the type of each parameter, any
+           parameter of type array of T or of function type T is adjusted to
+           be pointer to T.  After producing the list of parameter types,
+           any top-level cv-qualifiers modifying a parameter type are
+           deleted when forming the function type." */
+        if (record.kind == type_kind::array)
+            t = qualified_type::make(type_table.pointer_to(record.operand),
+                                     cv_none);
+        else if (record.kind == type_kind::function)
+            t = qualified_type::make(type_table.pointer_to(t), cv_none);
+        list.append(qualified_type::make(t.unqualified(), cv_none));
+        parameter_meaning parameter;
+        parameter.id = id;
+        parameter.type = t;
+        named.append(parameter);
+    }
+    /* the last function declarator to finish is a function definition's
+       own: the ones in its parameters finish before it */
+    function_parameters.clear();
+    for (const parameter_meaning &parameter : named)
+        function_parameters.append(parameter);
+    type = qualified_type::make(
+        type_table.function(type, list.data(), list.size(), variadic), cv_none);
+    return analysis_result::well_formed;
 }
 
 } // namespace cplusplus
