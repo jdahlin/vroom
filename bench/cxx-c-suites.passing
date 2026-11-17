@@ -14,6 +14,8 @@ gcc/20000227-1 -O0
 gcc/20000227-1 -O2
 gcc/20000313-1 -O0
 gcc/20000313-1 -O2
+gcc/20000314-1 -O0
+gcc/20000314-1 -O2
 gcc/20000314-2 -O0
 gcc/20000314-2 -O2
 gcc/20000403-1 -O0
@@ -36,6 +38,8 @@ gcc/20000523-1 -O0
 gcc/20000523-1 -O2
 gcc/20000528-1 -O0
 gcc/20000528-1 -O2
+gcc/20000622-1 -O0
+gcc/20000622-1 -O2
 gcc/20000706-3 -O0
 gcc/20000706-3 -O2
 gcc/20000706-4 -O0
@@ -73,6 +77,8 @@ gcc/20001229-1 -O2
 gcc/20010114-1 -O0
 gcc/20010114-1 -O2
 gcc/20010119-1 -O0
+gcc/20010129-1 -O0
+gcc/20010129-1 -O2
 gcc/20010206-1 -O0
 gcc/20010206-1 -O2
 gcc/20010221-1 -O0
@@ -83,6 +89,8 @@ gcc/20010224-1 -O0
 gcc/20010224-1 -O2
 gcc/20010325-1 -O0
 gcc/20010325-1 -O2
+gcc/20010329-1 -O0
+gcc/20010329-1 -O2
 gcc/20010403-1 -O0
 gcc/20010403-1 -O2
 gcc/20010422-1 -O0
@@ -118,6 +126,8 @@ gcc/20011223-1 -O0
 gcc/20011223-1 -O2
 gcc/20020103-1 -O0
 gcc/20020103-1 -O2
+gcc/20020118-1 -O0
+gcc/20020118-1 -O2
 gcc/20020127-1 -O0
 gcc/20020127-1 -O2
 gcc/20020201-1 -O0
@@ -228,6 +238,8 @@ gcc/20030913-1 -O0
 gcc/20030913-1 -O2
 gcc/20030916-1 -O0
 gcc/20030916-1 -O2
+gcc/20030920-1 -O0
+gcc/20030920-1 -O2
 gcc/20030928-1 -O0
 gcc/20030928-1 -O2
 gcc/20031011-1 -O0
@@ -262,6 +274,8 @@ gcc/20040820-1 -O0
 gcc/20040820-1 -O2
 gcc/20040831-1 -O0
 gcc/20040831-1 -O2
+gcc/20041112-1 -O0
+gcc/20041112-1 -O2
 gcc/20041114-1 -O0
 gcc/20041126-1 -O0
 gcc/20041126-1 -O2
@@ -395,6 +409,8 @@ gcc/951115-1 -O0
 gcc/951115-1 -O2
 gcc/951204-1 -O0
 gcc/951204-1 -O2
+gcc/960116-1 -O0
+gcc/960116-1 -O2
 gcc/960219-1 -O0
 gcc/960219-1 -O2
 gcc/960302-1 -O0
@@ -497,6 +513,8 @@ gcc/arith-1 -O0
 gcc/arith-1 -O2
 gcc/ashldi-1 -O0
 gcc/ashldi-1 -O2
+gcc/call-trap-1 -O0
+gcc/call-trap-1 -O2
 gcc/compare-2 -O0
 gcc/compare-2 -O2
 gcc/cvt-1 -O0
@@ -571,6 +589,8 @@ gcc/pr16790-1 -O0
 gcc/pr16790-1 -O2
 gcc/pr17078-1 -O0
 gcc/pr17078-1 -O2
+gcc/pr17252 -O0
+gcc/pr17252 -O2
 gcc/pr19005 -O0
 gcc/pr19005 -O2
 gcc/pr19606 -O0
@@ -607,6 +627,8 @@ gcc/pr24851 -O0
 gcc/pr24851 -O2
 gcc/pr27260 -O0
 gcc/pr27260 -O2
+gcc/pr28778 -O0
+gcc/pr28778 -O2
 gcc/pr29695-1 -O0
 gcc/pr29695-1 -O2
 gcc/pr29695-2 -O0
@@ -697,6 +719,8 @@ gcc/pr57321 -O0
 gcc/pr57321 -O2
 gcc/pr57875 -O0
 gcc/pr57875 -O2
+gcc/pr58209 -O0
+gcc/pr58209 -O2
 gcc/pr58385 -O0
 gcc/pr58385 -O2
 gcc/pr58387 -O0
@@ -765,6 +789,8 @@ tcc/11_precedence -O0
 tcc/11_precedence -O2
 tcc/84_hex-float -O0
 tcc/84_hex-float -O2
+tcc/91_ptr_longlong_arith32 -O0
+tcc/91_ptr_longlong_arith32 -O2
 vcc/asm_x86_fixed_pressure -O0
 vcc/asm_x86_fixed_pressure -O2
 vcc/asm_x86_fp_memory -O0

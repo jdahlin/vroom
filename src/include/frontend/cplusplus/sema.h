@@ -539,6 +539,13 @@ enum class conversion_kind : uint8_t {
     null_pointer, /* [conv.ptr]/1: a null pointer constant to a pointer */
     pointer,      /* [conv.ptr]/2, [conv.qual]: the same address */
     to_void,      /* [expr.static.cast]/6 */
+    /* the explicit conversions of a cast ([expr.cast]/4) that are not
+       implicit ones: */
+    qualification_cast,  /* [expr.const.cast]/3: the same address */
+    pointer_cast,        /* [expr.static.cast]/13, [expr.reinterpret.cast]/6,
+                            /7, /8: the same address, another type */
+    pointer_to_integral, /* [expr.reinterpret.cast]/4 */
+    integral_to_pointer, /* [expr.reinterpret.cast]/5 */
 };
 
 enum class increment_kind : uint8_t {
@@ -784,6 +791,9 @@ class semantic_analysis
     analysis_result postfix(node_index n, expression_meaning &m);
     /* [expr.cast], [expr.type.conv] */
     analysis_result cast(node_index n, expression_meaning &m);
+    /* explicit_conversion's pointer to pointer conversions */
+    analysis_result pointer_conversion(node_index at, qualified_type to,
+                                       expression_meaning &m);
     analysis_result explicit_conversion(node_index at, qualified_type to,
                                         expression_meaning &m);
     /* [expr.mul] to [expr.log.or] */

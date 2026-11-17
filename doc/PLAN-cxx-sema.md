@@ -604,6 +604,25 @@ libstdc++ and json), since sema cannot analyse a declaration kept as tokens.
   error now names the subclause whose rules are missing ("the rules of
   [class.pre] are not implemented yet") at the construct.
   Next: the 56 rejected programs, then S2-S4.
+- Status (2026-11-17, casts): the cast notation has [expr.cast]/4's
+  conversions for the fundamental types and pointers to them, in its
+  order, decided before any diagnostic: the implicit ones, then a
+  const_cast between similar pointers ([expr.const.cast]/3), a pointer to
+  another pointer type ([expr.static.cast]/13, [expr.reinterpret.cast]/6,
+  /7, /8: the same address), a pointer to an integer at least as wide
+  (/4), an integer to a pointer (/5); between a pointer and a floating
+  type it is ill-formed ([expr.cast]), a pointer to a narrower integer
+  too (/4).  Before, a cast that was not an implicit conversion was
+  reported ill-formed by [dcl.init]'s rule.  A pointer to a class stays
+  unsupported (a base/derived static_cast moves the address).  The
+  semantic tree has four new conversion kinds (qualification_cast,
+  pointer_cast, pointer_to_integral, integral_to_pointer), lowered to C's
+  casts; the reinterpreting ones are not constant expressions
+  ([expr.const]/5).  cxx-c-suites: 848 runs pass (+26), 0 wrong, 53
+  rejected (-58: no cast among them); cxx-run 20/20 with
+  `src/test/cxx/run/casts.cpp`; cxx-sema.py: declarations as clang 3570
+  (+44), symbols 707 verified, lowering 66 files, 0 refuted anywhere,
+  errors of our parser or analysis among the lowering's reasons 30 -> 16.
 
 ### S2. Names and entities in full
 

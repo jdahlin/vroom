@@ -526,7 +526,13 @@ uint32_t c_lowering::conversion(const semantic_node &n)
         return cast(zero, t, AST_CAST_NULL_POINTER);
     }
     case conversion_kind::pointer:
+    case conversion_kind::qualification_cast:
+    case conversion_kind::pointer_cast:
         return cast(expression(n.a), t, AST_CAST_POINTER_TO_POINTER);
+    case conversion_kind::pointer_to_integral:
+        return cast(expression(n.a), t, AST_CAST_POINTER_TO_INTEGER);
+    case conversion_kind::integral_to_pointer:
+        return cast(expression(n.a), t, AST_CAST_INTEGER_TO_POINTER);
     case conversion_kind::to_void:
         return cast(discard(n.a), ast_builder_type_basic(AST_TYPE_VOID),
                     AST_CAST_VOID);
