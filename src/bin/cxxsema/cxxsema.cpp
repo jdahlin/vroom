@@ -28,6 +28,9 @@
  *                                           (tree-check.h)
  *   cxxsema -dump-tree ...                  the semantic tree of each
  *                                           definition, a node per line
+ *   cxxsema -symbols ...                    the symbol of each function and
+ *                                           variable of a well-formed
+ *                                           declaration (write_symbols)
  *   cxxsema -stats ...                      declarations by result, types,
  *                                           entities
  *   cxxsema -selftest                       the tables no rule uses yet
@@ -351,12 +354,67 @@ static void write_type_claims(const semantic_analysis &analysis,
     }
 }
 
+/*
+ * -symbols: a line per function or variable a well-formed declaration
+ * declared that has a symbol, once per entity:
+ *
+ *     SYMBOL <tab> defined|inline|declared <tab> external|internal|none
+ *
+ * (itanium_symbol_name); bench/cxx-sema.py has clang -O0 compile a file
+ * it accepts and checks each defined one against its object's symbols.
+ * An entity whose symbol needs rules not written yet is "unsupported".
+ */
+static void write_symbols(const semantic_analysis &analysis,
+                          token_stream &tokens, vbuffer *out)
+{
+    owned_array<entity_index> seen;
+    owned_buffer symbol;
+    for (const declared_name &d : analysis.declared) {
+        if (!d.entity)
+            continue;
+        const entity &e = analysis.entity_table[d.entity];
+        if (e.kind != entity_kind::function && e.kind != entity_kind::variable)
+            continue;
+        if (e.kind == entity_kind::variable && e.automatic)
+            continue;
+        bool well_formed = false;
+        for (const analysed_declaration &a : analysis.declarations)
+            if (a.node == d.outermost)
+                well_formed = a.result == analysis_result::well_formed;
+        bool again = false;
+        for (entity_index s : seen)
+            if (s == d.entity)
+                again = true;
+        if (!well_formed || again)
+            continue;
+        seen.append(d.entity);
+        symbol.clear();
+        if (!itanium_symbol_name(analysis, tokens.pp, d.entity, symbol.get())) {
+            vbuffer_string_append(out, "unsupported\n");
+            continue;
+        }
+        vbuffer_append(out, symbol.data(), symbol.size());
+        const char *linkage = "none";
+        if (e.linkage_of_name == linkage::external)
+            linkage = "external";
+        else if (e.linkage_of_name == linkage::internal)
+            linkage = "internal";
+        const char *defined = "declared";
+        if (e.defined)
+            defined = "defined";
+        /* emitted where it is odr-used ([basic.def.odr]/11) */
+        if (e.defined && e.inline_)
+            defined = "inline";
+        vbuffer_format_append(out, "\t%s\t%s\n", defined, linkage);
+    }
+}
+
 int main(int argc, char **argv)
 {
     command_line options("cxxsema");
     bool dump_analysis = false, debug_unsupported = false, stats = false,
          type_claims = false, declaration_claims = false, check = false,
-         dump = false;
+         dump = false, symbols = false;
     const char *path = nullptr;
     for (int i = 1; i < argc; i++) {
         const char *a = argv[i];
@@ -374,6 +432,8 @@ int main(int argc, char **argv)
             check = true;
         else if (!strcmp(a, "-dump-tree"))
             dump = true;
+        else if (!strcmp(a, "-symbols"))
+            symbols = true;
         else if (!strcmp(a, "-stats"))
             stats = true;
         else if (!strcmp(a, "-fsyntax-only"))
@@ -384,10 +444,11 @@ int main(int argc, char **argv)
             path = a;
     }
     if (!path) {
-        fprintf(stderr, "usage: cxxsema [-fsyntax-only|-dump-analysis|"
-                        "-debug-unsupported|-declaration-claims|-type-claims|-"
-                        "check-tree|-dump-tree|-stats] [clang -cc1 options] "
-                        "FILE\n       cxxsema -selftest\n");
+        fprintf(stderr,
+                "usage: cxxsema [-fsyntax-only|-dump-analysis|"
+                "-debug-unsupported|-declaration-claims|-type-claims|-"
+                "check-tree|-dump-tree|-symbols|-stats] [clang -cc1 options] "
+                "FILE\n       cxxsema -selftest\n");
         return 2;
     }
     options.apply();
@@ -450,6 +511,8 @@ int main(int argc, char **argv)
         check_tree(analysis, tree, tokens, out.get());
     if (dump)
         dump_tree(analysis, tokens, out.get());
+    if (symbols)
+        write_symbols(analysis, tokens, out.get());
     if (stats) {
         vbuffer_format_append(
             out.get(),

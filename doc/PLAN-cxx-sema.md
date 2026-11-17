@@ -508,7 +508,18 @@ libstdc++ and json), since sema cannot analyse a declaration kept as tokens.
   converted; `cxx-sema.py` runs it on every test (0 problems, C3 and C4
   unchanged).  The Itanium ABI's grammar is data
   (`docs/itanium-abi-grammar.tsv`) and `cxx-spec-refs.py` checks quoted
-  productions.  Next: the mangler, then the lowering to `struct ast`.
+  productions.  The mangler (`abi/itanium/mangling.cpp`) has one function
+  per nonterminal of the S1 subset (<mangled-name>, <encoding>, <name>,
+  <local-name> with discriminators, <bare-function-type>, <type> with
+  builtin, qualified, pointer, reference, function and array types,
+  <substitution>), each quoting its alternatives after an `[abi:label]`:
+  51/292 of the ABI's alternatives quoted, 0 wrong.  Global variables,
+  `main` and (later) C-linkage names are not mangled; clang's and GCC's
+  `L` for internal linkage is cited as `[impl.gnu]`.  `cxxsema -symbols`
+  lists each symbol, and `cxx-sema.py`'s symbols claim compiles every
+  file clang accepts at -O0 and finds each defined symbol in its object
+  (`llvm-nm`): 681 verified, 0 refuted, 71 not emitted (unused internal
+  or inline entities).  Next: the lowering to `struct ast`.
 
 ### S2. Names and entities in full
 

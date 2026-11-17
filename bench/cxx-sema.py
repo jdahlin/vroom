@@ -46,6 +46,12 @@ them (work/testsuites), and src/test/cxx/sema/{spec,gram}/*.cpp.  For each
                static_assert((E) == VALUE);
            `bench/cxx-sema.py selftest` checks this path on claims written
            by hand, some of them wrong.
+  symbols  on a run clang accepts without an error, cxxsema -symbols gives
+           the symbol of each function and variable a well-formed
+           declaration defines (src/frontend/cplusplus/abi/itanium/); clang
+           -O0 compiles the file and each must be one its object defines
+           (llvm-nm): verified, refuted (a failure), or not emitted (clang
+           leaves out an unused entity with internal linkage).
 
 The summary ends with the subclauses most declarations are unsupported for:
 the work list.  clang's side is the cache of bench/cxx-parse.py
@@ -270,6 +276,49 @@ def selftest(clang):
     return 0
 
 
+def check_symbols(test, opts, clang, cxxsema):
+    """cxxsema -symbols against the symbols clang -O0's object defines:
+    a Counter, and the refuted"""
+    cwd, name = os.path.dirname(test), os.path.basename(test)
+    counts, refuted = collections.Counter(), []
+    ours = cxxparse.run([cxxsema, '-symbols'] + opts + [name], cwd)
+    if ours[0] not in (0, 1) or not ours[1].strip():
+        return counts, refuted
+
+    def compile_and_list():
+        with tempfile.TemporaryDirectory() as d:
+            obj = os.path.join(d, 'out.o')
+            r = cxxparse.run([clang, '-cc1'] + TARGET + ['-x', 'c++'] + opts +
+                             ['-emit-obj', '-o', obj, name], cwd, timeout=60)
+            if r[0] != 0 or not os.path.exists(obj):
+                return None
+            nm = os.path.join(os.path.dirname(clang), 'llvm-nm')
+            listed = cxxparse.run([nm, '--defined-only', '--just-symbol-name', obj], d)
+            if listed[0] != 0:
+                return None
+            return listed[1].split()
+    defined = cxxparse.cached('symbols' + ''.join(TARGET), clang, test, opts, compile_and_list)
+    if defined is None:
+        return counts, refuted
+    defined = set(defined)
+    for line in ours[1].splitlines():
+        fields = line.split('\t')
+        if fields[0] == 'unsupported':
+            counts['unsupported'] += 1
+            continue
+        if len(fields) != 3 or fields[1] != 'defined':
+            continue
+        symbol, linkage = fields[0], fields[2]
+        if symbol in defined:
+            counts['verified'] += 1
+        elif linkage != 'external':
+            counts['not_emitted'] += 1
+        else:
+            counts['refuted'] += 1
+            refuted.append(f'{symbol} is not a symbol clang -O0 defines')
+    return counts, refuted
+
+
 def check(test, opts, clang, cxxsema):
     cwd = os.path.dirname(test)
     name = os.path.basename(test)
@@ -343,6 +392,10 @@ def check(test, opts, clang, cxxsema):
     res['types'], refuted = check_type_claims(test, opts, clang, type_claims(cxxsema, opts, test))
     for r in refuted:
         res['fail'].append(('types', r))
+    if c[0] == 0 and not CLANG_ERROR.search(c[2]):
+        res['symbols'], refuted = check_symbols(test, opts, clang, cxxsema)
+        for r in refuted:
+            res['fail'].append(('symbols', r))
     if rejected:
         res['fail'].append(('verdict', f'ill-formed for us, accepted by clang: line {rejected[0]}'
                                        f' ({len(rejected)} declarations)'))
@@ -388,7 +441,7 @@ def main():
     with concurrent.futures.ThreadPoolExecutor(a.j) as ex:
         results = list(ex.map(lambda j: check(j[0], j[1], clang, cxxsema), jobs))
     verdict, unsupported, types = collections.Counter(), collections.Counter(), collections.Counter()
-    declared = collections.Counter()
+    declared, symbols = collections.Counter(), collections.Counter()
     crashes = failures = skipped = 0
     seen = set()
     for r in results:
@@ -397,6 +450,7 @@ def main():
         unsupported.update(r['unsupported'])
         types.update(r['types'])
         declared.update(r.get('declarators', {}))
+        symbols.update(r.get('symbols', {}))
         kinds = {k for k, _ in r['fail']}
         crashes += 'crash' in kinds
         failures += bool(kinds)
@@ -417,6 +471,8 @@ def main():
     print(f'types: {types["verified"]} claims verified, {types["refuted"]} refuted, '
           f'{types["unchecked"]} not checkable; constants: {types["value_verified"]} verified, '
           f'{types["value_refuted"]} refuted')
+    print(f'symbols: {symbols["verified"]} verified, {symbols["refuted"]} refuted, '
+          f'{symbols["not_emitted"]} not emitted by clang, {symbols["unsupported"]} unsupported')
     if unsupported and a.unsupported:
         top = ', '.join(f'[{label}] {n}' for label, n in unsupported.most_common(a.unsupported))
         print(f'unsupported by subclause ({len(unsupported)}): {top}')

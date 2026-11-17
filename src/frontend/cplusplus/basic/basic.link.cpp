@@ -275,8 +275,16 @@ analysis_result semantic_analysis::declare(node_index declaration,
         entity_table.bind(0, name, e);
         declared_entity = e;
     }
+    /* [basic.def.odr]/11: "A definition of an inline function or variable
+       shall be reachable from the end of every definition domain in which
+       it is odr-used outside of a discarded statement."  So it is emitted
+       where it is used; an entity is inline once a declaration says so */
+    if (s.inline_)
+        entity_table[declared_entity].inline_ = true;
     declared_name d;
     d.declaration = declaration;
+    d.outermost = current_declaration;
+    d.entity = declared_entity;
     d.id = id;
     d.kind = kind;
     d.type = type;
@@ -377,6 +385,8 @@ analysis_result semantic_analysis::declare_local(
     declared_entity = e;
     declared_name d;
     d.declaration = declaration;
+    d.outermost = current_declaration;
+    d.entity = declared_entity;
     d.id = id;
     d.kind = kind;
     d.type = type;

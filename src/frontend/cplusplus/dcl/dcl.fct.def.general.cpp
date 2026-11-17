@@ -225,6 +225,10 @@ analysis_result semantic_analysis::function_body(node_index definition,
                     "labels shall not be redeclared within a function",
                     "stmt.label");
     entity_index parameters = open_scope(0, true);
+    /* the scope the parameters are declared in is the function's
+       (entity::enclosing), and its blocks' local names are the function's
+       ([abi:mangling-scope]) */
+    entity_table[parameters].enclosing = f;
     owned_array<uint32_t> parameter_entities;
     for (const parameter_meaning &parameter : function_parameters) {
         parameter_entities.append(0);

@@ -233,6 +233,8 @@ struct entity {
     uint64_t value = 0;
     /* [dcl.constexpr]/1 */
     bool constexpr_ = false;
+    /* [dcl.inline]: an inline function or variable */
+    bool inline_ = false;
     /* a variable: [basic.stc.auto]/1, a local variable not declared static
        (or a parameter) */
     bool automatic = false;
@@ -349,6 +351,10 @@ struct analysed_declaration {
    cxxsema -declaration-claims has clang check */
 struct declared_name {
     node_index declaration = 0;
+    /* the declaration of the translation unit it is in
+       (analysed_declaration::node), and the entity it declared */
+    node_index outermost = 0;
+    entity_index entity = 0;
     token_index id = 0;
     entity_kind kind = entity_kind::none;
     qualified_type type;
@@ -975,6 +981,15 @@ class semantic_analysis
     const parser &p;
     diagnostic_consumer &diagnostics;
 };
+
+/* ---- the Itanium C++ ABI (abi/itanium/) ---- */
+
+/* [abi:mangling]: the symbol of entity e, a function or a variable,
+   appended to out: its mangled name, or its identifier where the ABI does
+   not mangle it; false if the name needs rules not written yet (out may
+   have a part of it) */
+bool itanium_symbol_name(const semantic_analysis &analysis,
+                         const preprocessor &pp, entity_index e, vbuffer *out);
 
 } // namespace cplusplus
 
