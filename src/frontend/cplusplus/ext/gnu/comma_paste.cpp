@@ -1,5 +1,5 @@
 /*
- * comma_paste.cpp: [ext.gnu] gnu_comma_paste (GCC manual 6.21, Variadic
+ * comma_paste.cpp: [ext:gnu_comma_paste] (GCC manual 6.21, Variadic
  * Macros): in the replacement list of a variadic macro,
  *
  *     , ## __VA_ARGS__

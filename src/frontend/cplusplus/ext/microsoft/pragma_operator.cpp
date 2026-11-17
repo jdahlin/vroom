@@ -1,5 +1,5 @@
 /*
- * pragma_operator.cpp: [ext.microsoft] microsoft_pragma_operator: MSVC's
+ * pragma_operator.cpp: [ext:microsoft_pragma_operator]: MSVC's
  *
  *     __pragma ( pp-tokens_opt )
  *

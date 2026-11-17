@@ -1,5 +1,5 @@
 /*
- * feature_checks.cpp: [ext.clang] clang_feature_checks (clang Language
+ * feature_checks.cpp: [ext:clang_feature_checks] (clang Language
  * Extensions, Feature Checking Macros), function-like macros replaced by 1
  * or 0 (or a version) as clang has the thing named:
  *
@@ -16,7 +16,7 @@
  *   __has_constexpr_builtin(x)             0: no builtin is constant yet
  *   __FLT_EVAL_METHOD__                    0 (clang_flt_eval_method)
  *
- * and [ext.clang] clang_has_include_next (__has_include_next, evaluated with
+ * and [ext:clang_has_include_next] (__has_include_next, evaluated with
  * __has_include in cpp.cond.cpp), clang_file_name_macro (__FILE_NAME__, the
  * presumed file name without its directory).  As [cpp.cond]/7 says of
  * __has_include, #ifdef sees each as a defined macro.

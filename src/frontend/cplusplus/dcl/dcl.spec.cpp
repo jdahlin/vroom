@@ -383,7 +383,7 @@ node_index parser::decl_specifier_seq(decl_specifier_facts &facts,
                 return 0;
             continue;
         }
-        /* [ext.gnu] gnu_restrict: a cv-qualifier ([dcl.decl]) */
+        /* [ext:gnu_restrict] a cv-qualifier ([dcl.decl]) */
         if (accept(extension_keyword::restrict))
             continue;
         standard_keyword k = keyword_of(peek());

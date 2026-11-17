@@ -14,8 +14,9 @@
             alternatives of that nonterminal's bnf block (spaces, the
             subscript opt written _opt, and quotes around terminals do not
             count).  Quoting some alternatives is allowed (a comment may
-            say which are not written yet).  The grammar quoted in ext/ is
-            an extension's, from its vendor's manual: not checked.
+            say which are not written yet).  A production quoted after an
+            [ext:NAME] citation in the same comment may also be one the
+            extension NAME adds (ext).
   coverage  per clause, the nonterminals of docs/cxx-spec/grammar-index.md
             that some comment quotes, of all of the clause's
   rules     per clause, the rules a comment quotes, of all of the clause's
@@ -35,11 +36,23 @@
             and a `# ...` remark do not count); coverage: per section, the
             alternatives some comment quotes, of all of the section's
 
-Usage: bench/cxx-spec-refs.py [-v] [--missing CLAUSE] [--rules CLAUSE] [--abi-missing LABEL] [FILE...]
+  ext       the extensions' grammar (src/frontend/cplusplus/ext/grammar.inc):
+            each row's extension is a row of ext/extensions.inc; an
+            alternative added to a standard nonterminal is not already
+            one of its own; any other nonterminal begins with the
+            extension's vendor (gnu-, clang-, microsoft-), is defined by a
+            row and used by another; every nonterminal an alternative uses
+            is the standard's or one of these.  Every [ext:NAME] names an
+            extension, and a production quoted after one is the
+            standard's or one of NAME's rows; coverage: per extension, the
+            rows some comment quotes, of all of its rows
+
+Usage: bench/cxx-spec-refs.py [-v] [--missing CLAUSE] [--rules CLAUSE] [--abi-missing LABEL] [--ext-missing NAME] [FILE...]
   -v                 every quoted production, not only the wrong ones
   --missing CLAUSE   list the clause's nonterminals no comment quotes yet
   --rules CLAUSE     list the clause's rules no comment quotes yet
   --abi-missing LABEL  list the ABI section's alternatives no comment quotes yet
+  --ext-missing NAME   list the extension's productions no comment quotes yet
 Exit status 1 if a citation or a quoted production is wrong.
 """
 import argparse
@@ -57,6 +70,10 @@ ABI_GRAMMAR = os.path.join(R, 'docs', 'itanium-abi-grammar.tsv')
 ABI_CITATION = re.compile(r'\[abi:([a-z0-9][a-z0-9.-]*)\]')
 # the clauses whose rules analysis enforces
 RULE_CLAUSES = ('basic', 'class', 'dcl', 'except', 'expr', 'module', 'over', 'stmt', 'temp')
+EXT_INDEX = os.path.join(FRONTEND, 'ext', 'extensions.inc')
+EXT_GRAMMAR = os.path.join(FRONTEND, 'ext', 'grammar.inc')
+EXT_CITATION = re.compile(r'\[ext:([a-z][a-z0-9_]*)\]')
+NONTERMINAL_SHAPE = re.compile(r'^[a-z][a-z0-9]*(-[a-z0-9]+)+$')
 CITATION = re.compile(r'\[([a-z][a-z0-9.]*[a-z0-9])\]/(\d+)(?:\.(\d+))?')
 # clang's and other vendors' tags, and the plan's own labels, are no
 # subclauses of the standard
@@ -297,12 +314,85 @@ def quoted_abi_productions(path):
     return found
 
 
+def extension_index():
+    """extension name -> vendor, from ext/extensions.inc"""
+    text = open(EXT_INDEX, encoding='utf-8').read()
+    return dict(re.findall(r'^EXTENSION\((\w+),\s*(\w+),', text, re.M))
+
+
+def extension_grammar():
+    """(line, extension, nonterminal, alternative or None for TERMINALS)
+    for each row of ext/grammar.inc"""
+    text = open(EXT_GRAMMAR, encoding='utf-8').read()
+    rows = []
+    row = re.compile(r'^(PRODUCTION|TERMINALS)\(\s*(\w+),\s*"([^"]+)",\s*((?:"(?:[^"\\]|\\.)*"\s*)+)\)',
+                     re.M | re.S)
+    for m in row.finditer(text):
+        line = text.count('\n', 0, m.start()) + 1
+        value = ''.join(re.findall(r'"((?:[^"\\]|\\.)*)"', m.group(4))).replace('\\"', '"')
+        rows.append((line, m.group(2), m.group(3), value if m.group(1) == 'PRODUCTION' else None))
+    return rows
+
+
+def check_extension_grammar(rows, index, grammar):
+    """the rows' errors; extension -> set of (nonterminal, alternative)"""
+    rel = os.path.relpath(EXT_GRAMMAR, R)
+    errors = []
+    defined = {nonterminal for _, _, nonterminal, _ in rows}
+    used = {}
+    by_extension = {}
+    for line, name, nonterminal, alternative in rows:
+        where = f'{rel}:{line}'
+        if name not in index:
+            errors.append(f'{where}: {name} is no extension of ext/extensions.inc')
+            continue
+        if nonterminal not in grammar and not nonterminal.startswith(index[name] + '-'):
+            errors.append(f'{where}: {nonterminal} is neither the standard\'s nor begins with {index[name]}-')
+        if alternative is None:
+            continue
+        a = normalize(alternative)
+        by_extension.setdefault(name, set()).add((nonterminal, a))
+        if nonterminal in grammar and a in grammar[nonterminal][1]:
+            errors.append(f'{where}: {nonterminal}: "{alternative}" is the standard\'s already')
+        for symbol in a.split():
+            symbol = re.sub(r'_opt$', '', symbol)
+            if symbol in defined and symbol not in grammar:
+                if symbol != nonterminal:
+                    used[symbol] = True
+            elif symbol not in grammar and NONTERMINAL_SHAPE.match(symbol):
+                errors.append(f'{where}: {symbol} is no nonterminal of the standard or of ext/grammar.inc')
+    for nonterminal in sorted(defined - set(grammar) - set(used)):
+        errors.append(f'{rel}: {nonterminal} is defined but no other production uses it')
+    return errors, by_extension
+
+
+def extension_contexts(path):
+    """comment line -> the extension the last [ext:NAME] of its comment
+    before it (or on it) names"""
+    contexts = {}
+    inside = False
+    current = None
+    for n, line in enumerate(open(path, encoding='utf-8', errors='replace'), 1):
+        start = line.find('/*')
+        if not inside and start >= 0:
+            inside, current = True, None
+        if inside:
+            for m in EXT_CITATION.finditer(line):
+                current = m.group(1)
+            if current:
+                contexts[n] = current
+            if '*/' in line[start + 2 if start >= 0 else 0:]:
+                inside = False
+    return contexts
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('-v', action='store_true')
     ap.add_argument('--missing')
     ap.add_argument('--rules')
     ap.add_argument('--abi-missing')
+    ap.add_argument('--ext-missing')
     ap.add_argument('files', nargs='*')
     a = ap.parse_args()
     files = a.files or sorted(glob.glob(os.path.join(FRONTEND, '**', '*.cpp'), recursive=True) +
@@ -314,10 +404,17 @@ def main():
     abi = abi_sections()
     abi_productions = abi_grammar()
     abi_quoted = set()
+    extensions = extension_index()
+    ext_rows = extension_grammar()
+    ext_errors, ext_productions = check_extension_grammar(ext_rows, extensions, grammar)
+    for e in ext_errors:
+        print(e)
+    ext_quoted = set()
+    ext_citations = 0
     abi_quotes = 0
     rules_quoted = set()
     abi_citations = 0
-    errors = 0
+    errors = len(ext_errors)
     citations = productions = 0
     quoted = {}
     for path in files:
@@ -359,11 +456,28 @@ def main():
                 else:
                     print(f'{rel}:{line}: {nonterminal} ::= {alternative} is none of the alternatives of the ABI\'s grammar')
                 errors += 1
-        vendor_grammar = os.path.relpath(path, FRONTEND).split(os.sep)[0] == 'ext'
+        for m in EXT_CITATION.finditer(text):
+            ext_citations += 1
+            if m.group(1) not in extensions:
+                line = text.count('\n', 0, m.start()) + 1
+                print(f'{rel}:{line}: [ext:{m.group(1)}] is no extension of ext/extensions.inc')
+                errors += 1
+        contexts = extension_contexts(path)
         for line, name, alternatives in quoted_productions(path):
-            if vendor_grammar:
-                continue
             productions += 1
+            extension = contexts.get(line)
+            if extension in extensions:
+                added = ext_productions.get(extension, set())
+                standard = grammar[name][1] if name in grammar else set()
+                for x in alternatives:
+                    if x == '...':
+                        continue
+                    if (name, normalize(x)) in added:
+                        ext_quoted.add((extension, name, normalize(x)))
+                    elif normalize(x) not in standard:
+                        print(f'{rel}:{line}: {name}: "{x}" is neither the standard\'s nor one [ext:{extension}] adds (ext/grammar.inc)')
+                        errors += 1
+                continue
             if name not in grammar:
                 # a nonterminal a later paper added, named near the quote
                 near = '\n'.join(t for n, t in comment_lines(path) if line - 15 <= n <= line + 15)
@@ -391,8 +505,8 @@ def main():
     for name, (label, _, _) in grammar.items():
         clause = os.path.basename(os.path.dirname(os_path(subclauses, label)))
         by_clause.setdefault(clause, set()).add(name)
-    print(f'{citations} citations, {abi_citations} of the ABI, {productions} quoted productions, '
-          f'{abi_quotes} of the ABI\'s grammar, {errors} wrong')
+    print(f'{citations} citations, {abi_citations} of the ABI, {ext_citations} of extensions, '
+          f'{productions} quoted productions, {abi_quotes} of the ABI\'s grammar, {errors} wrong')
     row = []
     for clause in sorted(by_clause):
         have = sum(1 for n in by_clause[clause] if n in quoted)
@@ -412,6 +526,16 @@ def main():
             row.append(f'{section} {have}/{len(alternatives)}')
     total = sum(len(x) for x in abi_productions.values())
     print(f'ABI alternatives quoted: {len(abi_quoted)}/{total}' + (', by section: ' + ', '.join(row) if row else ''))
+    row = []
+    for extension in sorted(ext_productions):
+        have = sum(1 for k in ext_productions[extension] if (extension,) + k in ext_quoted)
+        row.append(f'{extension} {have}/{len(ext_productions[extension])}')
+    total = sum(len(x) for x in ext_productions.values())
+    print(f'extension productions quoted: {len(ext_quoted)}/{total}' + (', by extension: ' + ', '.join(row) if row else ''))
+    if a.ext_missing:
+        for nonterminal, alternative in sorted(ext_productions.get(a.ext_missing, ())):
+            if (a.ext_missing, nonterminal, alternative) not in ext_quoted:
+                print(f'  {nonterminal}: {alternative}')
     if a.abi_missing:
         for nonterminal, alternative in abi_productions.get(a.abi_missing, ()):
             if (a.abi_missing, nonterminal, alternative) not in abi_quoted:

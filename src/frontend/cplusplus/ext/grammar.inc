@@ -1,0 +1,115 @@
+/*
+ * The grammar the extensions of extensions.inc add, in the notation of
+ * [syntax]: a nonterminal, an alternative of it, terminals as they are
+ * spelled, _opt for the subscript.  This is the extensions' counterpart of
+ * the standard's bnf blocks (docs/cxx-spec) and of the ABI's mangling
+ * grammar (docs/itanium-abi-grammar.tsv): code that parses an extension
+ * cites it as [ext:NAME] and quotes its productions, and
+ * bench/cxx-spec-refs.py checks each quote against these rows, as it
+ * checks the standard's.
+ *
+ * PRODUCTION(extension, nonterminal, alternative)
+ *     A standard nonterminal: an alternative the extension adds to it (not
+ *     one the standard has).  Any other nonterminal is the extension's own
+ *     and begins with its vendor (gnu-, clang-, microsoft-), so that it is
+ *     never taken for the standard's.  Every nonterminal an alternative
+ *     uses is the standard's or one defined here.
+ * TERMINALS(extension, nonterminal, where)
+ *     A nonterminal whose alternatives are keywords listed elsewhere.
+ *
+ * An extension that adds no syntax (another spelling of a keyword, a
+ * pragma's meaning, a predefined macro) has no rows.
+ */
+#ifndef PRODUCTION
+#define PRODUCTION(extension, nonterminal, alternative)
+#endif
+#ifndef TERMINALS
+#define TERMINALS(extension, nonterminal, where)
+#endif
+
+/* ---- the preprocessing directives ([cpp.pre]/1's control-line) ---- */
+
+/* GNU cpp manual 9, Preprocessor Output; flags 1 to 4 */
+PRODUCTION(gnu_line_marker, "control-line", "# digit-sequence \" s-char-sequence_opt \" pp-tokens_opt new-line")
+/* GNU cpp manual 2.7, Wrapper Headers */
+PRODUCTION(gnu_include_next, "control-line", "# include_next pp-tokens new-line")
+/* GNU cpp manual 11, Other Directives */
+PRODUCTION(gnu_ident_directive, "control-line", "# ident pp-tokens new-line")
+PRODUCTION(gnu_ident_directive, "control-line", "# sccs pp-tokens new-line")
+/* GCC manual 6.21, Variadic Macros: #define f(args...) */
+PRODUCTION(gnu_named_variadic_macro, "control-line",
+           "# define identifier lparen identifier ... ) replacement-list new-line")
+PRODUCTION(gnu_named_variadic_macro, "control-line",
+           "# define identifier lparen identifier-list , identifier ... ) replacement-list new-line")
+/* Objective-C's #import */
+PRODUCTION(clang_import_directive, "control-line", "# import pp-tokens new-line")
+/* C23 6.10.4 (C++26's [cpp.embed]) */
+PRODUCTION(clang_embed, "control-line", "# embed pp-tokens new-line")
+/* (MSVC's __pragma ( pp-tokens_opt ) is an operator like _Pragma, which
+   no production has either: [cpp.pragma.op]) */
+
+/* ---- GCC's attributes (GCC manual 6.39, Attribute Syntax) ---- */
+
+PRODUCTION(gnu_attributes, "gnu-attribute-specifier", "__attribute__ ( ( gnu-attribute-list ) )")
+PRODUCTION(gnu_attributes, "gnu-attribute-specifier-seq", "gnu-attribute-specifier-seq_opt gnu-attribute-specifier")
+PRODUCTION(gnu_attributes, "gnu-attribute-list", "gnu-attribute_opt")
+PRODUCTION(gnu_attributes, "gnu-attribute-list", "gnu-attribute-list , gnu-attribute_opt")
+/* (a keyword is an identifier there, as in [dcl.attr.grammar]/5) */
+PRODUCTION(gnu_attributes, "gnu-attribute", "identifier")
+PRODUCTION(gnu_attributes, "gnu-attribute", "identifier ( gnu-attribute-arguments_opt )")
+PRODUCTION(gnu_attributes, "gnu-attribute-arguments", "identifier")
+PRODUCTION(gnu_attributes, "gnu-attribute-arguments", "identifier , expression-list")
+PRODUCTION(gnu_attributes, "gnu-attribute-arguments", "expression-list")
+/* where the standard's attribute-specifiers go, and the places only
+   GCC's syntax has: among the decl-specifiers, after a declarator (with a
+   declarator-id), after a namespace's name */
+PRODUCTION(gnu_attributes, "attribute-specifier", "gnu-attribute-specifier")
+PRODUCTION(gnu_attributes, "decl-specifier", "gnu-attribute-specifier")
+PRODUCTION(gnu_attributes, "declarator", "ptr-declarator gnu-attribute-specifier-seq")
+PRODUCTION(gnu_attributes, "declarator",
+           "noptr-declarator parameters-and-qualifiers trailing-return-type gnu-attribute-specifier-seq")
+PRODUCTION(gnu_attributes, "named-namespace-definition",
+           "inline_opt namespace attribute-specifier-seq_opt identifier gnu-attribute-specifier-seq { namespace-body }")
+PRODUCTION(gnu_attributes, "unnamed-namespace-definition",
+           "inline_opt namespace attribute-specifier-seq_opt gnu-attribute-specifier-seq { namespace-body }")
+
+/* ---- GCC manual 6.47.4, Controlling Names Used in Assembler Code ---- */
+
+PRODUCTION(gnu_asm_labels, "gnu-asm-label", "asm ( string-literal )")
+PRODUCTION(gnu_asm_labels, "declarator", "ptr-declarator gnu-asm-label gnu-attribute-specifier-seq_opt")
+PRODUCTION(gnu_asm_labels, "declarator",
+           "noptr-declarator parameters-and-qualifiers trailing-return-type gnu-asm-label gnu-attribute-specifier-seq_opt")
+
+/* ---- GCC manual 7.3, Restricting Pointer Aliasing ---- */
+
+PRODUCTION(gnu_restrict, "cv-qualifier", "__restrict")
+PRODUCTION(gnu_restrict, "cv-qualifier", "__restrict__")
+
+/* ---- GCC manual 6.48, Alternate Keywords: __extension__ ---- */
+
+PRODUCTION(gnu_extension_keyword, "declaration", "__extension__ declaration")
+PRODUCTION(gnu_extension_keyword, "block-declaration", "__extension__ block-declaration")
+PRODUCTION(gnu_extension_keyword, "member-declaration", "__extension__ member-declaration")
+PRODUCTION(gnu_extension_keyword, "unary-expression", "__extension__ cast-expression")
+
+/* ---- clang Language Extensions, Type Trait Primitives ---- */
+
+PRODUCTION(clang_type_traits, "primary-expression", "clang-type-trait-expression")
+PRODUCTION(clang_type_traits, "clang-type-trait-expression", "clang-type-trait ( clang-type-trait-argument-list )")
+PRODUCTION(clang_type_traits, "clang-type-trait-argument-list", "clang-type-trait-argument")
+PRODUCTION(clang_type_traits, "clang-type-trait-argument-list",
+           "clang-type-trait-argument-list , clang-type-trait-argument")
+PRODUCTION(clang_type_traits, "clang-type-trait-argument", "type-id ..._opt")
+PRODUCTION(clang_type_traits, "clang-type-trait-argument", "assignment-expression ..._opt")
+PRODUCTION(clang_type_traits, "simple-type-specifier", "clang-type-transformation")
+PRODUCTION(clang_type_traits, "clang-type-transformation", "clang-type-transformation-keyword ( type-id )")
+TERMINALS(clang_type_traits, "clang-type-trait", "extension-keywords.inc: EXTENSION_KEYWORD(type_trait, ...)")
+TERMINALS(clang_type_traits, "clang-type-transformation-keyword",
+          "extension-keywords.inc: EXTENSION_KEYWORD(type_transformation, ...)")
+
+/* ---- C++26's = delete ( string-literal ) (P2573R2) before C++26 ---- */
+
+PRODUCTION(clang_deleted_function_message, "function-body", "= delete ( string-literal ) ;")
+
+#undef PRODUCTION
+#undef TERMINALS

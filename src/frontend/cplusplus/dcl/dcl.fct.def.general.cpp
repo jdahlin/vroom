@@ -74,6 +74,13 @@ void parser::defaultable_declarator(const declarator_facts &declarator,
              "dcl.fct.def.default", at_id);
 }
 
+/*
+ * [dcl.fct.def.general]/1's function-body, and before C++26
+ * [ext:clang_deleted_function_message]:
+ *
+ *     function-body:
+ *         = delete ( string-literal ) ;
+ */
 node_index parser::function_body(const declarator_facts &declarator,
                                  bool member)
 {
@@ -168,7 +175,7 @@ node_index parser::function_body(const declarator_facts &declarator,
         /* C++26's
                = delete deleted-function-message_opt ;   (P2573R2)
            with deleted-function-message: ( string-literal ); in an earlier
-           edition [ext.clang] clang_deleted_function_message */
+           edition [ext:clang_deleted_function_message] (above) */
         const implementation_defined_behavior &b = tokens.files.behavior;
         if (deleted && at(preprocessing_op_or_punc::LEFT_PARENTHESIS) &&
             (b.has(language_feature::deleted_function_message) ||

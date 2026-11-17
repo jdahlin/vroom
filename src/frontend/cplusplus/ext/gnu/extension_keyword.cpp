@@ -1,14 +1,21 @@
 /*
- * extension_keyword.cpp: [ext.gnu] gnu_extension_keyword (GCC manual 6.48,
+ * extension_keyword.cpp: [ext:gnu_extension_keyword] (GCC manual 6.48,
  * Alternate Keywords): "-pedantic and other options cause warnings for many
  * GNU C extensions.  You can prevent such warnings within one expression by
  * writing __extension__ before the expression."  GCC and clang take it
- * before a declaration as well, at namespace, class and block scope.
+ * before a declaration as well, at namespace, class and block scope:
  *
- *     __extension__ declaration
- *     __extension__ member-declaration
- *     __extension__ block-declaration
- *     __extension__ cast-expression
+ *     declaration:
+ *         __extension__ declaration
+ *
+ *     member-declaration:
+ *         __extension__ member-declaration
+ *
+ *     block-declaration:
+ *         __extension__ block-declaration
+ *
+ *     unary-expression:
+ *         __extension__ cast-expression
  *
  * The keyword changes no meaning: only which diagnostics are issued.
  */

@@ -1,14 +1,16 @@
 /*
- * asm_label.cpp: [ext.gnu] gnu_asm_labels (GCC manual 6.47.4, Controlling
+ * asm_label.cpp: [ext:gnu_asm_labels] (GCC manual 6.47.4, Controlling
  * Names Used in Assembler Code): "You can specify the name to be used in
  * the assembler code for a C function or variable by writing the asm (or
- * __asm__) keyword after the declarator."  With gnu_attributes, GCC's
- * attribute-specifiers may follow it ("immediately before the comma, = or
- * semicolon terminating the declaration").
+ * __asm__) keyword after the declarator."  GCC's attribute-specifiers may
+ * follow it ("immediately before the comma, = or semicolon terminating the
+ * declaration"):
  *
- *     declarator asm-label_opt attribute-specifier ...
+ *     declarator:
+ *         ptr-declarator gnu-asm-label gnu-attribute-specifier-seq_opt
+ *         noptr-declarator parameters-and-qualifiers trailing-return-type gnu-asm-label gnu-attribute-specifier-seq_opt
  *
- *     asm-label:
+ *     gnu-asm-label:
  *         asm ( string-literal )
  *
  * Only after a declarator that has a declarator-id: an abstract-declarator

@@ -200,7 +200,7 @@ preprocessing_token lexer::lex(bool header_name_permitted)
             uint32_t code_point,
                 n = decode_utf8(p + start + t.extent - 1, file.size - start,
                                 &code_point);
-            /* [ext.clang] clang_unicode_white_space */
+            /* [ext:clang_unicode_white_space] */
             if (n && is_unicode_white_space(code_point) &&
                 !options.preprocessed_input &&
                 behavior.has(extension::clang_unicode_white_space)) {

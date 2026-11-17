@@ -203,7 +203,7 @@ void preprocessor::substitute_range(substitution &s, uint32_t i,
         if (is_operator(e.token, op::HASH_HASH) && !out.empty()) {
             /* [impl.clang] white space before the ## is the deleted ##'s */
             s.next_space = false;
-            /* [ext.gnu] gnu_comma_paste */
+            /* [ext:gnu_comma_paste] */
             if (behavior.has(extension::gnu_comma_paste))
                 if (uint32_t used = gnu_comma_paste(s, i, out)) {
                     i += used;

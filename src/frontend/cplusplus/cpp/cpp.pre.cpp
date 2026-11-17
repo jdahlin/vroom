@@ -47,7 +47,7 @@ preprocessor::preprocessor(source_files &f, const preprocessor_options &o)
 /* [cpp.pre]: the directive names "appearing after a # in the syntax";
    elifdef, elifndef and warning are C++23's (P2334R1, P2437R1), whose use
    in earlier editions clang accepts with a warning
-   ([ext.clang] clang_later_edition_features, directive_elif_else) */
+   ([ext:clang_later_edition_features], directive_elif_else) */
 directive_kind find_directive(const implementation_defined_behavior &b,
                               const char *s, size_t n)
 {
@@ -302,7 +302,7 @@ void preprocessor::execute_directive(const preprocessing_token &hash)
        no effect." */
     if (is_end(name))
         return;
-    /* [ext.gnu] gnu_line_marker: # digit-sequence "s-char-sequence" flags */
+    /* [ext:gnu_line_marker]: # digit-sequence "s-char-sequence" flags */
     if (name.kind == preprocessing_token_kind::pp_number &&
         behavior.has(extension::gnu_line_marker)) {
         gnu_line_marker(name);

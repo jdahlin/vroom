@@ -1,9 +1,14 @@
 /*
- * include_next.cpp: [ext.gnu] gnu_include_next: #include_next (GNU cpp
- * manual 2.7, Wrapper Headers) searches for the header from the directory
+ * include_next.cpp: [ext:gnu_include_next] (GNU cpp manual 2.7, Wrapper
+ * Headers):
+ *
+ *     control-line:
+ *         # include_next pp-tokens new-line
+ *
+ * searches for the header from the directory
  * after the one the including file was found in, so that a header can wrap
  * the one of the same name later in the search.  Also clang's
- * __has_include_next ([ext.clang] clang_has_include_next, in
+ * __has_include_next ([ext:clang_has_include_next], in
  * preprocessor::has_include).
  */
 #include "../../cplusplus-internal.h"

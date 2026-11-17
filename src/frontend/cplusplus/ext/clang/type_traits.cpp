@@ -1,21 +1,31 @@
 /*
- * type_traits.cpp: [ext.clang] clang_type_traits (clang Language
- * Extensions, Type Trait Primitives): the compiler's answers to
- * <type_traits>' questions, which libstdc++ and libc++ use when
- * __has_builtin says they exist.
+ * type_traits.cpp: [ext:clang_type_traits] (clang Language Extensions,
+ * Type Trait Primitives): the compiler's answers to <type_traits>'
+ * questions, which libstdc++ and libc++ use when __has_builtin says they
+ * exist.
  *
- *     type-trait-expression:
- *         type-trait ( type-trait-argument , ... )
+ *     primary-expression:
+ *         clang-type-trait-expression
  *
- *     type-trait-argument:
+ *     clang-type-trait-expression:
+ *         clang-type-trait ( clang-type-trait-argument-list )
+ *
+ *     clang-type-trait-argument-list:
+ *         clang-type-trait-argument
+ *         clang-type-trait-argument-list , clang-type-trait-argument
+ *
+ *     clang-type-trait-argument:
  *         type-id ..._opt
  *         assignment-expression ..._opt
  *
- *     type-transformation:
- *         type-transformation-keyword ( type-id )
+ *     simple-type-specifier:
+ *         clang-type-transformation
  *
- * An expression trait is a primary-expression; a type transformation is a
- * simple-type-specifier.  Most traits take type-ids; __array_extent's
+ *     clang-type-transformation:
+ *         clang-type-transformation-keyword ( type-id )
+ *
+ * The keywords are extension-keywords.inc's type_trait and
+ * type_transformation rows.  Most traits take type-ids; __array_extent's
  * second argument, __is_lvalue_expr's and __is_rvalue_expr's are
  * expressions: an argument is a type-id when the tokens can be one
  * ([dcl.ambig.res]/2's rule).  How many arguments each takes is not

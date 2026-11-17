@@ -1,5 +1,5 @@
 /*
- * predefined.cpp: [ext.gnu] gnu_common_predefined_macros (GNU cpp manual
+ * predefined.cpp: [ext:gnu_common_predefined_macros] (GNU cpp manual
  * 3.7.2, Common Predefined Macros), whose replacement depends on where they
  * are used ([cpp.predefined]/4 lets an implementation predefine names that
  * "begin with a leading underscore followed by an uppercase letter or a

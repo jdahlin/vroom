@@ -94,7 +94,7 @@ void preprocessor::execute_pragma(const preprocessing_token *t, size_t count,
     (void)at;
     if (!count)
         return;
-    /* [ext.gnu] gnu_pragmas, gnu_push_pop_macro, gnu_pragma_message */
+    /* [ext:gnu_pragmas], gnu_push_pop_macro, gnu_pragma_message */
     if (gnu_pragma(t, count))
         return;
     if (spelled_as(files, t[0], "STDC") ||

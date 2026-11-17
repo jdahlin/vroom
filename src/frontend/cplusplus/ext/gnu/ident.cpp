@@ -1,7 +1,13 @@
 /*
- * ident.cpp: [ext.gnu] gnu_ident_directive: #ident "string" and #sccs
- * "string" (GNU cpp manual 11, Other Directives), which put the string in
- * the object file's comment section; clang accepts and drops them.
+ * ident.cpp: [ext:gnu_ident_directive] (GNU cpp manual 11, Other
+ * Directives):
+ *
+ *     control-line:
+ *         # ident pp-tokens new-line
+ *         # sccs pp-tokens new-line
+ *
+ * whose pp-tokens are a string-literal, which GCC puts in the object
+ * file's comment section; clang accepts and drops them.
  */
 #include "../../cplusplus-internal.h"
 

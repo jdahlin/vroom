@@ -4,8 +4,12 @@
  * well-formed program") the front end has, each with the implementation it
  * comes from and where that one documents it.  Code that implements one is
  * in ext/VENDOR/ where it can be, and asks behavior.has(extension::NAME);
- * where it cannot be moved out of the standard's code, its comment starts
- * with the tag [ext.VENDOR].  A choice the standard leaves to the
+ * its comment cites the extension as [ext:NAME], which
+ * bench/cxx-spec-refs.py checks names a row here.  The syntax an extension
+ * adds is in grammar.inc, and code that parses it quotes those productions
+ * as it quotes the standard's.  Where the code cannot be moved out of the
+ * standard's, a comment about the extension in general carries the tag
+ * [ext.VENDOR].  A choice the standard leaves to the
  * implementation (implementation-defined or undefined behavior), made as
  * that implementation makes it, is no extension: its tag is [impl.VENDOR].
  *
