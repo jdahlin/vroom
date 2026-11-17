@@ -236,10 +236,10 @@ $(OUT)/vasm: $(call o,bin/vasm/vasm.cpp $(LIB_SRC)) $(AS_OBJ)
 
 # cxxlex drives the C++ front end's lexer for bench/cxx-lex.py
 $(OUT)/cxxlex: $(call o,bin/cxxlex/cxxlex.cpp $(LIB_SRC)) $(call mod,cplusplus)
-	$(VCC_LINK) $(VCC_LDFLAGS) $^ -o $@
+	$(VCC_LINK) $(VCC_LDFLAGS) $^ -o $@ $(HOST_LIBS)
 # cxxparse drives its parser for bench/cxx-parse.py (doc/PLAN-cxx-parse.md)
 $(OUT)/cxxparse: $(call o,bin/cxxparse/cxxparse.cpp $(LIB_SRC)) $(call mod,cplusplus)
-	$(VCC_LINK) $(VCC_LDFLAGS) $^ -o $@
+	$(VCC_LINK) $(VCC_LDFLAGS) $^ -o $@ $(HOST_LIBS)
 # cxxsema drives its semantic analysis for bench/cxx-sema.py (doc/PLAN-cxx-sema.md);
 # -S lowers it to C's AST (frontend/c/ast-builder.h) for the code generator
 $(OUT)/cxxsema: $(call o,bin/cxxsema/cxxsema.cpp $(LEX_SRC) $(LIB_SRC)) $(LEX_OBJECT) $(AS_OBJ) $(PP_OBJ)
