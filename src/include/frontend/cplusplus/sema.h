@@ -218,6 +218,19 @@ enum class constness : uint8_t { constant, not_constant, unknown };
 /* [special]: a member function a class's objects are made and ended by */
 enum class special_member : uint8_t { none, constructor, destructor };
 
+/* [ext:gnu_attributes] the GNU attributes analysis has rules for, as a
+   function's or variable's flags */
+enum gnu_attribute_flag : uint32_t {
+    gnu_noinline = 1,
+    gnu_always_inline = 2,
+    gnu_noreturn = 4,
+    gnu_weak = 8,
+    gnu_used = 16,
+    gnu_section = 32,
+    gnu_aligned = 64,
+    gnu_packed = 128,
+};
+
 struct entity {
     entity_kind kind = entity_kind::none;
     linkage linkage_of_name = linkage::none;
@@ -310,6 +323,22 @@ struct entity {
     /* a class: its user-declared constructors (a chain through
        next_constructor) and destructor, 0 if none */
     entity_index first_constructor = 0, destructor = 0;
+    /* a non-static data member that is a bit-field ([class.bit]): its
+       width and the offset of its first bit in the class (offset is the
+       byte that bit is in); an unnamed one (name 0) is in the layout but
+       not a member ([class.bit]/2) */
+    bool bit_field = false;
+    uint16_t bit_width = 0;
+    uint64_t bit_offset = 0;
+    /* a class: a union ([class.union]/1: "A union is a class defined
+       with the class-key union") */
+    bool union_ = false;
+    /* a function or variable: [ext:gnu_attributes] the GNU attributes
+       its declarations gave it (gnu_attribute_flag) and a section
+       attribute's string-literal, 0 if none; its aligned attribute's
+       alignment is alignment */
+    uint32_t gnu_flags = 0;
+    token_index section = 0;
     /* [dcl.link]/1: a function or variable with C language linkage,
        whose name is its symbol */
     bool c_language_linkage = false;
@@ -499,6 +528,9 @@ struct expression_meaning {
     /* a floating-point operand or a comma operator inside: not an integral
        constant expression before C++11 (C++03 [expr.const]/1) */
     bool beyond_integral_constant = false;
+    /* a glvalue that designates a bit-field ([class.bit]), or the value
+       read from one: its width (0: not a bit-field), for [conv.prom]/5 */
+    uint16_t bit_field_width = 0;
     /* the expression in the semantic tree, with the conversions applied to
        it so far: 0 while it has none */
     uint32_t node = 0;
@@ -824,6 +856,11 @@ class semantic_analysis
         bool declares_class = false;
         /* ... and it was an enum-specifier */
         bool declares_enumeration = false;
+        /* [ext:gnu_attributes] the GNU attributes among the
+           decl-specifiers and before them */
+        uint32_t gnu_flags = 0;
+        token_index section = 0;
+        uint64_t aligned = 0;
     };
     analysis_result decl_specifier_seq(node_index seq, specified &s,
                                        bool parameter);
@@ -849,11 +886,12 @@ class semantic_analysis
            a member of it again (a definition outside the class) */
         entity_index qualifier = 0;
         /* [ext:gnu_attributes] the alignment an aligned attribute of the
-           declarator asks for, 0 if none */
+           declarator asks for, 0 if none; the other GNU attributes of the
+           declarator (gnu_attribute_flag) and a section attribute's
+           string-literal */
         uint64_t aligned = 0;
-        /* [ext:gnu_attributes] packed (a member's alignment is 1) and used
-           (the variable or function is emitted) */
-        bool packed = false, used = false;
+        uint32_t gnu_flags = 0;
+        token_index section = 0;
         /* the declarator-id is ~ class-name: a destructor ([class.dtor]/1) */
         bool destructor = false;
     };
@@ -879,10 +917,23 @@ class semantic_analysis
                               declarator_meaning &m);
     /* [dcl.fct] */
     analysis_result function(node_index parameters, qualified_type &type);
-    /* [ext:gnu_attributes] the attributes of a declarator analysis has
-       rules for: aligned */
+    /* [ext:gnu_attributes] the attributes of a gnu-attribute-specifier
+       (or a gnu-attribute-specifier-seq) analysis has rules for */
+    struct gnu_attributes {
+        uint64_t aligned = 0;
+        uint32_t flags = 0;
+        token_index section = 0;
+    };
+    analysis_result gnu_attribute_specifier(node_index n, gnu_attributes &g);
     analysis_result gnu_attribute_specifier(node_index n,
                                             declarator_meaning &m);
+    analysis_result gnu_attribute_specifier(node_index n, specified &s);
+    uint32_t leading_gnu_attributes(node_index n) const;
+    bool declares_unnamed_class(node_index seq) const;
+    /* [ext:gnu_library_builtins] the function __builtin_NAME (an
+       identifier) declares at its first use, 0 if it is not one */
+    entity_index library_builtin(uint32_t name);
+    qualified_type builtin_parameter_type(uint8_t t);
     /* the parameters of the function declarator analysed last: a function
        definition's, with the types they have in its body ([dcl.fct]/5's
        adjustment, top-level cv-qualifiers kept) */
@@ -1214,6 +1265,12 @@ class semantic_analysis
     uint8_t declaration_access = 0;
     uint64_t layout_size = 0;
     uint32_t layout_alignment = 1;
+    /* the bits at the end of layout_size the last bit-field left unused
+       (a next bit-field may take them) */
+    uint64_t layout_unfilled = 0;
+    analysis_result member_bit_field(entity_index c, node_index declaration,
+                                     syntax_child d, const specified &s,
+                                     uint8_t access);
 
     /* the declaration analysed now, for the expressions' records */
     node_index current_declaration = 0;

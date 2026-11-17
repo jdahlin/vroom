@@ -133,7 +133,8 @@ analysis_result semantic_analysis::special_member_declarator(
     in_member_declarator = false;
     if (r != analysis_result::well_formed)
         return r;
-    if (!m.has_id || m.qualifier || m.aligned || m.packed || m.used)
+    if (!m.has_id || m.qualifier || m.aligned ||
+        (m.gnu_flags & (gnu_packed | gnu_used)))
         return not_supported(declaration, "class.ctor");
     if (function_cv)
         /* [class.ctor]/5: "A constructor shall not be declared const,
@@ -1179,7 +1180,7 @@ analysis_result semantic_analysis::special_member_definition(node_index n)
     if (r != analysis_result::well_formed)
         return r;
     entity_index c = m.qualifier;
-    if (!c || !m.has_id || m.aligned || m.packed || m.used)
+    if (!c || !m.has_id || m.aligned || (m.gnu_flags & (gnu_packed | gnu_used)))
         return not_supported(n, "dcl.fct.def.general");
     if (tokens.identifier(m.id) != entity_table[c].name)
         /* a conversion function, or ~ with another name */

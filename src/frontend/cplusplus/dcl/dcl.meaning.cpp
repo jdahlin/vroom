@@ -568,6 +568,16 @@ analysis_result semantic_analysis::declarator(node_index declaration,
             return not_supported(n, "dcl.attr");
         if (syntax_is(tree, children[i],
                       syntax_kind::parameters_and_qualifiers)) {
+            /* [ext:gnu_attributes] after the parameters */
+            node_index pq = children[i].index();
+            for (uint32_t k = 0; k < tree[pq].child_count; k++)
+                if (syntax_is(tree, tree.children(pq)[k],
+                              syntax_kind::gnu_attribute_specifier)) {
+                    analysis_result r = gnu_attribute_specifier(
+                        tree.children(pq)[k].index(), m);
+                    if (r != analysis_result::well_formed)
+                        return r;
+                }
             suffixes.append({true, i, false});
             i++;
         } else if (syntax_is_punctuator(

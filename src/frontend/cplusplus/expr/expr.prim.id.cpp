@@ -518,6 +518,8 @@ analysis_result semantic_analysis::id_expression(token_index t,
                                                  expression_meaning &m)
 {
     entity_index e = lookup(tokens.identifier(t));
+    if (!e)
+        e = library_builtin(tokens.identifier(t));
     if (!e || entity_table[e].kind == entity_kind::none)
         return not_supported(current_declaration, "basic.lookup.unqual");
     if (entity_table[e].kind == entity_kind::enumerator)

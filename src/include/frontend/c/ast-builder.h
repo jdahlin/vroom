@@ -58,26 +58,28 @@ ast_qualified_type ast_builder_type_ptrdiff(cc *c);
 ast_qualified_type ast_builder_type_va_list(cc *c);
 /* the target's size of t in bytes */
 uint64_t ast_builder_type_size(cc *c, ast_qualified_type t);
-/* a struct named name, incomplete until ast_builder_type_record_complete
-   gives its fields (so that a field can point to it) */
+/* a struct (a union if is_union) named name, incomplete until
+   ast_builder_type_record_complete gives its fields (so that a field can
+   point to it) */
 ast_qualified_type ast_builder_type_record(cc *c, const char *name,
-                                           size_t length);
+                                           size_t length, bool is_union);
 /* the record's fields in order, laid out by C's rules; names[i] and
    lengths[i] name field i, aligned[i] is its aligned attribute's
    alignment in bytes (0: none), packed[i] whether it has the packed
-   attribute */
+   attribute, widths[i] its width if it is a bit-field (-1: it is not) */
 /* a C++ class non-trivial for the purposes of calls: returned through the
    result address (x8 on AArch64, memory on x86-64) whatever its size */
 void ast_builder_type_record_in_memory(cc *c, ast_qualified_type record);
-void ast_builder_type_record_complete(cc *c, ast_qualified_type record,
-                                      const ast_qualified_type *fields,
-                                      const char *const *names,
-                                      const size_t *lengths,
-                                      const uint32_t *aligned,
-                                      const uint8_t *packed, uint32_t count);
+void ast_builder_type_record_complete(
+    cc *c, ast_qualified_type record, const ast_qualified_type *fields,
+    const char *const *names, const size_t *lengths, const uint32_t *aligned,
+    const uint8_t *packed, const int32_t *widths, uint32_t count);
 /* the offset of field i of a complete record, in bytes */
 uint64_t ast_builder_type_record_offset(cc *c, ast_qualified_type record,
                                         uint32_t field);
+/* ... in bits (a bit-field's first bit) */
+uint64_t ast_builder_type_record_bit_offset(cc *c, ast_qualified_type record,
+                                            uint32_t field);
 
 /* ---- symbols ---- */
 /* kind AST_SYMBOL_*, storage AST_STORAGE_*, flags AST_SYMBOL_FLAG_*; depth
@@ -94,6 +96,13 @@ void ast_builder_symbol_keep(cc *c, uint32_t s);
    priority): GNU C's __attribute__((constructor)) */
 void ast_builder_symbol_constructor(cc *c, uint32_t s);
 void ast_builder_symbol_flags_add(cc *c, uint32_t s, uint32_t flags);
+/* GNU C's __attribute__((section(name))): the section the symbol is
+   placed in */
+void ast_builder_symbol_section(cc *c, uint32_t s, const char *name,
+                                size_t length);
+/* GNU C's __attribute__((aligned(alignment))) on a variable: its least
+   alignment in bytes */
+void ast_builder_symbol_align(cc *c, uint32_t s, uint32_t alignment);
 /* a function's body block, or a variable's initializer */
 void ast_builder_symbol_body(cc *c, uint32_t s, uint32_t node);
 /* the next definition or declaration of file scope, in order */
@@ -107,6 +116,8 @@ uint32_t ast_builder_list(cc *c, const uint32_t *items, uint32_t count);
    one */
 uint32_t ast_builder_member(cc *c, uint32_t object, uint32_t field,
                             ast_qualified_type t);
+/* value: the constant's 64 bits, sign-extended for a signed type and
+   zero-extended for an unsigned one (unsigned __int128 included) */
 uint32_t ast_builder_integer(cc *c, ast_qualified_type t, int64_t value);
 uint32_t ast_builder_floating(cc *c, ast_qualified_type t, double value);
 /* a string literal of count elements of size bytes each, terminator

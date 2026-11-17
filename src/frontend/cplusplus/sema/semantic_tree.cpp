@@ -110,6 +110,9 @@ uint32_t semantic_analysis::expression_node(semantic_kind kind,
 
 void semantic_analysis::converted(expression_meaning &m, conversion_kind kind)
 {
+    /* the value of another type is no bit-field's */
+    if (kind != conversion_kind::lvalue_to_rvalue)
+        m.bit_field_width = 0;
     if (!m.node)
         return;
     m.node = expression_node(semantic_kind::conversion, m, semantics[m.node].at,

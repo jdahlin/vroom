@@ -1012,6 +1012,16 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
             syntax_is(tree, c, syntax_kind::elaborated_enum_specifier) ||
             syntax_is(tree, c, syntax_kind::simple_type_specifier))
             continue;
+        /* an attribute specifier has rules unless a class-specifier is
+           among the specifiers */
+        bool defines_class = false;
+        for (uint32_t k = 0; k < node.child_count; k++)
+            if (syntax_is(tree, tree.children(seq)[k],
+                          syntax_kind::class_specifier))
+                defines_class = true;
+        if (!defines_class &&
+            syntax_is(tree, c, syntax_kind::gnu_attribute_specifier))
+            continue;
         /* the class names the declaration would define are held, as
            hold_names holds its declarators' */
         for (uint32_t k = 0; k < node.child_count; k++) {
@@ -1060,7 +1070,14 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
                 r = elaborated_enum_specifier(c.index(), class_type);
             else if (syntax_is(tree, c, syntax_kind::simple_type_specifier))
                 r = qualified_type_name(c.index(), class_type);
-            else
+            else if (syntax_is(tree, c, syntax_kind::gnu_attribute_specifier)) {
+                /* [ext:gnu_attributes] a decl-specifier: it applies to
+                   the declaration */
+                r = gnu_attribute_specifier(c.index(), s);
+                if (r != analysis_result::well_formed)
+                    return r;
+                continue;
+            } else
                 return not_supported(c.index());
             if (r != analysis_result::well_formed)
                 return r;

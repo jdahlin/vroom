@@ -61,6 +61,8 @@ FLAGS = ['--target=aarch64-linux-gnu', '-nostdinc', '-I', f'{ct.RT}/include', '-
 # programs whose result is not C++'s to give
 CXX_SKIP = {
     ('gcc', '20031003-1'): 'converts a float out of int\'s range (undefined)',
+    ('gcc', 'pr79286'): 'passes an uninitialized int to printf: undefined in C++ '
+                        '([basic.indet]/2), clang++ -O2 deletes main',
 }
 NOT_YET = re.compile(r'error: (?:the rules of \[([^\]]+)\] are not implemented yet|'
                      r'C\+\+ code generation does not handle (.*) yet)')
@@ -208,8 +210,14 @@ def one(t):
     ref = reference(suite, name, path, flags, wd)
     if not ref['valid']:
         return t, None, ref['why']
-    return t, [(level, *ours(suite, name, path, flags, level, ref, wd))
-               for level in state['levels']], None
+    results = [(level, *ours(suite, name, path, flags, level, ref, wd))
+               for level in state['levels']]
+    # a known bug of vcc's code generation (/* vcc-xfail: */, TODO.md) that
+    # the C suite counts as xfail is not the C++ front end's
+    if suite == 'vcc' and ct.exec_marks(src)[1]:
+        results = [(level, 'not yet', 'the C suite\'s vcc-xfail') if outcome == 'wrong'
+                   else (level, outcome, detail) for level, outcome, detail in results]
+    return t, results, None
 
 
 def init(levels, nocache, rt, rt_names):

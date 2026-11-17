@@ -128,6 +128,7 @@ class c_lowering
     bool without_linkage(qualified_type t) const;
     entity_index enclosing_function(entity_index e) const;
     uint32_t symbol(entity_index e, token_index at, int variant = 2);
+    void gnu_attributes(entity_index e, uint32_t s);
     void spelling(entity_index e, owned_buffer &out);
     /* a constructor or destructor called: its symbol for a call */
     uint32_t special_callee(entity_index e, token_index at);
@@ -405,7 +406,7 @@ ast_qualified_type c_lowering::class_type(entity_index e, token_index at)
         vbuffer_append(name.get(), s, length);
     }
     ast_qualified_type made =
-        ast_builder_type_record(c, name.data(), name.size());
+        ast_builder_type_record(c, name.data(), name.size(), x.union_);
     records[e] = made;
     if (!x.size)
         /* incomplete: a pointer to it is all a program can have */
@@ -415,6 +416,7 @@ ast_qualified_type c_lowering::class_type(entity_index e, token_index at)
     owned_array<size_t> lengths;
     owned_array<uint32_t> aligned;
     owned_array<uint8_t> packed;
+    owned_array<int32_t> widths;
     owned_buffer base_names;
     for (uint32_t i = 0; i < x.member_count; i++) {
         entity_index member = analysis.class_members[x.first_member + i];
@@ -426,13 +428,20 @@ ast_qualified_type c_lowering::class_type(entity_index e, token_index at)
             vbuffer_append(base_names.get(), "", 1);
             names.append(nullptr);
             lengths.append(0);
+        } else if (!m.name) {
+            /* an unnamed bit-field */
+            names.append("");
+            lengths.append(0);
         } else {
             size_t length = 0;
             names.append(tokens.pp.identifier_spelling(m.name - 1, &length));
             lengths.append(length);
         }
+        widths.append(-1);
+        if (m.bit_field)
+            widths[widths.size() - 1] = m.bit_width;
         aligned.append(m.alignment);
-        packed.append(m.packed);
+        packed.append((m.gnu_flags & gnu_packed) != 0);
     }
     for (size_t i = 0, at_name = 0; i < names.size(); i++) {
         if (names[i])
@@ -449,14 +458,17 @@ ast_qualified_type c_lowering::class_type(entity_index e, token_index at)
         lengths.append(7);
         aligned.append(0);
         packed.append(0);
+        widths.append(-1);
     }
     ast_builder_type_record_complete(
         c, made, fields.data(), names.data(), lengths.data(), aligned.data(),
-        packed.data(), static_cast<uint32_t>(fields.size()));
+        packed.data(), widths.data(), static_cast<uint32_t>(fields.size()));
     for (uint32_t i = 0; i < x.member_count; i++) {
         entity_index member = analysis.class_members[x.first_member + i];
-        if (ast_builder_type_record_offset(c, made, i) !=
-            analysis.entity_table[member].offset)
+        const entity &m = analysis.entity_table[member];
+        if (ast_builder_type_record_offset(c, made, i) != m.offset ||
+            (m.bit_field &&
+             ast_builder_type_record_bit_offset(c, made, i) != m.bit_offset))
             fail("a class whose layout is not C's", at);
     }
     if (ast_builder_type_size(c, made) != x.size)
@@ -571,6 +583,7 @@ uint32_t c_lowering::symbol(entity_index e, token_index at, int variant)
         s = ast_builder_symbol(c, AST_SYMBOL_VARIABLE, name.data(), name.size(),
                                t, AST_STORAGE_AUTO, 0, 1);
         *slot = s;
+        gnu_attributes(e, s);
         return s;
     }
     if (!itanium_symbol_name(analysis, tokens.pp, e, name.get(), variant))
@@ -591,6 +604,7 @@ uint32_t c_lowering::symbol(entity_index e, token_index at, int variant)
                                AST_STORAGE_STATIC, 0, 1);
         ast_builder_symbol_assembler_name(c, s, written.data(), written.size());
         *slot = s;
+        gnu_attributes(e, s);
         return s;
     }
     int storage = AST_STORAGE_NONE;
@@ -614,7 +628,38 @@ uint32_t c_lowering::symbol(entity_index e, token_index at, int variant)
                            0);
     *slot = s;
     ast_builder_toplevel(c, s);
+    gnu_attributes(e, s);
     return s;
+}
+
+/* [ext:gnu_attributes] what the entity's GNU attributes ask of its
+   symbol, as C's front end gives them */
+void c_lowering::gnu_attributes(entity_index e, uint32_t s)
+{
+    const entity &x = analysis.entity_table[e];
+    uint32_t flags = 0;
+    if (x.gnu_flags & gnu_noinline)
+        flags |= AST_SYMBOL_FLAG_NOINLINE;
+    if (x.gnu_flags & gnu_always_inline)
+        flags |= AST_SYMBOL_FLAG_ALWAYS_INLINE;
+    if (x.gnu_flags & gnu_noreturn)
+        flags |= AST_SYMBOL_FLAG_NORETURN;
+    if (x.gnu_flags & gnu_weak)
+        flags |= AST_SYMBOL_FLAG_WEAK;
+    if (flags)
+        ast_builder_symbol_flags_add(c, s, flags);
+    if (x.gnu_flags & gnu_used)
+        ast_builder_symbol_keep(c, s);
+    if (x.section) {
+        /* the string-literal's characters between its quotes (sema took
+           one with no escape sequence) */
+        owned_buffer written;
+        tokens.spelling(x.section, written.get());
+        ast_builder_symbol_section(c, s, written.data() + 1,
+                                   written.size() - 2);
+    }
+    if (x.kind == entity_kind::variable && x.alignment)
+        ast_builder_symbol_align(c, s, x.alignment);
 }
 
 /* [abi:mangling-special-ctor-dtor]: an inline constructor or destructor
@@ -1421,17 +1466,34 @@ uint32_t c_lowering::bind_reference(const semantic_node &n)
 uint32_t c_lowering::initializer_list(const semantic_node &n)
 {
     if (record(n.type).kind == type_kind::class_type) {
-        /* a struct's initializer: a value per field, in order */
+        /* a struct's initializer: a value per field, in order; none (0)
+           for an unnamed bit-field, which is no element ([class.bit]/2) */
         owned_array<uint32_t> values;
         const uint32_t *items = analysis.semantics.items(n.first);
-        for (uint32_t i = 0; i < n.count; i++) {
-            uint32_t e = expression(items[i]);
+        const entity &x = analysis.entity_table[record(n.type).entity];
+        for (uint32_t i = 0, item = 0; item < n.count; i++) {
+            if (i < x.member_count) {
+                const entity &m =
+                    analysis.entity_table
+                        [analysis.class_members[x.first_member + i]];
+                if (m.bit_field && !m.name) {
+                    values.append(0);
+                    continue;
+                }
+            }
+            uint32_t e = expression(items[item++]);
             if (!e)
                 return 0;
             values.append(e);
         }
+        uint32_t value_count = static_cast<uint32_t>(values.size());
+        /* a union's: the value of field a (C's aux 2), the first */
+        uint16_t aux = 0;
+        if (analysis.entity_table[record(n.type).entity].union_)
+            aux = 2;
         return make(AST_NODE_INITIALIZER, type(n.type, n.at), 0,
-                    ast_builder_list(c, values.data(), n.count), n.count, 0, 0);
+                    ast_builder_list(c, values.data(), value_count),
+                    value_count, aux, 0);
     }
     owned_array<uint32_t> runs;
     const uint32_t *items = analysis.semantics.items(n.first);

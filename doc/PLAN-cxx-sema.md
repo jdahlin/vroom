@@ -789,6 +789,57 @@ libstdc++ and json), since sema cannot analyse a declaration kept as tokens.
   C5.1 1206 passing, 1204 after the merge with main (which made a
   variable's `aligned` unsupported), 0 wrong.  bench/cxx-sema.py not run
   (needs clang 23).
+  Then GCC's attributes ([ext:gnu_attributes], `ext/gnu/attribute.cpp`)
+  wherever GCC takes them: before a declaration (the 251 function
+  definitions `__attribute__((noinline))` sent to the constructor path),
+  among the decl-specifiers, after a declarator and after a function's
+  parameters.  noinline (noipa), always_inline, noreturn, weak, used,
+  section("...") and aligned on functions and variables (automatic ones
+  too) lower to the C symbol's flags, section and alignment; packed on a
+  non-static data member gives it alignment 1 in sema's layout and C's
+  (`ast_builder_type_record_complete`'s packed[]); the attributes that
+  change no code (unused, noclone, const, pure, format, ...) are
+  accepted.  Member functions' and static data members' symbol attributes
+  stay unsupported.  Fixed on the way: `ast_builder_integer` sign-extended
+  an unsigned 64-bit constant to C's 128 bits (`(unsigned __int128)
+  0xfedcba9876543210ULL` was negative).  `src/test/cxx/run/gnu-attributes.cpp`;
+  cxx-c-suites reads the C suite's vcc-xfail (autoinit_zero is vcc's
+  arm64 gap, not C++'s).  C5.1 1206 -> 1563, 0 wrong; not yet by what is
+  missing: [basic.lookup.unqual] 666, declarations kept as tokens 441,
+  [ext.gnu] 206, [class.mem] 190, [class.union] 98.
+  Then GCC's library builtins ([ext:gnu_library_builtins],
+  `ext/gnu/library-builtins.cpp`): `__builtin_abort`, `memcpy`, `printf`
+  and the other C library functions' `__builtin_` forms (clang's
+  LibBuiltin prototypes) are declared at their first use, when
+  unqualified lookup finds nothing, as functions of the global namespace
+  with C language linkage named by the library function (its symbol);
+  `__builtin_abort` is noreturn.  The others (`__builtin_expect`,
+  `_constant_p`, `_trap`, the overflow builtins) stay unsupported.
+  gcc/pr79286 is skipped: its uninitialized argument is undefined in C++
+  and clang++ -O2 deletes main.  `src/test/cxx/run/library-builtins.cpp`.
+  C5.1 1563 -> 2033, 0 wrong.
+  Then unions ([class.union]): a class with the class-key union has
+  every non-static data member at offset 0, the largest's size and the
+  strictest alignment; aggregate initialization initializes the first
+  member alone ([dcl.init.aggr]/16, C's union initializer); union in
+  elaborated-type-specifiers, the class-key agreeing with the class's
+  ([dcl.type.elab]/3); lowered to a C union.  Unsupported: members of
+  class type, anonymous unions and unnamed structs ([class.union.anon],
+  they were taken for nested classes before), bases.
+  `src/test/cxx/run/unions.cpp`; C5.1 2033 -> 2077, 0 wrong.
+  Then bit-fields ([class.bit], `member_bit_field` in
+  `class/class.pre.cpp`): integral bit-fields, named, unnamed and of
+  width zero, laid out as clang's for aarch64 Linux (a bit-field moves to
+  its type's alignment only when it would cross it; every bit-field
+  raises the class's alignment), lowered as C bit-fields with each bit
+  offset checked against C's layout; [conv.prom]/5's promotions (an
+  `expression_meaning::bit_field_width` that a conversion clears, a cast
+  to the bit-field's own type too), & and sizeof of a bit-field and a
+  reference bound to one unsupported, unnamed bit-fields skipped by
+  aggregate initialization.  Unsupported: enumeration bit-fields, padding
+  bits (a width wider than the type), initializers, attributes, and
+  bit-fields in unions.  `src/test/cxx/run/bit-fields.cpp`;
+  C5.1 2077 -> 2211, 0 wrong.
   Next: member functions of local and nested classes, in-class
   initializers of static members, unions, virtual functions.
 

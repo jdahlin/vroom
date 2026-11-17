@@ -86,6 +86,23 @@ analysis_result semantic_analysis::class_specifier(node_index n,
     return r;
 }
 
+/* whether a decl-specifier-seq has a class-specifier of an unnamed
+   class */
+bool semantic_analysis::declares_unnamed_class(node_index seq) const
+{
+    for (uint32_t i = 0; i < tree[seq].child_count; i++) {
+        syntax_child c = tree.children(seq)[i];
+        if (!syntax_is(tree, c, syntax_kind::class_specifier) ||
+            !tree[c.index()].child_count)
+            continue;
+        syntax_child head = tree.children(c.index())[0];
+        if (syntax_is(tree, head, syntax_kind::class_head) &&
+            tree[head.index()].child_count == 1)
+            return true;
+    }
+    return false;
+}
+
 analysis_result semantic_analysis::class_definition(node_index n,
                                                     type_index &type)
 {
@@ -114,10 +131,13 @@ analysis_result semantic_analysis::class_definition(node_index n,
         /* a class-virt-specifier, a base-clause of an unnamed class */
         return not_supported(n, "class.derived");
     standard_keyword key = p.keyword_of(tokens[head_children[0].index()]);
-    if (key == standard_keyword::union_)
-        return not_supported(n, "class.union");
-    if (key != standard_keyword::class_ && key != standard_keyword::struct_)
+    if (key != standard_keyword::class_ && key != standard_keyword::struct_ &&
+        key != standard_keyword::union_)
         return not_supported(n, "class.pre");
+    /* [class.union]/1: "A union shall not have base classes." (clang's
+       error) */
+    if (key == standard_keyword::union_ && has_bases)
+        return not_supported(n, "class.union");
     /* [class.nest]/1: "A class can be declared within another class.  A
        class so declared is called a nested class."  [class.local]/1: "A
        class can be declared within a function definition; such a class is
@@ -163,6 +183,13 @@ analysis_result semantic_analysis::class_definition(node_index n,
                                        "more than one definition of any "
                                        "class type",
                                        "basic.def.odr");
+        /* [dcl.type.elab]/3: "The class-key or enum keyword present in
+           the elaborated-type-specifier shall agree in kind with the
+           declaration to which the name in the elaborated-type-specifier
+           refers ... the union class-key shall be used to refer to a
+           union" (an earlier declaration with another class-key) */
+        if (prior.union_ != (key == standard_keyword::union_))
+            return not_supported(n, "dcl.type.elab");
     } else {
         c = entity_table.make(entity_kind::class_type, name, scope);
         /* [basic.link]/2.3: a local class's name has no linkage; a nested
@@ -180,6 +207,7 @@ analysis_result semantic_analysis::class_definition(node_index n,
         entity_table[c].access = declaration_access;
     entity_table.add_declaration(c, current_declaration);
     entity_table[c].defined = true;
+    entity_table[c].union_ = key == standard_keyword::union_;
     entity_table[c].first_member = static_cast<uint32_t>(class_members.size());
     entity_table[c].member_count = 0;
     type = entity_table[c].type.unqualified();
@@ -192,10 +220,12 @@ analysis_result semantic_analysis::class_definition(node_index n,
         access = 2;
     uint64_t outer_size = layout_size;
     uint32_t outer_alignment = layout_alignment;
+    uint64_t outer_unfilled = layout_unfilled;
     uint8_t outer_access = declaration_access;
     defining_class = c;
     layout_size = 0;
     layout_alignment = 1;
+    layout_unfilled = 0;
     /* the enclosing class's analysis goes on after this one: its state
        back, and its members so far again after this class's, so that they
        stay one range of class_members */
@@ -203,6 +233,7 @@ analysis_result semantic_analysis::class_definition(node_index n,
         defining_class = outer;
         layout_size = outer_size;
         layout_alignment = outer_alignment;
+        layout_unfilled = outer_unfilled;
         declaration_access = outer_access;
         if (!outer)
             return;
@@ -319,8 +350,10 @@ analysis_result semantic_analysis::elaborated_type_specifier(node_index n,
         tokens[children[1].index()].kind != token_kind::identifier)
         return not_supported(n, "dcl.type.elab");
     standard_keyword key = p.keyword_of(tokens[children[0].index()]);
-    if (key != standard_keyword::class_ && key != standard_keyword::struct_)
+    if (key != standard_keyword::class_ && key != standard_keyword::struct_ &&
+        key != standard_keyword::union_)
         return not_supported(n, "dcl.type.elab");
+    bool is_union = key == standard_keyword::union_;
     uint32_t name = tokens.identifier(children[1].index());
     if (current_scope || function_state.active || defining_class) {
         /* [basic.lookup.elab]/2: a class found by lookup from a block or
@@ -329,6 +362,9 @@ analysis_result semantic_analysis::elaborated_type_specifier(node_index n,
         entity_index found = lookup(name);
         if (!found || entity_table[found].kind != entity_kind::class_type)
             return not_supported(n, "basic.lookup.elab");
+        /* [dcl.type.elab]/3: the class-key agrees with the class's */
+        if (entity_table[found].union_ != is_union)
+            return not_supported(n, "dcl.type.elab");
         type = entity_table[found].type.unqualified();
         return analysis_result::well_formed;
     }
@@ -336,11 +372,14 @@ analysis_result semantic_analysis::elaborated_type_specifier(node_index n,
     if (c) {
         if (entity_table[c].kind != entity_kind::class_type)
             return not_supported(n, "basic.lookup.elab");
+        if (entity_table[c].union_ != is_union)
+            return not_supported(n, "dcl.type.elab");
         type = entity_table[c].type.unqualified();
         return analysis_result::well_formed;
     }
     c = entity_table.make(entity_kind::class_type, name, 0);
     entity_table[c].linkage_of_name = linkage::external;
+    entity_table[c].union_ = is_union;
     entity_table[c].type = qualified_type::make(
         type_table.of_entity(type_kind::class_type, c), cv_none);
     entity_table.add_declaration(c, current_declaration);
@@ -514,6 +553,12 @@ semantic_analysis::member_declaration(entity_index c, syntax_child member,
                      !s.constexpr_ && !s.type.cv();
         if (s.declares_enumeration && plain)
             return analysis_result::well_formed;
+        /* [class.union.anon]/1: "A union of the form union { member-
+           specification } ; is called an anonymous union; it defines an
+           unnamed type and an unnamed object of that type"; an unnamed
+           struct so is clang's extension: neither is analysed yet */
+        if (declares_unnamed_class(children[0].index()))
+            return not_supported(n, "class.union.anon");
         /* [class.nest]/1: a nested class's definition */
         const syntax_node &seq = tree[children[0].index()];
         if (plain && seq.child_count == 1 &&
@@ -544,8 +589,15 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
                                      syntax_child d, const specified &s,
                                      uint8_t access, bool definition)
 {
-    if (syntax_is(tree, d, syntax_kind::member_declarator))
+    if (syntax_is(tree, d, syntax_kind::member_declarator)) {
+        /* identifier_opt attribute-specifier-seq_opt : constant-expression */
+        const syntax_node &node = tree[d.index()];
+        for (uint32_t i = 0; i < node.child_count; i++)
+            if (syntax_is_punctuator(tokens, tree.children(d.index())[i],
+                                     preprocessing_op_or_punc::COLON))
+                return member_bit_field(c, declaration, d, s, access);
         return not_supported(d.index(), "class.mem");
+    }
     if (!s.has_type && declares_special_member(c, d))
         /* a cv-qualifier or another specifier with a constructor */
         return not_supported(declaration, "class.ctor");
@@ -559,6 +611,12 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
         return r;
     if (!m.has_id || m.qualifier)
         return not_supported(declaration, "class.mem");
+    /* [ext:gnu_attributes] the declaration's and the declarator's */
+    if (s.aligned > m.aligned)
+        m.aligned = s.aligned;
+    m.gnu_flags |= s.gnu_flags;
+    if (!m.section)
+        m.section = s.section;
     if (!s.has_type)
         return not_supported(declaration, "dcl.type");
     if (s.typedef_)
@@ -575,7 +633,14 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
     uint32_t name = tokens.identifier(m.id);
     bool is_function =
         type_table[type.unqualified()].kind == type_kind::function;
-    if ((is_function && (m.aligned || m.packed)) || m.used)
+    if ((is_function && (m.aligned || (m.gnu_flags & gnu_packed))) ||
+        (m.gnu_flags & gnu_used))
+        return not_supported(declaration, "ext.gnu");
+    /* a member's symbol attributes (a member function's, a static data
+       member's) are not analysed yet; on a non-static data member they
+       are GCC's error */
+    if (m.gnu_flags & (gnu_noinline | gnu_always_inline | gnu_noreturn |
+                       gnu_weak | gnu_used | gnu_section))
         return not_supported(declaration, "ext.gnu");
     /* [class.mem]/20: "If T is the name of a class, then each of the
        following shall have a name different from T: every static data
@@ -692,9 +757,13 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
         uint32_t alignment = static_cast<uint32_t>(alignment_of_type(type));
         if (!alignment)
             return not_supported(declaration, "class.mem");
-        /* [ext:gnu_attributes] packed lowers a member's alignment to 1,
-           aligned raises it */
-        if (m.packed)
+        if (entity_table[c].union_ && record.kind == type_kind::class_type)
+            /* a member whose special member functions may make the
+               union's deleted ([class.union]/2 Note) */
+            return not_supported(declaration, "class.union");
+        /* [ext:gnu_attributes] aligned raises a member's alignment;
+           packed lowers it to one byte, which aligned raises */
+        if (m.gnu_flags & gnu_packed)
             alignment = 1;
         if (m.aligned > alignment)
             alignment = static_cast<uint32_t>(m.aligned);
@@ -704,14 +773,25 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
         entity_table[e].defined = true;
         entity_table[e].field = entity_table[c].member_count;
         entity_table[e].alignment = static_cast<uint32_t>(m.aligned);
-        entity_table[e].packed = m.packed;
+        entity_table[e].gnu_flags = m.gnu_flags & gnu_packed;
         /* [class.mem]/19 (Note): "Non-static data members of a (non-union)
            class with the same access control and non-zero size are
            allocated so that later members have higher addresses within a
            class object."  [abi:layout]: at the next offset aligned for the
            member's type */
-        entity_table[e].offset = align_up(layout_size, alignment);
-        layout_size = entity_table[e].offset + size;
+        if (entity_table[c].union_) {
+            /* [class.union]/2: "The size of a union is sufficient to
+               contain the largest of its non-static data members.  Each
+               non-static data member is allocated as if it were the sole
+               member of a non-union class." */
+            entity_table[e].offset = 0;
+            if (size > layout_size)
+                layout_size = size;
+        } else {
+            entity_table[e].offset = align_up(layout_size, alignment);
+            layout_size = entity_table[e].offset + size;
+        }
+        layout_unfilled = 0;
         if (alignment > layout_alignment)
             layout_alignment = alignment;
         class_members.append(e);
@@ -721,6 +801,130 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
     entity_table[e].access = access;
     entity_table.add_declaration(e, declaration);
     entity_table.bind(c, name, e);
+    last_declared = e;
+    return analysis_result::well_formed;
+}
+
+/*
+ * [class.bit]/1: "A member-declarator of the form
+ *     identifier_opt attribute-specifier-seq_opt : constant-expression brace-or-equal-initializer_opt
+ * specifies a bit-field.  The optional attribute-specifier-seq appertains
+ * to the entity being declared.  A bit-field shall not be a static member.
+ * A bit-field shall have integral or enumeration type ...  The
+ * constant-expression shall be an integral constant expression with a
+ * value greater than or equal to zero and is called the width of the
+ * bit-field.  If the width of a bit-field is larger than the width of the
+ * bit-field's type (or, in case of an enumeration type, of its underlying
+ * type), the extra bits are padding bits.  Allocation of bit-fields within
+ * a class object is implementation-defined."  /2: "A declaration for a
+ * bit-field that omits the identifier declares an unnamed bit-field.
+ * Unnamed bit-fields are not members and cannot be initialized. ... As a
+ * special case, an unnamed bit-field with a width of zero specifies
+ * alignment of the next bit-field at an allocation unit boundary.  Only
+ * when declaring an unnamed bit-field may the width be zero."
+ *
+ * [impl.clang] the allocation is clang's for aarch64 Linux
+ * (ItaniumRecordLayoutBuilder::LayoutBitField with
+ * useBitFieldTypeAlignment and useZeroLengthBitfieldAlignment): a
+ * bit-field starts at the next bit unless it would cross a boundary of its
+ * type's alignment, then at that boundary (a zero-width one always moves
+ * to it); every bit-field, named or not, raises the class's alignment to
+ * its type's.  Bit-fields of enumeration type, with padding bits, with an
+ * initializer, attributes, or in a union are not analysed yet.
+ */
+analysis_result semantic_analysis::member_bit_field(entity_index c,
+                                                    node_index declaration,
+                                                    syntax_child d,
+                                                    const specified &s,
+                                                    uint8_t access)
+{
+    const syntax_node &node = tree[d.index()];
+    const syntax_child *children = tree.children(d.index());
+    token_index id = 0;
+    uint32_t k = 0;
+    if (k < node.child_count && children[k].is_token() &&
+        tokens[children[k].index()].kind == token_kind::identifier)
+        id = children[k++].index();
+    if (k + 2 != node.child_count ||
+        !syntax_is_punctuator(tokens, children[k],
+                              preprocessing_op_or_punc::COLON))
+        /* attributes, a brace-or-equal-initializer */
+        return not_supported(d.index(), "class.bit");
+    syntax_child width_expression = children[k + 1];
+    if (!s.has_type || s.typedef_ || s.static_ || s.extern_ || s.inline_ ||
+        s.constexpr_ || s.aligned || s.gnu_flags)
+        return not_supported(declaration, "class.bit");
+    if (entity_table[c].union_)
+        return not_supported(declaration, "class.bit");
+    qualified_type type = s.type;
+    const struct type record = type_table[type.unqualified()];
+    if (record.kind == type_kind::enumeration)
+        return not_supported(declaration, "class.bit");
+    if (record.kind != type_kind::fundamental ||
+        !fundamental_type_is_integral(record.fundamental))
+        return ill_formed(declaration,
+                          "a bit-field shall have integral or enumeration "
+                          "type",
+                          "class.bit");
+    expression_meaning w;
+    analysis_result r = expression(width_expression, w);
+    if (r != analysis_result::well_formed)
+        return r;
+    r = operand_value(declaration, w);
+    if (r != analysis_result::well_formed)
+        return r;
+    promote_enumeration(w);
+    if (!is_integral(w.type) || w.evaluation != constness::constant)
+        return not_supported(declaration, "class.bit");
+    __int128 width_value =
+        integer_value(tokens.files.behavior, fundamental_of(w.type), w.value);
+    if (width_value < 0)
+        return ill_formed(declaration,
+                          "the width of a bit-field shall be greater than or "
+                          "equal to zero",
+                          "class.bit");
+    if (width_value == 0 && id)
+        return ill_formed(declaration,
+                          "only when declaring an unnamed bit-field may the "
+                          "width be zero",
+                          "class.bit");
+    uint64_t unit = size_of_type(type) * 8;
+    uint64_t alignment = alignment_of_type(type);
+    if (static_cast<unsigned __int128>(width_value) > unit || !alignment)
+        /* padding bits (clang's warning) */
+        return not_supported(declaration, "class.bit");
+    uint64_t width = static_cast<uint64_t>(width_value);
+    uint32_t name = 0;
+    if (id) {
+        name = tokens.identifier(id);
+        if (entity_table.find(c, name))
+            return not_supported(declaration, "class.mem");
+    }
+    uint64_t bit_alignment = alignment * 8;
+    uint64_t at = layout_size * 8 - layout_unfilled;
+    if (!width || (at % bit_alignment) + width > unit)
+        at = align_up(at, bit_alignment);
+    uint64_t end = at + width;
+    layout_size = align_up(end, 8) / 8;
+    layout_unfilled = layout_size * 8 - end;
+    if (alignment > layout_alignment)
+        layout_alignment = static_cast<uint32_t>(alignment);
+    entity_index e = entity_table.make(entity_kind::variable, name, c);
+    entity_table[e].type = type;
+    entity_table[e].nonstatic_member = true;
+    entity_table[e].defined = true;
+    entity_table[e].field = entity_table[c].member_count;
+    entity_table[e].offset = at / 8;
+    entity_table[e].bit_field = true;
+    entity_table[e].bit_width = static_cast<uint16_t>(width);
+    entity_table[e].bit_offset = at;
+    entity_table[e].linkage_of_name = entity_table[c].linkage_of_name;
+    entity_table[e].access = access;
+    class_members.append(e);
+    entity_table[c].member_count++;
+    entity_table.add_declaration(e, declaration);
+    if (name)
+        entity_table.bind(c, name, e);
     last_declared = e;
     return analysis_result::well_formed;
 }

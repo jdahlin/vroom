@@ -277,6 +277,10 @@ analysis_result semantic_analysis::size_of(node_index n, bool alignment,
         analysis_result r = expression(children[1], e);
         if (r != analysis_result::well_formed)
             return r;
+        /* [expr.sizeof]/1: "The sizeof operator shall not be applied to
+           ... an lvalue that designates a bit-field." */
+        if (e.bit_field_width)
+            return not_supported(n, "class.bit");
         operand = e.type;
     } else {
         /* sizeof...; alignof of an expression (GCC's) */
@@ -420,6 +424,10 @@ analysis_result semantic_analysis::unary(node_index n, expression_meaning &m)
                               "the operand of the unary & operator shall "
                               "be an lvalue",
                               "expr.unary.op");
+        /* [expr.unary.op]/5: "The operand of & shall not be a bit-field."
+           (clang's error) */
+        if (m.bit_field_width)
+            return not_supported(n, "class.bit");
         m.type = qualified_type::make(type_table.pointer_to(m.type), cv_none);
         m.category = value_category::prvalue;
         if (m.evaluation == constness::constant)

@@ -237,6 +237,24 @@ void semantic_analysis::promote(expression_meaning &m)
     if (!fundamental_type_is_integral(t))
         return;
     fundamental_type to = promoted_type(tokens.files.behavior, t);
+    if (m.bit_field_width && t != fundamental_type::bool_) {
+        /* [conv.prom]/5: "A prvalue for an integral bit-field can be
+           converted to a prvalue of type int if int can represent all the
+           values of the bit-field; otherwise, it can be converted to
+           unsigned int if unsigned int can represent all the values of the
+           bit-field.  If the bit-field is larger yet, no integral promotion
+           applies to it." */
+        const implementation_defined_behavior &b = tokens.files.behavior;
+        unsigned width = m.bit_field_width;
+        unsigned int_width = fundamental_type_width(b, fundamental_type::int_);
+        bool is_signed = fundamental_type_is_signed(b, t);
+        if (width < int_width || (is_signed && width == int_width))
+            to = fundamental_type::int_;
+        else if (!is_signed && width <= int_width)
+            to = fundamental_type::unsigned_int;
+        else
+            to = t;
+    }
     if (to != t)
         convert_arithmetic(m, to);
 }
@@ -309,6 +327,9 @@ void semantic_analysis::convert_arithmetic(expression_meaning &m,
 {
     fundamental_type from = fundamental_of(m.type);
     arithmetic_value(m, to);
+    /* a converted value is no bit-field's, of the same type too (a cast
+       to the bit-field's type) */
+    m.bit_field_width = 0;
     if (from == to)
         return;
     conversion_kind kind = conversion_kind::integral;
