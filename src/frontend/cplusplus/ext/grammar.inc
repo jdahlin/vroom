@@ -92,6 +92,10 @@ PRODUCTION(gnu_extension_keyword, "block-declaration", "__extension__ block-decl
 PRODUCTION(gnu_extension_keyword, "member-declaration", "__extension__ member-declaration")
 PRODUCTION(gnu_extension_keyword, "unary-expression", "__extension__ cast-expression")
 
+/* ---- GCC manual 6.9, 128-bit Integers ---- */
+
+PRODUCTION(gnu_int128, "simple-type-specifier", "__int128")
+
 /* ---- GCC manual 6.3, Labels as Values ---- */
 
 PRODUCTION(gnu_labels_as_values, "unary-expression", "gnu-label-address")

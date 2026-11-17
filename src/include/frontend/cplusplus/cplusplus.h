@@ -394,6 +394,10 @@ enum class fundamental_type : uint8_t {
     unsigned_char,
     short_int,
     unsigned_short_int,
+    /* an extended signed integer type and its unsigned one
+       ([basic.fundamental]/2): GCC's __int128 */
+    int128,
+    unsigned_int128,
 };
 
 const char *fundamental_type_name(fundamental_type type);

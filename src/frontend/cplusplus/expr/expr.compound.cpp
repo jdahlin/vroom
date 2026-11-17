@@ -394,6 +394,11 @@ analysis_result semantic_analysis::arithmetic(node_index n,
         m.value = floating_kept(r);
         return analysis_result::well_formed;
     }
+    /* (a 128-bit operation is not evaluated here: integer_kept_exactly) */
+    if (fundamental_type_width(b, t) >= 128) {
+        m.evaluation = constness::unknown;
+        return analysis_result::well_formed;
+    }
     bool is_signed = fundamental_type_is_signed(b, t);
     __int128 x = integer_value(b, t, left.value);
     __int128 y = integer_value(b, fundamental_of(right.type), right.value);

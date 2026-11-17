@@ -480,6 +480,11 @@ analysis_result semantic_analysis::unary(node_index n, expression_meaning &m)
             m.value = floating_kept(-d);
             break;
         }
+        /* (a 128-bit operation is not evaluated here) */
+        if (fundamental_type_width(b, t) >= 128) {
+            m.evaluation = constness::unknown;
+            break;
+        }
         __int128 v = integer_value(b, t, m.value);
         if (o == preprocessing_op_or_punc::TILDE) {
             m.value = integer_wrap(b, t, ~static_cast<unsigned __int128>(v));

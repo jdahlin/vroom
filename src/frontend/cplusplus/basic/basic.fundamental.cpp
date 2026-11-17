@@ -56,6 +56,8 @@ const char *fundamental_type_name(fundamental_type type)
         "unsigned char",
         "short",
         "unsigned short",
+        "__int128",
+        "unsigned __int128",
     };
     return names[static_cast<int>(type)];
 }
@@ -92,6 +94,9 @@ unsigned fundamental_type_width(const implementation_defined_behavior &behavior,
     case fundamental_type::long_long_int:
     case fundamental_type::unsigned_long_long_int:
         return behavior.long_long_width;
+    case fundamental_type::int128:
+    case fundamental_type::unsigned_int128:
+        return 128;
     default:
         return 0;
     }
@@ -112,6 +117,7 @@ bool fundamental_type_is_signed(const implementation_defined_behavior &behavior,
     case fundamental_type::int_:
     case fundamental_type::long_int:
     case fundamental_type::long_long_int:
+    case fundamental_type::int128:
         return true;
     default:
         return false;

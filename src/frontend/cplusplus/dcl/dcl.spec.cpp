@@ -223,9 +223,17 @@ struct type_specifier_count {
     /* char, int, double, and every other defining-type-specifier */
     unsigned char_ = 0, int_ = 0, double_ = 0, other = 0;
 
+    /* [ext:gnu_int128]: __int128, with signed or unsigned only */
+    unsigned int128 = 0;
+
     /* adds the specifier: false if the sequence now breaks the rule */
-    bool add(standard_keyword k)
+    bool add(standard_keyword k, bool is_int128)
     {
+        if (is_int128) {
+            int128++;
+            return int128 == 1 && !char_ && !int_ && !double_ && !other &&
+                   !short_ && !long_;
+        }
         switch (k) {
         case standard_keyword::const_:
             return ++const_ == 1;
@@ -254,13 +262,13 @@ struct type_specifier_count {
             other++;
             break;
         }
-        unsigned base = char_ + int_ + double_ + other;
+        unsigned base = char_ + int_ + double_ + other + int128;
         if (base > 1 || sign > 1 || short_ > 1 || long_ > 2 ||
             (short_ && long_))
             return false;
         if (sign && (double_ || other))
             return false;
-        if ((short_ || long_) && (char_ || other))
+        if ((short_ || long_) && (char_ || other || int128))
             return false;
         if (short_ && double_)
             return false;
@@ -492,6 +500,10 @@ node_index parser::decl_specifier_seq(decl_specifier_facts &facts,
             if (failed())
                 return 0;
             facts.has_defining_type_specifier = true;
+        } else if (at(extension_keyword::int128)) {
+            /* [ext:gnu_int128] a simple-type-specifier */
+            add_token();
+            facts.has_defining_type_specifier = true;
         } else if (k == standard_keyword::extension) {
             /* an extension's keyword (P9) */
             return beyond_this_step();
@@ -580,7 +592,9 @@ node_index parser::decl_specifier_seq(decl_specifier_facts &facts,
         facts.count++;
         if (k == standard_keyword::auto_ && !storage_class_auto)
             has_auto = true;
-        if (type_specifier && !count.add(k)) {
+        if (type_specifier &&
+            !count.add(k, extension_keyword_of(tokens[specifier]) ==
+                              extension_keyword::int128)) {
             /* auto int x: C++03's storage-class-specifier auto
                ([diff.cpp03.dcl.dcl]/1), in a later edition [ext.clang]
                clang's extension: P9 */
@@ -1008,6 +1022,13 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
             named_at = t;
             continue;
         }
+        if (p.extension_keyword_of(tok) == extension_keyword::int128) {
+            /* [ext:gnu_int128] */
+            if (!k.first)
+                k.first = t;
+            k.int128++;
+            continue;
+        }
         standard_keyword kw = p.keyword_of(tok);
         if (!k.first && kw != standard_keyword::const_ &&
             kw != standard_keyword::volatile_ &&
@@ -1133,7 +1154,7 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
                           "dcl.constexpr");
     type_index type = 0;
     bool keywords = k.signed_ || k.unsigned_ || k.short_ || k.long_ ||
-                    k.char_ || k.int_ || k.double_ ||
+                    k.char_ || k.int_ || k.double_ || k.int128 ||
                     k.alone_type != fundamental_type::none;
     if (named && keywords)
         /* [dcl.type]/2: "As a general rule, at most one

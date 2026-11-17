@@ -381,6 +381,11 @@ uint64_t integer_wrap(const implementation_defined_behavior &behavior,
 /* whether the integer type t can represent v */
 bool integer_holds(const implementation_defined_behavior &behavior,
                    fundamental_type t, __int128 v);
+/* whether the value v of the integer type t (wrapped to it) is what
+   integer_wrap keeps: a 128-bit type's value only when it fits in 64 bits
+   (an operation's result otherwise has no value analysis knows) */
+bool integer_kept_exactly(const implementation_defined_behavior &behavior,
+                          fundamental_type t, unsigned __int128 v);
 /* the value an expression_meaning keeps for the integer type t */
 __int128 integer_value(const implementation_defined_behavior &behavior,
                        fundamental_type t, uint64_t kept);
@@ -699,7 +704,7 @@ class semantic_analysis
        keywords of a decl-specifier-seq */
     struct simple_type_keywords {
         unsigned signed_ = 0, unsigned_ = 0, short_ = 0, long_ = 0, char_ = 0,
-                 int_ = 0, double_ = 0, alone = 0;
+                 int_ = 0, double_ = 0, alone = 0, int128 = 0;
         fundamental_type alone_type = fundamental_type::none;
         token_index first = 0;
     };

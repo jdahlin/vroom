@@ -174,6 +174,10 @@ ast_qualified_type c_lowering::fundamental(fundamental_type f, token_index at)
         return ast_builder_type_basic(AST_TYPE_LONG_LONG);
     case fundamental_type::unsigned_long_long_int:
         return ast_builder_type_basic(AST_TYPE_UNSIGNED_LONG_LONG);
+    case fundamental_type::int128:
+        return ast_builder_type_basic(AST_TYPE_INT128);
+    case fundamental_type::unsigned_int128:
+        return ast_builder_type_basic(AST_TYPE_UINT128);
     case fundamental_type::float_:
         return ast_builder_type_basic(AST_TYPE_FLOAT);
     case fundamental_type::double_:

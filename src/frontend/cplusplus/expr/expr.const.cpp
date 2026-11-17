@@ -42,6 +42,11 @@ bool fundamental_type_is_integral(fundamental_type t)
     case fundamental_type::unsigned_long_int:
     case fundamental_type::long_long_int:
     case fundamental_type::unsigned_long_long_int:
+    /* [basic.fundamental]/2: "the standard and extended signed integer
+       types are collectively called signed integer types" (and /3 the
+       unsigned ones) */
+    case fundamental_type::int128:
+    case fundamental_type::unsigned_int128:
         return true;
     default:
         return false;
@@ -83,6 +88,8 @@ bool integer_holds(const implementation_defined_behavior &behavior,
         return v == 0 || v == 1;
     unsigned width = fundamental_type_width(behavior, t);
     __int128 one = 1;
+    if (width >= 128)
+        return fundamental_type_is_signed(behavior, t) || v >= 0;
     if (fundamental_type_is_signed(behavior, t))
         return v >= -(one << (width - 1)) && v < (one << (width - 1));
     return v >= 0 && v < (one << width);
@@ -94,6 +101,17 @@ __int128 integer_value(const implementation_defined_behavior &behavior,
     if (fundamental_type_is_signed(behavior, t))
         return static_cast<int64_t>(kept);
     return kept;
+}
+
+bool integer_kept_exactly(const implementation_defined_behavior &behavior,
+                          fundamental_type t, unsigned __int128 v)
+{
+    if (fundamental_type_width(behavior, t) < 128)
+        return true;
+    if (fundamental_type_is_signed(behavior, t))
+        return static_cast<__int128>(v) ==
+               static_cast<int64_t>(static_cast<uint64_t>(v));
+    return v == static_cast<uint64_t>(v);
 }
 
 constness combined_constness(constness a, constness b)

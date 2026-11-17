@@ -147,6 +147,13 @@ unsigned integer_rank(fundamental_type t)
     case fundamental_type::long_long_int:
     case fundamental_type::unsigned_long_long_int:
         return 5;
+    /* [conv.rank]/1.3: "The rank of long long int shall be greater than
+       the rank of long int"; /1.7 an extended type's rank relative to
+       another of the same width is implementation-defined, and wider is
+       greater (/1.1 [impl.clang]) */
+    case fundamental_type::int128:
+    case fundamental_type::unsigned_int128:
+        return 6;
     default:
         return 3;
     }
@@ -161,6 +168,8 @@ fundamental_type unsigned_of(fundamental_type t)
         return fundamental_type::unsigned_long_int;
     case fundamental_type::long_long_int:
         return fundamental_type::unsigned_long_long_int;
+    case fundamental_type::int128:
+        return fundamental_type::unsigned_int128;
     default:
         return t;
     }
@@ -268,6 +277,11 @@ void semantic_analysis::arithmetic_value(expression_meaning &m,
         __int128 v = integer_value(b, from, m.value);
         if (fundamental_type_is_integral(to)) {
             /* [conv.integral]/3 */
+            if (!integer_kept_exactly(b, to,
+                                      static_cast<unsigned __int128>(v))) {
+                m.evaluation = constness::unknown;
+                return;
+            }
             m.value = integer_wrap(b, to, static_cast<unsigned __int128>(v));
             return;
         }
@@ -306,6 +320,12 @@ void semantic_analysis::arithmetic_value(expression_meaning &m,
         if (!(t > -18446744073709551616.0 && t < 18446744073709551616.0) ||
             !integer_holds(b, to, static_cast<__int128>(t))) {
             m.evaluation = constness::not_constant;
+            return;
+        }
+        if (!integer_kept_exactly(
+                b, to,
+                static_cast<unsigned __int128>(static_cast<__int128>(t)))) {
+            m.evaluation = constness::unknown;
             return;
         }
         m.value = integer_wrap(

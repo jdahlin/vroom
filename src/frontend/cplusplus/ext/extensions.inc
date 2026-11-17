@@ -43,6 +43,9 @@ EXTENSION(gnu_restrict, gnu,
           "GCC manual 7.3, Restricting Pointer Aliasing: __restrict__ as a cv-qualifier")
 EXTENSION(gnu_extension_keyword, gnu,
           "GCC manual 6.48, Alternate Keywords: __extension__ before a declaration or expression")
+EXTENSION(gnu_int128, gnu,
+          "GCC manual 6.9, 128-bit Integers: __int128 and unsigned __int128, an extended "
+          "integer type ([basic.fundamental]/2)")
 EXTENSION(gnu_labels_as_values, gnu,
           "GCC manual 6.3, Labels as Values: &&label and goto *expression;")
 EXTENSION(gnu_designated_initializers, gnu,

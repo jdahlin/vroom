@@ -387,11 +387,14 @@ bool itanium_mangler::type(qualified_type t)
  *                    ::= Ds
  *                    ::= Du
  *                    ::= Dn
+ *                    ::= n
+ *                    ::= o
  *
  * In the order of the section's table: void, wchar_t, bool, char, signed
  * char, unsigned char, short, unsigned short, int, unsigned int, long,
  * unsigned long, long long, unsigned long long, float, double, long double,
- * char32_t, char16_t, char8_t, std::nullptr_t.  _Float16 is DF16_ (the
+ * char32_t, char16_t, char8_t, std::nullptr_t, __int128, unsigned
+ * __int128.  _Float16 is DF16_ (the
  * DF <number> _ form below); _BitInt(N)'s DB <number> _ needs N, which the
  * type does not keep yet.
  *
@@ -441,6 +444,12 @@ bool itanium_mangler::builtin_type(fundamental_type t)
         return true;
     case fundamental_type::unsigned_long_long_int:
         text("y");
+        return true;
+    case fundamental_type::int128:
+        text("n");
+        return true;
+    case fundamental_type::unsigned_int128:
+        text("o");
         return true;
     case fundamental_type::float_:
         text("f");

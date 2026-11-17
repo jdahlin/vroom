@@ -5,7 +5,12 @@
  * [dcl.type.simple]/3: "When multiple simple-type-specifiers are allowed,
  * they can be freely intermixed with other decl-specifiers in any order":
  * the keywords are counted (decl_specifier_seq) and the row of Table 14 is
- * found from the counts.
+ * found from the counts.  [ext:gnu_int128] adds a row of its own:
+ *
+ *     simple-type-specifier:
+ *         __int128
+ *
+ * __int128 alone or with signed, and with unsigned, as GCC's types.
  */
 #include "../cplusplus-internal.h"
 #include "frontend/cplusplus/sema.h"
@@ -32,9 +37,21 @@ analysis_result semantic_analysis::simple_type(node_index seq,
                        "short, or int, short or long with int, long with "
                        "double, and long with long";
     unsigned keywords = k.signed_ + k.unsigned_ + k.short_ + k.long_ + k.char_ +
-                        k.int_ + k.double_ + k.alone;
+                        k.int_ + k.double_ + k.alone + k.int128;
     fundamental_type t = fundamental_type::none;
-    if (k.alone) {
+    if (k.int128) {
+        /* [ext:gnu_int128] (GCC manual 6.9): "__int128 for signed 128-bit
+           integers, and unsigned __int128 for unsigned 128-bit integers" */
+        if (k.int128 > 1 || k.signed_ + k.unsigned_ > 1 ||
+            keywords != k.int128 + k.signed_ + k.unsigned_)
+            return ill_formed(seq,
+                              "__int128 combined only with signed or "
+                              "unsigned",
+                              "ext.gnu");
+        t = fundamental_type::int128;
+        if (k.unsigned_)
+            t = fundamental_type::unsigned_int128;
+    } else if (k.alone) {
         /* bool, float, void, wchar_t, char8_t, char16_t, char32_t: a row of
            their own */
         if (keywords != 1)

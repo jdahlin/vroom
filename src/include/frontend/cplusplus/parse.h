@@ -442,6 +442,7 @@ enum class extension_keyword : uint8_t {
     extension,
     type_trait,
     type_transformation,
+    int128,
 };
 
 /*
