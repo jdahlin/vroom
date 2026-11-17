@@ -52,6 +52,8 @@
 /* a TU's tables */
 CC_PRIVATE void cc_translation_unit_init(cc *c, pp *p, const cc_options *o);
 CC_PRIVATE void cc_translation_unit_free(cc *c);
+CC_PRIVATE cc *cc_translation_unit_open(pp *p, const cc_options *o);
+CC_PRIVATE void cc_translation_unit_close(cc *c);
 
 /* ---------------- types ---------------- */
 

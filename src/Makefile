@@ -229,14 +229,17 @@ $(OUT)/vasm: $(call o,bin/vasm/vasm.cpp $(LIB_SRC)) $(AS_OBJ)
 # the C++ front end written against the standard (src/frontend/cplusplus,
 # doc/PLAN-cxx-spec.md): C++20 code, so not in a VCC_LANG=c build; cxxlex
 # drives its lexer for bench/cxx-lex.py
-cplusplus_SRC = $(wildcard frontend/cplusplus/*/*.cpp frontend/cplusplus/ext/*/*.cpp frontend/cplusplus/abi/*/*.cpp)
+cplusplus_SRC = $(filter-out $(cxxlower_SRC),$(wildcard frontend/cplusplus/*/*.cpp frontend/cplusplus/ext/*/*.cpp frontend/cplusplus/abi/*/*.cpp))
+# the lowering to C's AST needs C's front end and code generator: only cxxsema links it
+cxxlower_SRC = $(wildcard frontend/cplusplus/lower/*.cpp)
 $(OUT)/cxxlex: $(call o,bin/cxxlex/cxxlex.cpp $(LIB_SRC)) $(call mod,cplusplus)
 	$(VCC_LINK) $(VCC_LDFLAGS) $^ -o $@
 # cxxparse drives its parser for bench/cxx-parse.py (doc/PLAN-cxx-parse.md)
 $(OUT)/cxxparse: $(call o,bin/cxxparse/cxxparse.cpp $(LIB_SRC)) $(call mod,cplusplus)
 	$(VCC_LINK) $(VCC_LDFLAGS) $^ -o $@
-# cxxsema drives its semantic analysis for bench/cxx-sema.py (doc/PLAN-cxx-sema.md)
-$(OUT)/cxxsema: $(call o,bin/cxxsema/cxxsema.cpp $(LIB_SRC)) $(call mod,cplusplus)
+# cxxsema drives its semantic analysis for bench/cxx-sema.py (doc/PLAN-cxx-sema.md);
+# -S lowers it to C's AST (frontend/c/ast-builder.h) for the code generator
+$(OUT)/cxxsema: $(call o,bin/cxxsema/cxxsema.cpp $(cxxlower_SRC) $(LEX_SRC) $(LIB_SRC)) $(call mod,cplusplus) $(LEX_OBJECT) $(AS_OBJ) $(PP_OBJ)
 	$(VCC_LINK) $(VCC_LDFLAGS) $^ -o $@
 
 # virtest: VIR's parser, verifier and printer (SPEC-vir.md 16); depends on nothing else

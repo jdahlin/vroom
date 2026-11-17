@@ -336,6 +336,7 @@ bench/vcc-darwin-s.py -j 6           # Darwin -S assembled by Apple's as, runs a
 bench/cxx-pp.py -j 6 [-v] [PAT]     # C++ front end phase 4 (cxxlex) vs clang -cc1 on clang's Preprocessor tests: tokens, diagnostics, -dM (~2 min)
 bench/cxx-sema.py -j 6 [-v] [PAT]   # C++ semantic analysis (cxxsema) vs clang's test/CXX, SemaCXX, SemaTemplate: per declaration accepted/rejected, unsupported by subclause (~70 s cold)
 bench/cxx-sema.py selftest          # the type claims' path through clang on hand-written claims (<1 s)
+bench/cxx-run.py -j 6 [-O 0123] [PAT]  # src/test/cxx/run: cxxsema -S (lowered to C's AST, frontend/c/ast-builder.h) at -O0..3 vs clang++ -O2, run under qemu; -O0 symbols = clang's (<10 s)
 bench/cxx-spec-refs.py [--rules CLAUSE]   # citations, quoted grammar, [abi:...] labels; rules quoted per clause (<1 s)
 bench/itanium-abi.py [--check]      # docs/itanium-abi-index.tsv from the fetched ABI (fetch-testsuites.sh itanium-abi); section text in work/itanium-abi/
 bench/vcc-diag.py -j 6             # test/diag: vcc's .stderr snapshots, clang's locations/levels/flags (~2 s)

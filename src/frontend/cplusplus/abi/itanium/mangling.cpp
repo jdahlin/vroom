@@ -108,7 +108,13 @@ bool itanium_mangler::mangled_name(entity_index e)
     bool global = x.enclosing == 0;
     bool is_main = x.kind == entity_kind::function && length == 4 &&
                    !memcmp(identifier, "main", 4);
-    if (global && (x.kind == entity_kind::variable || is_main)) {
+    /* [impl.clang]: a variable of the global namespace with internal
+       linkage is mangled all the same (_ZL1x), so that it cannot collide
+       with an extern "C" name of the translation unit; GCC writes x */
+    bool internal_variable = x.kind == entity_kind::variable &&
+                             x.linkage_of_name == linkage::internal;
+    if (global && !internal_variable &&
+        (x.kind == entity_kind::variable || is_main)) {
         vbuffer_append(out, identifier, length);
         return true;
     }

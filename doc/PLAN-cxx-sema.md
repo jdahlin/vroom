@@ -519,7 +519,34 @@ libstdc++ and json), since sema cannot analyse a declaration kept as tokens.
   lists each symbol, and `cxx-sema.py`'s symbols claim compiles every
   file clang accepts at -O0 and finds each defined symbol in its object
   (`llvm-nm`): 681 verified, 0 refuted, 71 not emitted (unused internal
-  or inline entities).  Next: the lowering to `struct ast`.
+  or inline entities).
+- Status (2026-11-17, S1d lowering): the semantic tree reaches the code
+  generator.  C's module has a public builder
+  (`include/frontend/c/ast-builder.h`, `frontend/c/ast-builder.cpp`) that
+  makes types, symbols, nodes, strings, labels and cases through C's own
+  constructors and runs `codegen_unit_emit`;
+  `frontend/cplusplus/lower/lower.cpp` maps each semantic node to the C
+  node of the same operation.  A reference is a pointer (a name of one is
+  its target dereferenced, a binding takes the address, a prvalue's
+  temporary is a compound literal of the block); comparisons, `!` and
+  `&&`/`||` are C's int converted to bool; a condition that declares and
+  an init-statement are blocks around the statement (`while` with a
+  declaration: a `for` whose body declares, tests and breaks); a glvalue
+  comma or conditional selects an address; static locals carry the
+  mangled name as their assembler name; inline functions are LINKONCE and
+  weak (no COMDAT group yet).  Dynamic initialization, class and
+  enumeration types, long double constants and an assignment used as an
+  object fail the translation unit with a reason.  The mangler now gives
+  an internal-linkage variable of the global namespace clang's `_ZL`
+  name (`[impl.clang]`): symbols 691 verified, 0 refuted, 61 not emitted.
+  `cxxsema -S [-O0..3]` prints arm64 assembly; `bench/cxx-run.py`
+  compiles `src/test/cxx/run` (statements, references, operators and
+  conversions, data and linkage) with it and with clang++ -O2, runs both
+  under qemu: 16/16 runs as clang's at -O0 to -O3, and the -O0 objects
+  define clang -O0's symbols with its bindings (in `ci/premerge.sh`).
+  `cxx-sema.py` otherwise unchanged (C3, C4, 0 tree problems).  Next: a
+  lowering claim over the clang tests (which well-formed files lower,
+  assemble and define clang's symbols), then S1e, the driver.
 
 ### S2. Names and entities in full
 

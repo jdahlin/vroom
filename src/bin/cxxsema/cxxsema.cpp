@@ -31,6 +31,9 @@
  *   cxxsema -symbols ...                    the symbol of each function and
  *                                           variable of a well-formed
  *                                           declaration (write_symbols)
+ *   cxxsema -S [-O0..3] ...                 assembly for Linux arm64: the
+ *                                           tree lowered to C's AST and
+ *                                           C's code generator (emit_assembly)
  *   cxxsema -stats ...                      declarations by result, types,
  *                                           entities
  *   cxxsema -selftest                       the tables no rule uses yet
@@ -43,6 +46,7 @@
 #include <string.h>
 
 #include "../cxxlex/command-line.h"
+#include "frontend/cplusplus/lower.h"
 #include "frontend/cplusplus/parse.h"
 #include "frontend/cplusplus/sema.h"
 #include "type-claims.h"
@@ -409,12 +413,54 @@ static void write_symbols(const semantic_analysis &analysis,
     }
 }
 
+/*
+ * -S: the translation unit lowered to C's AST (lower_translation_unit) and
+ * compiled by C's code generator for Linux arm64, at -O0 to -O3: assembly
+ * on stdout.  A translation unit lowering has no rule for is reported
+ * ("cxxsema: not lowered: WHAT at FILE:LINE:COL") and fails.
+ */
+static int emit_assembly(const semantic_analysis &analysis,
+                         token_stream &tokens, const char *path, int level)
+{
+    /* C's preprocessor only receives the code generator's diagnostics */
+    pp_opts po = {};
+    po.main = path;
+    po.main_src = "";
+    po.main_len = 0;
+    po.predef = "";
+    po.target = PP_LINUX_AARCH64;
+    pp *p = pp_open(&po);
+    cc_options o = {};
+    o.target = PP_LINUX_AARCH64;
+    o.unsigned_char = 1;
+    o.outfd = 1;
+    o.emit = 1;
+    o.opt = level;
+#define X(field, name, at_level) o.optimize.field = level >= at_level;
+    CC_OPTIMIZATIONS(X)
+#undef X
+    cc *c = ast_builder_open(p, &o);
+    lowering_failure why;
+    int status = 0;
+    if (!lower_translation_unit(analysis, tokens, c, o.target, why)) {
+        source_position at = tokens.position(why.at);
+        fprintf(stderr, "cxxsema: not lowered: %s at %s:%u:%u\n", why.what,
+                at.file_name, at.line, at.column);
+        status = 1;
+    } else if (ast_builder_emit(c))
+        status = 1;
+    ast_builder_close(c);
+    pp_close(p);
+    return status;
+}
+
 int main(int argc, char **argv)
 {
     command_line options("cxxsema");
     bool dump_analysis = false, debug_unsupported = false, stats = false,
          type_claims = false, declaration_claims = false, check = false,
-         dump = false, symbols = false;
+         dump = false, symbols = false, assembly = false;
+    int level = 0;
     const char *path = nullptr;
     for (int i = 1; i < argc; i++) {
         const char *a = argv[i];
@@ -434,6 +480,11 @@ int main(int argc, char **argv)
             dump = true;
         else if (!strcmp(a, "-symbols"))
             symbols = true;
+        else if (!strcmp(a, "-S"))
+            assembly = true;
+        else if (a[0] == '-' && a[1] == 'O' && a[2] >= '0' && a[2] <= '3' &&
+                 !a[3])
+            level = a[2] - '0';
         else if (!strcmp(a, "-stats"))
             stats = true;
         else if (!strcmp(a, "-fsyntax-only"))
@@ -526,11 +577,16 @@ int main(int argc, char **argv)
             analysis.type_table.size() - 1, analysis.entity_table.size() - 1);
     }
     fwrite(out.data(), 1, out.size(), stdout);
+    int status = 0;
+    if (assembly && !diagnostics.error_count) {
+        fflush(stdout);
+        status = emit_assembly(analysis, tokens, path, level);
+    }
     owned_buffer messages;
     for (const diagnostic_message &m : diagnostics.messages)
         diagnostics.render(m, messages.get());
     fwrite(messages.data(), 1, messages.size(), stderr);
     if (diagnostics.error_count)
         return 1;
-    return 0;
+    return status;
 }
