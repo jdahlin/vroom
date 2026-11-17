@@ -320,6 +320,13 @@ struct entity {
     /* a class: its user-declared constructors (a chain through
        next_constructor) and destructor, 0 if none */
     entity_index first_constructor = 0, destructor = 0;
+    /* a non-static data member that is a bit-field ([class.bit]): its
+       width and the offset of its first bit in the class (offset is the
+       byte that bit is in); an unnamed one (name 0) is in the layout but
+       not a member ([class.bit]/2) */
+    bool bit_field = false;
+    uint16_t bit_width = 0;
+    uint64_t bit_offset = 0;
     /* a class: a union ([class.union]/1: "A union is a class defined
        with the class-key union") */
     bool union_ = false;
@@ -515,6 +522,9 @@ struct expression_meaning {
     /* a floating-point operand or a comma operator inside: not an integral
        constant expression before C++11 (C++03 [expr.const]/1) */
     bool beyond_integral_constant = false;
+    /* a glvalue that designates a bit-field ([class.bit]), or the value
+       read from one: its width (0: not a bit-field), for [conv.prom]/5 */
+    uint16_t bit_field_width = 0;
     /* the expression in the semantic tree, with the conversions applied to
        it so far: 0 while it has none */
     uint32_t node = 0;
@@ -1249,6 +1259,12 @@ class semantic_analysis
     uint8_t declaration_access = 0;
     uint64_t layout_size = 0;
     uint32_t layout_alignment = 1;
+    /* the bits at the end of layout_size the last bit-field left unused
+       (a next bit-field may take them) */
+    uint64_t layout_unfilled = 0;
+    analysis_result member_bit_field(entity_index c, node_index declaration,
+                                     syntax_child d, const specified &s,
+                                     uint8_t access);
 
     /* the declaration analysed now, for the expressions' records */
     node_index current_declaration = 0;

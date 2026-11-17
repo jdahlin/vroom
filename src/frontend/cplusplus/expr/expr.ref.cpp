@@ -99,6 +99,9 @@ analysis_result semantic_analysis::member_access(token_index at, entity_index e,
             result.evaluation = constness::not_constant;
         result.node =
             expression_node(semantic_kind::member, result, at, object, e);
+        /* [expr.ref]/6.2: "If E2 is a bit-field, E1.E2 is a bit-field." */
+        if (x.bit_field)
+            result.bit_field_width = x.bit_width;
         m = result;
         return analysis_result::well_formed;
     }

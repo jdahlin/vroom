@@ -428,6 +428,11 @@ analysis_result semantic_analysis::reference_binding(node_index at,
 {
     const struct type r = type_table[reference.unqualified()];
     bool rvalue_reference = r.kind == type_kind::rvalue_reference;
+    /* [dcl.init.ref]/5: a non-const lvalue reference "shall not be bound
+       to a bit-field"; a const one is bound to a temporary (not
+       analysed) */
+    if (m.bit_field_width && m.category != value_category::prvalue)
+        return not_supported(at, "class.bit");
     qualified_type t1 = r.operand, t2 = m.type;
     const struct type x = type_table[t1.unqualified()];
     const struct type y = type_table[t2.unqualified()];
@@ -1000,8 +1005,18 @@ analysis_result semantic_analysis::class_list_initialization(
         /* an element initialized from it: analysed again below */
     }
     const entity &x = entity_table[c];
-    uint32_t count = x.member_count;
-    uint32_t first = x.first_member;
+    /* [dcl.init.aggr]/1: "The elements of an aggregate are: ... for a
+       class, the direct base classes in declaration order, followed by the
+       direct non-static data members ([class.mem]) that are not members of
+       an anonymous union, in declaration order"; [class.bit]/2: "Unnamed
+       bit-fields are not members" */
+    owned_array<entity_index> members;
+    for (uint32_t i = 0; i < x.member_count; i++) {
+        entity_index member = class_members[x.first_member + i];
+        if (!entity_table[member].bit_field || entity_table[member].name)
+            members.append(member);
+    }
+    uint32_t count = static_cast<uint32_t>(members.size());
     /* [dcl.init.aggr]/16: "When a union is initialized with an initializer
        list, there shall not be more than one explicitly initialized
        element"; without designators, the first ([dcl.init.aggr]/3.1: "the
@@ -1015,9 +1030,8 @@ analysis_result semantic_analysis::class_list_initialization(
        aggregate." */
     bool elidable = false;
     for (uint32_t i = 0; i < count; i++) {
-        type_kind k = type_table[entity_table[class_members[first + i]]
-                                     .type.unqualified()]
-                          .kind;
+        type_kind k =
+            type_table[entity_table[members[i]].type.unqualified()].kind;
         if (k == type_kind::class_type || k == type_kind::array)
             elidable = true;
     }
@@ -1033,7 +1047,7 @@ analysis_result semantic_analysis::class_list_initialization(
     owned_array<uint32_t> elements;
     constness all = constness::constant;
     for (uint32_t i = 0; i < count; i++) {
-        entity_index member = class_members[first + i];
+        entity_index member = members[i];
         qualified_type element = entity_table[member].type;
         const struct type &record = type_table[element.unqualified()];
         initialized_value one;

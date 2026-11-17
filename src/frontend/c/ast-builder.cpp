@@ -92,12 +92,10 @@ ast_qualified_type ast_builder_type_record(cc *c, const char *name,
     return AST_QUALIFIED_TYPE(c->tags[ti].ty, 0);
 }
 
-void ast_builder_type_record_complete(cc *c, ast_qualified_type record,
-                                      const ast_qualified_type *fields,
-                                      const char *const *names,
-                                      const size_t *lengths,
-                                      const uint32_t *aligned,
-                                      const uint8_t *packed, uint32_t count)
+void ast_builder_type_record_complete(
+    cc *c, ast_qualified_type record, const ast_qualified_type *fields,
+    const char *const *names, const size_t *lengths, const uint32_t *aligned,
+    const uint8_t *packed, const int32_t *widths, uint32_t count)
 {
     tag *r = &c->tags[AST_TYPE(c, record)->aux];
 
@@ -107,6 +105,10 @@ void ast_builder_type_record_complete(cc *c, ast_qualified_type record,
     for (uint32_t i = 0; i < count; i++) {
         r->f[i].ty = fields[i];
         r->f[i].name = ast_builder_identifier(c, names[i], lengths[i]);
+        if (widths && widths[i] >= 0) {
+            r->f[i].bitfield = 1;
+            r->f[i].width = (uint16_t)widths[i];
+        }
     }
     r->flags |= AST_RECORD_FLAG_COMPLETE;
     cc_layout_record(c, r, aligned, packed);
@@ -121,6 +123,12 @@ uint64_t ast_builder_type_record_offset(cc *c, ast_qualified_type record,
                                         uint32_t field)
 {
     return c->tags[AST_TYPE(c, record)->aux].f[field].off / 8;
+}
+
+uint64_t ast_builder_type_record_bit_offset(cc *c, ast_qualified_type record,
+                                            uint32_t field)
+{
+    return c->tags[AST_TYPE(c, record)->aux].f[field].off;
 }
 
 /* ---- symbols ---- */

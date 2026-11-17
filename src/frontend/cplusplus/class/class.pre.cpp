@@ -220,10 +220,12 @@ analysis_result semantic_analysis::class_definition(node_index n,
         access = 2;
     uint64_t outer_size = layout_size;
     uint32_t outer_alignment = layout_alignment;
+    uint64_t outer_unfilled = layout_unfilled;
     uint8_t outer_access = declaration_access;
     defining_class = c;
     layout_size = 0;
     layout_alignment = 1;
+    layout_unfilled = 0;
     /* the enclosing class's analysis goes on after this one: its state
        back, and its members so far again after this class's, so that they
        stay one range of class_members */
@@ -231,6 +233,7 @@ analysis_result semantic_analysis::class_definition(node_index n,
         defining_class = outer;
         layout_size = outer_size;
         layout_alignment = outer_alignment;
+        layout_unfilled = outer_unfilled;
         declaration_access = outer_access;
         if (!outer)
             return;
@@ -586,8 +589,15 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
                                      syntax_child d, const specified &s,
                                      uint8_t access, bool definition)
 {
-    if (syntax_is(tree, d, syntax_kind::member_declarator))
+    if (syntax_is(tree, d, syntax_kind::member_declarator)) {
+        /* identifier_opt attribute-specifier-seq_opt : constant-expression */
+        const syntax_node &node = tree[d.index()];
+        for (uint32_t i = 0; i < node.child_count; i++)
+            if (syntax_is_punctuator(tokens, tree.children(d.index())[i],
+                                     preprocessing_op_or_punc::COLON))
+                return member_bit_field(c, declaration, d, s, access);
         return not_supported(d.index(), "class.mem");
+    }
     if (!s.has_type && declares_special_member(c, d))
         /* a cv-qualifier or another specifier with a constructor */
         return not_supported(declaration, "class.ctor");
@@ -774,6 +784,7 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
             entity_table[e].offset = align_up(layout_size, alignment);
             layout_size = entity_table[e].offset + size;
         }
+        layout_unfilled = 0;
         if (alignment > layout_alignment)
             layout_alignment = alignment;
         class_members.append(e);
@@ -783,6 +794,130 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
     entity_table[e].access = access;
     entity_table.add_declaration(e, declaration);
     entity_table.bind(c, name, e);
+    last_declared = e;
+    return analysis_result::well_formed;
+}
+
+/*
+ * [class.bit]/1: "A member-declarator of the form
+ *     identifier_opt attribute-specifier-seq_opt : constant-expression brace-or-equal-initializer_opt
+ * specifies a bit-field.  The optional attribute-specifier-seq appertains
+ * to the entity being declared.  A bit-field shall not be a static member.
+ * A bit-field shall have integral or enumeration type ...  The
+ * constant-expression shall be an integral constant expression with a
+ * value greater than or equal to zero and is called the width of the
+ * bit-field.  If the width of a bit-field is larger than the width of the
+ * bit-field's type (or, in case of an enumeration type, of its underlying
+ * type), the extra bits are padding bits.  Allocation of bit-fields within
+ * a class object is implementation-defined."  /2: "A declaration for a
+ * bit-field that omits the identifier declares an unnamed bit-field.
+ * Unnamed bit-fields are not members and cannot be initialized. ... As a
+ * special case, an unnamed bit-field with a width of zero specifies
+ * alignment of the next bit-field at an allocation unit boundary.  Only
+ * when declaring an unnamed bit-field may the width be zero."
+ *
+ * [impl.clang] the allocation is clang's for aarch64 Linux
+ * (ItaniumRecordLayoutBuilder::LayoutBitField with
+ * useBitFieldTypeAlignment and useZeroLengthBitfieldAlignment): a
+ * bit-field starts at the next bit unless it would cross a boundary of its
+ * type's alignment, then at that boundary (a zero-width one always moves
+ * to it); every bit-field, named or not, raises the class's alignment to
+ * its type's.  Bit-fields of enumeration type, with padding bits, with an
+ * initializer, attributes, or in a union are not analysed yet.
+ */
+analysis_result semantic_analysis::member_bit_field(entity_index c,
+                                                    node_index declaration,
+                                                    syntax_child d,
+                                                    const specified &s,
+                                                    uint8_t access)
+{
+    const syntax_node &node = tree[d.index()];
+    const syntax_child *children = tree.children(d.index());
+    token_index id = 0;
+    uint32_t k = 0;
+    if (k < node.child_count && children[k].is_token() &&
+        tokens[children[k].index()].kind == token_kind::identifier)
+        id = children[k++].index();
+    if (k + 2 != node.child_count ||
+        !syntax_is_punctuator(tokens, children[k],
+                              preprocessing_op_or_punc::COLON))
+        /* attributes, a brace-or-equal-initializer */
+        return not_supported(d.index(), "class.bit");
+    syntax_child width_expression = children[k + 1];
+    if (!s.has_type || s.typedef_ || s.static_ || s.extern_ || s.inline_ ||
+        s.constexpr_ || s.aligned || s.gnu_flags)
+        return not_supported(declaration, "class.bit");
+    if (entity_table[c].union_)
+        return not_supported(declaration, "class.bit");
+    qualified_type type = s.type;
+    const struct type record = type_table[type.unqualified()];
+    if (record.kind == type_kind::enumeration)
+        return not_supported(declaration, "class.bit");
+    if (record.kind != type_kind::fundamental ||
+        !fundamental_type_is_integral(record.fundamental))
+        return ill_formed(declaration,
+                          "a bit-field shall have integral or enumeration "
+                          "type",
+                          "class.bit");
+    expression_meaning w;
+    analysis_result r = expression(width_expression, w);
+    if (r != analysis_result::well_formed)
+        return r;
+    r = operand_value(declaration, w);
+    if (r != analysis_result::well_formed)
+        return r;
+    promote_enumeration(w);
+    if (!is_integral(w.type) || w.evaluation != constness::constant)
+        return not_supported(declaration, "class.bit");
+    __int128 width_value =
+        integer_value(tokens.files.behavior, fundamental_of(w.type), w.value);
+    if (width_value < 0)
+        return ill_formed(declaration,
+                          "the width of a bit-field shall be greater than or "
+                          "equal to zero",
+                          "class.bit");
+    if (width_value == 0 && id)
+        return ill_formed(declaration,
+                          "only when declaring an unnamed bit-field may the "
+                          "width be zero",
+                          "class.bit");
+    uint64_t unit = size_of_type(type) * 8;
+    uint64_t alignment = alignment_of_type(type);
+    if (static_cast<unsigned __int128>(width_value) > unit || !alignment)
+        /* padding bits (clang's warning) */
+        return not_supported(declaration, "class.bit");
+    uint64_t width = static_cast<uint64_t>(width_value);
+    uint32_t name = 0;
+    if (id) {
+        name = tokens.identifier(id);
+        if (entity_table.find(c, name))
+            return not_supported(declaration, "class.mem");
+    }
+    uint64_t bit_alignment = alignment * 8;
+    uint64_t at = layout_size * 8 - layout_unfilled;
+    if (!width || (at % bit_alignment) + width > unit)
+        at = align_up(at, bit_alignment);
+    uint64_t end = at + width;
+    layout_size = align_up(end, 8) / 8;
+    layout_unfilled = layout_size * 8 - end;
+    if (alignment > layout_alignment)
+        layout_alignment = static_cast<uint32_t>(alignment);
+    entity_index e = entity_table.make(entity_kind::variable, name, c);
+    entity_table[e].type = type;
+    entity_table[e].nonstatic_member = true;
+    entity_table[e].defined = true;
+    entity_table[e].field = entity_table[c].member_count;
+    entity_table[e].offset = at / 8;
+    entity_table[e].bit_field = true;
+    entity_table[e].bit_width = static_cast<uint16_t>(width);
+    entity_table[e].bit_offset = at;
+    entity_table[e].linkage_of_name = entity_table[c].linkage_of_name;
+    entity_table[e].access = access;
+    class_members.append(e);
+    entity_table[c].member_count++;
+    entity_table.add_declaration(e, declaration);
+    if (name)
+        entity_table.bind(c, name, e);
     last_declared = e;
     return analysis_result::well_formed;
 }

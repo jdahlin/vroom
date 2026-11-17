@@ -809,6 +809,19 @@ libstdc++ and json), since sema cannot analyse a declaration kept as tokens.
   class type, anonymous unions and unnamed structs ([class.union.anon],
   they were taken for nested classes before), bases.
   `src/test/cxx/run/unions.cpp`; C5.1 2033 -> 2077, 0 wrong.
+  Then bit-fields ([class.bit], `member_bit_field` in
+  `class/class.pre.cpp`): integral bit-fields, named, unnamed and of
+  width zero, laid out as clang's for aarch64 Linux (a bit-field moves to
+  its type's alignment only when it would cross it; every bit-field
+  raises the class's alignment), lowered as C bit-fields with each bit
+  offset checked against C's layout; [conv.prom]/5's promotions (an
+  `expression_meaning::bit_field_width` that a conversion clears, a cast
+  to the bit-field's own type too), & and sizeof of a bit-field and a
+  reference bound to one unsupported, unnamed bit-fields skipped by
+  aggregate initialization.  Unsupported: enumeration bit-fields, padding
+  bits (a width wider than the type), initializers, attributes, and
+  bit-fields in unions.  `src/test/cxx/run/bit-fields.cpp`;
+  C5.1 2077 -> 2211, 0 wrong.
   Next: member functions of local and nested classes, in-class
   initializers of static members, unions, virtual functions.
 
