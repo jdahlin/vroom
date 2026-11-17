@@ -112,6 +112,15 @@ void syntax_tree::truncate(size_t node_count)
     nodes.resize(node_count);
 }
 
+void syntax_tree::replace(node_index placeholder, node_index made)
+{
+    /* the placeholder is a leaf, made made last: the nodes before the last
+       keep their child lists in order (truncate) */
+    kind_counts[static_cast<size_t>(nodes[placeholder].kind)]--;
+    nodes[placeholder] = nodes[made];
+    nodes.resize(made);
+}
+
 /*
  *     translation-unit 1:1
  *       declaration-seq 1:1

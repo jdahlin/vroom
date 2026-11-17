@@ -638,13 +638,16 @@ static int translate(command_line &options, const char *path, bool dump_syntax,
             out.get(),
             "tokens %llu\nnodes %llu\ntentative-parses %llu\nrewinds %llu\n"
             "rewound-tokens %llu\nlookups %llu\nunparsed %llu\n"
-            "erroneous %llu\nbeyond-step %llu\nnanoseconds %llu\n"
+            "erroneous %llu\nbeyond-step %llu\none-pass-classes "
+            "%llu\ntwo-pass-classes %llu\nnanoseconds %llu\n"
             "peak-resident-bytes %llu\n",
             (unsigned long long)s.tokens, (unsigned long long)s.nodes,
             (unsigned long long)s.tentative_parses,
             (unsigned long long)s.rewinds, (unsigned long long)s.rewound_tokens,
             (unsigned long long)s.lookups, (unsigned long long)s.unparsed,
             (unsigned long long)s.erroneous, (unsigned long long)s.beyond_step,
+            (unsigned long long)s.one_pass_classes,
+            (unsigned long long)s.two_pass_classes,
             (unsigned long long)(seconds * 1e9), peak_resident());
     }
     return finish();

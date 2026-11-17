@@ -79,7 +79,7 @@ node_index parser::function_body(const declarator_facts &declarator,
     size_t mark = begin_node();
     token_index first = position;
     bool function_try = at(standard_keyword::try_);
-    if (member && collecting_members &&
+    if (member && (collecting_members || deferring_bodies) &&
         (at(preprocessing_op_or_punc::LEFT_BRACE) ||
          at(preprocessing_op_or_punc::COLON) || function_try)) {
         /* a complete-class context: the first pass over the
@@ -120,8 +120,26 @@ node_index parser::function_body(const declarator_facts &declarator,
             if (at(preprocessing_op_or_punc::LEFT_BRACE))
                 position += group_end(0);
         }
-        add(tree.make(syntax_kind::unparsed, nullptr, 0, first, position));
-        return finish_node(syntax_kind::function_body, mark, first);
+        node_index skipped =
+            tree.make(syntax_kind::unparsed, nullptr, 0, first, position);
+        add(skipped);
+        if (collecting_members)
+            return finish_node(syntax_kind::function_body, mark, first);
+        /* OPTIMIZATION: one pass over the member-specification: the body
+           is read after the outermost class's '}' (class.mem.cpp), its node
+           in the place of this one */
+        deferred_body d;
+        d.first = first;
+        d.end = position;
+        d.placeholder = skipped;
+        d.scope = names.current();
+        d.declarator = declarator;
+        d.class_name = member_class_name;
+        d.braces = enclosing_braces;
+        d.nesting = nesting;
+        d.implicit_typename = parameters_implicit_typename;
+        deferred_bodies.append(d);
+        return skipped;
     }
     if (at(preprocessing_op_or_punc::LEFT_BRACE) ||
         at(preprocessing_op_or_punc::COLON) || function_try) {

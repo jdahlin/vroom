@@ -181,6 +181,53 @@ node_index parser::class_body(uint32_t name, scope_index region)
         /* a nested class in its enclosing class's first pass: its members
            are its own, read when the enclosing class is read in full */
         return unparsed_group();
+    if (deferring_bodies)
+        /* a nested class in a member-specification read in one pass: read
+           in the same pass, its member function bodies after the outermost
+           class's '}' ([class.mem]/6: a complete-class context of the
+           nested class is one of the enclosing class too) */
+        return class_body_read(name, region, false);
+    /*
+     * OPTIMIZATION: [class.mem]/6 in one pass, as clang reads it: the
+     * member function bodies are skipped and read after the '}', the
+     * default arguments and default member initializers are read where they
+     * are, their lookups asked again once the class is complete.  When an
+     * answer differs, a body does not end where its tokens were skipped to,
+     * or the class does not parse, the class is read again in two passes
+     * (class_body_read), the first only for the names it declares.
+     */
+    size_t checked = names.checked.size();
+    size_t deferred = deferred_bodies.size();
+    {
+        tentative_parse one_pass(*this);
+        node_index n;
+        {
+            flag_set deferring(deferring_bodies, true);
+            n = class_body_read(name, region, false);
+        }
+        bool kept = !failed() && names.checked_lookups_hold(checked) &&
+                    deferred_bodies_read(deferred);
+        names.checked.resize(checked);
+        deferred_bodies.resize(deferred);
+        if (kept) {
+            one_pass.commit();
+            counters.one_pass_classes++;
+            return n;
+        }
+    }
+    counters.two_pass_classes++;
+    names.set_complete(region, 0);
+    return class_body_read(name, region, true);
+}
+
+/*
+ * The member-specification and the '}'; two_passes: first only for the
+ * names it declares, the complete-class contexts skipped, then again with
+ * the class complete.
+ */
+node_index parser::class_body_read(uint32_t name, scope_index region,
+                                   bool two_passes)
+{
     add_token(); /* { */
     scope_index outer = names.current();
     /* [temp.local]/1: a class template's injected-class-name is a
@@ -194,15 +241,20 @@ node_index parser::class_body(uint32_t name, scope_index region)
     uint32_t enclosing_class = member_class_name;
     member_class_name = name;
     enclosing_braces++;
-    scope_index complete = 0;
-    {
-        tentative_parse first_pass(*this);
-        flag_set collecting(collecting_members, true);
+    if (two_passes) {
+        scope_index complete = 0;
+        {
+            tentative_parse first_pass(*this);
+            flag_set collecting(collecting_members, true);
+            member_specification();
+            complete = names.snapshot(region);
+        }
+        names.set_complete(region, complete);
         member_specification();
-        complete = names.snapshot(region);
+    } else {
+        member_specification();
+        names.set_complete(region, names.snapshot(region));
     }
-    names.set_complete(region, complete);
-    member_specification();
     enclosing_braces--;
     member_class_name = enclosing_class;
     names.reenter(outer);
@@ -211,6 +263,51 @@ node_index parser::class_body(uint32_t name, scope_index region)
     if (!accept(preprocessing_op_or_punc::RIGHT_BRACE))
         return expected("'}' to end the member-specification", "class.pre");
     return 0;
+}
+
+/*
+ * OPTIMIZATION: the member function bodies skipped since `first`, read
+ * with every class around them complete, each where its declarator left
+ * the parser; false when one fails or does not end where it was skipped to.
+ */
+bool parser::deferred_bodies_read(size_t first)
+{
+    token_index after = position;
+    scope_index current = names.current();
+    unsigned braces = enclosing_braces, depth = nesting;
+    uint32_t class_name = member_class_name;
+    /* each body is read as the declaration it is in would read it: the
+       innermost that recovers ([intro.compliance]/2.2) */
+    unsigned level = recovery_level;
+    recovery_level = speculation;
+    flag_set block(block_scope, false);
+    flag_set deferring(deferring_bodies, false);
+    bool read = true;
+    for (size_t i = first; read && i < deferred_bodies.size(); i++) {
+        deferred_body d = deferred_bodies[i];
+        position = d.first;
+        names.reenter(d.scope);
+        enclosing_braces = d.braces;
+        nesting = d.nesting;
+        member_class_name = d.class_name;
+        flag_set implicit(parameters_implicit_typename, d.implicit_typename);
+        flag_set context(member_declarator_context, false);
+        size_t before = pending.size();
+        node_index n = function_body(d.declarator, true);
+        read = !failed() && position == d.end && pending.size() == before + 1 &&
+               n && n == static_cast<node_index>(tree.size() - 1);
+        if (read) {
+            pending.resize(before);
+            tree.replace(d.placeholder, n);
+        }
+    }
+    position = after;
+    names.reenter(current);
+    enclosing_braces = braces;
+    nesting = depth;
+    member_class_name = class_name;
+    recovery_level = level;
+    return read;
 }
 
 /*
@@ -433,6 +530,7 @@ node_index parser::member_declarator(const decl_specifier_facts &specifiers,
                 }
             } else {
                 complete_class_context context(names);
+                checked_lookups checked(*this);
                 initializer();
             }
             if (failed())
@@ -534,6 +632,7 @@ node_index parser::member_declarator(const decl_specifier_facts &specifiers,
             }
         } else {
             complete_class_context context(names);
+            checked_lookups checked(*this);
             initializer();
         }
         if (failed())

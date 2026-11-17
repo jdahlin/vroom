@@ -211,9 +211,9 @@ parser::tentative_parse::tentative_parse(parser &p)
     : p(p), position(p.position), pending(p.pending.size()),
       nodes(p.tree.size()), messages(p.diagnostics.messages.size()),
       errors(p.diagnostics.error_count), lookups(p.names.lookups.size()),
-      splits(p.tree.split_tokens.size()), split_active(p.split_active),
-      split_rest(p.split_rest), names(p.names.journal_mark()),
-      failure(p.failure)
+      splits(p.tree.split_tokens.size()), deferred(p.deferred_bodies.size()),
+      split_active(p.split_active), split_rest(p.split_rest),
+      names(p.names.journal_mark()), failure(p.failure)
 {
     p.counters.tentative_parses++;
     p.speculation++;
@@ -233,6 +233,7 @@ parser::tentative_parse::~tentative_parse()
     p.diagnostics.error_count = errors;
     p.names.lookups.resize(lookups);
     p.tree.split_tokens.resize(splits);
+    p.deferred_bodies.resize(deferred);
     p.split_active = split_active;
     p.split_rest = split_rest;
     p.names.rollback(names);
@@ -365,13 +366,13 @@ node_index parser::unparsed_declaration()
         (at(standard_keyword::inline_) && at(standard_keyword::namespace_, 1));
 
     for (;;) {
-        const token &t = peek();
+        const token t = peek(); /* the calls below may make more tokens */
         if (at_end()) {
             if (erroneous) {
                 /* [intro.compliance]/2.2: "at least one diagnostic
                    message": the declaration has its one */
             } else if (!open.empty()) {
-                const token &opener = tokens[open.back()];
+                const token opener = tokens[open.back()];
                 diagnostics.issue(diagnostic_id::parse_expected_closing,
                                   tokens.location(position))
                     << bracket_spelling(closing_bracket(opener))
@@ -391,7 +392,7 @@ node_index parser::unparsed_declaration()
         if (closing_bracket(t) != preprocessing_op_or_punc::count) {
             if (outside &&
                 is_operator(t, preprocessing_op_or_punc::LEFT_BRACE)) {
-                const token &before = tokens[position - 1];
+                const token before = tokens[position - 1];
                 bool after_requires =
                     position > first &&
                     keyword_of(before) == standard_keyword::requires_;

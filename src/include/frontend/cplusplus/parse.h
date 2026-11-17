@@ -169,6 +169,10 @@ class syntax_tree
     /* a tentative parse that failed takes back what it built: the tree as
        it was with node_count nodes */
     void truncate(size_t node_count);
+    /* OPTIMIZATION: a member function body read after its class's '}'
+       (class.mem.cpp): the node made for it takes the place of the
+       placeholder node made when its tokens were skipped */
+    void replace(node_index placeholder, node_index made);
 
     /* [temp.names]/3: the '>>' (or '>=', '>>=') tokens whose first '>'
        ended a template-argument-list: such a token is the child of two
@@ -327,6 +331,22 @@ class declared_names
     scope_index snapshot(scope_index region);
     void set_complete(scope_index region, scope_index complete);
     unsigned complete_contexts = 0;
+    /* OPTIMIZATION: [class.mem]/6 in one pass (class.mem.cpp): the lookups
+       of a default argument or default member initializer read where it
+       is (checking > 0), with their answers, asked again once the class's
+       complete region is known; equal answers: the reading is the one
+       with the class complete */
+    struct checked_lookup {
+        uint32_t name;
+        scope_index from;
+        bool qualified;
+        name_kind found;
+        scope_index scope;
+        bool dependent;
+    };
+    unsigned checking = 0;
+    owned_array<checked_lookup> checked;
+    bool checked_lookups_hold(size_t first);
     /* [class.pre]/2: a class-specifier defines a class an earlier
        declaration in the scope `in` may have declared (class X; ...
        class X { ... };): that declaration's region, which a typedef-name
@@ -379,7 +399,24 @@ class declared_names
         /* a type or template that depends on a template parameter
            ([temp.dep.type]) */
         bool dependent = false;
+        /* the scope's previous declaration of the name (no_declaration:
+           none) */
+        uint32_t previous = no_declaration;
     };
+    static constexpr uint32_t no_declaration = 0xFFFFFFFFu;
+    /* OPTIMIZATION: each (scope, name)'s latest declaration, as an index
+       into the scope's declarations: open addressing, a key once made stays
+       (its latest is no_declaration when a rollback removed them all) */
+    struct name_slot {
+        scope_index scope;
+        uint32_t name, latest;
+    };
+    owned_array<name_slot> name_slots;
+    size_t name_slots_used = 0;
+    uint32_t *latest_of(scope_index in, uint32_t name, bool make);
+    const declaration *latest(scope_index in, uint32_t name) const;
+    void add_declaration(scope_index in, declaration d);
+    void remove_declaration(scope_index in);
     struct scope {
         scope_kind kind;
         scope_index enclosing;
@@ -409,6 +446,9 @@ struct parser_statistics {
     uint64_t unparsed = 0, erroneous = 0;
     /* declarations kept as tokens because they use grammar of a later step */
     uint64_t beyond_step = 0;
+    /* member-specifications read in one pass, and read again in two
+       because the one pass did not hold (class.mem.cpp) */
+    uint64_t one_pass_classes = 0, two_pass_classes = 0;
 };
 
 /* [lex.key] Table 5, as parse/keywords.inc names them */
@@ -745,7 +785,7 @@ class parser
       private:
         parser &p;
         token_index position;
-        size_t pending, nodes, messages, errors, lookups, splits;
+        size_t pending, nodes, messages, errors, lookups, splits, deferred;
         bool split_active;
         token split_rest;
         declared_names::mark names;
@@ -910,6 +950,9 @@ class parser
     /* { member-specification_opt } of the class name (0: unnamed) whose
        region is region, in two passes ([class.mem]/6) */
     node_index class_body(uint32_t name, scope_index region);
+    node_index class_body_read(uint32_t name, scope_index region,
+                               bool two_passes);
+    bool deferred_bodies_read(size_t first);
     node_index member_specification();
     node_index member_declaration();
     node_index member_declaration_alternative();
@@ -928,6 +971,42 @@ class parser
     /* the first pass over a member-specification: only the names its
        member-declarations declare; the complete-class contexts are skipped */
     bool collecting_members = false;
+    /* OPTIMIZATION: inside the member-specification of an outermost class
+       read in one pass: a member function body is skipped and read after
+       the class's '}' (deferred_bodies), a default argument or default
+       member initializer is read where it is with its lookups checked
+       (checked_lookups); the class is read in two passes when that does
+       not hold */
+    bool deferring_bodies = false;
+    struct deferred_body {
+        token_index first, end;
+        node_index placeholder;
+        scope_index scope;
+        declarator_facts declarator;
+        uint32_t class_name;
+        unsigned braces, nesting;
+        bool implicit_typename;
+    };
+    owned_array<deferred_body> deferred_bodies;
+    /* a default argument or default member initializer read in place */
+    struct checked_lookups {
+        parser &p;
+        bool was;
+        explicit checked_lookups(parser &p) : p(p), was(p.deferring_bodies)
+        {
+            if (was)
+                p.names.checking++;
+            p.deferring_bodies = false;
+        }
+        ~checked_lookups()
+        {
+            if (was)
+                p.names.checking--;
+            p.deferring_bodies = was;
+        }
+        checked_lookups(const checked_lookups &) = delete;
+        checked_lookups &operator=(const checked_lookups &) = delete;
+    };
     /* a member-declaration's declarator is being parsed: its default
        arguments are complete-class contexts */
     bool member_declarator_context = false;

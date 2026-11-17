@@ -20,6 +20,100 @@
 namespace cplusplus
 {
 
+/*
+ * OPTIMIZATION: the declarations of a scope by name.  A scope with few
+ * declarations is searched from its latest; a larger one through
+ * name_slots, each name's latest declaration, earlier ones linked by
+ * previous.  Declarations are added and removed last first (rollback), so
+ * the slot goes back to the removed one's previous.
+ */
+static uint32_t name_slot_hash(scope_index in, uint32_t name)
+{
+    uint64_t h =
+        (static_cast<uint64_t>(in) << 32 | name) * 0x9E3779B97F4A7C15ull;
+    return static_cast<uint32_t>(h >> 32);
+}
+
+uint32_t *declared_names::latest_of(scope_index in, uint32_t name, bool make)
+{
+    if (make && name_slots_used * 2 >= name_slots.size()) {
+        {
+            size_t size = 4096;
+            if (name_slots.size())
+                size = name_slots.size() * 2;
+            owned_array<name_slot> old;
+            old.reserve(name_slots.size());
+            for (const name_slot &slot : name_slots)
+                old.append(slot);
+            name_slots.resize(size);
+            for (name_slot &slot : name_slots)
+                slot = {no_declaration, 0, no_declaration};
+            for (const name_slot &slot : old) {
+                if (slot.scope == no_declaration)
+                    continue;
+                size_t mask = name_slots.size() - 1;
+                size_t i = name_slot_hash(slot.scope, slot.name) & mask;
+                while (name_slots[i].scope != no_declaration)
+                    i = (i + 1) & mask;
+                name_slots[i] = slot;
+            }
+        }
+    }
+    size_t mask = name_slots.size() - 1;
+    for (size_t i = name_slot_hash(in, name) & mask;; i = (i + 1) & mask) {
+        name_slot &slot = name_slots[i];
+        if (slot.scope == in && slot.name == name)
+            return &slot.latest;
+        if (slot.scope != no_declaration)
+            continue;
+        if (!make)
+            return nullptr;
+        slot = {in, name, no_declaration};
+        name_slots_used++;
+        return &slot.latest;
+    }
+}
+
+const declared_names::declaration *declared_names::latest(scope_index in,
+                                                          uint32_t name) const
+{
+    const owned_array<declaration> &declarations = scopes[in].declarations;
+    if (declarations.size() <= 8) {
+        for (size_t i = declarations.size(); i-- > 0;)
+            if (declarations[i].name == name)
+                return &declarations[i];
+        return nullptr;
+    }
+    size_t mask = name_slots.size() - 1;
+    for (size_t i = name_slot_hash(in, name) & mask;; i = (i + 1) & mask) {
+        const name_slot &slot = name_slots[i];
+        if (slot.scope == in && slot.name == name) {
+            if (slot.latest == no_declaration)
+                return nullptr;
+            return &declarations[slot.latest];
+        }
+        if (slot.scope == no_declaration)
+            return nullptr;
+    }
+}
+
+void declared_names::add_declaration(scope_index in, declaration d)
+{
+    owned_array<declaration> &declarations = scopes[in].declarations;
+    uint32_t *latest = latest_of(in, d.name, true);
+    d.previous = *latest;
+    *latest = static_cast<uint32_t>(declarations.size());
+    declarations.append(d);
+}
+
+void declared_names::remove_declaration(scope_index in)
+{
+    owned_array<declaration> &declarations = scopes[in].declarations;
+    const declaration &d = declarations.back();
+    *latest_of(in, d.name, true) = d.previous;
+    declarations.resize(declarations.size() - 1);
+}
+
 declared_names::declared_names()
 {
     /* [basic.scope.namespace]/3: "The outermost declarative region of a
@@ -35,9 +129,8 @@ declared_names::find(scope_index in, uint32_t name, unsigned depth) const
     const scope &s = scopes[in];
     /* the latest declaration first: a later one of another kind is the one
        in effect ([basic.scope.hiding] is not modelled further) */
-    for (size_t i = s.declarations.size(); i-- > 0;)
-        if (s.declarations[i].name == name)
-            return &s.declarations[i];
+    if (const declaration *d = latest(in, name))
+        return d;
     /* a using-directive can nominate a namespace that encloses this one:
        the depth stops a cycle */
     if (depth > 16)
@@ -58,12 +151,15 @@ scope_index declared_names::enter_namespace(uint32_t name, bool inline_)
        extends the previously-declared namespace." */
     if (name) {
         const scope &here = scopes[current_scope];
-        for (size_t i = here.declarations.size(); i-- > 0;)
-            if (here.declarations[i].name == name &&
-                here.declarations[i].kind == name_kind::namespace_name) {
-                current_scope = here.declarations[i].scope;
+        for (const declaration *d = latest(current_scope, name); d;) {
+            if (d->kind == name_kind::namespace_name) {
+                current_scope = d->scope;
                 return current_scope;
             }
+            if (d->previous == no_declaration)
+                break;
+            d = &here.declarations[d->previous];
+        }
     }
     scope_index enclosing = current_scope;
     scope &s = scopes.make();
@@ -71,8 +167,7 @@ scope_index declared_names::enter_namespace(uint32_t name, bool inline_)
     s.enclosing = enclosing;
     scope_index made = static_cast<scope_index>(scopes.size() - 1);
     if (name) {
-        scopes[enclosing].declarations.append(
-            {name, name_kind::namespace_name, made});
+        add_declaration(enclosing, {name, name_kind::namespace_name, made});
         journal.append(enclosing);
     }
     /* [namespace.unnamed]/1: an unnamed-namespace-definition behaves as if
@@ -119,11 +214,15 @@ void declared_names::declare_in(scope_index in, uint32_t name, name_kind kind,
        ... an overload set that contains a function template": a function
        declared beside a function template of the same name does not hide
        it */
-    if (kind == name_kind::function)
-        for (const declaration &d : scopes[in].declarations)
-            if (d.name == name && d.kind == name_kind::function_template)
-                kind = name_kind::function_template;
-    scopes[in].declarations.append({name, kind, region, dependent});
+    for (const declaration *d = latest(in, name);
+         d && kind == name_kind::function;) {
+        if (d->kind == name_kind::function_template)
+            kind = name_kind::function_template;
+        if (d->previous == no_declaration)
+            break;
+        d = &scopes[in].declarations[d->previous];
+    }
+    add_declaration(in, {name, kind, region, dependent});
     journal.append(in);
 }
 
@@ -136,7 +235,7 @@ void declared_names::declare_template_parameter(uint32_t name, name_kind kind)
        is a dependent type ([temp.dep.type]/7) */
     bool dependent =
         kind == name_kind::type_name || kind == name_kind::template_name;
-    scopes[current_scope].declarations.append({name, kind, 0, dependent});
+    add_declaration(current_scope, {name, kind, 0, dependent});
     journal.append(current_scope);
 }
 
@@ -185,8 +284,9 @@ scope_index declared_names::snapshot(scope_index region)
     const scope &s = scopes[region];
     copy.kind = s.kind;
     copy.enclosing = s.enclosing;
-    for (const declaration &d : s.declarations)
-        copy.declarations.append(d);
+    scope_index made = static_cast<scope_index>(scopes.size() - 1);
+    for (size_t i = 0; i < scopes[region].declarations.size(); i++)
+        add_declaration(made, scopes[region].declarations[i]);
     for (scope_index other : s.searched_with)
         copy.searched_with.append(other);
     return static_cast<scope_index>(scopes.size() - 1);
@@ -195,18 +295,14 @@ scope_index declared_names::snapshot(scope_index region)
 void declared_names::define_class(scope_index in, uint32_t name,
                                   scope_index region)
 {
-    const scope &s = scopes[in];
-    for (size_t i = s.declarations.size(); i-- > 0;) {
-        const declaration &d = s.declarations[i];
-        if (d.name != name)
-            continue;
-        if ((d.kind == name_kind::type_name ||
-             d.kind == name_kind::template_name) &&
-            d.scope && d.scope != region) {
-            scopes[d.scope].searched_with.append(region);
-            journal.append(d.scope | 0x80000000u);
-        }
-        return;
+    const declaration *d = latest(in, name);
+    if (d &&
+        (d->kind == name_kind::type_name ||
+         d->kind == name_kind::template_name) &&
+        d->scope && d->scope != region) {
+        scope_index declared = d->scope;
+        scopes[declared].searched_with.append(region);
+        journal.append(declared | 0x80000000u);
     }
 }
 
@@ -218,8 +314,8 @@ void declared_names::set_complete(scope_index region, scope_index complete)
 void declared_names::declare_namespace_alias(uint32_t name,
                                              scope_index nominated)
 {
-    scopes[current_scope].declarations.append(
-        {name, name_kind::namespace_name, nominated});
+    add_declaration(current_scope,
+                    {name, name_kind::namespace_name, nominated});
     journal.append(current_scope);
 }
 
@@ -238,9 +334,42 @@ void declared_names::rollback(mark m)
         if (entry & 0x80000000u)
             s.searched_with.resize(s.searched_with.size() - 1);
         else
-            s.declarations.resize(s.declarations.size() - 1);
+            remove_declaration(entry & 0x7FFFFFFFu);
     }
     current_scope = m.current;
+}
+
+/* OPTIMIZATION: each checked lookup asked again as a complete-class
+   context asks it once every complete region is set ([class.mem]/6) */
+bool declared_names::checked_lookups_hold(size_t first)
+{
+    size_t recorded = lookups.size();
+    uint64_t dependent = dependent_found;
+    scope_index current = current_scope;
+    unsigned contexts = complete_contexts, was_checking = checking;
+    checking = 0;
+    complete_contexts = 1;
+    bool hold = true;
+    for (size_t i = first; hold && i < checked.size(); i++) {
+        checked_lookup c = checked[i];
+        scope_index scope = 0;
+        bool is_dependent = false;
+        name_kind found;
+        if (c.qualified) {
+            found = lookup_qualified(c.from, c.name, &scope, &is_dependent);
+        } else {
+            current_scope = c.from;
+            found = lookup_unqualified(c.name, &scope, &is_dependent);
+        }
+        hold =
+            found == c.found && scope == c.scope && is_dependent == c.dependent;
+    }
+    lookups.resize(recorded);
+    dependent_found = dependent;
+    current_scope = current;
+    complete_contexts = contexts;
+    checking = was_checking;
+    return hold;
 }
 
 name_kind declared_names::lookup_unqualified(uint32_t name, scope_index *scope,
@@ -286,6 +415,14 @@ name_kind declared_names::lookup_unqualified(uint32_t name, scope_index *scope,
             dependent_found++;
     }
     lookups.append({name, current_scope, false, found});
+    if (checking) {
+        checked_lookup c = {name, current_scope, false, found, 0, false};
+        if (d) {
+            c.scope = d->scope;
+            c.dependent = d->dependent;
+        }
+        checked.append(c);
+    }
     return found;
 }
 
@@ -312,6 +449,14 @@ name_kind declared_names::lookup_qualified(scope_index in, uint32_t name,
             dependent_found++;
     }
     lookups.append({name, in, true, found});
+    if (checking) {
+        checked_lookup c = {name, in, true, found, 0, false};
+        if (d) {
+            c.scope = d->scope;
+            c.dependent = d->dependent;
+        }
+        checked.append(c);
+    }
     return found;
 }
 

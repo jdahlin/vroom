@@ -590,6 +590,44 @@ recorded here:
   member-specification as one pass with ranges, the recognizer at the hot
   disambiguation sites, one lookup per token.  Gate: PLAN-cxx-parse's
   V1-V6 numbers unchanged.
+  Status (2026-11-17): measured first.  On json.hpp 565,613 of 845,955
+  tokens were rewound: 336k by the member-specification's first pass, 208k
+  by the 3,140 declarations of a later step's grammar (recover_declaration),
+  the ambiguity sites together about 20k.  Done:
+  - The member-specification in one pass (class.mem.cpp `class_body`):
+    member function bodies (with ctor-initializer and handlers) skipped and
+    read after the outermost class's '}', their node replacing the
+    placeholder (`syntax_tree::replace`); default arguments and default
+    member initializers read in place, their lookups recorded
+    (`declared_names::checked`) and asked again once every class is
+    complete.  A different answer, a body that does not end where it was
+    skipped to, or a class that fails is read again in the two passes as
+    before, so the result is the two-pass one: 18 of 1,863 classes on
+    json.  Rewound tokens 565,613 -> 90,628.
+  - Lookup by name instead of a scan (`declared_names::latest`, pulled
+    forward from S2): each (scope, name)'s latest declaration in an
+    open-addressed table, earlier ones linked, rollback restoring the
+    link; `find` went from 21 % of the samples to 2 %.
+  json.hpp parser 227 -> 199 (one pass) -> 106 ns/token; vcc 0.466 s ->
+  0.355 s against clang 23 -fsyntax-only 0.85 s (2.4x).  bench/cxx-parse.py
+  is the base's on every line; -dump-syntax and the diagnostics of every
+  Parser/ and CXX/ test (c++98 and c++20) are the base's but for two
+  tests: Parser/cxx-class.cpp reports a body's error after the later
+  member's, as clang does, and over.literal/p2.cpp (c++98) now issues the
+  invalid-suffix error of an (erroneous) statement the first pass had
+  diagnosed and rewound.  On json 19 statements calling a member template
+  declared later in the class are now parsed (the first pass had failed on
+  the template's declaration).  Fixed on the way: `unparsed_declaration`
+  kept a reference to a token across the stream's growth (ASan, mutants of
+  Parser/extern-template-attributes.cpp, in the base too); the ASan
+  mutant run is 3721/3721.
+  Not done, by the measurement: the recognizer and a per-token lookup cache
+  (the ambiguity sites rewind about 2 % of the tokens; lookups are 2 % of
+  the time).  Recovery without a tentative parse is left for S3, where
+  actions at finish_node need it; its rewinds today are the later step's
+  declarations.  The parser's largest costs now are phase 7
+  (`token_stream::make_through`, the 80-byte token and its copy: about
+  15 % of the samples with memmove) and malloc/free (S2).
 - **S2 Regions and lookup tables**: `vjob_region` arenas, C's scope
   directory, compact tokens, no `malloc` on the hot path.
 - **S3 Actions and the first typed nodes**: the class-free programs of

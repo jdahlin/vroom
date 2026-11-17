@@ -213,6 +213,7 @@ node_index parser::parameter_declaration()
             unparsed_until(stops, 3);
         } else if (member_declarator_context) {
             complete_class_context context(names);
+            checked_lookups checked(*this);
             initializer_clause();
         } else {
             initializer_clause();
