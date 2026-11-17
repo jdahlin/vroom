@@ -313,6 +313,14 @@ struct entity {
     /* a special member function declared implicitly ([class.default.ctor]/1,
        [class.copy.ctor]/6, [class.dtor]/4) */
     bool implicit = false;
+    /* an enumeration ([dcl.enum]): its underlying type once it is
+       complete (none before), whether it is scoped ([dcl.enum]/2) and
+       whether its underlying type is fixed ([dcl.enum]/5) */
+    fundamental_type underlying = fundamental_type::none;
+    bool scoped = false, fixed_underlying = false;
+    /* ... and, its underlying type not fixed, the type it promotes to
+       ([conv.prom]/4) */
+    fundamental_type promoted = fundamental_type::none;
 };
 
 /* one declaration of an entity: the syntax node that declares it */
@@ -808,6 +816,8 @@ class semantic_analysis
            declaration with no declarator declares the class
            ([dcl.pre]/5) */
         bool declares_class = false;
+        /* ... and it was an enum-specifier */
+        bool declares_enumeration = false;
     };
     analysis_result decl_specifier_seq(node_index seq, specified &s,
                                        bool parameter);
@@ -968,6 +978,8 @@ class semantic_analysis
                                      expression_meaning &left,
                                      expression_meaning &right,
                                      expression_meaning &m);
+    /* [expr.static.cast] */
+    analysis_result static_cast_expression(node_index n, expression_meaning &m);
     /* [expr.comma] */
     analysis_result comma(node_index n, expression_meaning &m);
     /* a type-id ([dcl.name]) */
@@ -987,6 +999,21 @@ class semantic_analysis
     analysis_result operand_value(node_index at, expression_meaning &m);
     /* [conv.prom] */
     void promote(expression_meaning &m);
+    /* the enumeration t, 0 if t is no complete enumeration */
+    entity_index enumeration_of(qualified_type t) const;
+    /* a prvalue of enumeration type as its underlying type
+       ([dcl.enum]/8: "the values of the enumeration are the values of the
+       underlying type"): false if it has no enumeration type */
+    bool enumeration_as_underlying(expression_meaning &m);
+    /* [conv.prom]/4-5: a prvalue of unscoped enumeration type promoted
+       to an integer type; false if it has no unscoped enumeration type */
+    bool promote_enumeration(expression_meaning &m);
+    /* the operands of a binary operator that takes arithmetic or
+       unscoped enumeration operands: both promoted, or, both of one
+       scoped enumeration type and comparison, both as its underlying
+       type ([expr.arith.conv]/1.1) */
+    void enumeration_operands(expression_meaning &a, expression_meaning &b,
+                              bool comparison);
     /* a prvalue converted to the arithmetic type to, its value with it */
     void convert_arithmetic(expression_meaning &m, fundamental_type to);
     /* ... its type and value, without the node */
@@ -1050,6 +1077,23 @@ class semantic_analysis
     /* [class.pre]: a class-specifier, the class's type */
     analysis_result class_specifier(node_index n, type_index &type);
     analysis_result class_definition(node_index n, type_index &type);
+    /* "class.nest" or "class.local" for a class declared in scope */
+    const char *inner_class_rule(entity_index scope) const;
+    /* [class.static.data]: the definition of a static data member */
+    analysis_result
+    static_member_definition(node_index declaration, token_index id,
+                             entity_index qualifier, qualified_type type,
+                             const specified &s, bool definition,
+                             entity_index &declared_entity);
+    /* [dcl.type.simple]: class-name :: type-name, the member type */
+    analysis_result qualified_type_name(node_index n, type_index &type);
+    /* [dcl.enum]: an enum-specifier, the enumeration's type */
+    analysis_result enum_specifier(node_index n, type_index &type);
+    /* [dcl.type.elab]: enum identifier, the enumeration's type */
+    analysis_result elaborated_enum_specifier(node_index n, type_index &type);
+    /* [dcl.enum]: an enumerator named by an id-expression */
+    analysis_result enumerator_value(token_index t, entity_index e,
+                                     expression_meaning &m);
     /* [dcl.type.elab]: class-key identifier, the class's type */
     analysis_result elaborated_type_specifier(node_index n, type_index &type);
     /* [class.mem]: one member-declaration of the class being defined */
@@ -1156,6 +1200,9 @@ class semantic_analysis
     /* the class whose member-specification is analysed, 0 if none, and
        its layout so far */
     entity_index defining_class = 0;
+    /* the access of the member-declaration analysed (an enumeration's and
+       its enumerators' in a class) */
+    uint8_t declaration_access = 0;
     uint64_t layout_size = 0;
     uint32_t layout_alignment = 1;
 

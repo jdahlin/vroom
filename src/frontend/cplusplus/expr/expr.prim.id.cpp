@@ -520,6 +520,8 @@ analysis_result semantic_analysis::id_expression(token_index t,
     entity_index e = lookup(tokens.identifier(t));
     if (!e || entity_table[e].kind == entity_kind::none)
         return not_supported(current_declaration, "basic.lookup.unqual");
+    if (entity_table[e].kind == entity_kind::enumerator)
+        return enumerator_value(t, e, m);
     const entity &x = entity_table[e];
     if (x.kind != entity_kind::variable && x.kind != entity_kind::function)
         return not_supported(current_declaration, "expr.prim.id");
@@ -593,6 +595,27 @@ analysis_result semantic_analysis::qualified_id(node_index n,
         tokens[names[0].index()].kind != token_kind::identifier)
         return not_supported(n, "basic.lookup.qual");
     entity_index c = lookup(tokens.identifier(names[0].index()));
+    if (c && entity_table[c].kind == entity_kind::enumeration) {
+        /* [expr.prim.id.qual]/4: "A nested-name-specifier that denotes an
+           enumeration ([dcl.enum]), followed by the name of an enumerator
+           of that enumeration, is a qualified-id that refers to the
+           enumerator."  An unscoped enumeration's enumerators are bound in
+           it as well as in its enclosing scope (enum_specifier) */
+        token_index t = parts[1].index();
+        entity_index e = entity_table.find(c, tokens.identifier(t));
+        if (!e || entity_table[e].kind != entity_kind::enumerator) {
+            if (entity_table[c].underlying == fundamental_type::none)
+                return not_supported(n, "dcl.enum");
+            return ill_formed_at_token(t,
+                                       "a nested-name-specifier that denotes "
+                                       "an enumeration shall be followed by "
+                                       "the name of an enumerator of that "
+                                       "enumeration",
+                                       "expr.prim.id.qual");
+        }
+        m = expression_meaning();
+        return enumerator_value(t, e, m);
+    }
     if (!c || entity_table[c].kind != entity_kind::class_type)
         return not_supported(n, "basic.lookup.qual");
     token_index t = parts[1].index();
@@ -611,10 +634,21 @@ analysis_result semantic_analysis::qualified_id(node_index n,
                                    "the class its nested-name-specifier "
                                    "nominates",
                                    "basic.lookup.qual");
+    if (entity_table[e].kind == entity_kind::enumerator) {
+        if (!accessible(e))
+            return ill_formed_at_token(t,
+                                       "a private or protected member's name "
+                                       "can be used only by members and "
+                                       "friends of the class in which it is "
+                                       "declared",
+                                       "class.access");
+        m = expression_meaning();
+        return enumerator_value(t, e, m);
+    }
     const entity &x = entity_table[e];
     if (x.nonstatic_member)
         return implicit_member_access(t, e, m);
-    if (x.kind != entity_kind::function)
+    if (x.kind != entity_kind::function && x.kind != entity_kind::variable)
         return not_supported(n, "expr.prim.id.qual");
     if (!accessible(e))
         return ill_formed_at_token(t,

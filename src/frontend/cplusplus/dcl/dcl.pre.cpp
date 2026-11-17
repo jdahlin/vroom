@@ -745,6 +745,19 @@ analysis_result semantic_analysis::init_declarators(node_index declaration,
         if (s.typedef_ || s.static_ || s.extern_ || s.inline_ || s.constexpr_ ||
             s.type.cv())
             return not_supported(declaration, "dcl.pre");
+        /* [dcl.type.elab]/2: "class-key attribute-specifier-seq_opt
+           identifier ;" in a block declares a class there, which may hide
+           one found by lookup: not analysed yet */
+        if (current_scope && !s.declares_enumeration) {
+            const syntax_node &seq =
+                tree[tree.children(declaration)[0].index()];
+            for (uint32_t k = 0; k < seq.child_count; k++)
+                if (syntax_is(
+                        tree,
+                        tree.children(tree.children(declaration)[0].index())[k],
+                        syntax_kind::elaborated_type_specifier))
+                    return not_supported(declaration, "dcl.type.elab");
+        }
         return analysis_result::well_formed;
     }
     if (items.empty())
@@ -805,9 +818,10 @@ analysis_result semantic_analysis::declare_with_initializer(
         return not_supported(declaration, "dcl.meaning");
     if (m.aligned)
         return not_supported(declaration, "ext.gnu");
-    if (m.qualifier) {
+    if (m.qualifier &&
+        type_table[type.unqualified()].kind == type_kind::function) {
         if (initialized)
-            return not_supported(declaration, "class.static.data");
+            return not_supported(declaration, "dcl.init");
         return member_redeclaration(declaration, m.id, m.qualifier, type, s,
                                     definition);
     }
@@ -858,8 +872,12 @@ analysis_result semantic_analysis::declare_with_initializer(
            yet */
         return not_supported(declaration, "dcl.init");
     entity_index declared_entity = 0;
-    r = declare(declaration, m.id, kind, type, s, definition, initialized,
-                declared_entity);
+    if (m.qualifier)
+        r = static_member_definition(declaration, m.id, m.qualifier, type, s,
+                                     definition, declared_entity);
+    else
+        r = declare(declaration, m.id, kind, type, s, definition, initialized,
+                    declared_entity);
     last_declared = declared_entity;
     /* [dcl.array]/8: the bound of an earlier declaration (declare took it)
        is the one the initializer fills */

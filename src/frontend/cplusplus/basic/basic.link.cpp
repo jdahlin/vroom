@@ -88,9 +88,21 @@ analysis_result semantic_analysis::declare(node_index declaration,
     uint32_t name = tokens.identifier(id);
     entity_index scope = current_scope;
     entity_index prior = entity_table.find(scope, name);
-    /* a variable or function with a class's name hides it
+    /* [dcl.typedef]/3: "In a given non-class scope, a typedef specifier
+       can be used to redeclare the name of any type declared in that scope
+       to refer to the type to which it already refers": typedef struct s
+       { ... } s; the name still finds the class or enumeration */
+    if (prior && kind == entity_kind::typedef_name &&
+        (entity_table[prior].kind == entity_kind::class_type ||
+         entity_table[prior].kind == entity_kind::enumeration) &&
+        type == entity_table[prior].type) {
+        declared_entity = prior;
+        return analysis_result::well_formed;
+    }
+    /* a variable or function with a class's or enumeration's name hides it
        ([basic.scope.hiding]/2) */
-    if (prior && entity_table[prior].kind == entity_kind::class_type)
+    if (prior && (entity_table[prior].kind == entity_kind::class_type ||
+                  entity_table[prior].kind == entity_kind::enumeration))
         return not_supported(declaration, "basic.scope.hiding");
     if (scope) {
         /* [dcl.inline]/4: "The inline specifier shall not appear on a block
@@ -187,7 +199,8 @@ analysis_result semantic_analysis::declare(node_index declaration,
        denote the class type (or enumeration type) for linkage purposes
        only" */
     if (kind == entity_kind::typedef_name && !type.cv() &&
-        record.kind == type_kind::class_type) {
+        (record.kind == type_kind::class_type ||
+         record.kind == type_kind::enumeration)) {
         entity &c = entity_table[record.entity];
         if (!c.name && !c.linkage_name) {
             c.linkage_name = name;
@@ -437,7 +450,12 @@ analysis_result semantic_analysis::declare_local(
    entities: [basic.funscope]) */
 entity_index semantic_analysis::lookup(uint32_t name) const
 {
-    for (entity_index s = current_scope;; s = entity_table[s].enclosing) {
+    /* [basic.scope.class]: in a member-specification, the names its
+       members declared before */
+    entity_index first = current_scope;
+    if (!first && defining_class)
+        first = defining_class;
+    for (entity_index s = first;; s = entity_table[s].enclosing) {
         entity_index e = entity_table.find(s, name);
         if (!e && s && entity_table[s].kind == entity_kind::class_type) {
             /* [class.member.lookup]: a class scope's lookup includes its

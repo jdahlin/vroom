@@ -10,12 +10,12 @@
  *         class-key attribute-specifier-seq_opt class-head-name class-virt-specifier_opt base-clause_opt
  *         class-key attribute-specifier-seq_opt base-clause_opt
  *
- * What analysis has rules for so far (doc/PLAN-cxx-sema.md S4): a named
- * class or struct of global namespace scope with no base class, whose
- * members are non-static data members of complete object types and
- * member functions (static or not, defined in the class or outside it).
- * Constructors, destructors, static data members, bit-fields, unions,
- * nested and local classes, base classes and virtual functions are
+ * What analysis has rules for so far (doc/PLAN-cxx-sema.md S4): a class
+ * or struct whose members are non-static data members of complete object
+ * types, static data members, member functions (static or not, defined in
+ * the class or outside it), nested classes and enumerations.  A local or
+ * nested class has data members only.  Bit-fields, unions, virtual
+ * functions and member functions of local and nested classes are
  * `unsupported` with their subclause.  The layout is the Itanium ABI's for
  * such a class ([abi:layout]): each member at the next offset aligned for
  * it, the size rounded up to the class's alignment, an empty class one
@@ -38,6 +38,18 @@ uint64_t align_up(uint64_t n, uint64_t alignment)
 }
 
 } // namespace
+
+/* the subclause of a class declared in class c's scope: a nested class
+   ([class.nest]) or, c in a block, a local one ([class.local]); none for
+   a class of namespace scope */
+const char *semantic_analysis::inner_class_rule(entity_index scope) const
+{
+    if (!scope)
+        return nullptr;
+    if (entity_table[scope].kind == entity_kind::class_type)
+        return "class.nest";
+    return "class.local";
+}
 
 /*
  * [class.pre]/1: "A class is a type.  Its name becomes a class-name
@@ -106,22 +118,30 @@ analysis_result semantic_analysis::class_definition(node_index n,
         return not_supported(n, "class.union");
     if (key != standard_keyword::class_ && key != standard_keyword::struct_)
         return not_supported(n, "class.pre");
-    if (defining_class)
-        return not_supported(n, "class.nest");
-    if (current_scope || function_state.active)
-        return not_supported(n, "class.local");
+    /* [class.nest]/1: "A class can be declared within another class.  A
+       class so declared is called a nested class."  [class.local]/1: "A
+       class can be declared within a function definition; such a class is
+       called a local class."  Their members are analysed as a class of
+       namespace scope's, but member functions (which would need a
+       <nested-name> or <local-name> symbol) not yet */
+    entity_index outer = defining_class;
+    entity_index scope = current_scope;
+    if (outer)
+        scope = outer;
+    if (has_bases && scope)
+        return not_supported(n, inner_class_rule(scope));
     token_index id = head_children[0].index();
     uint32_t name = 0;
     entity_index c = 0;
     if (!unnamed) {
         id = head_children[1].index();
         name = tokens.identifier(id);
-        c = entity_table.find(0, name);
+        c = entity_table.find(scope, name);
     }
     if (unnamed) {
         /* [basic.link]/4: an unnamed class has no linkage until a typedef
            names it for linkage purposes (declare) */
-        c = entity_table.make(entity_kind::class_type, 0, 0);
+        c = entity_table.make(entity_kind::class_type, 0, scope);
         entity_table[c].type = qualified_type::make(
             type_table.of_entity(type_kind::class_type, c), cv_none);
     } else if (c) {
@@ -144,12 +164,20 @@ analysis_result semantic_analysis::class_definition(node_index n,
                                        "class type",
                                        "basic.def.odr");
     } else {
-        c = entity_table.make(entity_kind::class_type, name, 0);
-        entity_table[c].linkage_of_name = linkage::external;
+        c = entity_table.make(entity_kind::class_type, name, scope);
+        /* [basic.link]/2.3: a local class's name has no linkage; a nested
+           class's is its enclosing class's */
+        if (!scope)
+            entity_table[c].linkage_of_name = linkage::external;
+        else if (outer)
+            entity_table[c].linkage_of_name =
+                entity_table[outer].linkage_of_name;
         entity_table[c].type = qualified_type::make(
             type_table.of_entity(type_kind::class_type, c), cv_none);
-        entity_table.bind(0, name, c);
+        entity_table.bind(scope, name, c);
     }
+    if (outer)
+        entity_table[c].access = declaration_access;
     entity_table.add_declaration(c, current_declaration);
     entity_table[c].defined = true;
     entity_table[c].first_member = static_cast<uint32_t>(class_members.size());
@@ -162,16 +190,37 @@ analysis_result semantic_analysis::class_definition(node_index n,
     uint8_t access = 0;
     if (key == standard_keyword::class_)
         access = 2;
+    uint64_t outer_size = layout_size;
+    uint32_t outer_alignment = layout_alignment;
+    uint8_t outer_access = declaration_access;
     defining_class = c;
     layout_size = 0;
     layout_alignment = 1;
+    /* the enclosing class's analysis goes on after this one: its state
+       back, and its members so far again after this class's, so that they
+       stay one range of class_members */
+    auto resume_outer = [&]() {
+        defining_class = outer;
+        layout_size = outer_size;
+        layout_alignment = outer_alignment;
+        declaration_access = outer_access;
+        if (!outer)
+            return;
+        entity &o = entity_table[outer];
+        if (o.first_member + o.member_count == class_members.size())
+            return;
+        uint32_t first = static_cast<uint32_t>(class_members.size());
+        for (uint32_t i = 0; i < o.member_count; i++)
+            class_members.append(class_members[o.first_member + i]);
+        entity_table[outer].first_member = first;
+    };
     entity_table[c].first_base = static_cast<uint32_t>(class_bases.size());
     entity_table[c].base_count = 0;
     analysis_result result = analysis_result::well_formed;
     if (has_bases)
         result = base_clause(c, head_children[2].index(), key);
     if (result != analysis_result::well_formed) {
-        defining_class = 0;
+        resume_outer();
         entity_table[c].kind = entity_kind::none;
         entity_table[c].size = 0;
         return result;
@@ -208,12 +257,12 @@ analysis_result semantic_analysis::class_definition(node_index n,
                 worse(result, member_declaration(c, member, access, bodies));
         }
     }
-    defining_class = 0;
     /* [class.mem]/7: complete at the closing } */
     entity &x = entity_table[c];
     x.alignment = layout_alignment;
     x.data_size = layout_size;
     x.size = align_up(layout_size, layout_alignment);
+    resume_outer();
     /* [intro.object]/8: "Unless it is a bit-field, an object with nonzero
        size shall occupy one or more bytes of storage": an empty class is
        one byte ([abi:layout]: dsize, size 1) */
@@ -234,14 +283,14 @@ analysis_result semantic_analysis::class_definition(node_index n,
     /* [class.mem]/6: "A complete-class context of a class is a function
        body ... within the member-specification of the class": the bodies
        are analysed with the class complete */
-    node_index outer = current_declaration;
+    node_index outer_declaration = current_declaration;
     for (node_index body : bodies) {
         result = worse(result, member_function_body(c, body));
-        current_declaration = outer;
+        current_declaration = outer_declaration;
     }
     if (result == analysis_result::well_formed)
         result = implicit_definitions(c, n);
-    current_declaration = outer;
+    current_declaration = outer_declaration;
     if (result != analysis_result::well_formed) {
         entity_table[c].kind = entity_kind::none;
         entity_table[c].size = 0;
@@ -272,9 +321,17 @@ analysis_result semantic_analysis::elaborated_type_specifier(node_index n,
     standard_keyword key = p.keyword_of(tokens[children[0].index()]);
     if (key != standard_keyword::class_ && key != standard_keyword::struct_)
         return not_supported(n, "dcl.type.elab");
-    if (current_scope || function_state.active || defining_class)
-        return not_supported(n, "basic.lookup.elab");
     uint32_t name = tokens.identifier(children[1].index());
+    if (current_scope || function_state.active || defining_class) {
+        /* [basic.lookup.elab]/2: a class found by lookup from a block or
+           class scope; one not found would be declared in the innermost
+           enclosing namespace or block scope ([basic.scope.pdecl]/7) */
+        entity_index found = lookup(name);
+        if (!found || entity_table[found].kind != entity_kind::class_type)
+            return not_supported(n, "basic.lookup.elab");
+        type = entity_table[found].type.unqualified();
+        return analysis_result::well_formed;
+    }
     entity_index c = entity_table.find(0, name);
     if (c) {
         if (entity_table[c].kind != entity_kind::class_type)
@@ -381,6 +438,10 @@ semantic_analysis::member_declaration(entity_index c, syntax_child member,
     if (node.kind != syntax_kind::member_declaration &&
         node.kind != syntax_kind::function_definition)
         return not_supported(n);
+    entity_index enclosing = entity_table[c].enclosing;
+    const char *nested_rule = inner_class_rule(enclosing);
+    if (nested_rule && node.kind == syntax_kind::function_definition)
+        return not_supported(n, nested_rule);
     if (!node.child_count ||
         !syntax_is(tree, children[0], syntax_kind::decl_specifier_seq)) {
         /* [class.mem]/12: "The decl-specifier-seq may be omitted in
@@ -388,6 +449,8 @@ semantic_analysis::member_declaration(entity_index c, syntax_child member,
            only" */
         if (!node.child_count || !declares_special_member(c, children[0]))
             return not_supported(n, "class.ctor");
+        if (nested_rule)
+            return not_supported(n, nested_rule);
         if (node.kind == syntax_kind::member_declaration) {
             if (node.child_count != 2 ||
                 !syntax_is_punctuator(tokens, children[1],
@@ -406,7 +469,9 @@ semantic_analysis::member_declaration(entity_index c, syntax_child member,
         return r;
     }
     specified s;
+    declaration_access = access;
     analysis_result r = decl_specifier_seq(children[0].index(), s, false);
+    declaration_access = 0;
     if (r != analysis_result::well_formed)
         return r;
     if (node.kind == syntax_kind::function_definition) {
@@ -443,9 +508,21 @@ semantic_analysis::member_declaration(entity_index c, syntax_child member,
         }
         declarators.append(d);
     }
-    if (declarators.empty())
-        /* a nested class or enumeration, or an anonymous union */
+    if (declarators.empty()) {
+        /* [class.mem]/3: a member enumeration ([dcl.pre]/5) */
+        bool plain = !s.typedef_ && !s.static_ && !s.extern_ && !s.inline_ &&
+                     !s.constexpr_ && !s.type.cv();
+        if (s.declares_enumeration && plain)
+            return analysis_result::well_formed;
+        /* [class.nest]/1: a nested class's definition */
+        const syntax_node &seq = tree[children[0].index()];
+        if (plain && seq.child_count == 1 &&
+            syntax_is(tree, tree.children(children[0].index())[0],
+                      syntax_kind::class_specifier))
+            return analysis_result::well_formed;
+        /* a nested class, an anonymous union */
         return not_supported(n, "class.mem");
+    }
     analysis_result result = analysis_result::well_formed;
     for (syntax_child d : declarators)
         result = worse(result, member_declarator(c, n, d, s, access, false));
@@ -528,6 +605,9 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
                                    "class.mem");
     }
     entity_index e = 0;
+    if (is_function && entity_table[c].enclosing)
+        return not_supported(declaration,
+                             inner_class_rule(entity_table[c].enclosing));
     if (is_function) {
         /* [class.static.mfct]/2: "A static member function shall not be
            virtual ... A static member function shall not be declared
@@ -547,9 +627,29 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
            ([dcl.inline])" */
         entity_table[e].inline_ = definition || s.inline_;
         entity_table[e].defined = definition;
-    } else {
-        if (s.static_)
+    } else if (s.static_) {
+        /* [class.static.data]/3: "The declaration of a non-inline static
+           data member in its class definition is not a definition and may
+           be of an incomplete type other than cv void." */
+        if (s.inline_)
             return not_supported(declaration, "class.static.data");
+        if (entity_table[c].enclosing)
+            /* [class.local]/4: "A local class cannot have static data
+               members"; a nested class's needs a <nested-name> of two
+               classes */
+            return not_supported(declaration, "class.static.data");
+        const struct type &record = type_table[type.unqualified()];
+        if (record.kind == type_kind::lvalue_reference ||
+            record.kind == type_kind::rvalue_reference)
+            return not_supported(declaration, "class.static.data");
+        e = entity_table.make(entity_kind::variable, name, c);
+        entity_table[e].type = type;
+        /* [class.static.data]/1: "A static data member is not part of the
+           subobjects of a class." */
+        entity_table[e].nonstatic_member = false;
+        entity_table[e].defined = false;
+        entity_table[e].alignment = static_cast<uint32_t>(m.aligned);
+    } else {
         if (s.inline_)
             /* [dcl.inline]/5: "The inline specifier shall not appear on a
                block scope declaration or on the declaration of a function
@@ -687,6 +787,7 @@ analysis_result semantic_analysis::member_redeclaration(
     if (current_scope || function_state.active)
         return not_supported(declaration, "class.mfct");
     if (type_table[type.unqualified()].kind != type_kind::function)
+        /* (init_declarator analyses a static data member's definition) */
         return not_supported(declaration, "class.static.data");
     if (!definition || s.static_ || s.typedef_ || s.extern_)
         return not_supported(declaration, "class.mfct");
@@ -712,6 +813,77 @@ analysis_result semantic_analysis::member_redeclaration(
         entity_table[e].inline_ = true;
     entity_table.add_declaration(e, declaration);
     last_declared = e;
+    return analysis_result::well_formed;
+}
+
+/*
+ * [class.static.data]/3: "The definition for a static data
+ * member that is not defined inline in the class definition shall appear
+ * in a namespace scope enclosing the member's class definition.  In the
+ * definition at namespace scope, the name of the static data member shall
+ * be qualified by its class name using the :: operator."  The declaration
+ * refers to the member declared in the class ([dcl.meaning]/1), with its
+ * type (an array's bound may be given here, [dcl.array]/8).
+ */
+analysis_result semantic_analysis::static_member_definition(
+    node_index declaration, token_index id, entity_index qualifier,
+    qualified_type type, const specified &s, bool definition,
+    entity_index &declared_entity)
+{
+    declared_entity = 0;
+    if (current_scope || function_state.active)
+        return not_supported(declaration, "class.static.data");
+    if (s.typedef_ || s.inline_ || s.constexpr_)
+        return not_supported(declaration, "class.static.data");
+    /* static or extern on the definition: clang's error */
+    if (s.static_ || s.extern_)
+        return not_supported(declaration, "class.static.data");
+    entity_index e = entity_table.find(qualifier, tokens.identifier(id));
+    if (e && entity_table[e].kind == entity_kind::none)
+        return not_supported(declaration, "class.static.data");
+    /* [basic.link]/11: "declarations for an array object can specify
+       array types that differ by the presence or absence of a major array
+       bound" */
+    bool same_type = false;
+    if (e) {
+        const struct type &x = type_table[entity_table[e].type.unqualified()];
+        const struct type &y = type_table[type.unqualified()];
+        same_type = entity_table[e].type == type ||
+                    (x.kind == type_kind::array && y.kind == type_kind::array &&
+                     x.operand == y.operand && x.bound_known != y.bound_known &&
+                     entity_table[e].type.cv() == type.cv());
+    }
+    if (!e || entity_table[e].kind != entity_kind::variable ||
+        entity_table[e].nonstatic_member || !same_type)
+        return ill_formed_at_token(id,
+                                   "when the declarator-id is qualified, the "
+                                   "declaration shall refer to a previously "
+                                   "declared member of the class",
+                                   "dcl.meaning");
+    /* [basic.def.odr]/1 */
+    if (entity_table[e].defined)
+        return ill_formed_at_token(id,
+                                   "no translation unit shall contain more "
+                                   "than one definition of any variable",
+                                   "basic.def.odr");
+    /* [basic.def]/2: a declaration of it outside the class is a
+       definition (it has no extern) */
+    (void)definition;
+    entity_table[e].defined = true;
+    if (type_table[type.unqualified()].kind == type_kind::array &&
+        type_table[type.unqualified()].bound_known)
+        entity_table[e].type = type;
+    entity_table.add_declaration(e, declaration);
+    declared_entity = e;
+    declared_name d;
+    d.declaration = declaration;
+    d.outermost = current_declaration;
+    d.entity = e;
+    d.id = id;
+    d.kind = entity_kind::variable;
+    d.type = type;
+    d.claimable = declarations_claimable;
+    declared.append(d);
     return analysis_result::well_formed;
 }
 

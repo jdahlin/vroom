@@ -246,6 +246,33 @@ bool parser::parenthesized_expression_list(const char *what,
  * notation T(e), T() and T{e} of a fundamental type.  A function call
  * ([expr.call]) needs overload resolution and is not analysed yet.
  */
+/*
+ * [expr.static.cast]/1: "The result of the expression static_cast<T>(v)
+ * is the result of converting the expression v to type T."  What analysis
+ * has rules for: T cv void (/6) and the conversions between arithmetic and
+ * enumeration types (/4 the implicit ones, /9, /10, [conv.fpint],
+ * [conv.integral]); the rest (references, pointers, classes) not yet.
+ */
+analysis_result semantic_analysis::static_cast_expression(node_index n,
+                                                          expression_meaning &m)
+{
+    const syntax_child *children = tree.children(n);
+    qualified_type to;
+    analysis_result r = type_id(children[2].index(), to);
+    if (r == analysis_result::well_formed)
+        r = expression(children[5], m);
+    if (r != analysis_result::well_formed)
+        return r;
+    const struct type target = type_table[to.unqualified()];
+    bool to_void = target.kind == type_kind::fundamental &&
+                   target.fundamental == fundamental_type::void_;
+    bool to_value = is_arithmetic(to) || enumeration_of(to);
+    bool from_value = is_arithmetic(m.type) || enumeration_of(m.type);
+    if (to_void || (to_value && from_value))
+        return explicit_conversion(n, to, m);
+    return not_supported(n, "expr.static.cast");
+}
+
 analysis_result semantic_analysis::postfix(node_index n, expression_meaning &m)
 {
     const syntax_node &node = tree[n];
@@ -262,6 +289,11 @@ analysis_result semantic_analysis::postfix(node_index n, expression_meaning &m)
     }
     if (node.child_count < 2)
         return not_supported(n, "expr.post");
+    if (node.child_count == 7 && children[0].is_token() &&
+        p.keyword_of(tokens[children[0].index()]) ==
+            standard_keyword::static_cast_ &&
+        syntax_is(tree, children[2], syntax_kind::type_id))
+        return static_cast_expression(n, m);
     if (node.child_count == 3 &&
         (syntax_is_punctuator(tokens, children[1],
                               preprocessing_op_or_punc::DOT) ||
@@ -282,7 +314,8 @@ analysis_result semantic_analysis::postfix(node_index n, expression_meaning &m)
             entity_index e = lookup(tokens.identifier(children[0].index()));
             if (e && entity_table[e].kind == entity_kind::class_type)
                 return class_conversion(n, e, m);
-            if (e && entity_table[e].kind == entity_kind::typedef_name)
+            if (e && (entity_table[e].kind == entity_kind::typedef_name ||
+                      entity_table[e].kind == entity_kind::enumeration))
                 named = entity_table[e].type.unqualified();
             if (e && entity_table[e].kind == entity_kind::typedef_name &&
                 entity_table[e].type.cv())
@@ -445,6 +478,9 @@ analysis_result semantic_analysis::postfix(node_index n, expression_meaning &m)
             r = operand_value(n, *index);
         if (r != analysis_result::well_formed)
             return r;
+        /* [expr.sub]/1: "The other shall be a prvalue of unscoped
+           enumeration or integral type" */
+        promote_enumeration(*index);
         if (!is_pointer(base->type) || !is_integral(index->type)) {
             if ((fundamental_of(base->type) == fundamental_type::none &&
                  !is_pointer(base->type)) ||
@@ -604,6 +640,7 @@ analysis_result semantic_analysis::call(node_index n, expression_meaning &m)
             r = operand_value(node_of(a), e);
         if (r != analysis_result::well_formed)
             return r;
+        promote_enumeration(e);
         fundamental_type passed = fundamental_of(e.type);
         if (passed == fundamental_type::void_)
             return ill_formed(n,

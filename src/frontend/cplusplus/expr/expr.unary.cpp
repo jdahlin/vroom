@@ -217,6 +217,13 @@ uint64_t semantic_analysis::size_of_type(qualified_type t) const
     case type_kind::class_type:
         /* [class.mem]/6: 0 until the class is complete */
         return entity_table[record.entity].size;
+    case type_kind::enumeration: {
+        /* [dcl.enum]/8 and [abi:layout]: the underlying type's */
+        fundamental_type u = entity_table[record.entity].underlying;
+        if (u == fundamental_type::none)
+            return 0;
+        return fundamental_type_width(b, u) / 8;
+    }
     default:
         return 0;
     }
@@ -451,6 +458,9 @@ analysis_result semantic_analysis::unary(node_index n, expression_meaning &m)
         r = operand_value(n, m);
         if (r != analysis_result::well_formed)
             return r;
+        /* [expr.unary.op]/7, /8, /10: "arithmetic or unscoped
+           enumeration type", "integral or unscoped enumeration type" */
+        promote_enumeration(m);
         if (o == preprocessing_op_or_punc::PLUS && is_pointer(m.type)) {
             /* [expr.unary.op]/7: "or pointer type" */
             break;

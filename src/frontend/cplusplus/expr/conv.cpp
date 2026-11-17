@@ -241,6 +241,69 @@ void semantic_analysis::promote(expression_meaning &m)
         convert_arithmetic(m, to);
 }
 
+entity_index semantic_analysis::enumeration_of(qualified_type t) const
+{
+    const struct type record = type_table[t.unqualified()];
+    if (record.kind != type_kind::enumeration ||
+        entity_table[record.entity].underlying == fundamental_type::none)
+        return 0;
+    return record.entity;
+}
+
+/* the value is unchanged: an enumeration's value is kept as its
+   underlying type's is */
+bool semantic_analysis::enumeration_as_underlying(expression_meaning &m)
+{
+    entity_index e = enumeration_of(m.type);
+    if (!e)
+        return false;
+    m.type = qualified_type::make(
+        type_table.fundamental(entity_table[e].underlying), cv_none);
+    m.zero_literal = false;
+    converted(m, conversion_kind::integral);
+    return true;
+}
+
+/*
+ * [conv.prom]/4: "A prvalue of an unscoped enumeration type whose
+ * underlying type is not fixed can be converted to a prvalue of the first
+ * of the following types that can represent all the values of the
+ * enumeration: int, unsigned int, long int, unsigned long int, long long
+ * int, or unsigned long long int."  The underlying type chosen for such an
+ * enumeration is that type (enum_specifier).  /5: "A prvalue of an
+ * unscoped enumeration type whose underlying type is fixed can be
+ * converted to a prvalue of its underlying type.  Moreover, if integral
+ * promotion can be applied to its underlying type, a prvalue of an
+ * unscoped enumeration type whose underlying type is fixed can also be
+ * converted to a prvalue of the promoted underlying type."
+ */
+bool semantic_analysis::promote_enumeration(expression_meaning &m)
+{
+    entity_index e = enumeration_of(m.type);
+    if (!e || entity_table[e].scoped)
+        return false;
+    enumeration_as_underlying(m);
+    if (entity_table[e].fixed_underlying)
+        promote(m);
+    else
+        convert_arithmetic(m, entity_table[e].promoted);
+    return true;
+}
+
+void semantic_analysis::enumeration_operands(expression_meaning &a,
+                                             expression_meaning &b,
+                                             bool comparison)
+{
+    entity_index x = enumeration_of(a.type), y = enumeration_of(b.type);
+    if (comparison && x && x == y && entity_table[x].scoped) {
+        enumeration_as_underlying(a);
+        enumeration_as_underlying(b);
+        return;
+    }
+    promote_enumeration(a);
+    promote_enumeration(b);
+}
+
 void semantic_analysis::convert_arithmetic(expression_meaning &m,
                                            fundamental_type to)
 {
@@ -517,6 +580,38 @@ analysis_result semantic_analysis::implicit_conversion(node_index at,
                        "ill-formed";
     to = qualified_type::make(to.unqualified(), cv_none);
     const struct type target = type_table[to.unqualified()];
+    if (type_table[m.type.unqualified()].kind == type_kind::enumeration ||
+        target.kind == type_kind::enumeration) {
+        if (m.type.unqualified() == to.unqualified()) {
+            m.type = to;
+            return analysis_result::well_formed;
+        }
+        entity_index e = enumeration_of(m.type);
+        if (target.kind == type_kind::enumeration || !e) {
+            if (!enumeration_of(to) && target.kind == type_kind::enumeration)
+                return not_supported(at, "dcl.enum");
+            if (!e &&
+                type_table[m.type.unqualified()].kind == type_kind::enumeration)
+                return not_supported(at, "dcl.enum");
+            /* [conv.integral]/1: "A prvalue of an integer type can be
+               converted to a prvalue of another integer type.": an
+               enumeration is none; no standard conversion makes one */
+            if (fundamental_of(m.type) == fundamental_type::none &&
+                !is_pointer(m.type) &&
+                type_table[m.type.unqualified()].kind != type_kind::enumeration)
+                return not_supported(at, "conv");
+            return ill_formed(at, rule, "dcl.init");
+        }
+        if (target.kind != type_kind::fundamental)
+            return not_supported(at, "conv");
+        /* [conv.integral]/1: "A prvalue of an unscoped enumeration type
+           can be converted to a prvalue of an integer type."; [conv.bool],
+           [conv.fpint]/2 likewise.  A scoped one converts implicitly to
+           nothing ([dcl.enum]/10) */
+        if (entity_table[e].scoped)
+            return ill_formed(at, rule, "dcl.init");
+        enumeration_as_underlying(m);
+    }
     fundamental_type from = fundamental_of(m.type);
     if (target.kind == type_kind::fundamental) {
         fundamental_type t = target.fundamental;

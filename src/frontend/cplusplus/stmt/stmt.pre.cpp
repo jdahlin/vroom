@@ -675,6 +675,8 @@ analysis_result semantic_analysis::switch_condition(node_index at,
        enumeration type, or class type. ... If the (possibly converted) type
        is subject to integral promotions, the condition is converted to the
        promoted type." */
+    if (!promote_enumeration(m))
+        enumeration_as_underlying(m);
     if (!is_integral(m.type)) {
         if (fundamental_of(m.type) == fundamental_type::none &&
             !is_pointer(m.type))

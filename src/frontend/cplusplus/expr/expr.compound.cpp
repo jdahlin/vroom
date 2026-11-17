@@ -740,6 +740,16 @@ analysis_result semantic_analysis::binary(node_index n, expression_meaning &m)
         r = operand_value(n, right);
     if (r != analysis_result::well_formed)
         return r;
+    /* [expr.arith.conv]/1, [expr.add]/1, [expr.shift]/1: unscoped
+       enumeration operands are promoted; two of one scoped enumeration
+       type are compared ([expr.rel]/3, [expr.eq]/7) */
+    enumeration_operands(left, right,
+                         op == preprocessing_op_or_punc::LESS ||
+                             op == preprocessing_op_or_punc::GREATER ||
+                             op == preprocessing_op_or_punc::LESS_EQUAL ||
+                             op == preprocessing_op_or_punc::GREATER_EQUAL ||
+                             op == preprocessing_op_or_punc::EQUAL_EQUAL ||
+                             op == preprocessing_op_or_punc::EXCLAMATION_EQUAL);
     switch (op) {
     case preprocessing_op_or_punc::LESS:
     case preprocessing_op_or_punc::GREATER:
@@ -897,6 +907,10 @@ analysis_result semantic_analysis::conditional(node_index n,
     if (r != analysis_result::well_formed)
         return r;
     bool zero2 = e2.zero_literal, zero3 = e3.zero_literal;
+    /* [expr.cond]/7.3: "The second and third operands have arithmetic or
+       enumeration type; the usual arithmetic conversions are performed" */
+    if (e2.type.unqualified() != e3.type.unqualified())
+        enumeration_operands(e2, e3, false);
     if (e2.type.unqualified() == e3.type.unqualified()) {
         /* "The second and third operands have the same type; the result is
            of that type" */
