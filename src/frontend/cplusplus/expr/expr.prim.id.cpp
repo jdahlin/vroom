@@ -546,6 +546,7 @@ analysis_result semantic_analysis::id_expression(token_index t,
            initialization": not modelled */
         m.evaluation = constness::unknown;
     }
+    m.node = expression_node(semantic_kind::entity, m, t, e);
     return analysis_result::well_formed;
 }
 

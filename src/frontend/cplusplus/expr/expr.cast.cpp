@@ -67,10 +67,13 @@ analysis_result semantic_analysis::explicit_conversion(node_index at,
            expression." */
         constness evaluation = m.evaluation;
         bool beyond = m.beyond_integral_constant;
+        uint32_t operand = m.node;
         m = expression_meaning();
         m.type = qualified_type::make(to.unqualified(), cv_none);
         m.evaluation = evaluation;
         m.beyond_integral_constant = beyond;
+        m.node = operand;
+        converted(m, conversion_kind::to_void);
         return analysis_result::well_formed;
     }
     if (target.kind != type_kind::fundamental &&

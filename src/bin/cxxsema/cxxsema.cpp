@@ -22,6 +22,12 @@
  *   cxxsema -type-claims ...                one line per typed expression:
  *                                           its type and value category for
  *                                           clang to check (type-claims.h)
+ *   cxxsema -check-tree ...                 the semantic tree of each
+ *                                           well-formed definition is
+ *                                           complete: a line per problem
+ *                                           (tree-check.h)
+ *   cxxsema -dump-tree ...                  the semantic tree of each
+ *                                           definition, a node per line
  *   cxxsema -stats ...                      declarations by result, types,
  *                                           entities
  *   cxxsema -selftest                       the tables no rule uses yet
@@ -37,6 +43,7 @@
 #include "frontend/cplusplus/parse.h"
 #include "frontend/cplusplus/sema.h"
 #include "type-claims.h"
+#include "tree-check.h"
 
 static bool check(bool condition, const char *what)
 {
@@ -348,7 +355,8 @@ int main(int argc, char **argv)
 {
     command_line options("cxxsema");
     bool dump_analysis = false, debug_unsupported = false, stats = false,
-         type_claims = false, declaration_claims = false;
+         type_claims = false, declaration_claims = false, check = false,
+         dump = false;
     const char *path = nullptr;
     for (int i = 1; i < argc; i++) {
         const char *a = argv[i];
@@ -362,6 +370,10 @@ int main(int argc, char **argv)
             declaration_claims = true;
         else if (!strcmp(a, "-type-claims"))
             type_claims = true;
+        else if (!strcmp(a, "-check-tree"))
+            check = true;
+        else if (!strcmp(a, "-dump-tree"))
+            dump = true;
         else if (!strcmp(a, "-stats"))
             stats = true;
         else if (!strcmp(a, "-fsyntax-only"))
@@ -374,7 +386,7 @@ int main(int argc, char **argv)
     if (!path) {
         fprintf(stderr, "usage: cxxsema [-fsyntax-only|-dump-analysis|"
                         "-debug-unsupported|-declaration-claims|-type-claims|-"
-                        "stats] [clang -cc1 options] "
+                        "check-tree|-dump-tree|-stats] [clang -cc1 options] "
                         "FILE\n       cxxsema -selftest\n");
         return 2;
     }
@@ -434,6 +446,10 @@ int main(int argc, char **argv)
         write_declaration_claims(analysis, tree, tokens, out.get());
     if (type_claims)
         write_type_claims(analysis, tree, tokens, out.get());
+    if (check)
+        check_tree(analysis, tree, tokens, out.get());
+    if (dump)
+        dump_tree(analysis, tokens, out.get());
     if (stats) {
         vbuffer_format_append(
             out.get(),

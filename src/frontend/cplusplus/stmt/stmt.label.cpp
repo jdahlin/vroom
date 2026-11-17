@@ -80,7 +80,8 @@ void semantic_analysis::collect_labels(syntax_child s)
  *         attribute-specifier-seq_opt case constant-expression : statement
  *         attribute-specifier-seq_opt default : statement
  */
-analysis_result semantic_analysis::labeled_statement(node_index n)
+analysis_result semantic_analysis::labeled_statement(node_index n,
+                                                     uint32_t &built)
 {
     const syntax_node &node = tree[n];
     const syntax_child *children = tree.children(n);
@@ -97,7 +98,12 @@ analysis_result semantic_analysis::labeled_statement(node_index n)
                 l.point.scope = current_scope;
                 l.analysed = true;
             }
-        return statement(last);
+        uint32_t labelled = 0;
+        analysis_result r = statement(last, labelled);
+        built =
+            statement_node(semantic_kind::identifier_label, first, labelled);
+        semantics[built].value = tokens.identifier(first);
+        return r;
     }
     standard_keyword k = p.keyword_of(t);
     if (k != standard_keyword::case_ && k != standard_keyword::default_)
@@ -113,9 +119,12 @@ analysis_result semantic_analysis::labeled_statement(node_index n)
                             "case labels and default labels shall occur only "
                             "in switch statements",
                             "stmt.label");
-        return worse(result, statement(last));
+        uint32_t ignored = 0;
+        return worse(result, statement(last, ignored));
     }
     size_t innermost = function_state.switches.size() - 1;
+    semantic_kind kind = semantic_kind::default_label;
+    uint64_t value = 0;
     if (k == standard_keyword::default_) {
         if (node.child_count != 3)
             return not_supported(n, "stmt.label");
@@ -133,6 +142,9 @@ analysis_result semantic_analysis::labeled_statement(node_index n)
         if (node.child_count != 4)
             return not_supported(n, "stmt.switch");
         result = case_label(n, children[1], innermost);
+        kind = semantic_kind::case_label;
+        if (result == analysis_result::well_formed)
+            value = function_state.case_values.back();
     }
     if (result != analysis_result::ill_formed &&
         jump_bypasses(function_state.switches[innermost].point, here))
@@ -141,7 +153,11 @@ analysis_result semantic_analysis::labeled_statement(node_index n)
                             "in a way that bypasses declarations with "
                             "initialization",
                             "stmt.dcl");
-    return worse(result, statement(last));
+    uint32_t labelled = 0;
+    result = worse(result, statement(last, labelled));
+    built = statement_node(kind, first, labelled);
+    semantics[built].value = value;
+    return result;
 }
 
 /*

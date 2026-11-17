@@ -477,28 +477,31 @@ node_index parser::substatement()
  * (hold_names), so that nothing after it rests on what it would have
  * declared.
  */
-analysis_result semantic_analysis::statement(syntax_child s)
+analysis_result semantic_analysis::statement(syntax_child s, uint32_t &built)
 {
+    built = 0;
     if (s.is_token())
         return not_supported(current_declaration, "stmt.pre");
     node_index n = s.index();
     switch (tree[n].kind) {
     case syntax_kind::compound_statement:
-        return compound_statement(n, 0);
+        return compound_statement(n, 0, built);
     case syntax_kind::expression_statement:
-        return expression_statement(n);
+        return expression_statement(n, built);
     case syntax_kind::selection_statement:
-        return selection_statement(n);
+        return selection_statement(n, built);
     case syntax_kind::iteration_statement:
-        return iteration_statement(n);
+        return iteration_statement(n, built);
     case syntax_kind::jump_statement:
-        return jump_statement(n);
+        return jump_statement(n, built);
     case syntax_kind::labeled_statement:
-        return labeled_statement(n);
+        return labeled_statement(n, built);
     case syntax_kind::simple_declaration: {
         /* [stmt.dcl]/1: "A declaration statement introduces one or more new
            names into a block" */
+        size_t first = block_variables.size();
         analysis_result r = simple_declaration(n);
+        built = declaration_statements(first, tree[n].first_token);
         if (r != analysis_result::well_formed)
             hold_names(n);
         return r;
@@ -520,21 +523,51 @@ analysis_result semantic_analysis::statement(syntax_child s)
  * shall not redeclare ([basic.scope.block]/3).
  */
 analysis_result semantic_analysis::substatement(syntax_child s,
-                                                entity_index conflicts)
+                                                entity_index conflicts,
+                                                uint32_t &built)
 {
     if (syntax_is(tree, s, syntax_kind::compound_statement))
-        return compound_statement(s.index(), conflicts);
+        return compound_statement(s.index(), conflicts, built);
     if (!syntax_is(tree, s, syntax_kind::simple_declaration))
-        return statement(s);
+        return statement(s, built);
     entity_index outer = current_scope;
     bool claimable = declarations_claimable;
     open_scope(conflicts, false);
     /* a claim just after it would be outside the implied block */
     declarations_claimable = false;
-    analysis_result r = statement(s);
+    uint32_t declaration = 0;
+    analysis_result r = statement(s, declaration);
     declarations_claimable = claimable;
     current_scope = outer;
+    /* the compound-statement it is as if it were rewritten to */
+    built = statement_node(semantic_kind::block, first_token(s));
+    semantics[built].first = semantics.list(&declaration, 1);
+    semantics[built].count = 1;
     return r;
+}
+
+/*
+ * The node of a declaration statement whose variables are
+ * block_variables[first ..]: one declaration_statement per variable (a: the
+ * variable, b: its initializer's node), several in a declarations node, a
+ * null statement when it declares no variable (a typedef).
+ */
+uint32_t semantic_analysis::declaration_statements(size_t first, token_index at)
+{
+    owned_array<uint32_t> each;
+    for (size_t i = first; i < block_variables.size(); i++)
+        each.append(statement_node(
+            semantic_kind::declaration_statement, at, block_variables[i],
+            entity_table[block_variables[i]].definition));
+    block_variables.resize(first);
+    if (each.empty())
+        return statement_node(semantic_kind::null_statement, at);
+    if (each.size() == 1)
+        return each[0];
+    uint32_t built = statement_node(semantic_kind::declarations, at);
+    semantics[built].first = semantics.list(&each[0], each.size());
+    semantics[built].count = static_cast<uint32_t>(each.size());
+    return built;
 }
 
 /* the node of a syntax child, or the declaration's for a token (where a
@@ -567,6 +600,7 @@ analysis_result semantic_analysis::condition(syntax_child c, bool for_switch,
 {
     node_index at = node_of(c);
     analysis_result r = analysis_result::well_formed;
+    uint32_t declaration = 0;
     if (syntax_is(tree, c, syntax_kind::condition)) {
         const syntax_node &node = tree[at];
         const syntax_child *children = tree.children(at);
@@ -585,6 +619,7 @@ analysis_result semantic_analysis::condition(syntax_child c, bool for_switch,
                            "decl-specifier shall be either a type-specifier "
                            "or constexpr",
                            "stmt.pre");
+        size_t first = block_variables.size();
         if (r == analysis_result::well_formed) {
             bool claimable = declarations_claimable;
             declarations_claimable = false;
@@ -595,9 +630,11 @@ analysis_result semantic_analysis::condition(syntax_child c, bool for_switch,
             declarations_claimable = claimable;
         }
         if (r != analysis_result::well_formed) {
+            block_variables.resize(first);
             hold_names(at);
             return r;
         }
+        declaration = declaration_statements(first, first_token(c));
         const entity &e = entity_table[last_declared];
         m = expression_meaning();
         m.category = value_category::lvalue;
@@ -610,14 +647,28 @@ analysis_result semantic_analysis::condition(syntax_child c, bool for_switch,
             m.type = record.operand;
             m.entity = 0;
         }
+        m.node = expression_node(semantic_kind::entity, m,
+                                 first_token(children[1]), last_declared);
     } else {
         r = expression(c, m);
         if (r != analysis_result::well_formed)
             return r;
     }
     if (!for_switch)
-        return contextual_bool(at, m);
-    r = operand_value(at, m);
+        r = contextual_bool(at, m);
+    else
+        r = switch_condition(at, m);
+    if (r == analysis_result::well_formed && declaration)
+        m.node = expression_node(semantic_kind::condition_declaration, m,
+                                 first_token(c), declaration, m.node);
+    return r;
+}
+
+/* [stmt.switch]/2: the value of a switch's condition, m */
+analysis_result semantic_analysis::switch_condition(node_index at,
+                                                    expression_meaning &m)
+{
+    analysis_result r = operand_value(at, m);
     if (r != analysis_result::well_formed)
         return r;
     /* [stmt.switch]/2: "The condition shall be of integral type,

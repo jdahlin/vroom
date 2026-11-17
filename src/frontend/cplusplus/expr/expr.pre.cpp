@@ -28,6 +28,8 @@ analysis_result semantic_analysis::expression(syntax_child e,
     if (m.category == value_category::prvalue &&
         record.kind != type_kind::class_type && record.kind != type_kind::array)
         m.type = qualified_type::make(m.type.unqualified(), cv_none);
+    if (m.node)
+        semantics[m.node].type = m.type;
     analysed_expression x;
     x.at = e;
     x.declaration = current_declaration;
@@ -54,8 +56,17 @@ analysis_result semantic_analysis::expression_kind(syntax_child e,
     if (e.is_token()) {
         const token &t = tokens[e.index()];
         /* true, false and nullptr are keywords that are literals */
-        if (t.literal != literal_kind::none)
-            return literal(e.index(), m);
+        if (t.literal != literal_kind::none) {
+            /* the value of a literal analysis does not evaluate (a long
+               double's) is the token's */
+            analysis_result r = literal(e.index(), m);
+            semantic_kind kind = semantic_kind::constant;
+            if (t.literal == literal_kind::string_literal)
+                kind = semantic_kind::string_literal;
+            if (r == analysis_result::well_formed)
+                m.node = expression_node(kind, m, e.index());
+            return r;
+        }
         if (t.kind == token_kind::identifier)
             return id_expression(e.index(), m);
         if (t.kind == token_kind::keyword &&

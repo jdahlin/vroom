@@ -491,6 +491,24 @@ libstdc++ and json), since sema cannot analyse a declaration kept as tokens.
   unsupported, 8952 not parsed, 189 after a fatal error.  C4: 9110
   declared types verified, 0 refuted; 16222 expression types verified, 0
   refuted, 1262 not checkable; 5065 constants verified, 0 refuted.
+- Status (2026-11-17, S1d in progress): the semantic tree (3.2) and the
+  ABI grammar are in.  Analysis builds a `semantic_node` for every
+  expression, initializer and statement it accepts
+  (`sema/semantic_tree.cpp`, `semantic_kind` in `sema.h`), each implicit
+  conversion a `conversion` node of its own (lvalue-to-rvalue,
+  array-to-pointer, integral, boolean, null pointer, ...), a variadic
+  argument's default promotion included.  A function's entity has its
+  `function_body` (outermost block, parameter entities), a variable's its
+  initializer; a block-scope declaration is a `declaration_statement` per
+  variable, a condition that declares a `condition_declaration`.
+  `cxxsema -dump-tree` prints the trees; `cxxsema -check-tree`
+  (`src/bin/cxxsema/tree-check.h`) checks that every well-formed
+  definition has a complete tree and every recorded expression a node of
+  its type and value category, with conditions bool prvalues and operands
+  converted; `cxx-sema.py` runs it on every test (0 problems, C3 and C4
+  unchanged).  The Itanium ABI's grammar is data
+  (`docs/itanium-abi-grammar.tsv`) and `cxx-spec-refs.py` checks quoted
+  productions.  Next: the mangler, then the lowering to `struct ast`.
 
 ### S2. Names and entities in full
 

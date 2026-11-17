@@ -519,6 +519,7 @@ analysis_result semantic_analysis::initialize_from(node_index at,
             if (r != analysis_result::well_formed)
                 return r;
             result.evaluation = constness::constant;
+            result.node = m.node;
             return string_initialization(at, m, type);
         }
         if (direct)
@@ -555,7 +556,14 @@ analysis_result semantic_analysis::initialize_with(node_index at,
         /* [dcl.init]/17.2: "If the destination type is a reference type,
            see [dcl.init.ref]." */
         result.evaluation = constness::unknown;
-        return reference_binding(at, m, type);
+        r = reference_binding(at, m, type);
+        if (r != analysis_result::well_formed)
+            return r;
+        /* the reference's own type: what lowering makes an address of */
+        result.node = expression_node(semantic_kind::bind_reference, m,
+                                      tree[at].first_token, m.node);
+        semantics[result.node].type = type;
+        return r;
     }
     if (target.kind != type_kind::fundamental &&
         target.kind != type_kind::pointer)
@@ -588,6 +596,7 @@ analysis_result semantic_analysis::initialize_with(node_index at,
         return r;
     result.evaluation = m.evaluation;
     result.value = m.value;
+    result.node = m.node;
     return analysis_result::well_formed;
 }
 
@@ -686,6 +695,7 @@ semantic_analysis::list_initialization(node_index list, qualified_type &type,
            initializer-clause is an expression and a narrowing conversion is
            required to convert the expression, the program is ill-formed." */
         constness all = constness::constant;
+        owned_array<uint32_t> elements;
         for (syntax_child clause : clauses) {
             qualified_type e = element;
             initialized_value one;
@@ -697,9 +707,18 @@ semantic_analysis::list_initialization(node_index list, qualified_type &type,
             if (r != analysis_result::well_formed)
                 return r;
             all = combined_constness(all, one.evaluation);
+            elements.append(one.node);
         }
         result.evaluation = all;
         result.value = 0;
+        expression_meaning list_meaning;
+        list_meaning.type = type;
+        list_meaning.evaluation = all;
+        result.node = expression_node(semantic_kind::initializer_list,
+                                      list_meaning, node.first_token);
+        semantics[result.node].first =
+            semantics.list(elements.data(), elements.size());
+        semantics[result.node].count = static_cast<uint32_t>(elements.size());
         return analysis_result::well_formed;
     }
     if (target.kind == type_kind::lvalue_reference ||
@@ -713,6 +732,11 @@ semantic_analysis::list_initialization(node_index list, qualified_type &type,
            it: the value 0, a null pointer */
         result.evaluation = constness::constant;
         result.value = 0;
+        expression_meaning zero;
+        zero.type = qualified_type::make(type.unqualified(), cv_none);
+        zero.evaluation = constness::constant;
+        result.node =
+            expression_node(semantic_kind::zero, zero, node.first_token);
         return analysis_result::well_formed;
     }
     if (clauses.size() > 1)

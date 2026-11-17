@@ -94,7 +94,8 @@ struct statement_parts {
  * [stmt.if]/3 and [stmt.switch]/5: an init-statement's names are local to
  * the statement, as the condition's are ([basic.scope.block]/3).
  */
-analysis_result semantic_analysis::selection_statement(node_index n)
+analysis_result semantic_analysis::selection_statement(node_index n,
+                                                       uint32_t &built)
 {
     const syntax_node &node = tree[n];
     const syntax_child *children = tree.children(n);
@@ -132,21 +133,25 @@ analysis_result semantic_analysis::selection_statement(node_index n)
         syntax_is(tree, parts.condition, syntax_kind::condition))
         statement_scope = open_scope(0, false);
     analysis_result result = analysis_result::well_formed;
+    uint32_t init = 0, body = 0, otherwise = 0;
     if (parts.has_init) {
         bool claimable = declarations_claimable;
         declarations_claimable = false;
-        result = statement(parts.init);
+        result = statement(parts.init, init);
         declarations_claimable = claimable;
     }
     expression_meaning m;
     analysis_result c = condition(parts.condition, is_switch, m);
     result = worse(result, c);
+    token_index at = children[0].index();
     if (!is_switch) {
-        result = worse(result, substatement(parts.body, statement_scope));
+        result = worse(result, substatement(parts.body, statement_scope, body));
         if (parts.has_otherwise)
-            result =
-                worse(result, substatement(parts.otherwise, statement_scope));
+            result = worse(result, substatement(parts.otherwise,
+                                                statement_scope, otherwise));
         current_scope = outer;
+        built = statement_node(semantic_kind::if_statement, at, m.node, body,
+                               otherwise, init);
         return result;
     }
     switch_record sw;
@@ -157,11 +162,13 @@ analysis_result semantic_analysis::selection_statement(node_index n)
     sw.first_value = function_state.case_values.size();
     function_state.switches.append(sw);
     function_state.breakable++;
-    result = worse(result, substatement(parts.body, statement_scope));
+    result = worse(result, substatement(parts.body, statement_scope, body));
     function_state.breakable--;
     function_state.case_values.resize(sw.first_value);
     function_state.switches.resize(function_state.switches.size() - 1);
     current_scope = outer;
+    built = statement_node(semantic_kind::switch_statement, at, m.node, body, 0,
+                           init);
     return result;
 }
 

@@ -155,7 +155,8 @@ node_index parser::for_range_declaration()
  *
  * The range-based for is not analysed yet.
  */
-analysis_result semantic_analysis::iteration_statement(node_index n)
+analysis_result semantic_analysis::iteration_statement(node_index n,
+                                                       uint32_t &built)
 {
     const syntax_node &node = tree[n];
     const syntax_child *children = tree.children(n);
@@ -165,13 +166,15 @@ analysis_result semantic_analysis::iteration_statement(node_index n)
     entity_index outer = current_scope, statement_scope = 0;
     analysis_result result = analysis_result::well_formed;
     expression_meaning m;
+    token_index at = children[0].index();
+    uint32_t body = 0, init = 0, step_node = 0;
     if (k == standard_keyword::do_) {
         /* do statement while ( expression ) ; */
         if (node.child_count != 7)
             return not_supported(n, "stmt.do");
         function_state.loops++;
         function_state.breakable++;
-        result = substatement(children[1], 0);
+        result = substatement(children[1], 0, body);
         function_state.loops--;
         function_state.breakable--;
         /* [stmt.do]/1: "The expression is contextually converted to bool;
@@ -179,6 +182,7 @@ analysis_result semantic_analysis::iteration_statement(node_index n)
         analysis_result r = expression(children[4], m);
         if (r == analysis_result::well_formed)
             r = contextual_bool(n, m);
+        built = statement_node(semantic_kind::do_statement, at, body, m.node);
         return worse(result, r);
     }
     if (k == standard_keyword::while_) {
@@ -198,7 +202,7 @@ analysis_result semantic_analysis::iteration_statement(node_index n)
                 return not_supported(n, "stmt.ranged");
         /* for ( init-statement condition_opt ; expression_opt ) statement:
            the init-statement ends with its own ; */
-        syntax_child init = children[2], cond, step;
+        syntax_child init_syntax = children[2], cond, step;
         bool has_cond = false, has_step = false;
         uint32_t i = 3;
         if (!syntax_is_punctuator(tokens, children[i],
@@ -220,29 +224,36 @@ analysis_result semantic_analysis::iteration_statement(node_index n)
         }
         if (i + 2 != node.child_count)
             return not_supported(n, "stmt.for");
-        if (!syntax_is(tree, init, syntax_kind::expression_statement) ||
+        if (!syntax_is(tree, init_syntax, syntax_kind::expression_statement) ||
             (has_cond && syntax_is(tree, cond, syntax_kind::condition)))
             statement_scope = open_scope(0, false);
         bool claimable = declarations_claimable;
         declarations_claimable = false;
-        result = statement(init);
+        result = statement(init_syntax, init);
         declarations_claimable = claimable;
         if (has_cond)
             result = worse(result, condition(cond, false, m));
         if (has_step) {
             expression_meaning e;
             result = worse(result, expression(step, e));
+            step_node = e.node;
         }
     } else {
         return not_supported(n, "stmt.iter");
     }
     function_state.loops++;
     function_state.breakable++;
-    result = worse(
-        result, substatement(children[node.child_count - 1], statement_scope));
+    result = worse(result, substatement(children[node.child_count - 1],
+                                        statement_scope, body));
     function_state.loops--;
     function_state.breakable--;
     current_scope = outer;
+    if (k == standard_keyword::while_)
+        built =
+            statement_node(semantic_kind::while_statement, at, m.node, body);
+    else
+        built = statement_node(semantic_kind::for_statement, at, init, m.node,
+                               step_node, body);
     return result;
 }
 

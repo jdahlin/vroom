@@ -48,18 +48,19 @@ node_index parser::compound_statement()
  * "A name declared in a block is local to that block".
  */
 analysis_result semantic_analysis::compound_statement(node_index n,
-                                                      entity_index conflicts)
+                                                      entity_index conflicts,
+                                                      uint32_t &built)
 {
     entity_index outer = current_scope;
     open_scope(conflicts, false);
-    analysis_result r = block_items(n);
+    analysis_result r = block_items(n, built);
     current_scope = outer;
     return r;
 }
 
 /* the statements of a block, each with the place for the claims about its
    expressions just after it */
-analysis_result semantic_analysis::block_items(node_index n)
+analysis_result semantic_analysis::block_items(node_index n, uint32_t &built)
 {
     owned_array<syntax_child> items;
     const syntax_node &node = tree[n];
@@ -80,15 +81,24 @@ analysis_result semantic_analysis::block_items(node_index n)
     analysis_result result = analysis_result::well_formed;
     token_index place = claim_place;
     entity_index place_scope = claim_scope;
+    owned_array<uint32_t> statements;
     for (syntax_child s : items) {
         claim_place = s.index();
         if (!s.is_token())
             claim_place = tree[s.index()].end_token - 1;
         claim_scope = current_scope;
-        result = worse(result, statement(s));
+        uint32_t one = 0;
+        result = worse(result, statement(s, one));
+        statements.append(one);
     }
     claim_place = place;
     claim_scope = place_scope;
+    built = statement_node(semantic_kind::block, tree[n].first_token);
+    if (!statements.empty()) {
+        semantics[built].first =
+            semantics.list(&statements[0], statements.size());
+        semantics[built].count = static_cast<uint32_t>(statements.size());
+    }
     return result;
 }
 

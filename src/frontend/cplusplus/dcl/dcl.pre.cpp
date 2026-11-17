@@ -830,6 +830,10 @@ analysis_result semantic_analysis::declare_with_initializer(
     r = declare(declaration, m.id, kind, type, s, definition, initialized,
                 declared_entity);
     last_declared = declared_entity;
+    /* the declaration statement's variables (statement) */
+    if (r == analysis_result::well_formed && function_state.active &&
+        kind == entity_kind::variable)
+        block_variables.append(declared_entity);
     if (r != analysis_result::well_formed || !initialized)
         return r;
     /* [stmt.dcl]/3: a local variable with automatic storage duration and an
@@ -866,6 +870,13 @@ analysis_result semantic_analysis::declare_with_initializer(
                                    "incomplete type",
                                    "basic.def");
     entity &e = entity_table[declared_entity];
+    e.definition = value.node;
+    if (!function_state.active) {
+        definition_record d;
+        d.declaration = current_declaration;
+        d.entity = declared_entity;
+        definitions.append(d);
+    }
     if (!(before == type)) {
         /* [dcl.array]/7: an array of unknown bound completed by its
            initializer */

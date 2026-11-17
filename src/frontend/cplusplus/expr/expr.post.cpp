@@ -346,11 +346,14 @@ analysis_result semantic_analysis::postfix(node_index n, expression_meaning &m)
                specified type that performs no initialization.  Otherwise,
                the expression is a prvalue of the specified type whose result
                object is direct-initialized with the initializer."  T() of a
-               scalar: value-initialized ([dcl.init]/11), zero */
+               scalar: value-initialized ([dcl.init]/11), zero; void(): a
+               constant of type void, which has no value */
             m = expression_meaning();
             m.type = to;
             m.evaluation = constness::constant;
             m.value = 0;
+            m.node =
+                expression_node(semantic_kind::constant, m, node.first_token);
             return analysis_result::well_formed;
         }
         if (parenthesized && node.child_count == 4) {
@@ -385,6 +388,7 @@ analysis_result semantic_analysis::postfix(node_index n, expression_meaning &m)
             m.type = to;
             m.evaluation = result.evaluation;
             m.value = result.value;
+            m.node = result.node;
             return analysis_result::well_formed;
         }
         return not_supported(n, "expr.type.conv");
@@ -450,6 +454,8 @@ analysis_result semantic_analysis::postfix(node_index n, expression_meaning &m)
         m.evaluation = evaluation;
         if (m.evaluation == constness::constant)
             m.evaluation = constness::unknown;
+        m.node = expression_node(semantic_kind::subscript, m, node.first_token,
+                                 base->node, index->node);
         return analysis_result::well_formed;
     }
     return not_supported(n, "expr.post");
@@ -520,6 +526,7 @@ analysis_result semantic_analysis::call(node_index n, expression_meaning &m)
     }
     const struct type function = type_table[function_type.unqualified()];
     size_t count = function.parameter_count;
+    owned_array<uint32_t> argument_nodes;
     /* [over.match.viable]/2: "First, to be a viable function, a candidate
        function shall have enough parameters to agree in number with the
        arguments in the list."  [over.match]/3: "If a best viable
@@ -556,6 +563,7 @@ analysis_result semantic_analysis::call(node_index n, expression_meaning &m)
             }
             if (r != analysis_result::well_formed)
                 return r;
+            argument_nodes.append(value.node);
             continue;
         }
         /* [expr.call]/12: "The lvalue-to-rvalue, array-to-pointer, and
@@ -571,12 +579,33 @@ analysis_result semantic_analysis::call(node_index n, expression_meaning &m)
             r = operand_value(node_of(a), e);
         if (r != analysis_result::well_formed)
             return r;
-        if (fundamental_of(e.type) == fundamental_type::void_)
+        fundamental_type passed = fundamental_of(e.type);
+        if (passed == fundamental_type::void_)
             return ill_formed(n,
                               "an argument passed for an ellipsis shall have "
                               "arithmetic, enumeration, pointer, "
                               "pointer-to-member, or class type",
                               "expr.call");
+        if (passed == fundamental_type::none && !is_pointer(e.type))
+            return not_supported(n, "expr.call");
+        if (passed == fundamental_type::std_nullptr_t) {
+            /* "An argument that has type cv std::nullptr_t is converted to
+               type void*" */
+            qualified_type v = qualified_type::make(
+                type_table.fundamental(fundamental_type::void_), cv_none);
+            e.type = qualified_type::make(type_table.pointer_to(v), cv_none);
+            converted(e, conversion_kind::null_pointer);
+        } else if (passed == fundamental_type::float_) {
+            /* "If the argument has integral or enumeration type that is
+               subject to the integral promotions, or a floating-point type
+               that is subject to the floating-point promotion, the value of
+               the argument is converted to the promoted type before the
+               call." ([conv.fpprom]: float to double) */
+            convert_arithmetic(e, fundamental_type::double_);
+        } else {
+            promote(e);
+        }
+        argument_nodes.append(e.node);
     }
     /* [expr.call]/14: "A function call is an lvalue if the result type is
        an lvalue reference type or an rvalue reference to function type, an
@@ -599,6 +628,10 @@ analysis_result semantic_analysis::call(node_index n, expression_meaning &m)
     /* [expr.const]/5.2: "an invocation of a non-constexpr function": no
        function analysis has a declaration of is constexpr */
     m.evaluation = constness::not_constant;
+    m.node = expression_node(semantic_kind::call, m, node.first_token, f.node);
+    semantics[m.node].first =
+        semantics.list(argument_nodes.data(), argument_nodes.size());
+    semantics[m.node].count = static_cast<uint32_t>(argument_nodes.size());
     return analysis_result::well_formed;
 }
 

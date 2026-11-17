@@ -135,6 +135,8 @@ analysis_result semantic_analysis::assignment(node_index n,
         return r;
     qualified_type target =
         qualified_type::make(left.type.unqualified(), cv_none);
+    /* E1 op= E2: the type E1 op E2 is computed in */
+    qualified_type computation = target;
     if (op == preprocessing_op_or_punc::EQUAL) {
         /* [expr.ass]/3: "If the right operand is an expression, it is
            implicitly converted to the cv-unqualified type of the left
@@ -208,16 +210,21 @@ analysis_result semantic_analysis::assignment(node_index n,
             r = operand_value(n, value);
             if (r == analysis_result::well_formed)
                 r = arithmetic(n, arithmetic_op, value, right, result);
+            computation = result.type;
             if (r == analysis_result::well_formed)
                 r = implicit_conversion(n, result, target, false);
             if (r != analysis_result::well_formed)
                 return r;
         }
     }
+    uint32_t assigned = left.node;
     m = left;
     m.evaluation = constness::not_constant;
     m.entity = 0;
     m.beyond_integral_constant = true;
+    m.node = expression_node(semantic_kind::assignment, m, children[1].index(),
+                             assigned, right.node, static_cast<uint8_t>(op));
+    semantics[m.node].computation = computation;
     return analysis_result::well_formed;
 }
 

@@ -72,7 +72,9 @@ analysis_result semantic_analysis::operand_value(node_index at,
     constness address = constness::unknown;
     if (m.evaluation == constness::not_constant)
         address = constness::not_constant;
+    conversion_kind kind = conversion_kind::lvalue_to_rvalue;
     if (record.kind == type_kind::array) {
+        kind = conversion_kind::array_to_pointer;
         /* [conv.array]/1: "An lvalue or rvalue of type "array of N T" or
            "array of unknown bound of T" can be converted to a prvalue of
            type "pointer to T"." */
@@ -80,6 +82,7 @@ analysis_result semantic_analysis::operand_value(node_index at,
                                       cv_none);
         m.evaluation = address;
     } else if (record.kind == type_kind::function) {
+        kind = conversion_kind::function_to_pointer;
         /* [conv.func]/1: "An lvalue of function type T can be converted to
            a prvalue of type "pointer to T"." */
         m.type = qualified_type::make(type_table.pointer_to(m.type), cv_none);
@@ -107,6 +110,7 @@ analysis_result semantic_analysis::operand_value(node_index at,
         m.evaluation = read;
     }
     m.category = value_category::prvalue;
+    converted(m, kind);
     m.entity = 0;
     /* the pointer a string literal converts to keeps the literal: C++03's
        conversion to a pointer to non-const characters needs it */
@@ -222,6 +226,25 @@ void semantic_analysis::promote(expression_meaning &m)
 
 void semantic_analysis::convert_arithmetic(expression_meaning &m,
                                            fundamental_type to)
+{
+    fundamental_type from = fundamental_of(m.type);
+    arithmetic_value(m, to);
+    if (from == to)
+        return;
+    conversion_kind kind = conversion_kind::integral;
+    if (to == fundamental_type::bool_)
+        kind = conversion_kind::boolean;
+    else if (fundamental_type_is_floating(from) &&
+             fundamental_type_is_floating(to))
+        kind = conversion_kind::floating;
+    else if (fundamental_type_is_floating(from) ||
+             fundamental_type_is_floating(to))
+        kind = conversion_kind::floating_integral;
+    converted(m, kind);
+}
+
+void semantic_analysis::arithmetic_value(expression_meaning &m,
+                                         fundamental_type to)
 {
     const implementation_defined_behavior &b = tokens.files.behavior;
     fundamental_type from = fundamental_of(m.type);
@@ -482,6 +505,7 @@ analysis_result semantic_analysis::implicit_conversion(node_index at,
                 m.type = to;
                 if (m.evaluation == constness::constant)
                     m.evaluation = constness::unknown;
+                converted(m, conversion_kind::boolean);
                 return analysis_result::well_formed;
             }
             if (t == fundamental_type::bool_ &&
@@ -492,6 +516,7 @@ analysis_result semantic_analysis::implicit_conversion(node_index at,
                    the object being initialized is false" */
                 m.type = to;
                 m.value = 0;
+                converted(m, conversion_kind::boolean);
                 return analysis_result::well_formed;
             }
             if (from == fundamental_type::none &&
@@ -503,8 +528,11 @@ analysis_result semantic_analysis::implicit_conversion(node_index at,
             /* [conv.ptr]/1: "A null pointer constant of integral type can
                be converted to a prvalue of type std::nullptr_t." */
             if (from == fundamental_type::std_nullptr_t || m.zero_literal) {
+                bool same = from == fundamental_type::std_nullptr_t;
                 m.type = to;
                 m.zero_literal = false;
+                if (!same)
+                    converted(m, conversion_kind::null_pointer);
                 return analysis_result::well_formed;
             }
             if (is_integral(m.type) && m.evaluation != constness::not_constant)
@@ -527,6 +555,7 @@ analysis_result semantic_analysis::implicit_conversion(node_index at,
         m.value = 0;
         if (m.evaluation == constness::unknown)
             m.evaluation = constness::constant;
+        converted(m, conversion_kind::null_pointer);
         return analysis_result::well_formed;
     }
     if (is_pointer(m.type)) {
@@ -571,7 +600,10 @@ analysis_result semantic_analysis::implicit_conversion(node_index at,
                 return not_supported(at, "conv.ptr");
             return ill_formed(at, rule, "dcl.init");
         }
+        bool same = m.type == to;
         m.type = to;
+        if (!same)
+            converted(m, conversion_kind::pointer);
         return analysis_result::well_formed;
     }
     /* [conv.ptr]/1: "A null pointer constant is an integer literal with

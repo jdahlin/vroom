@@ -658,6 +658,22 @@ analysis_result semantic_analysis::comparison(node_index n,
     return analysis_result::well_formed;
 }
 
+/* a binary operation analysed (well-formed): its node, of the converted
+   operands */
+analysis_result semantic_analysis::binary_built(analysis_result r,
+                                                token_index at,
+                                                preprocessing_op_or_punc op,
+                                                const expression_meaning &left,
+                                                const expression_meaning &right,
+                                                expression_meaning &m)
+{
+    if (r != analysis_result::well_formed)
+        return r;
+    m.node = expression_node(semantic_kind::binary, m, at, left.node,
+                             right.node, static_cast<uint8_t>(op));
+    return r;
+}
+
 /*
  * The binary operators of [expr.mul] to [expr.log.or]: E1 op E2.
  */
@@ -672,6 +688,7 @@ analysis_result semantic_analysis::binary(node_index n, expression_meaning &m)
         return not_supported(n, "expr.compound");
     preprocessing_op_or_punc op =
         preprocessing_op_or_punc_primary(t.op_or_punc);
+    token_index at = children[1].index();
     expression_meaning left, right;
     analysis_result r = expression(children[0], left);
     if (r != analysis_result::well_formed)
@@ -702,10 +719,15 @@ analysis_result semantic_analysis::binary(node_index n, expression_meaning &m)
             (left.value != 0) != is_and) {
             m.evaluation = constness::constant;
             m.value = left.value;
-            return analysis_result::well_formed;
+        } else {
+            m.evaluation =
+                combined_constness(left.evaluation, right.evaluation);
+            m.value = right.value;
         }
-        m.evaluation = combined_constness(left.evaluation, right.evaluation);
-        m.value = right.value;
+        semantic_kind kind = semantic_kind::logical_or;
+        if (is_and)
+            kind = semantic_kind::logical_and;
+        m.node = expression_node(kind, m, at, left.node, right.node);
         return analysis_result::well_formed;
     }
     r = operand_value(n, left);
@@ -720,16 +742,20 @@ analysis_result semantic_analysis::binary(node_index n, expression_meaning &m)
     case preprocessing_op_or_punc::GREATER_EQUAL:
     case preprocessing_op_or_punc::EQUAL_EQUAL:
     case preprocessing_op_or_punc::EXCLAMATION_EQUAL:
-        return comparison(n, op, left, right, m);
+        r = comparison(n, op, left, right, m);
+        return binary_built(r, at, op, left, right, m);
     case preprocessing_op_or_punc::PLUS:
     case preprocessing_op_or_punc::MINUS:
         break;
     default:
-        return arithmetic(n, op, left, right, m);
+        r = arithmetic(n, op, left, right, m);
+        return binary_built(r, at, op, left, right, m);
     }
     bool lp = is_pointer(left.type), rp = is_pointer(right.type);
-    if (!lp && !rp)
-        return arithmetic(n, op, left, right, m);
+    if (!lp && !rp) {
+        r = arithmetic(n, op, left, right, m);
+        return binary_built(r, at, op, left, right, m);
+    }
     /* [expr.add]: pointer arithmetic */
     auto complete_object = [&](const expression_meaning &x) {
         return is_object_pointer(x.type) &&
@@ -765,7 +791,8 @@ analysis_result semantic_analysis::binary(node_index n, expression_meaning &m)
         /* [expr.add]/5: std::ptrdiff_t, long on aarch64 Linux */
         m.type = qualified_type::make(
             type_table.fundamental(fundamental_type::long_int), cv_none);
-        return analysis_result::well_formed;
+        return binary_built(analysis_result::well_formed, at, op, left, right,
+                            m);
     }
     expression_meaning *pointer_operand = &right, *integer_operand = &left;
     if (lp) {
@@ -788,7 +815,7 @@ analysis_result semantic_analysis::binary(node_index n, expression_meaning &m)
        to or subtracted from an expression P of pointer type, the result has
        the type of P." */
     m.type = pointer.type;
-    return analysis_result::well_formed;
+    return binary_built(analysis_result::well_formed, at, op, left, right, m);
 }
 
 /*
@@ -850,6 +877,9 @@ analysis_result semantic_analysis::conditional(node_index n,
                 if (m.evaluation == constness::constant)
                     m.evaluation = constness::unknown;
             }
+            m.node = expression_node(semantic_kind::conditional, m,
+                                     tree[n].first_token, c.node, e2.node);
+            semantics[m.node].c = e3.node;
             return analysis_result::well_formed;
         }
     }
@@ -910,6 +940,9 @@ analysis_result semantic_analysis::conditional(node_index n,
         if (m.evaluation == constness::constant)
             m.evaluation = constness::unknown;
     }
+    m.node = expression_node(semantic_kind::conditional, m, tree[n].first_token,
+                             c.node, e2.node);
+    semantics[m.node].c = e3.node;
     return analysis_result::well_formed;
 }
 
@@ -933,9 +966,15 @@ analysis_result semantic_analysis::comma(node_index n, expression_meaning &m)
         analysis_result r = expression(children[i], e);
         if (r != analysis_result::well_formed)
             return r;
+        uint32_t previous = m.node;
         if (any)
             so_far = combined_constness(so_far, m.evaluation);
         m = e;
+        /* the left operand is evaluated first ([expr.comma]/1) */
+        if (any)
+            m.node =
+                expression_node(semantic_kind::comma, e,
+                                first_token(children[i]), previous, e.node);
         any = true;
     }
     if (!any)
@@ -951,6 +990,8 @@ analysis_result semantic_analysis::comma(node_index n, expression_meaning &m)
     m.beyond_integral_constant = true;
     m.zero_literal = false;
     m.string_literal = 0;
+    if (m.node && node.child_count > 1)
+        semantics[m.node].evaluation = m.evaluation;
     return analysis_result::well_formed;
 }
 

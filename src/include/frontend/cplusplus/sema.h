@@ -246,6 +246,9 @@ struct entity {
     /* [basic.link]: its declarations, in order, are a chain through
        `declarations`: the first and the last */
     uint32_t first_declaration = 0, last_declaration = 0;
+    /* the semantic tree of its definition: a function's
+       semantic_kind::function_body, a variable's initializer (0: none) */
+    uint32_t definition = 0;
 };
 
 /* one declaration of an entity: the syntax node that declares it */
@@ -409,6 +412,183 @@ struct expression_meaning {
     /* a floating-point operand or a comma operator inside: not an integral
        constant expression before C++11 (C++03 [expr.const]/1) */
     bool beyond_integral_constant = false;
+    /* the expression in the semantic tree, with the conversions applied to
+       it so far: 0 while it has none */
+    uint32_t node = 0;
+};
+
+/* ---- the semantic tree (sema/semantic_tree.cpp) ---- */
+
+/*
+ * The operations the standard describes, typed, with every implicit step
+ * explicit (doc/PLAN-cxx-sema.md 3.2): what lowering reads.  An expression
+ * node has the type and value category analysis gave the expression; a
+ * statement node none.
+ */
+enum class semantic_kind : uint8_t {
+    none,
+    /* ---- expressions ---- */
+    /* a prvalue whose value analysis knows (a literal, sizeof, a folded
+       operation): value, as expression_meaning keeps it */
+    constant,
+    /* at: the string-literal; an lvalue of array type */
+    string_literal,
+    /* a: the variable or function named; a reference variable names the
+       object or function it refers to */
+    entity,
+    /* op: a conversion_kind; a: the operand */
+    conversion,
+    /* op: the operator (+ - ~ !); a */
+    unary,
+    /* &a, *a */
+    address,
+    indirection,
+    /* op: an increment_kind; a: the lvalue */
+    increment,
+    /* op: the operator; a, b: the converted operands (pointer arithmetic
+       too) */
+    binary,
+    logical_and,
+    logical_or,
+    /* op: = or the compound operator; a: the lvalue, b: the converted
+       right operand; a compound assignment's computation type is
+       computation */
+    assignment,
+    /* a ? b : c; a glvalue when b and c are */
+    conditional,
+    /* a, b */
+    comma,
+    /* a: the function lvalue or pointer prvalue; the arguments, each
+       initialized as its parameter, are list[first .. first + count) */
+    call,
+    /* a: the pointer prvalue, b: the integer prvalue (E1[E2] with the
+       operands in that order) */
+    subscript,
+    /* ---- initializers ---- */
+    /* value- or zero-initialization: a scalar's 0, an array's all zero */
+    zero,
+    /* an array's elements, each initialized, in list[first .. first +
+       count); the rest zero */
+    initializer_list,
+    /* a: the glvalue a reference binds to; a prvalue: a temporary
+       materialized from it ([conv.rval]) */
+    bind_reference,
+    /* ---- statements ---- */
+    /* the statements in list[first .. first + count) */
+    block,
+    /* a: the expression */
+    expression_statement,
+    /* a: the variable declared, b: its initializer (0: none) */
+    declaration_statement,
+    /* a declaration of several variables: their declaration_statements in
+       list[first .. first + count), in the enclosing block's scope */
+    declarations,
+    /* a: the condition (bool), b: the substatement, c: the else (0: none),
+       d: the init-statement (0: none) */
+    if_statement,
+    /* a: the condition, b: the substatement */
+    while_statement,
+    /* a: the substatement, b: the condition */
+    do_statement,
+    /* a: the init-statement (0: none), b: the condition (0: none), c: the
+       expression (0: none), d: the substatement */
+    for_statement,
+    /* a: the condition (promoted), b: the substatement, d: the
+       init-statement */
+    switch_statement,
+    /* value: the case's converted value; a: the statement */
+    case_label,
+    /* a: the statement */
+    default_label,
+    /* value: the identifier's number; a: the statement */
+    identifier_label,
+    /* value: the identifier's number */
+    goto_statement,
+    break_statement,
+    continue_statement,
+    /* a: the operand, initialized as the result (0: none) */
+    return_statement,
+    /* ; */
+    null_statement,
+    /* a condition that declares: a: the declaration_statement, b: its
+       variable's value converted as the condition ([stmt.pre]/6, /7) */
+    condition_declaration,
+    /* a function definition: a: the outermost block; the parameters'
+       entities (0 for an unnamed one) are list[first .. first + count) */
+    function_body,
+};
+
+const char *semantic_kind_name(semantic_kind kind);
+
+/* [conv]: the standard conversions, and the explicit ones of [expr.cast]
+   analysis has */
+enum class conversion_kind : uint8_t {
+    lvalue_to_rvalue,    /* [conv.lval] */
+    array_to_pointer,    /* [conv.array] */
+    function_to_pointer, /* [conv.func] */
+    integral,            /* [conv.integral], [conv.prom] */
+    floating,            /* [conv.double], [conv.fpprom] */
+    floating_integral,   /* [conv.fpint] */
+    boolean,             /* [conv.bool] */
+    null_pointer, /* [conv.ptr]/1: a null pointer constant to a pointer */
+    pointer,      /* [conv.ptr]/2, [conv.qual]: the same address */
+    to_void,      /* [expr.static.cast]/6 */
+};
+
+enum class increment_kind : uint8_t {
+    pre_increment,
+    pre_decrement,
+    post_increment,
+    post_decrement,
+};
+
+struct semantic_node {
+    semantic_kind kind = semantic_kind::none;
+    uint8_t op = 0;
+    value_category category = value_category::prvalue;
+    constness evaluation = constness::unknown;
+    qualified_type type;
+    /* a compound assignment's computation type */
+    qualified_type computation;
+    /* the token the node is reported at */
+    token_index at = 0;
+    uint32_t a = 0, b = 0, c = 0, d = 0;
+    /* a list's first index and its count */
+    uint32_t first = 0, count = 0;
+    uint64_t value = 0;
+};
+
+class semantic_tree
+{
+  public:
+    semantic_tree();
+    semantic_tree(const semantic_tree &) = delete;
+    semantic_tree &operator=(const semantic_tree &) = delete;
+
+    uint32_t add(const semantic_node &n);
+    /* a list of node or entity indexes: its first index */
+    uint32_t list(const uint32_t *items, size_t count);
+
+    const semantic_node &operator[](uint32_t n) const
+    {
+        return nodes[n];
+    }
+    semantic_node &operator[](uint32_t n)
+    {
+        return nodes[n];
+    }
+    const uint32_t *items(uint32_t first) const
+    {
+        return lists.data() + first;
+    }
+    size_t size() const
+    {
+        return nodes.size();
+    }
+
+  private:
+    owned_array<semantic_node> nodes;
+    owned_array<uint32_t> lists;
 };
 
 /* one expression analysis gave a type: what cxxsema -type-claims has clang
@@ -444,6 +624,16 @@ class semantic_analysis
     owned_array<unsupported_construct> unsupported;
     owned_array<declared_name> declared;
     owned_array<analysed_expression> expressions;
+    /* the semantic tree of every definition analysed */
+    semantic_tree semantics;
+    /* the entities a declaration of declarations defined with a tree
+       (entity::definition): functions, and variables of namespace scope
+       with an initializer */
+    struct definition_record {
+        node_index declaration = 0;
+        entity_index entity = 0;
+    };
+    owned_array<definition_record> definitions;
 
   private:
     /* the node needs rules that are not written: those of the subclause
@@ -550,6 +740,17 @@ class semantic_analysis
                             const specified &s, bool definition,
                             bool initialized, entity_index &declared_entity);
 
+    /* ---- the semantic tree (sema/semantic_tree.cpp) ---- */
+    /* a node for the expression m is now */
+    uint32_t expression_node(semantic_kind kind, const expression_meaning &m,
+                             token_index at, uint32_t a = 0, uint32_t b = 0,
+                             uint8_t op = 0);
+    /* m's node, converted to what m now is */
+    void converted(expression_meaning &m, conversion_kind kind);
+    uint32_t statement_node(semantic_kind kind, token_index at, uint32_t a = 0,
+                            uint32_t b = 0, uint32_t c = 0, uint32_t d = 0);
+    token_index first_token(syntax_child c) const;
+
     /* ---- expressions ([expr]) ---- */
     /* [expr.pre]: an expression's type, value category and value; the
        expression is recorded in expressions */
@@ -576,6 +777,11 @@ class semantic_analysis
                                         expression_meaning &m);
     /* [expr.mul] to [expr.log.or] */
     analysis_result binary(node_index n, expression_meaning &m);
+    analysis_result binary_built(analysis_result r, token_index at,
+                                 preprocessing_op_or_punc op,
+                                 const expression_meaning &left,
+                                 const expression_meaning &right,
+                                 expression_meaning &m);
     analysis_result arithmetic(node_index n, preprocessing_op_or_punc op,
                                expression_meaning &left,
                                expression_meaning &right,
@@ -614,6 +820,8 @@ class semantic_analysis
     void promote(expression_meaning &m);
     /* a prvalue converted to the arithmetic type to, its value with it */
     void convert_arithmetic(expression_meaning &m, fundamental_type to);
+    /* ... its type and value, without the node */
+    void arithmetic_value(expression_meaning &m, fundamental_type to);
     /* [expr.arith.conv]: the operands' common type, both converted */
     fundamental_type usual_arithmetic_conversions(expression_meaning &a,
                                                   expression_meaning &b);
@@ -635,6 +843,8 @@ class semantic_analysis
     struct initialized_value {
         constness evaluation = constness::unknown;
         uint64_t value = 0;
+        /* the initialization in the semantic tree */
+        uint32_t node = 0;
     };
     /* the object or reference of type type (an array of unknown bound gets
        its bound) initialized by the initializer node (a
@@ -711,20 +921,30 @@ class semantic_analysis
     } function_state;
     analysis_result function_body(node_index definition, syntax_child compound);
     void collect_labels(syntax_child s);
-    analysis_result statement(syntax_child s);
+    /* the statement functions give the statement's node in built (when
+       well-formed) */
+    analysis_result statement(syntax_child s, uint32_t &built);
     /* a substatement ([stmt.pre]/2): a block scope of its own whose
        outermost names shall not redeclare conflicts' */
-    analysis_result substatement(syntax_child s, entity_index conflicts);
-    analysis_result compound_statement(node_index n, entity_index conflicts);
-    analysis_result block_items(node_index n);
-    analysis_result expression_statement(node_index n);
-    analysis_result selection_statement(node_index n);
-    analysis_result iteration_statement(node_index n);
-    analysis_result jump_statement(node_index n);
-    analysis_result labeled_statement(node_index n);
+    analysis_result substatement(syntax_child s, entity_index conflicts,
+                                 uint32_t &built);
+    analysis_result compound_statement(node_index n, entity_index conflicts,
+                                       uint32_t &built);
+    analysis_result block_items(node_index n, uint32_t &built);
+    analysis_result expression_statement(node_index n, uint32_t &built);
+    analysis_result selection_statement(node_index n, uint32_t &built);
+    analysis_result iteration_statement(node_index n, uint32_t &built);
+    analysis_result jump_statement(node_index n, uint32_t &built);
+    analysis_result labeled_statement(node_index n, uint32_t &built);
     analysis_result case_label(node_index n, syntax_child value,
                                size_t innermost);
-    analysis_result return_statement(node_index n);
+    /* operand: the operand's node, initialized as the result (0: none) */
+    analysis_result return_statement(node_index n, uint32_t &operand);
+    /* the variables declared at block scope, in order, until the
+       declaration statement that declares them takes them */
+    owned_array<entity_index> block_variables;
+    /* the declaration statement of block_variables[first ..] */
+    uint32_t declaration_statements(size_t first, token_index at);
     node_index node_of(syntax_child c) const;
     /* a condition's declarator is analysed ([stmt.pre]/4) */
     bool in_condition = false;
@@ -732,6 +952,7 @@ class semantic_analysis
        switch, the condition's value promoted: m) */
     analysis_result condition(syntax_child c, bool for_switch,
                               expression_meaning &m);
+    analysis_result switch_condition(node_index at, expression_meaning &m);
     /* [stmt.dcl]/3: a jump from from to to bypasses no initialization */
     bool jump_bypasses(jump_point from, jump_point to) const;
     bool in_scope(jump_point variable, jump_point at) const;

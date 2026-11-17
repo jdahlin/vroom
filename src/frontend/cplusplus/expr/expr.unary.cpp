@@ -289,6 +289,8 @@ analysis_result semantic_analysis::size_of(node_index n, bool alignment,
     m.category = value_category::prvalue;
     m.evaluation = constness::constant;
     m.value = size;
+    /* the operand is unevaluated ([expr.sizeof]/1): the constant alone */
+    m.node = expression_node(semantic_kind::constant, m, node.first_token);
     return analysis_result::well_formed;
 }
 
@@ -334,10 +336,18 @@ analysis_result semantic_analysis::increment(node_index n, syntax_child operand,
         return not_supported(n, subclause);
     m.evaluation = constness::not_constant;
     m.entity = 0;
+    increment_kind kind = increment_kind::pre_increment;
+    if (decrement)
+        kind = increment_kind::pre_decrement;
     if (postfix) {
         m.category = value_category::prvalue;
         m.type = qualified_type::make(m.type.unqualified(), cv_none);
+        kind = increment_kind::post_increment;
+        if (decrement)
+            kind = increment_kind::post_decrement;
     }
+    m.node = expression_node(semantic_kind::increment, m, tree[n].first_token,
+                             m.node, 0, static_cast<uint8_t>(kind));
     return analysis_result::well_formed;
 }
 
@@ -372,6 +382,7 @@ analysis_result semantic_analysis::unary(node_index n, expression_meaning &m)
     if (r != analysis_result::well_formed)
         return r;
     const implementation_defined_behavior &b = tokens.files.behavior;
+    token_index at = children[0].index();
     switch (o) {
     case preprocessing_op_or_punc::AMPERSAND: {
         /* [expr.unary.op]/3: "The operand shall be an lvalue or a
@@ -388,6 +399,7 @@ analysis_result semantic_analysis::unary(node_index n, expression_meaning &m)
             m.evaluation = constness::unknown;
         m.entity = 0;
         m.string_literal = 0;
+        m.node = expression_node(semantic_kind::address, m, at, m.node);
         return analysis_result::well_formed;
     }
     case preprocessing_op_or_punc::STAR: {
@@ -415,6 +427,7 @@ analysis_result semantic_analysis::unary(node_index n, expression_meaning &m)
         m.category = value_category::lvalue;
         if (m.evaluation != constness::not_constant)
             m.evaluation = constness::unknown;
+        m.node = expression_node(semantic_kind::indirection, m, at, m.node);
         return analysis_result::well_formed;
     }
     case preprocessing_op_or_punc::PLUS:
@@ -425,7 +438,7 @@ analysis_result semantic_analysis::unary(node_index n, expression_meaning &m)
             return r;
         if (o == preprocessing_op_or_punc::PLUS && is_pointer(m.type)) {
             /* [expr.unary.op]/7: "or pointer type" */
-            return analysis_result::well_formed;
+            break;
         }
         bool allowed = is_arithmetic(m.type);
         if (o == preprocessing_op_or_punc::TILDE)
@@ -457,16 +470,16 @@ analysis_result semantic_analysis::unary(node_index n, expression_meaning &m)
         fundamental_type t = fundamental_of(m.type);
         if (m.evaluation != constness::constant ||
             o == preprocessing_op_or_punc::PLUS)
-            return analysis_result::well_formed;
+            break;
         if (fundamental_type_is_floating(t)) {
             double d = floating_value(m.value);
             m.value = floating_kept(-d);
-            return analysis_result::well_formed;
+            break;
         }
         __int128 v = integer_value(b, t, m.value);
         if (o == preprocessing_op_or_punc::TILDE) {
             m.value = integer_wrap(b, t, ~static_cast<unsigned __int128>(v));
-            return analysis_result::well_formed;
+            break;
         }
         /* [expr.unary.op]/8: "The negative of an unsigned quantity is
            computed by subtracting its value from 2^n"; a signed one that
@@ -475,7 +488,7 @@ analysis_result semantic_analysis::unary(node_index n, expression_meaning &m)
             m.evaluation = constness::not_constant;
         else
             m.value = integer_wrap(b, t, static_cast<unsigned __int128>(-v));
-        return analysis_result::well_formed;
+        break;
     }
     case preprocessing_op_or_punc::EXCLAMATION: {
         /* [expr.unary.op]/9: "The operand of the logical negation operator
@@ -486,11 +499,14 @@ analysis_result semantic_analysis::unary(node_index n, expression_meaning &m)
         if (r != analysis_result::well_formed)
             return r;
         m.value = !m.value;
-        return analysis_result::well_formed;
+        break;
     }
     default:
         return not_supported(n, "expr.unary");
     }
+    m.node = expression_node(semantic_kind::unary, m, at, m.node, 0,
+                             static_cast<uint8_t>(o));
+    return analysis_result::well_formed;
 }
 
 } // namespace cplusplus

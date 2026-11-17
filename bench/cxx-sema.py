@@ -25,6 +25,11 @@ them (work/testsuites), and src/test/cxx/sema/{spec,gram}/*.cpp.  For each
              not parsed   the parser's (an erroneous node, or one kept as
                           tokens), or clang's error there is one of syntax
 
+  tree     cxxsema -check-tree: the semantic tree of every well-formed
+           definition is complete and agrees with each expression's
+           recorded type and value category (src/bin/cxxsema/tree-check.h);
+           a problem is a failure
+
   declared cxxsema -declaration-claims gives each name a declaration
            declared and the type analysis gave it, in cxxparse's format;
            bench/cxx-parse.py's check has clang compile
@@ -270,7 +275,7 @@ def check(test, opts, clang, cxxsema):
     name = os.path.basename(test)
     res = {'test': test, 'opts': opts, 'fail': [], 'verdict': collections.Counter(),
            'unsupported': collections.Counter(), 'types': collections.Counter()}
-    ours = cxxparse.run([cxxsema, '-dump-analysis'] + opts + [name], cwd)
+    ours = cxxparse.run([cxxsema, '-dump-analysis', '-check-tree'] + opts + [name], cwd)
     if ours[0] == 2 and 'unsupported -std' in ours[2]:
         res['skip'] = ours[2].strip()
         return res
@@ -299,6 +304,9 @@ def check(test, opts, clang, cxxsema):
     known = KNOWN.get(relative(test), set())
     rejected = []
     for line in ours[1].splitlines():
+        if line.startswith('tree '):
+            res['fail'].append(('tree', line[5:]))
+            continue
         m = ANALYSIS_LINE.match(line)
         if not m:
             res['fail'].append(('crash', f'-dump-analysis: {line!r}'))

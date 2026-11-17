@@ -225,7 +225,9 @@ analysis_result semantic_analysis::function_body(node_index definition,
                     "labels shall not be redeclared within a function",
                     "stmt.label");
     entity_index parameters = open_scope(0, true);
+    owned_array<uint32_t> parameter_entities;
     for (const parameter_meaning &parameter : function_parameters) {
+        parameter_entities.append(0);
         if (!parameter.id)
             continue;
         uint32_t name = tokens.identifier(parameter.id);
@@ -247,9 +249,25 @@ analysis_result semantic_analysis::function_body(node_index definition,
         entity_table[e].automatic = true;
         entity_table.add_declaration(e, definition);
         entity_table.bind(parameters, name, e);
+        parameter_entities.back() = e;
     }
     open_scope(parameters, false);
-    result = worse(result, block_items(compound.index()));
+    uint32_t block = 0;
+    result = worse(result, block_items(compound.index(), block));
+    /* the function's semantic tree: its outermost block and parameters */
+    uint32_t body = statement_node(semantic_kind::function_body,
+                                   first_token(compound), block);
+    if (!parameter_entities.empty()) {
+        semantics[body].first =
+            semantics.list(&parameter_entities[0], parameter_entities.size());
+        semantics[body].count =
+            static_cast<uint32_t>(parameter_entities.size());
+    }
+    entity_table[f].definition = body;
+    definition_record record;
+    record.declaration = current_declaration;
+    record.entity = f;
+    definitions.append(record);
     for (const goto_record &g : function_state.gotos) {
         const label_record *target = nullptr;
         for (const label_record &l : function_state.labels)
