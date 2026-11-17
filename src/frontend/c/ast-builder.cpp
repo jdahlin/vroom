@@ -111,6 +111,11 @@ void ast_builder_type_record_complete(cc *c, ast_qualified_type record,
     cc_layout_record(c, r, aligned, NULL);
 }
 
+void ast_builder_type_record_in_memory(cc *c, ast_qualified_type record)
+{
+    c->tags[AST_TYPE(c, record)->aux].flags |= AST_RECORD_FLAG_CALLS_IN_MEMORY;
+}
+
 uint64_t ast_builder_type_record_offset(cc *c, ast_qualified_type record,
                                         uint32_t field)
 {

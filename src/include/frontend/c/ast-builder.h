@@ -65,6 +65,9 @@ ast_qualified_type ast_builder_type_record(cc *c, const char *name,
 /* the record's fields in order, laid out by C's rules; names[i] and
    lengths[i] name field i, aligned[i] is its aligned attribute's
    alignment in bytes (0: none) */
+/* a C++ class non-trivial for the purposes of calls: returned through the
+   result address (x8 on AArch64, memory on x86-64) whatever its size */
+void ast_builder_type_record_in_memory(cc *c, ast_qualified_type record);
 void ast_builder_type_record_complete(cc *c, ast_qualified_type record,
                                       const ast_qualified_type *fields,
                                       const char *const *names,

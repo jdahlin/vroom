@@ -891,6 +891,12 @@ static inline bool codegen_type_is_integer(cc *c, ast_qualified_type t);
 static inline bool codegen_type_is_pointer(cc *c, ast_qualified_type t);
 static inline bool codegen_type_is_float(cc *c, ast_qualified_type t);
 static inline bool codegen_type_is_record(cc *c, ast_qualified_type t);
+/* a C++ class returned and passed by address whatever its size */
+static inline bool codegen_type_is_in_memory(cc *c, ast_qualified_type t)
+{
+    return codegen_type_is_record(c, t) &&
+           (c->tags[T(c, t)->aux].flags & AST_RECORD_FLAG_CALLS_IN_MEMORY);
+}
 static inline bool codegen_type_is_array(cc *c, ast_qualified_type t);
 static inline bool codegen_type_is_function(cc *c, ast_qualified_type t);
 static inline bool codegen_type_is_void(cc *c, ast_qualified_type t);

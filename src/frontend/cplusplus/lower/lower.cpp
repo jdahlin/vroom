@@ -152,6 +152,20 @@ class c_lowering
        lowered now (collecting): their declarations, constructed where
        their argument is, and their destructor calls, run after it */
     bool collecting = false;
+    /* [dcl.init]/17.6.1: the prvalue whose result object is the object
+       being initialized (a declared variable, a returned value, an
+       argument's temporary), and whether expression() is at it now */
+    uint32_t result_object = 0;
+    bool at_result_object = false;
+    /* [class.copy.elision]/1.1: the automatic variable every return
+       statement of the function lowered returns, constructed in the
+       result object (clang's NRVO), 0 if none */
+    entity_index named_return = 0;
+    uint32_t initializer(uint32_t n);
+    entity_index returned_variable(uint32_t return_operand) const;
+    void find_named_return(uint32_t statement, entity_index &found,
+                           bool &mixed) const;
+    uint32_t materialize(uint32_t value, qualified_type t, token_index at);
     unsigned conditional_depth = 0;
     owned_array<uint32_t> temporaries, destructions;
     uint32_t conditional(const semantic_node &n);
@@ -436,6 +450,12 @@ ast_qualified_type c_lowering::class_type(entity_index e, token_index at)
     }
     if (ast_builder_type_size(c, made) != x.size)
         fail("a class whose size is not C's", at);
+    if (!analysis.trivial_class(e))
+        /* [abi:calls]: "If the return type is a class type that is
+           non-trivial for the purposes of calls, the caller passes an
+           address as an implicit parameter" (x8 on AArch64), whatever its
+           size */
+        ast_builder_type_record_in_memory(c, made);
     return made;
 }
 
@@ -475,12 +495,6 @@ bool c_lowering::indirect_parameter(entity_index e) const
 ast_qualified_type c_lowering::entity_type(entity_index e, token_index at)
 {
     const entity &x = analysis.entity_table[e];
-    if (x.kind == entity_kind::function &&
-        passed_indirectly(record(x.type).operand))
-        /* [abi:calls]: "If the return type is a class type that is
-           non-trivial for the purposes of calls, the caller passes an
-           address as an implicit parameter", x8 on AArch64 */
-        fail("a class returned by address", at);
     if (indirect_parameter(e))
         return parameter_type(x.type, at);
     if (x.kind != entity_kind::function || !x.nonstatic_member)
@@ -702,10 +716,11 @@ uint32_t c_lowering::construct(const semantic_node &n)
             address_of(object, ast_builder_type_pointer(c, type_of(object))),
             arguments.data(), n.count, n.at);
     }
+    bool here = at_result_object;
     if (!in_function)
         return fail("dynamic initialization of a variable", n.at);
     entity_index cls = record(n.type).entity;
-    if (analysis.entity_table[cls].destructor)
+    if (analysis.entity_table[cls].destructor && !here)
         /* [class.temporary]/4: destroyed at the end of the full-expression */
         return fail("a temporary with a destructor", n.at);
     ast_qualified_type t = type(n.type, n.at);
@@ -1101,6 +1116,7 @@ uint32_t c_lowering::assignment(const semantic_node &n)
    reference returns its address */
 uint32_t c_lowering::call(const semantic_node &n)
 {
+    bool here = at_result_object;
     uint32_t callee = expression(n.a);
     if (!callee)
         return 0;
@@ -1136,9 +1152,12 @@ uint32_t c_lowering::call(const semantic_node &n)
     qualified_type result = record(function_type).operand;
     ast_qualified_type t = AST_QUALIFIED_TYPE_UNQUALIFIED(type(result, n.at));
     uint32_t count = static_cast<uint32_t>(arguments.size());
+    bool initializes = here;
     uint32_t made =
         make(AST_NODE_CALL, t, callee,
              ast_builder_list(c, arguments.data(), count), count, 0, 0);
+    if (passed_indirectly(result) && !initializes)
+        return materialize(made, result, n.at);
     if (!is_reference(result))
         return made;
     return make(AST_NODE_DEREFERENCE, type(n.type, n.at), made, 0, 0, 0,
@@ -1163,6 +1182,112 @@ uint32_t c_lowering::conditional(const semantic_node &n)
              address_of(b, pointer), address_of(c_, pointer), 0, 0);
     return make(AST_NODE_DEREFERENCE, t, selected, 0, 0, 0,
                 AST_NODE_FLAG_LVALUE);
+}
+
+/* the initializer n of an object: a prvalue there initializes the object
+   itself ([dcl.init]/17.6.1) */
+uint32_t c_lowering::initializer(uint32_t n)
+{
+    uint32_t outer = result_object;
+    result_object = n;
+    uint32_t lowered = expression(n);
+    result_object = outer;
+    return lowered;
+}
+
+/* [class.temporary]/2: "the temporary materialization conversion": a
+   prvalue of a class returned by address that initializes no object, held
+   in a temporary destroyed at the end of the full-expression; *(t =
+   value, &t) */
+uint32_t c_lowering::materialize(uint32_t value, qualified_type type_,
+                                 token_index at)
+{
+    entity_index destructor =
+        analysis.entity_table[record(type_).entity].destructor;
+    if (!collecting)
+        return fail("a class returned by address outside a statement", at);
+    if (destructor && conditional_depth)
+        return fail("a class returned by address in a conditional operand", at);
+    ast_qualified_type t = type(type_, at);
+    ast_qualified_type pointer = ast_builder_type_pointer(c, t);
+    ast_qualified_type v = ast_builder_type_basic(AST_TYPE_VOID);
+    uint32_t temporary =
+        ast_builder_symbol(c, AST_SYMBOL_VARIABLE, "", 0, t, AST_STORAGE_AUTO,
+                           AST_SYMBOL_FLAG_ADDRESS_TAKEN, 1);
+    temporaries.append(
+        ast_builder_node(c, AST_NODE_DECLARATION, v, temporary, 0, 0, 0, 0));
+    auto variable = [&] {
+        return make(AST_NODE_VARIABLE, t, temporary, 0, 0, 0,
+                    AST_NODE_FLAG_LVALUE);
+    };
+    if (destructor) {
+        uint32_t call = special_call(
+            destructor, address_of(variable(), pointer), nullptr, 0, at);
+        destructions.append(
+            ast_builder_node(c, AST_NODE_EXPRESSION, v, call, 0, 0, 0, 0));
+    }
+    uint32_t stored = make(AST_NODE_ASSIGN, AST_QUALIFIED_TYPE_UNQUALIFIED(t),
+                           variable(), value, 0, 0, 0);
+    uint32_t address = make(AST_NODE_COMMA, pointer, stored,
+                            address_of(variable(), pointer), 0, 0, 0);
+    return make(AST_NODE_DEREFERENCE, t, address, 0, 0, 0,
+                AST_NODE_FLAG_LVALUE);
+}
+
+/* the automatic variable a return statement's operand copies (a copy
+   constructor's call on it, as [class.copy.elision]/1.1 allows to omit),
+   0 if it is not one */
+entity_index c_lowering::returned_variable(uint32_t operand) const
+{
+    if (!operand)
+        return 0;
+    const semantic_node &n = node(operand);
+    if (n.kind != semantic_kind::construct || n.a || n.count != 1)
+        return 0;
+    uint32_t argument = analysis.semantics.items(n.first)[0];
+    if (node(argument).kind == semantic_kind::bind_reference)
+        argument = node(argument).a;
+    const semantic_node &named = node(argument);
+    if (named.kind != semantic_kind::entity)
+        return 0;
+    const entity &x = analysis.entity_table[named.a];
+    if (x.kind != entity_kind::variable || !x.automatic ||
+        x.type.unqualified() != n.type.unqualified() || x.type.cv() ||
+        analysis.entity_table[x.enclosing].parameter_scope)
+        return 0;
+    return named.a;
+}
+
+/* [class.copy.elision]/1.1 as clang applies it: every return statement
+   names the same variable */
+void c_lowering::find_named_return(uint32_t statement, entity_index &found,
+                                   bool &mixed) const
+{
+    if (!statement || statement >= analysis.semantics.size())
+        return;
+    const semantic_node &n = node(statement);
+    if (n.kind < semantic_kind::block || n.kind > semantic_kind::null_statement)
+        return;
+    if (n.kind == semantic_kind::return_statement) {
+        entity_index e = returned_variable(n.a);
+        if (!e || (found && found != e))
+            mixed = true;
+        found = e;
+        return;
+    }
+    if (n.kind == semantic_kind::block ||
+        n.kind == semantic_kind::declarations) {
+        const uint32_t *items = analysis.semantics.items(n.first);
+        for (uint32_t i = 0; i < n.count; i++)
+            find_named_return(items[i], found, mixed);
+        return;
+    }
+    if (n.kind == semantic_kind::declaration_statement)
+        return;
+    find_named_return(n.a, found, mixed);
+    find_named_return(n.b, found, mixed);
+    find_named_return(n.c, found, mixed);
+    find_named_return(n.d, found, mixed);
 }
 
 /* [expr.call]/7: "When a function is called, each parameter is
@@ -1207,7 +1332,7 @@ uint32_t c_lowering::indirect_argument(uint32_t argument,
     } else {
         /* a prvalue of the class: its bytes are the object (no copy
            constructor runs, [dcl.init]/17.6.1) */
-        uint32_t value = expression(argument);
+        uint32_t value = initializer(argument);
         if (!value)
             return 0;
         made = make(AST_NODE_ASSIGN, t, object, value, 0, 0, 0);
@@ -1237,7 +1362,7 @@ uint32_t c_lowering::full_expression(uint32_t e, bool discarded,
     if (discarded)
         lowered = discard(e);
     else
-        lowered = expression(e);
+        lowered = initializer(e);
     collecting = outer;
     for (size_t i = first; i < temporaries.size(); i++)
         before.append(temporaries[i]);
@@ -1312,6 +1437,9 @@ uint32_t c_lowering::expression(uint32_t index)
 {
     if (failure.what)
         return 0;
+    at_result_object = index == result_object;
+    if (at_result_object)
+        result_object = 0;
     const semantic_node &n = node(index);
     switch (n.kind) {
     case semantic_kind::constant:
@@ -1580,7 +1708,7 @@ void c_lowering::initialized_declaration(const semantic_node &n,
         out.append(
             ast_builder_node(c, AST_NODE_EXPRESSION, v, call, 0, 0, 0, 0));
     }
-    if (destructor) {
+    if (destructor && e != named_return) {
         scope_record r;
         r.kind = scope_record::object;
         r.symbol = symbol(e, n.at);
@@ -1774,7 +1902,7 @@ uint32_t c_lowering::declaration(const semantic_node &n, bool in_block)
     if (n.b) {
         if (!x.automatic && !constant_initializer(n.b))
             return fail("a static local with dynamic initialization", n.at);
-        init = expression(n.b);
+        init = initializer(n.b);
         if (!init)
             return 0;
     }
@@ -1995,7 +2123,14 @@ uint32_t c_lowering::statement(uint32_t index)
     case semantic_kind::return_statement: {
         uint32_t value = 0;
         owned_array<uint32_t> items, after;
-        if (n.a) {
+        if (n.a && named_return && returned_variable(n.a) == named_return) {
+            /* the variable is the result object: its bytes are the
+               result, and it is not destroyed */
+            uint32_t s = symbol(named_return, n.at);
+            value = make(AST_NODE_VARIABLE,
+                         type(analysis.entity_table[named_return].type, n.at),
+                         s, 0, 0, 0, AST_NODE_FLAG_LVALUE);
+        } else if (n.a) {
             value = full_expression(n.a, false, items, after);
             if (!value)
                 return 0;
@@ -2065,6 +2200,14 @@ bool c_lowering::function_definition(entity_index e)
         parameters.append(p);
     }
     live.clear();
+    named_return = 0;
+    if (passed_indirectly(f.operand)) {
+        bool mixed = false;
+        entity_index found = 0;
+        find_named_return(body.a, found, mixed);
+        if (!mixed)
+            named_return = found;
+    }
     if (body.c) {
         scope_record r;
         r.kind = scope_record::subobjects;
@@ -2228,7 +2371,7 @@ bool c_lowering::dynamic_initialization()
                         0, 0, 0);
         } else {
             done = make(AST_NODE_ASSIGN, AST_QUALIFIED_TYPE_UNQUALIFIED(t),
-                        variable, expression(x.definition), 0, 0, 0);
+                        variable, initializer(x.definition), 0, 0, 0);
         }
         in_function = false;
         if (failure.what || !done)

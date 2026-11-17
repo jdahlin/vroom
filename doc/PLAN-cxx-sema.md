@@ -741,8 +741,19 @@ libstdc++ and json), since sema cannot analyse a declaration kept as tokens.
   returns it through x8 whatever its size: C's code generators need a
   record flag for that).  `src/test/cxx/run/by-address.cpp`, LLVM's
   `llvm-2003-09-29-NonPODsByValue.cpp`; C5.1 unchanged at 1096.
-  Next: returning classes by address, elaborated-type-specifiers in block
-  and class scope, static data members.
+  Then returning them: the C record of such a class is marked
+  `AST_RECORD_FLAG_CALLS_IN_MEMORY`, which arm64's direct emitter returns
+  through x8 and x86-64's classifies as memory whatever the size (VIR
+  gives up on record results and falls back to the direct emitter).  A
+  prvalue result initializes the object it is the initializer of (a
+  variable, a return value, an argument's temporary); any other use
+  materializes a temporary destroyed at the end of the full-expression;
+  when every return names one automatic variable, it is the result
+  object (clang's NRVO).  Results agree with clang's in both directions at
+  -O0 and -O2 (by hand, a split caller/callee pair).  Unsupported: such a
+  result in a conditional operand.  `src/test/cxx/run/returns.cpp`.
+  Next: elaborated-type-specifiers in block and class scope, static data
+  members, enumerations, virtual functions.
 
 ### S5. Conversions by user code, lambdas, the rest of [expr]
 
