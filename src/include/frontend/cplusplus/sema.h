@@ -310,6 +310,9 @@ struct entity {
     /* [dcl.link]/1: a function or variable with C language linkage,
        whose name is its symbol */
     bool c_language_linkage = false;
+    /* a special member function declared implicitly ([class.default.ctor]/1,
+       [class.copy.ctor]/6, [class.dtor]/4) */
+    bool implicit = false;
 };
 
 /* one declaration of an entity: the syntax node that declares it */
@@ -746,6 +749,7 @@ class semantic_analysis
        its objects are copied as their bytes, passed in registers */
     bool trivial_class(entity_index c) const;
     bool copies_bytes(entity_index c) const;
+    bool is_copy_constructor(entity_index c, entity_index k) const;
     /* whether destroying an object of class c runs code */
     bool destroys(entity_index c) const;
 
@@ -1102,6 +1106,10 @@ class semantic_analysis
        defined constructor or destructor of c would do that analysis does
        not; checked when c is complete */
     analysis_result implicit_special_members(entity_index c, node_index n);
+    void declare_implicit(entity_index c, special_member kind, bool copy);
+    analysis_result implicit_definitions(entity_index c, node_index n);
+    analysis_result implicit_copy(entity_index c, node_index n,
+                                  entity_index source, uint32_t &built);
     /* [class.dtor]/13: after the body of the destructor of class c, the
        destructors of its members and bases, in the reverse order of
        their construction */

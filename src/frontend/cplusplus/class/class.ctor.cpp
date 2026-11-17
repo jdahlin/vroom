@@ -80,23 +80,29 @@ bool semantic_analysis::trivial_class(entity_index c) const
 
 /* whether the copy constructor of class c is the implicit one and
    trivial: no subobject's class declares one either */
+/* whether constructor k of class c is a copy constructor X(cv X&)
+   ([class.copy.ctor]/1, without default arguments) */
+bool semantic_analysis::is_copy_constructor(entity_index c,
+                                            entity_index k) const
+{
+    const struct type &f = type_table[entity_table[k].type.unqualified()];
+    if (f.parameter_count != 1)
+        return false;
+    const struct type &p =
+        type_table[type_table.parameters(entity_table[k].type.unqualified())[0]
+                       .unqualified()];
+    return (p.kind == type_kind::lvalue_reference ||
+            p.kind == type_kind::rvalue_reference) &&
+           p.operand.unqualified() == entity_table[c].type.unqualified();
+}
+
 bool semantic_analysis::copies_bytes(entity_index c) const
 {
     const entity &x = entity_table[c];
     for (entity_index k = x.first_constructor; k;
-         k = entity_table[k].next_constructor) {
-        const struct type &f = type_table[entity_table[k].type.unqualified()];
-        if (f.parameter_count != 1)
-            continue;
-        const struct type &p =
-            type_table[type_table
-                           .parameters(entity_table[k].type.unqualified())[0]
-                           .unqualified()];
-        if ((p.kind == type_kind::lvalue_reference ||
-             p.kind == type_kind::rvalue_reference) &&
-            p.operand.unqualified() == x.type.unqualified())
+         k = entity_table[k].next_constructor)
+        if (is_copy_constructor(c, k))
             return false;
-    }
     owned_array<entity_index> classes;
     subobject_classes(c, classes);
     for (entity_index k : classes)
@@ -768,15 +774,25 @@ bool semantic_analysis::destroys(entity_index c) const
 }
 
 /*
- * [class.default.ctor]/4: "an implicitly-defined default constructor
- * performs the set of initializations of the class that would be performed
- * by a user-written default constructor for that class with no
- * ctor-initializer and an empty compound-statement"; [class.dtor]/11 an
- * implicitly-defined destructor, /13 "the destructor for class X calls the
- * destructors for X's direct non-variant non-static data members, ... the
- * destructors for X's non-virtual direct base classes".  Not analysed: a
- * class without constructors whose subobjects have some, without a
- * destructor whose subobjects have one, and arrays of classes with either.
+ * [class.default.ctor]/1: "If there is no user-declared constructor for
+ * class X, a non-explicit constructor having no parameters is implicitly
+ * declared as defaulted"; /3: "A default constructor is trivial if it is
+ * not user-provided and if ... (3.3) no non-static data member of its
+ * class has a default member initializer, and (3.4) all the direct base
+ * classes of its class have trivial default constructors, and (3.5) for
+ * all the non-static data members of its class that are of class type
+ * (or array thereof), each such class has a trivial default constructor";
+ * [class.copy.ctor]/6: "If the class definition does not explicitly
+ * declare a copy constructor, a non-explicit one is declared implicitly";
+ * /11: it is trivial when each base's and member's is; [class.dtor]/4:
+ * "If a class has no user-declared prospective destructor, a prospective
+ * destructor is implicitly declared as defaulted"; /8: trivial when
+ * each base's and member's is.  The non-trivial ones are declared here,
+ * as entities like user-declared ones (inline, [class.default.ctor]/4:
+ * "implicitly defined"); implicit_definitions gives them their bodies.
+ * A trivial one is no entity: a copy copies the bytes, a default
+ * construction or destruction does nothing.  Arrays of classes whose
+ * construction or destruction runs code are not analysed.
  */
 analysis_result semantic_analysis::implicit_special_members(entity_index c,
                                                             node_index n)
@@ -796,11 +812,236 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
     }
     owned_array<entity_index> classes;
     subobject_classes(c, classes);
+    bool construction = false, destruction = false, copy = false;
     for (entity_index k : classes) {
-        if (entity_table[k].first_constructor && !x.first_constructor)
-            return not_supported(n, "class.default.ctor");
-        if (destroys(k) && !x.destructor)
-            return not_supported(n, "class.dtor");
+        if (entity_table[k].first_constructor)
+            construction = true;
+        if (destroys(k))
+            destruction = true;
+        if (!copies_bytes(k))
+            copy = true;
+    }
+    bool user_constructors = x.first_constructor != 0;
+    bool user_copy = false;
+    for (entity_index k = x.first_constructor; k;
+         k = entity_table[k].next_constructor)
+        if (is_copy_constructor(c, k))
+            user_copy = true;
+    if (copy && !user_copy)
+        declare_implicit(c, special_member::constructor, true);
+    if (!user_constructors &&
+        (construction || entity_table[c].first_constructor))
+        declare_implicit(c, special_member::constructor, false);
+    if (destruction && !entity_table[c].destructor)
+        declare_implicit(c, special_member::destructor, false);
+    return analysis_result::well_formed;
+}
+
+/* an implicitly-declared constructor (the copy constructor X(const X&)
+   when copy) or destructor of class c, public and inline */
+void semantic_analysis::declare_implicit(entity_index c, special_member kind,
+                                         bool copy)
+{
+    qualified_type v = qualified_type::make(
+        type_table.fundamental(fundamental_type::void_), cv_none);
+    qualified_type parameter;
+    size_t count = 0;
+    if (copy) {
+        /* [class.copy.ctor]/7: "The implicitly-declared copy constructor
+           for a class X will have the form X::X(const X&) if each potentially
+           constructed subobject of a class type M (or array thereof) has a
+           copy constructor whose first parameter is of type const M& or
+           const volatile M&" (the other form is not analysed) */
+        parameter = qualified_type::make(
+            type_table.lvalue_reference_to(qualified_type::make(
+                entity_table[c].type.unqualified(), cv_const)),
+            cv_none);
+        count = 1;
+    }
+    qualified_type type = qualified_type::make(
+        type_table.function(v, &parameter, count, false), cv_none);
+    entity_index e =
+        entity_table.make(entity_kind::function, entity_table[c].name, c);
+    entity &f = entity_table[e];
+    f.type = type;
+    f.nonstatic_member = true;
+    f.special = kind;
+    f.inline_ = true;
+    f.defined = true;
+    f.implicit = true;
+    f.linkage_of_name = entity_table[c].linkage_of_name;
+    if (kind == special_member::destructor) {
+        entity_table[c].destructor = e;
+        return;
+    }
+    if (!entity_table[c].first_constructor) {
+        entity_table[c].first_constructor = e;
+        return;
+    }
+    entity_index k = entity_table[c].first_constructor;
+    while (entity_table[k].next_constructor)
+        k = entity_table[k].next_constructor;
+    entity_table[k].next_constructor = e;
+}
+
+/*
+ * [class.default.ctor]/4: "an implicitly-defined default constructor
+ * performs the set of initializations of the class that would be performed
+ * by a user-written default constructor for that class with no
+ * ctor-initializer and an empty compound-statement"; [class.copy.ctor]/14:
+ * "The implicitly-defined copy/move constructor for a non-union class X
+ * performs a memberwise copy/move of its bases and members ... in the
+ * order of their initialization", each "direct-initialized with the
+ * corresponding base or member of x"; [class.dtor]/12: the implicitly
+ * defined destructor is a user-written one "with an empty
+ * function-body".  The bodies of class c's implicitly-declared special
+ * members, at the end of its definition n.
+ */
+analysis_result semantic_analysis::implicit_definitions(entity_index c,
+                                                        node_index n)
+{
+    owned_array<entity_index> implicit;
+    for (entity_index k = entity_table[c].first_constructor; k;
+         k = entity_table[k].next_constructor)
+        if (entity_table[k].implicit)
+            implicit.append(k);
+    if (entity_table[c].destructor &&
+        entity_table[entity_table[c].destructor].implicit)
+        implicit.append(entity_table[c].destructor);
+    current_declaration = n;
+    token_index at = tree[n].first_token;
+    for (entity_index f : implicit) {
+        function_state.active = true;
+        function_state.returns = qualified_type::make(
+            type_table.fundamental(fundamental_type::void_), cv_none);
+        function_state.function = f;
+        entity_index parameters = open_scope(0, true);
+        entity_table[parameters].enclosing = f;
+        owned_array<uint32_t> parameter_entities;
+        entity_index t =
+            entity_table.make(entity_kind::variable, 0, parameters);
+        entity_table[t].type = qualified_type::make(
+            type_table.pointer_to(qualified_type::make(
+                entity_table[c].type.unqualified(), cv_none)),
+            cv_none);
+        entity_table[t].defined = true;
+        entity_table[t].automatic = true;
+        parameter_entities.append(t);
+        function_state.this_entity = t;
+        const struct type &ft = type_table[entity_table[f].type.unqualified()];
+        entity_index source = 0;
+        if (ft.parameter_count) {
+            source = entity_table.make(entity_kind::variable, 0, parameters);
+            entity_table[source].type =
+                type_table.parameters(entity_table[f].type.unqualified())[0];
+            entity_table[source].defined = true;
+            entity_table[source].automatic = true;
+            parameter_entities.append(source);
+        }
+        current_scope = parameters;
+        analysis_result r = analysis_result::well_formed;
+        uint32_t members = 0, destructions = 0;
+        if (entity_table[f].special == special_member::destructor)
+            destructions = subobject_destructions(c, at);
+        else if (source)
+            r = implicit_copy(c, n, source, members);
+        else
+            r = ctor_initializer(syntax_child(), members);
+        uint32_t block = statement_node(semantic_kind::block, at);
+        uint32_t body = statement_node(semantic_kind::function_body, at, block,
+                                       members, destructions);
+        semantics[body].first =
+            semantics.list(&parameter_entities[0], parameter_entities.size());
+        semantics[body].count =
+            static_cast<uint32_t>(parameter_entities.size());
+        entity_table[f].definition = body;
+        definition_record record;
+        record.declaration = n;
+        record.entity = f;
+        definitions.append(record);
+        current_scope = 0;
+        function_state.active = false;
+        function_state.function = 0;
+        function_state.this_entity = 0;
+        if (r != analysis_result::well_formed)
+            return r;
+    }
+    return analysis_result::well_formed;
+}
+
+/* [class.copy.ctor]/14: each base and member of *this direct-initialized
+   from the corresponding one of the source (the parameter, a const X&) */
+analysis_result semantic_analysis::implicit_copy(entity_index c, node_index n,
+                                                 entity_index source,
+                                                 uint32_t &built)
+{
+    token_index at = tree[n].first_token;
+    const entity &x = entity_table[c];
+    owned_array<entity_index> order;
+    for (uint32_t i = 0; i < x.base_count; i++)
+        order.append(class_bases[x.first_base + i]);
+    for (uint32_t i = 0; i < x.member_count; i++)
+        if (!entity_table[class_members[x.first_member + i]].base_subobject)
+            order.append(class_members[x.first_member + i]);
+    owned_array<uint32_t> statements;
+    for (entity_index e : order) {
+        expression_meaning from;
+        from.category = value_category::lvalue;
+        from.type = type_table[entity_table[source].type.unqualified()].operand;
+        from.evaluation = constness::not_constant;
+        from.node = expression_node(semantic_kind::entity, from, at, source);
+        analysis_result r = analysis_result::well_formed;
+        if (entity_table[e].base_subobject)
+            r = to_base(at,
+                        type_table[entity_table[e].type.unqualified()].entity,
+                        from);
+        else
+            r = member_access(at, e, from);
+        if (r != analysis_result::well_formed)
+            return r;
+        expression_meaning object;
+        r = subobject(at, e, object);
+        if (r != analysis_result::well_formed)
+            return r;
+        qualified_type type = entity_table[e].type;
+        const struct type &record = type_table[type.unqualified()];
+        if (record.kind == type_kind::class_type &&
+            !copies_bytes(record.entity)) {
+            owned_array<expression_meaning> arguments;
+            arguments.append(from);
+            initialized_value value;
+            r = construct(n, type, arguments, object.node, value);
+            if (r != analysis_result::well_formed)
+                return r;
+            statements.append(statement_node(
+                semantic_kind::expression_statement, at, value.node));
+            continue;
+        }
+        if (record.kind == type_kind::lvalue_reference ||
+            record.kind == type_kind::rvalue_reference)
+            return not_supported(n, "class.copy.ctor");
+        if (record.kind == type_kind::class_type &&
+            entity_table[e].field == UINT32_MAX)
+            /* an empty base: no bytes */
+            continue;
+        r = operand_value(n, from);
+        if (r != analysis_result::well_formed)
+            return r;
+        expression_meaning stored = object;
+        stored.type = qualified_type::make(type.unqualified(), cv_none);
+        stored.evaluation = constness::not_constant;
+        stored.entity = 0;
+        uint32_t assigned = expression_node(
+            semantic_kind::assignment, stored, at, object.node, from.node,
+            static_cast<uint8_t>(preprocessing_op_or_punc::EQUAL));
+        statements.append(
+            statement_node(semantic_kind::expression_statement, at, assigned));
+    }
+    built = statement_node(semantic_kind::block, at);
+    if (!statements.empty()) {
+        semantics[built].first =
+            semantics.list(&statements[0], statements.size());
+        semantics[built].count = static_cast<uint32_t>(statements.size());
     }
     return analysis_result::well_formed;
 }

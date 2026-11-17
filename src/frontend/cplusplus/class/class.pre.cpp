@@ -239,6 +239,9 @@ analysis_result semantic_analysis::class_definition(node_index n,
         result = worse(result, member_function_body(c, body));
         current_declaration = outer;
     }
+    if (result == analysis_result::well_formed)
+        result = implicit_definitions(c, n);
+    current_declaration = outer;
     if (result != analysis_result::well_formed) {
         entity_table[c].kind = entity_kind::none;
         entity_table[c].size = 0;

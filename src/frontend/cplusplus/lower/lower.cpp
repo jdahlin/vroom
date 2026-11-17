@@ -184,7 +184,7 @@ class c_lowering
     uint32_t scoped_block(const semantic_node &n, uint32_t prefix);
     uint32_t loop_body(uint32_t n, bool is_switch);
     uint32_t block(const uint32_t *items, uint32_t count);
-    uint32_t declaration(const semantic_node &n);
+    uint32_t declaration(const semantic_node &n, bool in_block = false);
     uint32_t condition(uint32_t n, uint32_t &declaration_statement);
     uint32_t label(uint32_t identifier);
     bool function_definition(entity_index e);
@@ -1384,7 +1384,8 @@ void c_lowering::declaration_items(const semantic_node &n,
         return;
     }
     if (!n.b || node(n.b).kind != semantic_kind::construct || !x.automatic) {
-        out.append(declaration(n));
+        /* a block's object, whose destructor is called below */
+        out.append(declaration(n, true));
     } else {
         const semantic_node &init = node(n.b);
         uint32_t s = symbol(e, n.at);
@@ -1585,7 +1586,7 @@ bool c_lowering::constant_initializer(uint32_t n) const
 
 /* a variable declared in a block: an automatic one is a C declaration, a
    static one's symbol holds its initializer */
-uint32_t c_lowering::declaration(const semantic_node &n)
+uint32_t c_lowering::declaration(const semantic_node &n, bool in_block)
 {
     entity_index e = n.a;
     const entity &x = analysis.entity_table[e];
@@ -1596,7 +1597,7 @@ uint32_t c_lowering::declaration(const semantic_node &n)
         return fail("a constructor call in a condition or init-statement",
                     n.at);
     qualified_type object = x.type;
-    if (record(object).kind == type_kind::class_type &&
+    if (!in_block && record(object).kind == type_kind::class_type &&
         analysis.entity_table[record(object).entity].destructor)
         return fail("an object with a destructor in a condition or "
                     "init-statement",

@@ -719,8 +719,18 @@ libstdc++ and json), since sema cannot analyse a declaration kept as tokens.
   rest of SingleSource/Regression/C++ needs [dcl.mptr], virtual
   functions, [dcl.enum], [class.local], bit-fields, classes passed by
   address, __cxa_atexit and exceptions.
+  Then the implicitly-declared special members that are not trivial
+  ([class.default.ctor]/1, [class.copy.ctor]/6, [class.dtor]/4): entities
+  like user-declared ones (`entity::implicit`, inline: C2/D2 symbols),
+  declared at the class's completion, defined after its member function
+  bodies (`implicit_definitions`): the default constructor constructs the
+  bases and members, the copy constructor copies each (its own copy
+  constructor, else the bytes), the destructor destroys them.  A block's
+  object of a class with a destructor but no constructor is now lowered.
+  `src/test/cxx/run/implicit-members.cpp`; C5.1 unchanged at 1096.
+  Unsupported still: arrays of such classes, such classes by value.
   Next: elaborated-type-specifiers in block and class scope, static data
-  members, the implicitly-defined special members.
+  members, classes passed by address.
 
 ### S5. Conversions by user code, lambdas, the rest of [expr]
 
