@@ -578,7 +578,32 @@ libstdc++ and json), since sema cannot analyse a declaration kept as tokens.
   What those need, by files: unqualified lookup ([basic.lookup.unqual];
   the compiler's `__builtin_*` among the names) 738, classes
   ([class.pre]) 448, files the parser does not finish 369, elaborated
-  type specifiers 256, GNU extensions 169.  Next: C5, then S2-S4.
+  type specifiers 256, GNU extensions 169.
+- Status (2026-11-17, C5.1's harness): `bench/cxx-c-suites.py` compiles
+  the programs of the C suites vcc-ctests.py runs (gcc torture, tcc
+  tests2, inlining, vcc's; their skips and flags, a C `-std=` dropped) as
+  C++20 with the driver at -O0 and -O2, runs them under qemu against
+  clang++ -O2's build, and checks the -O0 object's symbols against clang++
+  -O0's.  `extern "C"` around a file, as C5.1 had it, is ill-formed
+  (`main` "shall not be declared with a linkage-specification",
+  [basic.start.main]/3), so the comparison is with clang++.  The corpus
+  is what clang++ -O0 compiles and links: the run time's headers have no
+  `extern "C"` until [dcl.link] is implemented, so a run-time function
+  the program declares with C++ linkage (`abort()`, `printf`) is linked
+  to the C one by `--defsym`, on both sides; a function that flows off
+  its end (undefined in C++, [stmt.return]/2) is out.  Baseline: 2268
+  programs, 1718 valid C++; at -O0 and -O2 822 runs pass
+  (`bench/cxx-c-suites.passing`, a lost one is an error), 0 wrong, 0
+  symbol differences; 111 rejected (56 programs, one only at -O2: C-style casts between
+  pointers and integers or dropping const reported ill-formed instead of
+  unsupported, 29; parser errors on GNU syntax, 12; ...); 2503 not yet,
+  by what is missing: [class.pre] 1084, [dcl.fct.def.general] 354,
+  declarations the parser kept as tokens 331, [basic.lookup.unqual] 240, [ext.gnu] 231.
+  The run found and fixed: a static local of `main` mangled with main's
+  type (`_ZZ4mainvE1r`; clang and GCC write `_ZZ4mainE1r`).  The driver's
+  error now names the subclause whose rules are missing ("the rules of
+  [class.pre] are not implemented yet") at the construct.
+  Next: the 56 rejected programs, then S2-S4.
 
 ### S2. Names and entities in full
 

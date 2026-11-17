@@ -15,6 +15,9 @@ namespace cplusplus
 struct lowering_failure {
     const char *what = nullptr;
     token_index at = 0;
+    /* a declaration the analysis does not support: the subclause whose
+       rules are missing (unsupported_construct), at its first token */
+    const char *subclause = nullptr;
 };
 
 /* every function and variable of a translation unit whose declarations are

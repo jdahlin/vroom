@@ -139,10 +139,16 @@ static int compile(const cplusplus_compile_options *o, pp *p,
         lowering_failure why;
         if (!lower_translation_unit(analysis, tokens, c, co->target, why)) {
             source_position at = tokens.position(why.at);
-            dprintf(o->errfd,
-                    "%s:%u:%u: error: C++ code generation does not handle "
-                    "%s yet\n",
-                    at.file_name, at.line, at.column, why.what);
+            if (why.subclause)
+                dprintf(o->errfd,
+                        "%s:%u:%u: error: the rules of [%s] are not "
+                        "implemented yet\n",
+                        at.file_name, at.line, at.column, why.subclause);
+            else
+                dprintf(o->errfd,
+                        "%s:%u:%u: error: C++ code generation does not handle "
+                        "%s yet\n",
+                        at.file_name, at.line, at.column, why.what);
             status = 1;
         } else if (ast_builder_emit(c))
             status = 1;

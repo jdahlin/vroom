@@ -640,6 +640,11 @@ class semantic_analysis
         entity_index entity = 0;
     };
     owned_array<definition_record> definitions;
+    /* the syntax tree analysed */
+    const syntax_tree &syntax() const
+    {
+        return tree;
+    }
 
   private:
     /* the node needs rules that are not written: those of the subclause

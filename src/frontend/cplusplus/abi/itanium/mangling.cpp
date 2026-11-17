@@ -241,7 +241,16 @@ bool itanium_mangler::local_name(entity_index e, entity_index function)
     if (x.kind != entity_kind::variable || x.automatic)
         return false;
     text("Z");
-    if (!encoding(function))
+    /* [impl.gnu] [impl.clang] the encoding of a function whose own symbol
+       is not mangled (main) is its name alone, without its type:
+       _ZZ4mainE1r */
+    const entity &f = table[function];
+    size_t length = 0;
+    const char *identifier = spelling(f.name, &length);
+    if (f.enclosing == 0 && length == 4 && !memcmp(identifier, "main", 4)) {
+        if (!unqualified_name(function))
+            return false;
+    } else if (!encoding(function))
         return false;
     text("E");
     if (!unqualified_name(e))

@@ -339,6 +339,7 @@ bench/cxx-pp.py -j 6 [-v] [PAT]     # C++ front end phase 4 (cxxlex) vs clang -c
 bench/cxx-sema.py -j 6 [-v] [PAT]   # C++ semantic analysis (cxxsema) vs clang's test/CXX, SemaCXX, SemaTemplate: per declaration accepted/rejected, unsupported by subclause (~70 s cold)
 bench/cxx-sema.py selftest          # the type claims' path through clang on hand-written claims (<1 s)
 bench/cxx-run.py -j 6 [-O 0123] [PAT]  # src/test/cxx/run: vpp -c (the driver: frontend/cplusplus lowered to C's AST, frontend/c/ast-builder.h) at -O0..3 vs clang++ -O2, run under qemu; -O0 symbols = clang's (<10 s)
+bench/cxx-c-suites.py -j 6 [-O 02] [--bless] [PAT]   # C5.1: the C suites' programs as C++ (those clang++ -O0 builds): vpp -x c++ -c runs as clang++ -O2's under qemu, -O0 symbols clang++'s; passing list bench/cxx-c-suites.passing, a lost pass is an error; what is missing by subclause (~3 min cold, ~25 s warm)
 bench/cxx-spec-refs.py [--rules CLAUSE]   # citations, quoted grammar, [abi:...] labels; rules quoted per clause (<1 s)
 bench/itanium-abi.py [--check]      # docs/itanium-abi-index.tsv from the fetched ABI (fetch-testsuites.sh itanium-abi); section text in work/itanium-abi/
 bench/vcc-diag.py -j 6             # test/diag: vcc's .stderr snapshots, clang's locations/levels/flags (~2 s)

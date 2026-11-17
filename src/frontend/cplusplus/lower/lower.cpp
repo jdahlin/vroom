@@ -1217,7 +1217,18 @@ bool c_lowering::translation_unit()
 {
     for (const analysed_declaration &d : analysis.declarations)
         if (d.result != analysis_result::well_formed) {
-            fail("a declaration that is not well-formed", 0);
+            token_index at = analysis.syntax()[d.node].first_token;
+            if (d.result == analysis_result::unsupported &&
+                d.first_unsupported) {
+                const unsupported_construct &u =
+                    analysis.unsupported[d.first_unsupported];
+                failure.subclause = u.subclause;
+                at = analysis.syntax()[u.node].first_token;
+            }
+            if (d.result == analysis_result::not_parsed)
+                fail("a declaration the parser kept as tokens", at);
+            else
+                fail("a declaration that is not well-formed", at);
             return false;
         }
     /* the namespace-scope functions and variables, in the order they are
