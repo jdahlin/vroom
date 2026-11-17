@@ -993,6 +993,7 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
     unsigned const_ = 0, volatile_ = 0, typedef_ = 0, static_ = 0, extern_ = 0,
              inline_ = 0, constexpr_ = 0;
     type_index named = 0;
+    bool declares_class = false;
     token_index named_at = 0, duplicate = 0;
     const char *duplicate_spelling = nullptr;
     auto count = [&](unsigned &n, token_index t, const char *spelling) {
@@ -1001,16 +1002,82 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
             duplicate_spelling = spelling;
         }
     };
+    /* a specifier with no rules yet (an attribute after a class-specifier
+       may change the class's layout) before any class is defined */
     for (uint32_t i = 0; i < node.child_count; i++) {
         syntax_child c = tree.children(seq)[i];
-        if (!c.is_token())
-            return not_supported(c.index());
+        if (c.is_token() || syntax_is(tree, c, syntax_kind::class_specifier) ||
+            syntax_is(tree, c, syntax_kind::elaborated_type_specifier))
+            continue;
+        /* the class names the declaration would define are held, as
+           hold_names holds its declarators' */
+        for (uint32_t k = 0; k < node.child_count; k++) {
+            syntax_child spec = tree.children(seq)[k];
+            if (!syntax_is(tree, spec, syntax_kind::class_specifier) ||
+                !tree[spec.index()].child_count ||
+                !syntax_is(tree, tree.children(spec.index())[0],
+                           syntax_kind::class_head))
+                continue;
+            node_index head = tree.children(spec.index())[0].index();
+            for (uint32_t h = 0; h < tree[head].child_count; h++) {
+                syntax_child t = tree.children(head)[h];
+                if (!t.is_token() ||
+                    tokens[t.index()].kind != token_kind::identifier)
+                    continue;
+                uint32_t name = tokens.identifier(t.index());
+                entity_index found = entity_table.find(current_scope, name);
+                if (found) {
+                    entity_table[found].kind = entity_kind::none;
+                } else {
+                    found = entity_table.make(entity_kind::none, name,
+                                              current_scope);
+                    entity_table.bind(current_scope, name, found);
+                }
+                break;
+            }
+        }
+        return not_supported(c.index());
+    }
+    for (uint32_t i = 0; i < node.child_count; i++) {
+        syntax_child c = tree.children(seq)[i];
+        if (!c.is_token()) {
+            /* [dcl.type.class]... a class-specifier or an
+               elaborated-type-specifier: the class is the type */
+            type_index class_type = 0;
+            analysis_result r;
+            if (syntax_is(tree, c, syntax_kind::class_specifier))
+                r = class_specifier(c.index(), class_type);
+            else if (syntax_is(tree, c, syntax_kind::elaborated_type_specifier))
+                r = elaborated_type_specifier(c.index(), class_type);
+            else
+                return not_supported(c.index());
+            if (r != analysis_result::well_formed)
+                return r;
+            if (named || !k.first)
+                k.first = tree[c.index()].first_token;
+            if (named)
+                k.alone++;
+            named = class_type;
+            named_at = tree[c.index()].first_token;
+            declares_class = true;
+            continue;
+        }
         token_index t = c.index();
         const token &tok = tokens[t];
         if (tok.kind == token_kind::identifier) {
             /* a type-name ([dcl.type.simple]/1): at global namespace scope,
                a typedef-name declared there before */
             entity_index e = lookup(tokens.identifier(t));
+            if (e && entity_table[e].kind == entity_kind::class_type) {
+                /* [class.name]/1: a class-name */
+                if (named || !k.first)
+                    k.first = t;
+                if (named)
+                    k.alone++;
+                named = entity_table[e].type.unqualified();
+                named_at = t;
+                continue;
+            }
             if (!e || entity_table[e].kind != entity_kind::typedef_name)
                 return not_supported(seq, "basic.lookup.unqual");
             if (named || !k.first)
@@ -1188,6 +1255,7 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
             return r;
     }
     s.has_type = type != 0;
+    s.declares_class = declares_class;
     s.typedef_ = typedef_;
     s.static_ = static_;
     s.extern_ = extern_;

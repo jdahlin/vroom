@@ -93,6 +93,7 @@ LLVM_TEST = cxxparse.LLVM_TEST
 # clang -cc1 has plain char signed unless told otherwise; the driver tells
 # it so for aarch64 Linux, the target cxxsema analyses for
 TARGET = cxxparse.TRIPLE + ['-fno-signed-char']
+ALIASES = ['-mconstructor-aliases']
 SUITES = ('CXX', 'SemaCXX', 'SemaTemplate')
 
 
@@ -289,7 +290,9 @@ def clang_defined(test, opts, clang):
     def compile_and_list():
         with tempfile.TemporaryDirectory() as d:
             obj = os.path.join(d, 'out.o')
-            r = cxxparse.run([clang, '-cc1'] + TARGET + ['-x', 'c++'] + opts +
+            # the driver's -mconstructor-aliases for Linux: an inline
+            # constructor's complete object variant is an alias of the base one
+            r = cxxparse.run([clang, '-cc1'] + TARGET + ALIASES + ['-x', 'c++'] + opts +
                              ['-emit-obj', '-o', obj, name], cwd, timeout=60)
             if r[0] != 0 or not os.path.exists(obj):
                 return None
@@ -298,7 +301,7 @@ def clang_defined(test, opts, clang):
             if listed[0] != 0:
                 return None
             return listed[1].split()
-    return cxxparse.cached('symbols' + ''.join(TARGET), clang, test, opts, compile_and_list)
+    return cxxparse.cached('symbols' + ''.join(TARGET + ALIASES), clang, test, opts, compile_and_list)
 
 
 def check_symbols(test, opts, clang, cxxsema):

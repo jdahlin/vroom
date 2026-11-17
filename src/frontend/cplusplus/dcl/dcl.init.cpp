@@ -431,6 +431,8 @@ analysis_result semantic_analysis::reference_binding(node_index at,
     qualified_type t1 = r.operand, t2 = m.type;
     const struct type x = type_table[t1.unqualified()];
     const struct type y = type_table[t2.unqualified()];
+    if (x.kind == type_kind::class_type && y.kind == type_kind::class_type)
+        return class_reference_binding(at, m, reference);
     if (x.kind == type_kind::class_type || x.kind == type_kind::enumeration ||
         y.kind == type_kind::class_type || y.kind == type_kind::enumeration ||
         x.kind == type_kind::none || y.kind == type_kind::none)
@@ -493,6 +495,71 @@ analysis_result semantic_analysis::reference_binding(node_index at,
     if (result != analysis_result::well_formed)
         return result;
     return implicit_conversion(at, m, t1, false);
+}
+
+/*
+ * [dcl.init.ref]/5 for a class: "(5.1) If the reference is an lvalue
+ * reference and the initializer expression (5.1.1) is an lvalue (but is
+ * not a bit-field), and "cv1 T1" is reference-compatible with "cv2 T2"
+ * ... then the reference binds to the initializer expression lvalue ...
+ * (5.3) Otherwise, if the initializer expression (5.3.1) is an rvalue (but
+ * not a bit-field) ... and "cv1 T1" is reference-compatible with "cv2
+ * T2" ... the reference is bound to the result of the conversion"; /5.2
+ * an lvalue reference to a non-const type binds to nothing else.  A
+ * reference to a base binds to the base class subobject ([conv.ptr]/3's
+ * pointer conversion makes T1 reference-compatible); the conversions by a
+ * conversion function or constructor (/5.1.2, /5.3.2, /5.4.1) are not
+ * analysed, nor a temporary with a destructor.
+ */
+analysis_result
+semantic_analysis::class_reference_binding(node_index at, expression_meaning &m,
+                                           qualified_type reference)
+{
+    const struct type r = type_table[reference.unqualified()];
+    bool rvalue_reference = r.kind == type_kind::rvalue_reference;
+    qualified_type t1 = r.operand, t2 = m.type;
+    entity_index c1 = type_table[t1.unqualified()].entity;
+    entity_index c2 = type_table[t2.unqualified()].entity;
+    if (entity_table[c1].kind != entity_kind::class_type ||
+        entity_table[c2].kind != entity_kind::class_type ||
+        !entity_table[c2].size)
+        return not_supported(at, "dcl.init.ref");
+    bool ambiguous = false;
+    bool related = c1 == c2 || base_step(c2, c1, ambiguous);
+    if (!related)
+        return not_supported(at, "dcl.init.ref");
+    if (t2.cv() & ~t1.cv()) {
+        if (!rvalue_reference && !(t1.cv() & cv_const))
+            return ill_formed(at,
+                              "an lvalue reference to a type that is not "
+                              "const-qualified or is volatile-qualified binds "
+                              "only to a reference-compatible lvalue",
+                              "dcl.init.ref");
+        return ill_formed(at,
+                          "cv1 shall be the same cv-qualification as, or "
+                          "greater cv-qualification than, cv2",
+                          "dcl.init.ref");
+    }
+    bool lvalue = m.category == value_category::lvalue;
+    if (!rvalue_reference && !lvalue &&
+        (!(t1.cv() & cv_const) || (t1.cv() & cv_volatile)))
+        return ill_formed(at,
+                          "an lvalue reference to a type that is not "
+                          "const-qualified or is volatile-qualified binds "
+                          "only to a reference-compatible lvalue",
+                          "dcl.init.ref");
+    if (rvalue_reference && lvalue)
+        return ill_formed(at,
+                          "if the reference is an rvalue reference, the "
+                          "initializer expression shall not be an lvalue",
+                          "dcl.init.ref");
+    if (!lvalue && destroys(c2))
+        /* [class.temporary]/6: the temporary bound lives as long as the
+           reference */
+        return not_supported(at, "class.temporary");
+    if (c1 == c2)
+        return analysis_result::well_formed;
+    return to_base(tree[at].first_token, c1, m);
 }
 
 /*
@@ -568,12 +635,74 @@ analysis_result semantic_analysis::initialize_with(node_index at,
         semantics[result.node].type = type;
         return r;
     }
+    if (target.kind == type_kind::class_type) {
+        /* [dcl.init]/17.6.1: "If the initializer is a prvalue and the
+           cv-unqualified version of the source type is the same class as
+           the class of the destination, the initializer expression is used
+           to initialize the destination object"; /17.6.2: "Otherwise, if
+           the initialization is direct-initialization, or if it is
+           copy-initialization where the cv-unqualified version of the
+           source type is the same class as, or a derived class of, the
+           class of the destination, constructors are considered": the
+           implicitly-declared copy constructor ([class.copy.ctor]/6), which
+           is trivial for the classes analysis has ([class.copy.ctor]/11):
+           it copies the object representation */
+        if (entity_table[target.entity].kind != entity_kind::class_type)
+            return not_supported(at, "dcl.init");
+        bool same = m.type.unqualified() == type.unqualified();
+        if (!(same && m.category == value_category::prvalue) &&
+            entity_table[target.entity].first_constructor) {
+            /* /17.6.2 by [over.match.ctor]; /17.6.3: a user-defined
+               conversion by a converting constructor ([class.conv.ctor]),
+               whose result initializes the object (the copy elided) */
+            owned_array<expression_meaning> arguments;
+            arguments.append(m);
+            return construct(at, type, arguments, 0, result);
+        }
+        bool ambiguous = false;
+        if (!same &&
+            type_table[m.type.unqualified()].kind == type_kind::class_type &&
+            base_step(type_table[m.type.unqualified()].entity, target.entity,
+                      ambiguous)) {
+            /* the implicit copy constructor's const T& bound to the base
+               class subobject of the derived object */
+            if (!copies_bytes(target.entity))
+                return not_supported(at, "class.copy.ctor");
+            r = to_base(tree[at].first_token, target.entity, m);
+            if (r != analysis_result::well_formed)
+                return r;
+            same = true;
+        }
+        if (!same)
+            return not_supported(at, "dcl.init");
+        r = operand_value(at, m);
+        if (r != analysis_result::well_formed)
+            return r;
+        result.evaluation = constness::unknown;
+        result.value = 0;
+        result.node = m.node;
+        return analysis_result::well_formed;
+    }
     if (target.kind != type_kind::fundamental &&
         target.kind != type_kind::pointer)
         return not_supported(at, "dcl.init");
     if (target.kind == type_kind::fundamental &&
         target.fundamental == fundamental_type::void_)
         return not_supported(at, "dcl.init");
+    if (target.kind == type_kind::fundamental &&
+        target.fundamental == fundamental_type::builtin_va_list) {
+        /* [impl.clang] a va_list is initialized from a va_list only (a
+           copy, as va_copy's) */
+        if (m.type.unqualified() != type.unqualified())
+            return not_supported(at, "dcl.init");
+        r = operand_value(at, m);
+        if (r != analysis_result::well_formed)
+            return r;
+        result.evaluation = constness::not_constant;
+        result.value = 0;
+        result.node = m.node;
+        return analysis_result::well_formed;
+    }
     r = operand_value(at, m);
     if (r != analysis_result::well_formed)
         return r;
@@ -724,6 +853,8 @@ semantic_analysis::list_initialization(node_index list, qualified_type &type,
         semantics[result.node].count = static_cast<uint32_t>(elements.size());
         return analysis_result::well_formed;
     }
+    if (target.kind == type_kind::class_type)
+        return class_list_initialization(list, clauses, type, result);
     if (target.kind == type_kind::lvalue_reference ||
         target.kind == type_kind::rvalue_reference)
         return not_supported(list, "dcl.init.list");
@@ -788,8 +919,20 @@ analysis_result semantic_analysis::initializer(syntax_child init,
             const struct type target = type_table[type.unqualified()];
             if (target.kind == type_kind::array)
                 return not_supported(n, "dcl.init");
-            if (target.kind == type_kind::class_type)
-                return not_supported(n, "dcl.init");
+            if (target.kind == type_kind::class_type) {
+                /* [dcl.init]/17.6.2: the constructor called with the
+                   expression-list as its arguments */
+                if (entity_table[target.entity].kind !=
+                        entity_kind::class_type ||
+                    !entity_table[target.entity].first_constructor)
+                    return not_supported(n, "dcl.init");
+                owned_array<expression_meaning> arguments;
+                analysis_result r =
+                    expression_list_meanings(children[1], arguments);
+                if (r != analysis_result::well_formed)
+                    return r;
+                return construct(n, type, arguments, 0, result);
+            }
             return ill_formed(n,
                               "if the entity being initialized does not have "
                               "class type, the expression-list in a "
@@ -801,6 +944,146 @@ analysis_result semantic_analysis::initializer(syntax_child init,
     default:
         return not_supported(n, "dcl.init");
     }
+}
+
+/*
+ * [dcl.init.list]/3 for a class T: "(3.4) Otherwise, if T is an aggregate,
+ * aggregate initialization is performed ([dcl.init.aggr])"; "(3.5)
+ * Otherwise, if the initializer list has no elements and T is a class type
+ * with a default constructor, the object is value-initialized"; (3.7) a
+ * constructor otherwise.  (3.2) first: "If T is a class type and the
+ * initializer list has a single element of type cv U, where U is T or a
+ * class derived from T, the object is initialized from that element".
+ *
+ * [dcl.init.aggr]/4: "For each explicitly initialized element: ... (4.2)
+ * Otherwise, the element is copy-initialized from the corresponding
+ * initializer-clause"; /5: "For a non-union aggregate, each element that
+ * is not an explicitly initialized element is initialized as follows:
+ * (5.1) If the element has a default member initializer, ... (5.2)
+ * Otherwise, if the element is not a reference, the element is
+ * copy-initialized from an empty initializer list ([dcl.init.list])."
+ * Without brace elision ([dcl.init.aggr]/15): an element that is an
+ * aggregate takes a braced-init-list.
+ */
+analysis_result semantic_analysis::class_list_initialization(
+    node_index list, const owned_array<syntax_child> &clauses,
+    qualified_type type, initialized_value &result)
+{
+    entity_index c = type_table[type.unqualified()].entity;
+    if (entity_table[c].kind != entity_kind::class_type)
+        return not_supported(list, "class.pre");
+    if (!entity_table[c].size)
+        /* [dcl.init.list]/3: list-initialization of an incomplete class:
+           clang's "incomplete type" error */
+        return not_supported(list, "dcl.init.list");
+    if (!is_aggregate(c)) {
+        /* (3.5): "Otherwise, if the initializer list has no elements and T
+           is a class type with a default constructor, the object is
+           value-initialized"; [dcl.init]/8.1: "if T is a (possibly
+           cv-qualified) class type with ... a user-provided ... default
+           constructor, then the object is default-initialized" */
+        if (!clauses.empty() || !entity_table[c].first_constructor)
+            /* (3.7) with narrowing checked ([over.match.list]) */
+            return not_supported(list, "over.match.list");
+        owned_array<expression_meaning> none;
+        return construct(list, type, none, 0, result);
+    }
+    if (clauses.size() == 1 &&
+        !syntax_is(tree, clauses[0], syntax_kind::braced_init_list)) {
+        /* (3.2): an element of the class's own type */
+        expression_meaning e;
+        analysis_result r = expression(clauses[0], e);
+        if (r != analysis_result::well_formed)
+            return r;
+        if (e.type.unqualified() == type.unqualified())
+            return initialize_with(list, e, type, false, true, result);
+        /* an element initialized from it: analysed again below */
+    }
+    const entity &x = entity_table[c];
+    uint32_t count = x.member_count;
+    uint32_t first = x.first_member;
+    /* [dcl.init.aggr]/11: "An initializer-list is ill-formed if the number
+       of initializer-clauses exceeds the number of elements of the
+       aggregate." */
+    bool elidable = false;
+    for (uint32_t i = 0; i < count; i++) {
+        type_kind k = type_table[entity_table[class_members[first + i]]
+                                     .type.unqualified()]
+                          .kind;
+        if (k == type_kind::class_type || k == type_kind::array)
+            elidable = true;
+    }
+    if (clauses.size() > count && elidable)
+        /* brace elision ([dcl.init.aggr]/15) */
+        return not_supported(list, "dcl.init.aggr");
+    if (clauses.size() > count)
+        return ill_formed(list,
+                          "an initializer-list is ill-formed if the number of "
+                          "initializer-clauses exceeds the number of elements "
+                          "of the aggregate",
+                          "dcl.init.aggr");
+    owned_array<uint32_t> elements;
+    constness all = constness::constant;
+    for (uint32_t i = 0; i < count; i++) {
+        entity_index member = class_members[first + i];
+        qualified_type element = entity_table[member].type;
+        const struct type &record = type_table[element.unqualified()];
+        initialized_value one;
+        if (i < clauses.size()) {
+            syntax_child clause = clauses[i];
+            node_index at = list;
+            if (!clause.is_token())
+                at = clause.index();
+            bool braced =
+                syntax_is(tree, clause, syntax_kind::braced_init_list);
+            analysis_result r;
+            if (record.kind == type_kind::class_type && !braced) {
+                /* [dcl.init.aggr]/15: "If the initializer-clause is an
+                   expression and an implicit conversion sequence can be
+                   formed that converts the expression to the type of the
+                   element, the element is initialized"; else the braces
+                   are elided, not analysed yet */
+                expression_meaning e;
+                r = expression(clause, e);
+                if (r != analysis_result::well_formed)
+                    return r;
+                if (e.type.unqualified() != element.unqualified())
+                    return not_supported(list, "dcl.init.aggr");
+                r = initialize_with(at, e, element, false, true, one);
+            } else if (record.kind == type_kind::array && !braced &&
+                       !is_string_literal(tokens, clause)) {
+                /* brace elision */
+                return not_supported(list, "dcl.init.aggr");
+            } else {
+                r = initialize_from(at, clause, element, false, true, one);
+            }
+            if (r != analysis_result::well_formed)
+                return r;
+        } else {
+            /* (5.2): from an empty initializer list: value-initialization
+               ([dcl.init.list]/3.11 for a scalar, an aggregate's own
+               elements for an aggregate), all zero for these members */
+            expression_meaning zero;
+            zero.type = qualified_type::make(element.unqualified(), cv_none);
+            zero.evaluation = constness::constant;
+            one.evaluation = constness::constant;
+            one.node = expression_node(semantic_kind::zero, zero,
+                                       tree[list].first_token);
+        }
+        all = combined_constness(all, one.evaluation);
+        elements.append(one.node);
+    }
+    result.evaluation = all;
+    result.value = 0;
+    expression_meaning list_meaning;
+    list_meaning.type = qualified_type::make(type.unqualified(), cv_none);
+    list_meaning.evaluation = all;
+    result.node = expression_node(semantic_kind::initializer_list, list_meaning,
+                                  tree[list].first_token);
+    semantics[result.node].first =
+        semantics.list(elements.data(), elements.size());
+    semantics[result.node].count = static_cast<uint32_t>(elements.size());
+    return analysis_result::well_formed;
 }
 
 } // namespace cplusplus

@@ -1,5 +1,8 @@
 #ifndef _RT_STDIO_H
 #define _RT_STDIO_H
+#ifdef __cplusplus
+extern "C" {
+#endif
 #include <stddef.h>
 #include <stdarg.h>
 typedef struct _rt_file FILE;
@@ -38,4 +41,7 @@ int fscanf(FILE *, const char *, ...);
 void perror(const char *);
 int remove(const char *);
 char *tmpnam(char *);
+#ifdef __cplusplus
+}
+#endif
 #endif

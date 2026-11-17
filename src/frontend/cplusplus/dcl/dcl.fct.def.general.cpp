@@ -205,7 +205,8 @@ node_index parser::function_body(const declarator_facts &declarator,
  * anywhere in the function in which they are declared."
  */
 analysis_result semantic_analysis::function_body(node_index definition,
-                                                 syntax_child compound)
+                                                 syntax_child compound,
+                                                 syntax_child ctor_init)
 {
     entity_index f = last_declared;
     qualified_type returns =
@@ -237,6 +238,25 @@ analysis_result semantic_analysis::function_body(node_index definition,
        ([abi:mangling-scope]) */
     entity_table[parameters].enclosing = f;
     owned_array<uint32_t> parameter_entities;
+    function_state.function = f;
+    function_state.this_entity = 0;
+    if (entity_table[f].nonstatic_member) {
+        /* [class.this]/1: "The type of this in a member function whose
+           type has a cv-qualifier-seq cv and whose class is X is "pointer
+           to cv X"."  An unnamed variable lowering makes the first
+           parameter */
+        entity_index c = entity_table[f].enclosing;
+        qualified_type object = qualified_type::make(
+            entity_table[c].type.unqualified(), entity_table[f].member_cv);
+        entity_index t =
+            entity_table.make(entity_kind::variable, 0, parameters);
+        entity_table[t].type =
+            qualified_type::make(type_table.pointer_to(object), cv_none);
+        entity_table[t].defined = true;
+        entity_table[t].automatic = true;
+        parameter_entities.append(t);
+        function_state.this_entity = t;
+    }
     for (const parameter_meaning &parameter : function_parameters) {
         parameter_entities.append(0);
         if (!parameter.id)
@@ -262,12 +282,28 @@ analysis_result semantic_analysis::function_body(node_index definition,
         entity_table.bind(parameters, name, e);
         parameter_entities.back() = e;
     }
+    /* [class.base.init]/2: "Lookup for an unqualified name in a
+       mem-initializer-id ignores the constructor's function parameter
+       scope" (the name is looked up in the class); the expressions are in
+       the function parameter scope */
+    current_scope = parameters;
+    uint32_t members = 0;
+    /* [class.base.init]/9: a constructor without a ctor-initializer
+       default-initializes its bases and members as well */
+    if (ctor_init.index() ||
+        entity_table[f].special == special_member::constructor)
+        result = worse(result, ctor_initializer(ctor_init, members));
     open_scope(parameters, false);
     uint32_t block = 0;
     result = worse(result, block_items(compound.index(), block));
+    uint32_t destructions = 0;
+    if (entity_table[f].special == special_member::destructor)
+        destructions = subobject_destructions(entity_table[f].enclosing,
+                                              first_token(compound));
     /* the function's semantic tree: its outermost block and parameters */
-    uint32_t body = statement_node(semantic_kind::function_body,
-                                   first_token(compound), block);
+    uint32_t body =
+        statement_node(semantic_kind::function_body, first_token(compound),
+                       block, members, destructions);
     if (!parameter_entities.empty()) {
         semantics[body].first =
             semantics.list(&parameter_entities[0], parameter_entities.size());
@@ -309,6 +345,8 @@ analysis_result semantic_analysis::function_body(node_index definition,
     claim_place = 0;
     claim_scope = 0;
     function_state.active = false;
+    function_state.function = 0;
+    function_state.this_entity = 0;
     return result;
 }
 

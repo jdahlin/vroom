@@ -523,6 +523,16 @@ analysis_result semantic_analysis::id_expression(token_index t,
     const entity &x = entity_table[e];
     if (x.kind != entity_kind::variable && x.kind != entity_kind::function)
         return not_supported(current_declaration, "expr.prim.id");
+    if (x.nonstatic_member)
+        return implicit_member_access(t, e, m);
+    if (x.enclosing &&
+        entity_table[x.enclosing].kind == entity_kind::class_type &&
+        !accessible(e))
+        return ill_formed_at_token(t,
+                                   "a private or protected member's name can "
+                                   "be used only by members and friends of "
+                                   "the class in which it is declared",
+                                   "class.access");
     if (x.bound_unknown)
         /* (the initializer analysis has no rules for yet) */
         return not_supported(current_declaration, "dcl.init");
@@ -549,6 +559,77 @@ analysis_result semantic_analysis::id_expression(token_index t,
            initialization": not modelled */
         m.evaluation = constness::unknown;
     }
+    m.node = expression_node(semantic_kind::entity, m, t, e);
+    return analysis_result::well_formed;
+}
+
+/*
+ * [expr.prim.id.qual]/1:
+ *
+ *     qualified-id:
+ *         nested-name-specifier template_opt unqualified-id
+ *
+ * /2: "A nested-name-specifier that denotes a class ... nominates that
+ * class.  If a nested-name-specifier N of a declarative
+ * nested-name-specifier nominates a class C, ... the nested-name-specifier
+ * is ... looked up in C" ([basic.lookup.qual]/1).  A class-name of the
+ * global namespace followed by an identifier: a static member function,
+ * or in a member function of that class a non-static member (made a class
+ * member access as an unqualified name is, [class.mfct.non-static]/2).
+ */
+analysis_result semantic_analysis::qualified_id(node_index n,
+                                                expression_meaning &m)
+{
+    const syntax_node &node = tree[n];
+    const syntax_child *parts = tree.children(n);
+    if (node.child_count != 2 ||
+        !syntax_is(tree, parts[0], syntax_kind::nested_name_specifier) ||
+        !parts[1].is_token() ||
+        tokens[parts[1].index()].kind != token_kind::identifier)
+        return not_supported(n, "expr.prim.id.qual");
+    node_index nested = parts[0].index();
+    const syntax_child *names = tree.children(nested);
+    if (tree[nested].child_count != 2 || !names[0].is_token() ||
+        tokens[names[0].index()].kind != token_kind::identifier)
+        return not_supported(n, "basic.lookup.qual");
+    entity_index c = lookup(tokens.identifier(names[0].index()));
+    if (!c || entity_table[c].kind != entity_kind::class_type)
+        return not_supported(n, "basic.lookup.qual");
+    token_index t = parts[1].index();
+    entity_index e = entity_table.find(c, tokens.identifier(t));
+    if (e && entity_table[e].kind == entity_kind::none)
+        return not_supported(n, "over");
+    if (!e)
+        /* [basic.lookup.qual]/1: "If a :: scope resolution operator in a
+           nested-name-specifier is not preceded by a decltype-specifier,
+           lookup of the name preceding that :: considers only namespaces,
+           types, and templates whose specializations are types."; the
+           name after it is looked up in the class ([class.member.lookup]):
+           finding nothing, clang's "no member named" */
+        return ill_formed_at_token(t,
+                                   "a qualified name shall name a member of "
+                                   "the class its nested-name-specifier "
+                                   "nominates",
+                                   "basic.lookup.qual");
+    const entity &x = entity_table[e];
+    if (x.nonstatic_member)
+        return implicit_member_access(t, e, m);
+    if (x.kind != entity_kind::function)
+        return not_supported(n, "expr.prim.id.qual");
+    if (!accessible(e))
+        return ill_formed_at_token(t,
+                                   "a private or protected member's name can "
+                                   "be used only by members and friends of "
+                                   "the class in which it is declared",
+                                   "class.access");
+    /* [expr.prim.id.qual]/2: "The result is the member ... The result is
+       an lvalue if the member is a static member function or a data
+       member" */
+    m = expression_meaning();
+    m.category = value_category::lvalue;
+    m.type = x.type;
+    m.entity = e;
+    m.evaluation = constness::constant;
     m.node = expression_node(semantic_kind::entity, m, t, e);
     return analysis_result::well_formed;
 }

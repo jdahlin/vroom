@@ -398,6 +398,11 @@ enum class fundamental_type : uint8_t {
        ([basic.fundamental]/2): GCC's __int128 */
     int128,
     unsigned_int128,
+    /* [impl.clang] the type of clang's predeclared typedef-name
+       __builtin_va_list, <stdarg.h>'s va_list: on aarch64 Linux AAPCS64's
+       struct std::__va_list (B.3: __stack, __gr_top, __vr_top, __gr_offs,
+       __vr_offs), 32 bytes aligned to 8; no arithmetic type */
+    builtin_va_list,
 };
 
 const char *fundamental_type_name(fundamental_type type);

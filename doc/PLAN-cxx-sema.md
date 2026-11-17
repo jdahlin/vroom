@@ -657,6 +657,119 @@ libstdc++ and json), since sema cannot analyse a declaration kept as tokens.
   nameable so far.
 - Gate: layout, vtable and symbols claims 0 wrong; C5.3 without exceptions;
   run tests.
+- Status (2026-11-17): started.  Classes without bases, constructors or
+  destructors: data members with the Itanium layout (and GNU `aligned`),
+  member functions in and outside the class, `this`, const member
+  functions, static member functions, access, `.`/`->`, aggregate
+  initialization, the trivial copy and assignment, classes by value;
+  mangling of members (`class/class.pre.cpp`, `expr/expr.ref.cpp`; lowered
+  to C structs whose layout is checked against sema's).  Unsupported with
+  their subclause: unions, nested and local classes, bases, constructors,
+  destructors, static data members, reference members, brace elision.
+  `src/test/cxx/run/classes.cpp`; C5.1 848 -> 915 passing, 0 wrong.
+  Then user-declared constructors and destructors (`class/class.ctor.cpp`):
+  in and outside the class, mem-initializers in member order, overload
+  resolution among constructors for exact and standard conversions,
+  `T x;`, `T x(a, b)`, `T x = a`, `T x{}`, `T(args)`; destructors called
+  at block end, return, break and continue; C1/C2 and D1/D2 symbols as
+  clang's.  Unsupported: temporaries with destructors, members of class
+  type with constructors or destructors, classes passed by address, gotos
+  past live objects, static objects with destructors.
+  `src/test/cxx/run/constructors.cpp`.  LLVM's SingleSource/Regression/C++
+  still needs [dcl.link] (`extern "C"` in the run-time headers),
+  [class.derived], dynamic initialization and [dcl.enum].
+  Then [dcl.link] (`dcl/dcl.link.cpp`: extern "C" and "C++", nested, the
+  brace-less form as extern; C language linkage names unmangled) with
+  extern "C" in src/test/rt's headers, and dynamic initialization of
+  namespace-scope variables ([basic.start.dynamic]) as clang's:
+  `__cxx_global_var_init[.N]` per variable, called in definition order
+  by `_GLOBAL__sub_I_<file>` from .init_array; address constants
+  ([expr.const]/11) stay static data.  C5.1 915 -> 950.  First LLVM
+  import: `src/test/cxx/run/llvm-global_type.cpp`; the others need
+  `__builtin_va_list` (the run time's stdio.h), [class.derived],
+  [dcl.enum], [class.local], __cxa_atexit.  Open: gcc/pr58277-2's static
+  referenced only from unreachable code is dropped by vcc's -O0 code
+  generator, kept by clang (symbols).
+  Then `__builtin_va_list` (a predeclared typedef of AAPCS64's
+  std::__va_list: 32 bytes, mangled St9__va_list, lowered to C's
+  va_list; copied only from a va_list), so programs include the run
+  time's <stdio.h>: C5.1 950 -> 1096.  [dcl.array]/8's earlier bound is
+  the one an initializer fills; a namespace-scope initializer analysis
+  cannot fold and that needs nothing of the running program (clang folds
+  an out-of-range shift) is not lowered as dynamic initialization.
+  LLVM import: `llvm-2003-05-14-array-init.cpp`.
+  Then non-virtual base classes (`class/class.derived.cpp`): a base is an
+  unnamed member subobject (`entity::base_subobject`; a non-empty one is
+  also a field), laid out as [abi:layout] (empty bases at offset 0, a
+  non-POD base's tail padding reused: lowering then refuses the C
+  struct); member lookup through bases ([class.member.lookup], ambiguity
+  unsupported), [class.access.base] and [class.protected]; [conv.ptr]/3
+  and references to a base ([dcl.init.ref], now for classes generally:
+  copy constructors with `const T&` work), the derived-to-base Conversion
+  in overload resolution; [class.base.init] constructs bases and members
+  of class type (named or default), and a destructor destroys them after
+  its body ([class.dtor]/13, a `return` in it too).  Unsupported: virtual
+  bases, a pointer conversion to a base at a nonzero offset (the null
+  check), an implicitly-defined default constructor, destructor or copy
+  constructor that has to call a subobject's, arrays of such classes,
+  aggregates with an empty base.  An empty class is lowered with one char
+  of padding (Itanium passes an empty class like clang's C does not:
+  not checked across compilers yet).  `src/test/cxx/run/derived.cpp`,
+  LLVM's `llvm-2003-06-08-BaseType.cpp`; C5.1 unchanged at 1096.  The
+  rest of SingleSource/Regression/C++ needs [dcl.mptr], virtual
+  functions, [dcl.enum], [class.local], bit-fields, classes passed by
+  address, __cxa_atexit and exceptions.
+  Then the implicitly-declared special members that are not trivial
+  ([class.default.ctor]/1, [class.copy.ctor]/6, [class.dtor]/4): entities
+  like user-declared ones (`entity::implicit`, inline: C2/D2 symbols),
+  declared at the class's completion, defined after its member function
+  bodies (`implicit_definitions`): the default constructor constructs the
+  bases and members, the copy constructor copies each (its own copy
+  constructor, else the bytes), the destructor destroys them.  A block's
+  object of a class with a destructor but no constructor is now lowered.
+  `src/test/cxx/run/implicit-members.cpp`; C5.1 unchanged at 1096.
+  Unsupported still: arrays of such classes, such classes by value.
+  Then classes non-trivial for the purposes of calls as parameters
+  ([abi:calls]): lowered as a pointer parameter (the callee's uses are
+  the object at it); the caller constructs a temporary (by the copy
+  constructor, or a prvalue's constructor in place), passes its address
+  and destroys it at the end of the full-expression (expression
+  statements, returns, declarations; `full_expression`).  Calls between
+  vcc and clang objects agree both ways (checked by hand on a
+  caller/callee pair).  Unsupported: such an argument in a conditional
+  operand or outside a statement, and returning such a class (Itanium
+  returns it through x8 whatever its size: C's code generators need a
+  record flag for that).  `src/test/cxx/run/by-address.cpp`, LLVM's
+  `llvm-2003-09-29-NonPODsByValue.cpp`; C5.1 unchanged at 1096.
+  Then returning them: the C record of such a class is marked
+  `AST_RECORD_FLAG_CALLS_IN_MEMORY`, which arm64's direct emitter returns
+  through x8 and x86-64's classifies as memory whatever the size (VIR
+  gives up on record results and falls back to the direct emitter).  A
+  prvalue result initializes the object it is the initializer of (a
+  variable, a return value, an argument's temporary); any other use
+  materializes a temporary destroyed at the end of the full-expression;
+  when every return names one automatic variable, it is the result
+  object (clang's NRVO).  Results agree with clang's in both directions at
+  -O0 and -O2 (by hand, a split caller/callee pair).  Unsupported: such a
+  result in a conditional operand.  `src/test/cxx/run/returns.cpp`.
+  cxx-sema.py against main: the 60 declarations we rejected that clang
+  accepts are back to 0, and nothing is refuted.  Now unsupported: an
+  implicit special member whose subobject's constructor or destructor is
+  missing or inaccessible, `&` of a class prvalue (clang's
+  -Waddress-of-temporary), any non-class child of a decl-specifier-seq
+  before the class it defines (`} __attribute__((packed))`; the class name
+  is held), a second `_` member (C++26), MS `sealed`/`abstract`, and a
+  GNU attribute in a declarator other than `aligned`, `packed` (a member's
+  alignment is 1, lowered with C's per-field packed), `unused` and `used`
+  (not on an internal name): one without arguments was ignored before,
+  which let `packed` members pass with the wrong layout.  A variable's
+  `aligned` is unsupported (gcc/memcpy-bi leaves the passing list).  A
+  variable whose type is an unnamed class with no typedef name for
+  linkage has internal linkage under its plain name, as in clang.  The
+  harness's clang -O0 symbol list uses the driver's
+  `-mconstructor-aliases`.  C5.1 1094 passing, 0 wrong.
+  Next: elaborated-type-specifiers in block and class scope, static data
+  members, enumerations, virtual functions.
 
 ### S5. Conversions by user code, lambdas, the rest of [expr]
 

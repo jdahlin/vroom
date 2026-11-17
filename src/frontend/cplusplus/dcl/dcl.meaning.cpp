@@ -467,9 +467,63 @@ analysis_result semantic_analysis::declarator(node_index declaration,
         head = children[0];
         i = 1;
     } else if (node.child_count &&
-               (syntax_is(tree, children[0], syntax_kind::qualified_id) ||
-                syntax_is(tree, children[0], syntax_kind::unqualified_id))) {
-        return not_supported(children[0].index(), "dcl.meaning");
+               syntax_is(tree, children[0], syntax_kind::qualified_id)) {
+        /* [dcl.meaning]/1: "When the declarator-id is qualified, the
+           declaration shall refer to a previously declared member of the
+           class or namespace to which the qualifier refers": a
+           nested-name-specifier that is one class-name of the global
+           namespace */
+        node_index q = children[0].index();
+        const syntax_node &qualified = tree[q];
+        const syntax_child *parts = tree.children(q);
+        syntax_child name = {};
+        if (qualified.child_count == 2)
+            name = parts[1];
+        if (qualified.child_count == 2 &&
+            syntax_is(tree, name, syntax_kind::unqualified_id) &&
+            tree[name.index()].child_count == 2 &&
+            syntax_is_punctuator(tokens, tree.children(name.index())[0],
+                                 preprocessing_op_or_punc::TILDE)) {
+            /* [class.dtor]/1: ~ class-name */
+            m.destructor = true;
+            name = tree.children(name.index())[1];
+        }
+        if (qualified.child_count != 2 ||
+            !syntax_is(tree, parts[0], syntax_kind::nested_name_specifier) ||
+            !name.is_token() ||
+            tokens[name.index()].kind != token_kind::identifier)
+            return not_supported(q, "dcl.meaning");
+        node_index nested = parts[0].index();
+        const syntax_child *names = tree.children(nested);
+        if (tree[nested].child_count != 2 || !names[0].is_token() ||
+            tokens[names[0].index()].kind != token_kind::identifier)
+            return not_supported(q, "basic.lookup.qual");
+        entity_index c =
+            entity_table.find(0, tokens.identifier(names[0].index()));
+        if (!c || entity_table[c].kind != entity_kind::class_type ||
+            !entity_table[c].size || current_scope)
+            return not_supported(q, "basic.lookup.qual");
+        m.qualifier = c;
+        has_head = true;
+        head = name;
+        i = 1;
+        /* the suffixes are the member's: a cv-qualifier-seq may follow */
+        in_member_declarator = true;
+    } else if (node.child_count &&
+               syntax_is(tree, children[0], syntax_kind::unqualified_id)) {
+        /* [class.dtor]/1: ~ class-name, in its class */
+        node_index u = children[0].index();
+        const syntax_child *parts = tree.children(u);
+        if (!in_member_declarator || tree[u].child_count != 2 ||
+            !syntax_is_punctuator(tokens, parts[0],
+                                  preprocessing_op_or_punc::TILDE) ||
+            !parts[1].is_token() ||
+            tokens[parts[1].index()].kind != token_kind::identifier)
+            return not_supported(u, "dcl.meaning");
+        m.destructor = true;
+        has_head = true;
+        head = parts[1];
+        i = 1;
     }
     struct suffix {
         bool function;
@@ -478,6 +532,14 @@ analysis_result semantic_analysis::declarator(node_index declaration,
     };
     owned_array<suffix> suffixes;
     while (i < node.child_count) {
+        if (syntax_is(tree, children[i],
+                      syntax_kind::gnu_attribute_specifier)) {
+            analysis_result r = gnu_attribute_specifier(children[i].index(), m);
+            if (r != analysis_result::well_formed)
+                return r;
+            i++;
+            continue;
+        }
         if (syntax_is_attribute(tree, children[i]))
             return not_supported(n, "dcl.attr");
         if (syntax_is(tree, children[i],
@@ -514,6 +576,7 @@ analysis_result semantic_analysis::declarator(node_index declaration,
            declarator's outermost type */
         m.reference_made = false;
     }
+    in_member_declarator = false;
     if (!has_head)
         return analysis_result::well_formed;
     return declarator(declaration, head, type, m);

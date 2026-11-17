@@ -1,5 +1,8 @@
 #ifndef _RT_MATH_H
 #define _RT_MATH_H
+#ifdef __cplusplus
+extern "C" {
+#endif
 #define HUGE_VAL __builtin_huge_val()
 #define HUGE_VALF __builtin_huge_valf()
 #define INFINITY __builtin_inff()
@@ -16,4 +19,7 @@ double sin(double); double cos(double); double tan(double); double atan(double);
 long double fabsl(long double);
 double asin(double); double acos(double); double sinh(double); double cosh(double); double tanh(double);
 double log10(double);
+#ifdef __cplusplus
+}
+#endif
 #endif

@@ -158,6 +158,9 @@ enum {
         4096, /* C++'s T C::*: a struct of one or two longs (for C++) */
     AST_RECORD_FLAG_ENUM_SCOPED =
         8192, /* C++'s enum class: no implicit conversion to an integer */
+    AST_RECORD_FLAG_CALLS_IN_MEMORY =
+        16384, /* C++'s class non-trivial for the purposes of calls: passed
+                  and returned by address ([abi:calls]), whatever its size */
 };
 
 typedef struct tag {

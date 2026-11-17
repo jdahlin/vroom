@@ -198,6 +198,8 @@ uint64_t semantic_analysis::size_of_type(qualified_type t) const
             return 8;
         case fundamental_type::std_nullptr_t:
             return b.long_width / 8;
+        case fundamental_type::builtin_va_list:
+            return 32;
         default:
             if (fundamental_type_is_integral(record.fundamental))
                 return fundamental_type_width(b, record.fundamental) / 8;
@@ -212,6 +214,9 @@ uint64_t semantic_analysis::size_of_type(qualified_type t) const
         if (!record.bound_known)
             return 0;
         return record.bound * size_of_type(record.operand);
+    case type_kind::class_type:
+        /* [class.mem]/6: 0 until the class is complete */
+        return entity_table[record.entity].size;
     default:
         return 0;
     }
@@ -225,6 +230,12 @@ uint64_t semantic_analysis::alignment_of_type(qualified_type t) const
     case type_kind::rvalue_reference:
     case type_kind::array:
         return alignment_of_type(record.operand);
+    case type_kind::class_type:
+        return entity_table[record.entity].alignment;
+    case type_kind::fundamental:
+        if (record.fundamental == fundamental_type::builtin_va_list)
+            return 8;
+        return size_of_type(t);
     default:
         /* the fundamental types and pointers are aligned to their size on
            aarch64 (AAPCS64 5.1) */
@@ -392,6 +403,11 @@ analysis_result semantic_analysis::unary(node_index n, expression_meaning &m)
         /* [expr.unary.op]/3: "The operand shall be an lvalue or a
            qualified-id. ... if the type of the expression is T, the result
            has type "pointer to T" and is a prvalue" */
+        if (m.category != value_category::lvalue &&
+            type_table[m.type.unqualified()].kind == type_kind::class_type)
+            /* [impl.clang] the address of a class temporary: an error
+               clang makes a warning (-Waddress-of-temporary) */
+            return not_supported(n, "expr.unary.op");
         if (m.category != value_category::lvalue)
             return ill_formed(n,
                               "the operand of the unary & operator shall "

@@ -88,6 +88,10 @@ analysis_result semantic_analysis::declare(node_index declaration,
     uint32_t name = tokens.identifier(id);
     entity_index scope = current_scope;
     entity_index prior = entity_table.find(scope, name);
+    /* a variable or function with a class's name hides it
+       ([basic.scope.hiding]/2) */
+    if (prior && entity_table[prior].kind == entity_kind::class_type)
+        return not_supported(declaration, "basic.scope.hiding");
     if (scope) {
         /* [dcl.inline]/4: "The inline specifier shall not appear on a block
            scope declaration" */
@@ -119,6 +123,12 @@ analysis_result semantic_analysis::declare(node_index declaration,
            contains the extern specifier ... and neither an initializer nor
            a function-body" */
         definition = !s.extern_ || initialized;
+        /* [dcl.link]/7: "A declaration directly contained in a
+           linkage-specification is treated as if it contains the extern
+           specifier ([dcl.stc]) for the purpose of determining the linkage
+           of the declared name and whether it is a definition." */
+        if (linkage_without_braces && !scope)
+            definition = initialized;
         /* [dcl.ref]/5: "The declaration of a reference shall contain an
            initializer except when the declaration contains an explicit
            extern specifier" */
@@ -145,10 +155,40 @@ analysis_result semantic_analysis::declare(node_index declaration,
            yet */
         if (is_void)
             return not_supported(declaration, "basic.types");
+        if (record.kind == type_kind::class_type) {
+            const entity &c = entity_table[record.entity];
+            if (c.kind != entity_kind::class_type)
+                /* a class whose definition was not analysed */
+                return not_supported(declaration, "class.pre");
+            /* [basic.def]/5 */
+            if (definition && !c.size)
+                return ill_formed_at_token(id,
+                                           "in the definition of an object, "
+                                           "the type of that object shall "
+                                           "not be an incomplete type",
+                                           "basic.def");
+        }
         /* [dcl.init]/7: "If a program calls for the default-initialization
            of an object of a const-qualified type T, T shall be a
            const-default-constructible class type or array thereof." */
-        if (definition && !initialized && (cv_of(type_table, type) & cv_const))
+        bool user_default = false;
+        qualified_type element = type;
+        while (type_table[element.unqualified()].kind == type_kind::array)
+            element = type_table[element.unqualified()].operand;
+        if (type_table[element.unqualified()].kind == type_kind::class_type) {
+            /* /7: "A class type T is const-default-constructible if
+               default-initialization of T would invoke a user-provided
+               constructor of T" */
+            entity_index cls = type_table[element.unqualified()].entity;
+            for (entity_index k = entity_table[cls].first_constructor; k;
+                 k = entity_table[k].next_constructor)
+                if (!entity_table[k].implicit &&
+                    !type_table[entity_table[k].type.unqualified()]
+                         .parameter_count)
+                    user_default = true;
+        }
+        if (definition && !initialized && !user_default &&
+            (cv_of(type_table, type) & cv_const))
             return ill_formed_at_token(id,
                                        "the default-initialization of an "
                                        "object of a const-qualified type "
@@ -158,6 +198,19 @@ analysis_result semantic_analysis::declare(node_index declaration,
     }
     if (kind == entity_kind::typedef_name && definition)
         return not_supported(declaration, "dcl.fct.def.general");
+    /* [dcl.typedef]/9: "If the typedef declaration defines an unnamed
+       class (or enumeration), the first typedef-name declared by the
+       declaration to be that class type (or enumeration type) is used to
+       denote the class type (or enumeration type) for linkage purposes
+       only" */
+    if (kind == entity_kind::typedef_name && !type.cv() &&
+        record.kind == type_kind::class_type) {
+        entity &c = entity_table[record.entity];
+        if (!c.name && !c.linkage_name) {
+            c.linkage_name = name;
+            c.linkage_of_name = linkage::external;
+        }
+    }
     if (kind != entity_kind::function && s.inline_ &&
         kind != entity_kind::variable)
         return not_supported(declaration, "dcl.inline");
@@ -267,7 +320,26 @@ analysis_result semantic_analysis::declare(node_index declaration,
     } else {
         if (const_object)
             implied = linkage::internal;
+        /* [basic.link]/4.3: an unnamed class without a typedef name for
+           linkage purposes ([dcl.typedef]/9) has no name for linkage; a
+           variable of its type is [basic.link]/8's "entity with no
+           linkage" type's, which clang gives internal linkage */
+        qualified_type object = type;
+        while (type_table[object.unqualified()].kind == type_kind::array)
+            object = type_table[object.unqualified()].operand;
+        bool unnamed_type = false;
+        if (kind == entity_kind::variable && implied == linkage::external &&
+            type_table[object.unqualified()].kind == type_kind::class_type &&
+            entity_table[type_table[object.unqualified()].entity].kind ==
+                entity_kind::class_type &&
+            !entity_table[type_table[object.unqualified()].entity].name &&
+            !entity_table[type_table[object.unqualified()].entity]
+                 .linkage_name) {
+            implied = linkage::internal;
+            unnamed_type = true;
+        }
         entity_index e = entity_table.make(kind, name, 0);
+        entity_table[e].unnamed_type_linkage = unnamed_type;
         entity_table[e].type = type;
         entity_table[e].linkage_of_name = implied;
         entity_table[e].defined = definition;
@@ -403,6 +475,14 @@ entity_index semantic_analysis::lookup(uint32_t name) const
 {
     for (entity_index s = current_scope;; s = entity_table[s].enclosing) {
         entity_index e = entity_table.find(s, name);
+        if (!e && s && entity_table[s].kind == entity_kind::class_type) {
+            /* [class.member.lookup]: a class scope's lookup includes its
+               bases'; an ambiguous one finds nothing analysis uses */
+            bool ambiguous = false;
+            e = class_member_lookup(s, name, ambiguous);
+            if (ambiguous)
+                return 0;
+        }
         if (e || !s)
             return e;
     }

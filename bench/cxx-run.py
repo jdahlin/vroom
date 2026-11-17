@@ -31,7 +31,9 @@ NM = ct.llvm('llvm-nm')
 TARGET = ['--target=aarch64-linux-gnu', '-nostdinc', '-fno-PIE',
           '-fno-asynchronous-unwind-tables', '-fno-stack-protector',
           '-mno-outline-atomics']
-CXX = TARGET + ['-x', 'c++', '-std=c++20', '-fno-exceptions', '-fno-rtti', '-w']
+# the C run time's headers (src/test/rt/include, extern "C" for C++)
+CXX = TARGET + ['-I', f'{ct.RT}/include', '-isystem', ct.RES,
+                '-x', 'c++', '-std=c++20', '-fno-exceptions', '-fno-rtti', '-w']
 
 
 def defined(obj):

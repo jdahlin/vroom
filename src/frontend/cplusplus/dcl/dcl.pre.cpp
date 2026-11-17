@@ -668,8 +668,12 @@ analysis_result semantic_analysis::simple_declaration(node_index n)
 analysis_result semantic_analysis::function_definition(node_index n)
 {
     const syntax_node &node = tree[n];
-    if (!node.child_count ||
+    if (node.child_count &&
         !syntax_is(tree, tree.children(n)[0], syntax_kind::decl_specifier_seq))
+        /* [class.mem]/12: a constructor or destructor (or a conversion
+           function) defined outside its class */
+        return special_member_definition(n);
+    if (!node.child_count)
         return not_supported(n, "dcl.fct.def.general");
     analysis_result r = init_declarators(n, tree.children(n)[0].index(), true);
     if (r != analysis_result::well_formed)
@@ -734,6 +738,15 @@ analysis_result semantic_analysis::init_declarators(node_index declaration,
        when declaring a class or enumeration": the decl-specifier-seq has
        neither (it would be unsupported), and clang accepts it with a
        warning */
+    if (items.empty() && s.declares_class) {
+        /* [dcl.pre]/5: a class declared: a storage class or other
+           specifier with it is [dcl.pre]/5's "ill-formed" or clang's
+           warning, not analysed */
+        if (s.typedef_ || s.static_ || s.extern_ || s.inline_ || s.constexpr_ ||
+            s.type.cv())
+            return not_supported(declaration, "dcl.pre");
+        return analysis_result::well_formed;
+    }
     if (items.empty())
         return extension_used(diagnostic_id::sema_no_declarator,
                               tree[declaration].first_token, nullptr);
@@ -784,11 +797,40 @@ analysis_result semantic_analysis::declare_with_initializer(
     last_declared = 0;
     qualified_type type = s.type;
     declarator_meaning m;
+    function_cv = 0;
     analysis_result r = declarator(declaration, d, type, m);
     if (r != analysis_result::well_formed)
         return r;
     if (!m.has_id)
         return not_supported(declaration, "dcl.meaning");
+    if (tokens.files.behavior.microsoft_extensions && s.declares_class) {
+        /* Microsoft's class-virt-specifiers, struct X sealed { }: the
+           parser takes the word for a declarator-id */
+        owned_buffer spelling;
+        tokens.spelling(m.id, spelling.get());
+        if ((spelling.size() == 6 && !memcmp(spelling.data(), "sealed", 6)) ||
+            (spelling.size() == 8 && !memcmp(spelling.data(), "abstract", 8)))
+            return not_supported(declaration, "dcl.type.elab");
+    }
+    /* [ext:gnu_attributes] a variable's alignment has no rules yet; packed
+       is for members; used keeps an internal name's definition */
+    if (m.aligned || m.packed || (m.used && (s.static_ || s.inline_)))
+        return not_supported(declaration, "ext.gnu");
+    if (m.qualifier) {
+        if (initialized)
+            return not_supported(declaration, "class.static.data");
+        return member_redeclaration(declaration, m.id, m.qualifier, type, s,
+                                    definition);
+    }
+    /* [dcl.fct]/6: "A function type with a cv-qualifier-seq or a
+       ref-qualifier ... shall appear only as the function type for a
+       non-static member function" */
+    if (function_cv)
+        return ill_formed_at_token(m.id,
+                                   "a function type with a cv-qualifier-seq "
+                                   "shall appear only as the function type "
+                                   "for a non-static member function",
+                                   "dcl.fct");
     /* [stmt.pre]/4: "The declarator shall not specify a function or an
        array." */
     if (in_condition &&
@@ -830,10 +872,54 @@ analysis_result semantic_analysis::declare_with_initializer(
     r = declare(declaration, m.id, kind, type, s, definition, initialized,
                 declared_entity);
     last_declared = declared_entity;
+    /* [dcl.array]/8: the bound of an earlier declaration (declare took it)
+       is the one the initializer fills */
+    if (r == analysis_result::well_formed && kind == entity_kind::variable &&
+        type_table[type.unqualified()].kind == type_kind::array &&
+        !type_table[type.unqualified()].bound_known) {
+        qualified_type known = entity_table[declared_entity].type;
+        const struct type &k = type_table[known.unqualified()];
+        if (k.kind == type_kind::array && k.bound_known)
+            type = known;
+    }
+    /* [dcl.link]/1: "All functions and variables whose names have external
+       linkage ... have a language linkage"; /5: the linkage-specification's
+       ([dcl.link]/6: a later declaration without one keeps it) */
+    if (r == analysis_result::well_formed && c_language && !current_scope &&
+        (kind == entity_kind::function || kind == entity_kind::variable) &&
+        entity_table[declared_entity].linkage_of_name != linkage::internal)
+        entity_table[declared_entity].c_language_linkage = true;
     /* the declaration statement's variables (statement) */
     if (r == analysis_result::well_formed && function_state.active &&
         kind == entity_kind::variable)
         block_variables.append(declared_entity);
+    if (r == analysis_result::well_formed && !initialized &&
+        kind == entity_kind::variable &&
+        entity_table[declared_entity].defined && !s.extern_) {
+        /* [dcl.init]/12: "If no initializer is specified for an object,
+           the object is default-initialized"; [dcl.init]/7.1: "If T is a
+           (possibly cv-qualified) class type, constructors are considered.
+           The applicable constructors are enumerated ([over.match.ctor]),
+           and the best one for the initializer () is chosen through
+           overload resolution" */
+        qualified_type object = type;
+        while (type_table[object.unqualified()].kind == type_kind::array)
+            object = type_table[object.unqualified()].operand;
+        const struct type &record = type_table[object.unqualified()];
+        if (record.kind == type_kind::class_type &&
+            entity_table[record.entity].kind == entity_kind::class_type &&
+            entity_table[record.entity].first_constructor) {
+            if (!(object == type))
+                /* [dcl.init]/7.2: each element default-initialized */
+                return not_supported(declaration, "dcl.init");
+            owned_array<expression_meaning> none;
+            initialized_value value;
+            r = construct(declaration, type, none, 0, value);
+            if (r != analysis_result::well_formed)
+                return r;
+            entity_table[declared_entity].definition = value.node;
+        }
+    }
     if (r != analysis_result::well_formed || !initialized)
         return r;
     /* [stmt.dcl]/3: a local variable with automatic storage duration and an

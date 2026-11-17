@@ -317,6 +317,11 @@ VPRIV void x64_abi_classify_named(codegen_context *e, ast_qualified_type t,
     a->is_wide_record = x64_abi_type_is_wide_record(c, t);
     a->align =
         codegen_type_alignment(c, t) > 8 ? codegen_type_alignment(c, t) : 8;
+    if (codegen_type_is_in_memory(c, t)) {
+        /* [abi:calls]: a C++ class non-trivial for calls */
+        a->is_in_memory = true;
+        return;
+    }
     /* SysV classifies _BitInt wider than 128 bits as MEMORY, including
 	 * unnamed variadic arguments. Returns use the ordinary hidden pointer. */
     if (codegen_type_is_bitint_big(c, t)) {

@@ -65,7 +65,15 @@ bool semantic_analysis::is_object_pointer(qualified_type t) const
 analysis_result semantic_analysis::operand_value(node_index at,
                                                  expression_meaning &m)
 {
-    (void)at;
+    if (m.node &&
+        semantics[m.node].kind == semantic_kind::bound_member_function)
+        /* [expr.ref]/6.3.2: "The expression can be used only as the
+           left-hand operand of a member function call." */
+        return ill_formed(at,
+                          "a non-static member function named by a class "
+                          "member access can be used only as the left-hand "
+                          "operand of a member function call",
+                          "expr.ref");
     if (m.category == value_category::prvalue)
         return analysis_result::well_formed;
     const struct type record = type_table[m.type.unqualified()];
@@ -608,9 +616,16 @@ analysis_result semantic_analysis::implicit_conversion(node_index at,
             converts = true;
         }
         if (!converts) {
-            /* a class's pointer to a base, a function pointer conversion:
-               not analysed yet */
             const struct type fp = type_table[pointee.unqualified()];
+            bool ambiguous = false;
+            if (fp.kind == type_kind::class_type &&
+                tp.kind == type_kind::class_type &&
+                entity_table[fp.entity].size &&
+                !(pointee.cv() & ~target_pointee.cv()) &&
+                base_step(fp.entity, tp.entity, ambiguous))
+                return pointer_to_base(tree[at].first_token, fp.entity,
+                                       tp.entity, to, m);
+            /* a function pointer conversion: not analysed yet */
             if (fp.kind == type_kind::class_type ||
                 fp.kind == type_kind::function ||
                 tp.kind == type_kind::class_type ||

@@ -48,14 +48,17 @@ struct tree_checker {
     static bool is_expression(semantic_kind k)
     {
         return (k >= semantic_kind::constant &&
-                k <= semantic_kind::subscript) ||
-               k == semantic_kind::condition_declaration;
+                k <= semantic_kind::bound_member_function) ||
+               k == semantic_kind::condition_declaration ||
+               /* T(args), a prvalue of class type ([expr.type.conv]/2) */
+               k == semantic_kind::construct;
     }
     static bool is_initializer(semantic_kind k)
     {
         return is_expression(k) || k == semantic_kind::zero ||
                k == semantic_kind::initializer_list ||
-               k == semantic_kind::bind_reference;
+               k == semantic_kind::bind_reference ||
+               k == semantic_kind::construct || k == semantic_kind::destroy;
     }
     static bool is_statement(semantic_kind k)
     {
@@ -156,6 +159,10 @@ struct tree_checker {
                 analysis.semantics[node.a].category == value_category::prvalue)
                 problem(n, "the operand of an lvalue-to-rvalue conversion is "
                            "a prvalue");
+            if (node.op ==
+                    static_cast<uint8_t>(conversion_kind::derived_to_base) &&
+                (!node.b || !analysis.entity_table[node.b].base_subobject))
+                problem(n, "no base subobject");
             /* the conversions of a glvalue, and the discarding of any
                value ([expr.static.cast]/6) */
             if (node.op !=
@@ -213,13 +220,38 @@ struct tree_checker {
             break;
         case semantic_kind::call:
             child(n, node.a, tree_sort::expression, false, "function");
+            child(n, node.b, tree_sort::expression, true, "object address");
+            if (node.b)
+                prvalue(n, node.b, "object address");
             list(n, tree_sort::initializer, "argument");
+            break;
+        case semantic_kind::member:
+            child(n, node.a, tree_sort::expression, false, "object");
+            if (!node.b)
+                problem(n, "no member");
+            break;
+        case semantic_kind::bound_member_function:
+            /* only a call's function, which the call replaces */
+            problem(n, "a bound member function outside a call");
             break;
         case semantic_kind::initializer_list:
             list(n, tree_sort::initializer, "element");
             break;
         case semantic_kind::bind_reference:
             child(n, node.a, tree_sort::expression, false, "referent");
+            break;
+        case semantic_kind::construct:
+            child(n, node.a, tree_sort::expression, true, "object");
+            if (!node.b || analysis.entity_table[node.b].special !=
+                               special_member::constructor)
+                problem(n, "no constructor");
+            list(n, tree_sort::initializer, "argument");
+            break;
+        case semantic_kind::destroy:
+            child(n, node.a, tree_sort::expression, false, "object");
+            if (!node.b || analysis.entity_table[node.b].special !=
+                               special_member::destructor)
+                problem(n, "no destructor");
             break;
         case semantic_kind::block:
         case semantic_kind::declarations:
@@ -286,6 +318,10 @@ struct tree_checker {
                 problem(n, "no outermost block");
             else
                 walk(node.a);
+            child(n, node.b, tree_sort::statement, true,
+                  "member initializations");
+            child(n, node.c, tree_sort::statement, true,
+                  "subobject destructions");
             break;
         }
     }
@@ -389,6 +425,10 @@ void dump_node(const semantic_analysis &analysis, token_stream &tokens,
         vbuffer_format_append(out, " entity #%u", node.a);
     vbuffer_string_append(out, "\n");
     uint32_t children[4] = {node.a, node.b, node.c, node.d};
+    /* a member's and a constructor call's b is an entity */
+    if (node.kind == semantic_kind::member ||
+        node.kind == semantic_kind::construct)
+        children[1] = 0;
     for (unsigned i = 0; i < 4; i++) {
         if (i == 0 && a_is_entity)
             continue;
