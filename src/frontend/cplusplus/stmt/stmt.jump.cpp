@@ -36,9 +36,12 @@ node_index parser::jump_statement()
         if (failed())
             return 0;
     } else if (k == standard_keyword::goto_) {
-        if (at(preprocessing_op_or_punc::STAR))
-            /* [ext.gnu] a computed goto, goto *p: P9 */
+        if (at(preprocessing_op_or_punc::STAR)) {
+            /* [ext:gnu_labels_as_values] */
+            if (tokens.files.behavior.has(extension::gnu_labels_as_values))
+                return gnu_computed_goto(mark, first);
             return beyond_this_step();
+        }
         if (!at_identifier())
             return expected("an identifier after goto", "stmt.goto");
         add_token();

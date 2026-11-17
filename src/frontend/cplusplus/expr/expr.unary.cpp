@@ -72,6 +72,10 @@ node_index parser::unary_expression()
     token_index first = position;
     if (at(extension_keyword::extension)) /* [ext.gnu] */
         return gnu_extension_expression();
+    /* [ext:gnu_labels_as_values] */
+    if (at(preprocessing_op_or_punc::AMPERSAND_AMPERSAND) && at_identifier(1) &&
+        tokens.files.behavior.has(extension::gnu_labels_as_values))
+        return gnu_label_address();
     if (is_unary_operator(peek()) || at(preprocessing_op_or_punc::PLUS_PLUS) ||
         at(preprocessing_op_or_punc::MINUS_MINUS)) {
         add_token();

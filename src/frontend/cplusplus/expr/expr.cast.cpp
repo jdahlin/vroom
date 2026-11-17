@@ -35,6 +35,10 @@ node_index parser::cast_expression()
             return 0;
         return unary_expression();
     }
+    /* (parenthesized_type_id leaves a '{' only for
+       [ext:gnu_compound_literals]) */
+    if (at(preprocessing_op_or_punc::LEFT_BRACE))
+        return gnu_compound_literal(mark, first);
     cast_expression();
     if (failed())
         return 0;

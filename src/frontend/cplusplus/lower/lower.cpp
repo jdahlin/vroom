@@ -104,6 +104,7 @@ class c_lowering
     }
     ast_qualified_type type_of(uint32_t n);
     uint32_t to_bool(uint32_t int_value);
+    uint32_t truth(uint32_t value);
     uint32_t to_ptrdiff(uint32_t integer);
     uint32_t expression(uint32_t n);
     uint32_t read(uint32_t n);
@@ -339,6 +340,22 @@ uint32_t c_lowering::to_bool(uint32_t int_value)
 {
     return cast(int_value, ast_builder_type_basic(AST_TYPE_BOOL),
                 AST_CAST_BOOL);
+}
+
+/* a value whose truth is tested (the operand of !, && and ||, a
+   condition): a conversion to bool tests as its operand does
+   ([conv.bool]/1: "A zero value, null pointer value, or null member
+   pointer value is converted to false; any other value is converted to
+   true", as C's test against 0), so the int C's comparisons and logical
+   operators give is tested without being made a bool first */
+uint32_t c_lowering::truth(uint32_t value)
+{
+    if (!value)
+        return 0;
+    const struct node &x = ast_builder_ast(c)->nodes[value];
+    if (x.op == AST_NODE_CAST && x.aux == AST_CAST_BOOL)
+        return x.a;
+    return value;
 }
 
 /* C adds a pointer and an integer of ptrdiff_t's type */
@@ -780,8 +797,8 @@ uint32_t c_lowering::expression(uint32_t index)
         int op = c_operator(static_cast<preprocessing_op_or_punc>(n.op));
         if (op == LEX_TOKEN_EXCLAMATION)
             return to_bool(make(AST_NODE_UNARY,
-                                ast_builder_type_basic(AST_TYPE_INT), a, 0, 0,
-                                LEX_TOKEN_EXCLAMATION, 0));
+                                ast_builder_type_basic(AST_TYPE_INT), truth(a),
+                                0, 0, LEX_TOKEN_EXCLAMATION, 0));
         if (!op)
             return fail("a unary operator", n.at);
         return make(AST_NODE_UNARY,
@@ -836,8 +853,8 @@ uint32_t c_lowering::expression(uint32_t index)
         int op = AST_NODE_LOGICAL_AND;
         if (n.kind == semantic_kind::logical_or)
             op = AST_NODE_LOGICAL_OR;
-        return to_bool(
-            make(op, ast_builder_type_basic(AST_TYPE_INT), a, b, 0, 0, 0));
+        return to_bool(make(op, ast_builder_type_basic(AST_TYPE_INT), truth(a),
+                            truth(b), 0, 0, 0));
     }
     case semantic_kind::assignment:
         return assignment(n);
@@ -845,15 +862,15 @@ uint32_t c_lowering::expression(uint32_t index)
         ast_qualified_type t = type(n.type, n.at);
         if (!is_glvalue(n))
             return make(AST_NODE_CONDITIONAL, AST_QUALIFIED_TYPE_UNQUALIFIED(t),
-                        expression(n.a), expression(n.b), expression(n.c), 0,
-                        0);
+                        truth(expression(n.a)), expression(n.b),
+                        expression(n.c), 0, 0);
         /* the object one of the operands is: its address selected */
         ast_qualified_type pointer = ast_builder_type_pointer(c, t);
         uint32_t b = object(n.b), c_ = object(n.c);
         if (!b || !c_)
             return 0;
         uint32_t selected =
-            make(AST_NODE_CONDITIONAL, pointer, expression(n.a),
+            make(AST_NODE_CONDITIONAL, pointer, truth(expression(n.a)),
                  address_of(b, pointer), address_of(c_, pointer), 0, 0);
         return make(AST_NODE_DEREFERENCE, t, selected, 0, 0, 0,
                     AST_NODE_FLAG_LVALUE);
@@ -984,9 +1001,9 @@ uint32_t c_lowering::condition(uint32_t n, uint32_t &declaration_statement)
     declaration_statement = 0;
     const semantic_node &x = node(n);
     if (x.kind != semantic_kind::condition_declaration)
-        return expression(n);
+        return truth(expression(n));
     declaration_statement = declaration(node(x.a));
-    return expression(x.b);
+    return truth(expression(x.b));
 }
 
 uint32_t c_lowering::label(uint32_t identifier)
@@ -1067,8 +1084,8 @@ uint32_t c_lowering::statement(uint32_t index)
     }
     case semantic_kind::do_statement: {
         uint32_t body = statement(n.a);
-        return ast_builder_node(c, AST_NODE_DO, v, expression(n.b), body, 0, 0,
-                                0);
+        return ast_builder_node(c, AST_NODE_DO, v, truth(expression(n.b)), body,
+                                0, 0, 0);
     }
     case semantic_kind::for_statement: {
         uint32_t init = 0;

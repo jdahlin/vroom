@@ -255,7 +255,7 @@ node_index parser::enum_specifier_or_elaborated(decl_specifier_facts &facts)
            an enumeration"; a name not declared yet is the semantic
            analysis's error, and declared here so that the rest of the
            declaration parses */
-        if (name && names.lookup_unqualified(name) != name_kind::type_name)
+        if (name && names.lookup_elaborated(name) != name_kind::type_name)
             names.declare(name, name_kind::type_name);
         facts.elaborated = true;
         facts.elaborated_at = first;

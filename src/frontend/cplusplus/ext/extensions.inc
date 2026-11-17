@@ -43,6 +43,13 @@ EXTENSION(gnu_restrict, gnu,
           "GCC manual 7.3, Restricting Pointer Aliasing: __restrict__ as a cv-qualifier")
 EXTENSION(gnu_extension_keyword, gnu,
           "GCC manual 6.48, Alternate Keywords: __extension__ before a declaration or expression")
+EXTENSION(gnu_labels_as_values, gnu,
+          "GCC manual 6.3, Labels as Values: &&label and goto *expression;")
+EXTENSION(gnu_designated_initializers, gnu,
+          "GCC manual 6.29, Designated Initializers: C99's [index] =, .a.b =, a list that "
+          "mixes clauses with designators, [first ... last] =, and the obsolete field:")
+EXTENSION(gnu_compound_literals, gnu,
+          "GCC manual 6.30, Compound Literals: C99's (type-id) { initializer-list } in C++")
 
 /* clang */
 EXTENSION(clang_feature_checks, clang,

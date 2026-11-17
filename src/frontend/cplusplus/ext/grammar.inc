@@ -92,6 +92,33 @@ PRODUCTION(gnu_extension_keyword, "block-declaration", "__extension__ block-decl
 PRODUCTION(gnu_extension_keyword, "member-declaration", "__extension__ member-declaration")
 PRODUCTION(gnu_extension_keyword, "unary-expression", "__extension__ cast-expression")
 
+/* ---- GCC manual 6.3, Labels as Values ---- */
+
+PRODUCTION(gnu_labels_as_values, "unary-expression", "gnu-label-address")
+PRODUCTION(gnu_labels_as_values, "gnu-label-address", "&& identifier")
+PRODUCTION(gnu_labels_as_values, "jump-statement", "gnu-computed-goto")
+PRODUCTION(gnu_labels_as_values, "gnu-computed-goto", "goto * expression ;")
+
+/* ---- GCC manual 6.29, Designated Initializers ---- */
+
+PRODUCTION(gnu_designated_initializers, "braced-init-list", "{ gnu-initializer-list ,_opt }")
+PRODUCTION(gnu_designated_initializers, "gnu-initializer-list", "gnu-designation_opt initializer-clause")
+PRODUCTION(gnu_designated_initializers, "gnu-initializer-list",
+           "gnu-initializer-list , gnu-designation_opt initializer-clause")
+/* (the second only before a braced-init-list, as C++20's .a{1}) */
+PRODUCTION(gnu_designated_initializers, "gnu-designation", "gnu-designator-list =")
+PRODUCTION(gnu_designated_initializers, "gnu-designation", "gnu-designator-list")
+PRODUCTION(gnu_designated_initializers, "gnu-designation", "identifier :")
+PRODUCTION(gnu_designated_initializers, "gnu-designator-list", "designator")
+PRODUCTION(gnu_designated_initializers, "gnu-designator-list", "gnu-designator-list designator")
+PRODUCTION(gnu_designated_initializers, "designator", "[ constant-expression ]")
+PRODUCTION(gnu_designated_initializers, "designator", "[ constant-expression ... constant-expression ]")
+
+/* ---- GCC manual 6.30, Compound Literals ---- */
+
+PRODUCTION(gnu_compound_literals, "postfix-expression", "gnu-compound-literal")
+PRODUCTION(gnu_compound_literals, "gnu-compound-literal", "( type-id ) braced-init-list")
+
 /* ---- clang Language Extensions, Type Trait Primitives ---- */
 
 PRODUCTION(clang_type_traits, "primary-expression", "clang-type-trait-expression")

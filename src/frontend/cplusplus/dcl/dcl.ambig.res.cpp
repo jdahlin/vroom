@@ -117,13 +117,18 @@ bool parser::parenthesized_type_id(bool cast)
                 return true;
             }
             compound_literal = at(preprocessing_op_or_punc::LEFT_BRACE);
+            /* [ext:gnu_compound_literals] (ext/gnu/compound_literal.cpp) */
+            if (compound_literal &&
+                tokens.files.behavior.has(extension::gnu_compound_literals)) {
+                attempt.commit();
+                return true;
+            }
         }
         failed_with = failure;
     }
     unknown_names_are_types = as_types;
     if (compound_literal) {
-        /* [ext.gnu] ( type-id ) braced-init-list, C99's compound literal:
-           P9 */
+        /* ( type-id ) braced-init-list without the extension */
         beyond_this_step();
         return false;
     }

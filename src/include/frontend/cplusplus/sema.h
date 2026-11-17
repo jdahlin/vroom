@@ -251,6 +251,9 @@ struct entity {
     /* the semantic tree of its definition: a function's
        semantic_kind::function_body, a variable's initializer (0: none) */
     uint32_t definition = 0;
+    /* an array of unknown bound whose initializer would give the bound
+       ([dcl.array]/7) and was not analysed: its type is not known */
+    bool bound_unknown = false;
 };
 
 /* one declaration of an entity: the syntax node that declares it */

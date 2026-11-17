@@ -126,6 +126,12 @@ preprocessing_token lexer::lex(bool header_name_permitted)
 {
     preprocessing_token token;
     const unsigned char *p = file.physical_characters;
+    /* [lex.phases]/1.1 maps the physical characters in an
+       implementation-defined manner: [impl.clang] a UTF-8 byte order mark
+       (EF BB BF) at the start of a file is no character */
+    if (position == 0 && file.size >= 3 && p[0] == 0xEF && p[1] == 0xBB &&
+        p[2] == 0xBF)
+        position = 3;
 
     for (;;) {
         uint32_t start = position;

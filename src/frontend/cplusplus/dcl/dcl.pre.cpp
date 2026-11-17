@@ -857,9 +857,15 @@ analysis_result semantic_analysis::declare_with_initializer(
     value.evaluation = constness::unknown;
     value.value = 0;
     qualified_type before = type;
+    {
+        const struct type t = type_table[type.unqualified()];
+        entity_table[declared_entity].bound_unknown =
+            t.kind == type_kind::array && !t.bound_known;
+    }
     r = initializer(init, type, value);
     if (r != analysis_result::well_formed)
         return r;
+    entity_table[declared_entity].bound_unknown = false;
     const struct type record = type_table[type.unqualified()];
     /* [basic.def]/5: "In the definition of an object, the type of that
        object shall not be an incomplete type" */

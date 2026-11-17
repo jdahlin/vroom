@@ -349,6 +349,10 @@ class declared_names
        class-name found */
     name_kind lookup_unqualified(uint32_t name, scope_index *scope = nullptr,
                                  bool *dependent = nullptr);
+    /* [basic.lookup.elab]/2: an elaborated-type-specifier's identifier "is
+       looked up according to [basic.lookup.unqual] but ignoring any
+       non-type names that have been declared" */
+    name_kind lookup_elaborated(uint32_t name);
     /* [basic.lookup.qual]: the name in the namespace a
        nested-name-specifier named */
     name_kind lookup_qualified(scope_index in, uint32_t name,
@@ -403,6 +407,8 @@ class declared_names
     owned_array<uint32_t> journal;
     const declaration *find(scope_index in, uint32_t name,
                             unsigned depth = 0) const;
+    /* find skips the names of no type (lookup_elaborated) */
+    bool ignoring_non_types = false;
 };
 
 /* ---- the parser ---------------------------------------------------------- */
@@ -832,6 +838,14 @@ class parser
        declaration (alternative parses what follows) or an expression */
     node_index gnu_extension_prefixed(node_index (parser::*alternative)());
     node_index gnu_extension_expression();
+    /* ---- ext/gnu/labels_as_values.cpp: &&label, goto *p; */
+    node_index gnu_label_address();
+    node_index gnu_computed_goto(size_t mark, token_index first);
+    /* ---- ext/gnu/designated_initializers.cpp: { [1] = x, .a.b = y } */
+    bool gnu_initializer_list_needed();
+    node_index gnu_initializer_list();
+    /* ---- ext/gnu/compound_literal.cpp: ( type-id ) { ... } */
+    node_index gnu_compound_literal(size_t mark, token_index first);
     /* ---- ext/clang/type_traits.cpp: __is_same(T, U), __remove_cv(T) */
     node_index clang_type_trait_expression();
     node_index clang_type_transformation();
@@ -1079,6 +1093,8 @@ class parser
        name is the object's class's to look up ([basic.lookup.classref]) */
     node_index id_expression(bool member);
     node_index postfix_expression();
+    node_index postfix_expression_suffixes(size_t mark, token_index first,
+                                           node_index n);
     node_index expression_list();
     /* ( expression-list_opt ) at the current '(': false after
        expected(what, subclause) or another failure */

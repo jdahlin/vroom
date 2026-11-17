@@ -523,6 +523,9 @@ analysis_result semantic_analysis::id_expression(token_index t,
     const entity &x = entity_table[e];
     if (x.kind != entity_kind::variable && x.kind != entity_kind::function)
         return not_supported(current_declaration, "expr.prim.id");
+    if (x.bound_unknown)
+        /* (the initializer analysis has no rules for yet) */
+        return not_supported(current_declaration, "dcl.init");
     m.category = value_category::lvalue;
     m.type = x.type;
     m.entity = e;

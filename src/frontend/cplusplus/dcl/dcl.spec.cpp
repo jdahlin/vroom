@@ -866,7 +866,7 @@ node_index parser::elaborated_or_class_specifier(decl_specifier_facts &facts)
     }
     name_kind found = name_kind::not_declared;
     if (!qualifier && !template_id)
-        found = names.lookup_unqualified(name);
+        found = names.lookup_elaborated(name);
     if (!qualifier && !template_id && !facts.friend_ &&
         found != name_kind::type_name && found != name_kind::template_name) {
         /* the class's region, empty until a class-specifier defines it

@@ -115,7 +115,10 @@ node_index parser::braced_init_list()
     token_index first = position;
     add_token(); /* { */
     if (!at(preprocessing_op_or_punc::RIGHT_BRACE)) {
-        if (at(preprocessing_op_or_punc::DOT)) {
+        if (gnu_initializer_list_needed()) {
+            /* [ext:gnu_designated_initializers] */
+            gnu_initializer_list();
+        } else if (at(preprocessing_op_or_punc::DOT)) {
             /* P0329R4 (C++20); before it [ext.clang] C99's designators,
                clang's extension: P9 */
             if (!tokens.files.behavior.has(

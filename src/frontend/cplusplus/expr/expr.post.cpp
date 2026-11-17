@@ -160,7 +160,14 @@ node_index parser::postfix_expression()
         if (failed())
             return 0;
     }
+    return postfix_expression_suffixes(mark, first, n);
+}
 
+/* the suffixes after what begins a postfix-expression n, which starts at
+   mark and first */
+node_index parser::postfix_expression_suffixes(size_t mark, token_index first,
+                                               node_index n)
+{
     const implementation_defined_behavior &b = tokens.files.behavior;
     for (;;) {
         if (at(preprocessing_op_or_punc::LEFT_BRACKET)) {
