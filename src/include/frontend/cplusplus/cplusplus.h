@@ -137,8 +137,9 @@ struct source_position {
 
 struct source_file {
     const char *name = nullptr;
-    /* [lex.phases]/1.1: the physical source file characters, followed by 16
-       zero bytes so that a reader may look ahead without checking the end */
+    /* [lex.phases]/1.1: the physical source file characters, followed by 32
+       zero bytes so that a reader may look ahead without checking the end
+       (lex.simd.h loads 32 at a time) */
     const unsigned char *physical_characters = nullptr;
     uint32_t size = 0;
 

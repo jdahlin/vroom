@@ -570,8 +570,20 @@ recorded here:
     7.5 M tokens: phases 1-7 2.84 s -> 1.84 s, 1457 includes replayed,
     4.9 M tokens replayed; clang's Preprocessor tests twice (748 TUs):
     the same tokens, few hits (most of them issue diagnostics).
-  Next: the lexer's SIMD fast paths (the old lexer's NEON/AVX scanning);
-  then the replayed sources' text shared instead of read again.  Gates: `bench/cxx-lex.py` 121/121, `bench/cxx-pp.py` as the base
+  - the lexer's searches (`lex/lex.simd.h`, after the old lexer's
+    `lex_comment_end_find`/`lex_line_end_find`): the rest of a comment, of
+    an identifier's plain characters, of spaces and tabs, and the line ends
+    of `index_lines`, 16 bytes at a time with NEON or SSE2, 32 with AVX2;
+    the scalar code decides at the byte each stops at, so a search stops
+    early but never late.  Sources are padded with 32 NUL bytes (was 16).
+    `cxxparse -selftest` checks each search against its scalar definition
+    (CI runs it on arm64 and x86-64).  json.hpp: phases 1-7 330 -> 293
+    ns/token; the 110 TUs above 2.84 s -> 2.63 s without the cache, 1.84 s
+    -> 1.73 s with it.  The old lexer's 64-byte block classification
+    (`lex_bytes_classify`) would need the lexer rebuilt around masks: not
+    ported.
+  Next: the replayed sources' text shared instead of read again, and phase
+  7 (`convert`, `lookup_keyword`) per token.  Gates: `bench/cxx-lex.py` 121/121, `bench/cxx-pp.py` as the base
   (its `-dM` column differs by clang's version string only), and
   `bench/cxx-parse.py` identical.
 - **S1 The parser without build-and-rewind** (3.0 item 3): recovery, the

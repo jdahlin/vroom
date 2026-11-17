@@ -49,6 +49,7 @@
 #include "../cxxlex/command-line.h"
 #include "port/clock.h"
 #include "frontend/cplusplus/parse.h"
+#include "../../frontend/cplusplus/lex/lex.simd.h"
 
 #include "declarator-claims.h"
 
@@ -66,6 +67,31 @@ static bool check(bool condition, const char *what)
 static int selftest()
 {
     bool ok = true;
+    {
+        /* OPTIMIZATION: lex.simd.h's searches are its scalar definitions,
+           on generated text with NULs inside and 32 after */
+        static const char alphabet[] = "aZ_09 \t\n\r\\?*/x$#\x80\x01";
+        unsigned char text[300];
+        uint32_t state = 1;
+        auto random = [&state]() {
+            state = state * 1103515245u + 12345u;
+            return state >> 8;
+        };
+        bool same = true;
+        for (int round = 0; round < 20000 && same; round++) {
+            uint32_t n = random() % 260;
+            for (uint32_t i = 0; i < n; i++)
+                text[i] = alphabet[random() % (sizeof alphabet - 1)];
+            memset(text + n, 0, 32);
+            if (n && !(random() % 8))
+                text[random() % n] = 0;
+            for (int k = 0; k < 5; k++)
+                for (uint32_t at = 0; at <= n; at += 1 + random() % 5)
+                    same &= lex_search((lex_stop)k, text, at) ==
+                            lex_search_scalar((lex_stop)k, text, at);
+        }
+        ok &= check(same, "lex.simd.h searches = scalar");
+    }
     {
         declared_names names;
         const uint32_t N = 1, T = 2, x = 3, M = 4;
