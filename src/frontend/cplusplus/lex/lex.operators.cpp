@@ -29,6 +29,48 @@ constexpr op_or_punc_description op_or_punc_descriptions[] = {
 #undef PREPROCESSING_OP_OR_PUNC
 };
 
+constexpr int op_or_punc_count =
+    static_cast<int>(preprocessing_op_or_punc::count);
+
+/*
+ * OPTIMIZATION: the candidates by first character.  The grammar's table is
+ * the specification; scanning all of it with strlen and memcmp for every
+ * operator was 65 % of phases 1-7 on json.hpp (doc/PLAN-cxx-codegen.md
+ * S0b).  This index is computed from the same table at compile time:
+ * order[begin[c] .. begin[c + 1]) are the entries whose spelling starts
+ * with c, and length[i] is entry i's spelling's length.
+ */
+struct first_character_index {
+    uint8_t length[op_or_punc_count];
+    uint8_t begin[257];
+    uint8_t order[op_or_punc_count];
+};
+
+constexpr first_character_index make_first_character_index()
+{
+    first_character_index x{};
+    for (int i = 0; i < op_or_punc_count; i++) {
+        const char *s = op_or_punc_descriptions[i].spelling;
+        int n = 0;
+        while (s[n])
+            n++;
+        x.length[i] = static_cast<uint8_t>(n);
+    }
+    int at = 0;
+    for (int c = 0; c < 256; c++) {
+        x.begin[c] = static_cast<uint8_t>(at);
+        for (int i = 0; i < op_or_punc_count; i++)
+            if (static_cast<unsigned char>(
+                    op_or_punc_descriptions[i].spelling[0]) == c)
+                x.order[at++] = static_cast<uint8_t>(i);
+    }
+    x.begin[256] = static_cast<uint8_t>(at);
+    return x;
+}
+
+constexpr first_character_index op_or_punc_index = make_first_character_index();
+static_assert(op_or_punc_count < 256, "the index holds entries in a byte");
+
 } // namespace
 
 const char *preprocessing_op_or_punc_spelling(preprocessing_op_or_punc op)
@@ -70,7 +112,19 @@ uint32_t lexer::scan_preprocessing_op_or_punc(uint32_t at,
     unsigned char c[5];
     uint32_t end[5];
     uint32_t q = at;
-    for (int i = 0; i < 4; i++) {
+    translation_character first = peek(q);
+    if (!first.extent)
+        return 0;
+    c[0] = first.character;
+    /* OPTIMIZATION: most characters begin no operator; stop before looking
+       further ahead */
+    unsigned from = op_or_punc_index.begin[c[0]],
+             to = op_or_punc_index.begin[c[0] + 1];
+    if (from == to)
+        return 0;
+    q += first.extent;
+    end[0] = q;
+    for (int i = 1; i < 4; i++) {
         translation_character t = peek(q);
         c[i] = 0;
         if (t.extent)
@@ -82,10 +136,10 @@ uint32_t lexer::scan_preprocessing_op_or_punc(uint32_t at,
 
     int best = -1;
     size_t best_length = 0;
-    for (int i = 0; i < static_cast<int>(preprocessing_op_or_punc::count);
-         i++) {
+    for (unsigned k = from; k < to; k++) {
+        int i = op_or_punc_index.order[k];
         const char *s = op_or_punc_descriptions[i].spelling;
-        size_t n = strlen(s);
+        size_t n = op_or_punc_index.length[i];
         if (n <= best_length || memcmp(s, c, n))
             continue;
         /* <=> is C++20's; before it, <= and > ([diff.cpp17.expr]) */

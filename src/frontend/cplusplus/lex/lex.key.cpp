@@ -134,6 +134,26 @@ keyword_status keyword_status_of(const implementation_defined_behavior &b,
 
 } // namespace
 
+/* OPTIMIZATION: the spellings' lengths, computed at compile time, so that the
+   binary search compares lengths before bytes and calls no strlen */
+struct keyword_lengths {
+    uint8_t length[sizeof keywords / sizeof keywords[0]];
+};
+
+constexpr keyword_lengths make_keyword_lengths()
+{
+    keyword_lengths x{};
+    for (size_t i = 0; i < sizeof keywords / sizeof keywords[0]; i++) {
+        size_t n = 0;
+        while (keywords[i].spelling[n])
+            n++;
+        x.length[i] = static_cast<uint8_t>(n);
+    }
+    return x;
+}
+
+constexpr keyword_lengths keyword_spelling_lengths = make_keyword_lengths();
+
 VPRIV int lookup_keyword(const implementation_defined_behavior &behavior,
                          const char *spelling, size_t length)
 {
@@ -141,7 +161,7 @@ VPRIV int lookup_keyword(const implementation_defined_behavior &behavior,
     while (lo < hi) {
         int mid = (lo + hi) / 2;
         const char *k = keywords[mid].spelling;
-        size_t n = strlen(k);
+        size_t n = keyword_spelling_lengths.length[mid];
         size_t common = n;
         if (length < common)
             common = length;

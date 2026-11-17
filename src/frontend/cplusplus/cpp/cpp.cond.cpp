@@ -819,9 +819,11 @@ bool preprocessor::evaluate_defined_condition(const preprocessing_token &name,
         skip_rest_of_directive();
         return false;
     }
-    int32_t m = identifiers[identifier(t)].macro;
+    uint32_t operand = identifier(t);
+    int32_t m = identifiers[operand].macro;
     if (m >= 0)
         macros[m].used = true;
+    defined_condition_operand = operand; /* OPTIMIZATION: the guard */
     char name_text[16];
     snprintf(name_text, sizeof name_text, "%.*s", (int)directive.size(),
              directive.data());
@@ -866,7 +868,19 @@ static bool condition_holds(preprocessor &p, const preprocessing_token &name,
 void preprocessor::directive_if(const preprocessing_token &name,
                                 directive_kind kind)
 {
+    defined_condition_operand = -1;
     bool condition = condition_holds(*this, name, kind);
+    /* OPTIMIZATION: the multiple-include guard's #ifndef, its group
+       entered (one skipped here would end at an #else or #endif that
+       skip_group reads, not directive_endif; clang's PR6282) */
+    inclusion &in = inclusions.back();
+    if (in.guard_state == 1 && kind == directive_kind::ifndef &&
+        defined_condition_operand >= 0 && condition) {
+        in.guard_state = 2;
+        in.guard_name = (uint32_t)defined_condition_operand;
+        in.guard_conditional = (uint32_t)conditionals.size();
+    } else if (in.guard_state == 1)
+        in.guard_state = 4;
     conditionals.append({name.location, condition, false});
     if (!condition)
         skip_group();
@@ -890,6 +904,10 @@ void preprocessor::directive_elif_else(const preprocessing_token &name,
         return;
     }
     conditional &c = conditionals[conditionals.size() - 1];
+    /* OPTIMIZATION: an #else or #elif of the guard: not a guard */
+    inclusion &in = inclusions.back();
+    if (in.guard_state == 2 && conditionals.size() - 1 == in.guard_conditional)
+        in.guard_state = 4;
     if (c.else_seen) {
         diagnostic_id id = diagnostic_id::pp_err_elif_after_else;
         if (is_else)
@@ -914,6 +932,10 @@ void preprocessor::directive_endif(const preprocessing_token &name)
         return;
     }
     conditionals.resize(conditionals.size() - 1);
+    /* OPTIMIZATION: the multiple-include guard's #endif */
+    inclusion &in = inclusions.back();
+    if (in.guard_state == 2 && conditionals.size() == in.guard_conditional)
+        in.guard_state = 3;
     expect_end_of_directive("endif");
 }
 

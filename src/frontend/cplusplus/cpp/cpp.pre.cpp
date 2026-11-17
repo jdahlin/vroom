@@ -200,6 +200,8 @@ preprocessing_token preprocessor::read_file_token(bool header_name_permitted)
             }
             continue;
         }
+        if (t.kind != preprocessing_token_kind::end_of_file)
+            guard_token(); /* OPTIMIZATION: the multiple-include guard */
         if (t.kind == preprocessing_token_kind::end_of_file) {
             if (stop_at_file_end && inclusions.size() > 1) {
                 unread_file_token(t);
@@ -235,6 +237,7 @@ void preprocessor::leave_file()
                           conditionals[conditionals.size() - 1].location);
         conditionals.resize(conditionals.size() - 1);
     }
+    guard_end_of_file(); /* OPTIMIZATION: the multiple-include guard */
     inclusions.resize(inclusions.size() - 1);
 }
 
@@ -305,6 +308,7 @@ void preprocessor::execute_directive(const preprocessing_token &hash)
     /* [ext.gnu] gnu_line_marker: # digit-sequence "s-char-sequence" flags */
     if (name.kind == preprocessing_token_kind::pp_number &&
         behavior.has(extension::gnu_line_marker)) {
+        guard_directive(directive_kind::line); /* OPTIMIZATION: the guard */
         gnu_line_marker(name);
         return;
     }
@@ -326,6 +330,7 @@ void preprocessor::execute_directive(const preprocessing_token &hash)
         skip_rest_of_directive();
         return;
     }
+    guard_directive(kind); /* OPTIMIZATION: the multiple-include guard */
     switch (kind) {
     case directive_kind::include:
     case directive_kind::include_next:

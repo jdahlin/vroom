@@ -528,6 +528,38 @@ recorded here:
   keyword tables as direct lookups, the lexer's fast paths), and S2's
   compact tokens and S5's shared header cache matter more than the
   parser's own cost.
+  (The clang of this table was Apple's: see S0b for clang 23's.)
+- **S0b The input path.**  Status (2026-11-17, first part done): each
+  change is a hook marked `OPTIMIZATION:` that changes no output.
+  - `lex.operators.cpp`: the operators by first character, an index built
+    from the grammar's table at compile time; a character that begins no
+    operator is answered without looking ahead.
+  - `lex.key.cpp`: the keywords' lengths at compile time (no `strlen` in
+    the binary search).
+  - the multiple-include guard (`cpp.include.cpp`, clang's
+    MultipleIncludeOpt, the old preprocessor's guard skip): a file that is
+    one `#ifndef` group, entered the first time, is not opened again while
+    its macro is defined.
+
+  Measured with Homebrew clang 23.1.4, one run each, the base built from
+  d240699f:
+
+  | input | phases 1-7 | parser | vcc | clang -E | clang -fsyntax-only | ratio |
+  |---|---|---|---|---|---|---|
+  | json.hpp, before | 1409 ns/token | 220 | 1.38 s | 0.14 s | 0.83 s | 0.60 |
+  | json.hpp, after | 330 | 222 | 0.47 s | 0.13 s | 0.83 s | 1.78 |
+  | each libstdc++ header alone, before | 1471 | 152 | 12.2 s | | 9.7 s | 0.80 |
+  | each libstdc++ header alone, after | 398 | 163 | 4.2 s | | 9.6 s | 2.27 |
+
+  Phases 1-7 are still 2.5x clang -E on json.hpp, and a sample is now flat
+  (the lexer, `lookup_keyword`, phase 7's `convert`, `stat`).  Next: the
+  old preprocessor's header cache (`frontend/pp/header-cache-*.cpp`:
+  regions recorded with the macros they read and wrote, replayed in a
+  later TU) behind the same kind of hook at `directive_include`; it pays
+  only across TUs, so it comes with a batch or vccd driver for cxxparse
+  (S5).  Gates: `bench/cxx-lex.py` 121/121, `bench/cxx-pp.py` as the base
+  (its `-dM` column differs by clang's version string only), and
+  `bench/cxx-parse.py` identical.
 - **S1 The parser without build-and-rewind** (3.0 item 3): recovery, the
   member-specification as one pass with ranges, the recognizer at the hot
   disambiguation sites, one lookup per token.  Gate: PLAN-cxx-parse's
