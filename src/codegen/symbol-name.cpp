@@ -84,7 +84,21 @@ VPRIV void codegen_symbol_name_append(cc *c, tbuf *b, uint32_t s)
     y = &c->syms[s];
     a = codegen_symbol_attributes(c, s);
     if (a->asmname) {
-        vtext_string_append(b, c->strs[a->asmname - 1].s);
+        const char *name = c->strs[a->asmname - 1].s;
+        bool plain = true;
+
+        for (const char *p = name; *p; p++)
+            if (!((*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z') ||
+                  (*p >= '0' && *p <= '9') || *p == '_' || *p == '.' ||
+                  *p == '$'))
+                plain = false;
+        /* a name the assembler would read as an expression (clang's
+           _GLOBAL__sub_I_a-b.cpp): quoted, as LLVM writes it */
+        if (!plain)
+            vtext_char_append(b, '"');
+        vtext_string_append(b, name);
+        if (!plain)
+            vtext_char_append(b, '"');
         return;
     }
     if (!y->name) {

@@ -678,8 +678,20 @@ libstdc++ and json), since sema cannot analyse a declaration kept as tokens.
   `src/test/cxx/run/constructors.cpp`.  LLVM's SingleSource/Regression/C++
   still needs [dcl.link] (`extern "C"` in the run-time headers),
   [class.derived], dynamic initialization and [dcl.enum].
-  Next: elaborated-type-specifiers in block and class scope, [dcl.link],
-  dynamic initialization of globals, static data members.
+  Then [dcl.link] (`dcl/dcl.link.cpp`: extern "C" and "C++", nested, the
+  brace-less form as extern; C language linkage names unmangled) with
+  extern "C" in src/test/rt's headers, and dynamic initialization of
+  namespace-scope variables ([basic.start.dynamic]) as clang's:
+  `__cxx_global_var_init[.N]` per variable, called in definition order
+  by `_GLOBAL__sub_I_<file>` from .init_array; address constants
+  ([expr.const]/11) stay static data.  C5.1 915 -> 950.  First LLVM
+  import: `src/test/cxx/run/llvm-global_type.cpp`; the others need
+  `__builtin_va_list` (the run time's stdio.h), [class.derived],
+  [dcl.enum], [class.local], __cxa_atexit.  Open: gcc/pr58277-2's static
+  referenced only from unreachable code is dropped by vcc's -O0 code
+  generator, kept by clang (symbols).
+  Next: `__builtin_va_list`, elaborated-type-specifiers in block and class
+  scope, static data members.
 
 ### S5. Conversions by user code, lambdas, the rest of [expr]
 

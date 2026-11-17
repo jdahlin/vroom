@@ -22,10 +22,13 @@ struct lowering_failure {
 
 /* every function and variable of a translation unit whose declarations are
    all well-formed, added to c (ast_builder_open) with its definition;
-   false, and why, at the first construct not lowered */
+   false, and why, at the first construct not lowered.  main_path is the
+   main source file's path, which names the function that runs the
+   dynamic initializations */
 bool lower_translation_unit(const semantic_analysis &analysis,
                             token_stream &tokens, cc *c, int target,
-                            lowering_failure &why);
+                            lowering_failure &why,
+                            const char *main_path = nullptr);
 
 } // namespace cplusplus
 

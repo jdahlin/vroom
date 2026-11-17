@@ -83,6 +83,9 @@ void ast_builder_symbol_assembler_name(cc *c, uint32_t s, const char *name,
 /* emitted though nothing refers to it (attribute used); a static local
    is then a top-level symbol too */
 void ast_builder_symbol_keep(cc *c, uint32_t s);
+/* a function the program's start runs (.init_array; the default
+   priority): GNU C's __attribute__((constructor)) */
+void ast_builder_symbol_constructor(cc *c, uint32_t s);
 void ast_builder_symbol_flags_add(cc *c, uint32_t s, uint32_t flags);
 /* a function's body block, or a variable's initializer */
 void ast_builder_symbol_body(cc *c, uint32_t s, uint32_t node);

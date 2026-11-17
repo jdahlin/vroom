@@ -123,6 +123,12 @@ analysis_result semantic_analysis::declare(node_index declaration,
            contains the extern specifier ... and neither an initializer nor
            a function-body" */
         definition = !s.extern_ || initialized;
+        /* [dcl.link]/7: "A declaration directly contained in a
+           linkage-specification is treated as if it contains the extern
+           specifier ([dcl.stc]) for the purpose of determining the linkage
+           of the declared name and whether it is a definition." */
+        if (linkage_without_braces && !scope)
+            definition = initialized;
         /* [dcl.ref]/5: "The declaration of a reference shall contain an
            initializer except when the declaration contains an explicit
            extern specifier" */

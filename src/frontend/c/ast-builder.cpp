@@ -150,6 +150,11 @@ static attrs *ast_builder_attributes(cc *c, uint32_t s)
     return &c->attr[c->syms[s].attrs];
 }
 
+void ast_builder_symbol_constructor(cc *c, uint32_t s)
+{
+    ast_builder_attributes(c, s)->constructor = 1;
+}
+
 void ast_builder_symbol_keep(cc *c, uint32_t s)
 {
     ast_builder_attributes(c, s)->used = 1;

@@ -294,6 +294,9 @@ struct entity {
     /* a class: its user-declared constructors (a chain through
        next_constructor) and destructor, 0 if none */
     entity_index first_constructor = 0, destructor = 0;
+    /* [dcl.link]/1: a function or variable with C language linkage,
+       whose name is its symbol */
+    bool c_language_linkage = false;
 };
 
 /* one declaration of an entity: the syntax node that declares it */
@@ -749,6 +752,15 @@ class semantic_analysis
     analysis_result empty_declaration(node_index n);
     analysis_result simple_declaration(node_index n);
     analysis_result function_definition(node_index n);
+    /* [dcl.link]: extern "C" or extern "C++", and the declarations in it */
+    analysis_result linkage_specification(node_index n);
+    /* a declaration of the kinds analysis has (declaration's switch) */
+    analysis_result declaration_by_kind(node_index n);
+    /* [dcl.link]/5: the language linkage of the declarations analysed
+       now: "C" (true) or "C++"; and whether the linkage-specification is
+       the declaration's own, without braces ([dcl.link]/7) */
+    bool c_language = false;
+    bool linkage_without_braces = false;
     analysis_result init_declarators(node_index declaration,
                                      node_index specifiers, bool definition);
 

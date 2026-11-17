@@ -109,30 +109,32 @@ analysis_result semantic_analysis::declaration(node_index n)
     d.node = n;
     current_declaration = n;
     size_t unsupported_before = unsupported.size();
-    if (!parsed_completely(n)) {
+    if (!parsed_completely(n))
         d.result = analysis_result::not_parsed;
-    } else {
-        switch (tree[n].kind) {
-        case syntax_kind::empty_declaration:
-            d.result = empty_declaration(n);
-            break;
-        case syntax_kind::simple_declaration:
-            d.result = simple_declaration(n);
-            break;
-        case syntax_kind::function_definition:
-            d.result = function_definition(n);
-            break;
-        default:
-            d.result = not_supported(n);
-            break;
-        }
-    }
+    else
+        d.result = declaration_by_kind(n);
     if (d.result == analysis_result::unsupported)
         d.first_unsupported = static_cast<uint32_t>(unsupported_before);
     if (d.result != analysis_result::well_formed)
         hold_names(n);
     declarations.append(d);
     return d.result;
+}
+
+analysis_result semantic_analysis::declaration_by_kind(node_index n)
+{
+    switch (tree[n].kind) {
+    case syntax_kind::empty_declaration:
+        return empty_declaration(n);
+    case syntax_kind::simple_declaration:
+        return simple_declaration(n);
+    case syntax_kind::function_definition:
+        return function_definition(n);
+    case syntax_kind::linkage_specification:
+        return linkage_specification(n);
+    default:
+        return not_supported(n);
+    }
 }
 
 void semantic_analysis::translation_unit()

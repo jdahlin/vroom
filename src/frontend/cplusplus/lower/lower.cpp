@@ -35,8 +35,9 @@ class c_lowering
 {
   public:
     c_lowering(const semantic_analysis &analysis, token_stream &tokens, cc *c,
-               int target)
-        : analysis(analysis), tokens(tokens), c(c), target(target)
+               int target, const char *main_path)
+        : analysis(analysis), tokens(tokens), c(c), target(target),
+          main_path(main_path)
     {
         symbols.resize(analysis.entity_table.size());
         for (uint32_t &s : symbols)
@@ -58,6 +59,12 @@ class c_lowering
     token_stream &tokens;
     cc *c;
     int target;
+    const char *main_path;
+    /* [basic.start.dynamic]: the variables of namespace scope initialized
+       dynamically, in the order of their definitions */
+    owned_array<entity_index> dynamic;
+    bool dynamic_initialization();
+    uint32_t local_function(const char *name, size_t length);
     /* the C symbol of each entity, 0 until made */
     owned_array<uint32_t> symbols;
     /* the C struct of each class, 0 until made */
@@ -176,6 +183,8 @@ class c_lowering
     bool function_definition(entity_index e);
     bool variable_definition(entity_index e);
     bool constant_initializer(uint32_t n) const;
+    bool address_constant(uint32_t n) const;
+    bool static_lvalue(uint32_t n) const;
 };
 
 /* ---- types ---------------------------------------------------------- */
@@ -1368,6 +1377,72 @@ uint32_t c_lowering::loop_body(uint32_t n, bool is_switch)
     return s;
 }
 
+/* whether the glvalue n designates an object or function of static
+   storage duration ([basic.stc.static]) at an address known before the
+   program runs: a variable's, a function, a string literal, or a part of
+   one at a constant place */
+bool c_lowering::static_lvalue(uint32_t n) const
+{
+    const semantic_node &x = node(n);
+    switch (x.kind) {
+    case semantic_kind::string_literal:
+        return true;
+    case semantic_kind::entity: {
+        const entity &e = analysis.entity_table[x.a];
+        if (is_reference(e.type))
+            return false;
+        return e.kind == entity_kind::function ||
+               (e.kind == entity_kind::variable && !e.automatic &&
+                !e.nonstatic_member);
+    }
+    case semantic_kind::member:
+        return static_lvalue(x.a);
+    case semantic_kind::subscript:
+        return address_constant(x.a) && constant_initializer(x.b) &&
+               node(x.b).kind == semantic_kind::constant;
+    case semantic_kind::indirection:
+        return address_constant(x.a);
+    default:
+        return false;
+    }
+}
+
+/* [expr.const]/11: "a prvalue core constant expression of pointer type ...
+   contains the address of an object with static storage duration, ... the
+   address of a non-immediate function, or a null pointer value": an
+   address the linker resolves */
+bool c_lowering::address_constant(uint32_t n) const
+{
+    const semantic_node &x = node(n);
+    switch (x.kind) {
+    case semantic_kind::address:
+        return static_lvalue(x.a);
+    case semantic_kind::conversion:
+        switch (static_cast<conversion_kind>(x.op)) {
+        case conversion_kind::array_to_pointer:
+        case conversion_kind::function_to_pointer:
+            return static_lvalue(x.a);
+        case conversion_kind::pointer:
+        case conversion_kind::qualification_cast:
+        case conversion_kind::pointer_cast:
+            return address_constant(x.a);
+        default:
+            return false;
+        }
+    case semantic_kind::binary: {
+        /* E1 + E2, E1 - E2 of a pointer and a constant integer */
+        if (record(x.type).kind != type_kind::pointer)
+            return false;
+        const semantic_node &a = node(x.a), &b = node(x.b);
+        if (record(a.type).kind == type_kind::pointer)
+            return address_constant(x.a) && b.kind == semantic_kind::constant;
+        return address_constant(x.b) && a.kind == semantic_kind::constant;
+    }
+    default:
+        return false;
+    }
+}
+
 /* whether an initializer is a constant C emits as data */
 bool c_lowering::constant_initializer(uint32_t n) const
 {
@@ -1385,11 +1460,16 @@ bool c_lowering::constant_initializer(uint32_t n) const
         return true;
     }
     case semantic_kind::conversion:
+        if (address_constant(n))
+            return true;
         return x.evaluation == constness::constant &&
                static_cast<conversion_kind>(x.op) !=
                    conversion_kind::lvalue_to_rvalue;
+    case semantic_kind::bind_reference:
+        /* a reference bound to an object of static storage duration */
+        return static_lvalue(x.a);
     default:
-        return x.evaluation == constness::constant;
+        return x.evaluation == constness::constant || address_constant(n);
     }
 }
 
@@ -1757,15 +1837,131 @@ bool c_lowering::variable_definition(entity_index e)
     if (x.definition) {
         /* [basic.start.static]/2: constant initialization; anything else is
            dynamic initialization, which needs code before main */
-        if (!constant_initializer(x.definition))
-            return fail("dynamic initialization of a variable",
-                        node(x.definition).at);
+        if (!constant_initializer(x.definition)) {
+            /* [basic.start.static]/2: zero-initialized, then initialized
+               by dynamic_initialization */
+            dynamic.append(e);
+            ast_builder_symbol_flags_add(c, s, AST_SYMBOL_FLAG_DEFINED);
+            return true;
+        }
         uint32_t init = expression(x.definition);
         if (!init)
             return false;
         ast_builder_symbol_body(c, s, init);
     }
     ast_builder_symbol_flags_add(c, s, AST_SYMBOL_FLAG_DEFINED);
+    return true;
+}
+
+/* a function void name(void) of internal linkage, named as written (its
+   body to come) */
+uint32_t c_lowering::local_function(const char *name, size_t length)
+{
+    ast_qualified_type f = ast_builder_type_function(
+        c, ast_builder_type_basic(AST_TYPE_VOID), nullptr, 0, 0);
+    uint32_t s = ast_builder_symbol(c, AST_SYMBOL_FUNCTION, name, length, f,
+                                    AST_STORAGE_STATIC, 0, 0);
+    owned_buffer written;
+    if (target == PP_DARWIN)
+        vbuffer_string_append(written.get(), "_");
+    vbuffer_append(written.get(), name, length);
+    ast_builder_symbol_assembler_name(c, s, written.data(), written.size());
+    ast_builder_toplevel(c, s);
+    return s;
+}
+
+/*
+ * [basic.start.dynamic]/2: "Dynamic initialization of non-block variables
+ * ... Within a single translation unit, the initialization of ... variables
+ * with ordered initialization is sequenced before ... initialization of
+ * the variables defined later in the translation unit."  [impl.clang]: one
+ * internal function per variable, __cxx_global_var_init (then .1, .2,
+ * ...), called in order by _GLOBAL__sub_I_<the source file's name>, which
+ * .init_array runs before main ([basic.start.dynamic]/5 lets it).
+ */
+bool c_lowering::dynamic_initialization()
+{
+    ast_qualified_type v = ast_builder_type_basic(AST_TYPE_VOID);
+    owned_array<uint32_t> calls;
+    for (size_t i = 0; i < dynamic.size(); i++) {
+        entity_index e = dynamic[i];
+        const entity &x = analysis.entity_table[e];
+        const semantic_node &init = node(x.definition);
+        if (init.kind == semantic_kind::initializer_list)
+            /* an aggregate's elements, some not constant: each stored */
+            return fail("dynamic initialization of an aggregate", init.at);
+        qualified_type object = x.type;
+        if (record(object).kind == type_kind::class_type &&
+            analysis.entity_table[record(object).entity].destructor)
+            /* [basic.start.term]: __cxa_atexit */
+            return fail("a static object with a destructor", init.at);
+        owned_buffer name;
+        vbuffer_string_append(name.get(), "__cxx_global_var_init");
+        if (i)
+            vbuffer_format_append(name.get(), ".%u", static_cast<unsigned>(i));
+        uint32_t f = local_function(name.data(), name.size());
+        in_function = true;
+        labels.clear();
+        live.clear();
+        uint32_t s = symbol(e, init.at);
+        ast_qualified_type t = type(x.type, init.at);
+        uint32_t variable =
+            make(AST_NODE_VARIABLE, t, s, 0, 0, 0, AST_NODE_FLAG_LVALUE);
+        uint32_t done = 0;
+        if (init.kind == semantic_kind::construct) {
+            owned_array<uint32_t> arguments;
+            const uint32_t *items = analysis.semantics.items(init.first);
+            for (uint32_t k = 0; k < init.count; k++)
+                arguments.append(expression(items[k]));
+            done = special_call(
+                init.b, address_of(variable, ast_builder_type_pointer(c, t)),
+                arguments.data(), init.count, init.at);
+        } else if (is_reference(x.type)) {
+            done = make(AST_NODE_ASSIGN, t, variable, expression(x.definition),
+                        0, 0, 0);
+        } else {
+            done = make(AST_NODE_ASSIGN, AST_QUALIFIED_TYPE_UNQUALIFIED(t),
+                        variable, expression(x.definition), 0, 0, 0);
+        }
+        in_function = false;
+        if (failure.what || !done)
+            return false;
+        uint32_t statement_node =
+            ast_builder_node(c, AST_NODE_EXPRESSION, v, done, 0, 0, 0, 0);
+        ast_builder_symbol_body(c, f, block(&statement_node, 1));
+        ast_builder_symbol_flags_add(
+            c, f, AST_SYMBOL_FLAG_DEFINED | AST_SYMBOL_FLAG_USED);
+        ast_qualified_type ft = ast_builder_type_function(c, v, nullptr, 0, 0);
+        uint32_t callee =
+            cast(make(AST_NODE_VARIABLE, ft, f, 0, 0, 0, 0),
+                 ast_builder_type_pointer(c, ft), AST_CAST_FUNCTION_DECAY);
+        uint32_t call = make(AST_NODE_CALL, v, callee, 0, 0, 0, 0);
+        calls.append(
+            ast_builder_node(c, AST_NODE_EXPRESSION, v, call, 0, 0, 0, 0));
+    }
+    owned_buffer name;
+    vbuffer_string_append(name.get(), "_GLOBAL__sub_I_");
+    const char *base = main_path;
+    if (!base)
+        base = "";
+    for (const char *p = base; *p; p++)
+        if (*p == '/')
+            base = p + 1;
+    /* [impl.clang]: the file's name with each character that cannot
+       continue a pp-number ([lex.ppnumber]: a letter, a digit, _ or .)
+       replaced by _ */
+    for (const char *p = base; *p; p++) {
+        char k = *p;
+        if (!((k >= 'a' && k <= 'z') || (k >= 'A' && k <= 'Z') ||
+              (k >= '0' && k <= '9') || k == '_' || k == '.'))
+            k = '_';
+        vbuffer_append(name.get(), &k, 1);
+    }
+    uint32_t start = local_function(name.data(), name.size());
+    ast_builder_symbol_body(
+        c, start, block(calls.data(), static_cast<uint32_t>(calls.size())));
+    ast_builder_symbol_flags_add(c, start, AST_SYMBOL_FLAG_DEFINED);
+    ast_builder_symbol_constructor(c, start);
     return true;
 }
 
@@ -1822,6 +2018,8 @@ bool c_lowering::translation_unit()
                 return false;
         }
     }
+    if (!dynamic.empty() && !dynamic_initialization())
+        return false;
     /* the member functions defined, in the order of their definitions */
     for (const semantic_analysis::definition_record &d : analysis.definitions) {
         const entity &x = analysis.entity_table[d.entity];
@@ -1838,9 +2036,9 @@ bool c_lowering::translation_unit()
 
 bool lower_translation_unit(const semantic_analysis &analysis,
                             token_stream &tokens, cc *c, int target,
-                            lowering_failure &why)
+                            lowering_failure &why, const char *main_path)
 {
-    c_lowering lowering(analysis, tokens, c, target);
+    c_lowering lowering(analysis, tokens, c, target, main_path);
     bool lowered = lowering.translation_unit();
     why = lowering.failure;
     return lowered;

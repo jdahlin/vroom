@@ -137,7 +137,8 @@ static int compile(const cplusplus_compile_options *o, pp *p,
     if (!diagnostics.error_count && co->emit) {
         cc *c = ast_builder_open(p, co);
         lowering_failure why;
-        if (!lower_translation_unit(analysis, tokens, c, co->target, why)) {
+        if (!lower_translation_unit(analysis, tokens, c, co->target, why,
+                                    o->path)) {
             source_position at = tokens.position(why.at);
             if (why.subclause)
                 dprintf(o->errfd,

@@ -120,7 +120,7 @@ bool itanium_mangler::mangled_name(entity_index e)
     bool internal_variable = x.kind == entity_kind::variable &&
                              x.linkage_of_name == linkage::internal;
     if (global && !internal_variable &&
-        (x.kind == entity_kind::variable || is_main)) {
+        (x.kind == entity_kind::variable || is_main || x.c_language_linkage)) {
         vbuffer_append(out, identifier, length);
         return true;
     }

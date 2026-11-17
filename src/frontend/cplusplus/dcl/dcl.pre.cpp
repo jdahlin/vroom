@@ -861,6 +861,13 @@ analysis_result semantic_analysis::declare_with_initializer(
     r = declare(declaration, m.id, kind, type, s, definition, initialized,
                 declared_entity);
     last_declared = declared_entity;
+    /* [dcl.link]/1: "All functions and variables whose names have external
+       linkage ... have a language linkage"; /5: the linkage-specification's
+       ([dcl.link]/6: a later declaration without one keeps it) */
+    if (r == analysis_result::well_formed && c_language && !current_scope &&
+        (kind == entity_kind::function || kind == entity_kind::variable) &&
+        entity_table[declared_entity].linkage_of_name != linkage::internal)
+        entity_table[declared_entity].c_language_linkage = true;
     /* the declaration statement's variables (statement) */
     if (r == analysis_result::well_formed && function_state.active &&
         kind == entity_kind::variable)

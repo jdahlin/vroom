@@ -1,0 +1,80 @@
+/*
+ * dcl.link.cpp: [dcl.link] Linkage specifications.
+ *
+ *     linkage-specification:
+ *         extern string-literal { declaration-seq_opt }
+ *         extern string-literal declaration
+ *
+ * The grammar is namespace.def.cpp's.  [dcl.link]/2: "The string-literal
+ * indicates the required language linkage. ... Every implementation shall
+ * provide for linkage to functions written in the C programming language,
+ * "C", and linkage to C++ functions, "C++"."  /5: "Linkage specifications
+ * nest.  When linkage specifications nest, the innermost one determines
+ * the language linkage."  /1: "the names of functions with external linkage
+ * and variable names with external linkage" are the ones that have one; a
+ * function or variable of C language linkage is named in the object file
+ * by its identifier ([abi:mangling]: "entities with C linkage ... are not
+ * mangled").
+ */
+#include "../cplusplus-internal.h"
+#include "frontend/cplusplus/sema.h"
+
+namespace cplusplus
+{
+
+analysis_result semantic_analysis::linkage_specification(node_index n)
+{
+    const syntax_node &node = tree[n];
+    const syntax_child *children = tree.children(n);
+    if (node.child_count < 3 || !children[1].is_token())
+        return not_supported(n, "dcl.link");
+    /* [dcl.link]/4: "A linkage-specification shall inhabit a namespace
+       scope." */
+    owned_buffer spelling;
+    tokens.spelling(children[1].index(), spelling.get());
+    bool c = false;
+    if (spelling.size() == 3 && !memcmp(spelling.data(), "\"C\"", 3))
+        c = true;
+    else if (!(spelling.size() == 5 && !memcmp(spelling.data(), "\"C++\"", 5)))
+        /* [dcl.link]/2: "Use of a string-literal other than "C" or "C++" is
+           conditionally-supported, with implementation-defined
+           semantics." */
+        return not_supported(n, "dcl.link");
+    owned_array<node_index> inner;
+    bool braces = false;
+    for (uint32_t i = 2; i < node.child_count; i++) {
+        syntax_child x = children[i];
+        if (x.is_token()) {
+            braces = true;
+            continue;
+        }
+        if (syntax_is(tree, x, syntax_kind::declaration_seq)) {
+            for (uint32_t k = 0; k < tree[x.index()].child_count; k++) {
+                syntax_child y = tree.children(x.index())[k];
+                if (!y.is_token())
+                    inner.append(y.index());
+            }
+            continue;
+        }
+        inner.append(x.index());
+    }
+    bool saved = c_language;
+    bool saved_braces = linkage_without_braces;
+    c_language = c;
+    linkage_without_braces = !braces;
+    analysis_result result = analysis_result::well_formed;
+    for (node_index d : inner) {
+        current_declaration = d;
+        if (!parsed_completely(d)) {
+            result = worse(result, analysis_result::not_parsed);
+            continue;
+        }
+        result = worse(result, declaration_by_kind(d));
+    }
+    c_language = saved;
+    linkage_without_braces = saved_braces;
+    current_declaration = n;
+    return result;
+}
+
+} // namespace cplusplus
