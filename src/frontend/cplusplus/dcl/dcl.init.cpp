@@ -537,6 +537,19 @@ analysis_result semantic_analysis::initialize_from(node_index at,
     analysis_result r = expression(clause, m);
     if (r != analysis_result::well_formed)
         return r;
+    return initialize_with(at, m, type, direct, list, result);
+}
+
+/* the initialization of an object or reference of type type by the
+   analysed expression m (the rest of initialize_from) */
+analysis_result semantic_analysis::initialize_with(node_index at,
+                                                   expression_meaning &m,
+                                                   qualified_type type,
+                                                   bool direct, bool list,
+                                                   initialized_value &result)
+{
+    const struct type target = type_table[type.unqualified()];
+    analysis_result r = analysis_result::well_formed;
     if (target.kind == type_kind::lvalue_reference ||
         target.kind == type_kind::rvalue_reference) {
         /* [dcl.init]/17.2: "If the destination type is a reference type,

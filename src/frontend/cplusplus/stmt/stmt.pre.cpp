@@ -24,6 +24,7 @@
  * the attributes and the alternative; without, the alternative passes
  * through.  try-block is except.pre.cpp's.
  */
+#include "frontend/cplusplus/sema.h"
 #include "stmt.ambig.h"
 
 namespace cplusplus
@@ -465,6 +466,175 @@ node_index parser::substatement()
 {
     declarative_region block(names, scope_kind::block);
     return statement();
+}
+
+/* ---- semantic analysis ---------------------------------------------- */
+
+/*
+ * [stmt.pre]/1: one statement of a function body.  A statement whose rules
+ * are not written is unsupported, and the statements after it are still
+ * analysed: the names an unsupported declaration declares are held
+ * (hold_names), so that nothing after it rests on what it would have
+ * declared.
+ */
+analysis_result semantic_analysis::statement(syntax_child s)
+{
+    if (s.is_token())
+        return not_supported(current_declaration, "stmt.pre");
+    node_index n = s.index();
+    switch (tree[n].kind) {
+    case syntax_kind::compound_statement:
+        return compound_statement(n, 0);
+    case syntax_kind::expression_statement:
+        return expression_statement(n);
+    case syntax_kind::selection_statement:
+        return selection_statement(n);
+    case syntax_kind::iteration_statement:
+        return iteration_statement(n);
+    case syntax_kind::jump_statement:
+        return jump_statement(n);
+    case syntax_kind::labeled_statement:
+        return labeled_statement(n);
+    case syntax_kind::simple_declaration: {
+        /* [stmt.dcl]/1: "A declaration statement introduces one or more new
+           names into a block" */
+        analysis_result r = simple_declaration(n);
+        if (r != analysis_result::well_formed)
+            hold_names(n);
+        return r;
+    }
+    default:
+        return not_supported(n);
+    }
+}
+
+/*
+ * [stmt.pre]/2: "A substatement of a statement is one of the following:
+ * ... for a selection-statement, any of its statements ...; for an
+ * iteration-statement, its statement".  [stmt.select]/2: "If the
+ * substatement in a selection-statement is a single statement and not a
+ * compound-statement, it is as if it was rewritten to be a
+ * compound-statement containing the original substatement" (so for an
+ * iteration-statement, [stmt.iter]/2).  conflicts: the scope of the
+ * statement's condition, whose names the substatement's outermost block
+ * shall not redeclare ([basic.scope.block]/3).
+ */
+analysis_result semantic_analysis::substatement(syntax_child s,
+                                                entity_index conflicts)
+{
+    if (syntax_is(tree, s, syntax_kind::compound_statement))
+        return compound_statement(s.index(), conflicts);
+    if (!syntax_is(tree, s, syntax_kind::simple_declaration))
+        return statement(s);
+    entity_index outer = current_scope;
+    bool claimable = declarations_claimable;
+    open_scope(conflicts, false);
+    /* a claim just after it would be outside the implied block */
+    declarations_claimable = false;
+    analysis_result r = statement(s);
+    declarations_claimable = claimable;
+    current_scope = outer;
+    return r;
+}
+
+/* the node of a syntax child, or the declaration's for a token (where a
+   diagnostic about it is issued) */
+node_index semantic_analysis::node_of(syntax_child c) const
+{
+    if (c.is_token())
+        return current_declaration;
+    return c.index();
+}
+
+/*
+ * [stmt.pre]/1:
+ *
+ *     condition:
+ *         expression
+ *         attribute-specifier-seq_opt decl-specifier-seq declarator brace-or-equal-initializer
+ *
+ * [stmt.pre]/6: "The value of a condition that is an initialized
+ * declaration in a statement other than a switch statement is the value of
+ * the declared variable contextually converted to bool.  If that conversion
+ * is ill-formed, the program is ill-formed.  The value of a condition that
+ * is an initialized declaration in a switch statement is the value of the
+ * declared variable if it has integral or enumeration type ...  The value
+ * of a condition that is an expression is the value of the expression,
+ * contextually converted to bool for statements other than switch".
+ */
+analysis_result semantic_analysis::condition(syntax_child c, bool for_switch,
+                                             expression_meaning &m)
+{
+    node_index at = node_of(c);
+    analysis_result r = analysis_result::well_formed;
+    if (syntax_is(tree, c, syntax_kind::condition)) {
+        const syntax_node &node = tree[at];
+        const syntax_child *children = tree.children(at);
+        if (node.child_count != 3 ||
+            !syntax_is(tree, children[0], syntax_kind::decl_specifier_seq))
+            return not_supported(at, "dcl.attr");
+        specified s;
+        r = decl_specifier_seq(children[0].index(), s, false);
+        if (r == analysis_result::well_formed &&
+            (s.typedef_ || s.static_ || s.extern_ || s.inline_))
+            /* [stmt.pre]/8: "In the decl-specifier-seq of a condition, each
+               decl-specifier shall be either a type-specifier or
+               constexpr." */
+            r = ill_formed(at,
+                           "in the decl-specifier-seq of a condition, each "
+                           "decl-specifier shall be either a type-specifier "
+                           "or constexpr",
+                           "stmt.pre");
+        if (r == analysis_result::well_formed) {
+            bool claimable = declarations_claimable;
+            declarations_claimable = false;
+            in_condition = true;
+            r = declare_with_initializer(at, children[1], children[2], true, s,
+                                         false);
+            in_condition = false;
+            declarations_claimable = claimable;
+        }
+        if (r != analysis_result::well_formed) {
+            hold_names(at);
+            return r;
+        }
+        const entity &e = entity_table[last_declared];
+        m = expression_meaning();
+        m.category = value_category::lvalue;
+        m.type = e.type;
+        m.entity = last_declared;
+        m.evaluation = constness::unknown;
+        const struct type record = type_table[e.type.unqualified()];
+        if (record.kind == type_kind::lvalue_reference ||
+            record.kind == type_kind::rvalue_reference) {
+            m.type = record.operand;
+            m.entity = 0;
+        }
+    } else {
+        r = expression(c, m);
+        if (r != analysis_result::well_formed)
+            return r;
+    }
+    if (!for_switch)
+        return contextual_bool(at, m);
+    r = operand_value(at, m);
+    if (r != analysis_result::well_formed)
+        return r;
+    /* [stmt.switch]/2: "The condition shall be of integral type,
+       enumeration type, or class type. ... If the (possibly converted) type
+       is subject to integral promotions, the condition is converted to the
+       promoted type." */
+    if (!is_integral(m.type)) {
+        if (fundamental_of(m.type) == fundamental_type::none &&
+            !is_pointer(m.type))
+            return not_supported(at, "stmt.switch");
+        return ill_formed(at,
+                          "the condition shall be of integral type, "
+                          "enumeration type, or class type",
+                          "stmt.switch");
+    }
+    promote(m);
+    return analysis_result::well_formed;
 }
 
 } // namespace cplusplus

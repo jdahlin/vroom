@@ -236,8 +236,10 @@ node_index parser::parameter_declaration()
  */
 analysis_result semantic_analysis::parameter_declaration(node_index n,
                                                          qualified_type &type,
-                                                         bool &unnamed)
+                                                         bool &unnamed,
+                                                         token_index &id)
 {
+    id = 0;
     const syntax_node &node = tree[n];
     const syntax_child *children = tree.children(n);
     if (!node.child_count ||
@@ -265,6 +267,8 @@ analysis_result semantic_analysis::parameter_declaration(node_index n,
     declarator_meaning m;
     r = declarator(n, children[1], type, m);
     unnamed = !m.has_id;
+    if (m.has_id)
+        id = m.id;
     return r;
 }
 
@@ -334,10 +338,13 @@ analysis_result semantic_analysis::function(node_index parameters,
         declarations.append(c.index());
     }
     owned_array<qualified_type> list;
+    owned_array<parameter_meaning> named;
     for (size_t k = 0; k < declarations.size(); k++) {
         qualified_type t;
         bool unnamed = true;
-        analysis_result r = parameter_declaration(declarations[k], t, unnamed);
+        token_index id = 0;
+        analysis_result r =
+            parameter_declaration(declarations[k], t, unnamed, id);
         if (r != analysis_result::well_formed)
             return r;
         const struct type &record = type_table[t.unqualified()];
@@ -367,7 +374,16 @@ analysis_result semantic_analysis::function(node_index parameters,
         else if (record.kind == type_kind::function)
             t = qualified_type::make(type_table.pointer_to(t), cv_none);
         list.append(qualified_type::make(t.unqualified(), cv_none));
+        parameter_meaning parameter;
+        parameter.id = id;
+        parameter.type = t;
+        named.append(parameter);
     }
+    /* the last function declarator to finish is a function definition's
+       own: the ones in its parameters finish before it */
+    function_parameters.clear();
+    for (const parameter_meaning &parameter : named)
+        function_parameters.append(parameter);
     type = qualified_type::make(
         type_table.function(type, list.data(), list.size(), variadic), cv_none);
     return analysis_result::well_formed;

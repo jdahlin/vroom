@@ -194,6 +194,8 @@ static void write_declaration_claims(const semantic_analysis &analysis,
 {
     owned_buffer claim;
     for (const declared_name &d : analysis.declared) {
+        if (!d.claimable)
+            continue;
         const syntax_node &node = tree[d.declaration];
         bool from_macro = false;
         for (token_index t = node.first_token; t < node.end_token; t++)
@@ -315,9 +317,17 @@ static void write_type_claims(const semantic_analysis &analysis,
         if (!write_expression_claim(analysis.type_table, x.meaning.type,
                                     x.meaning.category, claim.get()))
             continue;
-        const syntax_node &node = tree[x.declaration];
-        source_position at = tokens.position(node.end_token - 1);
-        uint32_t extent = tokens[node.end_token - 1].preprocessing.extent;
+        if (!x.placeable)
+            continue;
+        /* just after the statement of a block the expression is in, or
+           after its declaration */
+        token_index after = tree[x.declaration].end_token - 1;
+        if (x.place)
+            after = x.place;
+        if (tokens[after].preprocessing.expansion)
+            continue;
+        source_position at = tokens.position(after);
+        uint32_t extent = tokens[after].preprocessing.extent;
         vbuffer_format_append(out, "%s\t%u:%u\t", at.file_name, at.line,
                               at.column + extent);
         vbuffer_append(out, spelling.data(), spelling.size());

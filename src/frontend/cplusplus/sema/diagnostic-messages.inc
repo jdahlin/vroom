@@ -26,3 +26,8 @@ DIAGNOSTIC(sema_narrowing, EXTENSION_WARNING, ERROR, "c++11-narrowing",
    clang's -Wwritable-strings from C++11 on */
 DIAGNOSTIC(sema_writable_string, EXTENSION_WARNING, WARNING, "writable-strings",
            "a string literal converts to a pointer to const characters: the conversion to char * was removed in C++11 ([diff.lex]/3)")
+/* [stmt.return]/2: clang's -Wreturn-mismatch, an error by default */
+DIAGNOSTIC(sema_return_without_value, EXTENSION_WARNING, ERROR, "return-mismatch",
+           "a return statement with no operand shall be used only in a function whose return type is cv void ([stmt.return]/2)")
+DIAGNOSTIC(sema_return_with_value, EXTENSION_WARNING, ERROR, "return-mismatch",
+           "a return statement with an operand that is not of type void shall be used only in a function whose return type is not cv void ([stmt.return]/2)")

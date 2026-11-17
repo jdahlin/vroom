@@ -192,10 +192,14 @@ def load(d=None):
             if kind not in ('def',):
                 continue
             body = st[1].strip().rstrip(';')
-            m = re.match(r'(\w+)\s*:\s*(.*)', body, re.S)
+            m = re.match(r'(\w*)\s*:\s*(.*)', body, re.S)
             if not m:
                 continue
             name, rest = m.group(1), m.group(2)
+            if not name:
+                # an anonymous def: a group alias (def : DiagGroup<"narrowing", [CXX11Narrowing]>)
+                name = f':anonymous:{len(groups)}:{len(diags)}'
+
             parents = _split_top(rest)
             head = parents[0]
             hm = re.match(r'(\w+)\s*<(.*)>\s*$', head, re.S)

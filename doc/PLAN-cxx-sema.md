@@ -446,6 +446,35 @@ libstdc++ and json), since sema cannot analyse a declaration kept as tokens.
   refuted; 1098 expression types verified, 0 refuted, 118 not checkable;
   757 constants verified, 0 refuted.  Rule coverage: basic 4/112, dcl
   38/238, expr 18/152.
+- Status (2026-11-17, S1c done): function definitions with a compound
+  body.  Block scopes (`open_scope`, `lookup` outward; parameters in their
+  own scope, [basic.scope.param]/1 and [basic.scope.block]/3 against
+  redeclaring them; automatic variables are not constant), every statement
+  of [stmt] but range-`for`, `if constexpr` and computed `goto`: labels
+  ([stmt.label]), `case` constants converted to the condition's promoted
+  type with duplicates and narrowing ([stmt.switch]), `break`/`continue`
+  placement, `goto` and `switch` jumps past an initialized declaration
+  ([stmt.dcl]/3), conditions ([stmt.pre]), `return` ([stmt.return]/2 with
+  clang's `-Wreturn-mismatch`, an error by default).  Calls to one
+  function, by name or through a pointer: argument count
+  ([over.match.viable]/2), copy-initialized parameters, void through an
+  ellipsis ([expr.call]/12).  Unsupported for now: a function or `extern`
+  declared at block scope, a reference returned from a local by name
+  (implicit move, [class.copy.elision]/3), C++26's `_`.  A name held by an
+  unsupported declaration, also inside `extern "C" { }` and in templates
+  or using-declarations, makes the name's entity unknown (overloads the
+  analysis did not see).  `-Wno-error=X` demotes a warning that is an
+  error by default (`-Wno-error=narrowing`; `bench/clangdiag.py` now loads
+  clang's anonymous group aliases).  Type claims inside a body are placed
+  after the enclosing block statement and only at that scope; the
+  harnesses leave claims in files with line markers unchecked, compare
+  nothing after clang's fatal error, and give clang `-fno-signed-char` as
+  the driver does for aarch64 Linux.  `src/test/cxx/sema/gram/stmt.*.cpp`
+  has the cases.  C3: 4191 runs, no crash; 3515 declarations as clang, 0
+  we reject and clang accepts, 67 we accept and clang rejects, 51133
+  unsupported, 8952 not parsed, 189 after a fatal error.  C4: 9110
+  declared types verified, 0 refuted; 16222 expression types verified, 0
+  refuted, 1262 not checkable; 5065 constants verified, 0 refuted.
 
 ### S2. Names and entities in full
 

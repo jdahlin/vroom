@@ -11,6 +11,7 @@
  *
  * coroutine-return-statement is stmt.return.coroutine.cpp's.
  */
+#include "frontend/cplusplus/sema.h"
 #include "stmt.ambig.h"
 
 namespace cplusplus
@@ -45,6 +46,142 @@ node_index parser::jump_statement()
     if (!accept(preprocessing_op_or_punc::SEMICOLON))
         return expected("';' after the jump-statement", "stmt.jump");
     return finish_node(syntax_kind::jump_statement, mark, first);
+}
+
+/* ---- semantic analysis ---------------------------------------------- */
+
+/*
+ * [stmt.jump]/1:
+ *
+ *     jump-statement:
+ *         break ;
+ *         continue ;
+ *         return expr-or-braced-init-list_opt ;
+ *         coroutine-return-statement
+ *         goto identifier ;
+ */
+analysis_result semantic_analysis::jump_statement(node_index n)
+{
+    const syntax_node &node = tree[n];
+    const syntax_child *children = tree.children(n);
+    if (!node.child_count || !children[0].is_token())
+        return not_supported(n, "stmt.jump");
+    switch (p.keyword_of(tokens[children[0].index()])) {
+    case standard_keyword::break_:
+        /* [stmt.break]/1: "The break statement shall occur only in an
+           iteration-statement or a switch statement" */
+        if (!function_state.breakable)
+            return ill_formed(n,
+                              "the break statement shall occur only in an "
+                              "iteration-statement or a switch statement",
+                              "stmt.break");
+        return analysis_result::well_formed;
+    case standard_keyword::continue_:
+        /* [stmt.cont]/1: "The continue statement shall occur only in an
+           iteration-statement" */
+        if (!function_state.loops)
+            return ill_formed(n,
+                              "the continue statement shall occur only in an "
+                              "iteration-statement",
+                              "stmt.cont");
+        return analysis_result::well_formed;
+    case standard_keyword::goto_: {
+        if (node.child_count != 3 || !children[1].is_token() ||
+            tokens[children[1].index()].kind != token_kind::identifier)
+            /* GNU's computed goto */
+            return not_supported(n, "stmt.goto");
+        goto_record g;
+        g.name = tokens.identifier(children[1].index());
+        g.point.scope = current_scope;
+        g.point.at = children[0].index();
+        g.node = n;
+        function_state.gotos.append(g);
+        return analysis_result::well_formed;
+    }
+    case standard_keyword::return_:
+        return return_statement(n);
+    default:
+        return not_supported(n, "stmt.jump");
+    }
+}
+
+/*
+ * [stmt.return]/2: "A return statement with no operand shall be used only
+ * in a function whose return type is cv void, a constructor, or a
+ * destructor.  A return statement with an operand of type void shall be
+ * used only in a function whose return type is cv void.  A return statement
+ * with any other operand shall be used only in a function whose return type
+ * is not cv void; the return statement initializes the glvalue result or
+ * prvalue result object of the (explicit or implicit) function call by
+ * copy-initialization from the operand."  clang's -Wreturn-mismatch for
+ * the first and the last, an error by default.
+ */
+analysis_result semantic_analysis::return_statement(node_index n)
+{
+    const syntax_node &node = tree[n];
+    const syntax_child *children = tree.children(n);
+    qualified_type returns = function_state.returns;
+    bool returns_void = fundamental_of(returns) == fundamental_type::void_;
+    if (node.child_count == 2) {
+        if (returns_void)
+            return analysis_result::well_formed;
+        return extension_used(diagnostic_id::sema_return_without_value,
+                              children[0].index(), nullptr);
+    }
+    if (node.child_count != 3)
+        return not_supported(n, "stmt.return");
+    syntax_child operand = children[1];
+    initialized_value result;
+    if (syntax_is(tree, operand, syntax_kind::braced_init_list)) {
+        if (returns_void)
+            return ill_formed(n,
+                              "a return statement with any other operand "
+                              "shall be used only in a function whose return "
+                              "type is not cv void",
+                              "stmt.return");
+        qualified_type type = returns;
+        return list_initialization(operand.index(), type, false, result);
+    }
+    /* [class.copy.elision]/3: "An implicitly movable entity is a variable
+       of automatic storage duration that is either a non-volatile object
+       or an rvalue reference to a non-volatile object type."  Returned by
+       name it is an xvalue in C++23 and is first tried as an rvalue in
+       C++11 to C++20; for a reference result that decides whether the
+       initialization is well-formed, which analysis does not follow */
+    type_kind result_kind = type_table[returns.unqualified()].kind;
+    if (result_kind == type_kind::lvalue_reference ||
+        result_kind == type_kind::rvalue_reference) {
+        syntax_child named = operand;
+        while (!named.is_token() &&
+               tree[named.index()].kind == syntax_kind::primary_expression &&
+               tree[named.index()].child_count == 3)
+            named = tree.children(named.index())[1];
+        if (named.is_token() &&
+            tokens[named.index()].kind == token_kind::identifier) {
+            entity_index e = lookup(tokens.identifier(named.index()));
+            if (e && entity_table[e].automatic)
+                return not_supported(n, "class.copy.elision");
+        }
+    }
+    expression_meaning m;
+    analysis_result r = expression(operand, m);
+    if (r != analysis_result::well_formed)
+        return r;
+    bool void_operand = m.category == value_category::prvalue &&
+                        fundamental_of(m.type) == fundamental_type::void_;
+    if (returns_void) {
+        if (void_operand)
+            return analysis_result::well_formed;
+        return extension_used(diagnostic_id::sema_return_with_value,
+                              children[0].index(), nullptr);
+    }
+    if (void_operand)
+        return ill_formed(n,
+                          "a return statement with an operand of type void "
+                          "shall be used only in a function whose return "
+                          "type is cv void",
+                          "stmt.return");
+    return initialize_with(n, m, returns, false, false, result);
 }
 
 } // namespace cplusplus

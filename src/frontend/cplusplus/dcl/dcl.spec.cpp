@@ -996,7 +996,7 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
         if (tok.kind == token_kind::identifier) {
             /* a type-name ([dcl.type.simple]/1): at global namespace scope,
                a typedef-name declared there before */
-            entity_index e = entity_table.find(0, tokens.identifier(t));
+            entity_index e = lookup(tokens.identifier(t));
             if (!e || entity_table[e].kind != entity_kind::typedef_name)
                 return not_supported(seq, "basic.lookup.unqual");
             if (named || !k.first)

@@ -86,7 +86,22 @@ analysis_result semantic_analysis::declare(node_index declaration,
 {
     declared_entity = 0;
     uint32_t name = tokens.identifier(id);
-    entity_index prior = entity_table.find(0, name);
+    entity_index scope = current_scope;
+    entity_index prior = entity_table.find(scope, name);
+    if (scope) {
+        /* [dcl.inline]/4: "The inline specifier shall not appear on a block
+           scope declaration" */
+        if (s.inline_)
+            return ill_formed_at_token(id,
+                                       "the inline specifier shall not "
+                                       "appear on a block scope declaration",
+                                       "dcl.inline");
+        /* a block-scope declaration of a function, or with extern: it
+           declares the namespace's entity of the name ([basic.link]/7),
+           not analysed yet */
+        if (kind == entity_kind::function || s.extern_)
+            return not_supported(declaration, "basic.link");
+    }
     /* [dcl.array]/8: "if there is a preceding declaration of the entity in
        the same scope in which the bound was specified, an omitted array
        bound is taken to be the same as in that earlier declaration" */
@@ -161,6 +176,8 @@ analysis_result semantic_analysis::declare(node_index declaration,
     uint32_t cv = cv_of(type_table, type);
     bool const_object = kind == entity_kind::variable && (cv & cv_const) &&
                         !(cv & cv_volatile) && !s.extern_ && !s.inline_;
+    if (scope)
+        return declare_local(declaration, id, kind, type, s, declared_entity);
     if (prior) {
         entity &e = entity_table[prior];
         /* declared by a declaration not analysed (hold_names) */
@@ -263,8 +280,133 @@ analysis_result semantic_analysis::declare(node_index declaration,
     d.id = id;
     d.kind = kind;
     d.type = type;
+    d.claimable = declarations_claimable;
     declared.append(d);
     return analysis_result::well_formed;
+}
+
+/*
+ * [basic.scope.block]/1: "A name declared in a block is local to that
+ * block; it has block scope."  A local variable or typedef-name, its
+ * object's rules checked by declare.
+ */
+analysis_result semantic_analysis::declare_local(
+    node_index declaration, token_index id, entity_kind kind,
+    qualified_type type, const specified &s, entity_index &declared_entity)
+{
+    uint32_t name = tokens.identifier(id);
+    entity_index scope = current_scope;
+    entity_index prior = entity_table.find(scope, name);
+    if (prior) {
+        const entity &e = entity_table[prior];
+        if (e.kind == entity_kind::none)
+            return not_supported(declaration, "basic.scope.declarative");
+        /* C++26's name-independent declarations (P2169, not in C++20): a
+           variable named _ may be declared again */
+        owned_buffer spelling;
+        tokens.spelling(id, spelling.get());
+        if (spelling.size() == 1 && spelling.data()[0] == '_')
+            return not_supported(declaration, "basic.scope.declarative");
+        /* [dcl.typedef]/6: "In a given non-class scope, a typedef
+           specifier can be used to redeclare the name of any type declared
+           in that scope to refer to the type to which it already refers." */
+        if (e.kind == entity_kind::typedef_name &&
+            kind == entity_kind::typedef_name) {
+            if (!(e.type == type))
+                return ill_formed_at_token(id,
+                                           "a typedef specifier shall not be "
+                                           "used to redeclare the name of a "
+                                           "type to refer to a different type",
+                                           "dcl.typedef");
+            entity_table.add_declaration(prior, declaration);
+            declared_entity = prior;
+            return analysis_result::well_formed;
+        }
+        if (e.kind != kind)
+            return ill_formed_at_token(id,
+                                       "declarations of the same name in a "
+                                       "declarative region shall all refer to "
+                                       "the same entity, or all to functions",
+                                       "basic.scope.declarative");
+        /* [basic.def.odr]/1: "No translation unit shall contain more than
+           one definition of any variable" */
+        return ill_formed_at_token(id,
+                                   "no translation unit shall contain more "
+                                   "than one definition of any variable",
+                                   "basic.def.odr");
+    }
+    entity_index conflicts = entity_table[scope].conflicts;
+    if (conflicts) {
+        entity_index other = entity_table.find(conflicts, name);
+        if (other && entity_table[other].kind == entity_kind::none)
+            return not_supported(declaration, "basic.scope.block");
+        if (other && entity_table[conflicts].parameter_scope)
+            /* [basic.scope.param]/1: "A parameter name shall not be
+               redeclared in the outermost block of the function
+               definition" */
+            return ill_formed_at_token(id,
+                                       "a parameter name shall not be "
+                                       "redeclared in the outermost block of "
+                                       "the function definition",
+                                       "basic.scope.param");
+        if (other)
+            /* [basic.scope.block]/3: "Names declared in the init-statement,
+               ... and in the condition of if, while, for, and switch
+               statements are local to the if, while, for, or switch
+               statement (including the controlled statement), and shall not
+               be redeclared in a subsequent condition of that statement nor
+               in the outermost block (or, for the if statement, any of the
+               outermost blocks) of the controlled statement." */
+            return ill_formed_at_token(id,
+                                       "a name declared in the init-statement "
+                                       "or condition of a statement shall not "
+                                       "be redeclared in the outermost block "
+                                       "of the controlled statement",
+                                       "basic.scope.block");
+    }
+    entity_index e = entity_table.make(kind, name, scope);
+    entity_table[e].type = type;
+    entity_table[e].linkage_of_name = linkage::none;
+    entity_table[e].defined = kind == entity_kind::variable;
+    /* [basic.stc.auto]/1: "Variables that belong to a block or parameter
+       scope and are not explicitly declared static, thread_local, or
+       extern have automatic storage duration." */
+    entity_table[e].automatic = kind == entity_kind::variable && !s.static_;
+    entity_table.add_declaration(e, declaration);
+    entity_table.bind(scope, name, e);
+    declared_entity = e;
+    declared_name d;
+    d.declaration = declaration;
+    d.id = id;
+    d.kind = kind;
+    d.type = type;
+    d.claimable = declarations_claimable;
+    declared.append(d);
+    return analysis_result::well_formed;
+}
+
+/* [basic.lookup.unqual]/1: "the scopes are searched for a declaration in
+   the order listed in each of the respective categories; name lookup ends
+   as soon as a declaration is found for the name" (labels are not
+   entities: [basic.funscope]) */
+entity_index semantic_analysis::lookup(uint32_t name) const
+{
+    for (entity_index s = current_scope;; s = entity_table[s].enclosing) {
+        entity_index e = entity_table.find(s, name);
+        if (e || !s)
+            return e;
+    }
+}
+
+entity_index semantic_analysis::open_scope(entity_index conflicts,
+                                           bool parameters)
+{
+    entity_index s =
+        entity_table.make(entity_kind::block_scope, 0, current_scope);
+    entity_table[s].conflicts = conflicts;
+    entity_table[s].parameter_scope = parameters;
+    current_scope = s;
+    return s;
 }
 
 } // namespace cplusplus

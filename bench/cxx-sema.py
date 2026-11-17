@@ -73,6 +73,9 @@ cxxpp = cxxparse.cxxpp
 R = cxxpp.R
 OURS = os.path.join(R, 'src', 'test', 'cxx', 'sema')
 LLVM_TEST = cxxparse.LLVM_TEST
+# clang -cc1 has plain char signed unless told otherwise; the driver tells
+# it so for aarch64 Linux, the target cxxsema analyses for
+TARGET = cxxparse.TRIPLE + ['-fno-signed-char']
 SUITES = ('CXX', 'SemaCXX', 'SemaTemplate')
 
 
@@ -132,6 +135,9 @@ def check_type_claims(test, opts, clang, claims, cache=True):
     cwd = os.path.dirname(test)
     name = os.path.basename(test)
     lines = open(test, 'rb').read().decode('latin-1').split('\n')
+    if cxxparse.has_line_directive(lines):
+        counts['unchecked'] += len(claims)
+        return counts, refuted
     places = {}
     for k, c in enumerate(claims):
         places.setdefault(c[:2], []).append(k)
@@ -141,6 +147,8 @@ def check_type_claims(test, opts, clang, claims, cache=True):
         block = ''
         for k in places[(row, column)]:
             e, claim, value = claims[k][2], claims[k][3], claims[k][4]
+            # the file is read as latin-1: the expression's UTF-8 bytes too
+            e = e.encode('utf-8', 'surrogateescape').decode('latin-1')
             block += (f'\n#line {3 * k + 1} "{TYPES_FILE}"\n'
                       f'static_assert(__is_same(decltype(({e})), decltype(({e}))));\n'
                       f'static_assert(__is_same(decltype(({e})), {claim}));')
@@ -154,14 +162,14 @@ def check_type_claims(test, opts, clang, claims, cache=True):
 
     def compile_claims():
         try:
-            r = subprocess.run([clang, '-cc1'] + cxxparse.TRIPLE + ['-x', 'c++'] + opts +
+            r = subprocess.run([clang, '-cc1'] + TARGET + ['-x', 'c++'] + opts +
                                ['-fsyntax-only', '-ferror-limit', '0', '-w', '-'],
                                cwd=cwd, input=source, capture_output=True, timeout=60)
         except subprocess.TimeoutExpired:
             return None
         return r.stderr.decode('utf-8', 'replace')
     if cache:
-        stderr = cxxparse.cached('type-claims:' + hashlib.sha256(source).hexdigest(), clang, test, opts,
+        stderr = cxxparse.cached('type-claims:' + ''.join(TARGET) + hashlib.sha256(source).hexdigest(), clang, test, opts,
                                  compile_claims)
     else:
         stderr = compile_claims()
@@ -269,8 +277,8 @@ def check(test, opts, clang, cxxsema):
     if ours[0] not in (0, 1):
         res['fail'].append(('crash', f'status {ours[0]}: {ours[2].strip().splitlines()[-1:]}'))
         return res
-    c = cxxparse.cached('diagnostics', clang, test, opts, lambda: list(
-        cxxparse.run([clang, '-cc1'] + cxxparse.TRIPLE + ['-x', 'c++'] + opts +
+    c = cxxparse.cached('diagnostics' + ''.join(TARGET), clang, test, opts, lambda: list(
+        cxxparse.run([clang, '-cc1'] + TARGET + ['-x', 'c++'] + opts +
                      ['-fsyntax-only', '-fdiagnostics-show-category', 'name', '-ferror-limit', '0', name],
                      cwd, timeout=60)))
     if c[0] == 'timeout':
@@ -284,6 +292,10 @@ def check(test, opts, clang, cxxsema):
             syntax_lines.add(int(m.group(2)))
         else:
             error_lines.add(int(m.group(2)))
+    # a fatal error (-Wfatal-errors, a missing include) ends clang's
+    # analysis there: what follows it is not compared
+    fatal = re.search(r'^[^:\n]+:(\d+):\d+: fatal error:', c[2], re.M)
+    fatal_line = int(fatal.group(1)) if fatal else None
     known = KNOWN.get(relative(test), set())
     rejected = []
     for line in ours[1].splitlines():
@@ -295,7 +307,9 @@ def check(test, opts, clang, cxxsema):
             continue
         first, last, result = int(m.group(3)), int(m.group(6)), m.group(8)
         lines = range(first, last + 1)
-        if result == 'not-parsed' or any(n in syntax_lines for n in lines):
+        if fatal_line is not None and first > fatal_line:
+            res['verdict']['after_fatal'] += 1
+        elif result == 'not-parsed' or any(n in syntax_lines for n in lines):
             res['verdict']['not_parsed'] += 1
         elif result == 'unsupported':
             res['verdict']['unsupported'] += 1
@@ -316,7 +330,8 @@ def check(test, opts, clang, cxxsema):
     for m in CLANG_ERROR.finditer(c[2]):
         if m.group(1) == name:
             every_error_line.add(int(m.group(2)))
-    cxxparse.check_claims(test, opts, clang, cxxsema, res, every_error_line, expression_mode=None)
+    cxxparse.check_claims(test, opts, clang, cxxsema, res, every_error_line, expression_mode=None,
+                          target=TARGET[len(cxxparse.TRIPLE):])
     res['types'], refuted = check_type_claims(test, opts, clang, type_claims(cxxsema, opts, test))
     for r in refuted:
         res['fail'].append(('types', r))
@@ -386,7 +401,8 @@ def main():
           f'no crash {runs - crashes}/{runs}')
     print(f'declarations: {verdict["agree"]} as clang, {verdict["we_reject"]} we reject and clang accepts '
           f'({verdict["known"]} known differences), {verdict["we_accept"]} we accept and clang rejects, '
-          f'{verdict["unsupported"]} unsupported, {verdict["not_parsed"]} not parsed')
+          f'{verdict["unsupported"]} unsupported, {verdict["not_parsed"]} not parsed, '
+          f'{verdict["after_fatal"]} after a fatal error')
     print(f'declared types: {declared["verified"]} verified, {declared["overload"]} as one of a name\'s overloads, '
           f'{declared["refuted"]} refuted, {declared["rejected"]} in declarations clang rejects, '
           f'{declared["unchecked"]} not checkable')

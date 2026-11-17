@@ -266,8 +266,7 @@ analysis_result semantic_analysis::postfix(node_index n, expression_meaning &m)
     if ((parenthesized || braced) && children[0].is_token()) {
         const token &t = tokens[children[0].index()];
         if (t.kind == token_kind::identifier) {
-            entity_index e =
-                entity_table.find(0, tokens.identifier(children[0].index()));
+            entity_index e = lookup(tokens.identifier(children[0].index()));
             if (e && entity_table[e].kind == entity_kind::typedef_name)
                 named = entity_table[e].type.unqualified();
             if (e && entity_table[e].kind == entity_kind::typedef_name &&
@@ -391,7 +390,7 @@ analysis_result semantic_analysis::postfix(node_index n, expression_meaning &m)
         return not_supported(n, "expr.type.conv");
     }
     if (parenthesized)
-        return not_supported(n, "expr.call");
+        return call(n, m);
     if (node.child_count == 4 &&
         syntax_is_punctuator(tokens, children[1],
                              preprocessing_op_or_punc::LEFT_BRACKET)) {
@@ -454,6 +453,153 @@ analysis_result semantic_analysis::postfix(node_index n, expression_meaning &m)
         return analysis_result::well_formed;
     }
     return not_supported(n, "expr.post");
+}
+
+/*
+ * [expr.call]/1: "A function call is a postfix expression followed by
+ * parentheses containing a possibly empty, comma-separated list of
+ * initializer-clauses which constitute the arguments to the function.  ...
+ * For a call to a non-member function or to a static member function, the
+ * postfix expression shall be either an lvalue that refers to a function
+ * (in which case the function-to-pointer standard conversion is suppressed
+ * on the postfix expression), or a prvalue of function pointer type."
+ *
+ * The function a name finds is one, not an overload set (analysis holds
+ * the name of a function declared twice with different parameters), so
+ * overload resolution ([over.match]) has one candidate: viable or not.
+ */
+analysis_result semantic_analysis::call(node_index n, expression_meaning &m)
+{
+    const syntax_node &node = tree[n];
+    const syntax_child *children = tree.children(n);
+    expression_meaning f;
+    analysis_result r = expression(children[0], f);
+    if (r != analysis_result::well_formed)
+        return r;
+    qualified_type function_type = f.type;
+    if (type_table[f.type.unqualified()].kind != type_kind::function ||
+        f.category != value_category::lvalue) {
+        r = operand_value(n, f);
+        if (r != analysis_result::well_formed)
+            return r;
+        const struct type pointer = type_table[f.type.unqualified()];
+        if (pointer.kind == type_kind::pointer &&
+            type_table[pointer.operand.unqualified()].kind ==
+                type_kind::function) {
+            function_type = pointer.operand;
+        } else {
+            if (fundamental_of(f.type) == fundamental_type::none &&
+                !is_pointer(f.type))
+                return not_supported(n, "expr.call");
+            return ill_formed(n,
+                              "the postfix expression shall be either an "
+                              "lvalue that refers to a function or a prvalue "
+                              "of function pointer type",
+                              "expr.call");
+        }
+    }
+    owned_array<syntax_child> arguments;
+    if (node.child_count == 4) {
+        syntax_child c = children[2];
+        if (syntax_is(tree, c, syntax_kind::initializer_list)) {
+            for (uint32_t i = 0; i < tree[c.index()].child_count; i++) {
+                syntax_child a = tree.children(c.index())[i];
+                if (syntax_is_punctuator(tokens, a,
+                                         preprocessing_op_or_punc::COMMA))
+                    continue;
+                if (syntax_is_punctuator(tokens, a,
+                                         preprocessing_op_or_punc::ELLIPSIS))
+                    return not_supported(n, "temp.variadic");
+                arguments.append(a);
+            }
+        } else {
+            arguments.append(c);
+        }
+    } else if (node.child_count != 3) {
+        return not_supported(n, "expr.call");
+    }
+    const struct type function = type_table[function_type.unqualified()];
+    size_t count = function.parameter_count;
+    /* [over.match.viable]/2: "First, to be a viable function, a candidate
+       function shall have enough parameters to agree in number with the
+       arguments in the list."  [over.match]/3: "If a best viable
+       function exists and is unique, overload resolution succeeds ...
+       Otherwise overload resolution fails and the invocation is
+       ill-formed." */
+    if (arguments.size() < count ||
+        (arguments.size() > count && !function.variadic))
+        return ill_formed(n,
+                          "to be a viable function, a candidate function "
+                          "shall have enough parameters to agree in number "
+                          "with the arguments in the list",
+                          "over.match.viable");
+    for (size_t i = 0; i < arguments.size(); i++) {
+        syntax_child a = arguments[i];
+        initialized_value value;
+        if (i < count) {
+            /* [expr.call]/7: "When a function is called, each parameter is
+               initialized with its corresponding argument." ([dcl.init]/15:
+               copy-initialization) */
+            qualified_type parameter =
+                type_table.parameters(function_type.unqualified())[i];
+            if (syntax_is(tree, a, syntax_kind::braced_init_list)) {
+                r = list_initialization(a.index(), parameter, false, value);
+            } else {
+                expression_meaning e;
+                r = expression(a, e);
+                /* an argument that is one token is reported at the call */
+                node_index at = n;
+                if (!a.is_token())
+                    at = a.index();
+                if (r == analysis_result::well_formed)
+                    r = initialize_with(at, e, parameter, false, false, value);
+            }
+            if (r != analysis_result::well_formed)
+                return r;
+            continue;
+        }
+        /* [expr.call]/12: "The lvalue-to-rvalue, array-to-pointer, and
+           function-to-pointer standard conversions are performed on the
+           argument expression. ... After these conversions, if the argument
+           does not have arithmetic, enumeration, pointer, pointer-to-member,
+           or class type, the program is ill-formed." */
+        if (syntax_is(tree, a, syntax_kind::braced_init_list))
+            return not_supported(n, "expr.call");
+        expression_meaning e;
+        r = expression(a, e);
+        if (r == analysis_result::well_formed)
+            r = operand_value(node_of(a), e);
+        if (r != analysis_result::well_formed)
+            return r;
+        if (fundamental_of(e.type) == fundamental_type::void_)
+            return ill_formed(n,
+                              "an argument passed for an ellipsis shall have "
+                              "arithmetic, enumeration, pointer, "
+                              "pointer-to-member, or class type",
+                              "expr.call");
+    }
+    /* [expr.call]/14: "A function call is an lvalue if the result type is
+       an lvalue reference type or an rvalue reference to function type, an
+       xvalue if the result type is an rvalue reference to object type, and
+       a prvalue otherwise." */
+    m = expression_meaning();
+    qualified_type result = function.operand;
+    const struct type record = type_table[result.unqualified()];
+    m.type = result;
+    m.category = value_category::prvalue;
+    if (record.kind == type_kind::lvalue_reference ||
+        record.kind == type_kind::rvalue_reference) {
+        m.type = record.operand;
+        m.category = value_category::lvalue;
+        if (record.kind == type_kind::rvalue_reference &&
+            type_table[record.operand.unqualified()].kind !=
+                type_kind::function)
+            m.category = value_category::xvalue;
+    }
+    /* [expr.const]/5.2: "an invocation of a non-constexpr function": no
+       function analysis has a declaration of is constexpr */
+    m.evaluation = constness::not_constant;
+    return analysis_result::well_formed;
 }
 
 } // namespace cplusplus

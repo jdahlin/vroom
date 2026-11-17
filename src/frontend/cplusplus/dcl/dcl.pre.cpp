@@ -674,7 +674,21 @@ analysis_result semantic_analysis::function_definition(node_index n)
     analysis_result r = init_declarators(n, tree.children(n)[0].index(), true);
     if (r != analysis_result::well_formed)
         return r;
-    return not_supported(n, "dcl.fct.def.general");
+    entity_index f = last_declared;
+    syntax_child body;
+    for (uint32_t i = 0; i < node.child_count; i++)
+        if (syntax_is(tree, tree.children(n)[i], syntax_kind::function_body))
+            body = tree.children(n)[i];
+    if (!f || entity_table[f].kind != entity_kind::function ||
+        body.is_token() || !body.index())
+        return not_supported(n, "dcl.fct.def.general");
+    /* function-body: compound-statement; a ctor-initializer, a
+       function-try-block, = default and = delete are not analysed yet */
+    const syntax_node &b = tree[body.index()];
+    if (b.child_count != 1 || !syntax_is(tree, tree.children(body.index())[0],
+                                         syntax_kind::compound_statement))
+        return not_supported(n, "dcl.fct.def.general");
+    return function_body(n, tree.children(body.index())[0]);
 }
 
 /*
@@ -759,6 +773,15 @@ analysis_result semantic_analysis::init_declarator(node_index declaration,
         init = tree.children(item.index())[1];
         initialized = true;
     }
+    return declare_with_initializer(declaration, d, init, initialized, s,
+                                    definition);
+}
+
+analysis_result semantic_analysis::declare_with_initializer(
+    node_index declaration, syntax_child d, syntax_child init, bool initialized,
+    const specified &s, bool definition)
+{
+    last_declared = 0;
     qualified_type type = s.type;
     declarator_meaning m;
     analysis_result r = declarator(declaration, d, type, m);
@@ -766,6 +789,15 @@ analysis_result semantic_analysis::init_declarator(node_index declaration,
         return r;
     if (!m.has_id)
         return not_supported(declaration, "dcl.meaning");
+    /* [stmt.pre]/4: "The declarator shall not specify a function or an
+       array." */
+    if (in_condition &&
+        (type_table[type.unqualified()].kind == type_kind::function ||
+         type_table[type.unqualified()].kind == type_kind::array))
+        return ill_formed_at_token(m.id,
+                                   "the declarator of a condition shall not "
+                                   "specify a function or an array",
+                                   "stmt.pre");
     entity_kind kind = entity_kind::variable;
     if (s.typedef_)
         kind = entity_kind::typedef_name;
@@ -797,8 +829,17 @@ analysis_result semantic_analysis::init_declarator(node_index declaration,
     entity_index declared_entity = 0;
     r = declare(declaration, m.id, kind, type, s, definition, initialized,
                 declared_entity);
+    last_declared = declared_entity;
     if (r != analysis_result::well_formed || !initialized)
         return r;
+    /* [stmt.dcl]/3: a local variable with automatic storage duration and an
+       initializer, which a jump shall not bypass */
+    if (entity_table[declared_entity].automatic && function_state.active) {
+        jump_point point;
+        point.scope = current_scope;
+        point.at = m.id;
+        function_state.initialized.append(point);
+    }
     /* until the initializer is analysed (and if it is unsupported) the
        value of a variable that may be usable in constant expressions is
        unknown */

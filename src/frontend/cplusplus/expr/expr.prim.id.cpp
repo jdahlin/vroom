@@ -517,7 +517,7 @@ node_index parser::declarator_id(declarator_facts &facts)
 analysis_result semantic_analysis::id_expression(token_index t,
                                                  expression_meaning &m)
 {
-    entity_index e = entity_table.find(0, tokens.identifier(t));
+    entity_index e = lookup(tokens.identifier(t));
     if (!e || entity_table[e].kind == entity_kind::none)
         return not_supported(current_declaration, "basic.lookup.unqual");
     const entity &x = entity_table[e];
@@ -529,6 +529,11 @@ analysis_result semantic_analysis::id_expression(token_index t,
     /* the address of an object or function with static storage duration
        is a constant ([expr.const]/11) */
     m.evaluation = constness::constant;
+    /* a variable with automatic storage duration has no constant address;
+       reading one usable in constant expressions is still a constant
+       ([expr.const]/3) */
+    if (x.automatic)
+        m.evaluation = constness::unknown;
     const struct type record = type_table[x.type.unqualified()];
     if (record.kind == type_kind::lvalue_reference ||
         record.kind == type_kind::rvalue_reference) {

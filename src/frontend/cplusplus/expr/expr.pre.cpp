@@ -32,6 +32,18 @@ analysis_result semantic_analysis::expression(syntax_child e,
     x.at = e;
     x.declaration = current_declaration;
     x.meaning = m;
+    x.place = claim_place;
+    x.placeable = current_scope == claim_scope;
+    /* a name in its own declaration's initializer: [basic.scope.pdecl]/1
+       "The point of declaration for a name is immediately after its
+       complete declarator ([dcl.decl]) and before its initializer (if
+       any)", but the initializer can complete the type (an array's bound),
+       so after the declaration the name may have another type */
+    if (e.is_token() && tokens[e.index()].kind == token_kind::identifier) {
+        const struct type &named = type_table[m.type.unqualified()];
+        if (named.kind == type_kind::array && !named.bound_known)
+            x.placeable = false;
+    }
     expressions.append(x);
     return analysis_result::well_formed;
 }

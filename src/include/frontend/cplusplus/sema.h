@@ -198,6 +198,10 @@ enum class entity_kind : uint8_t {
     template_specialization,
     namespace_entity,
     pack,
+    /* not an entity: a block scope or a function parameter scope
+       ([basic.scope.block], [basic.scope.param]), the scope the names
+       declared in it are bound in */
+    block_scope,
 };
 
 /* [basic.link]/2 */
@@ -229,6 +233,16 @@ struct entity {
     uint64_t value = 0;
     /* [dcl.constexpr]/1 */
     bool constexpr_ = false;
+    /* a variable: [basic.stc.auto]/1, a local variable not declared static
+       (or a parameter) */
+    bool automatic = false;
+    /* a block_scope: the scope whose names it shall not redeclare (the
+       function parameter scope for the outermost block of a function
+       definition, the scope of a statement's condition for its
+       substatements' outermost blocks), and whether that is the parameter
+       scope */
+    entity_index conflicts = 0;
+    bool parameter_scope = false;
     /* [basic.link]: its declarations, in order, are a chain through
        `declarations`: the first and the last */
     uint32_t first_declaration = 0, last_declaration = 0;
@@ -300,6 +314,19 @@ enum class analysis_result : uint8_t {
 };
 const char *analysis_result_name(analysis_result result);
 
+/* the conclusion about a construct of two parts: ill-formed if either is,
+   else unsupported if either is */
+inline analysis_result worse(analysis_result a, analysis_result b)
+{
+    if (a == analysis_result::ill_formed || b == analysis_result::ill_formed)
+        return analysis_result::ill_formed;
+    if (a == analysis_result::not_parsed || b == analysis_result::not_parsed)
+        return analysis_result::not_parsed;
+    if (a == analysis_result::unsupported || b == analysis_result::unsupported)
+        return analysis_result::unsupported;
+    return analysis_result::well_formed;
+}
+
 /* a construct analysis has no rules for yet */
 struct unsupported_construct {
     node_index node = 0;
@@ -322,6 +349,9 @@ struct declared_name {
     token_index id = 0;
     entity_kind kind = entity_kind::none;
     qualified_type type;
+    /* whether a claim can be placed just after the declaration: not for a
+       declaration in a condition or init-statement */
+    bool claimable = true;
 };
 
 /* ---- values of constant expressions (expr/expr.const.cpp) ---- */
@@ -387,6 +417,12 @@ struct analysed_expression {
     syntax_child at;
     node_index declaration = 0;
     expression_meaning meaning;
+    /* where a claim about it can be placed: just after this token (the
+       statement of a block it is in), or after the declaration if 0; not
+       at all if placeable is false (a name of a condition would be out of
+       scope there) */
+    token_index place = 0;
+    bool placeable = true;
 };
 
 class semantic_analysis
@@ -471,6 +507,16 @@ class semantic_analysis
                                qualified_type &type, declarator_meaning &m);
     token_index declarator_id(syntax_child d) const;
     void hold_names(node_index declaration);
+    bool declared_by(entity_index e, node_index node) const;
+    analysis_result declare_local(node_index declaration, token_index id,
+                                  entity_kind kind, qualified_type type,
+                                  const specified &s,
+                                  entity_index &declared_entity);
+    /* [basic.lookup.unqual]/1: the entity an unqualified name finds from
+       the current scope out, 0 if none */
+    entity_index lookup(uint32_t name) const;
+    /* a block scope in the current one, made current */
+    entity_index open_scope(entity_index conflicts, bool parameters);
     analysis_result pointer_operator(node_index op, qualified_type &type,
                                      declarator_meaning &m);
     analysis_result array(node_index at, const syntax_child *bound,
@@ -479,8 +525,16 @@ class semantic_analysis
                               declarator_meaning &m);
     /* [dcl.fct] */
     analysis_result function(node_index parameters, qualified_type &type);
+    /* the parameters of the function declarator analysed last: a function
+       definition's, with the types they have in its body ([dcl.fct]/5's
+       adjustment, top-level cv-qualifiers kept) */
+    struct parameter_meaning {
+        token_index id = 0;
+        qualified_type type;
+    };
+    owned_array<parameter_meaning> function_parameters;
     analysis_result parameter_declaration(node_index n, qualified_type &type,
-                                          bool &unnamed);
+                                          bool &unnamed, token_index &id);
     /* cv-qualifiers added to a type: to an array's elements
        ([basic.type.qualifier]/3), none to a reference or a function type
        ([dcl.ref]/1, [dcl.fct]/7) */
@@ -606,6 +660,94 @@ class semantic_analysis
 
     /* the declaration analysed now, for the expressions' records */
     node_index current_declaration = 0;
+    /* the scope analysis is in: 0 the global namespace, else a
+       block_scope entity */
+    entity_index current_scope = 0;
+    /* the entity the last declarator declared */
+    entity_index last_declared = 0;
+    /* where claims about the expressions analysed now go
+       (analysed_expression::place), the scope there, and whether
+       declarations analysed now can have claims after them */
+    token_index claim_place = 0;
+    entity_index claim_scope = 0;
+    bool declarations_claimable = true;
+
+    /* ---- statements ([stmt]) ---- */
+    /* a point of a function body: the innermost scope there, and a token
+       at it (later tokens are later points) */
+    struct jump_point {
+        entity_index scope = 0;
+        token_index at = 0;
+    };
+    struct label_record {
+        uint32_t name = 0;
+        jump_point point;
+        bool analysed = false;
+    };
+    struct goto_record {
+        uint32_t name = 0;
+        jump_point point;
+        node_index node = 0;
+    };
+    struct switch_record {
+        /* the adjusted type of the condition, none if unknown */
+        fundamental_type type = fundamental_type::none;
+        jump_point point;
+        size_t first_value = 0;
+        bool has_default = false;
+    };
+    /* the function definition whose body is analysed */
+    struct function_context {
+        bool active = false;
+        qualified_type returns;
+        unsigned loops = 0, breakable = 0;
+        owned_array<label_record> labels;
+        owned_array<goto_record> gotos;
+        /* [stmt.dcl]/3: the variables whose initialization a jump shall
+           not bypass, where each is declared */
+        owned_array<jump_point> initialized;
+        owned_array<switch_record> switches;
+        owned_array<uint64_t> case_values;
+    } function_state;
+    analysis_result function_body(node_index definition, syntax_child compound);
+    void collect_labels(syntax_child s);
+    analysis_result statement(syntax_child s);
+    /* a substatement ([stmt.pre]/2): a block scope of its own whose
+       outermost names shall not redeclare conflicts' */
+    analysis_result substatement(syntax_child s, entity_index conflicts);
+    analysis_result compound_statement(node_index n, entity_index conflicts);
+    analysis_result block_items(node_index n);
+    analysis_result expression_statement(node_index n);
+    analysis_result selection_statement(node_index n);
+    analysis_result iteration_statement(node_index n);
+    analysis_result jump_statement(node_index n);
+    analysis_result labeled_statement(node_index n);
+    analysis_result case_label(node_index n, syntax_child value,
+                               size_t innermost);
+    analysis_result return_statement(node_index n);
+    node_index node_of(syntax_child c) const;
+    /* a condition's declarator is analysed ([stmt.pre]/4) */
+    bool in_condition = false;
+    /* [stmt.pre]: a condition, its value converted to bool (or, for a
+       switch, the condition's value promoted: m) */
+    analysis_result condition(syntax_child c, bool for_switch,
+                              expression_meaning &m);
+    /* [stmt.dcl]/3: a jump from from to to bypasses no initialization */
+    bool jump_bypasses(jump_point from, jump_point to) const;
+    bool in_scope(jump_point variable, jump_point at) const;
+    /* [expr.call] */
+    analysis_result call(node_index n, expression_meaning &m);
+    /* the initialization of type from the analysed expression m */
+    analysis_result initialize_with(node_index at, expression_meaning &m,
+                                    qualified_type type, bool direct, bool list,
+                                    initialized_value &result);
+    /* a declarator and its initializer (none if !initialized), as in an
+       init-declarator or a condition */
+    analysis_result declare_with_initializer(node_index declaration,
+                                             syntax_child d, syntax_child init,
+                                             bool initialized,
+                                             const specified &s,
+                                             bool definition);
 
     const syntax_tree &tree;
     token_stream &tokens;

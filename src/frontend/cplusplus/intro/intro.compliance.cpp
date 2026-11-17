@@ -178,6 +178,10 @@ diagnostic_severity diagnostic_options::severity(diagnostic_id id) const
                 else if (s == diagnostic_severity::ignored)
                     s = diagnostic_severity::warning;
             }
+    /* -Wno-error=x: a warning that is an error by default is a warning */
+    if (error < 0 && s == diagnostic_severity::error &&
+        d.mapping == default_mapping::ERROR)
+        s = diagnostic_severity::warning;
     if (!explicit_setting && (d.kind == diagnostic_class::EXTENSION ||
                               d.kind == diagnostic_class::EXTENSION_WARNING)) {
         if (pedantic_errors)

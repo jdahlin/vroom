@@ -300,14 +300,35 @@ token_index semantic_analysis::declarator_id(syntax_child d) const
 void semantic_analysis::hold_names(node_index declaration)
 {
     owned_array<token_index> ids;
-    if (!parsed_completely(declaration)) {
-        /* the declarators are not known: every identifier outside
-           parentheses, brackets and braces, which holds more names than
-           the declaration declares and so only makes more declarations
-           unsupported */
+    const syntax_node &node = tree[declaration];
+    if (node.kind == syntax_kind::linkage_specification) {
+        /* extern "C" { ... }: the declarations in it are the scope's */
+        for (uint32_t i = 0; i < node.child_count; i++) {
+            syntax_child c = tree.children(declaration)[i];
+            if (c.is_token())
+                continue;
+            if (syntax_is(tree, c, syntax_kind::declaration_seq)) {
+                for (uint32_t k = 0; k < tree[c.index()].child_count; k++)
+                    if (!tree.children(c.index())[k].is_token())
+                        hold_names(tree.children(c.index())[k].index());
+                continue;
+            }
+            hold_names(c.index());
+        }
+        return;
+    }
+    bool by_declarator = parsed_completely(declaration) &&
+                         (node.kind == syntax_kind::simple_declaration ||
+                          node.kind == syntax_kind::function_definition ||
+                          node.kind == syntax_kind::condition);
+    if (!by_declarator) {
+        /* the declarators are not known (a declaration not parsed, or of
+           a kind analysis has no rules for: a template, a
+           using-declaration, ...): every identifier outside parentheses,
+           brackets and braces, which holds more names than the declaration
+           declares and so only makes more declarations unsupported */
         int depth = 0;
-        for (token_index t = tree[declaration].first_token;
-             t < tree[declaration].end_token; t++) {
+        for (token_index t = node.first_token; t < node.end_token; t++) {
             const token &tok = tokens[t];
             if (tok.kind == token_kind::identifier && !depth)
                 ids.append(t);
@@ -328,11 +349,10 @@ void semantic_analysis::hold_names(node_index declaration)
                 break;
             }
         }
-    } else if (syntax_is(tree, syntax_child::node(declaration),
-                         syntax_kind::simple_declaration) ||
-               syntax_is(tree, syntax_child::node(declaration),
-                         syntax_kind::function_definition)) {
-        const syntax_node &node = tree[declaration];
+    } else if (node.kind == syntax_kind::condition) {
+        if (node.child_count > 1)
+            ids.append(declarator_id(tree.children(declaration)[1]));
+    } else {
         for (uint32_t i = 0; i < node.child_count; i++) {
             syntax_child c = tree.children(declaration)[i];
             if (syntax_is(tree, c, syntax_kind::init_declarator_list)) {
@@ -348,11 +368,29 @@ void semantic_analysis::hold_names(node_index declaration)
         if (!id)
             continue;
         uint32_t name = tokens.identifier(id);
-        if (entity_table.find(0, name))
+        entity_index found = entity_table.find(current_scope, name);
+        if (found) {
+            /* a declaration of the name that analysis could not follow
+               (an overload, a redeclaration with default arguments ...):
+               what the name denotes is not known from here on */
+            if (!declared_by(found, declaration))
+                entity_table[found].kind = entity_kind::none;
             continue;
-        entity_index e = entity_table.make(entity_kind::none, name, 0);
-        entity_table.bind(0, name, e);
+        }
+        entity_index e =
+            entity_table.make(entity_kind::none, name, current_scope);
+        entity_table.bind(current_scope, name, e);
     }
+}
+
+/* whether the node is one of the entity's declarations */
+bool semantic_analysis::declared_by(entity_index e, node_index node) const
+{
+    for (uint32_t d = entity_table[e].first_declaration; d;
+         d = entity_table.declaration(d).next)
+        if (entity_table.declaration(d).node == node)
+            return true;
+    return false;
 }
 
 /*

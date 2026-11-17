@@ -16,6 +16,7 @@
  * ([class.base.init]), and into a function-try-block's handlers.
  */
 #include "../cplusplus-internal.h"
+#include "frontend/cplusplus/sema.h"
 
 namespace cplusplus
 {
@@ -184,6 +185,102 @@ node_index parser::function_body(const declarator_facts &declarator,
                             "dcl.fct.def.general");
     }
     return finish_node(syntax_kind::function_body, mark, first);
+}
+
+/* ---- semantic analysis ---------------------------------------------- */
+
+/*
+ * [dcl.fct.def.general]/1: the function-body of a function definition
+ * whose declarator analysis has given its entity (last_declared) and its
+ * parameters (function_parameters).  [basic.scope.param]/1: the parameters
+ * have function parameter scope, which ends at the end of the outermost
+ * block; [basic.funscope]/1: "Labels have function scope and may be used
+ * anywhere in the function in which they are declared."
+ */
+analysis_result semantic_analysis::function_body(node_index definition,
+                                                 syntax_child compound)
+{
+    entity_index f = last_declared;
+    qualified_type returns =
+        type_table[entity_table[f].type.unqualified()].operand;
+    function_state.active = true;
+    function_state.returns = returns;
+    function_state.loops = 0;
+    function_state.breakable = 0;
+    function_state.labels.clear();
+    function_state.gotos.clear();
+    function_state.initialized.clear();
+    function_state.switches.clear();
+    function_state.case_values.clear();
+    analysis_result result = analysis_result::well_formed;
+    collect_labels(compound);
+    /* [stmt.label]/1: "Labels shall not be redeclared within a function." */
+    for (size_t i = 0; i < function_state.labels.size(); i++)
+        for (size_t k = 0; k < i; k++)
+            if (function_state.labels[k].name ==
+                    function_state.labels[i].name &&
+                result != analysis_result::ill_formed)
+                result = ill_formed_at_token(
+                    function_state.labels[i].point.at,
+                    "labels shall not be redeclared within a function",
+                    "stmt.label");
+    entity_index parameters = open_scope(0, true);
+    for (const parameter_meaning &parameter : function_parameters) {
+        if (!parameter.id)
+            continue;
+        uint32_t name = tokens.identifier(parameter.id);
+        if (entity_table.find(parameters, name)) {
+            /* [basic.def.odr]/1: each parameter of a function definition
+               is a definition ([basic.def]/2) */
+            result =
+                worse(result, ill_formed_at_token(parameter.id,
+                                                  "no translation unit shall "
+                                                  "contain more than one "
+                                                  "definition of any variable",
+                                                  "basic.def.odr"));
+            continue;
+        }
+        entity_index e =
+            entity_table.make(entity_kind::variable, name, parameters);
+        entity_table[e].type = parameter.type;
+        entity_table[e].defined = true;
+        entity_table[e].automatic = true;
+        entity_table.add_declaration(e, definition);
+        entity_table.bind(parameters, name, e);
+    }
+    open_scope(parameters, false);
+    result = worse(result, block_items(compound.index()));
+    for (const goto_record &g : function_state.gotos) {
+        const label_record *target = nullptr;
+        for (const label_record &l : function_state.labels)
+            if (l.name == g.name && !target)
+                target = &l;
+        /* [stmt.goto]/1: "The identifier shall be a label located in the
+           current function." */
+        if (!target) {
+            result = worse(result, ill_formed(g.node,
+                                              "the identifier shall be a label "
+                                              "located in the current function",
+                                              "stmt.goto"));
+            continue;
+        }
+        if (!target->analysed) {
+            result = worse(result, not_supported(g.node, "stmt.dcl"));
+            continue;
+        }
+        if (jump_bypasses(g.point, target->point))
+            result = worse(result,
+                           ill_formed(g.node,
+                                      "it is possible to transfer into a "
+                                      "block, but not in a way that bypasses "
+                                      "declarations with initialization",
+                                      "stmt.dcl"));
+    }
+    current_scope = 0;
+    claim_place = 0;
+    claim_scope = 0;
+    function_state.active = false;
+    return result;
 }
 
 } // namespace cplusplus
