@@ -139,15 +139,9 @@ node_index parser::postfix_expression()
         return 0;
     if (type) {
         if (at(preprocessing_op_or_punc::LEFT_PARENTHESIS)) {
-            add_token();
-            if (!at(preprocessing_op_or_punc::RIGHT_PARENTHESIS)) {
-                expression_list();
-                if (failed())
-                    return 0;
-            }
-            if (!accept(preprocessing_op_or_punc::RIGHT_PARENTHESIS))
-                return expected("')' to close the expression-list",
-                                "expr.type.conv");
+            if (!parenthesized_expression_list(
+                    "')' to close the expression-list", "expr.type.conv"))
+                return 0;
         } else if (at(preprocessing_op_or_punc::LEFT_BRACE)) {
             if (list_initialization_missing())
                 return 0;
@@ -191,15 +185,9 @@ node_index parser::postfix_expression()
             if (!accept(preprocessing_op_or_punc::RIGHT_BRACKET))
                 return expected("']' to close the subscript", "expr.sub");
         } else if (at(preprocessing_op_or_punc::LEFT_PARENTHESIS)) {
-            add_token();
-            if (!at(preprocessing_op_or_punc::RIGHT_PARENTHESIS)) {
-                expression_list();
-                if (failed())
-                    return 0;
-            }
-            if (!accept(preprocessing_op_or_punc::RIGHT_PARENTHESIS))
-                return expected("')' to close the expression-list",
-                                "expr.call");
+            if (!parenthesized_expression_list(
+                    "')' to close the expression-list", "expr.call"))
+                return 0;
         } else if (at(preprocessing_op_or_punc::DOT) ||
                    at(preprocessing_op_or_punc::ARROW)) {
             add_token();
@@ -224,6 +212,22 @@ node_index parser::postfix_expression()
 node_index parser::expression_list()
 {
     return initializer_list(false);
+}
+
+bool parser::parenthesized_expression_list(const char *what,
+                                           const char *subclause)
+{
+    add_token(); /* ( */
+    if (!at(preprocessing_op_or_punc::RIGHT_PARENTHESIS)) {
+        expression_list();
+        if (failed())
+            return false;
+    }
+    if (!accept(preprocessing_op_or_punc::RIGHT_PARENTHESIS)) {
+        expected(what, subclause);
+        return false;
+    }
+    return true;
 }
 
 } // namespace cplusplus

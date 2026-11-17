@@ -17,33 +17,6 @@
 namespace cplusplus
 {
 
-namespace
-{
-
-bool is_assignment_operator(const token &t)
-{
-    if (t.kind != token_kind::operator_or_punctuator)
-        return false;
-    switch (preprocessing_op_or_punc_primary(t.op_or_punc)) {
-    case preprocessing_op_or_punc::EQUAL:
-    case preprocessing_op_or_punc::STAR_EQUAL:
-    case preprocessing_op_or_punc::SLASH_EQUAL:
-    case preprocessing_op_or_punc::PERCENT_EQUAL:
-    case preprocessing_op_or_punc::PLUS_EQUAL:
-    case preprocessing_op_or_punc::MINUS_EQUAL:
-    case preprocessing_op_or_punc::GREATER_GREATER_EQUAL:
-    case preprocessing_op_or_punc::LESS_LESS_EQUAL:
-    case preprocessing_op_or_punc::AMPERSAND_EQUAL:
-    case preprocessing_op_or_punc::CARET_EQUAL:
-    case preprocessing_op_or_punc::BAR_EQUAL:
-        return true;
-    default:
-        return false;
-    }
-}
-
-} // namespace
-
 /*
  * [expr.cond]:
  *

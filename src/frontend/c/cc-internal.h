@@ -49,7 +49,7 @@
 
 #define CC_IDENTIFIER(id) cc_identifier_length(id), cc_identifier_string(id)
 
-/* a TU's tables: also the C++ front end's AST (frontend/cxx/, compiled in this module) */
+/* a TU's tables */
 CC_PRIVATE void cc_translation_unit_init(cc *c, pp *p, const cc_options *o);
 CC_PRIVATE void cc_translation_unit_free(cc *c);
 

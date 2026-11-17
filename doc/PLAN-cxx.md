@@ -1,5 +1,15 @@
 # C++ front end, first plan: validate the cache structure
 
+**Status (2026-11-16):** the front end this plan built (`src/frontend/cxx/`:
+parser, sema, instantiation, mangling, code generation) has been removed,
+with its harnesses (`cxx-json`, `cxx-llvm`, `cxx-layout`, `cxx-mangle`,
+`cxx-parse-tests`, `cxx-run-tests`, `cxx-coverage`, `cxx-strict`,
+`cxx-skia`, `bench/skia/`) and tests (`src/test/cxx/{mangle,run}`, the
+`ok-`/`bad-` cases of `src/test/cxx/parse`).  It is being redone from
+scratch against the standard in `src/frontend/cplusplus/` (PLAN-cxx-spec.md).
+The goals and measurements below still apply; step statuses describe the
+removed code.
+
 **Goal:** find out, with as little C++ as possible, whether vroom's design
 (one resident vccd, state shared between TUs, a direct emitter at -O0) wins
 for C++ where C++ spends its time: **template instantiation and the code it
