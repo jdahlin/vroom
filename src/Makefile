@@ -243,7 +243,7 @@ $(OUT)/cxxparse: $(call o,bin/cxxparse/cxxparse.cpp $(LIB_SRC)) $(call mod,cplus
 # cxxsema drives its semantic analysis for bench/cxx-sema.py (doc/PLAN-cxx-sema.md);
 # -S lowers it to C's AST (frontend/c/ast-builder.h) for the code generator
 $(OUT)/cxxsema: $(call o,bin/cxxsema/cxxsema.cpp $(LEX_SRC) $(LIB_SRC)) $(LEX_OBJECT) $(AS_OBJ) $(PP_OBJ)
-	$(VCC_LINK) $(VCC_LDFLAGS) $^ -o $@
+	$(VCC_LINK) $(VCC_LDFLAGS) -pthread $^ -o $@ $(HOST_LIBS)
 
 # virtest: VIR's parser, verifier and printer (SPEC-vir.md 16); depends on nothing else
 $(OUT)/virtest: $(call o,bin/virtest/virtest.cpp $(LIB_SRC)) $(call mod,vir)
