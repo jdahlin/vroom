@@ -786,7 +786,9 @@ libstdc++ and json), since sema cannot analyse a declaration kept as tokens.
   class, defined outside it, `S::m`).  Known laxness: a `case` of an
   integer in a switch on a scoped enumeration is accepted.
   `src/test/cxx/run/enums.cpp`, `local-classes.cpp`, `static-members.cpp`;
-  C5.1 1096 -> 1206, 0 wrong.  bench/cxx-sema.py not run (needs clang 23).
+  C5.1 1206 passing, 1204 after the merge with main (which made a
+  variable's `aligned` unsupported), 0 wrong.  bench/cxx-sema.py not run
+  (needs clang 23).
   Then GCC's attributes ([ext:gnu_attributes], `ext/gnu/attribute.cpp`)
   wherever GCC takes them: before a declaration (the 251 function
   definitions `__attribute__((noinline))` sent to the constructor path),
