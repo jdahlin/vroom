@@ -22,3 +22,8 @@ template <class T> struct __is_signed { static constexpr bool value = T(-1) < T(
 static_assert(__is_signed<int>::value && !__is_signed<unsigned>::value);
 template <class T> struct __make_unsigned { using type = unsigned; };
 static_assert(__is_same(__make_unsigned<int>::type, unsigned));
+
+// [impl.clang] __builtin_va_list is a predeclared typedef-name.
+typedef __builtin_va_list va_list_t;
+__builtin_va_list predeclared_va_list;
+void takes_va_list(__builtin_va_list *p, va_list_t q);

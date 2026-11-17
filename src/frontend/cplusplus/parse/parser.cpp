@@ -72,6 +72,14 @@ parser::parser(token_stream &tokens, syntax_tree &tree, declared_names &names,
                 extension_kinds[i] == extension_keyword::type_trait ||
                 extension_kinds[i] == extension_keyword::type_transformation;
     }
+    /* [impl.clang] a typedef-name every translation unit starts with, as
+       clang's predeclared builtin type: <stdarg.h> declares va_list with
+       it (the token stream's identifiers are the preprocessor's plus 1) */
+    static const char va_list_name[] = "__builtin_va_list";
+    names.declare_in(
+        declared_names::global_namespace,
+        tokens.pp.identifier(va_list_name, sizeof va_list_name - 1) + 1,
+        name_kind::type_name);
 }
 
 extension_keyword parser::extension_keyword_of(const token &t) const
