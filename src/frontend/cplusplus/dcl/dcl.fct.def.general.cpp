@@ -204,6 +204,71 @@ node_index parser::function_body(const declarator_facts &declarator,
  * block; [basic.funscope]/1: "Labels have function scope and may be used
  * anywhere in the function in which they are declared."
  */
+namespace
+{
+
+/* what a constexpr function's body encloses that the rules of its edition
+   ask about: a return statement, and the first iteration statement, which
+   C++11 does not allow (0: none) */
+struct constexpr_body {
+    bool returns = false;
+    token_index not_in_cplusplus_11 = 0;
+};
+
+void walk_constexpr_body(const semantic_tree &tree, uint32_t n,
+                         constexpr_body &found)
+{
+    if (!n)
+        return;
+    const semantic_node &x = tree[n];
+    switch (x.kind) {
+    case semantic_kind::block:
+    case semantic_kind::declarations: {
+        const uint32_t *items = tree.items(x.first);
+        for (uint32_t i = 0; i < x.count; i++)
+            walk_constexpr_body(tree, items[i], found);
+        return;
+    }
+    case semantic_kind::return_statement:
+        found.returns = true;
+        return;
+    /* (clang allows the other statements as extensions, expression
+       statements too; an evaluation that modifies an object is what C++11
+       cannot run, its "never produces a constant expression") */
+    case semantic_kind::while_statement:
+    case semantic_kind::do_statement:
+    case semantic_kind::for_statement:
+        if (!found.not_in_cplusplus_11)
+            found.not_in_cplusplus_11 = x.at;
+        break;
+    default:
+        break;
+    }
+    switch (x.kind) {
+    case semantic_kind::if_statement:
+        walk_constexpr_body(tree, x.b, found);
+        walk_constexpr_body(tree, x.c, found);
+        return;
+    case semantic_kind::while_statement:
+    case semantic_kind::switch_statement:
+        walk_constexpr_body(tree, x.b, found);
+        return;
+    case semantic_kind::do_statement:
+    case semantic_kind::case_label:
+    case semantic_kind::default_label:
+    case semantic_kind::identifier_label:
+        walk_constexpr_body(tree, x.a, found);
+        return;
+    case semantic_kind::for_statement:
+        walk_constexpr_body(tree, x.d, found);
+        return;
+    default:
+        return;
+    }
+}
+
+} // namespace
+
 analysis_result semantic_analysis::function_body(node_index definition,
                                                  syntax_child compound,
                                                  syntax_child ctor_init)
@@ -321,6 +386,53 @@ analysis_result semantic_analysis::function_body(node_index definition,
     /* a body analysed in part has a tree the evaluator cannot run */
     if (result != analysis_result::well_formed)
         semantics[body].evaluation = constness::not_constant;
+    if (result == analysis_result::well_formed && entity_table[f].constexpr_ &&
+        entity_table[f].special == special_member::none) {
+        const implementation_defined_behavior &b = tokens.files.behavior;
+        constexpr_body found;
+        walk_constexpr_body(semantics, block, found);
+        bool returns_void = fundamental_of(returns) == fundamental_type::void_;
+        /* C++11's [dcl.constexpr]/3: the function-body "shall be ... a
+           compound-statement that contains only" null statements,
+           static_assert-declarations, typedefs, using-declarations and
+           -directives "and exactly one return statement", the return type
+           a literal type (void is not one there); clang allows the
+           other statements as extensions */
+        if (!b.has(language_feature::relaxed_constexpr)) {
+            if (found.not_in_cplusplus_11)
+                result = worse(
+                    result,
+                    ill_formed_at_token(
+                        found.not_in_cplusplus_11,
+                        "before C++14 the body of a constexpr function shall "
+                        "contain no iteration statement",
+                        "dcl.constexpr"));
+            if (returns_void)
+                result = worse(
+                    result,
+                    ill_formed_at_token(
+                        first_token(compound),
+                        "before C++14 the return type of a constexpr function "
+                        "shall be a literal type, which void is not",
+                        "dcl.constexpr"));
+        }
+        /* [dcl.constexpr]/6: "if no argument values exist such that an
+           invocation of the function ... could be an evaluated
+           subexpression of a core constant expression ..., the program is
+           ill-formed, no diagnostic required": a function that returns a
+           value and has no return statement flows off its end
+           ([stmt.return]/2), which clang diagnoses until C++23 */
+        if (!b.has(language_feature::constexpr_without_constant_result) &&
+            !returns_void && !found.returns)
+            result =
+                worse(result,
+                      ill_formed_at_token(first_token(compound),
+                                          "a constexpr function that returns a "
+                                          "value shall have a return statement "
+                                          "(no invocation of it is a constant "
+                                          "expression)",
+                                          "dcl.constexpr"));
+    }
     definition_record record;
     record.declaration = current_declaration;
     record.entity = f;

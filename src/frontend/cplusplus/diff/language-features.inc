@@ -92,6 +92,10 @@ LANGUAGE_FEATURE(range_based_for, cplusplus_11, never, "N2930: the range-based f
 LANGUAGE_FEATURE(selection_init_statement, cplusplus_17, never,
                  "P0305R1: an init-statement in if and switch")
 LANGUAGE_FEATURE(constexpr_if, cplusplus_17, never, "P0292R2: if constexpr")
+LANGUAGE_FEATURE(relaxed_constexpr, cplusplus_14, never,
+                 "N3652: a constexpr function's body may have loops, expression statements and a void return type")
+LANGUAGE_FEATURE(constexpr_without_constant_result, cplusplus_23, never,
+                 "P2448R2: a constexpr function need not be able to produce a constant expression")
 LANGUAGE_FEATURE(range_for_init_statement, cplusplus_20, never,
                  "P0614R1: an init-statement in the range-based for statement")
 LANGUAGE_FEATURE(labels_anywhere, cplusplus_23, never,

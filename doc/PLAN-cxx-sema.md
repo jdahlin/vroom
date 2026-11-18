@@ -1353,7 +1353,22 @@ lines:
   makes not constant and the tree did not say; the cast's step to bool is
   now an integral conversion, which the evaluator gives no value outside 0
   and 1.  cxx-sema: constants 18887 -> 19048 verified, 0 refuted; we
-  accept and clang rejects 520 -> 514.  cxx-sema: declarations as clang
+  accept and clang rejects 520 -> 514.
+  [dcl.constexpr]'s rules on declarations and bodies, as clang 23
+  enforces them (probed per edition): /1, every declaration of a function
+  has constexpr or none does; C++11 (before N3652, `relaxed_constexpr`): no
+  iteration statement in the body and no void return type; until C++23
+  (P2448R2, `constexpr_without_constant_result`): a function that returns
+  a value has a return statement (/6, flowing off the end is never
+  constant).  Not yet: /1 on a declaration that declares no variable or
+  function (`constexpr int;`, in dcl.pre.cpp where S3 works); /3.5.3's
+  variable of non-literal type (no literal-type test yet); and clang's
+  "never produces a constant expression" (/6 for any argument values),
+  which is behind its errors on static and thread_local variables, goto,
+  asm, throw and C++11's modifications: it needs the evaluator to run with
+  unknown parameters.  cxx-sema: declarations as clang 28590 -> 28608, 0
+  we reject and clang accepts, 0 refuted; we accept and clang rejects
+  514 -> 496; cxx-run 156/156; cxx-c-suites unchanged.  cxx-sema: declarations as clang
   27704 -> 27826, 0 we reject and clang accepts, 0 refuted (types 47348,
   constants 18837, lookup 12628 verified); cxx-run 132/132 with
   constexpr-functions.cpp's constant uses; cxx-c-suites unchanged.

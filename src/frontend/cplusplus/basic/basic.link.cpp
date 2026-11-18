@@ -569,6 +569,17 @@ analysis_result semantic_analysis::declare(node_index declaration,
                                        "more than one definition of any "
                                        "variable or function",
                                        "basic.def.odr");
+        /* [dcl.constexpr]/1: "If any declaration of a function or function
+           template has a constexpr or consteval specifier, then all its
+           declarations shall contain the same specifier." */
+        if (kind == entity_kind::function && e.kind == entity_kind::function &&
+            e.constexpr_ != s.constexpr_)
+            return ill_formed_at_token(id,
+                                       "if any declaration of a function has "
+                                       "a constexpr specifier, then all its "
+                                       "declarations shall contain the same "
+                                       "specifier",
+                                       "dcl.constexpr");
         /* [dcl.stc]/6: "The linkages implied by successive declarations for
            a given entity shall agree." */
         if (implied == linkage::internal && !in_unnamed &&
@@ -660,8 +671,8 @@ analysis_result semantic_analysis::declare(node_index declaration,
         entity_table[declared_entity].inline_ = true;
     /* [dcl.constexpr]/1: "A function or static data member declared with
        the constexpr or consteval specifier is implicitly an inline function
-       or variable"; a function's other rules ([dcl.constexpr]/3, its body's
-       /3.4) are not checked yet */
+       or variable"; the rules on a definition's body are function_body's
+       (dcl.fct.def.general.cpp) */
     if (s.constexpr_ &&
         entity_table[declared_entity].kind == entity_kind::function) {
         entity_table[declared_entity].inline_ = true;
