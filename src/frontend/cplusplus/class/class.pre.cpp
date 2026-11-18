@@ -220,6 +220,8 @@ analysis_result semantic_analysis::class_definition(node_index n,
                 alignas_list.append(tree.children(c.index())[k].index());
         } else if (i && syntax_is(tree, c, syntax_kind::alignment_specifier)) {
             alignas_list.append(c.index());
+        } else if (i && class_head_attributes_without_effect(c)) {
+            /* [dcl.attr.deprecated] and the like: nothing generated */
         } else {
             head_list.append(c);
         }
@@ -2095,7 +2097,8 @@ syntax_child semantic_analysis::class_head_name(node_index head) const
 {
     for (uint32_t i = 1; i < tree[head].child_count; i++) {
         syntax_child c = tree.children(head)[i];
-        if (syntax_is(tree, c, syntax_kind::alignment_specifier))
+        if (syntax_is(tree, c, syntax_kind::alignment_specifier) ||
+            class_head_attributes_without_effect(c))
             continue;
         bool only_alignment =
             syntax_is(tree, c, syntax_kind::attribute_specifier_seq);

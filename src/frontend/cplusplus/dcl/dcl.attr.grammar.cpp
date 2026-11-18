@@ -564,4 +564,65 @@ bool semantic_analysis::attributes_without_effect(syntax_child n) const
     return true;
 }
 
+/* [ext:gnu_attributes] the same for a gnu-attribute-specifier (or its
+   list): each attribute's name one of attribute_without_effect's gnu
+   names, its arguments ignored */
+bool semantic_analysis::gnu_attributes_without_effect(syntax_child n) const
+{
+    owned_array<syntax_child> work;
+    work.append(n);
+    bool any = false;
+    while (!work.empty()) {
+        syntax_child c = work.back();
+        work.resize(work.size() - 1);
+        syntax_child name_token = c;
+        if (!c.is_token()) {
+            const syntax_node &node = tree[c.index()];
+            const syntax_child *children = tree.children(c.index());
+            if (node.kind == syntax_kind::gnu_attribute_specifier ||
+                node.kind == syntax_kind::gnu_attribute_list) {
+                for (uint32_t i = 0; i < node.child_count; i++)
+                    work.append(children[i]);
+                continue;
+            }
+            /* an attribute with arguments: its name first */
+            if (node.kind != syntax_kind::gnu_attribute || !node.child_count ||
+                !children[0].is_token())
+                return false;
+            name_token = children[0];
+        }
+        /* __attribute__ ( ( , ) ): not names */
+        if (tokens[name_token.index()].kind != token_kind::identifier)
+            continue;
+        owned_buffer spelling;
+        tokens.spelling(name_token.index(), spelling.get());
+        const char *name;
+        size_t length;
+        attribute_name(spelling, &name, &length);
+        if (!attribute_without_effect("gnu", 3, name, length))
+            return false;
+        any = true;
+    }
+    return any;
+}
+
+/* a class-head's attribute-specifier-seq, attribute-specifier or
+   gnu-attribute-specifier at c of attributes without effect only */
+bool semantic_analysis::class_head_attributes_without_effect(
+    syntax_child c) const
+{
+    if (c.is_token())
+        return false;
+    if (syntax_is(tree, c, syntax_kind::gnu_attribute_specifier))
+        return gnu_attributes_without_effect(c);
+    if (syntax_is(tree, c, syntax_kind::attribute_specifier))
+        return attributes_without_effect(c);
+    if (!syntax_is(tree, c, syntax_kind::attribute_specifier_seq))
+        return false;
+    for (uint32_t i = 0; i < tree[c.index()].child_count; i++)
+        if (!class_head_attributes_without_effect(tree.children(c.index())[i]))
+            return false;
+    return true;
+}
+
 } // namespace cplusplus
