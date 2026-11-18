@@ -261,6 +261,11 @@ enum gnu_attribute_flag : uint32_t {
     gnu_packed = 128,
     /* nothrow: no code changes, but clang's function type is noexcept */
     gnu_nothrow = 256,
+    /* visibility("default"), type_visibility("default"): what vcc's
+       symbols have already; never set in a declaration's flags */
+    gnu_default_visibility = 512,
+    /* clang's using_if_exists, on a using-declarator */
+    gnu_using_if_exists = 1024,
 };
 
 struct entity {
@@ -659,10 +664,29 @@ inline analysis_result worse(analysis_result a, analysis_result b)
 }
 
 /* a construct analysis has no rules for yet */
+/* where in vcc's source a function was called from: its default argument's
+   __builtin_FILE/LINE/FUNCTION are the caller's (as std::source_location) */
+struct call_site {
+    const char *file;
+    unsigned line;
+    const char *function;
+    explicit call_site(const char *f = __builtin_FILE(),
+                       unsigned l = __builtin_LINE(),
+                       const char *fn = __builtin_FUNCTION())
+        : file(f), line(l), function(fn)
+    {
+    }
+};
+
 struct unsupported_construct {
     node_index node = 0;
     /* the subclause whose rules are missing, without brackets */
     const char *subclause = "";
+    /* the check in vcc that refused it: its source file, line and
+       function (not_supported's call site) */
+    const char *file = "";
+    uint32_t line = 0;
+    const char *function = "";
 };
 
 struct analysed_declaration {
@@ -671,6 +695,8 @@ struct analysed_declaration {
     /* result unsupported: the first reason, an index into
        semantic_analysis::unsupported */
     uint32_t first_unsupported = 0;
+    /* whether the analysis recorded a reason (first_unsupported is one) */
+    bool has_unsupported = false;
 };
 
 /* a name a declaration declared, with the type analysis gave it: what
@@ -1252,6 +1278,10 @@ class semantic_analysis
     owned_array<name_use> name_uses;
 
     /* the syntax tree analysed */
+    const parser &parsed() const
+    {
+        return p;
+    }
     const syntax_tree &syntax() const
     {
         return tree;
@@ -1260,8 +1290,12 @@ class semantic_analysis
   private:
     /* the node needs rules that are not written: those of the subclause
        that defines its nonterminal, or of the one named */
-    analysis_result not_supported(node_index n);
-    analysis_result not_supported(node_index n, const char *subclause);
+    /* the construct at n has no rules yet: recorded with the subclause
+       and the call site (the check that refused it, for the diagnostic's
+       note) */
+    analysis_result not_supported(node_index n, call_site where = call_site());
+    analysis_result not_supported(node_index n, const char *subclause,
+                                  call_site where = call_site());
     /* whether the parser gave up on a part of the declaration */
     bool parsed_completely(node_index n) const;
 
@@ -1620,7 +1654,7 @@ class semantic_analysis
     analysis_result using_directive(node_index n);
     analysis_result namespace_alias_definition(node_index n);
     analysis_result using_declaration(node_index n);
-    analysis_result using_declarator(node_index n);
+    analysis_result using_declarator(node_index n, bool if_exists = false);
     /* [basic.lookup.udir]: the namespace a namespace-name, after a
        nested-name-specifier (0: none), names */
     analysis_result named_namespace(node_index at, node_index qualifier,
@@ -1684,6 +1718,9 @@ class semantic_analysis
                                             declarator_meaning &m);
     analysis_result gnu_attribute_specifier(node_index n, specified &s);
     uint32_t leading_gnu_attributes(node_index n) const;
+    /* [dcl.attr.grammar]: every attribute at n (an attribute-specifier,
+       -seq or -list) changes nothing vcc generates */
+    bool attributes_without_effect(syntax_child n) const;
     bool declares_unnamed_class(node_index seq) const;
     /* [ext:gnu_library_builtins] the function __builtin_NAME (an
        identifier) declares at its first use, 0 if it is not one */
@@ -2253,6 +2290,7 @@ class semantic_analysis
                                         uint32_t &cv);
     /* [dcl.enum]: an enum-specifier, the enumeration's type */
     analysis_result enum_specifier(node_index n, type_index &type);
+    analysis_result enum_specifier_rules(node_index n, type_index &type);
     /* [dcl.type.elab]: enum identifier, the enumeration's type */
     analysis_result elaborated_enum_specifier(node_index n, type_index &type);
     /* [dcl.enum]: an enumerator named by an id-expression */
@@ -2413,6 +2451,11 @@ class semantic_analysis
     /* the access of the member-declaration analysed (an enumeration's and
        its enumerators' in a class) */
     uint8_t declaration_access = 0;
+    /* [dcl.typedef] in a class: a member typedef-name */
+    analysis_result member_typedef(entity_index c, node_index declaration,
+                                   token_index id, qualified_type type,
+                                   const specified &s,
+                                   const declarator_meaning &m, uint8_t access);
     analysis_result member_bit_field(entity_index c, node_index declaration,
                                      syntax_child d, const specified &s,
                                      uint8_t access);
@@ -2756,6 +2799,10 @@ class semantic_analysis
     /* [temp.param]/6: a non-type template-parameter's type with rules
        here; one whose arguments are addresses */
     bool structural_parameter_type(qualified_type t) const;
+    /* [temp.param]/4: the position of the earlier type parameter of the
+       same template-parameter-list that is t, UINT32_MAX if none */
+    uint32_t own_type_parameter_position(qualified_type t, entity_index scope,
+                                         uint32_t first) const;
     bool address_parameter_type(qualified_type t) const;
     /* [temp.arg.nontype]/3: an argument for one of those */
     analysis_result address_argument(node_index at, qualified_type to,

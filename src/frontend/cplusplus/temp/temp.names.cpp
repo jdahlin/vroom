@@ -147,6 +147,18 @@ bool parser::at_closing_angle()
            at(preprocessing_op_or_punc::GREATER_GREATER_EQUAL);
 }
 
+/*
+ * Whether the '<' at the current token has a matching '>' (angle_group_end)
+ * that a '(' or a '::' follows: the only template-id a speculative parse
+ * after a name of unknown kind keeps.
+ */
+bool parser::angle_group_follows_call()
+{
+    unsigned end = angle_group_end(0);
+    return end && (at(preprocessing_op_or_punc::LEFT_PARENTHESIS, end) ||
+                   at(preprocessing_op_or_punc::COLON_COLON, end));
+}
+
 bool parser::accept_closing_angle()
 {
     if (at(preprocessing_op_or_punc::GREATER))

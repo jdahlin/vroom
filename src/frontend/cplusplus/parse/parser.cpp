@@ -225,6 +225,14 @@ parser::tentative_parse::tentative_parse(parser &p)
 {
     p.counters.tentative_parses++;
     p.speculation++;
+    if (++p.declaration_speculations > p.speculation_limit &&
+        !p.nesting_limit_exceeded) {
+        /* [implimits]: every nesting check fails from here on, so the
+           declaration's parse ends quickly; it is reported as this */
+        p.nesting_limit_exceeded = true;
+        p.nesting_limit_at = p.position;
+        p.speculation_limit_exceeded = true;
+    }
 }
 
 parser::tentative_parse::~tentative_parse()

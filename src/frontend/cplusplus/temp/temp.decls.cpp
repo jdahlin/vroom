@@ -424,6 +424,27 @@ semantic_analysis::function_template_definition(node_index n,
 }
 
 /*
+ * The position among the template's parameters of the type parameter whose
+ * type t is (cv-qualified or not), when it is one of the parameters of this
+ * template-parameter-list declared before (their entities from
+ * template_parameter_entities[first] on, in scope); UINT32_MAX otherwise.
+ */
+uint32_t semantic_analysis::own_type_parameter_position(qualified_type t,
+                                                        entity_index scope,
+                                                        uint32_t first) const
+{
+    const struct type &record = type_table[t.unqualified()];
+    if (record.kind != type_kind::template_parameter)
+        return UINT32_MAX;
+    entity_index q = record.entity;
+    for (size_t k = first; k < template_parameter_entities.size(); k++)
+        if (template_parameter_entities[k] == q &&
+            entity_table[q].enclosing == scope)
+            return static_cast<uint32_t>(entity_table[q].value);
+    return UINT32_MAX;
+}
+
+/*
  * [temp.param]/2: "There is no semantic difference between class and
  * typename in a type-parameter-key."  A type parameter's name is a
  * typedef-name of its template_parameter type; a non-type parameter's
@@ -484,7 +505,15 @@ analysis_result semantic_analysis::declare_template_parameters(
             current_scope = saved;
             if (r != analysis_result::well_formed)
                 return r;
-            if (!structural_parameter_type(type) || depends(type_table, type) ||
+            /* [temp.param]/4 with a type that is one of this template's
+               type parameters declared before it (template <class T, T v>,
+               libc++'s integral_constant): an argument gives its type
+               (template_argument_for); any other dependent type has no
+               rules yet */
+            bool own_parameter_type =
+                own_type_parameter_position(type, scope, first) != UINT32_MAX;
+            if ((!own_parameter_type && (!structural_parameter_type(type) ||
+                                         depends(type_table, type))) ||
                 sp.typedef_ || sp.static_ || sp.extern_ || sp.constexpr_ ||
                 sp.inline_ || sp.gnu_flags)
                 return not_supported(node, "temp.param");
@@ -1897,6 +1926,7 @@ analysis_result semantic_analysis::define_template_member(uint32_t member,
             continue;
         d.result = analysis_result::unsupported;
         d.first_unsupported = static_cast<uint32_t>(unsupported_before);
+        d.has_unsupported = unsupported.size() > unsupported_before;
     }
     return analysis_result::unsupported;
 }

@@ -682,6 +682,15 @@ class parser
     unsigned enclosing_braces = 0;
     /* -fcxx-debug-fallbacks: why each declaration was not parsed */
     bool debug_fallbacks = false;
+    /* why each declaration kept as tokens (unparsed) was not parsed: where
+       the parse failed and what it expected there, for the diagnostic
+       that reports it (lower/compile.cpp) */
+    struct unparsed_reason {
+        token_index first = 0, at = 0;
+        const char *expected = nullptr, *subclause = nullptr;
+        bool later_step = false;
+    };
+    owned_array<unparsed_reason> unparsed_reasons;
     /* an expression of the current declaration named something
        declared_names does not know (a template, a class's member, a name
        declared in a part kept as tokens): if the declaration then does not
@@ -699,6 +708,12 @@ class parser
        diagnostic is this one, whatever a tentative parse made of it */
     bool nesting_limit_exceeded = false;
     token_index nesting_limit_at = 0;
+    /* the tentative parses of the current declaration, and the most it may
+       make: past them it is refused as nesting past the limit is (a
+       grammar that backtracks exponentially fails, it does not hang) */
+    uint32_t declaration_speculations = 0;
+    uint32_t speculation_limit = 1u << 20;
+    bool speculation_limit_exceeded = false;
     /* [implimits]/2: counts one more level for the caller's scope (level);
        past the limit the parse fails, and 0 is returned */
     bool nesting_within_limit(const char *what);
@@ -1169,6 +1184,8 @@ class parser
        is at tokens[ahead], brackets balanced; 0 when none ends before a
        ';', '{' or '}' */
     unsigned angle_group_end(unsigned ahead);
+    /* angle_group_end of the current token, then a ( or a :: */
+    bool angle_group_follows_call();
     bool named_pack_follows();
     bool binary_operator_follows();
     /* in the declaration of an explicit-instantiation or

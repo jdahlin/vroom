@@ -319,9 +319,19 @@ analysis_result semantic_analysis::namespace_definition(node_index n)
                 head.append(tree.children(c.index())[k]);
             continue;
         }
+        if (syntax_is(tree, c, syntax_kind::gnu_attribute_specifier)) {
+            /* GNU attributes that change nothing a namespace's members
+               get (abi_tag, which changes their symbols, has no rule) */
+            gnu_attributes g;
+            analysis_result r = gnu_attribute_specifier(c.index(), g);
+            if (r != analysis_result::well_formed)
+                return r;
+            if (g.flags || g.aligned || g.section)
+                return not_supported(n, "dcl.attr");
+            continue;
+        }
         if (!c.is_token())
-            /* an attribute-specifier-seq, GNU attributes (abi_tag changes
-               the members' symbols) */
+            /* an attribute-specifier-seq */
             return not_supported(n, "dcl.attr");
         if (syntax_is_punctuator(tokens, c,
                                  preprocessing_op_or_punc::LEFT_BRACE))

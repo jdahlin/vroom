@@ -1003,6 +1003,20 @@ semantic_analysis::member_declaration(entity_index c, syntax_child member,
         declaration_access = 0;
         return r;
     }
+    if (node.kind == syntax_kind::alias_declaration) {
+        /* [dcl.typedef]/2: "A typedef-name can also be introduced by an
+           alias-declaration", a member-declaration ([class.mem]/1) */
+        qualified_type type;
+        analysis_result r = alias_type(n, type);
+        if (r != analysis_result::well_formed)
+            return r;
+        specified s;
+        s.typedef_ = true;
+        s.type = type;
+        s.has_type = true;
+        return member_typedef(c, n, node.first_token + 1, type, s,
+                              declarator_meaning(), access);
+    }
     if (node.kind != syntax_kind::member_declaration &&
         node.kind != syntax_kind::function_definition)
         return not_supported(n);
@@ -1033,8 +1047,25 @@ semantic_analysis::member_declaration(entity_index c, syntax_child member,
         /* [class.mem]/12: "The decl-specifier-seq may be omitted in
            constructor, destructor, and conversion function declarations
            only" */
-        if (!node.child_count || !declares_special_member(c, children[at]))
+        if (!node.child_count || !declares_special_member(c, children[at])) {
+            /* a conversion function ([class.conv.fct]) has no rules yet:
+               reported at its conversion-function-id */
+            owned_array<node_index> work;
+            for (uint32_t i = 0; i < node.child_count; i++)
+                if (!children[i].is_token() &&
+                    !syntax_is(tree, children[i], syntax_kind::function_body))
+                    work.append(children[i].index());
+            while (!work.empty()) {
+                node_index k = work.back();
+                work.resize(work.size() - 1);
+                if (tree[k].kind == syntax_kind::conversion_function_id)
+                    return not_supported(k, "class.conv.fct");
+                for (uint32_t i = 0; i < tree[k].child_count; i++)
+                    if (!tree.children(k)[i].is_token())
+                        work.append(tree.children(k)[i].index());
+            }
             return not_supported(n, "class.ctor");
+        }
         if (node.kind == syntax_kind::member_declaration) {
             if (node.child_count != at + 2 ||
                 !syntax_is_punctuator(tokens, children[at + 1],
@@ -1267,12 +1298,12 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
     if (!s.has_type)
         return not_supported(declaration, "dcl.type");
     if (s.typedef_)
-        return not_supported(declaration, "dcl.typedef");
+        return member_typedef(c, declaration, m.id, type, s, m, access);
     /* [dcl.constexpr]/1: "The constexpr specifier shall be applied only to
        the definition of a variable or variable template or the declaration
        of a function or function template": a static data member's is not
        analysed yet */
-    if (s.constexpr_ &&
+    if (s.constexpr_ && !s.static_ &&
         type_table[type.unqualified()].kind != type_kind::function)
         return not_supported(declaration, "dcl.constexpr");
     /* [class.mem]/11: "A member shall not be declared with the extern
@@ -1469,8 +1500,18 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
         /* [class.static.data]/3: "The declaration of a non-inline static
            data member in its class definition is not a definition and may
            be of an incomplete type other than cv void." */
-        if (s.inline_)
+        /* an inline static data member ([dcl.inline]/6: defined in the
+           class) has rules when it is const too: the constexpr path */
+        if (s.inline_ && !s.constexpr_ && !(type.cv() & cv_const))
             return not_supported(declaration, "class.static.data");
+        /* [dcl.constexpr]/10: "A constexpr specifier used in an object
+           declaration declares the object as const"; [dcl.constexpr]/1 a
+           constexpr static data member is an inline variable, defined by
+           its declaration in the class (its initializer:
+           static_member_initializer) */
+        if (s.constexpr_)
+            type =
+                qualified_type::make(type.unqualified(), type.cv() | cv_const);
         if (local_class_rule(c))
             /* [class.local]/4: "A local class cannot have static data
                members" (a class nested in one neither) */
@@ -1567,6 +1608,42 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
     } else {
         entity_table.bind(c, name, e);
     }
+    last_declared = e;
+    return analysis_result::well_formed;
+}
+
+/*
+ * [dcl.typedef]/1: a typedef-name declared in a member-specification (or
+ * by an alias-declaration there, [dcl.typedef]/2) is a member of the class
+ * ([class.mem]/3: "Members of a class are data members, member functions
+ * ..., nested types, enumerators, and member templates"), with the access
+ * of its declaration.  [class.mem]/20: "every member of class T that is
+ * itself a type" shall have a name different from T.  A redeclaration in
+ * the class ([dcl.typedef]/3 allows one at namespace scope; [class.mem]/5
+ * not in a class) and attributes on it have no rules yet.
+ */
+analysis_result semantic_analysis::member_typedef(
+    entity_index c, node_index declaration, token_index id, qualified_type type,
+    const specified &s, const declarator_meaning &m, uint8_t access)
+{
+    if (s.static_ || s.inline_ || s.constexpr_ || s.virtual_ || s.gnu_flags ||
+        s.aligned || m.aligned || m.gnu_flags || m.section)
+        return not_supported(declaration, "dcl.typedef");
+    uint32_t name = tokens.identifier(id);
+    if (name == entity_table[c].name)
+        return ill_formed_at_token(id,
+                                   "every member of a class that is itself "
+                                   "a type shall have a name different from "
+                                   "the class",
+                                   "class.mem");
+    if (entity_table.find(c, name))
+        return not_supported(declaration, "dcl.typedef");
+    entity_index e = entity_table.make(entity_kind::typedef_name, name, c);
+    entity_table[e].type = type;
+    entity_table[e].defined = true;
+    entity_table[e].access = access;
+    entity_table.add_declaration(e, declaration);
+    entity_table.bind(c, name, e);
     last_declared = e;
     return analysis_result::well_formed;
 }
@@ -1860,8 +1937,6 @@ semantic_analysis::static_member_initializer(node_index declarator,
     qualified_type type = entity_table[e].type;
     uint32_t cv = cv_of(type_table, type);
     const struct type record = type_table[type.unqualified()];
-    if (s.inline_ || s.constexpr_)
-        return not_supported(declarator, "class.static.data");
     if (!(cv & cv_const) || (cv & cv_volatile) ||
         record.kind != type_kind::fundamental || !is_integral(type))
         /* an enumeration's too, which analysis does not fold yet */
@@ -1884,6 +1959,18 @@ semantic_analysis::static_member_initializer(node_index declarator,
     x.usable = constness::constant;
     x.value = value.value;
     x.definition = value.node;
+    if (s.constexpr_ || s.inline_) {
+        /* [dcl.inline]/1 (C++17): "A function or static data member
+           declared with the constexpr specifier is implicitly an inline
+           function or variable"; this declaration (of it or of an inline
+           one) is its definition ([basic.def]/2.3), and an odr-use emits it
+           (COMDAT, as clang) */
+        if (tokens.files.behavior.edition < standard_edition::cplusplus_17)
+            return not_supported(declarator, "class.static.data");
+        x.inline_ = true;
+        x.constexpr_ = s.constexpr_;
+        x.defined = true;
+    }
     return analysis_result::well_formed;
 }
 

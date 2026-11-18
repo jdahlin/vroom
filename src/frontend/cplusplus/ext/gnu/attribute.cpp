@@ -202,6 +202,14 @@ static const gnu_attribute_rule gnu_attribute_rules[] = {
        and one byte otherwise, unless a larger value is specified with the
        aligned attribute." (ignored elsewhere, clang's warning) */
     {"packed", gnu_packed},
+    /* "visibility (visibility_type)": "default" only, the visibility
+       vcc's symbols have; clang's type_visibility the same for a type's
+       vague linkage (libc++'s namespace std) */
+    {"visibility", gnu_default_visibility},
+    {"type_visibility", gnu_default_visibility},
+    /* clang's using_if_exists: a using-declarator whose name is not
+       found declares nothing */
+    {"using_if_exists", gnu_using_if_exists},
     /* "aligned (alignment)" (below) */
     {"aligned", gnu_aligned},
     /* the attributes that change no code vcc generates: they say what a
@@ -358,6 +366,14 @@ analysis_result semantic_analysis::gnu_attribute_specifier(node_index n,
                 return not_supported(at, "ext.gnu");
             g.section = children[2].index();
             g.flags |= gnu_section;
+            continue;
+        }
+        if (rule->flag == gnu_default_visibility) {
+            owned_buffer value;
+            if (count == 4 && children[2].is_token())
+                tokens.spelling(children[2].index(), value.get());
+            if (value.size() != 9 || memcmp(value.data(), "\"default\"", 9))
+                return not_supported(at, "ext.gnu");
             continue;
         }
         /* the others take no arguments analysis has rules for (format's

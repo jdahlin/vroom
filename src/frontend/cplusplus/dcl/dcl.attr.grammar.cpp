@@ -11,6 +11,7 @@
  * semantic rule, not checked here.
  */
 #include "../cplusplus-internal.h"
+#include "frontend/cplusplus/sema.h"
 
 namespace cplusplus
 {
@@ -436,6 +437,131 @@ node_index parser::misplaced_attribute_brackets()
 {
     return violates("'[[' only where an attribute-specifier can be",
                     "dcl.attr.grammar", position);
+}
+
+} // namespace cplusplus
+
+namespace cplusplus
+{
+
+namespace
+{
+
+/* an attribute-token's identifier without the __ before and after that
+   implementations allow ([dcl.attr.grammar]/5 reserves them) */
+void attribute_name(const owned_buffer &spelling, const char **name,
+                    size_t *length)
+{
+    *name = reinterpret_cast<const char *>(spelling.data());
+    *length = spelling.size();
+    if (*length > 4 && (*name)[0] == '_' && (*name)[1] == '_' &&
+        (*name)[*length - 1] == '_' && (*name)[*length - 2] == '_') {
+        *name += 2;
+        *length -= 4;
+    }
+}
+
+bool name_is(const char *name, size_t length, const char *s)
+{
+    return strlen(s) == length && !memcmp(name, s, length);
+}
+
+/*
+ * The attributes that change nothing vcc generates or lays out: they ask
+ * for a diagnostic or describe the program to a tool.  Standard:
+ * maybe_unused, nodiscard, deprecated, likely, unlikely; GCC's, as
+ * gnu::NAME: nodebug, unused, deprecated; clang's, as clang::NAME:
+ * preferred_name, no_specializations, lifetimebound (the names clang 23
+ * knows in each namespace; another is an unknown attribute to clang).
+ */
+bool attribute_without_effect(const char *ns, size_t ns_length,
+                              const char *name, size_t length)
+{
+    static const char *const standard[] = {"maybe_unused", "nodiscard",
+                                           "deprecated", "likely", "unlikely"};
+    static const char *const gnu[] = {"nodebug", "unused", "deprecated"};
+    static const char *const clang[] = {"preferred_name", "no_specializations",
+                                        "lifetimebound"};
+    if (!ns) {
+        for (const char *s : standard)
+            if (name_is(name, length, s))
+                return true;
+    } else if (name_is(ns, ns_length, "gnu")) {
+        for (const char *s : gnu)
+            if (name_is(name, length, s))
+                return true;
+    } else if (name_is(ns, ns_length, "clang")) {
+        for (const char *s : clang)
+            if (name_is(name, length, s))
+                return true;
+    }
+    return false;
+}
+
+} // namespace
+
+/*
+ * [dcl.attr.grammar]/4: "Each attribute-specifier-seq is said to appertain
+ * to some entity or statement, identified by the syntactic context where
+ * it appears."  Whether every attribute of the attribute-specifier (or
+ * -seq, or the list) at n is one that changes nothing vcc generates
+ * (attribute_without_effect): only then may a declaration that has no rules
+ * for attributes leave them out.
+ */
+bool semantic_analysis::attributes_without_effect(syntax_child n) const
+{
+    owned_array<syntax_child> work;
+    work.append(n);
+    while (!work.empty()) {
+        syntax_child c = work.back();
+        work.resize(work.size() - 1);
+        if (c.is_token()) {
+            token_kind k = tokens[c.index()].kind;
+            if (k == token_kind::operator_or_punctuator)
+                continue; /* [ [ , ] ] */
+            owned_buffer spelling;
+            tokens.spelling(c.index(), spelling.get());
+            const char *name;
+            size_t length;
+            attribute_name(spelling, &name, &length);
+            if (!attribute_without_effect(nullptr, 0, name, length))
+                return false;
+            continue;
+        }
+        const syntax_node &node = tree[c.index()];
+        const syntax_child *children = tree.children(c.index());
+        if (node.kind == syntax_kind::attribute_specifier_seq ||
+            node.kind == syntax_kind::attribute_specifier ||
+            node.kind == syntax_kind::attribute_list) {
+            for (uint32_t i = 0; i < node.child_count; i++)
+                work.append(children[i]);
+            continue;
+        }
+        if (node.kind == syntax_kind::attribute) {
+            /* the token and an attribute-argument-clause, which none of
+               these takes for anything vcc generates */
+            if (!node.child_count ||
+                syntax_is(tree, children[0], syntax_kind::attribute))
+                return false;
+            work.append(children[0]);
+            continue;
+        }
+        if (node.kind != syntax_kind::attribute_scoped_token ||
+            node.child_count != 3 || !children[0].is_token() ||
+            !children[2].is_token())
+            /* an attribute-using-prefix, an alignment-specifier */
+            return false;
+        owned_buffer ns_spelling, spelling;
+        tokens.spelling(children[0].index(), ns_spelling.get());
+        tokens.spelling(children[2].index(), spelling.get());
+        const char *ns, *name;
+        size_t ns_length, length;
+        attribute_name(ns_spelling, &ns, &ns_length);
+        attribute_name(spelling, &name, &length);
+        if (!attribute_without_effect(ns, ns_length, name, length))
+            return false;
+    }
+    return true;
 }
 
 } // namespace cplusplus

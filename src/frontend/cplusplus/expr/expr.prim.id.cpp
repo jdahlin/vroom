@@ -359,10 +359,12 @@ node_index parser::id_expression(bool member)
                 if (failed())
                     return 0;
             } else if ((member || (!known && !dependent_qualifier)) &&
-                       !dependent_qualifier) {
+                       !dependent_qualifier && angle_group_follows_call()) {
                 /* a member's name and a name of a class the parser does not
                    know may be a template's: the tokens are a template-id
-                   when they parse as one and a call or a '::' follows */
+                   when they parse as one and a call or a '::' follows.
+                   The token scan first: a speculative parse per '<' of
+                   r.a < r.b && r.a < r.b && ... is exponential */
                 tentative_parse attempt(*this);
                 template_id_rest(id_mark, id_first,
                                  syntax_kind::simple_template_id);

@@ -123,6 +123,23 @@ VPRIV void driver_searchpath_build(struct driver_job *job,
     /* Darwin: vcc's own <stdatomic.h>, <arm_neon.h>, <arm_acle.h> ahead of the SDK's */
     if (job->darwin && !job->no_standard_includes)
         ADD(VCC_INCDIR);
+    if (job->darwin && !job->no_standard_includes && job->cxx &&
+        !job->no_standard_cxx_includes) {
+        /* clang++ on Darwin: the SDK's libc++ (<sdk>/usr/include/c++/v1) first */
+        static __thread char cxxdir[1024];
+
+        for (size_t k = 0; k < nsys; k++) {
+            const char *d = sysdirs_darwin[k],
+                       *u = strstr(d, ".sdk/usr/include");
+
+            if (u && !u[16] &&
+                snprintf(cxxdir, sizeof cxxdir, "%s/c++/v1", d) <
+                    (int)sizeof cxxdir) {
+                ADD(cxxdir);
+                break;
+            }
+        }
+    }
     if (job->darwin && !job->no_standard_includes)
         for (size_t k = 0; k < nsys; k++) {
             size_t l = strlen(sysdirs_darwin[k]);

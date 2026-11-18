@@ -1,0 +1,2 @@
+parser-kept-tokens.cpp:6:1: error: the C++ front end does not handle a declaration the parser kept as tokens yet
+parser-kept-tokens.cpp:6:11: note: the parser stopped at '[': grammar it does not parse yet
