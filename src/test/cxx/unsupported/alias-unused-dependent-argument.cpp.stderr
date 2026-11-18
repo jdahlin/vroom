@@ -1,2 +1,0 @@
-alias-unused-dependent-argument.cpp:8:39: error: the rules of [temp.alias] are not implemented yet
-alias-unused-dependent-argument.cpp:8:39: note: refused by vcc's frontend/cplusplus/temp/temp.decls.cpp:N (alias_template_type)

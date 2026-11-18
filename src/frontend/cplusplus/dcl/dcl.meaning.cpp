@@ -90,10 +90,15 @@ analysis_result semantic_analysis::reference(node_index at, bool rvalue,
             return ill_formed(at, "there shall be no references to references",
                               "dcl.ref");
     }
-    /* a reference to cv void: clang's error, a rule not found yet */
+    /* [dcl.ref]/1: "A declarator that specifies the type "reference to cv
+       void" is ill-formed." (in a substitution, a deduction failure:
+       [temp.deduct]/11.4) */
     if (referred.kind == type_kind::fundamental &&
         referred.fundamental == fundamental_type::void_)
-        return not_supported(at, "dcl.ref");
+        return ill_formed(at,
+                          "a declarator that specifies the type \"reference "
+                          "to cv void\" is ill-formed",
+                          "dcl.ref");
     type = reference_to(type, rvalue);
     m.reference_made = true;
     return analysis_result::well_formed;

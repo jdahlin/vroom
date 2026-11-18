@@ -2918,6 +2918,12 @@ class semantic_analysis
     analysis_result alias_template_type(node_index id, uint32_t at,
                                         type_index &type);
     node_index variable_specialization_id(node_index d) const;
+    /* a partial specialization equivalent to another: the template not
+       used */
+    void equivalent_partial_specializations(uint32_t added);
+    analysis_result variable_partial_specialization(node_index n,
+                                                    node_index declaration,
+                                                    node_index id);
     analysis_result variable_specialization(node_index n, node_index inner,
                                             node_index id);
     /* the variable template the held name e is, plus one */
@@ -3035,6 +3041,14 @@ class semantic_analysis
     analysis_result
     class_specialization_definition(node_index n, node_index specifier,
                                     const owned_array<node_index> &parameters);
+    /* [temp.class.spec.match]/3: whether the deduced arguments substituted
+       into the partial specialization's give the use's */
+    analysis_result substitute_specialization(
+        uint32_t specialization, const owned_array<template_argument> &deduced,
+        const template_argument *arguments, uint32_t count, bool &substituted);
+    /* analysing a partial specialization's template arguments, which
+       matching substitutes again (substitute_specialization) */
+    uint32_t partial_arguments = 0;
     /* the specialization of function_templates[class_template - 1] whose
        pattern the arguments match (0: the primary), with its parameters'
        arguments */
@@ -3414,6 +3428,17 @@ class semantic_analysis
     };
 
   private:
+    /* [temp.deduct]/8: "Invalid types and expressions can result in a
+       deduction failure only in the immediate context": what a
+       substitution issued and made, taken back when it failed there */
+    struct substitution_mark {
+        size_t messages = 0, errors = 0, warnings = 0, fatals = 0;
+        size_t expressions = 0, uses = 0;
+        uint32_t failures = 0;
+    };
+    substitution_mark mark_substitution() const;
+    /* false (nothing undone) when the failure is not the substitution's */
+    bool undo_substitution(const substitution_mark &m);
     /* [temp.over]/1: the specializations of the templates in group
        whose deduction from the call's arguments succeeds, appended to
        candidates; with first_arguments, where each one's deduced

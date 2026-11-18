@@ -972,6 +972,35 @@ analysis_result semantic_analysis::template_callee_parts(
     return analysis_result::well_formed;
 }
 
+semantic_analysis::substitution_mark
+semantic_analysis::mark_substitution() const
+{
+    substitution_mark m;
+    m.messages = diagnostics.messages.size();
+    m.errors = diagnostics.error_count;
+    m.warnings = diagnostics.warning_count;
+    m.fatals = diagnostics.fatal_count;
+    m.expressions = expressions.size();
+    m.uses = name_uses.size();
+    m.failures = definition_failures;
+    return m;
+}
+
+bool semantic_analysis::undo_substitution(const substitution_mark &m)
+{
+    /* (a definition instantiated on the way failed, or a fatal error:
+       not the substitution's own failure) */
+    if (m.failures != definition_failures ||
+        diagnostics.fatal_count != m.fatals)
+        return false;
+    diagnostics.messages.resize(m.messages);
+    diagnostics.error_count = m.errors;
+    diagnostics.warning_count = m.warnings;
+    expressions.resize(m.expressions);
+    name_uses.resize(m.uses);
+    return true;
+}
+
 /*
  * [temp.over]/1: "For each function template, if the argument deduction
  * and checking succeeds, the template-arguments (deduced and/or explicit)
@@ -996,13 +1025,7 @@ analysis_result semantic_analysis::template_candidates(
            immediate context of the declaration (or of a default
            template-argument) substituted is no candidate, and no
            diagnostic: what substitution issued is taken back */
-        size_t messages = diagnostics.messages.size();
-        size_t errors = diagnostics.error_count;
-        size_t warnings = diagnostics.warning_count;
-        size_t fatals = diagnostics.fatal_count;
-        size_t expressions_before = expressions.size();
-        size_t uses_before = name_uses.size();
-        uint32_t failures = definition_failures;
+        substitution_mark mark = mark_substitution();
         substituting++;
         analysis_result r = deduce_from_call(n, g, meanings, count, d, &failed);
         entity_index e = 0;
@@ -1014,16 +1037,8 @@ analysis_result semantic_analysis::template_candidates(
             unevaluated--;
         }
         substituting--;
-        if (r == analysis_result::ill_formed &&
-            failures == definition_failures &&
-            diagnostics.fatal_count == fatals) {
-            diagnostics.messages.resize(messages);
-            diagnostics.error_count = errors;
-            diagnostics.warning_count = warnings;
-            expressions.resize(expressions_before);
-            name_uses.resize(uses_before);
+        if (r == analysis_result::ill_formed && undo_substitution(mark))
             continue;
-        }
         if (r != analysis_result::well_formed)
             return r;
         if (failed)

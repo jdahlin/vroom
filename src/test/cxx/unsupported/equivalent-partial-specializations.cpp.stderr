@@ -1,0 +1,2 @@
+equivalent-partial-specializations.cpp:17:9: error: the rules of [temp.names] are not implemented yet
+equivalent-partial-specializations.cpp:17:9: note: refused by vcc's frontend/cplusplus/temp/temp.decls.cpp:N (template_type)
