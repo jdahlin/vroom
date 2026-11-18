@@ -92,6 +92,9 @@ struct dump_request {
     /* -fcxx-debug-fallbacks: the parser reports each declaration it keeps
        as tokens */
     bool debug_fallbacks = false;
+    /* -fcxx-speculation-limit=N: the parser's tentative parses per
+       declaration (0: its default), to test the limit */
+    uint32_t speculation_limit = 0;
 
     bool has(dump_output d) const
     {

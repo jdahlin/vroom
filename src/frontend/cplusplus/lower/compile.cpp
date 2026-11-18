@@ -109,6 +109,58 @@ static void compile_predefines(const cplusplus_compile_options *o,
     }
 }
 
+/*
+ * What the analysis or the lowering has no rule for, at its token: the
+ * subclause, and in a note the check in vcc that refused it (its source
+ * file under src/, line and function), so the gap is found at once.
+ */
+static void report_failure(int fd, token_stream &tokens,
+                           const lowering_failure &why)
+{
+    source_position at = tokens.position(why.at);
+    if (why.subclause)
+        dprintf(fd,
+                "%s:%u:%u: error: the rules of [%s] are not implemented "
+                "yet\n",
+                at.file_name, at.line, at.column, why.subclause);
+    else if (why.front_end)
+        dprintf(fd,
+                "%s:%u:%u: error: the C++ front end does not handle %s "
+                "yet\n",
+                at.file_name, at.line, at.column, why.what);
+    else
+        dprintf(fd,
+                "%s:%u:%u: error: C++ code generation does not handle %s "
+                "yet\n",
+                at.file_name, at.line, at.column, why.what);
+    if (why.file && *why.file) {
+        const char *file = strstr(why.file, "/src/");
+        if (file)
+            file += 5;
+        else
+            file = why.file;
+        dprintf(fd, "%s:%u:%u: note: refused by vcc's %s:%u (%s)\n",
+                at.file_name, at.line, at.column, file, why.line, why.function);
+    }
+    if (why.expected) {
+        /* where the parse of a declaration kept as tokens stopped: the
+           grammar a later step parses, or tokens it could not read */
+        source_position stop = tokens.position(why.parse_at);
+        owned_buffer spelling;
+        tokens.spelling(why.parse_at, spelling.get());
+        dprintf(fd, "%s:%u:%u: note: the parser stopped at '%.*s': ",
+                stop.file_name, stop.line, stop.column, (int)spelling.size(),
+                spelling.data());
+        if (why.later_step)
+            dprintf(fd, "grammar it does not parse yet");
+        else
+            dprintf(fd, "expected %s", why.expected);
+        if (why.parse_subclause && *why.parse_subclause)
+            dprintf(fd, " ([%s])", why.parse_subclause);
+        dprintf(fd, "\n");
+    }
+}
+
 /* phases 7 to 9: the parse, the analysis, and unless -fsyntax-only the
    code; the developer outputs of the parse or of the analysis on out */
 static int compile_translation_unit(const cplusplus_compile_options *o, pp *p,
@@ -123,6 +175,8 @@ static int compile_translation_unit(const cplusplus_compile_options *o, pp *p,
     declared_names names;
     parser parse(tokens, tree, names, diagnostics);
     parse.debug_fallbacks = request.debug_fallbacks;
+    if (request.speculation_limit)
+        parse.speculation_limit = request.speculation_limit;
     parse.translation_unit();
     if (request.phase() == dump_phase::parsing) {
         dump_parsing(request, tree, tokens, parse, out);
@@ -137,23 +191,23 @@ static int compile_translation_unit(const cplusplus_compile_options *o, pp *p,
     }
 
     int status = 0;
-    /* (-fsyntax-only: no code, nothing lowered) */
+    /* -fsyntax-only: no code, but a declaration analysis has no rules for
+       is reported as -c reports it (the developer outputs report their
+       own) */
+    if (!diagnostics.error_count && !co->emit &&
+        request.phase() == dump_phase::none) {
+        lowering_failure why;
+        if (!analysis_complete(analysis, why)) {
+            report_failure(o->errfd, tokens, why);
+            status = 1;
+        }
+    }
     if (!diagnostics.error_count && co->emit) {
         cc *c = ast_builder_open(p, co);
         lowering_failure why;
         if (!lower_translation_unit(analysis, tokens, c, co->target, why,
                                     o->path)) {
-            source_position at = tokens.position(why.at);
-            if (why.subclause)
-                dprintf(o->errfd,
-                        "%s:%u:%u: error: the rules of [%s] are not "
-                        "implemented yet\n",
-                        at.file_name, at.line, at.column, why.subclause);
-            else
-                dprintf(o->errfd,
-                        "%s:%u:%u: error: C++ code generation does not handle "
-                        "%s yet\n",
-                        at.file_name, at.line, at.column, why.what);
+            report_failure(o->errfd, tokens, why);
             status = 1;
         } else if (ast_builder_emit(c))
             status = 1;
@@ -190,6 +244,8 @@ static bool compile_arguments(const cplusplus_compile_options *o,
             r.phase4_diagnostics_only = true;
         else if (!strcmp(a, "-fcxx-debug-fallbacks"))
             r.debug_fallbacks = true;
+        else if (!strncmp(a, "-fcxx-speculation-limit=", 24))
+            r.speculation_limit = (uint32_t)strtoul(a + 24, nullptr, 10);
         else if (!strncmp(a, "-fcxx-", 6)) {
             dprintf(o->errfd, "vcc: error: unknown argument: '%s'\n", a);
             return false;

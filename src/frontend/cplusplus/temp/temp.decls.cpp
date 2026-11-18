@@ -1926,6 +1926,7 @@ analysis_result semantic_analysis::define_template_member(uint32_t member,
             continue;
         d.result = analysis_result::unsupported;
         d.first_unsupported = static_cast<uint32_t>(unsupported_before);
+        d.has_unsupported = unsupported.size() > unsupported_before;
     }
     return analysis_result::unsupported;
 }

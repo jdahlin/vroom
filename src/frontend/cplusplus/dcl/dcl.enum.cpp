@@ -425,6 +425,24 @@ unsigned signed_bits(__int128 v)
 analysis_result semantic_analysis::enum_specifier(node_index n,
                                                   type_index &type)
 {
+    type = 0;
+    analysis_result r = enum_specifier_rules(n, type);
+    /* a definition analysis gave up in (or found ill-formed) leaves an
+       enumeration with only some of its enumerators: no underlying type,
+       so a use of it is unsupported too ([expr.prim.id.qual]'s "shall be
+       followed by the name of an enumerator" would be a false error) */
+    if (r != analysis_result::well_formed && type &&
+        type_table[type].kind == type_kind::enumeration) {
+        entity &x = entity_table[type_table[type].entity];
+        if (!x.defined)
+            x.underlying = fundamental_type::none;
+    }
+    return r;
+}
+
+analysis_result semantic_analysis::enum_specifier_rules(node_index n,
+                                                        type_index &type)
+{
     const implementation_defined_behavior &b = tokens.files.behavior;
     const syntax_node &node = tree[n];
     const syntax_child *children = tree.children(n);

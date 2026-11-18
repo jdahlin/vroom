@@ -1047,8 +1047,25 @@ semantic_analysis::member_declaration(entity_index c, syntax_child member,
         /* [class.mem]/12: "The decl-specifier-seq may be omitted in
            constructor, destructor, and conversion function declarations
            only" */
-        if (!node.child_count || !declares_special_member(c, children[at]))
+        if (!node.child_count || !declares_special_member(c, children[at])) {
+            /* a conversion function ([class.conv.fct]) has no rules yet:
+               reported at its conversion-function-id */
+            owned_array<node_index> work;
+            for (uint32_t i = 0; i < node.child_count; i++)
+                if (!children[i].is_token() &&
+                    !syntax_is(tree, children[i], syntax_kind::function_body))
+                    work.append(children[i].index());
+            while (!work.empty()) {
+                node_index k = work.back();
+                work.resize(work.size() - 1);
+                if (tree[k].kind == syntax_kind::conversion_function_id)
+                    return not_supported(k, "class.conv.fct");
+                for (uint32_t i = 0; i < tree[k].child_count; i++)
+                    if (!tree.children(k)[i].is_token())
+                        work.append(tree.children(k)[i].index());
+            }
             return not_supported(n, "class.ctor");
+        }
         if (node.kind == syntax_kind::member_declaration) {
             if (node.child_count != at + 2 ||
                 !syntax_is_punctuator(tokens, children[at + 1],

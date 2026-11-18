@@ -164,6 +164,7 @@ analysis_result semantic_analysis::instantiate_definition(node_index at,
         d.result = r;
         if (r == analysis_result::unsupported)
             d.first_unsupported = static_cast<uint32_t>(unsupported_before);
+        d.has_unsupported = unsupported.size() > unsupported_before;
     }
     /* the use names a function all the same */
     return analysis_result::well_formed;

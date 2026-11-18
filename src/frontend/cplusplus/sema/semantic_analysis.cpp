@@ -38,17 +38,21 @@ semantic_analysis::semantic_analysis(const syntax_tree &tree,
     unsupported.append(unsupported_construct());
 }
 
-analysis_result semantic_analysis::not_supported(node_index n)
+analysis_result semantic_analysis::not_supported(node_index n, call_site where)
 {
-    return not_supported(n, syntax_kind_subclause(tree[n].kind));
+    return not_supported(n, syntax_kind_subclause(tree[n].kind), where);
 }
 
 analysis_result semantic_analysis::not_supported(node_index n,
-                                                 const char *subclause)
+                                                 const char *subclause,
+                                                 call_site where)
 {
     unsupported_construct u;
     u.node = n;
     u.subclause = subclause;
+    u.file = where.file;
+    u.line = where.line;
+    u.function = where.function;
     unsupported.append(u);
     return analysis_result::unsupported;
 }
@@ -140,6 +144,7 @@ analysis_result semantic_analysis::declaration(node_index n)
         d.result = declaration_by_kind(n);
     if (d.result == analysis_result::unsupported)
         d.first_unsupported = static_cast<uint32_t>(unsupported_before);
+    d.has_unsupported = unsupported.size() > unsupported_before;
     if (d.result != analysis_result::well_formed)
         hold_names(n);
     declarations.append(d);

@@ -661,10 +661,29 @@ inline analysis_result worse(analysis_result a, analysis_result b)
 }
 
 /* a construct analysis has no rules for yet */
+/* where in vcc's source a function was called from: its default argument's
+   __builtin_FILE/LINE/FUNCTION are the caller's (as std::source_location) */
+struct call_site {
+    const char *file;
+    unsigned line;
+    const char *function;
+    explicit call_site(const char *f = __builtin_FILE(),
+                       unsigned l = __builtin_LINE(),
+                       const char *fn = __builtin_FUNCTION())
+        : file(f), line(l), function(fn)
+    {
+    }
+};
+
 struct unsupported_construct {
     node_index node = 0;
     /* the subclause whose rules are missing, without brackets */
     const char *subclause = "";
+    /* the check in vcc that refused it: its source file, line and
+       function (not_supported's call site) */
+    const char *file = "";
+    uint32_t line = 0;
+    const char *function = "";
 };
 
 struct analysed_declaration {
@@ -673,6 +692,8 @@ struct analysed_declaration {
     /* result unsupported: the first reason, an index into
        semantic_analysis::unsupported */
     uint32_t first_unsupported = 0;
+    /* whether the analysis recorded a reason (first_unsupported is one) */
+    bool has_unsupported = false;
 };
 
 /* a name a declaration declared, with the type analysis gave it: what
@@ -1249,6 +1270,10 @@ class semantic_analysis
     owned_array<name_use> name_uses;
 
     /* the syntax tree analysed */
+    const parser &parsed() const
+    {
+        return p;
+    }
     const syntax_tree &syntax() const
     {
         return tree;
@@ -1257,8 +1282,12 @@ class semantic_analysis
   private:
     /* the node needs rules that are not written: those of the subclause
        that defines its nonterminal, or of the one named */
-    analysis_result not_supported(node_index n);
-    analysis_result not_supported(node_index n, const char *subclause);
+    /* the construct at n has no rules yet: recorded with the subclause
+       and the call site (the check that refused it, for the diagnostic's
+       note) */
+    analysis_result not_supported(node_index n, call_site where = call_site());
+    analysis_result not_supported(node_index n, const char *subclause,
+                                  call_site where = call_site());
     /* whether the parser gave up on a part of the declaration */
     bool parsed_completely(node_index n) const;
 
@@ -2168,6 +2197,7 @@ class semantic_analysis
     analysis_result decltype_type(node_index n, type_index &type, uint32_t &cv);
     /* [dcl.enum]: an enum-specifier, the enumeration's type */
     analysis_result enum_specifier(node_index n, type_index &type);
+    analysis_result enum_specifier_rules(node_index n, type_index &type);
     /* [dcl.type.elab]: enum identifier, the enumeration's type */
     analysis_result elaborated_enum_specifier(node_index n, type_index &type);
     /* [dcl.enum]: an enumerator named by an id-expression */
