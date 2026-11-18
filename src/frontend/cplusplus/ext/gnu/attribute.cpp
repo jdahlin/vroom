@@ -55,6 +55,7 @@
  * means, and which of them it takes, is not grammar.
  */
 #include "../../cplusplus-internal.h"
+#include "frontend/cplusplus/sema.h"
 
 namespace cplusplus
 {

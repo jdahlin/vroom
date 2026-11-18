@@ -70,6 +70,9 @@ namespace cplusplus
       "the semantic tree of each definition, a node per line")                 \
     X(symbols, "symbols", analysis,                                            \
       "per function and variable of a well-formed declaration: its symbol")    \
+    X(layout_claims, "layout-claims", analysis,                                \
+      "per complete class: its size, data size and alignment, and the "        \
+      "offset of each base and non-static data member")                        \
     X(stats, "stats", analysis, "declarations by result, types, entities")
 
 enum class dump_phase { none, lexing, preprocessing, parsing, analysis };
@@ -134,7 +137,7 @@ void dump_parsing(const dump_request &r, const syntax_tree &tree,
                   token_stream &tokens, parser &p, vbuffer *out);
 
 /* analysis, unsupported, declaration-claims, type-claims, lookup-claims,
-   check-tree, tree, symbols, stats */
+   check-tree, tree, symbols, layout-claims, stats */
 void dump_analysis(const dump_request &r, const semantic_analysis &analysis,
                    const syntax_tree &tree, token_stream &tokens, vbuffer *out);
 

@@ -16,28 +16,14 @@
  * the class or outside it), nested classes and enumerations.  A local or
  * nested class has data members only.  Bit-fields, unions, virtual
  * functions and member functions of local and nested classes are
- * `unsupported` with their subclause.  The layout is the Itanium ABI's for
- * such a class ([abi:layout]): each member at the next offset aligned for
- * it, the size rounded up to the class's alignment, an empty class one
- * byte.
+ * `unsupported` with their subclause.  The layout is the Itanium ABI's,
+ * made at the closing } (abi/itanium/layout.cpp).
  */
 #include "../cplusplus-internal.h"
 #include "frontend/cplusplus/sema.h"
 
 namespace cplusplus
 {
-
-namespace
-{
-
-uint64_t align_up(uint64_t n, uint64_t alignment)
-{
-    if (!alignment)
-        return n;
-    return (n + alignment - 1) / alignment * alignment;
-}
-
-} // namespace
 
 /* the subclause of a class declared in class c's scope: a nested class
    ([class.nest]) or, c in a block, a local one ([class.local]); none for
@@ -327,6 +313,7 @@ analysis_result semantic_analysis::class_definition(node_index n,
     entity_table.add_declaration(c, current_declaration);
     entity_table[c].defined = true;
     entity_table[c].union_ = key == standard_keyword::union_;
+    entity_table[c].class_key = head_children[0].index();
     entity_table[c].first_member = static_cast<uint32_t>(class_members.size());
     entity_table[c].member_count = 0;
     type = entity_table[c].type.unqualified();
@@ -337,22 +324,13 @@ analysis_result semantic_analysis::class_definition(node_index n,
     uint8_t access = 0;
     if (key == standard_keyword::class_)
         access = 2;
-    uint64_t outer_size = layout_size;
-    uint32_t outer_alignment = layout_alignment;
-    uint64_t outer_unfilled = layout_unfilled;
     uint8_t outer_access = declaration_access;
     defining_class = c;
-    layout_size = 0;
-    layout_alignment = 1;
-    layout_unfilled = 0;
     /* the enclosing class's analysis goes on after this one: its state
        back, and its members so far again after this class's, so that they
        stay one range of class_members */
     auto resume_outer = [&]() {
         defining_class = outer;
-        layout_size = outer_size;
-        layout_alignment = outer_alignment;
-        layout_unfilled = outer_unfilled;
         declaration_access = outer_access;
         if (!outer)
             return;
@@ -407,19 +385,13 @@ analysis_result semantic_analysis::class_definition(node_index n,
                 worse(result, member_declaration(c, member, access, bodies));
         }
     }
-    /* [class.mem]/7: complete at the closing } */
-    entity &x = entity_table[c];
-    x.alignment = layout_alignment;
-    x.data_size = layout_size;
-    x.size = align_up(layout_size, layout_alignment);
+    /* [class.mem]/7: complete at the closing }, where its bases and
+       members get their offsets and the class its size
+       ([abi:class-types]) */
+    const char *layout_rule = itanium_class_layout(*this, c);
     resume_outer();
-    /* [intro.object]/8: "Unless it is a bit-field, an object with nonzero
-       size shall occupy one or more bytes of storage": an empty class is
-       one byte ([abi:layout]: dsize, size 1) */
-    if (!x.size)
-        x.size = 1;
-    if (result == analysis_result::well_formed)
-        result = empty_base_conflict(c, n);
+    if (layout_rule && result == analysis_result::well_formed)
+        result = not_supported(n, layout_rule);
     if (result == analysis_result::well_formed)
         result = implicit_special_members(c, n);
     if (result != analysis_result::well_formed) {
@@ -1203,12 +1175,9 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
             /* a member whose special member functions may make the
                union's deleted ([class.union]/2 Note) */
             return not_supported(declaration, "class.union");
-        /* [ext:gnu_attributes] aligned raises a member's alignment;
-           packed lowers it to one byte, which aligned raises */
-        if (m.gnu_flags & gnu_packed)
-            alignment = 1;
-        if (m.aligned > alignment)
-            alignment = static_cast<uint32_t>(m.aligned);
+        /* its offset is the layout's, at the closing }
+           ([abi:class-types]), with [ext:gnu_attributes]' aligned and
+           packed */
         e = entity_table.make(entity_kind::variable, name, c);
         entity_table[e].type = type;
         entity_table[e].nonstatic_member = true;
@@ -1216,26 +1185,6 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
         entity_table[e].field = entity_table[c].member_count;
         entity_table[e].alignment = static_cast<uint32_t>(m.aligned);
         entity_table[e].gnu_flags = m.gnu_flags & gnu_packed;
-        /* [class.mem]/19 (Note): "Non-static data members of a (non-union)
-           class with the same access control and non-zero size are
-           allocated so that later members have higher addresses within a
-           class object."  [abi:layout]: at the next offset aligned for the
-           member's type */
-        if (entity_table[c].union_) {
-            /* [class.union]/2: "The size of a union is sufficient to
-               contain the largest of its non-static data members.  Each
-               non-static data member is allocated as if it were the sole
-               member of a non-union class." */
-            entity_table[e].offset = 0;
-            if (size > layout_size)
-                layout_size = size;
-        } else {
-            entity_table[e].offset = align_up(layout_size, alignment);
-            layout_size = entity_table[e].offset + size;
-        }
-        layout_unfilled = 0;
-        if (alignment > layout_alignment)
-            layout_alignment = alignment;
         class_members.append(e);
         entity_table[c].member_count++;
     }
@@ -1275,14 +1224,10 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
  * alignment of the next bit-field at an allocation unit boundary.  Only
  * when declaring an unnamed bit-field may the width be zero."
  *
- * [impl.clang] the allocation is clang's for aarch64 Linux
- * (ItaniumRecordLayoutBuilder::LayoutBitField with
- * useBitFieldTypeAlignment and useZeroLengthBitfieldAlignment): a
- * bit-field starts at the next bit unless it would cross a boundary of its
- * type's alignment, then at that boundary (a zero-width one always moves
- * to it); every bit-field, named or not, raises the class's alignment to
- * its type's.  Bit-fields of enumeration type, with padding bits, with an
- * initializer, attributes, or in a union are not analysed yet.
+ * The allocation is the layout's, at the closing } (abi/itanium/layout.cpp:
+ * clang's for aarch64 Linux).  Bit-fields of enumeration type, with
+ * padding bits, with an initializer, attributes, or in a union are not
+ * analysed yet.
  */
 analysis_result semantic_analysis::member_bit_field(entity_index c,
                                                     node_index declaration,
@@ -1352,24 +1297,13 @@ analysis_result semantic_analysis::member_bit_field(entity_index c,
         if (entity_table.find(c, name))
             return not_supported(declaration, "class.mem");
     }
-    uint64_t bit_alignment = alignment * 8;
-    uint64_t at = layout_size * 8 - layout_unfilled;
-    if (!width || (at % bit_alignment) + width > unit)
-        at = align_up(at, bit_alignment);
-    uint64_t end = at + width;
-    layout_size = align_up(end, 8) / 8;
-    layout_unfilled = layout_size * 8 - end;
-    if (alignment > layout_alignment)
-        layout_alignment = static_cast<uint32_t>(alignment);
     entity_index e = entity_table.make(entity_kind::variable, name, c);
     entity_table[e].type = type;
     entity_table[e].nonstatic_member = true;
     entity_table[e].defined = true;
     entity_table[e].field = entity_table[c].member_count;
-    entity_table[e].offset = at / 8;
     entity_table[e].bit_field = true;
     entity_table[e].bit_width = static_cast<uint16_t>(width);
-    entity_table[e].bit_offset = at;
     entity_table[e].linkage_of_name = entity_table[c].linkage_of_name;
     entity_table[e].access = access;
     class_members.append(e);

@@ -60,6 +60,15 @@ them (work/testsuites), and src/test/cxx/sema/{spec,gram}/*.cpp.  For each
            -O0 compiles the file and each must be one its object defines
            (llvm-nm): verified, refuted (a failure), or not emitted (clang
            leaves out an unused entity with internal linkage).
+  layout   -fcxx-dump=layout-claims gives each class analysis completed
+           its size, data size and alignment, and the offset of each direct
+           base class subobject, non-static data member and bit-field
+           (src/frontend/cplusplus/abi/itanium/layout.cpp); clang
+           -fdump-record-layouts-complete gives the record of that name:
+           verified, refuted (a failure: S4's gate), or not checkable (no
+           record of that name in clang's dump or two that differ, or an
+           error of clang's in the declaration).  `bench/cxx-sema.py
+           selftest` checks this path too, on claims written by hand.
   lowering on the same runs, vpp -S -O0 (the tree lowered to C's AST,
            C's code generator): its assembly must assemble (clang -cc1as)
            and the object define exactly the functions and variables
@@ -289,6 +298,200 @@ def selftest(clang):
     print(f'cxx-sema selftest: ok ({want["verified"]} verified, {want["refuted"]} refuted, '
           f'{want["unchecked"]} not checkable; values {want["value_verified"]} verified, '
           f'{want["value_refuted"]} refuted, as expected)')
+    return 0
+
+
+LAYOUT_LINE = re.compile(r'^ *(\d+)?(?::(?:(\d+)-(\d+)|-))? \| (.*)$')
+LAYOUT_SIZES = re.compile(r'\[sizeof=(\d+), (?:dsize=(\d+), )?align=(\d+)')
+LAYOUT_UNNAMED = re.compile(r'\((?:unnamed|anonymous)(?: struct| union| class)? at [^()]*?:(\d+):(\d+)\)')
+LAYOUT_KEY = re.compile(r'^(?:struct|class|union) ')
+LAYOUT_BASE = re.compile(r'^(.*?) \((?:primary |virtual |primary virtual )?base\)(?: \(empty\))?$')
+
+
+def parse_record_layouts(text):
+    """clang -fdump-record-layouts' records: {name: [(sizes, components)]},
+    sizes (sizeof, dsize, align), components the direct ones in clang's
+    order: ('vptr', offset), ('base', offset, name), ('field', offset,
+    name), ('bits', bit offset, width, name).  An unnamed class's place is
+    written without its file: (unnamed at LINE:COLUMN)"""
+    records = {}
+    for block in text.split('*** Dumping AST Record Layout')[1:]:
+        name, sizes, components = None, None, []
+        for line in block.split('\n'):
+            m = LAYOUT_LINE.match(line)
+            if not m:
+                continue
+            what = m.group(4)
+            sized = LAYOUT_SIZES.match(what)
+            if sized:
+                sizes = (int(sized.group(1)), int(sized.group(2) or sized.group(1)), int(sized.group(3)))
+                continue
+            if m.group(1) is None:
+                continue
+            offset = int(m.group(1))
+            if name is None:
+                name = LAYOUT_UNNAMED.sub(r'(unnamed at \1:\2)', LAYOUT_KEY.sub('', what))
+                if name.endswith(' (empty)'):
+                    name = name[:-len(' (empty)')]
+                continue
+            if not what.startswith('  ') or what.startswith('   '):
+                continue        # a component of a component
+            what = what[2:]
+            if ':' in line.split('|', 1)[0]:
+                bit, width = offset * 8, 0
+                if m.group(2) is not None:
+                    bit += int(m.group(2))
+                    width = int(m.group(3)) - int(m.group(2)) + 1
+                components.append(('bits', bit, width, what.rsplit(' ', 1)[-1]))
+                continue
+            if re.match(r'^\(.* (?:vtable|vbase) pointer\)$', what):
+                components.append(('vptr', offset))
+                continue
+            base = LAYOUT_BASE.match(what)
+            if base:
+                components.append(('base', offset,
+                                   LAYOUT_UNNAMED.sub(r'(unnamed at \1:\2)', LAYOUT_KEY.sub('', base.group(1)))))
+                continue
+            if what.endswith(' (empty)'):
+                what = what[:-len(' (empty)')]
+            components.append(('field', offset, what.rsplit(' ', 1)[-1]))
+        if name is not None and sizes is not None:
+            records.setdefault(name, [])
+            if (sizes, components) not in records[name]:
+                records[name].append((sizes, components))
+    return records
+
+
+def clang_record_layouts(test, opts, clang, cache=True):
+    """parse_record_layouts of clang's dump for the test (cached), or None"""
+    cwd, name = os.path.dirname(test), os.path.basename(test)
+
+    def compute():
+        r = cxxparse.run([clang, '-cc1'] + TARGET + ['-x', 'c++'] + opts +
+                         ['-fsyntax-only', '-w', '-fdump-record-layouts-complete', name], cwd, timeout=60)
+        if r[0] == 'timeout':
+            return None
+        return r[1]
+    if cache:
+        text = cxxparse.cached('record-layouts' + ''.join(TARGET), clang, test, opts, compute)
+    else:
+        text = compute()
+    if text is None:
+        return None
+    return parse_record_layouts(text)
+
+
+def layout_claims(text, test):
+    """-fcxx-dump=layout-claims: [(file, line, name, sizes, components)]"""
+    found = []
+    for line in text.split('\n'):
+        parts = line.split('\t')
+        if parts[0] == 'record' and len(parts) == 6:
+            f, row, _ = parts[1].rsplit(':', 2)
+            found.append((os.path.normpath(f), int(row), parts[2], tuple(map(int, parts[3:6])), []))
+        elif not found:
+            continue
+        elif parts[0] in ('base', 'field') and len(parts) == 3:
+            found[-1][4].append((parts[0], int(parts[1]), parts[2]))
+        elif parts[0] == 'bits' and len(parts) == 4:
+            found[-1][4].append(('bits', int(parts[1]), int(parts[2]), parts[3]))
+    return found
+
+
+def compare_layouts(claims, theirs, main, unchecked_lines):
+    """our claims against clang's records: a Counter, and the refuted"""
+    counts, refuted = collections.Counter(), []
+    for f, row, name, sizes, components in claims:
+        records = theirs.get(name, [])
+        if len(records) != 1 or (f == main and row in unchecked_lines):
+            counts['unchecked'] += 1
+            continue
+        their_sizes, their_components = records[0]
+        if sizes == their_sizes and components == their_components:
+            counts['verified'] += 1
+            continue
+        counts['refuted'] += 1
+        why = f'sizeof, dsize, align {sizes}, clang {their_sizes}'
+        if sizes == their_sizes:
+            why = next((f'{" ".join(map(str, a))}, clang {" ".join(map(str, b))}'
+                        for a, b in zip(components, their_components) if a != b),
+                       f'{len(components)} bases and members, clang {len(their_components)}')
+        refuted.append(f'{row}: layout of `{name}`: {why}')
+    return counts, refuted
+
+
+def check_layout_claims(test, opts, clang, vpp, unchecked_lines):
+    """-fcxx-dump=layout-claims against clang's record layouts: a Counter,
+    and the refuted.  A class at one of unchecked_lines (a declaration clang
+    has an error in) is not checkable"""
+    cwd, name = os.path.dirname(test), os.path.basename(test)
+    ours = cxxparse.run(cxxpp.vpp_command(vpp, 'layout-claims', opts, name), cwd)
+    if ours[0] not in (0, 1):
+        return collections.Counter(), []
+    claims = layout_claims(ours[1], test)
+    if not claims:
+        return collections.Counter(), []
+    theirs = clang_record_layouts(test, opts, clang)
+    if theirs is None:
+        return collections.Counter({'unchecked': len(claims)}), []
+    return compare_layouts(claims, theirs, os.path.normpath(name), unchecked_lines)
+
+
+LAYOUT_SELFTEST_SOURCE = """struct E {};
+struct A { char c; int i; };
+namespace N { struct B : A, E { short s; int p : 3; int : 0; unsigned q : 9; }; }
+struct C { C(); int i; char c; };
+struct D : C { char d; E e; A a[2]; void (*f)(int); };
+typedef struct { long y; } T;
+struct V { virtual void f(); int v; };
+void f() { struct L { int a; }; }
+void g() { struct L { char b; }; }
+"""
+# (claim lines, expected): what -fcxx-dump=layout-claims would write
+LAYOUT_SELFTEST_CLAIMS = [
+    ('record\tclaims.cpp:1:1\tE\t1\t1\t1', 'verified'),
+    ('record\tclaims.cpp:2:1\tA\t8\t8\t4\nfield\t0\tc\nfield\t4\ti', 'verified'),
+    ('record\tclaims.cpp:3:15\tN::B\t16\t14\t4\nbase\t0\tA\nbase\t0\tE\nfield\t8\ts\n'
+     'bits\t80\t3\tp\nbits\t96\t0\t\nbits\t96\t9\tq', 'verified'),
+    ('record\tclaims.cpp:4:1\tC\t8\t5\t4\nfield\t0\ti\nfield\t4\tc', 'verified'),
+    ('record\tclaims.cpp:5:1\tD\t32\t32\t8\nbase\t0\tC\nfield\t5\td\nfield\t6\te\n'
+     'field\t8\ta\nfield\t24\tf', 'verified'),
+    ('record\tclaims.cpp:6:9\t(unnamed at 6:9)\t8\t8\t8\nfield\t0\ty', 'verified'),
+    # the tail padding of C not reused, a wrong data size, a missing
+    # virtual table pointer, a bit-field one bit off, a base left out
+    ('record\tclaims.cpp:5:1\tD\t32\t32\t8\nbase\t0\tC\nfield\t8\td\nfield\t9\te\n'
+     'field\t12\ta\nfield\t24\tf', 'refuted'),
+    ('record\tclaims.cpp:4:1\tC\t8\t8\t4\nfield\t0\ti\nfield\t4\tc', 'refuted'),
+    ('record\tclaims.cpp:7:1\tV\t16\t12\t8\nfield\t8\tv', 'refuted'),
+    ('record\tclaims.cpp:3:15\tN::B\t16\t14\t4\nbase\t0\tA\nbase\t0\tE\nfield\t8\ts\n'
+     'bits\t81\t3\tp\nbits\t96\t0\t\nbits\t96\t9\tq', 'refuted'),
+    ('record\tclaims.cpp:3:15\tN::B\t16\t14\t4\nbase\t0\tA\nfield\t8\ts\n'
+     'bits\t80\t3\tp\nbits\t96\t0\t\nbits\t96\t9\tq', 'refuted'),
+    # two classes of one name in clang's dump, a class clang has none for
+    ('record\tclaims.cpp:8:12\tL\t4\t4\t4\nfield\t0\ta', 'unchecked'),
+    ('record\tclaims.cpp:9:1\tNone\t4\t4\t4', 'unchecked'),
+]
+
+
+def layout_selftest(clang):
+    """the layout claims' path through clang, on claims written by hand"""
+    with tempfile.TemporaryDirectory() as d:
+        test = os.path.join(d, 'claims.cpp')
+        open(test, 'w').write(LAYOUT_SELFTEST_SOURCE)
+        theirs = clang_record_layouts(test, ['-std=c++17'], clang, cache=False)
+    failed = 0
+    want = collections.Counter()
+    for text, expected in LAYOUT_SELFTEST_CLAIMS:
+        want[expected] += 1
+        counts, _ = compare_layouts(layout_claims(text, test), theirs or {}, 'claims.cpp', set())
+        if counts != collections.Counter({expected: 1}):
+            failed += 1
+            print(f'cxx-sema selftest: FAILED: layout claim {text.splitlines()[0]!r}: {dict(counts)}, '
+                  f'expected {expected}')
+    if failed:
+        return 1
+    print(f'cxx-sema selftest: ok (layouts: {want["verified"]} verified, {want["refuted"]} refuted, '
+          f'{want["unchecked"]} not checkable, as expected)')
     return 0
 
 
@@ -565,6 +768,8 @@ def check(test, opts, clang, vpp):
     known = KNOWN.get(relative(test), set())
     rejected = []
     unanalysed_lines = set()
+    # the lines of the declarations clang has an error in
+    rejected_lines = set()
     for line in ours[1].splitlines():
         if line.startswith('tree '):
             res['fail'].append(('tree', line[5:]))
@@ -579,6 +784,8 @@ def check(test, opts, clang, vpp):
         lines = range(first, last + 1)
         if result != 'well-formed':
             unanalysed_lines.update(lines)
+        if any(n in error_lines or n in syntax_lines for n in lines):
+            rejected_lines.update(lines)
         if fatal_line is not None and first > fatal_line:
             res['verdict']['after_fatal'] += 1
         elif result == 'not-parsed' or any(n in syntax_lines for n in lines):
@@ -612,6 +819,9 @@ def check(test, opts, clang, vpp):
                                                     unanalysed_lines)
     for r in refuted:
         res['fail'].append(('lookup', r))
+    res['layout'], refuted = check_layout_claims(test, opts, clang, vpp, rejected_lines)
+    for r in refuted:
+        res['fail'].append(('layout', r))
     if c[0] == 0 and not CLANG_ERROR.search(c[2]):
         res['symbols'], refuted = check_symbols(test, opts, clang, vpp)
         for r in refuted:
@@ -627,7 +837,7 @@ def check(test, opts, clang, vpp):
 
 def main():
     if sys.argv[1:] == ['selftest']:
-        return selftest(cxxpp.find_clang())
+        return selftest(cxxpp.find_clang()) | layout_selftest(cxxpp.find_clang())
     ap = argparse.ArgumentParser()
     ap.add_argument('-v', action='store_true')
     ap.add_argument('-j', type=int, default=6)
@@ -665,7 +875,7 @@ def main():
         results = list(ex.map(lambda j: check(j[0], j[1], clang, vpp), jobs))
     verdict, unsupported, types = collections.Counter(), collections.Counter(), collections.Counter()
     declared, symbols, lowering = collections.Counter(), collections.Counter(), collections.Counter()
-    lookup = collections.Counter()
+    lookup, layout = collections.Counter(), collections.Counter()
     crashes = failures = skipped = 0
     seen = set()
     for r in results:
@@ -676,6 +886,7 @@ def main():
         declared.update(r.get('declarators', {}))
         symbols.update(r.get('symbols', {}))
         lookup.update(r.get('lookup', {}))
+        layout.update(r.get('layout', {}))
         lowering.update(r.get('lowering', {}))
         kinds = {k for k, _ in r['fail']}
         crashes += 'crash' in kinds
@@ -701,6 +912,8 @@ def main():
           f'{lookup["unchecked"]} not checkable')
     print(f'symbols: {symbols["verified"]} verified, {symbols["refuted"]} refuted, '
           f'{symbols["not_emitted"]} not emitted by clang, {symbols["unsupported"]} unsupported')
+    print(f'layout: {layout["verified"]} classes laid out as clang lays them out, {layout["refuted"]} refuted, '
+          f'{layout["unchecked"]} not checkable')
     reasons = sorted(((n, k[5:]) for k, n in lowering.items() if k.startswith('not: ')), reverse=True)
     print(f'lowering: {lowering["lowered"]} files lowered as clang -O0 compiles them, '
           f'{lowering["refuted"]} refuted, {sum(n for n, _ in reasons)} not lowered'

@@ -14,6 +14,7 @@
  * under the library's name, which is its symbol.
  */
 #include "../../cplusplus-internal.h"
+#include "frontend/cplusplus/sema.h"
 
 namespace cplusplus
 {

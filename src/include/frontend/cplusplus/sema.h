@@ -308,8 +308,9 @@ struct entity {
     /* a non-static member function: [class.mfct.non-static]/5 the
        cv-qualifier-seq of its declarator, which qualifies `this` */
     uint32_t member_cv = 0;
-    /* a non-static data member: its number among the class's and its
-       offset in bytes ([class.mem]/19, [abi:layout]) */
+    /* a non-static data member: its number among the class's and, once
+       the class is complete, its offset in bytes ([class.mem]/19,
+       [abi:class-types]) */
     uint32_t field = 0;
     uint64_t offset = 0;
     /* a class: its non-static data members, in declaration order, are
@@ -319,8 +320,9 @@ struct entity {
        type ... at the closing } of the class-specifier") */
     uint32_t first_member = 0, member_count = 0;
     uint64_t size = 0;
-    /* a class: [abi:layout] its data size (dsize), the size without the
-       tail padding a derived class may reuse; its direct base classes
+    /* a class: [abi:general] its data size (dsize), the size without the
+       tail padding a derived class may reuse (its size, for a POD for the
+       purpose of layout: [abi:pod]); its direct base classes
        ([class.derived]/2), in the order of the base-specifier-list, are
        semantic_analysis::class_bases[first_base .. first_base +
        base_count) */
@@ -392,6 +394,8 @@ struct entity {
     /* a class: a union ([class.union]/1: "A union is a class defined
        with the class-key union") */
     bool union_ = false;
+    /* a class that is defined: the class-key of its class-specifier */
+    token_index class_key = 0;
     /* a function or variable: [ext:gnu_attributes] the GNU attributes
        its declarations gave it (gnu_attribute_flag) and a section
        attribute's string-literal, 0 if none; its aligned attribute's
@@ -899,6 +903,10 @@ class semantic_analysis
     bool is_copy_constructor(entity_index c, entity_index k) const;
     /* whether destroying an object of class c runs code */
     bool destroys(entity_index c) const;
+    /* the type's size and alignment in bytes ([expr.sizeof],
+       [expr.alignof]), 0 if not complete */
+    uint64_t size_of_type(qualified_type t) const;
+    uint64_t alignment_of_type(qualified_type t) const;
 
     /* the uses of names lookup resolved, each with the entity found:
        what -fcxx-dump=lookup-claims writes for clang to
@@ -1465,9 +1473,6 @@ class semantic_analysis
     /* [dcl.init.list]/7: whether converting m to to narrows */
     analysis_result narrowing(node_index at, const expression_meaning &m,
                               qualified_type to, bool &narrows);
-    /* the type's size in bytes ([expr.sizeof]), 0 if not complete */
-    uint64_t size_of_type(qualified_type t) const;
-    uint64_t alignment_of_type(qualified_type t) const;
 
     /* ---- classes ([class]) ---- */
     /* [class.pre]: a class-specifier, the class's type */
@@ -1535,7 +1540,6 @@ class semantic_analysis
     /* the base-clause of class c ([class.derived]) */
     analysis_result base_clause(entity_index c, node_index n,
                                 standard_keyword key);
-    analysis_result empty_base_conflict(entity_index c, node_index n);
     /* [conv.ptr]/3: the pointer m to class from as a pointer to its base
        to, of type type */
     analysis_result pointer_to_base(token_index at, entity_index from,
@@ -1610,17 +1614,11 @@ class semantic_analysis
     analysis_result
     expression_list_meanings(syntax_child list,
                              owned_array<expression_meaning> &out);
-    /* the class whose member-specification is analysed, 0 if none, and
-       its layout so far */
+    /* the class whose member-specification is analysed, 0 if none */
     entity_index defining_class = 0;
     /* the access of the member-declaration analysed (an enumeration's and
        its enumerators' in a class) */
     uint8_t declaration_access = 0;
-    uint64_t layout_size = 0;
-    uint32_t layout_alignment = 1;
-    /* the bits at the end of layout_size the last bit-field left unused
-       (a next bit-field may take them) */
-    uint64_t layout_unfilled = 0;
     analysis_result member_bit_field(entity_index c, node_index declaration,
                                      syntax_child d, const specified &s,
                                      uint8_t access);
@@ -1985,6 +1983,14 @@ class semantic_analysis
 };
 
 /* ---- the Itanium C++ ABI (abi/itanium/) ---- */
+
+/* [abi:class-types]: the layout of class c at its closing }, from its
+   bases (class_bases) and non-static data members (class_members) in
+   declaration order: each one's entity::offset (a bit-field's bit_offset
+   too), and the class's size, data_size and alignment.  nullptr, or the
+   subclause whose rules a part of the layout needs that are not written
+   yet: the class then has no layout, and stays incomplete */
+const char *itanium_class_layout(semantic_analysis &analysis, entity_index c);
 
 /* [abi:mangling]: the symbol of entity e, a function or a variable,
    appended to out: its mangled name, or its identifier where the ABI does

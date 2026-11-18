@@ -1,8 +1,9 @@
 /*
  * analysis.cpp: the developer outputs of semantic analysis (dump.h):
  * analysis, unsupported, declaration-claims, type-claims, lookup-claims,
- * check-tree, tree, symbols and stats, which bench/cxx-sema.py checks with
- * clang; and the selftest of the tables analysis builds on.
+ * check-tree, tree, symbols, layout-claims and stats, which
+ * bench/cxx-sema.py checks with clang; and the selftest of the tables
+ * analysis builds on.
  */
 #include <math.h>
 #include <string.h>
@@ -466,6 +467,140 @@ static void dump_lookup_claims(const semantic_analysis &analysis,
                               declared.line, declared.column);
     }
 }
+
+/*
+ * A class's name as clang -fdump-record-layouts writes it: its enclosing
+ * namespaces and classes, an unnamed namespace as (anonymous namespace),
+ * an inline namespace left out, an unnamed class as (unnamed at
+ * LINE:COLUMN), the place of its class-key (clang has the file there too,
+ * which bench/cxx-sema.py takes out).  A class of block scope is its name
+ * alone; false for a class nested in one (clang names the function).
+ */
+static bool layout_class_name(const semantic_analysis &analysis,
+                              token_stream &tokens, entity_index c, bool nested,
+                              vbuffer *out)
+{
+    const entity &x = analysis.entity_table[c];
+    entity_index scope = x.enclosing;
+    if (scope) {
+        const entity &s = analysis.entity_table[scope];
+        if (s.kind == entity_kind::block_scope ||
+            s.kind == entity_kind::function) {
+            if (nested)
+                return false;
+        } else if (s.kind == entity_kind::namespace_entity) {
+            if (!layout_class_name(analysis, tokens, scope, true, out))
+                return false;
+        } else if (!layout_class_name(analysis, tokens, scope, true, out)) {
+            return false;
+        }
+    }
+    if (x.kind == entity_kind::namespace_entity) {
+        if (x.inline_ && x.name)
+            return true;
+        if (!x.name) {
+            vbuffer_string_append(out, "(anonymous namespace)::");
+            return true;
+        }
+    }
+    if (x.name) {
+        size_t length = 0;
+        const char *spelled =
+            tokens.pp.identifier_spelling(x.name - 1, &length);
+        vbuffer_append(out, spelled, length);
+    } else if (x.kind == entity_kind::class_type && x.defined) {
+        source_position at = tokens.position(x.class_key);
+        vbuffer_format_append(out, "(unnamed at %u:%u)", at.line, at.column);
+    } else {
+        return false;
+    }
+    if (nested)
+        vbuffer_string_append(out, "::");
+    return true;
+}
+
+/*
+ * layout-claims: per class analysis completed ([abi:class-types],
+ * abi/itanium/layout.cpp), a line
+ *
+ *     record <tab> FILE:LINE:COLUMN <tab> NAME <tab> SIZE <tab> DSIZE <tab> ALIGN
+ *
+ * (the place of its class-key; sizeof, the data size and the alignment in
+ * bytes), then a line per direct base class subobject and per non-static
+ * data member or unnamed bit-field, in the layout's order:
+ *
+ *     base <tab> OFFSET <tab> NAME
+ *     field <tab> OFFSET <tab> NAME
+ *     bits <tab> BIT-OFFSET <tab> WIDTH <tab> NAME
+ *
+ * bench/cxx-sema.py compares each record with the one of that name in
+ * clang -fdump-record-layouts-complete.  A class whose class-key a macro
+ * made, or whose name clang would write another way, is left out.
+ */
+static void dump_layout_claims(const semantic_analysis &analysis,
+                               token_stream &tokens, vbuffer *out)
+{
+    owned_buffer name, lines;
+    for (entity_index c = 1; c < analysis.entity_table.size(); c++) {
+        const entity &x = analysis.entity_table[c];
+        if (x.kind != entity_kind::class_type || !x.defined || !x.size ||
+            tokens[x.class_key].preprocessing.expansion)
+            continue;
+        name.clear();
+        if (!layout_class_name(analysis, tokens, c, false, name.get()))
+            continue;
+        source_position at = tokens.position(x.class_key);
+        lines.clear();
+        vbuffer_format_append(lines.get(), "record\t%s:%u:%u\t", at.file_name,
+                              at.line, at.column);
+        vbuffer_append(lines.get(), name.data(), name.size());
+        vbuffer_format_append(lines.get(), "\t%llu\t%llu\t%u\n",
+                              static_cast<unsigned long long>(x.size),
+                              static_cast<unsigned long long>(x.data_size),
+                              x.alignment);
+        bool nameable = true;
+        for (uint32_t i = 0; i < x.base_count; i++) {
+            const entity &b =
+                analysis.entity_table[analysis.class_bases[x.first_base + i]];
+            name.clear();
+            if (!layout_class_name(
+                    analysis, tokens,
+                    analysis.type_table[b.type.unqualified()].entity, false,
+                    name.get()))
+                nameable = false;
+            vbuffer_format_append(lines.get(), "base\t%llu\t",
+                                  static_cast<unsigned long long>(b.offset));
+            vbuffer_append(lines.get(), name.data(), name.size());
+            vbuffer_string_append(lines.get(), "\n");
+        }
+        for (uint32_t i = 0; i < x.member_count; i++) {
+            const entity &m =
+                analysis
+                    .entity_table[analysis.class_members[x.first_member + i]];
+            if (m.base_subobject)
+                continue;
+            if (m.bit_field)
+                vbuffer_format_append(
+                    lines.get(), "bits\t%llu\t%u\t",
+                    static_cast<unsigned long long>(m.bit_offset),
+                    static_cast<unsigned>(m.bit_width));
+            else
+                vbuffer_format_append(
+                    lines.get(), "field\t%llu\t",
+                    static_cast<unsigned long long>(m.offset));
+            if (m.name) {
+                size_t length = 0;
+                const char *spelled =
+                    tokens.pp.identifier_spelling(m.name - 1, &length);
+                vbuffer_append(lines.get(), spelled, length);
+            }
+            vbuffer_string_append(lines.get(), "\n");
+        }
+        if (nameable)
+            vbuffer_append(out, lines.data(), lines.size());
+    }
+}
+
 void dump_analysis(const dump_request &r, const semantic_analysis &analysis,
                    const syntax_tree &tree, token_stream &tokens, vbuffer *out)
 {
@@ -511,6 +646,8 @@ void dump_analysis(const dump_request &r, const semantic_analysis &analysis,
         dump_tree(analysis, tokens, out);
     if (r.has(dump_output::symbols))
         dump_symbols(analysis, tokens, out);
+    if (r.has(dump_output::layout_claims))
+        dump_layout_claims(analysis, tokens, out);
     if (r.has(dump_output::stats)) {
         vbuffer_format_append(
             out,

@@ -158,98 +158,6 @@ node_index parser::class_or_decltype(scope_index *region)
 
 /* ---- semantic analysis ---------------------------------------------- */
 
-namespace
-{
-
-uint64_t align_to(uint64_t n, uint64_t alignment)
-{
-    return (n + alignment - 1) / alignment * alignment;
-}
-
-} // namespace
-
-/*
- * [abi:pod]: "POD for the purpose of layout": a class that is a POD in
- * C++03's sense, whose tail padding a derived class does not reuse.
- * C++03's POD class is an aggregate (no user-declared constructors, no
- * private or protected non-static data members, no base classes, no
- * virtual functions) without a user-declared copy assignment operator or
- * destructor whose non-static data members are PODs.
- */
-static bool pod_for_layout(const semantic_analysis &a, const types &table,
-                           entity_index c)
-{
-    const entity &x = a.entity_table[c];
-    if (x.first_constructor || x.destructor || x.base_count ||
-        x.user_copy_assignment)
-        return false;
-    for (uint32_t i = 0; i < x.member_count; i++) {
-        const entity &m = a.entity_table[a.class_members[x.first_member + i]];
-        if (m.access)
-            return false;
-        qualified_type t = m.type;
-        while (table[t.unqualified()].kind == type_kind::array)
-            t = table[t.unqualified()].operand;
-        if (table[t.unqualified()].kind == type_kind::class_type &&
-            !pod_for_layout(a, table, table[t.unqualified()].entity))
-            return false;
-    }
-    return true;
-}
-
-/* whether class c has a subobject of class type `of` at offset 0: itself,
-   or one of its own at offset 0 ([abi:layout]'s empty base conflicts) */
-static bool at_offset_zero(const semantic_analysis &a, const types &table,
-                           entity_index c, entity_index of)
-{
-    if (c == of)
-        return true;
-    const entity &x = a.entity_table[c];
-    for (uint32_t i = 0; i < x.base_count; i++) {
-        const entity &b = a.entity_table[a.class_bases[x.first_base + i]];
-        if (!b.offset &&
-            at_offset_zero(a, table, table[b.type.unqualified()].entity, of))
-            return true;
-    }
-    for (uint32_t i = 0; i < x.member_count; i++) {
-        const entity &m = a.entity_table[a.class_members[x.first_member + i]];
-        qualified_type t = m.type;
-        while (table[t.unqualified()].kind == type_kind::array)
-            t = table[t.unqualified()].operand;
-        if (!m.offset && table[t.unqualified()].kind == type_kind::class_type &&
-            at_offset_zero(a, table, table[t.unqualified()].entity, of))
-            return true;
-    }
-    return false;
-}
-
-/* whether a subobject at offset 0 of class c2 (c2 itself, or a base or
-   member it has there) has the type of one at offset 0 of class c1: the
-   two cannot both be placed at one address ([abi:layout]) */
-static bool share_offset_zero(const semantic_analysis &a, const types &table,
-                              entity_index c1, entity_index c2)
-{
-    if (at_offset_zero(a, table, c1, c2))
-        return true;
-    const entity &x = a.entity_table[c2];
-    for (uint32_t i = 0; i < x.base_count; i++) {
-        const entity &b = a.entity_table[a.class_bases[x.first_base + i]];
-        if (!b.offset &&
-            share_offset_zero(a, table, c1, table[b.type.unqualified()].entity))
-            return true;
-    }
-    for (uint32_t i = 0; i < x.member_count; i++) {
-        const entity &m = a.entity_table[a.class_members[x.first_member + i]];
-        qualified_type t = m.type;
-        while (table[t.unqualified()].kind == type_kind::array)
-            t = table[t.unqualified()].operand;
-        if (!m.offset && table[t.unqualified()].kind == type_kind::class_type &&
-            share_offset_zero(a, table, c1, table[t.unqualified()].entity))
-            return true;
-    }
-    return false;
-}
-
 /*
  * The base-clause of the class c being defined, defined with class-key
  * key.  [class.derived]/2: "A class-or-decltype shall denote a (possibly
@@ -263,12 +171,10 @@ static bool share_offset_zero(const semantic_analysis &a, const types &table,
  * class-key struct and private is assumed when the class is defined with
  * the class-key class."
  *
- * [abi:layout] places each non-virtual base in declaration order: an
- * empty one at offset 0 (if no other subobject of its type is there), any
- * other at the data size so far rounded up to its alignment, taking its
- * data size (dsize) unless it is POD for the purpose of layout
- * ([abi:pod]), whose size it takes.  Virtual bases ([class.mi]/4) are not
- * analysed.
+ * Each base class subobject gets its offset with the class's layout, at
+ * the closing } ([abi:class-types], abi/itanium/layout.cpp); one that is
+ * not empty is also a field of the class.  Virtual bases ([class.mi]/4)
+ * are not analysed.
  */
 analysis_result semantic_analysis::base_clause(entity_index c, node_index n,
                                                standard_keyword key)
@@ -363,76 +269,17 @@ analysis_result semantic_analysis::base_clause(entity_index c, node_index n,
         entity_table[e].defined = true;
         entity_table[e].access = access;
         entity_table.add_declaration(e, current_declaration);
-        uint32_t alignment = entity_table[base].alignment;
-        if (alignment > layout_alignment)
-            layout_alignment = alignment;
         if (!entity_table[base].member_count) {
             /* [class.derived]/4 (Note): "A base class subobject may be of
-               zero size"; [abi:layout]: an empty base at offset 0, unless
-               a subobject of its type is already there */
-            for (uint32_t k = 0; k < entity_table[c].base_count; k++)
-                if (share_offset_zero(
-                        *this, type_table,
-                        type_table
-                            [entity_table
-                                 [class_bases[entity_table[c].first_base + k]]
-                                     .type.unqualified()]
-                                .entity,
-                        base))
-                    return not_supported(n, "class.derived");
+               zero size" */
             entity_table[e].field = UINT32_MAX;
-            entity_table[e].offset = 0;
         } else {
             entity_table[e].field = entity_table[c].member_count;
-            entity_table[e].offset = align_to(layout_size, alignment);
-            /* at offset 0 with an empty base placed there before */
-            for (uint32_t k = 0;
-                 !entity_table[e].offset && k < entity_table[c].base_count; k++)
-                if (share_offset_zero(
-                        *this, type_table,
-                        type_table
-                            [entity_table
-                                 [class_bases[entity_table[c].first_base + k]]
-                                     .type.unqualified()]
-                                .entity,
-                        base))
-                    return not_supported(n, "class.derived");
-            uint64_t taken = entity_table[base].data_size;
-            if (pod_for_layout(*this, type_table, base))
-                taken = entity_table[base].size;
-            layout_size = entity_table[e].offset + taken;
             class_members.append(e);
             entity_table[c].member_count++;
         }
         class_bases.append(e);
         entity_table[c].base_count++;
-    }
-    return analysis_result::well_formed;
-}
-
-/* [abi:layout]: a data member of class type placed at offset 0 where an
-   empty base of its type (or one it has at offset 0) is: not analysed */
-analysis_result semantic_analysis::empty_base_conflict(entity_index c,
-                                                       node_index n)
-{
-    const entity &x = entity_table[c];
-    if (!x.member_count)
-        return analysis_result::well_formed;
-    const entity &first = entity_table[class_members[x.first_member]];
-    if (first.base_subobject || first.offset)
-        return analysis_result::well_formed;
-    qualified_type t = first.type;
-    while (type_table[t.unqualified()].kind == type_kind::array)
-        t = type_table[t.unqualified()].operand;
-    if (type_table[t.unqualified()].kind != type_kind::class_type)
-        return analysis_result::well_formed;
-    for (uint32_t i = 0; i < x.base_count; i++) {
-        const entity &b = entity_table[class_bases[x.first_base + i]];
-        if (b.field == UINT32_MAX &&
-            share_offset_zero(*this, type_table,
-                              type_table[b.type.unqualified()].entity,
-                              type_table[t.unqualified()].entity))
-            return not_supported(n, "class.derived");
     }
     return analysis_result::well_formed;
 }
