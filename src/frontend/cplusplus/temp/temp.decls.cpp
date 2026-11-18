@@ -876,7 +876,7 @@ semantic_analysis::variable_template_definition(node_index n,
 {
     entity_index outer = current_scope;
     owned_array<node_index> parameters;
-    analysis_result r = template_head_parameters(n, parameters);
+    analysis_result r = template_head_parameters(n, parameters, true);
     if (r != analysis_result::well_formed)
         return r;
     const syntax_child *parts = tree.children(declaration);
@@ -968,10 +968,20 @@ analysis_result semantic_analysis::variable_template_id(node_index n,
     analysis_result r = template_id_arguments(n, vt, arguments);
     if (r != analysis_result::well_formed)
         return r;
-    for (const template_argument &a : arguments)
-        if (a.kind == template_argument::kind_t::pack ||
-            depends(type_table, a.type) || a.template_entity)
+    for (const template_argument &a : arguments) {
+        if (depends(type_table, a.type) || a.template_entity)
             return not_supported(n, "temp.dep");
+        /* a pack's elements: each known ([temp.variadic]/1) */
+        if (a.kind == template_argument::kind_t::pack) {
+            if (a.count == UINT32_MAX)
+                return not_supported(n, "temp.dep");
+            for (uint32_t k = 0; k < a.count; k++)
+                if (depends(type_table, pack_arguments[a.value + k].type) ||
+                    pack_arguments[a.value + k].template_entity ||
+                    pack_arguments[a.value + k].count == UINT32_MAX)
+                    return not_supported(n, "temp.dep");
+        }
+    }
     entity_index e = 0;
     r = instantiate_variable(n, vt, arguments.data(),
                              static_cast<uint32_t>(arguments.size()), e);
