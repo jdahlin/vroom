@@ -317,6 +317,104 @@ analysis_result semantic_analysis::special_member_declarator(
     return analysis_result::well_formed;
 }
 
+/*
+ * A constructor or destructor whose function-body is = default or
+ * = delete.  [dcl.fct.def.delete]/1: a deleted definition; /2 a use of it
+ * is ill-formed (a constructor's; a deleted destructor is not analysed).
+ * [dcl.fct.def.default]/5: "Explicitly-defaulted functions and
+ * implicitly-declared functions are collectively called defaulted
+ * functions, and the implementation shall provide implicit definitions
+ * for them ... A function is user-provided if it is user-declared and not
+ * explicitly defaulted or deleted on its first declaration."  A defaulted
+ * default constructor, copy constructor X(const X&) or destructor is
+ * declared as the implicit one would be (implicit_special_members: no
+ * entity when it is trivial); a public one only, without constexpr.
+ */
+analysis_result semantic_analysis::defaulted_or_deleted_special_member(
+    entity_index c, node_index n, syntax_child d, syntax_child body,
+    uint8_t access, bool constexpr_specified)
+{
+    if (deleted_body(body)) {
+        analysis_result r = special_member_declarator(c, n, d, access, false,
+                                                      constexpr_specified);
+        if (r != analysis_result::well_formed)
+            return r;
+        const entity &f = entity_table[last_declared];
+        if (f.special == special_member::destructor)
+            return not_supported(n, "dcl.fct.def.delete");
+        /* X(X&) = delete or X(X&&) = delete: which one a return of a local
+           chooses depends on [class.copy.elision]/3's implicit move, not
+           analysed */
+        const struct type &ft = type_table[f.type.unqualified()];
+        if (ft.parameter_count) {
+            const struct type &first =
+                type_table[type_table.parameters(f.type.unqualified())[0]
+                               .unqualified()];
+            if ((first.kind == type_kind::lvalue_reference ||
+                 first.kind == type_kind::rvalue_reference) &&
+                first.operand.unqualified() ==
+                    entity_table[c].type.unqualified() &&
+                !(first.kind == type_kind::lvalue_reference &&
+                  first.operand.cv() == cv_const))
+                return not_supported(n, "class.copy.elision");
+        }
+        return deleted_definition(n, last_declared);
+    }
+    const syntax_node &b = tree[body.index()];
+    if (b.child_count != 3 || !tree.children(body.index())[1].is_token() ||
+        p.keyword_of(tokens[tree.children(body.index())[1].index()]) !=
+            standard_keyword::default_)
+        return not_supported(n, "dcl.fct.def.general");
+    if (access || constexpr_specified)
+        return not_supported(n, "dcl.fct.def.default");
+    qualified_type type = qualified_type::make(
+        type_table.fundamental(fundamental_type::void_), cv_none);
+    declarator_meaning m;
+    function_cv = 0;
+    in_member_declarator = true;
+    function_parameters.clear();
+    analysis_result r = declarator(n, d, type, m);
+    in_member_declarator = false;
+    if (r != analysis_result::well_formed)
+        return r;
+    if (!m.has_id || m.qualifier || function_cv || m.aligned || m.gnu_flags)
+        return not_supported(n, "dcl.fct.def.default");
+    for (const parameter_meaning &parameter : function_parameters)
+        if (parameter.default_argument.index())
+            return not_supported(n, "dcl.fct.def.default");
+    const struct type &f = type_table[type.unqualified()];
+    if (f.variadic)
+        return not_supported(n, "dcl.fct.def.default");
+    entity &x = entity_table[c];
+    if (m.destructor) {
+        /* [class.dtor]/4: as the implicitly-declared destructor */
+        if (x.destructor || f.parameter_count)
+            return not_supported(n, "dcl.fct.def.default");
+        return analysis_result::well_formed;
+    }
+    if (!f.parameter_count) {
+        if (x.defaulted_default_constructor)
+            return not_supported(n, "class.mem");
+        x.defaulted_default_constructor = true;
+        return analysis_result::well_formed;
+    }
+    const qualified_type *parameters =
+        type_table.parameters(type.unqualified());
+    const struct type &first = type_table[parameters[0].unqualified()];
+    if (f.parameter_count == 1 && first.kind == type_kind::lvalue_reference &&
+        first.operand.unqualified() == x.type.unqualified() &&
+        first.operand.cv() == cv_const) {
+        /* [class.copy.ctor]/7's X(const X&), as implicitly declared */
+        for (entity_index k = x.first_constructor; k;
+             k = entity_table[k].next_constructor)
+            if (is_copy_constructor(c, k))
+                return not_supported(n, "class.mem");
+        return analysis_result::well_formed;
+    }
+    /* X(X&) = default, a move constructor */
+    return not_supported(n, "dcl.fct.def.default");
+}
+
 /* the expressions of an expression-list (an initializer_list node, or one
    expression), analysed; a braced-init-list or a pack expansion among them
    is not analysed yet */
@@ -372,6 +470,10 @@ semantic_analysis::construct(node_index at, qualified_type type,
     const entity &x = entity_table[c];
     if (x.kind != entity_kind::class_type)
         return not_supported(at, "class.pre");
+    if (arguments.empty() && trivial_defaulted_default_constructor(c))
+        /* value-initialization through a trivial X() = default
+           ([dcl.init]/8.2: zero-initialized): not analysed */
+        return not_supported(at, "dcl.init");
     /* [over.match.ctor]/1: "the candidate functions are all the
        constructors of the class of the object being initialized" */
     owned_array<overload_candidate> candidates;
@@ -898,7 +1000,7 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
         bool default_ok = !sub.first_constructor, copy_ok = copies_bytes(k);
         for (entity_index q = sub.first_constructor; q;
              q = entity_table[q].next_constructor) {
-            if (entity_table[q].access)
+            if (entity_table[q].access || entity_table[q].deleted)
                 continue;
             if (!type_table[entity_table[q].type.unqualified()].parameter_count)
                 default_ok = true;
@@ -912,6 +1014,11 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
             return not_supported(n, "class.default.ctor");
     }
     bool user_constructors = x.first_constructor != 0;
+    /* [dcl.fct.def.default]: X() = default beside other constructors: the
+       default constructor, trivial or not, that a default-initialization
+       chooses */
+    if (x.defaulted_default_constructor && user_constructors && construction)
+        declare_implicit(c, special_member::constructor, false);
     bool user_copy = false;
     for (entity_index k = x.first_constructor; k;
          k = entity_table[k].next_constructor)
@@ -925,6 +1032,22 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
     if (destruction && !entity_table[c].destructor)
         declare_implicit(c, special_member::destructor, false);
     return analysis_result::well_formed;
+}
+
+/* [class.default.ctor]/3: X() = default beside other constructors, trivial
+   (implicit_special_members declares no entity for it): default-initialization
+   calls nothing */
+bool semantic_analysis::trivial_defaulted_default_constructor(
+    entity_index c) const
+{
+    const entity &x = entity_table[c];
+    if (!x.defaulted_default_constructor)
+        return false;
+    for (entity_index k = x.first_constructor; k;
+         k = entity_table[k].next_constructor)
+        if (!type_table[entity_table[k].type.unqualified()].parameter_count)
+            return false;
+    return true;
 }
 
 /* an implicitly-declared constructor (the copy constructor X(const X&)

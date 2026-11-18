@@ -88,9 +88,14 @@ bool empty_class(const semantic_analysis &a, entity_index c)
 bool pod_for_layout(const semantic_analysis &a, entity_index c)
 {
     const entity &x = a.entity_table[c];
-    if (x.first_constructor || x.destructor || x.base_count ||
-        x.user_copy_assignment)
+    if (x.destructor || x.base_count || x.user_copy_assignment)
         return false;
+    /* [impl.clang] a constructor deleted on its first declaration is no
+       user-declared one here (C++11's aggregates allow it) */
+    for (entity_index k = x.first_constructor; k;
+         k = a.entity_table[k].next_constructor)
+        if (!a.entity_table[k].deleted)
+            return false;
     for (uint32_t i = 0; i < x.member_count; i++) {
         const entity &m = a.entity_table[a.class_members[x.first_member + i]];
         if (m.bit_field && !m.name)

@@ -1080,7 +1080,8 @@ analysis_result semantic_analysis::declare_with_initializer(
         const struct type &record = type_table[object.unqualified()];
         if (record.kind == type_kind::class_type &&
             entity_table[record.entity].kind == entity_kind::class_type &&
-            entity_table[record.entity].first_constructor) {
+            entity_table[record.entity].first_constructor &&
+            !trivial_defaulted_default_constructor(record.entity)) {
             if (!(object == type))
                 /* [dcl.init]/7.2: each element default-initialized */
                 return not_supported(declaration, "dcl.init");

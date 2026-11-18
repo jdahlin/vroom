@@ -320,6 +320,9 @@ struct entity {
        ([class.mem]/10: a brace-or-equal-initializer or braced-init-list
        node), 0 if none */
     node_index default_initializer = 0;
+    /* a class: its default constructor is declared = default
+       ([dcl.fct.def.default]), declared as the implicit one is */
+    bool defaulted_default_constructor = false;
     uint64_t offset = 0;
     /* a class: its non-static data members, in declaration order, are
        semantic_analysis::class_members[first_member .. first_member +
@@ -907,6 +910,7 @@ class semantic_analysis
     /* whether a class is trivially copyable and has a trivial destructor:
        its objects are copied as their bytes, passed in registers */
     bool trivial_class(entity_index c) const;
+    bool trivial_defaulted_default_constructor(entity_index c) const;
     bool copies_bytes(entity_index c) const;
     bool is_copy_constructor(entity_index c, entity_index k) const;
     /* whether destroying an object of class c runs code */
@@ -1558,6 +1562,9 @@ class semantic_analysis
                                     entity_index to, qualified_type type,
                                     expression_meaning &m);
     /* the subobject e (a base or a non-static data member) of *this */
+    analysis_result defaulted_or_deleted_special_member(
+        entity_index c, node_index n, syntax_child d, syntax_child body,
+        uint8_t access, bool constexpr_specified);
     analysis_result static_member_initializer(node_index declarator,
                                               entity_index e, syntax_child init,
                                               const specified &s);

@@ -931,10 +931,12 @@ semantic_analysis::member_declaration(entity_index c, syntax_child member,
             syntax_is_punctuator(tokens,
                                  tree.children(children[at + 1].index())[0],
                                  preprocessing_op_or_punc::EQUAL))
-            /* = default, = delete: such a constructor is not user-provided
+            /* = default, = delete: no user-provided function
                ([dcl.fct.def.default]/5), which the layout ([abi:pod]) and
                triviality need to know before the class is complete */
-            return not_supported(n, "dcl.fct.def.general");
+            return defaulted_or_deleted_special_member(c, n, children[at],
+                                                       children[at + 1], access,
+                                                       constexpr_specified);
         analysis_result r = special_member_declarator(
             c, n, children[at], access, true, constexpr_specified);
         if (r == analysis_result::well_formed)
