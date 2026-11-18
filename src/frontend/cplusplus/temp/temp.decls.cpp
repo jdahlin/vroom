@@ -358,6 +358,14 @@ semantic_analysis::named_specialization(node_index n, node_index declaration,
     }
     if (!ft)
         return not_supported(n, rule);
+    {
+        /* [temp.func.order]/1.4: which of the name's templates the
+           declaration refers to is partial ordering's: not analysed */
+        owned_array<uint32_t> group;
+        function_template_overloads(function_templates[ft - 1].name, group);
+        if (group.size() > 1)
+            return not_supported(n, rule);
+    }
     const function_template f = function_templates[ft - 1];
     const entity t = entity_table[f.entity];
     if (t.enclosing != current_scope || f.primary)
@@ -819,7 +827,42 @@ semantic_analysis::function_template_definition(node_index n,
        ([temp.over.link]/6: equivalent template-heads and function types),
        the first's record */
     entity_index prior = entity_table.find(outer, name);
-    uint32_t earlier = function_template_of(prior);
+    owned_array<uint32_t> group;
+    if (prior)
+        function_template_overloads(prior, group);
+    uint32_t earlier = 0;
+    for (uint32_t g : group) {
+        /* [temp.over.link]/7: "Two function templates are equivalent if
+           they are declared in the same scope, have the same name, have
+           equivalent template-heads, and have return types, parameter
+           lists, and trailing requires-clauses (if any) that are
+           equivalent using the rules described above to compare
+           expressions involving template parameters"; one that is not is
+           another template of the name, an overload ([temp.over]) */
+        const function_template f = function_templates[g - 1];
+        if (entity_table[f.entity].enclosing != outer)
+            return not_supported(n, "temp.over.link");
+        if (f.parameter_count != parameters.size() ||
+            !same_template_parameters(first, f.first_parameter,
+                                      f.parameter_count))
+            continue;
+        owned_array<template_argument> values;
+        owned_array<bool> set;
+        for (uint32_t i = 0; i < f.parameter_count; i++) {
+            values.append(template_argument());
+            set.append(false);
+        }
+        bool same =
+            deduce_type(entity_table[f.entity].type, type, values, set, true);
+        for (uint32_t i = 0; i < f.parameter_count && same; i++) {
+            entity_index pe = template_parameter_entities[first + i];
+            if (set[i] && (entity_table[pe].kind != entity_kind::typedef_name ||
+                           !(values[i].type == entity_table[pe].type)))
+                same = false;
+        }
+        if (same)
+            earlier = g;
+    }
     if (prior && earlier) {
         const function_template f = function_templates[earlier - 1];
         const entity old = entity_table[f.entity];
@@ -893,12 +936,46 @@ semantic_analysis::function_template_definition(node_index n,
     /* the name: hold_names binds a fresh one; one it finds bound already
        declares something else too (an overload, another template), which
        calls of it need [over.match.funcs] for */
+    /* the functions of the scope the name denotes ([over.pre]/1), which a
+       call of the name weighs against the template's specializations
+       ([temp.over]/1): the name is held by an entity of its own, the
+       functions kept */
+    owned_array<entity_index> functions;
+    /* (a scope with a using-directive, an inline namespace's among them,
+       or names not known: lookup of the name finds more than the
+       scope's own declarations) */
+    bool own = !entity_table[outer].has_using_directive &&
+               !entity_table[outer].unknown_names;
+    if (prior && group.empty() && own &&
+        entity_table[prior].kind == entity_kind::function &&
+        entity_table[prior].enclosing == outer &&
+        !entity_table[prior].nonstatic_member &&
+        !entity_table.bound_by_using(outer, name)) {
+        overload_set(prior, functions);
+        prior = entity_table.make(entity_kind::none, name, outer);
+        entity_table[prior].held_by_template = true;
+        entity_table.bind(outer, name, prior);
+    }
     size_t before = entity_table.size();
+    /* (another function template of the name, group, keeps it: the
+       name's templates are overloaded, [temp.over]) */
     hold_names(n);
     entity_index held = entity_table.find(outer, name);
     record.name = held;
-    if (!held || held < before ||
-        entity_table[held].kind != entity_kind::none) {
+    bool overload = (!group.empty() || !functions.empty()) && own &&
+                    held == prior &&
+                    entity_table[held].kind == entity_kind::none;
+    if (overload)
+        for (entity_index f : functions) {
+            template_name_function x;
+            x.name = held;
+            x.function = f;
+            template_name_functions.append(x);
+        }
+    for (uint32_t g : group)
+        function_templates[g - 1].unusable = !overload;
+    if (!overload && (!held || held < before ||
+                      entity_table[held].kind != entity_kind::none)) {
         record.unusable = true;
         for (function_template &other : function_templates)
             if (other.name == held)
@@ -1138,6 +1215,16 @@ uint32_t semantic_analysis::function_template_of(entity_index held) const
             !function_templates[i].unusable && !function_templates[i].is_class)
             return static_cast<uint32_t>(i + 1);
     return 0;
+}
+
+void semantic_analysis::function_template_overloads(
+    entity_index held, owned_array<uint32_t> &out) const
+{
+    out.clear();
+    for (size_t i = 0; i < function_templates.size(); i++)
+        if (function_templates[i].name == held && held &&
+            !function_templates[i].unusable && !function_templates[i].is_class)
+            out.append(static_cast<uint32_t>(i + 1));
 }
 
 uint32_t semantic_analysis::class_template_of(entity_index e) const
@@ -1482,8 +1569,8 @@ analysis_result semantic_analysis::class_specialization_definition(
  * actual template argument list" (exactly: [temp.deduct.type]/1's "make P
  * ... identical to A").  An explicit specialization of the arguments is
  * the specialization itself.  More than one partial specialization
- * matching is /1.2's partial ordering ([temp.class.order]): not
- * analysed.
+ * matching is /1.2's partial ordering ([temp.class.order],
+ * temp.func.order.cpp).
  */
 analysis_result semantic_analysis::matching_specialization(
     node_index at, uint32_t class_template, const template_argument *arguments,
@@ -1492,6 +1579,10 @@ analysis_result semantic_analysis::matching_specialization(
     pattern = 0;
     deduced.clear();
     uint32_t matches = 0;
+    /* the partial specializations that match, and their deduced
+       arguments' place in all */
+    owned_array<uint32_t> found, first_deduced;
+    owned_array<template_argument> all;
     for (uint32_t k = 0; k < function_templates.size(); k++) {
         const function_template s = function_templates[k];
         if (s.primary != class_template || s.pattern_count != count)
@@ -1532,13 +1623,46 @@ analysis_result semantic_analysis::matching_specialization(
             if (!set[i])
                 return not_supported(at, "temp.class.spec");
         matches++;
-        pattern = k + 1;
-        deduced.clear();
+        found.append(k + 1);
+        first_deduced.append(static_cast<uint32_t>(all.size()));
         for (const template_argument &a : d)
-            deduced.append(a);
+            all.append(a);
     }
-    if (matches > 1)
+    if (!matches)
+        return analysis_result::well_formed;
+    /* [temp.class.spec.match]/1.2: "If more than one matching
+       specialization is found, the partial order rules ([temp.class.order])
+       are used to determine whether one of the specializations is more
+       specialized than the others.  If none of the specializations is more
+       specialized than all of the other matching specializations, then the
+       use of the class template is ambiguous and the program is
+       ill-formed" (the ambiguity, or an order analysis cannot tell:
+       unsupported) */
+    size_t chosen = found.size();
+    for (size_t i = 0; i < found.size() && chosen == found.size(); i++) {
+        bool best = true;
+        for (size_t j = 0; j < found.size() && best; j++) {
+            if (i == j)
+                continue;
+            bool unknown = false;
+            bool forward =
+                class_at_least_as_specialized(found[i], found[j], unknown);
+            bool backward =
+                class_at_least_as_specialized(found[j], found[i], unknown);
+            if (unknown)
+                return not_supported(at, "temp.class.order");
+            best = forward && !backward;
+        }
+        if (best)
+            chosen = i;
+    }
+    if (chosen == found.size())
         return not_supported(at, "temp.class.order");
+    pattern = found[chosen];
+    deduced.clear();
+    for (uint32_t i = 0; i < function_templates[pattern - 1].parameter_count;
+         i++)
+        deduced.append(all[first_deduced[chosen] + i]);
     return analysis_result::well_formed;
 }
 
@@ -1749,12 +1873,62 @@ bool semantic_analysis::deduce_type(qualified_type p, qualified_type a,
  * obtained from default template-arguments."  [temp.deduct.call]: from a
  * call's arguments.  No rules yet.
  */
-analysis_result
-semantic_analysis::deduce_from_call(node_index at, uint32_t function_template,
-                                    const expression_meaning *arguments,
-                                    uint32_t count,
-                                    owned_array<template_argument> &deduced)
+/* a P and A (adjusted, [temp.deduct.call]/2-3) that deduce_type does not
+   match but that /4 may still: A of a class type or a pointer to one
+   (/4.3, a derived class), a pointer to a function (/4.2's function
+   pointer conversion), P a pointer to a pointer (/4.2's qualification
+   conversion of more than one level), P of a kind deduce_type has no
+   rules for */
+static bool deduction_may_succeed(const types &table, qualified_type p,
+                                  qualified_type a)
 {
+    const struct type &ar = table[a.unqualified()];
+    if (ar.kind == type_kind::class_type || ar.kind == type_kind::dependent)
+        return true;
+    if (ar.kind == type_kind::pointer) {
+        type_kind k = table[ar.operand.unqualified()].kind;
+        if (k == type_kind::class_type || k == type_kind::function ||
+            k == type_kind::dependent)
+            return true;
+    }
+    const struct type &pr = table[p.unqualified()];
+    switch (pr.kind) {
+    case type_kind::template_parameter:
+    case type_kind::fundamental:
+    case type_kind::enumeration:
+    case type_kind::array:
+    case type_kind::lvalue_reference:
+    case type_kind::rvalue_reference:
+        return false;
+    case type_kind::pointer: {
+        /* (A with fewer levels of pointers than P never matches it) */
+        qualified_type x = p, y = a;
+        while (table[x.unqualified()].kind == type_kind::pointer &&
+               table[y.unqualified()].kind == type_kind::pointer) {
+            x = table[x.unqualified()].operand;
+            y = table[y.unqualified()].operand;
+        }
+        if (table[x.unqualified()].kind == type_kind::pointer) {
+            type_kind k = table[y.unqualified()].kind;
+            return k == type_kind::class_type || k == type_kind::dependent ||
+                   k == type_kind::function;
+        }
+        type_kind k = table[pr.operand.unqualified()].kind;
+        return k != type_kind::template_parameter &&
+               k != type_kind::fundamental && k != type_kind::enumeration;
+    }
+    default:
+        return true;
+    }
+}
+
+analysis_result semantic_analysis::deduce_from_call(
+    node_index at, uint32_t function_template,
+    const expression_meaning *arguments, uint32_t count,
+    owned_array<template_argument> &deduced, bool *failed)
+{
+    if (failed)
+        *failed = false;
     const struct function_template &ft =
         function_templates[function_template - 1];
     qualified_type type = entity_table[ft.entity].type;
@@ -1772,9 +1946,17 @@ semantic_analysis::deduce_from_call(node_index at, uint32_t function_template,
     if (fixed && type_table[parameters[fixed - 1].unqualified()].kind ==
                      type_kind::pack_expansion)
         fixed--;
-    if (f.variadic || count < fixed ||
-        (fixed == f.parameter_count && count != fixed))
+    if (f.variadic)
         return not_supported(at, "temp.deduct.call");
+    if (count < fixed || (fixed == f.parameter_count && count != fixed)) {
+        /* [over.match.viable]/2: no default argument is analysed in a
+           template, so a template of another number of parameters
+           cannot be called with these arguments */
+        if (!failed)
+            return not_supported(at, "temp.deduct.call");
+        *failed = true;
+        return analysis_result::well_formed;
+    }
     uint32_t pack = ft.parameter_count;
     if (ft.parameter_count &&
         template_parameter_is_pack(ft.first_parameter + ft.parameter_count - 1))
@@ -1858,9 +2040,16 @@ semantic_analysis::deduce_from_call(node_index at, uint32_t function_template,
            overload resolution of the function templates of the name and
            its other functions decides; neither is analysed yet */
         if (i < fixed) {
-            if (!deduce_type(p, a, values, set))
+            if (deduce_type(p, a, values, set))
+                continue;
+            /* [temp.over]/1: "If, for a given function template, argument
+               deduction fails or the synthesized function template
+               specialization would be ill-formed, no such function is
+               added to the set of candidate functions for that template" */
+            if (!failed || deduction_may_succeed(type_table, p, a))
                 return not_supported(at, "temp.deduct.call");
-            continue;
+            *failed = true;
+            return analysis_result::well_formed;
         }
         /* the pack's next element, the other parameters the pattern names
            the same in each */
@@ -1870,8 +2059,15 @@ semantic_analysis::deduce_from_call(node_index at, uint32_t function_template,
             one.append(values[k]);
             one_set.append(set[k] && k != pack);
         }
-        if (!deduce_type(p, a, one, one_set) || pack >= one.size() ||
-            !one_set[pack])
+        if (pack >= one.size())
+            return not_supported(at, "temp.deduct.call");
+        if (!deduce_type(p, a, one, one_set)) {
+            if (!failed || deduction_may_succeed(type_table, p, a))
+                return not_supported(at, "temp.deduct.call");
+            *failed = true;
+            return analysis_result::well_formed;
+        }
+        if (!one_set[pack])
             return not_supported(at, "temp.deduct.call");
         for (uint32_t k = 0; k < values.size(); k++)
             if (k != pack && one_set[k] && !set[k]) {

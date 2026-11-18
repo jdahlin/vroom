@@ -15,8 +15,10 @@
  *
  * The contexts analysed: a call of a named function ([over.call.func], in
  * expr.post.cpp's call) and the initialization of an object of class type
- * by constructor ([over.match.ctor], class.ctor.cpp's construct).  There
- * are no templates, so [over.match.best]/2.4-2.7 never decide.
+ * by constructor ([over.match.ctor], class.ctor.cpp's construct), and
+ * the specializations of a name's function templates ([temp.over],
+ * expr.post.cpp's template_call), which [over.match.best]/2.4 and 2.5
+ * order; 2.6 and 2.7 never decide.
  *
  * A candidate whose conversion sequence analysis cannot tell (form::unknown)
  * is taken at its best, an Exact Match: when the best viable function of the
@@ -164,6 +166,24 @@ analysis_result semantic_analysis::best_viable_function(
         }
         if (some)
             return true;
+        const overload_candidate &x = candidates[f1], &y = candidates[f2];
+        /* (2.4) "F1 is not a function template specialization and F2 is a
+           function template specialization"; (2.5) "F1 and F2 are
+           function template specializations, and the function template
+           for F1 is more specialized than the template for F2 according
+           to the partial ordering rules described in [temp.func.order]" */
+        if (!x.template_index && y.template_index)
+            return true;
+        if (x.template_index && y.template_index &&
+            x.template_index != y.template_index) {
+            /* (an order analysis cannot tell is neither: the final check
+               below makes the call unsupported) */
+            bool unknown = false;
+            int order = function_template_order(x.template_index,
+                                                y.template_index, n, unknown);
+            if (!unknown && order != 0)
+                return order > 0;
+        }
         /* (2.8) "F2 is a rewritten candidate ([over.match.oper]) and F1 is
            not"; (2.9) "F1 and F2 are rewritten candidates, and F2 is a
            synthesized candidate with reversed order of parameters and F1
@@ -208,6 +228,12 @@ analysis_result semantic_analysis::best_viable_function(
                resolved for the non-reversed one with a warning
                (-Wambiguous-reversed-operator) */
             return not_supported(at, "over.match.oper");
+        if (!better(w, i) &&
+            (candidates[w].template_index || candidates[i].template_index))
+            /* two specializations neither more specialized (or partial
+               ordering analysis cannot tell): clang's ambiguity, not
+               claimed */
+            return not_supported(at, "temp.func.order");
         bool user_defined = false;
         for (size_t k = 0; k < width; k++)
             if (ics[w * width + k].kind ==

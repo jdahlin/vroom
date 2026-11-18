@@ -958,6 +958,16 @@ analysis_result semantic_analysis::template_callee_parts(
             return not_supported(id.index(), "temp.names");
         return analysis_result::well_formed;
     }
+    if (!written.empty()) {
+        /* explicit template arguments for each of several templates
+           ([temp.over]/1's "checking of any explicit template
+           arguments"): not analysed */
+        owned_array<uint32_t> group;
+        function_template_overloads(
+            function_templates[function_template - 1].name, group);
+        if (group.size() > 1)
+            return not_supported(id.index(), "temp.over");
+    }
     /* [temp.arg.explicit]/6: "The template argument list shall not
        specify more template-arguments than there are corresponding
        template-parameters" (clang: no candidate) */
@@ -1030,17 +1040,109 @@ analysis_result semantic_analysis::template_call(
     const expression_meaning *meanings = nullptr;
     if (!early.empty())
         meanings = &early[0];
-    analysis_result r =
-        deduce_from_call(n, function_template, meanings,
-                         static_cast<uint32_t>(early.size()), deduced);
-    if (r != analysis_result::well_formed)
-        return r;
+    owned_array<uint32_t> group;
+    function_template_overloads(function_templates[function_template - 1].name,
+                                group);
+    /* the name's non-template functions, candidates unless the name is a
+       template-id's ([temp.arg.explicit]: only templates take template
+       arguments) */
+    owned_array<entity_index> functions;
+    bool template_id =
+        tokens[name + 1].kind == token_kind::operator_or_punctuator &&
+        preprocessing_op_or_punc_primary(tokens[name + 1].op_or_punc) ==
+            preprocessing_op_or_punc::LESS;
+    for (const template_name_function &x : template_name_functions)
+        if (x.name == function_templates[function_template - 1].name &&
+            !template_id)
+            functions.append(x.function);
     entity_index specialization = 0;
-    r = instantiate(n, function_templates[function_template - 1].entity,
-                    &deduced[0], static_cast<uint32_t>(deduced.size()),
-                    specialization);
-    if (r != analysis_result::well_formed)
-        return r;
+    if (group.size() > 1 || !functions.empty()) {
+        /* [temp.over]/1: "For each function template, if the argument
+           deduction and checking succeeds, the template-arguments
+           (deduced and/or explicit) are used to synthesize the
+           declaration of a single function template specialization which
+           is added to the candidate functions set to be used in overload
+           resolution."  Each candidate's declaration is instantiated
+           ([temp.inst]/5: not its definition, which only the one chosen
+           needs) */
+        owned_array<overload_candidate> candidates;
+        owned_array<uint32_t> first_arguments;
+        owned_array<template_argument> all;
+        for (entity_index e : functions) {
+            overload_candidate c;
+            c.function = e;
+            c.type = entity_table[e].type;
+            candidates.append(c);
+            first_arguments.append(0);
+        }
+        for (uint32_t g : group) {
+            owned_array<template_argument> d;
+            bool failed = false;
+            analysis_result r = deduce_from_call(
+                n, g, meanings, static_cast<uint32_t>(early.size()), d,
+                &failed);
+            if (r != analysis_result::well_formed)
+                return r;
+            if (failed)
+                continue;
+            entity_index e = 0;
+            unevaluated++;
+            const struct function_template ft = function_templates[g - 1];
+            r = instantiate(n, ft.entity, d.data(),
+                            static_cast<uint32_t>(d.size()), e);
+            unevaluated--;
+            if (r != analysis_result::well_formed)
+                return r;
+            overload_candidate c;
+            c.function = e;
+            c.type = entity_table[e].type;
+            c.template_index = g;
+            candidates.append(c);
+            first_arguments.append(static_cast<uint32_t>(all.size()));
+            for (const template_argument &x : d)
+                all.append(x);
+        }
+        if (candidates.empty())
+            /* (deduction failed for each: no viable function, which
+               clang reports with each template's reason) */
+            return not_supported(n, "temp.over");
+        size_t chosen = 0;
+        analysis_result r =
+            best_viable_function(n, candidates, nullptr, early, chosen);
+        if (r != analysis_result::well_formed)
+            return r;
+        if (!candidates[chosen].template_index) {
+            /* a non-template function: [dcl.fct.def.delete]/2 "If a
+               function is overloaded, it is referenced only if the
+               function is selected by overload resolution." */
+            entity_index c = candidates[chosen].function;
+            r = deleted_use(name, c);
+            if (r != analysis_result::well_formed)
+                return r;
+            overloaded_callee = name;
+            r = named_entity(name, c, f);
+            overloaded_callee = 0;
+            return r;
+        }
+        const struct function_template ft =
+            function_templates[candidates[chosen].template_index - 1];
+        r = instantiate(n, ft.entity, &all[first_arguments[chosen]],
+                        ft.parameter_count, specialization);
+        if (r != analysis_result::well_formed)
+            return r;
+    } else {
+        analysis_result r =
+            deduce_from_call(n, function_template, meanings,
+                             static_cast<uint32_t>(early.size()), deduced);
+        if (r != analysis_result::well_formed)
+            return r;
+        r = instantiate(n, function_templates[function_template - 1].entity,
+                        &deduced[0], static_cast<uint32_t>(deduced.size()),
+                        specialization);
+        if (r != analysis_result::well_formed)
+            return r;
+    }
+    analysis_result r = analysis_result::well_formed;
     /* no claim is made about the name, whose declaration clang finds is
        the template's */
     overloaded_callee = name;

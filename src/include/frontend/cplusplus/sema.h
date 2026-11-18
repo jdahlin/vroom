@@ -2467,6 +2467,14 @@ class semantic_analysis
         uint32_t primary = 0, first_pattern = 0, pattern_count = 0;
     };
     owned_array<function_template> function_templates;
+    /* [temp.over]/1: "The complete set of candidate functions includes all
+       the synthesized declarations and all of the non-template overloaded
+       functions of the same name": the functions of a scope a function
+       template's name, held, was bound to before the template */
+    struct template_name_function {
+        entity_index name = 0, function = 0;
+    };
+    owned_array<template_name_function> template_name_functions;
     /* per template-parameter: a type parameter's typedef-name of its
        template_parameter type, or a non-type parameter's entity (kind
        none, so that the template's own declarator cannot use its value;
@@ -2624,6 +2632,22 @@ class semantic_analysis
     bool deduce_type(qualified_type p, qualified_type a,
                      owned_array<template_argument> &deduced,
                      owned_array<bool> &set, bool exact = false) const;
+    /* [temp.over]/1: the usable function templates (indices plus one) of
+       a held name, in declaration order */
+    void function_template_overloads(entity_index held,
+                                     owned_array<uint32_t> &out) const;
+    /* [temp.func.order] in a call of the given number of arguments
+       ([temp.deduct.partial]/3.1): 1 when f is more specialized than g,
+       -1 when g is more than f, 0 when neither; unknown set when analysis
+       cannot tell */
+    int function_template_order(uint32_t f, uint32_t g, size_t arguments,
+                                bool &unknown) const;
+    bool at_least_as_specialized(uint32_t f, uint32_t g, size_t arguments,
+                                 bool &unknown) const;
+    /* [temp.class.order]: whether partial specialization s (index plus
+       one) is at least as specialized as t */
+    bool class_at_least_as_specialized(uint32_t s, uint32_t t,
+                                       bool &unknown) const;
     owned_array<template_argument> template_arguments;
     /* [temp.variadic]: the elements of the packs among template arguments
        (template_argument::kind_t::pack) */
@@ -2675,7 +2699,8 @@ class semantic_analysis
     analysis_result deduce_from_call(node_index at, uint32_t function_template,
                                      const expression_meaning *arguments,
                                      uint32_t count,
-                                     owned_array<template_argument> &deduced);
+                                     owned_array<template_argument> &deduced,
+                                     bool *failed = nullptr);
     analysis_result function_body(node_index definition, syntax_child compound,
                                   syntax_child ctor_initializer = {});
     /* [class.base.init]: a constructor's member initializations, the
@@ -2834,6 +2859,10 @@ class semantic_analysis
            x != y or y == x), and one synthesized with the order of its two
            parameters reversed */
         bool rewritten = false, reversed = false;
+        /* a function template specialization: its template
+           (function_templates' index plus one), for [over.match.best]/2.4
+           and 2.5 */
+        uint32_t template_index = 0;
     };
 
   private:

@@ -1718,6 +1718,38 @@ lines:
   cxx-sema: declarations as clang 41733 -> 42029, 0 we reject and clang
   accepts, 0 refuted (types 43369, lookup 15144, symbols 1905, layouts
   10243); cxx-run 224/224; cxx-c-suites unchanged.
+  Then overloaded function templates and partial ordering ([temp.over],
+  [over.match.best]/2.4-2.5, [temp.func.order], [temp.deduct.partial],
+  [temp.class.order]).  A function template whose name already names
+  function templates of the same namespace is their redeclaration only
+  when equivalent ([temp.over.link]/7), otherwise another template of the
+  name (`function_template_overloads`); one whose name names the scope's
+  functions (no using-directive, inline namespace or unknown names in the
+  scope) keeps them as candidates (`template_name_functions`), the name
+  held by an entity of its own.  A call (`template_call`) deduces each
+  template with `deduce_from_call`'s trial mode: a deduction that fails
+  (a parameter count, a conflict, a P and A of other shapes) is no
+  candidate, one [temp.deduct.call]/4 might still rescue (a class, a
+  pointer to class or function, a multi-level qualification conversion)
+  unsupported; each candidate's declaration is instantiated (not its
+  definition, only the chosen's), then `best_viable_function` with the
+  tie-breakers: a non-template beats a specialization, and of two
+  specializations the more specialized template's
+  (temp/temp.func.order.cpp: per call argument, the parameter's type or
+  its pack's pattern; references and top-level cv removed, /9's
+  lvalue/cv rule, [temp.deduct.type]/10's pack rule, /11's trailing pack).
+  Head/tail recursive variadic templates work.  Two matching class
+  partial specializations are ordered the same way (deducing one's
+  pattern from the other's).  Unsupported still: an ambiguity or an
+  order analysis cannot tell (templates with non-type parameters, types
+  with template-ids or dependent names, pointers to members), explicit
+  template arguments when the name has several templates, explicit
+  specializations and instantiations of such a name ([temp.func.order]/1.4),
+  a non-template function declared after a template of its name, taking
+  the address of an overloaded template.  cxx-sema: declarations as clang
+  42029 -> 42350, 0 we reject and clang accepts, 0 refuted (types 43630,
+  lookup 15236, symbols 1910, layouts 10271, lowering 295 -> 298); cxx-run
+  228/228 (template-overloads.cpp); cxx-c-suites 2214 pass, 0 wrong.
 
 ### S7. Exceptions and RTTI
 
