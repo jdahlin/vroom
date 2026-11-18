@@ -244,12 +244,13 @@ analysis_result semantic_analysis::explicit_instantiation(node_index n)
     return analysis_result::well_formed;
 }
 
-uint32_t semantic_analysis::find_instantiation(
-    entity_index t, const owned_array<template_argument> &a) const
+uint32_t semantic_analysis::find_instantiation(entity_index t,
+                                               const template_argument *a,
+                                               uint32_t count) const
 {
     for (uint32_t k = 0; k < instantiations.size(); k++) {
         const instantiation_record &x = instantiations[k];
-        if (x.template_entity != t || x.argument_count != a.size())
+        if (x.template_entity != t || x.argument_count != count)
             continue;
         bool same = true;
         for (uint32_t i = 0; i < x.argument_count && same; i++)
@@ -258,6 +259,28 @@ uint32_t semantic_analysis::find_instantiation(
             return k + 1;
     }
     return 0;
+}
+
+uint32_t
+semantic_analysis::record_instantiation(const function_template &ft,
+                                        const template_argument *arguments,
+                                        uint32_t count)
+{
+    instantiation_record record;
+    record.template_entity = ft.entity;
+    record.first_argument = static_cast<uint32_t>(template_arguments.size());
+    record.argument_count = count;
+    for (uint32_t i = 0; i < count; i++)
+        template_arguments.append(arguments[i]);
+    record.scope = entity_table.make(entity_kind::block_scope, 0,
+                                     entity_table[ft.entity].enclosing);
+    for (uint32_t i = 0; i < count; i++)
+        bind_template_argument(
+            record.scope, template_parameter_entities[ft.first_parameter + i],
+            arguments[i]);
+    uint32_t index = static_cast<uint32_t>(instantiations.size());
+    instantiations.append(record);
+    return index;
 }
 
 /*
@@ -391,7 +414,8 @@ semantic_analysis::named_specialization(node_index n, node_index declaration,
     r = default_template_arguments(n, ft, values, set);
     if (r != analysis_result::well_formed)
         return not_supported(n, "temp.deduct.decl");
-    uint32_t prior = find_instantiation(f.entity, values);
+    uint32_t prior = find_instantiation(f.entity, values.data(),
+                                        static_cast<uint32_t>(values.size()));
     if (prior) {
         const instantiation_record &x = instantiations[prior - 1];
         entity_index e = x.specialization;
@@ -477,15 +501,10 @@ analysis_result semantic_analysis::class_explicit_instantiation(node_index n,
                                                                 node_index id,
                                                                 bool extern_)
 {
-    const syntax_child *parts = tree.children(id);
-    if (tree[id].child_count < 3 || !parts[0].is_token() ||
-        tokens[parts[0].index()].kind != token_kind::identifier)
+    lookup_result x;
+    entity_index named = 0;
+    if (!template_id_name(id, x, named))
         return not_supported(n, "temp.explicit");
-    lookup_result x = lookup_unqualified(tokens.identifier(parts[0].index()),
-                                         lookup_filter::any);
-    entity_index named = x.entity;
-    if (!named)
-        named = x.unknown_entity;
     uint32_t ct = class_template_of(named);
     if (!ct || entity_table[function_templates[ct - 1].entity].enclosing !=
                    current_scope)
@@ -499,7 +518,8 @@ analysis_result semantic_analysis::class_explicit_instantiation(node_index n,
     name_uses.resize(uses_before);
     if (r != analysis_result::well_formed)
         return not_supported(n, "temp.explicit");
-    uint32_t prior = find_instantiation(t, arguments);
+    uint32_t prior = find_instantiation(
+        t, arguments.data(), static_cast<uint32_t>(arguments.size()));
     type_index type = 0;
     r = template_type(id, 0, false, type);
     if (r != analysis_result::well_formed)
@@ -901,31 +921,20 @@ semantic_analysis::function_template_definition(node_index n,
         }
         return analysis_result::well_formed;
     }
-    entity_index t =
-        entity_table.make(entity_kind::template_entity, name, outer);
+    function_template record = new_template(
+        name, outer, n, index, first, static_cast<uint32_t>(parameters.size()));
+    entity_index t = record.entity;
     entity_table[t].type = type;
     entity_table[t].defined = defines;
     entity_table[t].inline_ = s.inline_;
     entity_table[t].constexpr_ = s.constexpr_;
-    entity_table[t].instantiation = index + 1;
     /* [basic.link]/3.1: a function template declared static has internal
-       linkage, as does any name of an unnamed namespace (/4) */
-    entity_table[t].linkage_of_name = linkage::external;
+       linkage */
     if (s.static_)
         entity_table[t].linkage_of_name = linkage::internal;
-    for (entity_index y = outer; y; y = entity_table[y].enclosing)
-        if (entity_table[y].kind == entity_kind::namespace_entity &&
-            !entity_table[y].name)
-            entity_table[t].linkage_of_name = linkage::internal;
-    entity_table.add_declaration(t, n);
-    function_template record;
-    record.entity = t;
-    record.declaration = n;
     if (defines)
         record.definition = definition;
     record.declarator = definition;
-    record.first_parameter = first;
-    record.parameter_count = static_cast<uint32_t>(parameters.size());
     /* the name: hold_names binds a fresh one; one it finds bound already
        declares something else too (an overload, another template), which
        calls of it need [over.match.funcs] for */
@@ -1532,22 +1541,45 @@ uint32_t semantic_analysis::class_template_of(entity_index e) const
     if (entity_table[e].kind == entity_kind::class_type &&
         entity_table[e].instantiation)
         return entity_table[specialized_template(e)].instantiation;
+    return template_of_form(e, &function_template::is_class);
+}
+
+uint32_t semantic_analysis::alias_template_of(entity_index e) const
+{
+    return template_of_form(e, &function_template::is_alias);
+}
+
+/* the usable template of the form (is_class, is_alias, is_variable) whose
+   name the held entity e is, plus one */
+uint32_t
+semantic_analysis::template_of_form(entity_index e,
+                                    bool function_template::*form) const
+{
+    if (!e)
+        return 0;
     for (size_t i = 0; i < function_templates.size(); i++)
-        if (function_templates[i].name == e && function_templates[i].is_class &&
+        if (function_templates[i].name == e && function_templates[i].*form &&
             !function_templates[i].unusable)
             return static_cast<uint32_t>(i + 1);
     return 0;
 }
 
-uint32_t semantic_analysis::alias_template_of(entity_index e) const
+/* the simple-template-id id's template-name, an identifier, looked up
+   unqualified (x), the entity it names or holds (named); false for another
+   form */
+bool semantic_analysis::template_id_name(node_index id, lookup_result &x,
+                                         entity_index &named) const
 {
-    if (!e)
-        return 0;
-    for (size_t i = 0; i < function_templates.size(); i++)
-        if (function_templates[i].name == e && function_templates[i].is_alias &&
-            !function_templates[i].unusable)
-            return static_cast<uint32_t>(i + 1);
-    return 0;
+    const syntax_child *parts = tree.children(id);
+    if (tree[id].child_count < 3 || !parts[0].is_token() ||
+        tokens[parts[0].index()].kind != token_kind::identifier)
+        return false;
+    x = lookup_unqualified(tokens.identifier(parts[0].index()),
+                           lookup_filter::any);
+    named = x.entity;
+    if (!named)
+        named = x.unknown_entity;
+    return true;
 }
 
 /*
@@ -1587,39 +1619,18 @@ analysis_result semantic_analysis::alias_template_definition(node_index n,
     current_scope = saved_scope;
     if (r != analysis_result::well_formed)
         return r;
-    entity_index t =
-        entity_table.make(entity_kind::template_entity, name, outer);
-    entity_table[t].defined = true;
-    entity_table[t].instantiation = index + 1;
-    entity_table[t].linkage_of_name = linkage::external;
-    if (within_unnamed_namespace(outer))
-        entity_table[t].linkage_of_name = linkage::internal;
-    entity_table.add_declaration(t, n);
-    function_template record;
-    record.entity = t;
-    record.declaration = n;
+    function_template record = new_template(
+        name, outer, n, index, first, static_cast<uint32_t>(parameters.size()));
+    entity_table[record.entity].defined = true;
     record.definition = alias;
-    record.first_parameter = first;
-    record.parameter_count = static_cast<uint32_t>(parameters.size());
     record.is_alias = true;
-    entity_index held = entity_table.make(entity_kind::none, name, outer);
-    entity_table[held].held_by_template = true;
-    entity_table.bind(outer, name, held);
-    record.name = held;
-    function_templates.append(record);
+    hold_template_name(record, name, outer);
     return analysis_result::well_formed;
 }
 
 uint32_t semantic_analysis::variable_template_of(entity_index e) const
 {
-    if (!e)
-        return 0;
-    for (size_t i = 0; i < function_templates.size(); i++)
-        if (function_templates[i].name == e &&
-            function_templates[i].is_variable &&
-            !function_templates[i].unusable)
-            return static_cast<uint32_t>(i + 1);
-    return 0;
+    return template_of_form(e, &function_template::is_variable);
 }
 
 /*
@@ -1693,28 +1704,14 @@ semantic_analysis::variable_template_definition(node_index n,
     for (uint32_t i = 0; i < parameters.size(); i++)
         if (entity_table[template_parameter_entities[first + i]].name == name)
             return not_supported(n, "temp.local");
-    entity_index t =
-        entity_table.make(entity_kind::template_entity, name, outer);
-    entity_table[t].defined = true;
-    entity_table[t].constexpr_ = s.constexpr_;
-    entity_table[t].instantiation = index + 1;
-    entity_table[t].linkage_of_name = linkage::external;
-    if (within_unnamed_namespace(outer))
-        entity_table[t].linkage_of_name = linkage::internal;
-    entity_table.add_declaration(t, n);
-    function_template record;
-    record.entity = t;
-    record.declaration = n;
+    function_template record = new_template(
+        name, outer, n, index, first, static_cast<uint32_t>(parameters.size()));
+    entity_table[record.entity].defined = true;
+    entity_table[record.entity].constexpr_ = s.constexpr_;
     record.definition = declaration;
     record.declarator = declaration;
-    record.first_parameter = first;
-    record.parameter_count = static_cast<uint32_t>(parameters.size());
     record.is_variable = true;
-    entity_index held = entity_table.make(entity_kind::none, name, outer);
-    entity_table[held].held_by_template = true;
-    entity_table.bind(outer, name, held);
-    record.name = held;
-    function_templates.append(record);
+    hold_template_name(record, name, outer);
     return analysis_result::well_formed;
 }
 
@@ -1732,15 +1729,10 @@ semantic_analysis::variable_template_definition(node_index n,
 analysis_result semantic_analysis::variable_template_id(node_index n,
                                                         expression_meaning &m)
 {
-    const syntax_child *parts = tree.children(n);
-    if (tree[n].child_count < 3 || !parts[0].is_token() ||
-        tokens[parts[0].index()].kind != token_kind::identifier)
+    lookup_result x;
+    entity_index named = 0;
+    if (!template_id_name(n, x, named))
         return not_supported(n, "temp.names");
-    lookup_result x = lookup_unqualified(tokens.identifier(parts[0].index()),
-                                         lookup_filter::any);
-    entity_index named = x.entity;
-    if (!named)
-        named = x.unknown_entity;
     uint32_t vt = variable_template_of(named);
     if (!vt || x.ambiguous)
         return not_supported(n, "temp.names");
@@ -1758,7 +1750,7 @@ analysis_result semantic_analysis::variable_template_id(node_index n,
     if (r != analysis_result::well_formed)
         return r;
     size_t uses_before = name_uses.size();
-    r = named_entity(parts[0].index(), e, m);
+    r = named_entity(tree.children(n)[0].index(), e, m);
     /* (clang's lookup of the name finds the template, no claim here) */
     name_uses.resize(uses_before);
     return r;
@@ -1773,15 +1765,8 @@ semantic_analysis::instantiate_variable(node_index at, uint32_t vt,
     const function_template ft = function_templates[vt - 1];
     if (count != ft.parameter_count)
         return not_supported(at, "temp.inst");
-    for (uint32_t k = 0; k < instantiations.size(); k++) {
-        const instantiation_record &x = instantiations[k];
-        if (x.template_entity != ft.entity || x.argument_count != count)
-            continue;
-        bool same = true;
-        for (uint32_t i = 0; i < count && same; i++)
-            same = template_arguments[x.first_argument + i] == arguments[i];
-        if (!same)
-            continue;
+    if (uint32_t prior = find_instantiation(ft.entity, arguments, count)) {
+        const instantiation_record &x = instantiations[prior - 1];
         /* (one whose initializer uses itself, or that failed) */
         if (!x.specialization || !x.defined)
             return not_supported(at, "temp.inst");
@@ -1790,77 +1775,18 @@ semantic_analysis::instantiate_variable(node_index at, uint32_t vt,
     }
     if (instantiation_depth >= 64)
         return not_supported(at, "temp.inst");
-    const entity t = entity_table[ft.entity];
-    instantiation_record record;
-    record.template_entity = ft.entity;
-    record.first_argument = static_cast<uint32_t>(template_arguments.size());
-    record.argument_count = count;
-    for (uint32_t i = 0; i < count; i++)
-        template_arguments.append(arguments[i]);
-    record.scope = entity_table.make(entity_kind::block_scope, 0, t.enclosing);
-    for (uint32_t i = 0; i < count; i++)
-        bind_template_argument(
-            record.scope, template_parameter_entities[ft.first_parameter + i],
-            arguments[i]);
-    uint32_t index = static_cast<uint32_t>(instantiations.size());
-    instantiations.append(record);
-    entity_index saved_scope = current_scope;
-    entity_index saved_class = defining_class;
-    entity_index saved_last = last_declared;
-    entity_index saved_member_scope = template_member_scope;
-    node_index saved_declaration = current_declaration;
-    uint32_t saved_cv = function_cv;
-    bool saved_condition = in_condition;
-    token_index saved_callee = overloaded_callee;
-    bool saved_claimable = declarations_claimable;
-    uint32_t saved_instantiating = instantiating;
-    uint32_t saved_variable = variable_instantiating;
-    token_index saved_horizon = lookup_horizon;
-    unsigned saved_unevaluated = unevaluated;
-    bool saved_expanding = expanding;
-    function_context saved_function =
-        static_cast<function_context &&>(function_state);
-    function_state = function_context();
-    owned_array<parameter_meaning> saved_parameters =
-        static_cast<owned_array<parameter_meaning> &&>(function_parameters);
-    size_t expressions_before = expressions.size();
-    size_t uses_before = name_uses.size();
-    current_scope = record.scope;
-    template_member_scope = record.scope;
-    current_declaration = ft.declaration;
-    defining_class = 0;
-    in_condition = false;
-    overloaded_callee = 0;
-    declarations_claimable = false;
-    unevaluated = 0;
+    uint32_t index = record_instantiation(ft, arguments, count);
+    entity_index scope = instantiations[index].scope;
+    instantiation_context context;
+    enter_instantiation(context, scope, ft.declaration);
+    template_member_scope = scope;
     expanding = false;
     instantiating = 0;
     variable_instantiating = index + 1;
-    lookup_horizon = tree[ft.declaration].first_token;
     instantiations[index].defining = true;
-    instantiation_depth++;
     analysis_result r = simple_declaration(ft.declarator);
-    instantiation_depth--;
     instantiations[index].defining = false;
-    expanding = saved_expanding;
-    unevaluated = saved_unevaluated;
-    lookup_horizon = saved_horizon;
-    variable_instantiating = saved_variable;
-    instantiating = saved_instantiating;
-    declarations_claimable = saved_claimable;
-    overloaded_callee = saved_callee;
-    in_condition = saved_condition;
-    function_cv = saved_cv;
-    last_declared = saved_last;
-    current_declaration = saved_declaration;
-    defining_class = saved_class;
-    template_member_scope = saved_member_scope;
-    current_scope = saved_scope;
-    function_state = static_cast<function_context &&>(saved_function);
-    function_parameters =
-        static_cast<owned_array<parameter_meaning> &&>(saved_parameters);
-    expressions.resize(expressions_before);
-    name_uses.resize(uses_before);
+    leave_instantiation(context);
     /* an argument that makes the declaration ill-formed: clang reports it
        at the template, with a note at the use */
     if (r != analysis_result::well_formed ||
@@ -2085,20 +2011,11 @@ semantic_analysis::class_template_definition(node_index n, node_index specifier)
                               "each template-parameter after one with a "
                               "default template-argument shall have one",
                               "temp.param");
-    entity_index t =
-        entity_table.make(entity_kind::template_entity, name, outer);
+    function_template record = new_template(
+        name, outer, n, index, first, static_cast<uint32_t>(parameters.size()));
+    entity_index t = record.entity;
     entity_table[t].defined = true;
-    entity_table[t].instantiation = index + 1;
-    entity_table[t].linkage_of_name = linkage::external;
-    if (within_unnamed_namespace(outer))
-        entity_table[t].linkage_of_name = linkage::internal;
-    entity_table.add_declaration(t, n);
-    function_template record;
-    record.entity = t;
-    record.declaration = n;
     record.definition = specifier;
-    record.first_parameter = first;
-    record.parameter_count = static_cast<uint32_t>(parameters.size());
     record.is_class = true;
     /* the name, held: one bound already declares something else too (a
        class, another template's forward declaration) */
@@ -2143,18 +2060,13 @@ analysis_result semantic_analysis::class_specialization_definition(
     const syntax_node &spec = tree[specifier];
     node_index head = tree.children(specifier)[0].index();
     node_index id = tree.children(head)[1].index();
-    const syntax_child *parts = tree.children(id);
-    if (tree[id].child_count < 3 || !parts[0].is_token() ||
-        tokens[parts[0].index()].kind != token_kind::identifier)
+    lookup_result x;
+    entity_index named = 0;
+    if (!template_id_name(id, x, named))
         return not_supported(n, rule);
     for (token_index i = spec.first_token; i < spec.end_token; i++)
         if (p.keyword_of(tokens[i]) == standard_keyword::friend_)
             return not_supported(n, "class.friend");
-    lookup_result x = lookup_unqualified(tokens.identifier(parts[0].index()),
-                                         lookup_filter::any);
-    entity_index named = x.entity;
-    if (!named)
-        named = x.unknown_entity;
     uint32_t ct = class_template_of(named);
     /* [temp.class.spec]/6, [temp.expl.spec]/3: declared where the
        primary template is, by its name (not an injected-class-name) */
@@ -3066,24 +2978,10 @@ semantic_analysis::class_template_declaration(node_index n,
         if (template_parameter_has_default(parameters[i - 1]) &&
             !template_parameter_has_default(parameters[i]))
             return not_supported(n, "temp.param");
-    entity_index t =
-        entity_table.make(entity_kind::template_entity, name, outer);
-    entity_table[t].instantiation = index + 1;
-    entity_table[t].linkage_of_name = linkage::external;
-    if (within_unnamed_namespace(outer))
-        entity_table[t].linkage_of_name = linkage::internal;
-    entity_table.add_declaration(t, n);
-    function_template record;
-    record.entity = t;
-    record.declaration = n;
-    record.first_parameter = first;
-    record.parameter_count = static_cast<uint32_t>(parameters.size());
+    function_template record = new_template(
+        name, outer, n, index, first, static_cast<uint32_t>(parameters.size()));
     record.is_class = true;
-    held = entity_table.make(entity_kind::none, name, outer);
-    entity_table[held].held_by_template = true;
-    entity_table.bind(outer, name, held);
-    record.name = held;
-    function_templates.append(record);
+    hold_template_name(record, name, outer);
     return analysis_result::well_formed;
 }
 
@@ -3159,15 +3057,10 @@ semantic_analysis::member_definition_of_template(node_index n,
         if (template_parameter_has_default(x))
             return not_supported(x, "temp.param");
     node_index id = out_of_class_member(definition);
-    const syntax_child *parts = tree.children(id);
-    if (tree[id].child_count < 3 || !parts[0].is_token() ||
-        tokens[parts[0].index()].kind != token_kind::identifier)
+    lookup_result x;
+    entity_index named = 0;
+    if (!template_id_name(id, x, named))
         return not_supported(n, "temp.mem.func");
-    lookup_result x = lookup_unqualified(tokens.identifier(parts[0].index()),
-                                         lookup_filter::any);
-    entity_index named = x.entity;
-    if (!named)
-        named = x.unknown_entity;
     uint32_t ct = class_template_of(named);
     if (!ct || function_templates[ct - 1].name != named ||
         function_templates[ct - 1].primary ||
@@ -3284,61 +3177,14 @@ analysis_result semantic_analysis::define_template_member(uint32_t member,
         bind_template_argument(
             scope, template_parameter_entities[of.first_parameter + i],
             template_arguments[first + i]);
-    entity_index saved_scope = current_scope;
-    entity_index saved_class = defining_class;
-    uint8_t saved_access = declaration_access;
-    entity_index saved_last = last_declared;
-    node_index saved_declaration = current_declaration;
-    uint32_t saved_cv = function_cv;
-    bool saved_condition = in_condition;
-    token_index saved_callee = overloaded_callee;
-    bool saved_claimable = declarations_claimable;
-    uint32_t saved_instantiating = instantiating;
-    uint32_t saved_class_instantiating = class_instantiating;
-    token_index saved_horizon = lookup_horizon;
-    unsigned saved_unevaluated = unevaluated;
-    function_context saved_function =
-        static_cast<function_context &&>(function_state);
-    function_state = function_context();
-    owned_array<parameter_meaning> saved_parameters =
-        static_cast<owned_array<parameter_meaning> &&>(function_parameters);
-    size_t expressions_before = expressions.size();
-    size_t uses_before = name_uses.size();
-    entity_index saved_member_scope = template_member_scope;
+    instantiation_context context;
+    enter_instantiation(context, scope, o.declaration);
     template_member_scope = scope;
-    current_scope = scope;
-    current_declaration = o.declaration;
-    defining_class = 0;
     declaration_access = 0;
-    in_condition = false;
-    overloaded_callee = 0;
-    declarations_claimable = false;
-    unevaluated = 0;
     instantiating = 0;
     class_instantiating = 0;
-    lookup_horizon = tree[o.declaration].first_token;
-    instantiation_depth++;
     analysis_result r = function_definition(o.definition);
-    instantiation_depth--;
-    template_member_scope = saved_member_scope;
-    class_instantiating = saved_class_instantiating;
-    unevaluated = saved_unevaluated;
-    lookup_horizon = saved_horizon;
-    instantiating = saved_instantiating;
-    declarations_claimable = saved_claimable;
-    overloaded_callee = saved_callee;
-    in_condition = saved_condition;
-    function_cv = saved_cv;
-    last_declared = saved_last;
-    current_declaration = saved_declaration;
-    declaration_access = saved_access;
-    defining_class = saved_class;
-    current_scope = saved_scope;
-    function_state = static_cast<function_context &&>(saved_function);
-    function_parameters =
-        static_cast<owned_array<parameter_meaning> &&>(saved_parameters);
-    expressions.resize(expressions_before);
-    name_uses.resize(uses_before);
+    leave_instantiation(context);
     /* the member defined: the class's function this definition declares
        (last_declared may be a name its body declared) */
     entity_index defined = 0;
@@ -3368,6 +3214,41 @@ analysis_result semantic_analysis::define_template_member(uint32_t member,
         d.first_unsupported = static_cast<uint32_t>(unsupported_before);
     }
     return analysis_result::unsupported;
+}
+
+/* a template's entity named name in outer, declared by n
+   (function_templates[index]), and its record of parameters
+   template_parameter_entities[first .. + count); [basic.link]/4: a name of
+   an unnamed namespace has internal linkage */
+semantic_analysis::function_template
+semantic_analysis::new_template(uint32_t name, entity_index outer, node_index n,
+                                uint32_t index, uint32_t first, uint32_t count)
+{
+    entity_index t =
+        entity_table.make(entity_kind::template_entity, name, outer);
+    entity_table[t].instantiation = index + 1;
+    entity_table[t].linkage_of_name = linkage::external;
+    if (within_unnamed_namespace(outer))
+        entity_table[t].linkage_of_name = linkage::internal;
+    entity_table.add_declaration(t, n);
+    function_template record;
+    record.entity = t;
+    record.declaration = n;
+    record.first_parameter = first;
+    record.parameter_count = count;
+    return record;
+}
+
+/* the template's name in outer, held by an entity of its own
+   (held_by_template), and its record kept */
+void semantic_analysis::hold_template_name(function_template &record,
+                                           uint32_t name, entity_index outer)
+{
+    entity_index held = entity_table.make(entity_kind::none, name, outer);
+    entity_table[held].held_by_template = true;
+    entity_table.bind(outer, name, held);
+    record.name = held;
+    function_templates.append(record);
 }
 
 } // namespace cplusplus

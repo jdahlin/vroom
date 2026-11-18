@@ -2142,6 +2142,9 @@ class semantic_analysis
                                 entity_index &c, token_index &id);
     /* [dcl.type.simple]: nested-name-specifier type-name: the type and,
        for a typedef-name, its cv-qualifiers */
+    analysis_result named_member_type(node_index n, token_index t,
+                                      entity_index e, const char *citation,
+                                      type_index &type, uint32_t &cv);
     analysis_result qualified_type_name(node_index n, type_index &type,
                                         uint32_t &cv);
     /* [dcl.enum]: an enum-specifier, the enumeration's type */
@@ -2485,6 +2488,11 @@ class semantic_analysis
         uint32_t primary = 0, first_pattern = 0, pattern_count = 0;
     };
     owned_array<function_template> function_templates;
+    function_template new_template(uint32_t name, entity_index outer,
+                                   node_index n, uint32_t index, uint32_t first,
+                                   uint32_t count);
+    void hold_template_name(function_template &record, uint32_t name,
+                            entity_index outer);
     /* [temp.over]/1: "The complete set of candidate functions includes all
        the synthesized declarations and all of the non-template overloaded
        functions of the same name": the functions of a scope a function
@@ -2505,6 +2513,25 @@ class semantic_analysis
        instantiations nest ([temp.inst]/16) */
     uint32_t instantiating = 0;
     unsigned instantiation_depth = 0;
+    /* the state enter_instantiation saves and leave_instantiation puts
+       back */
+    struct instantiation_context {
+        entity_index scope = 0, defining_class = 0, last_declared = 0,
+                     member_scope = 0;
+        node_index declaration = 0;
+        token_index horizon = 0, callee = 0;
+        uint32_t function_cv = 0, instantiating = 0, class_instantiating = 0,
+                 variable_instantiating = 0;
+        unsigned unevaluated = 0;
+        uint8_t access = 0;
+        bool in_condition = false, claimable = false, expanding = false;
+        function_context function;
+        owned_array<parameter_meaning> parameters;
+        size_t expressions_before = 0, uses_before = 0;
+    };
+    void enter_instantiation(instantiation_context &c, entity_index scope,
+                             node_index declaration);
+    void leave_instantiation(instantiation_context &c);
     /* an unevaluated operand ([expr.prop]/1) or a default argument is
        analysed: a specialization named there needs no definition
        ([temp.inst]/5) */
@@ -2534,6 +2561,10 @@ class semantic_analysis
     uint32_t class_template_of(entity_index e) const;
     /* the alias template the held name e is, plus one */
     uint32_t alias_template_of(entity_index e) const;
+    uint32_t template_of_form(entity_index e,
+                              bool function_template::*form) const;
+    bool template_id_name(node_index id, lookup_result &x,
+                          entity_index &named) const;
     /* [temp.alias]/1: an alias template defined at namespace scope */
     analysis_result alias_template_definition(node_index n, node_index alias);
     /* [temp.alias]/2: the type a simple-template-id naming the alias
@@ -2780,8 +2811,15 @@ class semantic_analysis
     owned_array<instantiation_record> instantiations;
     /* the instantiation record of the template's specialization for the
        arguments, plus one; 0 if there is none yet */
-    uint32_t find_instantiation(entity_index t,
-                                const owned_array<template_argument> &a) const;
+    uint32_t find_instantiation(entity_index t, const template_argument *a,
+                                uint32_t count) const;
+    /* a new instantiation record of function template ft (its entity the
+       template's) for the arguments, with a block scope in the template's
+       enclosing scope binding the template-parameters' names to them
+       (bind_template_argument); its index */
+    uint32_t record_instantiation(const function_template &ft,
+                                  const template_argument *arguments,
+                                  uint32_t count);
     /* [temp.inst]/1: the specialization of the template for the
        arguments, instantiated (or found, if it already was) */
     analysis_result instantiate(node_index at, entity_index template_entity,

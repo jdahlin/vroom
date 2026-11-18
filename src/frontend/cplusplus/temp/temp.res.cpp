@@ -130,24 +130,7 @@ analysis_result semantic_analysis::typename_type(node_index n, type_index &type,
                                    "members of that class or of one of its "
                                    "base classes",
                                    "class.qual");
-    if (!e || (entity_table[e].kind != entity_kind::class_type &&
-               entity_table[e].kind != entity_kind::enumeration &&
-               entity_table[e].kind != entity_kind::typedef_name))
-        return not_supported(n, "temp.res");
-    if (entity_table[e].enclosing &&
-        entity_table[entity_table[e].enclosing].kind ==
-            entity_kind::class_type &&
-        !accessible(e))
-        return ill_formed_at_token(t,
-                                   "a private or protected member's name can "
-                                   "be used only by members and friends of "
-                                   "the class in which it is declared",
-                                   "class.access");
-    used(t, e);
-    type = entity_table[e].type.unqualified();
-    if (entity_table[e].kind == entity_kind::typedef_name)
-        cv = entity_table[e].type.cv();
-    return analysis_result::well_formed;
+    return named_member_type(n, t, e, "temp.res", type, cv);
 }
 
 /* [temp.dep.type]/9: typename Q::name for a dependent Q; [temp.over.link]

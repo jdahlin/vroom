@@ -1414,10 +1414,23 @@ analysis_result semantic_analysis::qualified_type_name(node_index n,
                                    "namespaces",
                                    "namespace.qual");
     entity_index e = found.entity;
+    return named_member_type(n, t, e, "basic.lookup.qual", type, cv);
+}
+
+/*
+ * The entity e a qualified type-name found (t its identifier): a class,
+ * enumeration or typedef-name, accessible ([class.access]/1), as a type and
+ * its cv-qualifiers; anything else is not supported yet (cited by citation).
+ */
+analysis_result
+semantic_analysis::named_member_type(node_index n, token_index t,
+                                     entity_index e, const char *citation,
+                                     type_index &type, uint32_t &cv)
+{
     if (!e || (entity_table[e].kind != entity_kind::class_type &&
                entity_table[e].kind != entity_kind::enumeration &&
                entity_table[e].kind != entity_kind::typedef_name))
-        return not_supported(n, "basic.lookup.qual");
+        return not_supported(n, citation);
     if (entity_table[e].enclosing &&
         entity_table[entity_table[e].enclosing].kind ==
             entity_kind::class_type &&

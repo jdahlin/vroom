@@ -48,38 +48,11 @@ semantic_analysis::instantiate(node_index at, entity_index template_entity,
         return not_supported(at, "temp.inst");
     bool needed = !unevaluated;
     uint32_t index = 0;
-    bool found = false;
-    for (uint32_t k = 0; k < instantiations.size() && !found; k++) {
-        const instantiation_record &x = instantiations[k];
-        if (x.template_entity != template_entity || x.argument_count != count)
-            continue;
-        bool same = true;
-        for (uint32_t i = 0; i < count && same; i++)
-            same = template_arguments[x.first_argument + i] == arguments[i];
-        if (same) {
-            index = k;
-            found = true;
-        }
-    }
-    if (!found) {
-        instantiation_record record;
-        record.template_entity = template_entity;
-        record.first_argument =
-            static_cast<uint32_t>(template_arguments.size());
-        record.argument_count = count;
-        for (uint32_t i = 0; i < count; i++)
-            template_arguments.append(arguments[i]);
-        /* the template-parameters' names, each its argument
-           (bind_template_argument) */
-        record.scope =
-            entity_table.make(entity_kind::block_scope, 0, t.enclosing);
-        for (uint32_t i = 0; i < count; i++)
-            bind_template_argument(
-                record.scope,
-                template_parameter_entities[ft.first_parameter + i],
-                arguments[i]);
-        index = static_cast<uint32_t>(instantiations.size());
-        instantiations.append(record);
+    uint32_t prior = find_instantiation(template_entity, arguments, count);
+    if (prior)
+        index = prior - 1;
+    if (!prior) {
+        index = record_instantiation(ft, arguments, count);
         /* the declaration: the declarator, where its types are the
            arguments' */
         const syntax_child *d = tree.children(ft.declarator);
@@ -169,61 +142,18 @@ analysis_result semantic_analysis::instantiate_definition(node_index at,
     entity_index template_entity = instantiations[index].template_entity;
     const function_template ft =
         function_templates[entity_table[template_entity].instantiation - 1];
-    entity_index saved_scope = current_scope;
-    entity_index saved_class = defining_class;
-    entity_index saved_last = last_declared;
-    node_index saved_declaration = current_declaration;
-    uint32_t saved_cv = function_cv;
-    bool saved_condition = in_condition;
-    token_index saved_callee = overloaded_callee;
-    bool saved_claimable = declarations_claimable;
-    uint32_t saved_instantiating = instantiating;
-    token_index saved_horizon = lookup_horizon;
-    unsigned saved_unevaluated = unevaluated;
-    function_context saved_function =
-        static_cast<function_context &&>(function_state);
-    function_state = function_context();
-    owned_array<parameter_meaning> saved_parameters =
-        static_cast<owned_array<parameter_meaning> &&>(function_parameters);
-    size_t expressions_before = expressions.size();
-    size_t uses_before = name_uses.size();
     size_t unsupported_before = unsupported.size();
-    current_scope = instantiations[index].scope;
-    current_declaration = ft.declaration;
-    bool saved_expanding = expanding;
+    /* (leave_instantiation drops the claims of the template's expressions:
+       they are about one specialization, which clang makes none of) */
+    instantiation_context context;
+    enter_instantiation(context, instantiations[index].scope, ft.declaration);
     expanding = false;
-    defining_class = 0;
-    in_condition = false;
-    overloaded_callee = 0;
-    declarations_claimable = false;
-    unevaluated = 0;
     instantiating = index + 1;
-    lookup_horizon = tree[ft.declaration].first_token;
     instantiations[index].defining = true;
     instantiations[index].pending = false;
-    instantiation_depth++;
     analysis_result r = function_definition(ft.definition);
-    instantiation_depth--;
     instantiations[index].defining = false;
-    expanding = saved_expanding;
-    unevaluated = saved_unevaluated;
-    lookup_horizon = saved_horizon;
-    instantiating = saved_instantiating;
-    declarations_claimable = saved_claimable;
-    overloaded_callee = saved_callee;
-    in_condition = saved_condition;
-    function_cv = saved_cv;
-    last_declared = saved_last;
-    current_declaration = saved_declaration;
-    defining_class = saved_class;
-    current_scope = saved_scope;
-    function_state = static_cast<function_context &&>(saved_function);
-    function_parameters =
-        static_cast<owned_array<parameter_meaning> &&>(saved_parameters);
-    /* the claims of the template's expressions are about one
-       specialization, which clang makes none of */
-    expressions.resize(expressions_before);
-    name_uses.resize(uses_before);
+    leave_instantiation(context);
     instantiations[index].defined = true;
     entity_table[instantiations[index].specialization].defined = true;
     if (r == analysis_result::well_formed)
@@ -259,15 +189,9 @@ semantic_analysis::instantiate_class(node_index at, uint32_t class_template,
 {
     c = 0;
     const function_template ft = function_templates[class_template - 1];
-    for (uint32_t k = 0; k < instantiations.size(); k++) {
+    if (uint32_t prior = find_instantiation(ft.entity, arguments, count)) {
+        uint32_t k = prior - 1;
         const instantiation_record &x = instantiations[k];
-        if (x.template_entity != ft.entity || x.argument_count != count)
-            continue;
-        bool same = true;
-        for (uint32_t i = 0; i < count && same; i++)
-            same = template_arguments[x.first_argument + i] == arguments[i];
-        if (!same)
-            continue;
         c = x.specialization;
         if (!c || entity_table[c].kind != entity_kind::class_type)
             return not_supported(at, "temp.inst");
@@ -383,60 +307,16 @@ analysis_result semantic_analysis::define_class_instantiation(node_index at,
     if (record.pattern)
         definition = function_templates[record.pattern - 1];
     instantiations[index].defining = true;
-    entity_index saved_scope = current_scope;
-    entity_index saved_class = defining_class;
-    uint8_t saved_access = declaration_access;
-    entity_index saved_last = last_declared;
-    node_index saved_declaration = current_declaration;
-    uint32_t saved_cv = function_cv;
-    bool saved_condition = in_condition;
-    token_index saved_callee = overloaded_callee;
-    bool saved_claimable = declarations_claimable;
-    uint32_t saved_instantiating = instantiating;
-    uint32_t saved_class_instantiating = class_instantiating;
-    token_index saved_horizon = lookup_horizon;
-    unsigned saved_unevaluated = unevaluated;
-    function_context saved_function =
-        static_cast<function_context &&>(function_state);
-    function_state = function_context();
-    owned_array<parameter_meaning> saved_parameters =
-        static_cast<owned_array<parameter_meaning> &&>(function_parameters);
-    size_t expressions_before = expressions.size();
-    size_t uses_before = name_uses.size();
     size_t unsupported_before = unsupported.size();
-    current_scope = entity_table[ft.entity].enclosing;
-    current_declaration = definition.declaration;
-    defining_class = 0;
+    instantiation_context context;
+    enter_instantiation(context, entity_table[ft.entity].enclosing,
+                        definition.declaration);
     declaration_access = 0;
-    in_condition = false;
-    overloaded_callee = 0;
-    declarations_claimable = false;
-    unevaluated = 0;
     instantiating = 0;
     class_instantiating = index + 1;
-    lookup_horizon = tree[definition.declaration].first_token;
-    instantiation_depth++;
     type_index type = 0;
     analysis_result r = class_specifier(definition.definition, type);
-    instantiation_depth--;
-    class_instantiating = saved_class_instantiating;
-    unevaluated = saved_unevaluated;
-    lookup_horizon = saved_horizon;
-    instantiating = saved_instantiating;
-    declarations_claimable = saved_claimable;
-    overloaded_callee = saved_callee;
-    in_condition = saved_condition;
-    function_cv = saved_cv;
-    last_declared = saved_last;
-    current_declaration = saved_declaration;
-    declaration_access = saved_access;
-    defining_class = saved_class;
-    current_scope = saved_scope;
-    function_state = static_cast<function_context &&>(saved_function);
-    function_parameters =
-        static_cast<owned_array<parameter_meaning> &&>(saved_parameters);
-    expressions.resize(expressions_before);
-    name_uses.resize(uses_before);
+    leave_instantiation(context);
     instantiations[index].defining = false;
     c = instantiations[index].specialization;
     if (r == analysis_result::well_formed && c &&
@@ -446,16 +326,16 @@ analysis_result semantic_analysis::define_class_instantiation(node_index at,
                     record.template_entity &&
                 template_member_definitions[m].pattern == record.pattern)
                 define_template_member(m, index, true);
-    if (saved_class) {
+    if (context.defining_class) {
         /* a class being defined named the specialization: its members so
            far again after the specialization's, one range of
            class_members, as after a nested class (class_definition) */
-        entity &o = entity_table[saved_class];
+        entity &o = entity_table[context.defining_class];
         if (o.first_member + o.member_count != class_members.size()) {
             uint32_t first = static_cast<uint32_t>(class_members.size());
             for (uint32_t i = 0; i < o.member_count; i++)
                 class_members.append(class_members[o.first_member + i]);
-            entity_table[saved_class].first_member = first;
+            entity_table[context.defining_class].first_member = first;
         }
     }
     if (r == analysis_result::well_formed && c)
@@ -654,6 +534,78 @@ bool semantic_analysis::specialization_address(entity_index e, uint32_t i,
     reference =
         type_table[a.type.unqualified()].kind == type_kind::lvalue_reference;
     return true;
+}
+
+/*
+ * The analysis's state around one instantiation ([temp.inst]): what the
+ * template's declaration is analysed in (scope, declaration's tokens as the
+ * lookup horizon, no class being defined, no function, no condition or
+ * unevaluated operand) and, on leaving, the state of the use again, the
+ * claims of the template's expressions dropped.  The caller sets which
+ * instantiation is being made (instantiating, class_instantiating,
+ * variable_instantiating) and anything else between the two.
+ */
+void semantic_analysis::enter_instantiation(instantiation_context &c,
+                                            entity_index scope,
+                                            node_index declaration)
+{
+    c.scope = current_scope;
+    c.defining_class = defining_class;
+    c.last_declared = last_declared;
+    c.member_scope = template_member_scope;
+    c.declaration = current_declaration;
+    c.horizon = lookup_horizon;
+    c.callee = overloaded_callee;
+    c.function_cv = function_cv;
+    c.instantiating = instantiating;
+    c.class_instantiating = class_instantiating;
+    c.variable_instantiating = variable_instantiating;
+    c.unevaluated = unevaluated;
+    c.access = declaration_access;
+    c.in_condition = in_condition;
+    c.claimable = declarations_claimable;
+    c.expanding = expanding;
+    c.function = static_cast<function_context &&>(function_state);
+    function_state = function_context();
+    c.parameters =
+        static_cast<owned_array<parameter_meaning> &&>(function_parameters);
+    c.expressions_before = expressions.size();
+    c.uses_before = name_uses.size();
+    current_scope = scope;
+    current_declaration = declaration;
+    lookup_horizon = tree[declaration].first_token;
+    defining_class = 0;
+    in_condition = false;
+    overloaded_callee = 0;
+    declarations_claimable = false;
+    unevaluated = 0;
+    instantiation_depth++;
+}
+
+void semantic_analysis::leave_instantiation(instantiation_context &c)
+{
+    instantiation_depth--;
+    current_scope = c.scope;
+    defining_class = c.defining_class;
+    last_declared = c.last_declared;
+    template_member_scope = c.member_scope;
+    current_declaration = c.declaration;
+    lookup_horizon = c.horizon;
+    overloaded_callee = c.callee;
+    function_cv = c.function_cv;
+    instantiating = c.instantiating;
+    class_instantiating = c.class_instantiating;
+    variable_instantiating = c.variable_instantiating;
+    unevaluated = c.unevaluated;
+    declaration_access = c.access;
+    in_condition = c.in_condition;
+    declarations_claimable = c.claimable;
+    expanding = c.expanding;
+    function_state = static_cast<function_context &&>(c.function);
+    function_parameters =
+        static_cast<owned_array<parameter_meaning> &&>(c.parameters);
+    expressions.resize(c.expressions_before);
+    name_uses.resize(c.uses_before);
 }
 
 } // namespace cplusplus
