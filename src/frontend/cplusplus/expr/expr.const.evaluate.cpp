@@ -41,6 +41,20 @@ bool is_value(const constant_value &v)
            v.kind == constant_value_kind::floating;
 }
 
+/* the end of a scope ([basic.stc.auto]/1): its objects and their elements
+   go */
+/* evaluate_initialization's init for an element no initializer list
+   gives: zero-initialized */
+constexpr uint32_t zero_initializer = UINT32_MAX;
+
+template <class state_type>
+void restore(state_type &state, size_t objects, size_t elements)
+{
+    state.objects.resize(objects);
+    state.elements.resize(elements);
+    state.element_read_only.resize(elements);
+}
+
 } // namespace
 
 fundamental_type semantic_analysis::evaluated_type(qualified_type t) const
@@ -196,6 +210,87 @@ uint32_t semantic_analysis::frame_object(const constant_evaluation &state,
     return no_frame_object;
 }
 
+constant_value &semantic_analysis::place_value(constant_evaluation &state,
+                                               uint32_t place)
+{
+    if (place & element_place)
+        return state.elements[place & ~element_place];
+    return state.objects[place].value;
+}
+
+bool semantic_analysis::place_read_only(const constant_evaluation &state,
+                                        uint32_t place) const
+{
+    if (place & element_place)
+        return state.element_read_only[place & ~element_place] != 0;
+    return state.objects[place].read_only;
+}
+
+/*
+ * [dcl.init]/7: an object of type t initialized by init: a scalar by an
+ * expression or zero ([dcl.init]/6), an array element by element from an
+ * initializer list, the elements it does not give zero ([dcl.init.aggr]/5).
+ * No initializer (0) leaves the value indeterminate ([basic.indet]/1);
+ * zero_initializer stands for an element no list gives.
+ */
+constness semantic_analysis::evaluate_initialization(constant_evaluation &state,
+                                                     qualified_type t,
+                                                     uint32_t init,
+                                                     bool read_only,
+                                                     constant_value &v)
+{
+    v = constant_value();
+    bool zero = init == zero_initializer ||
+                (init && semantics[init].kind == semantic_kind::zero);
+    const struct type record = type_table[t.unqualified()];
+    if (record.kind != type_kind::array) {
+        fundamental_type f = evaluated_type(t);
+        if (f == fundamental_type::none)
+            return constness::unknown;
+        if (zero)
+            v = value_of(f, 0);
+        else if (init)
+            return evaluate_node(state, init, v);
+        return constness::constant;
+    }
+    if (!record.bound_known || record.bound > constant_full_expression_limit)
+        return constness::unknown;
+    uint32_t given = 0;
+    const uint32_t *items = nullptr;
+    if (init && !zero) {
+        /* a string literal, a copy: not modelled */
+        if (semantics[init].kind != semantic_kind::initializer_list)
+            return constness::unknown;
+        given = semantics[init].count;
+        items = semantics.items(semantics[init].first);
+    }
+    if (given > record.bound)
+        return constness::unknown;
+    uint32_t first = static_cast<uint32_t>(state.elements.size());
+    uint32_t count = static_cast<uint32_t>(record.bound);
+    for (uint32_t i = 0; i < count; i++) {
+        state.elements.append(constant_value());
+        state.element_read_only.append(read_only);
+    }
+    for (uint32_t i = 0; i < count; i++) {
+        uint32_t element = 0;
+        if (i < given)
+            element = items[i];
+        else if (init)
+            element = zero_initializer;
+        constant_value e;
+        constness c = evaluate_initialization(state, record.operand, element,
+                                              read_only, e);
+        if (c != constness::constant)
+            return c;
+        state.elements[first + i] = e;
+    }
+    v.kind = constant_value_kind::array;
+    v.first = first;
+    v.count = count;
+    return constness::constant;
+}
+
 /*
  * The object a glvalue designates: [expr.const]/5.8's "object whose
  * lifetime began within the evaluation of E", a local variable or
@@ -211,6 +306,32 @@ constness semantic_analysis::evaluate_object(constant_evaluation &state,
         object = frame_object(state, x.a);
         if (object != no_frame_object)
             return constness::constant;
+        const entity &e = entity_table[x.a];
+        if (x.a && e.kind == entity_kind::variable &&
+            (!e.automatic || e.constexpr_) &&
+            type_table[e.type.unqualified()].kind == type_kind::array) {
+            /* [expr.const]/4: a constexpr array (a local one too, read
+               outside its function's evaluation) is usable in constant
+               expressions, its elements read as the evaluation needs
+               them; another is not ([expr.const]/5.8) */
+            if (!e.constexpr_ || !e.definition)
+                return constness::unknown;
+            for (size_t i = 0; i < state.objects.size(); i++)
+                if (state.objects[i].entity == x.a && !state.objects[i].frame) {
+                    object = static_cast<uint32_t>(i);
+                    return constness::constant;
+                }
+            constant_evaluation::object o;
+            o.entity = x.a;
+            o.read_only = true;
+            c = evaluate_initialization(state, e.type, e.definition, true,
+                                        o.value);
+            if (c != constness::constant)
+                return c;
+            object = static_cast<uint32_t>(state.objects.size());
+            state.objects.append(o);
+            return constness::constant;
+        }
         /* an automatic variable whose lifetime did not begin within the
            evaluation: [expr.const]/5.8; a variable of static storage
            duration may not be modified (/5.16) */
@@ -218,11 +339,43 @@ constness semantic_analysis::evaluate_object(constant_evaluation &state,
             return constness::not_constant;
         return constness::unknown;
     }
+    /* [expr.sub]/1: "The expression E1[E2] is identical (by definition) to
+       *((E1)+(E2))", an element of the array E1 converted from */
+    case semantic_kind::subscript: {
+        const semantic_node &pointer = semantics[x.a];
+        if (pointer.kind != semantic_kind::conversion ||
+            static_cast<conversion_kind>(pointer.op) !=
+                conversion_kind::array_to_pointer)
+            return constness::unknown;
+        uint32_t array = 0;
+        c = evaluate_object(state, pointer.a, array);
+        if (c != constness::constant)
+            return c;
+        constant_value index;
+        c = evaluate_node(state, x.b, index);
+        if (c != constness::constant)
+            return c;
+        constant_value a = place_value(state, array);
+        if (a.kind != constant_value_kind::array ||
+            index.kind != constant_value_kind::integer)
+            return constness::unknown;
+        /* [expr.add]/4: an index outside the array is undefined, and the
+           one past its end designates no element ([expr.unary.op]/1) */
+        __int128 i = static_cast<__int128>(index.integer);
+        if (i < 0 || i >= a.count)
+            return constness::not_constant;
+        object = element_place | (a.first + static_cast<uint32_t>(i));
+        return constness::constant;
+    }
     case semantic_kind::assignment: {
         c = evaluate_object(state, x.a, object);
         if (c != constness::constant)
             return c;
         uint32_t target = object;
+        /* [expr.const]/5.16: the modification of an object whose lifetime
+           did not begin within the evaluation */
+        if (place_read_only(state, target))
+            return constness::not_constant;
         constant_value y;
         c = evaluate_node(state, x.b, y);
         if (c != constness::constant)
@@ -243,7 +396,7 @@ constness semantic_analysis::evaluate_object(constant_evaluation &state,
                 computation == fundamental_type::none ||
                 right == fundamental_type::none)
                 return constness::unknown;
-            constant_value old = state.objects[target].value;
+            constant_value old = place_value(state, target);
             if (old.kind == constant_value_kind::none)
                 return constness::not_constant;
             c = evaluate_conversion(old, t, computation);
@@ -267,7 +420,7 @@ constness semantic_analysis::evaluate_object(constant_evaluation &state,
                 return c;
             y = result;
         }
-        state.objects[target].value = y;
+        place_value(state, target) = y;
         object = target;
         return constness::constant;
     }
@@ -336,7 +489,7 @@ constness semantic_analysis::evaluate_read(constant_evaluation &state,
     constness c = evaluate_object(state, node, object);
     if (c != constness::constant)
         return c;
-    v = state.objects[object].value;
+    v = place_value(state, object);
     /* [expr.const]/5.8: the object's value must be one it was given; an
        indeterminate value is undefined behavior ([basic.indet]/2) */
     if (v.kind == constant_value_kind::none)
@@ -470,7 +623,9 @@ constness semantic_analysis::evaluate_node(constant_evaluation &state,
         c = evaluate_object(state, x.a, object);
         if (c != constness::constant)
             return c;
-        constant_value old = state.objects[object].value;
+        if (place_read_only(state, object))
+            return constness::not_constant;
+        constant_value old = place_value(state, object);
         if (old.kind == constant_value_kind::none)
             return constness::not_constant;
         increment_kind k = static_cast<increment_kind>(x.op);
@@ -497,7 +652,7 @@ constness semantic_analysis::evaluate_node(constant_evaluation &state,
         c = evaluate_conversion(updated, promoted, t);
         if (c != constness::constant)
             return c;
-        state.objects[object].value = updated;
+        place_value(state, object) = updated;
         v = old;
         if (k == increment_kind::pre_increment ||
             k == increment_kind::pre_decrement)
@@ -578,6 +733,7 @@ constness semantic_analysis::evaluate_call(constant_evaluation &state,
        arguments are evaluated in the caller's frame and kept as the
        parameters of the new one. */
     size_t saved = state.objects.size();
+    size_t saved_elements = state.elements.size();
     uint32_t frame = state.frames + 1;
     const uint32_t *items = semantics.items(x.first);
     const uint32_t *parameters = semantics.items(semantics[body].first);
@@ -585,7 +741,7 @@ constness semantic_analysis::evaluate_call(constant_evaluation &state,
         constant_evaluation::object o;
         constness c = evaluate_node(state, items[i], o.value);
         if (c != constness::constant) {
-            state.objects.resize(saved);
+            restore(state, saved, saved_elements);
             return c;
         }
         o.entity = parameters[i];
@@ -602,7 +758,7 @@ constness semantic_analysis::evaluate_call(constant_evaluation &state,
         evaluate_statement(state, semantics[body].a, returned, result);
     state.depth--;
     state.frame = caller;
-    state.objects.resize(saved);
+    restore(state, saved, saved_elements);
     if (c != constness::constant)
         return c;
     if (fundamental_of(x.type) == fundamental_type::void_) {
@@ -620,11 +776,11 @@ constness semantic_analysis::evaluate_call(constant_evaluation &state,
 }
 
 /* a condition ([stmt.pre]/1): an expression or a declaration whose
-   variable's value is converted to bool */
+   variable's value is converted to bool, or a switch's promoted type */
 constness semantic_analysis::evaluate_condition(constant_evaluation &state,
-                                                uint32_t node, bool &value)
+                                                uint32_t node,
+                                                constant_value &v)
 {
-    constant_value v;
     constness c;
     if (semantics[node].kind == semantic_kind::condition_declaration) {
         bool returned = false;
@@ -638,8 +794,57 @@ constness semantic_analysis::evaluate_condition(constant_evaluation &state,
         return c;
     if (v.kind != constant_value_kind::integer)
         return constness::unknown;
-    value = v.integer != 0;
     return constness::constant;
+}
+
+uint32_t semantic_analysis::switch_target(uint32_t node, uint64_t value,
+                                          bool &found) const
+{
+    if (!node)
+        return 0;
+    const semantic_node &x = semantics[node];
+    uint32_t target = 0, other = 0;
+    switch (x.kind) {
+    case semantic_kind::block:
+    case semantic_kind::declarations: {
+        const uint32_t *items = semantics.items(x.first);
+        for (uint32_t i = 0; i < x.count && !found; i++) {
+            other = switch_target(items[i], value, found);
+            if (other && (found || !target))
+                target = other;
+        }
+        return target;
+    }
+    case semantic_kind::case_label:
+        if (x.value == value) {
+            found = true;
+            return node;
+        }
+        return switch_target(x.a, value, found);
+    case semantic_kind::default_label:
+        target = switch_target(x.a, value, found);
+        if (found)
+            return target;
+        return node;
+    case semantic_kind::identifier_label:
+    case semantic_kind::do_statement:
+        return switch_target(x.a, value, found);
+    case semantic_kind::while_statement:
+        return switch_target(x.b, value, found);
+    case semantic_kind::for_statement:
+        return switch_target(x.d, value, found);
+    case semantic_kind::if_statement:
+        target = switch_target(x.b, value, found);
+        if (found)
+            return target;
+        other = switch_target(x.c, value, found);
+        if (other && (found || !target))
+            target = other;
+        return target;
+    /* a nested switch statement's labels are its own */
+    default:
+        return 0;
+    }
 }
 
 /*
@@ -659,6 +864,29 @@ constness semantic_analysis::evaluate_statement(constant_evaluation &state,
     const semantic_node x = semantics[node];
     constness c = constness::constant;
     size_t saved = state.objects.size();
+    size_t saved_elements = state.elements.size();
+    /* [stmt.switch]/5: control passes to the label: the statements before
+       it are not executed; the declarations among them still declare
+       their variables ([stmt.dcl]/2 rules out jumping past an
+       initialization) */
+    if (state.seek) {
+        switch (x.kind) {
+        case semantic_kind::block:
+        case semantic_kind::declarations:
+        case semantic_kind::declaration_statement:
+            break;
+        case semantic_kind::case_label:
+        case semantic_kind::default_label:
+        case semantic_kind::identifier_label:
+            if (node == state.seek)
+                state.seek = 0;
+            return evaluate_statement(state, x.a, returned, result);
+        /* a label inside another statement: switch_statement answers
+           unknown when the seek is not over */
+        default:
+            return c;
+        }
+    }
     switch (x.kind) {
     case semantic_kind::null_statement:
         return c;
@@ -672,7 +900,7 @@ constness semantic_analysis::evaluate_statement(constant_evaluation &state,
         }
         /* a declarations node's variables are in the enclosing block */
         if (x.kind == semantic_kind::block)
-            state.objects.resize(saved);
+            restore(state, saved, saved_elements);
         return c;
     }
     case semantic_kind::expression_statement: {
@@ -684,7 +912,7 @@ constness semantic_analysis::evaluate_statement(constant_evaluation &state,
         /* [dcl.constexpr]/3.5.3: "a definition of a variable of non-literal
            type or of static or thread storage duration" may not be in the
            body; references and objects of other types: not modelled */
-        if (!e.automatic || evaluated_type(e.type) == fundamental_type::none)
+        if (!e.automatic)
             return constness::unknown;
         /* [basic.scope.pdecl]/1: the variable is in scope in its own
            initializer */
@@ -693,10 +921,11 @@ constness semantic_analysis::evaluate_statement(constant_evaluation &state,
         o.frame = state.frame;
         uint32_t index = static_cast<uint32_t>(state.objects.size());
         state.objects.append(o);
-        if (!x.b)
-            return c;
+        uint32_t init = x.b;
+        if (state.seek)
+            init = 0;
         constant_value v;
-        c = evaluate_node(state, x.b, v);
+        c = evaluate_initialization(state, e.type, init, false, v);
         if (c == constness::constant)
             state.objects[index].value = v;
         return c;
@@ -707,15 +936,15 @@ constness semantic_analysis::evaluate_statement(constant_evaluation &state,
             if (c != constness::constant)
                 return c;
         }
-        bool value = false;
+        constant_value value;
         c = evaluate_condition(state, x.a, value);
         if (c == constness::constant) {
-            if (value)
+            if (value.integer != 0)
                 c = evaluate_statement(state, x.b, returned, result);
             else if (x.c)
                 c = evaluate_statement(state, x.c, returned, result);
         }
-        state.objects.resize(saved);
+        restore(state, saved, saved_elements);
         return c;
     }
     case semantic_kind::while_statement:
@@ -740,16 +969,17 @@ constness semantic_analysis::evaluate_statement(constant_evaluation &state,
             }
         }
         size_t iteration = state.objects.size();
+        size_t iteration_elements = state.elements.size();
         for (;;) {
             if (condition && !skip_test) {
-                bool value = false;
+                constant_value value;
                 c = evaluate_condition(state, condition, value);
-                if (c != constness::constant || !value)
+                if (c != constness::constant || value.integer == 0)
                     break;
             }
             skip_test = false;
             c = evaluate_statement(state, body, returned, result);
-            state.objects.resize(iteration);
+            restore(state, iteration, iteration_elements);
             if (c != constness::constant || returned)
                 break;
             uint8_t jump = state.jump;
@@ -767,7 +997,7 @@ constness semantic_analysis::evaluate_statement(constant_evaluation &state,
                 break;
             }
         }
-        state.objects.resize(saved);
+        restore(state, saved, saved_elements);
         return c;
     }
     case semantic_kind::break_statement:
@@ -783,11 +1013,46 @@ constness semantic_analysis::evaluate_statement(constant_evaluation &state,
         returned = true;
         return c;
     case semantic_kind::identifier_label:
-        return evaluate_statement(state, x.a, returned, result);
-    /* case labels: a jump into the substatement, not modelled */
-    case semantic_kind::switch_statement:
     case semantic_kind::case_label:
     case semantic_kind::default_label:
+        return evaluate_statement(state, x.a, returned, result);
+    case semantic_kind::switch_statement: {
+        if (x.d) {
+            c = evaluate_statement(state, x.d, returned, result);
+            if (c != constness::constant)
+                return c;
+        }
+        constant_value value;
+        c = evaluate_condition(state, x.a, value);
+        uint32_t condition = x.a;
+        if (semantics[condition].kind == semantic_kind::condition_declaration)
+            condition = semantics[condition].b;
+        fundamental_type t = evaluated_type(semantics[condition].type);
+        if (c == constness::constant && t == fundamental_type::none)
+            c = constness::unknown;
+        if (c == constness::constant) {
+            /* [stmt.switch]/5: "If one of the case constants has the same
+               value as the condition, control is passed to the statement
+               following the matched case label.  If no case constant
+               matches the condition, and if there is a default label,
+               control passes to the statement labeled by the default
+               label.  If no case matches and if there is no default then
+               none of the statements in the switch is executed." */
+            bool found = false;
+            state.seek = switch_target(x.b, kept_of(t, value), found);
+            if (state.seek)
+                c = evaluate_statement(state, x.b, returned, result);
+            /* a label inside a statement the seek passed over */
+            if (state.seek)
+                c = constness::unknown;
+            state.seek = 0;
+            /* [stmt.break]/1: the break ends the switch */
+            if (state.jump == jump_break)
+                state.jump = jump_none;
+        }
+        restore(state, saved, saved_elements);
+        return c;
+    }
     /* [dcl.constexpr]/3.5.1: "a goto statement" may not be in the body */
     case semantic_kind::goto_statement:
     default:

@@ -1826,10 +1826,17 @@ class semantic_analysis
        their lifetime began within it), the depth of invocations and the
        full-expressions evaluated, against [implimits] */
     struct constant_evaluation {
+        /* the elements of the arrays in objects (an element's value may be
+           an array whose elements are further on), and whether each may
+           not be modified: an element of a variable whose lifetime did not
+           begin within the evaluation ([expr.const]/5.16) */
         owned_array<constant_value> elements;
+        owned_array<uint8_t> element_read_only;
         struct object {
             entity_index entity = 0;
+            /* frame 0: a variable of static storage duration read */
             uint32_t frame = 0;
+            bool read_only = false;
             constant_value value;
         };
         owned_array<object> objects;
@@ -1840,6 +1847,9 @@ class semantic_analysis
         uint32_t frame = 0, frames = 0;
         /* a break or continue statement being executed ([stmt.jump]) */
         uint8_t jump = 0;
+        /* a switch statement's jump to this case or default label
+           ([stmt.switch]/5): the statements before it are passed over */
+        uint32_t seek = 0;
         /* for the claims (evaluate_analysed_expressions): a function whose
            body begins after this token is not defined yet where the claim
            is placed ([expr.const]/5.3); 0: every body counts */
@@ -1863,7 +1873,21 @@ class semantic_analysis
     constness evaluate_read(constant_evaluation &state, uint32_t node,
                             constant_value &v);
     constness evaluate_condition(constant_evaluation &state, uint32_t node,
-                                 bool &value);
+                                 constant_value &v);
+    /* an object of type t initialized by init (0: none, its value
+       indeterminate), arrays with their elements in state.elements */
+    constness evaluate_initialization(constant_evaluation &state,
+                                      qualified_type t, uint32_t init,
+                                      bool read_only, constant_value &v);
+    /* the case or default label of switch body a jump with the kept value
+       goes to, or 0 ([stmt.switch]/5) */
+    uint32_t switch_target(uint32_t body, uint64_t value, bool &found) const;
+    /* an object's place: objects[place], or elements[place & ~element_place]
+       when element_place is set */
+    static constexpr uint32_t element_place = 0x80000000u;
+    constant_value &place_value(constant_evaluation &state, uint32_t place);
+    bool place_read_only(const constant_evaluation &state,
+                         uint32_t place) const;
     /* the index in state.objects of the entity's object in the current
        frame, or no_frame_object */
     static constexpr uint32_t no_frame_object = UINT32_MAX;

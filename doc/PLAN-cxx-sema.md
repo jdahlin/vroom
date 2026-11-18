@@ -1372,6 +1372,25 @@ lines:
   27704 -> 27826, 0 we reject and clang accepts, 0 refuted (types 47348,
   constants 18837, lookup 12628 verified); cxx-run 132/132 with
   constexpr-functions.cpp's constant uses; cxx-c-suites unchanged.
+  The evaluator on review (constness throughout, a call of a function
+  defined after the expression unknown, a read of a non-const global not
+  constant), then switch statements and arrays, on S3's f436482e.  A switch
+  ([stmt.switch]/5) finds its case or default label in its body
+  (`switch_target`, not into a nested switch) and runs the body seeking it:
+  statements before the label are passed over, declarations still declare
+  ([stmt.dcl]/2), a label inside another statement is unknown; its break
+  ends it, a continue goes on to the loop.  Arrays of the evaluated types,
+  nested too, live in `constant_evaluation::elements`, an object's value
+  holding its range: a local array initialized by a list, zero or nothing
+  ([dcl.init.aggr]/5, [basic.indet]), a constexpr one (global, or local
+  read outside its function) evaluated from its definition on first use
+  and not modifiable ([expr.const]/5.16); `E1[E2]` on an array converted
+  to a pointer designates an element, an index outside the array not
+  constant ([expr.add]/4).  Pointers, string literals and arrays passed to
+  functions stay unknown.  `src/test/cxx/run/constexpr-switch-arrays.cpp`.
+  cxx-sema: declarations as clang 29354 -> 29407, 0 we reject and clang
+  accepts, 0 refuted (constants 19550 -> 19634); cxx-run 176/176;
+  cxx-c-suites unchanged.
 
 ### S7. Exceptions and RTTI
 
