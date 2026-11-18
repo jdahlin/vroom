@@ -1405,6 +1405,32 @@ lines:
   no longer among the reasons.  cxx-run 460/460 (115 programs);
   cxx-c-suites 0 wrong; quality redundant_tokens 59310 -> 59684,
   duplicate_runs_across_files 353 -> 360.
+- Status (2026-11-18, step 5 after review): linkage across translation
+  units.  A specialization internal only by local classes or closure types
+  of an inline or templated function has its template's linkage
+  (`specialization_visible`, clang's VisibleNoLinkage; one predicate,
+  `visible_local_class`, beside `closure_numbered`'s walk), a function
+  returning such a closure is weak, not local, and a static local of a
+  function emitted weak is weak (`V`, [dcl.inline]/6): `cnt(mk())` in two
+  units shares one counter.  A template parameter is a substitution
+  candidate by its position, as clang keys it (`...EiS1_` for a closure of
+  a function template).  [expr.prim.lambda.closure]/13: a closure type with
+  a lambda-capture (every one before C++20) has a deleted default
+  constructor and copy assignment operator.  A capture by reference of what
+  an enclosing lambda captured by copy has that lambda's member's type,
+  const unless it is mutable (`enclosing_capture_type`).  A closure type's
+  copy constructor is mangled, so a capture of a class with a user copy
+  constructor compiles.  Helpers in place of copies: `begin_synthesized`/
+  `finish_synthesized`, `semantic_tree::set_list`, `this_object`,
+  `make_members_contiguous`.  `bench/cxx-run.py` links programs of several
+  units (`/* cxx-run-units: */`, `src/test/cxx/run/units/`):
+  `vague-linkage.cpp`; cases added to `lambdas.cpp`.  `bench/cxx-sema.py`:
+  declarations 55862 -> 55874 as clang, 12 we reject and clang accepts
+  (the same), 2467 -> 2464 we accept and clang rejects, all 0 refuted;
+  declared types 27332 -> 27327 verified (declarations now rejected as
+  clang rejects them carry no claims).  cxx-run 464/464 (116 programs);
+  cxx-c-suites 2272 pass, 0 wrong, as before; quality redundant_tokens
+  59684 -> 59295, duplicate_runs_across_files 360 -> 353.
 
 ### S6. Constant evaluation and templates
 
