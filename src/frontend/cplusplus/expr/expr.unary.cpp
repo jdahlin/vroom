@@ -177,6 +177,11 @@ node_index parser::noexcept_expression()
 
 /* ---- semantic analysis ---------------------------------------------- */
 
+uint64_t semantic_analysis::pointer_size() const
+{
+    return tokens.files.behavior.long_width / 8;
+}
+
 /* the size in bytes of an object of type t on the target (aarch64 Linux,
    LP64), 0 if t is not a complete object type analysis knows the size of */
 uint64_t semantic_analysis::size_of_type(qualified_type t) const

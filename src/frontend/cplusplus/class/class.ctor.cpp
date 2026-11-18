@@ -891,8 +891,19 @@ analysis_result semantic_analysis::ctor_initializer(syntax_child list,
 analysis_result semantic_analysis::subobject(token_index at, entity_index e,
                                              expression_meaning &m)
 {
-    if (!entity_table[e].base_subobject)
-        return implicit_member_access(at, e, m);
+    if (!entity_table[e].base_subobject) {
+        analysis_result r = implicit_member_access(at, e, m);
+        type_kind k = type_table[entity_table[e].type.unqualified()].kind;
+        if (r == analysis_result::well_formed &&
+            (k == type_kind::lvalue_reference ||
+             k == type_kind::rvalue_reference)) {
+            /* a reference member is initialized itself ([dcl.init.ref]),
+               not the object it would refer to ([expr.ref]/6.1) */
+            m.type = entity_table[e].type;
+            semantics[m.node].type = m.type;
+        }
+        return r;
+    }
     analysis_result r = this_pointer(at, m);
     if (r != analysis_result::well_formed)
         return r;
@@ -1048,6 +1059,56 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
     if (destruction && !entity_table[c].destructor)
         declare_implicit(c, special_member::destructor, false);
     return analysis_result::well_formed;
+}
+
+/*
+ * Whether the default constructor of class c is implicitly declared or
+ * defaulted ([dcl.fct.def.default]) and defined as deleted:
+ * [class.default.ctor]/2: "A defaulted default constructor for class X is
+ * defined as deleted if: ... any non-variant non-static data member with no
+ * default member initializer ([class.mem]) is of reference type, any
+ * non-variant non-static data member of const-qualified type (or array
+ * thereof) with no brace-or-equal-initializer is not const-default-
+ * constructible ([dcl.init]), ... any potentially constructed subobject ...
+ * has class type M (or array thereof) and ... M has no default constructor
+ * or overload resolution ... results in ... a function that is deleted".
+ * A const member of class type and unions are not analysed (false).
+ */
+bool semantic_analysis::default_constructor_deleted(entity_index c) const
+{
+    const entity &x = entity_table[c];
+    if (x.union_)
+        return false;
+    /* a user-declared constructor and no X() = default: no implicit
+       default constructor ([class.default.ctor]/1) */
+    if (!x.defaulted_default_constructor)
+        for (entity_index k = x.first_constructor; k;
+             k = entity_table[k].next_constructor)
+            if (!entity_table[k].implicit)
+                return false;
+    for (uint32_t i = 0; i < x.member_count; i++) {
+        const entity &m = entity_table[class_members[x.first_member + i]];
+        if (m.kind != entity_kind::variable || !m.nonstatic_member ||
+            m.default_initializer || (m.bit_field && !m.name))
+            continue;
+        qualified_type t = m.type;
+        type_kind k = type_table[t.unqualified()].kind;
+        if (k == type_kind::lvalue_reference ||
+            k == type_kind::rvalue_reference)
+            return true;
+        while (type_table[t.unqualified()].kind == type_kind::array)
+            t = type_table[t.unqualified()].operand;
+        if ((cv_of(type_table, m.type) & cv_const) &&
+            type_table[t.unqualified()].kind != type_kind::class_type)
+            return true;
+    }
+    owned_array<entity_index> classes;
+    subobject_classes(c, classes);
+    for (entity_index k : classes)
+        if (entity_table[k].kind == entity_kind::class_type &&
+            default_constructor_deleted(k))
+            return true;
+    return false;
 }
 
 /* [class.default.ctor]/3: X() = default beside other constructors, trivial

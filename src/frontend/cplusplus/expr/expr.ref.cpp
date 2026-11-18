@@ -106,6 +106,14 @@ analysis_result semantic_analysis::member_access(token_index at, entity_index e,
         result.category = value_category::xvalue;
         if (m.category == value_category::lvalue)
             result.category = value_category::lvalue;
+        const struct type &declared = type_table[x.type.unqualified()];
+        if (declared.kind == type_kind::lvalue_reference ||
+            declared.kind == type_kind::rvalue_reference) {
+            /* [expr.ref]/6.1: "If E2 is declared to have type "reference
+               to T", then E1.E2 is an lvalue of type T." */
+            result.type = declared.operand;
+            result.category = value_category::lvalue;
+        }
         result.evaluation = constness::unknown;
         if (m.evaluation == constness::not_constant)
             result.evaluation = constness::not_constant;

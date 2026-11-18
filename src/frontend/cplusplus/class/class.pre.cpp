@@ -1333,11 +1333,6 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
                                        "of a variable or function",
                                        "dcl.inline");
         const struct type &record = type_table[type.unqualified()];
-        if (record.kind == type_kind::lvalue_reference ||
-            record.kind == type_kind::rvalue_reference)
-            /* a reference member makes the default constructor deleted
-               ([class.default.ctor]/2): with constructors */
-            return not_supported(declaration, "class.ctor");
         uint64_t size = size_of_type(type);
         bool is_void = record.kind == type_kind::fundamental &&
                        record.fundamental == fundamental_type::void_;

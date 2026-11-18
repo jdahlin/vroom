@@ -1080,6 +1080,19 @@ analysis_result semantic_analysis::declare_with_initializer(
         const struct type &record = type_table[object.unqualified()];
         if (record.kind == type_kind::class_type &&
             entity_table[record.entity].kind == entity_kind::class_type &&
+            default_constructor_deleted(record.entity)) {
+            /* C++03 has no deleted functions: the implicit default
+               constructor's definition is ill-formed ([class.ctor]/7 there),
+               reported at the class */
+            if (!tokens.files.behavior.has(language_feature::rvalue_references))
+                return not_supported(declaration, "class.default.ctor");
+            return ill_formed(declaration,
+                              "the defaulted default constructor is defined "
+                              "as deleted",
+                              "class.default.ctor");
+        }
+        if (record.kind == type_kind::class_type &&
+            entity_table[record.entity].kind == entity_kind::class_type &&
             entity_table[record.entity].first_constructor &&
             !trivial_defaulted_default_constructor(record.entity)) {
             if (!(object == type))

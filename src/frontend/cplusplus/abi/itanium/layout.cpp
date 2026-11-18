@@ -82,7 +82,7 @@ bool empty_class(const semantic_analysis &a, entity_index c)
  * aggregate (no user-declared constructors, no private or protected
  * non-static data members, no base classes, no virtual functions) without
  * a user-declared copy assignment operator or destructor whose non-static
- * data members are PODs.
+ * data members are PODs (no reference).
  * [class.bit]/2: "Unnamed bit-fields are not members".
  */
 bool pod_for_layout(const semantic_analysis &a, entity_index c)
@@ -103,6 +103,12 @@ bool pod_for_layout(const semantic_analysis &a, entity_index c)
         /* [impl.clang] a default member initializer (no aggregate in
            C++11, so no C++03 POD) */
         if (m.access || m.default_initializer)
+            return false;
+        /* C++03 [class]/4: a POD-struct has no "non-static data members of
+           type ... reference" */
+        type_kind kind = a.type_table[m.type.unqualified()].kind;
+        if (kind == type_kind::lvalue_reference ||
+            kind == type_kind::rvalue_reference)
             return false;
         entity_index of = class_of_component(a, m);
         if (of && !pod_for_layout(a, of))
@@ -369,6 +375,14 @@ const char *class_layout::data_member(entity &m)
 {
     uint64_t member_size = analysis.size_of_type(m.type);
     uint64_t member_alignment = analysis.alignment_of_type(m.type);
+    type_kind kind = analysis.type_table[m.type.unqualified()].kind;
+    if (kind == type_kind::lvalue_reference ||
+        kind == type_kind::rvalue_reference) {
+        /* [abi:class-types]: a member of reference type is laid out as a
+           pointer (clang's and GCC's) */
+        member_size = analysis.pointer_size();
+        member_alignment = member_size;
+    }
     if (m.gnu_flags & gnu_packed)
         member_alignment = 1;
     if (m.alignment > member_alignment)

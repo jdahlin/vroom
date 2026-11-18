@@ -485,6 +485,11 @@ ast_qualified_type c_lowering::class_type(entity_index e, token_index at)
         ast_qualified_type t = type(m.type, at);
         uint64_t size = analysis.size_of_type(m.type);
         uint64_t align = analysis.alignment_of_type(m.type);
+        if (is_reference(m.type)) {
+            /* a pointer in the C struct */
+            size = analysis.pointer_size();
+            align = size;
+        }
         if (m.gnu_flags & gnu_packed)
             align = 1;
         if (m.alignment > align)
@@ -2083,7 +2088,17 @@ uint32_t c_lowering::expression(uint32_t index)
         uint32_t object = expression(n.a);
         if (!object)
             return 0;
-        return ast_builder_member(c, object, c_fields[n.b], type(n.type, n.at));
+        const entity &x = analysis.entity_table[n.b];
+        if (!is_reference(x.type) || is_reference(n.type))
+            /* a reference member being initialized ([class.base.init]) is
+               the pointer itself */
+            return ast_builder_member(c, object, c_fields[n.b],
+                                      type(n.type, n.at));
+        /* [expr.ref]/6.1: a reference member is the object it refers to */
+        uint32_t pointer =
+            ast_builder_member(c, object, c_fields[n.b], type(x.type, n.at));
+        return make(AST_NODE_DEREFERENCE, type(n.type, n.at), pointer, 0, 0, 0,
+                    AST_NODE_FLAG_LVALUE);
     }
     case semantic_kind::zero:
         return make(AST_NODE_ZERO, type(n.type, n.at), 0, 0, 0, 0, 0);

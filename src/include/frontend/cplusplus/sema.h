@@ -914,12 +914,17 @@ class semantic_analysis
     bool copies_bytes(entity_index c) const;
     bool is_copy_constructor(entity_index c, entity_index k) const;
     bool declares_move_constructor(entity_index c) const;
+    bool copy_assignment_deleted(entity_index c) const;
+    bool default_constructor_deleted(entity_index c) const;
     entity_index implicitly_movable(syntax_child operand);
     /* whether destroying an object of class c runs code */
     bool destroys(entity_index c) const;
     /* the type's size and alignment in bytes ([expr.sizeof],
        [expr.alignof]), 0 if not complete */
     uint64_t size_of_type(qualified_type t) const;
+    /* the size (and alignment) of a pointer, which a reference member
+       takes in a class ([abi:class-types]) */
+    uint64_t pointer_size() const;
     uint64_t alignment_of_type(qualified_type t) const;
 
     /* the uses of names lookup resolved, each with the entity found:
