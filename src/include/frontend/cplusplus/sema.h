@@ -472,6 +472,10 @@ struct dynamic_class {
        order of [abi:vtable-construction] (each non-primary dynamic base's
        group, in declaration order) */
     uint32_t first_group = 0, group_count = 0;
+    /* [class.dtor]/12: the deallocation function the deleting destructor
+       of a virtual destructor calls, and whether it takes the size */
+    entity_index deallocation = 0;
+    bool deallocation_sized = false;
 };
 
 /* one virtual table of a group ([abi:vtable-general]): the offset of the
@@ -1691,7 +1695,7 @@ class semantic_analysis
     /* the subobject e (a base or a non-static data member) of *this */
     analysis_result defaulted_or_deleted_special_member(
         entity_index c, node_index n, syntax_child d, syntax_child body,
-        uint8_t access, bool constexpr_specified);
+        uint8_t access, bool constexpr_specified, bool virtual_specified);
     analysis_result static_member_initializer(node_index declarator,
                                               entity_index e, syntax_child init,
                                               const specified &s);
@@ -1742,9 +1746,11 @@ class semantic_analysis
                                               node_index declaration,
                                               syntax_child d, uint8_t access,
                                               bool definition,
-                                              bool constexpr_specified = false);
-    bool function_specifiers_only(node_index seq,
-                                  bool &constexpr_specified) const;
+                                              bool constexpr_specified = false,
+                                              bool virtual_specified = false);
+    /* virtual_specified: in a class, where virtual is one of them */
+    bool function_specifiers_only(node_index seq, bool &constexpr_specified,
+                                  bool *virtual_specified = nullptr) const;
     /* the function-body of a constructor or destructor definition
        (last_declared): ctor-initializer_opt compound-statement */
     analysis_result special_member_body(node_index definition,
@@ -2076,15 +2082,22 @@ class semantic_analysis
     uint32_t allocation_declarations_analysed = 0;
     uint32_t allocation_names_spelled();
     /* [expr.new]/11, [expr.delete]/9: the functions named kind found in
-       class c (0: none; in_class) or else in the global scope */
+       class c (0: none; in_class) or else in the global scope;
+       class_complete: at c's closing }, whose members (and its bases') are
+       all analysed */
     analysis_result allocation_functions(node_index n, allocation_function kind,
                                          entity_index c,
                                          owned_array<entity_index> &set,
-                                         bool &in_class);
+                                         bool &in_class,
+                                         bool class_complete = false);
 
     /* [expr.new] and [expr.delete]: the expressions */
     analysis_result new_expression(node_index n, expression_meaning &m);
     analysis_result delete_expression(node_index n, expression_meaning &m);
+    analysis_result usual_deallocation(node_index n, entity_index c,
+                                       bool global, bool array,
+                                       entity_index &function, bool &sized,
+                                       bool class_complete = false);
     /* the type of the new-type-id n ([expr.new]/1), the expression of the
        first bound of its noptr-new-declarator if any (bound) */
     analysis_result new_type_id(node_index n, qualified_type &type,

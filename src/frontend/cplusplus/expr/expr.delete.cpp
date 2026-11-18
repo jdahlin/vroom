@@ -44,6 +44,9 @@ node_index parser::delete_expression()
  * the object or the elements of the array being deleted."  /7: "the
  * delete-expression shall call a deallocation function".
  *
+ * A class with a virtual destructor is destroyed and deallocated by its
+ * deleting destructor, called through the virtual table.
+ *
  * Not analysed: an operand of class type (/2), a pointer to void or to an
  * incomplete class (/5), the array delete of a class with a destructor
  * (its cookie, [expr.new]/15), a destroying operator delete and
@@ -144,63 +147,14 @@ analysis_result semantic_analysis::delete_expression(node_index n,
         destroyed = expression_node(semantic_kind::destroy, call, at,
                                     target.node, destructor);
     }
-    /* /9: "When the keyword delete in a delete-expression is preceded by
-       the unary :: operator, the deallocation function's name is looked up
-       in global scope.  Otherwise, the lookup considers class-specific
-       deallocation functions ([class.free]).  If no class-specific
-       deallocation function is found, the deallocation function's name is
-       looked up in global scope." */
-    allocation_function kind = allocation_function::delete_;
-    if (array)
-        kind = allocation_function::delete_array;
-    owned_array<entity_index> set;
-    bool in_class = false;
-    entity_index scope = c;
-    if (global)
-        scope = 0;
-    r = allocation_functions(n, kind, scope, set, in_class);
+    entity_index function = 0;
+    bool sized = false;
+    r = usual_deallocation(n, c, global, array, function, sized);
     if (r != analysis_result::well_formed)
         return r;
-    /* [basic.stc.dynamic.deallocation]/3: "A usual deallocation function
-       is a deallocation function whose parameters after the first are ...
-       optionally, a parameter of type std::size_t" (the other forms are
-       not declared: see implicit_allocation_functions) */
-    qualified_type size_type = qualified_type::make(
-        type_table.fundamental(fundamental_type::unsigned_long_int), cv_none);
-    entity_index unsized = 0, sized = 0;
-    for (entity_index f : set) {
-        const struct type &ft = type_table[entity_table[f].type.unqualified()];
-        const qualified_type *parameters =
-            type_table.parameters(entity_table[f].type.unqualified());
-        if (ft.variadic)
-            continue;
-        if (ft.parameter_count == 1)
-            unsized = f;
-        else if (ft.parameter_count == 2 && parameters[1] == size_type)
-            sized = f;
-    }
-    /* [expr.delete]/10: "If deallocation function lookup finds more than
-       one usual deallocation function, the function to be called is
-       selected as follows: ... If exactly one function remains, that
-       function is selected ... If the deallocation functions have class
-       scope, the one without a parameter of type std::size_t is selected.
-       If the type is complete and if, for an array delete expression only,
-       the operand is a pointer to a class type with a non-trivial
-       destructor or a (possibly multi-dimensional) array thereof, the
-       function with a parameter of type std::size_t is selected.
-       Otherwise, it is unspecified whether a deallocation function with a
-       parameter of type std::size_t is selected."  As clang: the sized one
-       for a single object, the unsized one for an array. */
-    entity_index function = unsized;
-    if (!unsized || (sized && !in_class && !array))
-        function = sized;
-    if (!function)
-        /* a deallocation function that is no usual one: clang's "no
-           suitable member 'operator delete'" */
-        return not_supported(n, "expr.delete");
     owned_array<expression_meaning> arguments;
     arguments.append(deleted);
-    if (function == sized)
+    if (sized)
         /* /11: "If a deallocation function with a parameter of type
            std::size_t is used, the size of the deleted object in a
            single-object delete expression ... is passed as the
@@ -220,6 +174,93 @@ analysis_result semantic_analysis::delete_expression(node_index n,
                              destroyed);
     semantics[m.node].c = call.node;
     semantics[m.node].computation = deleted.type;
+    /* /3: "if the static type of the object to be deleted is different
+       from its dynamic type ... the static type shall have a virtual
+       destructor"; /10 a note: "If the static type of the object to be
+       deleted is complete and has a virtual destructor, the deallocation
+       function ... is looked up in the dynamic type's virtual
+       destructor": [abi:vtable-components] the deleting destructor in the
+       slot after the complete object one destroys and deallocates */
+    if (c && entity_table[c].destructor &&
+        entity_table[entity_table[c].destructor].virtual_)
+        semantics[m.node].value = 1;
+    return analysis_result::well_formed;
+}
+
+/*
+ * The usual deallocation function a delete-expression of an object of
+ * class c (0: not a class) calls, ::delete when global, delete[] when
+ * array; sized when it takes the size.
+ */
+analysis_result
+semantic_analysis::usual_deallocation(node_index n, entity_index c, bool global,
+                                      bool array, entity_index &function,
+                                      bool &is_sized, bool class_complete)
+{
+    /* /9: "When the keyword delete in a delete-expression is preceded by
+       the unary :: operator, the deallocation function's name is looked up
+       in global scope.  Otherwise, the lookup considers class-specific
+       deallocation functions ([class.free]).  If no class-specific
+       deallocation function is found, the deallocation function's name is
+       looked up in global scope." */
+    allocation_function kind = allocation_function::delete_;
+    if (array)
+        kind = allocation_function::delete_array;
+    owned_array<entity_index> set;
+    bool in_class = false;
+    entity_index scope = c;
+    if (global)
+        scope = 0;
+    analysis_result r =
+        allocation_functions(n, kind, scope, set, in_class, class_complete);
+    if (r != analysis_result::well_formed)
+        return r;
+    /* [basic.stc.dynamic.deallocation]/3: "A usual deallocation function
+       is a deallocation function whose parameters after the first are ...
+       optionally, a parameter of type std::size_t" (the other forms are
+       not declared: see implicit_allocation_functions) */
+    qualified_type size_type = qualified_type::make(
+        type_table.fundamental(fundamental_type::unsigned_long_int), cv_none);
+    entity_index unsized = 0, sized = 0;
+    bool other = false;
+    for (entity_index f : set) {
+        const struct type &ft = type_table[entity_table[f].type.unqualified()];
+        const qualified_type *parameters =
+            type_table.parameters(entity_table[f].type.unqualified());
+        if (ft.variadic)
+            other = true;
+        else if (ft.parameter_count == 1)
+            unsized = f;
+        else if (ft.parameter_count == 2 && parameters[1] == size_type)
+            sized = f;
+        else
+            other = true;
+    }
+    if (class_complete && in_class && other)
+        /* a class's deallocation functions that are not all usual ones:
+           clang's ambiguities ("multiple suitable 'operator delete'") are
+           not followed */
+        return not_supported(n, "class.dtor");
+    /* [expr.delete]/10: "If deallocation function lookup finds more than
+       one usual deallocation function, the function to be called is
+       selected as follows: ... If exactly one function remains, that
+       function is selected ... If the deallocation functions have class
+       scope, the one without a parameter of type std::size_t is selected.
+       If the type is complete and if, for an array delete expression only,
+       the operand is a pointer to a class type with a non-trivial
+       destructor or a (possibly multi-dimensional) array thereof, the
+       function with a parameter of type std::size_t is selected.
+       Otherwise, it is unspecified whether a deallocation function with a
+       parameter of type std::size_t is selected."  As clang: the sized one
+       for a single object, the unsized one for an array. */
+    function = unsized;
+    if (!unsized || (sized && !in_class && !array))
+        function = sized;
+    is_sized = function && function == sized;
+    if (!function)
+        /* a deallocation function that is no usual one: clang's "no
+           suitable member 'operator delete'" */
+        return not_supported(n, "expr.delete");
     return analysis_result::well_formed;
 }
 

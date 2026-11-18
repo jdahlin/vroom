@@ -422,13 +422,15 @@ bool itanium_mangler::unqualified_name(entity_index e)
  *
  *     <ctor-dtor-name> ::= C1
  *                      ::= C2
+ *                      ::= D0
  *                      ::= D1
  *                      ::= D2
  *
- * C1 and D1 are the complete object's, C2 and D2 the base object's.
- * The complete object constructor of a class without virtual bases does
- * what the base object constructor does ([abi:mangling-special-ctor-dtor]);
- * there are no allocating constructors or deleting destructors yet.
+ * C1 and D1 are the complete object's, C2 and D2 the base object's, D0
+ * the deleting destructor (variant 0).  The complete object constructor
+ * of a class without virtual bases does what the base object constructor
+ * does ([abi:mangling-special-ctor-dtor]); there are no allocating
+ * constructors yet.
  */
 bool itanium_mangler::ctor_dtor_name(special_member which)
 {
@@ -438,6 +440,8 @@ bool itanium_mangler::ctor_dtor_name(special_member which)
         text("D");
     if (variant == 1)
         text("1");
+    else if (variant == 0 && which == special_member::destructor)
+        text("0");
     else
         text("2");
     return true;

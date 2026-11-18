@@ -1053,6 +1053,13 @@ analysis_result semantic_analysis::constructor_list_initialization(
             return r;
         arguments.append(e);
     }
+    if (arguments.size() == 1 &&
+        arguments[0].category == value_category::prvalue &&
+        arguments[0].type.unqualified() == type.unqualified())
+        /* one prvalue of the class itself: clang initializes the object
+           from it with no constructor (CWG2311), the copy or move one
+           deleted or not */
+        return not_supported(list, "dcl.init.list");
     /* the arguments before the conversions overload resolution adds */
     owned_array<expression_meaning> before;
     for (const expression_meaning &e : arguments)

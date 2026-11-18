@@ -121,8 +121,8 @@ bool semantic_analysis::type_without_external_linkage(qualified_type t) const
  * union, for each anonymous union member with at least one non-static data
  * member (if any), exactly one non-static data member has a default member
  * initializer, and (7.7) each potentially constructed base class of T is
- * const-default-constructible."  No member analysis has has a default
- * member initializer.
+ * const-default-constructible."  A union's default member initializers
+ * (7.5) and anonymous union members (7.6) are not told apart.
  */
 bool semantic_analysis::const_default_constructible(entity_index c) const
 {
@@ -138,6 +138,10 @@ bool semantic_analysis::const_default_constructible(entity_index c) const
         const entity &m = entity_table[class_members[x.first_member + i]];
         /* an unnamed bit-field is not a member ([class.bit]/2) */
         if (m.bit_field && !m.name)
+            continue;
+        /* (7.4): "each direct non-variant non-static data member
+           M of T has a default member initializer or ..." */
+        if (m.default_initializer && !x.union_)
             continue;
         qualified_type t = m.type;
         while (type_table[t.unqualified()].kind == type_kind::array)

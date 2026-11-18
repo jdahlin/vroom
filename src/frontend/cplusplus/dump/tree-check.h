@@ -283,7 +283,13 @@ struct tree_checker {
             list(n, tree_sort::statement, "statement");
             break;
         case semantic_kind::expression_statement:
-            child(n, node.a, tree_sort::expression, false, "expression");
+            /* a destructor's call of a subobject's destructor
+               ([class.dtor]/13) is a statement of its own */
+            if (node.a && node.a < analysis.semantics.size() &&
+                analysis.semantics[node.a].kind == semantic_kind::destroy)
+                child(n, node.a, tree_sort::initializer, false, "expression");
+            else
+                child(n, node.a, tree_sort::expression, false, "expression");
             break;
         case semantic_kind::declaration_statement:
             if (!node.a)

@@ -173,14 +173,20 @@ bool semantic_analysis::copies_bytes(entity_index c) const
 
 /*
  * Whether a decl-specifier-seq has only function-specifiers analysis has
- * rules for on a constructor or destructor: constexpr and inline
- * ([class.ctor]/1, [class.dtor]/1).  A constexpr destructor is C++20's
+ * rules for on a constructor or destructor: constexpr ([class.ctor]/1,
+ * [class.dtor]/1) and, in a class (virtual_specified), virtual
+ * ([class.dtor]/1, [dcl.fct.spec]/2; on a constructor it is ill-formed,
+ * left to special_member_declarator).  A constexpr destructor is C++20's
  * and is not analysed.
  */
-bool semantic_analysis::function_specifiers_only(
-    node_index seq, bool &constexpr_specified) const
+bool semantic_analysis::function_specifiers_only(node_index seq,
+                                                 bool &constexpr_specified,
+                                                 bool *virtual_specified) const
 {
     constexpr_specified = false;
+    bool virtual_seen = false;
+    if (virtual_specified)
+        *virtual_specified = false;
     for (uint32_t i = 0; i < tree[seq].child_count; i++) {
         syntax_child c = tree.children(seq)[i];
         if (!c.is_token())
@@ -191,11 +197,17 @@ bool semantic_analysis::function_specifiers_only(
                 return false;
             constexpr_specified = true;
             break;
+        case standard_keyword::virtual_:
+            if (!virtual_specified || virtual_seen)
+                return false;
+            virtual_seen = true;
+            *virtual_specified = true;
+            break;
         default:
             return false;
         }
     }
-    return constexpr_specified;
+    return constexpr_specified || virtual_seen;
 }
 
 /*
@@ -209,7 +221,7 @@ bool semantic_analysis::function_specifiers_only(
  */
 analysis_result semantic_analysis::special_member_declarator(
     entity_index c, node_index declaration, syntax_child d, uint8_t access,
-    bool definition, bool constexpr_specified)
+    bool definition, bool constexpr_specified, bool virtual_specified)
 {
     qualified_type type = qualified_type::make(
         type_table.fundamental(fundamental_type::void_), cv_none);
@@ -251,6 +263,10 @@ analysis_result semantic_analysis::special_member_declarator(
     if (m.destructor && constexpr_specified)
         /* C++20's constexpr destructors ([dcl.constexpr]/3) */
         return not_supported(declaration, "dcl.constexpr");
+    if (virtual_specified && !m.destructor)
+        /* [class.ctor]/1 lists no virtual: clang's "constructor cannot be
+           declared 'virtual'" */
+        return not_supported(declaration, "class.ctor");
     if (m.destructor) {
         kind = special_member::destructor;
         if (f.parameter_count)
@@ -330,6 +346,12 @@ analysis_result semantic_analysis::special_member_declarator(
         entity_table[k].next_constructor = e;
     }
     last_declared = e;
+    if (kind == special_member::destructor) {
+        /* [class.virtual]/7: a virtual destructor, declared so or
+           overriding a base's ([class.dtor]/13) */
+        virt_override = virt_final = virt_pure = false;
+        return virtual_member(c, e, declaration, m.id, virtual_specified);
+    }
     return analysis_result::well_formed;
 }
 
@@ -348,11 +370,11 @@ analysis_result semantic_analysis::special_member_declarator(
  */
 analysis_result semantic_analysis::defaulted_or_deleted_special_member(
     entity_index c, node_index n, syntax_child d, syntax_child body,
-    uint8_t access, bool constexpr_specified)
+    uint8_t access, bool constexpr_specified, bool virtual_specified)
 {
     if (deleted_body(body)) {
-        analysis_result r = special_member_declarator(c, n, d, access, false,
-                                                      constexpr_specified);
+        analysis_result r = special_member_declarator(
+            c, n, d, access, false, constexpr_specified, virtual_specified);
         if (r != analysis_result::well_formed)
             return r;
         const entity &f = entity_table[last_declared];
@@ -406,7 +428,15 @@ analysis_result semantic_analysis::defaulted_or_deleted_special_member(
         /* [class.dtor]/4: as the implicitly-declared destructor */
         if (x.destructor || f.parameter_count)
             return not_supported(n, "dcl.fct.def.default");
-        return analysis_result::well_formed;
+        if (!virtual_specified)
+            return analysis_result::well_formed;
+        /* virtual ~X() = default: the implicit destructor's definition,
+           virtual ([class.virtual]/7) */
+        declare_implicit(c, special_member::destructor, false);
+        entity_index e = entity_table[c].destructor;
+        entity_table.add_declaration(e, n);
+        virt_override = virt_final = virt_pure = false;
+        return virtual_member(c, e, n, m.id, true);
     }
     if (!f.parameter_count) {
         if (x.defaulted_default_constructor)
@@ -1321,9 +1351,11 @@ analysis_result semantic_analysis::implicit_definitions(entity_index c,
         current_scope = parameters;
         analysis_result r = analysis_result::well_formed;
         uint32_t members = 0, destructions = 0;
-        if (entity_table[f].special == special_member::destructor)
+        if (entity_table[f].special == special_member::destructor) {
+            /* [class.cdtor]/4: the destructor's virtual table pointer */
+            members = vtable_pointer_store(c, at);
             destructions = subobject_destructions(c, at);
-        else if (source)
+        } else if (source)
             r = implicit_copy(c, n, source, members);
         else
             r = ctor_initializer(syntax_child(), members);

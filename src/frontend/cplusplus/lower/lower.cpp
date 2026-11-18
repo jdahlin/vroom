@@ -54,6 +54,9 @@ class c_lowering
         complete_symbols.resize(analysis.entity_table.size());
         for (uint32_t &s : complete_symbols)
             s = 0;
+        deleting_symbols.resize(analysis.entity_table.size());
+        for (uint32_t &s : deleting_symbols)
+            s = 0;
         vtables.resize(analysis.entity_table.size());
         for (uint32_t &s : vtables)
             s = 0;
@@ -96,6 +99,9 @@ class c_lowering
        each special member function, 0 until made; symbols has the base
        object one (C2, D2) */
     owned_array<uint32_t> complete_symbols;
+    /* each virtual destructor's deleting destructor (D0), 0 until made */
+    owned_array<uint32_t> deleting_symbols;
+    bool deleting_destructor(entity_index e, token_index at, bool define);
     /* [abi:vtable]: each dynamic class's virtual table symbol, 0 until
        made, and __cxa_pure_virtual's ([abi:pure-virtual]) */
     owned_array<uint32_t> vtables;
@@ -119,7 +125,8 @@ class c_lowering
     bool thunk_definitions(entity_index f, token_index at);
     /* &((char *)p)[offset] as a pointer of type t */
     uint32_t offset_pointer(uint32_t p, int64_t offset, ast_qualified_type t);
-    uint32_t virtual_function(entity_index f, uint32_t object, token_index at);
+    uint32_t virtual_function(entity_index f, uint32_t object, token_index at,
+                              uint32_t next = 0);
     bool side_effect_free(uint32_t lowered) const;
     /* [stmt.dcl]/2: the automatic objects with a destructor that are in
        scope where the lowering is, in the order they were constructed,
@@ -737,6 +744,8 @@ uint32_t c_lowering::symbol(entity_index e, token_index at, int variant)
     uint32_t *slot = &symbols[e];
     if (x.special != special_member::none && variant == 1)
         slot = &complete_symbols[e];
+    if (x.special == special_member::destructor && variant == 0)
+        slot = &deleting_symbols[e];
     if (*slot)
         return *slot;
     if (x.kind != entity_kind::function && x.kind != entity_kind::variable)
@@ -1202,6 +1211,29 @@ uint32_t c_lowering::delete_object(const semantic_node &n)
     uint32_t body[2];
     uint32_t count = 0;
     uint32_t destroyed = 0, deallocated = 0;
+    auto variable = [&] {
+        return make(AST_NODE_VARIABLE, t, symbol, 0, 0, 0,
+                    AST_NODE_FLAG_LVALUE);
+    };
+    if (n.value == 1) {
+        /* [expr.delete]/3: a virtual destructor, the deleting destructor
+           in the slot after the complete object one destroys and
+           deallocates the most derived object ([abi:vtable-components]) */
+        allocated_symbol = outer;
+        allocated_type = outer_type;
+        uint32_t callee = virtual_function(node(n.b).b, variable(), n.at, 1);
+        if (!callee)
+            return 0;
+        uint32_t argument = variable();
+        uint32_t call = make(AST_NODE_CALL, v, callee,
+                             ast_builder_list(c, &argument, 1), 1, 0, 0);
+        body[0] = ast_builder_node(c, AST_NODE_EXPRESSION, v, call, 0, 0, 0, 0);
+        items.append(ast_builder_node(c, AST_NODE_IF, v, truth(variable()),
+                                      block(body, 1), 0, 0, 0));
+        return make(AST_NODE_STATEMENT_EXPRESSION, v,
+                    block(items.data(), static_cast<uint32_t>(items.size())), 0,
+                    0, 0, 0);
+    }
     if (n.b)
         destroyed = expression(n.b);
     deallocated = expression(n.c);
@@ -1214,9 +1246,7 @@ uint32_t c_lowering::delete_object(const semantic_node &n)
             ast_builder_node(c, AST_NODE_EXPRESSION, v, destroyed, 0, 0, 0, 0);
     body[count++] =
         ast_builder_node(c, AST_NODE_EXPRESSION, v, deallocated, 0, 0, 0, 0);
-    uint32_t variable =
-        make(AST_NODE_VARIABLE, t, symbol, 0, 0, 0, AST_NODE_FLAG_LVALUE);
-    items.append(ast_builder_node(c, AST_NODE_IF, v, truth(variable),
+    items.append(ast_builder_node(c, AST_NODE_IF, v, truth(variable()),
                                   block(body, count), 0, 0, 0));
     return make(AST_NODE_STATEMENT_EXPRESSION, v,
                 block(items.data(), static_cast<uint32_t>(items.size())), 0, 0,
@@ -2960,7 +2990,21 @@ uint32_t c_lowering::vtable(entity_index k, token_index at)
             int64_t adjustment = analysis.vtable_adjustments[slot];
             uint32_t target = 0;
             ast_qualified_type ft = 0;
-            if (analysis.entity_table[f].pure) {
+            /* [abi:vtable-components]: a virtual destructor's pair of
+               entries, the complete object destructor (the variant its
+               calls use: D2 for an inline one, as clang) and the deleting
+               one */
+            bool destructor =
+                analysis.entity_table[f].special == special_member::destructor;
+            if (destructor && i && analysis.vtable_slots[slot - 1] == f) {
+                ft = entity_type(f, at);
+                if (!deleting_destructor(f, at, false))
+                    return 0;
+                target = deleting_symbols[f];
+            } else if (destructor) {
+                ft = entity_type(f, at);
+                target = special_callee(f, at);
+            } else if (analysis.entity_table[f].pure) {
                 /* [abi:pure-virtual]: a pure virtual function's slot */
                 ft = ast_builder_type_function(c, v, nullptr, 0, 0);
                 if (!pure_virtual) {
@@ -3173,10 +3217,81 @@ bool c_lowering::thunk_definitions(entity_index f, token_index at)
     return true;
 }
 
+/*
+ * [abi:mangling-special-ctor-dtor] D0, the deleting destructor of virtual
+ * destructor e: its symbol, and
+ * when define its definition (where e is defined): D1(this), then the
+ * deallocation function of [class.dtor]/12 given this
+ * (and the class's size when it takes one, [expr.delete]/11).
+ */
+bool c_lowering::deleting_destructor(entity_index e, token_index at,
+                                     bool define)
+{
+    const entity &x = analysis.entity_table[e];
+    uint32_t s = symbol(e, at, 0);
+    if (!s)
+        return false;
+    if (!define)
+        return true;
+    entity_index k = x.enclosing;
+    const dynamic_class *d = analysis.dynamic_of(k);
+    if (!d || !d->deallocation) {
+        fail("a deleting destructor without a deallocation function", at);
+        return false;
+    }
+    ast_qualified_type v = ast_builder_type_basic(AST_TYPE_VOID);
+    ast_qualified_type self =
+        ast_builder_type_pointer(c, type(analysis.entity_table[k].type, at));
+    uint32_t p = ast_builder_symbol(c, AST_SYMBOL_VARIABLE, "", 0, self,
+                                    AST_STORAGE_AUTO, 0, 1);
+    ast_builder_symbol_flags_add(c, p, AST_SYMBOL_FLAG_PARAMETER);
+    auto self_value = [&] {
+        return make(AST_NODE_VARIABLE, self, p, 0, 0, 0, AST_NODE_FLAG_LVALUE);
+    };
+    uint32_t statements[2];
+    statements[0] = special_call(e, self_value(), nullptr, 0, at);
+    if (!statements[0])
+        return false;
+    statements[0] =
+        ast_builder_node(c, AST_NODE_EXPRESSION, v, statements[0], 0, 0, 0, 0);
+    entity_index f = d->deallocation;
+    uint32_t target = symbol(f, at);
+    if (!target)
+        return false;
+    ast_builder_symbol_flags_add(c, target, AST_SYMBOL_FLAG_USED);
+    ast_qualified_type function = entity_type(f, at);
+    const qualified_type *types = analysis.type_table.parameters(
+        analysis.entity_table[f].type.unqualified());
+    uint32_t arguments[2];
+    uint32_t count = 1;
+    arguments[0] = cast(self_value(), parameter_type(types[0], at),
+                        AST_CAST_POINTER_TO_POINTER);
+    if (d->deallocation_sized) {
+        arguments[1] = ast_builder_integer(
+            c, AST_QUALIFIED_TYPE_UNQUALIFIED(parameter_type(types[1], at)),
+            static_cast<int64_t>(analysis.entity_table[k].size));
+        count = 2;
+    }
+    uint32_t callee =
+        cast(make(AST_NODE_VARIABLE, function, target, 0, 0, 0, 0),
+             ast_builder_type_pointer(c, function), AST_CAST_FUNCTION_DECAY);
+    uint32_t call = make(AST_NODE_CALL, v, callee,
+                         ast_builder_list(c, arguments, count), count, 0, 0);
+    statements[1] =
+        ast_builder_node(c, AST_NODE_EXPRESSION, v, call, 0, 0, 0, 0);
+    uint32_t body = block(statements, 2);
+    struct node &b = ast_builder_ast(c)->nodes[body];
+    b.a = ast_builder_list(c, &p, 1);
+    b.aux = 1;
+    ast_builder_symbol_body(c, s, body);
+    ast_builder_symbol_flags_add(c, s, AST_SYMBOL_FLAG_DEFINED);
+    return true;
+}
+
 /* the final overrider of virtual function f for the object at the address
    object: (F *)(*(void ***)object)[slot] */
 uint32_t c_lowering::virtual_function(entity_index f, uint32_t object,
-                                      token_index at)
+                                      token_index at, uint32_t next)
 {
     ast_qualified_type v = ast_builder_type_basic(AST_TYPE_VOID);
     ast_qualified_type vp = ast_builder_type_pointer(c, v);
@@ -3185,11 +3300,11 @@ uint32_t c_lowering::virtual_function(entity_index f, uint32_t object,
                           cast(object, ast_builder_type_pointer(c, vpp),
                                AST_CAST_POINTER_TO_POINTER),
                           0, 0, 0, AST_NODE_FLAG_LVALUE);
-    uint32_t slot = make(
-        AST_NODE_INDEX, vp, table,
-        to_ptrdiff(ast_builder_integer(c, ast_builder_type_basic(AST_TYPE_INT),
-                                       analysis.entity_table[f].vtable_slot)),
-        0, 0, AST_NODE_FLAG_LVALUE);
+    uint32_t slot = make(AST_NODE_INDEX, vp, table,
+                         to_ptrdiff(ast_builder_integer(
+                             c, ast_builder_type_basic(AST_TYPE_INT),
+                             analysis.entity_table[f].vtable_slot + next)),
+                         0, 0, AST_NODE_FLAG_LVALUE);
     ast_qualified_type ft = entity_type(f, at);
     return cast(slot, ast_builder_type_pointer(c, ft),
                 AST_CAST_POINTER_TO_POINTER);
@@ -3283,6 +3398,9 @@ bool c_lowering::function_definition(entity_index e)
     ast_builder_symbol_body(c, s, block_node);
     ast_builder_symbol_flags_add(c, s, AST_SYMBOL_FLAG_DEFINED);
     if (x.virtual_ && !thunk_definitions(e, body.at))
+        return false;
+    if (x.virtual_ && x.special == special_member::destructor &&
+        !deleting_destructor(e, body.at, true))
         return false;
     if (x.special == special_member::none || x.inline_)
         return true;

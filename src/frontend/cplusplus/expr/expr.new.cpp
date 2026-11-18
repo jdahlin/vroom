@@ -231,12 +231,13 @@ analysis_result semantic_analysis::new_type_id(node_index n,
 
 analysis_result semantic_analysis::allocation_functions(
     node_index n, allocation_function kind, entity_index c,
-    owned_array<entity_index> &set, bool &in_class)
+    owned_array<entity_index> &set, bool &in_class, bool class_complete)
 {
     implicit_allocation_functions();
     uint32_t name = allocation_function_name(kind);
     in_class = false;
-    if (c && allocation_names_spelled() != allocation_declarations_analysed)
+    if (c && !class_complete &&
+        allocation_names_spelled() != allocation_declarations_analysed)
         /* the class may declare one analysis did not follow */
         return not_supported(n, "class.free");
     if (c) {

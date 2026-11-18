@@ -936,10 +936,11 @@ semantic_analysis::member_declaration(entity_index c, syntax_child member,
        the decl-specifier-seq of a constructor declaration (if any) shall
        be friend, inline, constexpr, or an explicit-specifier") */
     uint32_t at = 0;
-    bool constexpr_specified = false;
+    bool constexpr_specified = false, virtual_specified = false;
     if (node.child_count > 1 &&
         syntax_is(tree, children[0], syntax_kind::decl_specifier_seq) &&
-        function_specifiers_only(children[0].index(), constexpr_specified) &&
+        function_specifiers_only(children[0].index(), constexpr_specified,
+                                 &virtual_specified) &&
         declares_special_member(c, children[1]))
         at = 1;
     if (!node.child_count || at ||
@@ -956,7 +957,8 @@ semantic_analysis::member_declaration(entity_index c, syntax_child member,
                 /* = default, = delete, a pure-specifier */
                 return not_supported(n, "dcl.fct.def");
             return special_member_declarator(c, n, children[at], access, false,
-                                             constexpr_specified);
+                                             constexpr_specified,
+                                             virtual_specified);
         }
         if (node.child_count != at + 2 ||
             !syntax_is(tree, children[at + 1], syntax_kind::function_body))
@@ -969,11 +971,12 @@ semantic_analysis::member_declaration(entity_index c, syntax_child member,
             /* = default, = delete: no user-provided function
                ([dcl.fct.def.default]/5), which the layout ([abi:pod]) and
                triviality need to know before the class is complete */
-            return defaulted_or_deleted_special_member(c, n, children[at],
-                                                       children[at + 1], access,
-                                                       constexpr_specified);
-        analysis_result r = special_member_declarator(
-            c, n, children[at], access, true, constexpr_specified);
+            return defaulted_or_deleted_special_member(
+                c, n, children[at], children[at + 1], access,
+                constexpr_specified, virtual_specified);
+        analysis_result r =
+            special_member_declarator(c, n, children[at], access, true,
+                                      constexpr_specified, virtual_specified);
         if (r == analysis_result::well_formed)
             bodies.append(n);
         return r;
@@ -1612,11 +1615,12 @@ analysis_result semantic_analysis::member_function_body(entity_index c,
 analysis_result semantic_analysis::member_function_definition(
     entity_index c, node_index definition, const syntax_child *children)
 {
-    bool constexpr_specified = false;
+    bool constexpr_specified = false, body_virtual = false;
     uint32_t at = 0;
     if (tree[definition].child_count > 2 &&
         syntax_is(tree, children[0], syntax_kind::decl_specifier_seq) &&
-        function_specifiers_only(children[0].index(), constexpr_specified) &&
+        function_specifiers_only(children[0].index(), constexpr_specified,
+                                 &body_virtual) &&
         declares_special_member(c, children[1]))
         at = 1;
     if (at || !syntax_is(tree, children[0], syntax_kind::decl_specifier_seq)) {

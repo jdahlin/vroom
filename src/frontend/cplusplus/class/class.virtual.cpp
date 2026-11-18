@@ -11,8 +11,10 @@
  * class overrides call through non-virtual thunks.  What is analysed: no
  * virtual bases ([class.mi]), the primary base the first base;
  * overriders with the overridden function's type (no covariant returns);
- * no virtual destructors (D0 needs operator delete, R8), no virtual
- * operator functions, no virtual functions in unions or local classes.
+ * virtual destructors in the primary virtual table only (two slots, the
+ * complete object and the deleting destructor, [abi:vtable-components]),
+ * not pure ones; no virtual operator functions, no virtual functions in
+ * unions or local classes.
  */
 #include "../cplusplus-internal.h"
 #include "frontend/cplusplus/sema.h"
@@ -25,6 +27,12 @@ namespace cplusplus
 bool semantic_analysis::overrides_function(entity_index e, entity_index g) const
 {
     const entity &gx = entity_table[g];
+    /* [class.virtual]/7: "Even though destructors are not inherited, a
+       destructor in a derived class overrides a base class destructor
+       declared virtual" */
+    if (gx.special == special_member::destructor ||
+        entity_table[e].special == special_member::destructor)
+        return gx.special == entity_table[e].special;
     return gx.name == entity_table[e].name &&
            gx.member_cv == entity_table[e].member_cv &&
            same_parameters(type_table, gx.type.unqualified(),
@@ -186,10 +194,48 @@ analysis_result semantic_analysis::dynamic_class_record(entity_index c,
             any = true;
     if (!any)
         return analysis_result::well_formed;
-    if (entity_table[c].destructor)
-        /* [class.cdtor]: a destructor of a dynamic class, whose base's may
-           be virtual (D0 needs the deallocation function, R8) */
-        return not_supported(n, "class.virtual");
+    /* [class.dtor]/13: "If a class has a base class with a virtual
+       destructor, its destructor (whether user- or implicitly-declared)
+       is virtual": the implicit one declared here, before the virtual
+       table that has it ([class.dtor]/4) */
+    if (!entity_table[c].destructor) {
+        bool virtual_destructor = false;
+        for (uint32_t i = 0; i < x.base_count; i++) {
+            entity_index b =
+                type_table[entity_table[class_bases[x.first_base + i]]
+                               .type.unqualified()]
+                    .entity;
+            entity_index bd = entity_table[b].destructor;
+            if (bd && entity_table[bd].virtual_)
+                virtual_destructor = true;
+        }
+        if (virtual_destructor) {
+            declare_implicit(c, special_member::destructor, false);
+            entity_index e = entity_table[c].destructor;
+            entity_table[e].virtual_ = true;
+            declared_virtual v;
+            v.c = c;
+            v.f = e;
+            v.declaration = n;
+            declared_virtuals.append(v);
+        }
+    }
+    /* [class.dtor]/6: a defaulted destructor is deleted when a
+       subobject's destructor is deleted or inaccessible: not followed for
+       a dynamic class (its destructor's slots) */
+    owned_array<entity_index> classes;
+    subobject_classes(c, classes);
+    for (entity_index k : classes) {
+        entity_index kd = entity_table[k].destructor;
+        if (kd && (entity_table[kd].access || entity_table[kd].deleted))
+            return not_supported(n, "class.dtor");
+    }
+    entity_index destructor = entity_table[c].destructor;
+    if (destructor && entity_table[destructor].virtual_ &&
+        entity_table[destructor].pure)
+        /* a pure virtual destructor, still defined ([class.dtor]/12): its
+           slots and its deleting destructor are not analysed */
+        return not_supported(n, "class.dtor");
     dynamic_class d;
     d.primary_base = primary;
     d.first_slot = static_cast<uint32_t>(vtable_slots.size());
@@ -230,10 +276,21 @@ analysis_result semantic_analysis::dynamic_class_record(entity_index c,
         if (replaced)
             continue;
         entity_table[v.f].vtable_slot = d.slot_count;
-        vtable_slots.append(v.f);
-        vtable_adjustments.append(0);
-        vtable_own.append(true);
-        d.slot_count++;
+        /* [abi:vtable-components]: "The entries for virtual destructors
+           are actually pairs of entries.  The first destructor, called the
+           complete object destructor, performs the destruction without
+           calling delete() on the object.  The second destructor, called
+           the deleting destructor, calls delete() after destroying the
+           object." */
+        uint32_t entries = 1;
+        if (entity_table[v.f].special == special_member::destructor)
+            entries = 2;
+        for (uint32_t k = 0; k < entries; k++) {
+            vtable_slots.append(v.f);
+            vtable_adjustments.append(0);
+            vtable_own.append(true);
+            d.slot_count++;
+        }
     }
     vtable_group primary_group;
     primary_group.first_slot = d.first_slot;
@@ -243,6 +300,7 @@ analysis_result semantic_analysis::dynamic_class_record(entity_index c,
     /* then the secondary virtual tables: the primary base's own secondary
        ones, then each other dynamic base's group, each slot the class
        overrides replaced (called through a this-adjusting thunk) */
+    bool secondary_destructor = false;
     auto secondary = [&](entity_index base, const dynamic_class *bd,
                          uint32_t from) {
         for (uint32_t g = from; g < bd->group_count; g++) {
@@ -252,6 +310,11 @@ analysis_result semantic_analysis::dynamic_class_record(entity_index c,
             group.slot_count = bg.slot_count;
             for (uint32_t k = 0; k < bg.slot_count; k++) {
                 copy(bg.first_slot + k);
+                if (entity_table[vtable_slots.back()].special ==
+                    special_member::destructor)
+                    /* a virtual destructor in a secondary virtual table:
+                       its thunks (D1's and D0's) are not made */
+                    secondary_destructor = true;
                 for (const declared_virtual &v : declared_virtuals)
                     if (v.c == c &&
                         overrides_function(v.f, vtable_slots.back())) {
@@ -278,6 +341,27 @@ analysis_result semantic_analysis::dynamic_class_record(entity_index c,
             secondary(base, bd, 0);
     }
     d.group_count = static_cast<uint32_t>(vtable_groups.size()) - d.first_group;
+    if (secondary_destructor)
+        return not_supported(n, "class.dtor");
+    if (destructor && entity_table[destructor].virtual_) {
+        /* [class.dtor]/12: "At the point of definition of a virtual
+           destructor (including an implicit definition), the non-array
+           deallocation function is determined as if for the expression
+           delete this appearing in a non-virtual destructor of the
+           destructor's class": the deleting destructor's
+           ([abi:mangling-special-ctor-dtor] D0) */
+        analysis_result r = usual_deallocation(
+            n, c, false, false, d.deallocation, d.deallocation_sized, true);
+        if (r != analysis_result::well_formed)
+            return r;
+        if (entity_table[d.deallocation].access ||
+            entity_table[d.deallocation].deleted)
+            /* [class.dtor]/6: the destructor is deleted when the lookup
+               "results in an ambiguity or in a function that is deleted
+               or inaccessible from the destructor" (access from the
+               class is not followed) */
+            return not_supported(n, "class.dtor");
+    }
     /* the key function is among all the class's virtual functions,
        overriders too, in declaration order */
     for (const declared_virtual &v : declared_virtuals)
