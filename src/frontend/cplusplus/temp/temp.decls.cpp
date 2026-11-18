@@ -789,7 +789,9 @@ analysis_result semantic_analysis::variable_partial_specialization(
 {
     entity_index outer = current_scope;
     owned_array<node_index> parameters;
-    analysis_result r = template_head_parameters(n, parameters);
+    /* [temp.param]/14: a partial specialization's packs are deduced,
+       wherever they are */
+    analysis_result r = template_head_parameters(n, parameters, true, true);
     if (r != analysis_result::well_formed)
         return r;
     lookup_result x;
@@ -798,9 +800,7 @@ analysis_result semantic_analysis::variable_partial_specialization(
     uint32_t vt = variable_template_of(named);
     const function_template primary = function_templates[vt - 1];
     if (parameters.empty() || function_templates[vt - 1].name != named ||
-        entity_table[primary.entity].enclosing != outer ||
-        template_parameter_is_pack(primary.first_parameter +
-                                   primary.parameter_count - 1))
+        entity_table[primary.entity].enclosing != outer)
         return not_supported(n, "temp.class.spec");
     /* [temp.class.spec]/1: one declared after an instantiation it would
        be used for: not analysed */
@@ -824,11 +824,21 @@ analysis_result semantic_analysis::variable_partial_specialization(
         const template_argument &a = arguments[i];
         if (depends(type_table, a.type) || a.template_entity)
             dependent = true;
+        if (a.kind == template_argument::kind_t::pack)
+            for (uint32_t k = 0; k < a.count; k++)
+                if (depends(type_table, pack_arguments[a.value + k].type) ||
+                    pack_arguments[a.value + k].template_entity)
+                    dependent = true;
+    }
+    for (uint32_t i = 0; i < arguments.size() && identity; i++) {
         entity_index pe = template_parameter_entities[first + i];
-        if (identity)
-            identity = a.template_entity == pe ||
-                       (a.kind == template_argument::kind_t::type &&
-                        a.type == entity_table[pe].type);
+        const template_argument &a = arguments[i];
+        identity = a.template_entity == pe ||
+                   (a.kind == template_argument::kind_t::type &&
+                    a.type == entity_table[pe].type) ||
+                   (a.kind == template_argument::kind_t::pack && a.count == 1 &&
+                    pack_arguments[a.value].count == UINT32_MAX &&
+                    pack_arguments[a.value].template_entity == pe);
     }
     /* [temp.class.spec]/9: more specialized than the primary */
     if (!dependent || identity)
