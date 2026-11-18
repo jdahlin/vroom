@@ -1377,6 +1377,34 @@ lines:
   we accept and clang rejects, all 0 refuted.  cxx-run 428/428 (107
   programs); cxx-c-suites 0 wrong; quality redundant_tokens 58937,
   duplicate_runs_across_files 351, unchanged.
+- Status (2026-11-18, step 5: non-generic lambdas): a closure is a local
+  class (`expr.prim.lambda.cpp`) with its function call operator (const
+  unless `mutable`, deduced or trailing return type), its captures
+  unnamed members (`expr.prim.lambda.capture.cpp`: by copy, by reference,
+  `[=]`/`[&]`, `this`, `*this`, init-captures, an enclosing lambda's
+  captures for a nested one, [expr.prim.lambda.capture]/14), its object an
+  initializer list of them.  A captureless lambda has the conversion
+  function to pointer to function and clang's static `__invoke`
+  (`expr.prim.lambda.closure.cpp`); `f(args)` on a closure takes the call
+  operator over the surrogate.  Mangling: `Ul<params>E[n]_` in inline and
+  templated contexts (a lambda's call operator among them), clang's
+  per-function `$_N` elsewhere, numbered in the order lowering makes the
+  symbols (`number_closures`; a specialization for such a closure gets
+  its symbol at its first use); a function template specialization
+  internal by its arguments has no `L`.  Not supported: generic lambdas,
+  `constexpr`/`consteval` lambdas and the call operator's implicit
+  constexpr (a constant evaluation of a closure's function is unknown),
+  default arguments, packs, implicit capture of a variable usable in
+  constant expressions (the odr-use question), lambdas outside a
+  function body, an init-capture with a trailing-return-type, the
+  conversion of a variadic lambda; a closure capturing a class with a
+  destructor fails in lowering (a temporary with a destructor).  Test
+  `lambdas.cpp`.  `bench/cxx-sema.py`: declarations 55698 -> 55862 as
+  clang, 12 we reject and clang accepts (the same), 2453 -> 2467 we accept
+  and clang rejects, all 0 refuted; lowering 428 -> 435 files, [expr.prim.lambda]
+  no longer among the reasons.  cxx-run 460/460 (115 programs);
+  cxx-c-suites 0 wrong; quality redundant_tokens 59310 -> 59684,
+  duplicate_runs_across_files 353 -> 360.
 
 ### S6. Constant evaluation and templates
 
