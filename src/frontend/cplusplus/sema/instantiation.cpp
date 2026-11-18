@@ -74,7 +74,11 @@ semantic_analysis::instantiate(node_index at, entity_index template_entity,
         qualified_type type = s.type;
         if (r == analysis_result::well_formed) {
             function_cv = 0;
+            /* (a member function template's cv-qualifier-seq,
+               [temp.mem]) */
+            in_member_declarator = !is_namespace(t.enclosing);
             r = declarator(ft.declarator, d[1], type, m);
+            in_member_declarator = false;
         }
         entity_index e = 0;
         if (r == analysis_result::well_formed) {
@@ -152,7 +156,12 @@ analysis_result semantic_analysis::instantiate_definition(node_index at,
     instantiating = index + 1;
     instantiations[index].defining = true;
     instantiations[index].pending = false;
+    /* a member function template's definition, in its class
+       ([temp.mem]): its declarator's cv-qualifier-seq the member's */
+    bool member = !is_namespace(entity_table[template_entity].enclosing);
+    in_member_declarator = member;
     analysis_result r = function_definition(ft.definition);
+    in_member_declarator = false;
     instantiations[index].defining = false;
     leave_instantiation(context);
     instantiations[index].defined = true;
@@ -406,7 +415,9 @@ analysis_result semantic_analysis::declare_specialization(
     }
     /* (a copy: making the entity can move the table) */
     const entity t = entity_table[record.template_entity];
-    if (s.inline_ != t.inline_ || s.constexpr_ != t.constexpr_)
+    /* (a member function template is inline, [class.mfct]/1) */
+    bool inline_ = s.inline_ || !is_namespace(t.enclosing);
+    if (inline_ != t.inline_ || s.constexpr_ != t.constexpr_)
         return not_supported(declaration, "temp.inst");
     entity_index e =
         entity_table.make(entity_kind::function, t.name, t.enclosing);
@@ -419,6 +430,11 @@ analysis_result semantic_analysis::declare_specialization(
     entity_table[e].operator_function = t.operator_function;
     entity_table[e].implemented = t.implemented;
     entity_table[e].instantiation = index + 1;
+    /* a member function template's specialization: a member function of
+       its class ([temp.mem]) */
+    entity_table[e].nonstatic_member = t.nonstatic_member;
+    entity_table[e].member_cv = t.member_cv;
+    entity_table[e].access = t.access;
     entity_table.add_declaration(e, declaration);
     const function_template ft = function_templates[t.instantiation - 1];
     entity_table[e].gnu_flags = ft.gnu_flags;
@@ -476,6 +492,11 @@ analysis_result semantic_analysis::declare_variable_specialization(
     entity_table[e].constexpr_ = s.constexpr_;
     entity_table[e].defined = true;
     entity_table[e].instantiation = index + 1;
+    /* a member function template's specialization: a member function of
+       its class ([temp.mem]) */
+    entity_table[e].nonstatic_member = t.nonstatic_member;
+    entity_table[e].member_cv = t.member_cv;
+    entity_table[e].access = t.access;
     entity_table.add_declaration(e, declaration);
     instantiations[index].specialization = e;
     declared_name d;

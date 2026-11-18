@@ -2690,7 +2690,25 @@ class semantic_analysis
     /* [class.mem]: one member-declaration of the class being defined */
     /* [temp.mem]/1: the member template n (a template-declaration) of
        class c */
-    analysis_result member_template_declaration(entity_index c, node_index n);
+    analysis_result member_template_declaration(entity_index c, node_index n,
+                                                uint8_t access);
+    analysis_result member_function_template(entity_index c, node_index n,
+                                             node_index definition,
+                                             uint8_t access);
+    /* a call x.f(args) or x->f(args) of a member function template
+       ([temp.mem]/1): member_reference's object (its address) and the
+       held name it found, for call to deduce from the arguments */
+    entity_index member_template_name = 0;
+    expression_meaning member_template_object;
+    analysis_result member_template_call(
+        node_index n, entity_index held, const expression_meaning &object,
+        const owned_array<syntax_child> &arguments,
+        owned_array<expression_meaning> &early, expression_meaning &m);
+    analysis_result bound_member_call(
+        node_index n, entity_index f, const expression_meaning &object,
+        const owned_array<syntax_child> &arguments,
+        owned_array<expression_meaning> &early, expression_meaning &m);
+    uint32_t member_function_template_of(entity_index held) const;
     analysis_result member_declaration(entity_index c, syntax_child n,
                                        uint8_t access,
                                        owned_array<node_index> &bodies);

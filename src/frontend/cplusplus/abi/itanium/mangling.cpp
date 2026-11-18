@@ -284,9 +284,20 @@ bool itanium_mangler::specialization_encoding(entity_index e)
     entity_index scope = table[e].enclosing;
     bool nested = scope && !is_std(scope);
     if (nested) {
-        if (table[scope].kind != entity_kind::namespace_entity)
+        /* (a member function template's specialization, [temp.mem]: the
+           nested-name's CV-qualifiers its own, as nested_name's) */
+        const entity &x = table[e];
+        bool member = table[scope].kind == entity_kind::class_type &&
+                      x.kind == entity_kind::function;
+        if (table[scope].kind != entity_kind::namespace_entity && !member)
             return false;
         text("N");
+        if (member && x.nonstatic_member) {
+            if (x.member_cv & cv_volatile)
+                text("V");
+            if (x.member_cv & cv_const)
+                text("K");
+        }
         if (!prefix(scope))
             return false;
     } else if (scope) {
