@@ -29,6 +29,8 @@ analysis_result semantic_analysis::explicit_specialization(node_index n)
     if (x.child_count != 4 || tree.children(n)[3].is_token())
         return not_supported(n, "temp.expl.spec");
     node_index inner = tree.children(n)[3].index();
+    if (node_index id = variable_specialization_id(inner))
+        return variable_specialization(n, inner, id);
     if (!syntax_is(tree, syntax_child::node(inner),
                    syntax_kind::function_definition) &&
         !syntax_is(tree, syntax_child::node(inner),
@@ -177,6 +179,73 @@ semantic_analysis::record_instantiation(const function_template &ft,
     uint32_t index = static_cast<uint32_t>(instantiations.size());
     instantiations.append(record);
     return index;
+}
+
+/* the simple-template-id a simple-declaration of one declarator with an
+   initializer declares (the declarator-id of a variable template's
+   explicit specialization), or 0 */
+node_index semantic_analysis::variable_specialization_id(node_index d) const
+{
+    const syntax_node &node = tree[d];
+    if (node.kind != syntax_kind::simple_declaration || node.child_count != 3 ||
+        !syntax_is(tree, tree.children(d)[1], syntax_kind::init_declarator))
+        return 0;
+    node_index item = tree.children(d)[1].index();
+    if (tree[item].child_count != 2 ||
+        !syntax_is(tree, tree.children(item)[0],
+                   syntax_kind::simple_template_id))
+        return 0;
+    node_index id = tree.children(item)[0].index();
+    lookup_result x;
+    entity_index named = 0;
+    if (!template_id_name(id, x, named) || x.ambiguous ||
+        !variable_template_of(named))
+        return 0;
+    return id;
+}
+
+/*
+ * [temp.expl.spec]/1: a variable template's explicit specialization
+ * template<> T name<args> = init;: the specialization's variable, declared
+ * by this declaration as an instantiation declares one by the template's
+ * (declare_variable_specialization), which no instantiation makes then;
+ * inline only if declared so ([temp.expl.spec]/12).  One the program used
+ * before is not analysed ([temp.expl.spec]/7: clang's error).
+ */
+analysis_result semantic_analysis::variable_specialization(node_index n,
+                                                           node_index inner,
+                                                           node_index id)
+{
+    lookup_result x;
+    entity_index named = 0;
+    template_id_name(id, x, named);
+    uint32_t vt = variable_template_of(named);
+    owned_array<template_argument> arguments;
+    analysis_result r = template_id_arguments(id, vt, arguments);
+    if (r != analysis_result::well_formed)
+        return r;
+    for (const template_argument &a : arguments)
+        if (a.kind == template_argument::kind_t::pack ||
+            depends_on_template_parameter(a.type) || a.template_entity)
+            return not_supported(n, "temp.expl.spec");
+    const function_template ft = function_templates[vt - 1];
+    uint32_t count = static_cast<uint32_t>(arguments.size());
+    if (count != ft.parameter_count ||
+        find_instantiation(ft.entity, arguments.data(), count))
+        return not_supported(n, "temp.expl.spec");
+    uint32_t index = record_instantiation(ft, arguments.data(), count);
+    instantiations[index].explicit_specialization = true;
+    variable_instantiating = index + 1;
+    declarator_template_id = true;
+    r = simple_declaration(inner);
+    declarator_template_id = false;
+    variable_instantiating = 0;
+    if (r != analysis_result::well_formed)
+        return r;
+    if (!instantiations[index].specialization)
+        return not_supported(n, "temp.expl.spec");
+    instantiations[index].defined = true;
+    return analysis_result::well_formed;
 }
 
 /*

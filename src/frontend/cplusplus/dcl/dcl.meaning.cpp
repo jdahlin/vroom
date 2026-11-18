@@ -772,6 +772,18 @@ analysis_result semantic_analysis::declarator(node_index declaration,
         m.conversion_function = true;
         tokens.name_token(m.id, conversion_function_name());
         return analysis_result::well_formed;
+    case syntax_kind::simple_template_id:
+        /* [temp.expl.spec]/1: a specialization's template-id, the whole
+           declarator (a variable template's) */
+        if (!declarator_template_id || !node.child_count ||
+            !children[0].is_token() ||
+            tokens[children[0].index()].kind != token_kind::identifier)
+            return not_supported(n);
+        declarator_template_id = false;
+        m.template_id = n;
+        m.has_id = true;
+        m.id = children[0].index();
+        return analysis_result::well_formed;
     default:
         return not_supported(n);
     }

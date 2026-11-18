@@ -2917,6 +2917,9 @@ class semantic_analysis
        template at denotes */
     analysis_result alias_template_type(node_index id, uint32_t at,
                                         type_index &type);
+    node_index variable_specialization_id(node_index d) const;
+    analysis_result variable_specialization(node_index n, node_index inner,
+                                            node_index id);
     /* the variable template the held name e is, plus one */
     uint32_t variable_template_of(entity_index e) const;
     /* [temp.pre]/1: a variable template defined at namespace scope */
