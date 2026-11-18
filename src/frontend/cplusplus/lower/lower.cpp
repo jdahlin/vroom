@@ -905,6 +905,12 @@ ast_qualified_type c_lowering::class_type(entity_index e, token_index at)
         lengths[i] = strlen(names[i]);
         at_name += lengths[i] + 1;
     }
+    /* [dcl.align]: the class's alignment-specifiers, as C's aligned on
+       its first field (at offset 0), which raises the struct's alignment
+       and rounds its size */
+    if (x.requested_alignment && !aligned.empty() &&
+        aligned[0] < x.requested_alignment)
+        aligned[0] = x.requested_alignment;
     c_fields[e] = static_cast<uint32_t>(fields.size());
     ast_builder_type_record_complete(
         c, made, fields.data(), names.data(), lengths.data(), aligned.data(),
@@ -1042,6 +1048,11 @@ uint32_t c_lowering::symbol(entity_index e, token_index at, int variant)
         return *slot;
     if (x.kind != entity_kind::function && x.kind != entity_kind::variable)
         return fail("an entity that is not a function or variable", at);
+    /* [dcl.fct.def.delete]/2: a deleted function is never called in a
+       well-formed program (a deleted destructor's object destroyed: the
+       analysis does not see each destruction) */
+    if (x.kind == entity_kind::function && x.deleted)
+        return fail("a call of a deleted function", at);
     if (x.kind == entity_kind::variable && x.nonstatic_member)
         return fail("a non-static data member as an object", at);
     ast_qualified_type t = entity_type(e, at);
@@ -6118,6 +6129,18 @@ bool c_lowering::translation_unit()
         if (x.kind == entity_kind::function && x.placeholder_return &&
             !x.defined)
             continue;
+        /* a deleted function: no symbol ([dcl.fct.def.delete]) */
+        if (x.kind == entity_kind::function && x.deleted)
+            continue;
+        /* a function declared, not defined, whose symbol is not mangled
+           yet (a specialization of a template whose signature names a
+           dependent decltype): a use of it fails where it is */
+        if (x.kind == entity_kind::function && !x.defined) {
+            owned_buffer name;
+            if (!itanium_symbol_name(analysis, tokens.pp, d.entity, name.get(),
+                                     0))
+                continue;
+        }
         if (!symbol(d.entity, 0))
             return false;
     }

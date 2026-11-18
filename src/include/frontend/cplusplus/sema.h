@@ -236,6 +236,14 @@ enum class entity_kind : uint8_t {
        negated), one entity for the same three ([temp.over.link]); else
        value 0, an entity of its own */
     dependent_value,
+    /* not an entity: a dependent type in a template's own declaration
+       known only by how it is written: [temp.dep.type]/10.3
+       decltype(expression) of a type-dependent expression, a builtin
+       template's dependent template-id; its type is a type_kind::dependent
+       of it, value the syntax node, one for nodes of the same tokens
+       ([temp.over.link]/5: equivalent expressions).  An instantiation
+       analyses it again */
+    dependent_written,
     /* not an entity: a block scope or a function parameter scope
        ([basic.scope.block], [basic.scope.param]), the scope the names
        declared in it are bound in */
@@ -421,6 +429,9 @@ struct entity {
     /* a class: its alignment; a non-static data member: the alignment
        its aligned attribute asks for, 0 if none ([ext:gnu_attributes]) */
     uint32_t alignment = 0;
+    /* a class: the alignment its alignment-specifiers ask for, 0 if none
+       ([dcl.align]) */
+    uint32_t requested_alignment = 0;
     /* a non-static data member with the packed attribute: aligned to 1
        before its aligned attribute ([ext:gnu_attributes]) */
     bool packed = false;
@@ -466,9 +477,9 @@ struct entity {
        conversion_function_name's, shared by all; explicit_ when declared
        explicit ([class.conv.fct]/2) */
     bool conversion_function = false, explicit_ = false;
-    /* a class: it declares a copy assignment operator
-       ([class.copy.assign]/1) */
-    bool user_copy_assignment = false;
+    /* a class: the copy assignment operators it declares
+       ([class.copy.assign]/1) not deleted on their first declaration */
+    uint32_t user_copy_assignments = 0;
     /* a class: its user-declared constructors (a chain through
        next_constructor) and destructor, 0 if none */
     entity_index first_constructor = 0, destructor = 0;
@@ -1769,6 +1780,9 @@ class semantic_analysis
        class template specialization c's class-specifier names one of the
        template-parameters (bound in c) */
     bool dependent_base_specifier(entity_index c, syntax_child name) const;
+    uint32_t own_pack_parameter(uint32_t name) const;
+    analysis_result base_class_name(syntax_child name, node_index n,
+                                    entity_index &base, token_index &id);
     bool in_dependent_base_only(entity_index c, uint32_t name,
                                 bool &unknown) const;
     /* [temp.res]/3: typename-specifier, as a type */
@@ -1778,7 +1792,9 @@ class semantic_analysis
                               uint32_t name, uint64_t value);
     /* the type typename Q::name for a dependent Q, one per Q and name */
     type_index dependent_member_type(type_index qualifier, uint32_t name);
+    type_index dependent_written_type(node_index n);
     owned_array<entity_index> dependent_members;
+    owned_array<entity_index> dependent_written_types;
     /* a block scope in the current one, made current */
     entity_index open_scope(entity_index conflicts, bool parameters);
     analysis_result pointer_operator(node_index op, qualified_type &type,
@@ -1808,9 +1824,13 @@ class semantic_analysis
                                             declarator_meaning &m);
     analysis_result gnu_attribute_specifier(node_index n, specified &s);
     uint32_t leading_gnu_attributes(node_index n) const;
+    bool gnu_or_without_effect(node_index n) const;
     /* [dcl.attr.grammar]: every attribute at n (an attribute-specifier,
        -seq or -list) changes nothing vcc generates */
     bool attributes_without_effect(syntax_child n) const;
+    bool gnu_attributes_without_effect(syntax_child n) const;
+    bool class_head_attributes_without_effect(syntax_child c) const;
+    uint32_t attributes_without_effect_before(node_index declaration) const;
     bool declares_unnamed_class(node_index seq) const;
     /* [ext:gnu_library_builtins] the function __builtin_NAME (an
        identifier) declares at its first use, 0 if it is not one */
@@ -2089,6 +2109,11 @@ class semantic_analysis
                                            expression_meaning &b);
     /* [expr.cond] */
     analysis_result conditional(node_index n, expression_meaning &m);
+    analysis_result conditional_operands(node_index n,
+                                         const expression_meaning &c,
+                                         expression_meaning e2,
+                                         expression_meaning e3,
+                                         expression_meaning &m);
     /* [expr.ass] */
     analysis_result assignment(node_index n, expression_meaning &m);
     /* [expr.ass]/4: = of a class */
@@ -2103,6 +2128,8 @@ class semantic_analysis
     analysis_result comma(node_index n, expression_meaning &m);
     /* a type-id ([dcl.name]) */
     analysis_result type_id(node_index n, qualified_type &type);
+    analysis_result alignment_specifier(node_index n, uint64_t &alignment);
+    syntax_child class_head_name(node_index head) const;
 
     /* ---- standard conversions ([conv]) ---- */
     /* the fundamental type of t, none if t is no fundamental type */
@@ -2818,6 +2845,9 @@ class semantic_analysis
         /* a variable template ([temp.pre]/1): declarator is its
            simple-declaration */
         bool is_variable = false;
+        /* a concept ([temp.concept]): definition is its
+           constraint-expression */
+        bool is_concept = false;
         /* a template template-parameter ([temp.param]/1): the class
            template its name stands for in the template's own
            declaration, never instantiated (a specialization of it is a
@@ -2914,8 +2944,50 @@ class semantic_analysis
     analysis_result alias_template_definition(node_index n, node_index alias);
     /* [temp.alias]/2: the type a simple-template-id naming the alias
        template at denotes */
+    /* [ext:clang_builtin_templates] __builtin_common_type<Template,
+       TypeIdentity, Empty, T...> (type_traits.cpp) */
+    bool is_builtin_common_type(uint32_t name) const;
+    analysis_result builtin_common_type(node_index id, type_index &type);
+    enum class common_found : uint8_t { none, found };
+    analysis_result common_type_of(node_index id, entity_index base,
+                                   const qualified_type *types, uint32_t count,
+                                   common_found &found, qualified_type &out);
+    analysis_result common_type_pair(node_index id, entity_index base,
+                                     qualified_type a, qualified_type b,
+                                     common_found &found, qualified_type &out);
+    analysis_result common_conditional(node_index id, qualified_type a,
+                                       qualified_type b, common_found &found,
+                                       qualified_type &out);
+    analysis_result template_with_types(node_index id, entity_index named,
+                                        const qualified_type *types,
+                                        uint32_t count, type_index &type);
+    qualified_type decayed(qualified_type t);
+    analysis_result changed_signedness(node_index n, qualified_type t,
+                                       bool to_signed, qualified_type &type);
+    analysis_result alias_template_specialization(
+        node_index id, uint32_t at,
+        const owned_array<template_argument> &arguments, type_index &type);
     analysis_result alias_template_type(node_index id, uint32_t at,
                                         type_index &type);
+    node_index variable_specialization_id(node_index d) const;
+    /* a partial specialization equivalent to another: the template not
+       used */
+    void equivalent_partial_specializations(uint32_t added);
+    analysis_result variable_partial_specialization(node_index n,
+                                                    node_index declaration,
+                                                    node_index id);
+    analysis_result variable_specialization(node_index n, node_index inner,
+                                            node_index id);
+    /* [temp.concept]: a concept-definition; the concept the held name e
+       is, plus one; [temp.names]/8: a concept-id's value */
+    analysis_result concept_definition(node_index n, node_index definition);
+    uint32_t concept_of(entity_index e) const;
+    analysis_result concept_id(node_index n, uint32_t ct,
+                               expression_meaning &m);
+    /* [temp.constr.constr]: whether constraint-expression e is satisfied,
+       the template parameters bound in scope */
+    analysis_result constraint_satisfied(syntax_child e, entity_index scope,
+                                         token_index horizon, bool &satisfied);
     /* the variable template the held name e is, plus one */
     uint32_t variable_template_of(entity_index e) const;
     /* [temp.pre]/1: a variable template defined at namespace scope */
@@ -2939,7 +3011,34 @@ class semantic_analysis
     /* [temp.pre]/1: a template-head's parameters */
     analysis_result
     template_head_parameters(node_index n, owned_array<node_index> &parameters,
-                             bool packs = false);
+                             bool packs = false, bool constrained = false,
+                             bool pack_anywhere = false);
+    syntax_child head_constraint(node_index n) const;
+    /* [temp.constr.atomic]/3: the satisfaction of a concept-id, once per
+       concept and arguments (a later different result would be ill-formed,
+       no diagnostic required; clang keeps the first, as here).  Its
+       arguments are satisfaction_arguments[first .. + count) */
+    struct satisfaction {
+        uint32_t concept_template = 0, first = 0, count = 0;
+        bool satisfied = false;
+        /* not known: its check was unsupported */
+        bool unknown = false;
+    };
+    owned_array<satisfaction> satisfactions;
+    owned_array<template_argument> satisfaction_arguments;
+    uint32_t template_record(entity_index t) const;
+    analysis_result
+    concept_satisfied(node_index at, uint32_t ct,
+                      const owned_array<template_argument> &arguments,
+                      bool &satisfied);
+    bool same_constraints(node_index a, node_index b);
+    bool same_token_spelling(token_index a, token_index b);
+    /* [temp.deduct]/5: whether the function template's constraints are
+       satisfied by the arguments deduced */
+    analysis_result
+    template_constraints_satisfied(uint32_t function_template,
+                                   const owned_array<template_argument> &values,
+                                   bool &satisfied);
     /* a template-parameter's identifier (after the ellipsis of a pack's) */
     token_index template_parameter_id(node_index parameter) const;
     /* [temp.param]/1's template-parameter, as written: a type-parameter
@@ -3031,6 +3130,14 @@ class semantic_analysis
     analysis_result
     class_specialization_definition(node_index n, node_index specifier,
                                     const owned_array<node_index> &parameters);
+    /* [temp.class.spec.match]/3: whether the deduced arguments substituted
+       into the partial specialization's give the use's */
+    analysis_result substitute_specialization(
+        uint32_t specialization, const owned_array<template_argument> &deduced,
+        const template_argument *arguments, uint32_t count, bool &substituted);
+    /* analysing a partial specialization's template arguments, which
+       matching substitutes again (substitute_specialization) */
+    uint32_t partial_arguments = 0;
     /* the specialization of function_templates[class_template - 1] whose
        pattern the arguments match (0: the primary), with its parameters'
        arguments */
@@ -3129,6 +3236,10 @@ class semantic_analysis
     bool deduce_type(qualified_type p, qualified_type a,
                      owned_array<template_argument> &deduced,
                      owned_array<bool> &set, bool exact = false);
+    /* each time deduction met a form it does not analyse (a pack not at
+       the end, a template template-parameter's pack) and answered false
+       without knowing: a caller that compares the count refuses */
+    uint32_t deduction_unknowns = 0;
     /* t without the cv-qualifiers cv, an array's taken from its elements
        ([basic.type.qualifier]/3) */
     qualified_type remove_cv(qualified_type t, uint32_t cv);
@@ -3153,6 +3264,13 @@ class semantic_analysis
     owned_array<template_argument> pack_arguments;
     template_argument make_pack(const template_argument *elements,
                                 uint32_t count);
+    bool deduce_argument(const template_argument &x, const template_argument &y,
+                         owned_array<template_argument> &d,
+                         owned_array<bool> &set);
+    bool deduce_pack_argument(const template_argument &x,
+                              const template_argument &y,
+                              owned_array<template_argument> &d,
+                              owned_array<bool> &set);
     /* a template parameter pack: template_parameter_entities[i]'s */
     bool template_parameter_is_pack(uint32_t i) const;
     /* [temp.variadic]/1: an instantiation's packs (entity_kind::pack, the
@@ -3214,6 +3332,17 @@ class semantic_analysis
         node_index body;
     };
     owned_array<deferred_body> nested_bodies;
+    /* [temp.inst]/4: the member function bodies of a class template's
+       specialization instantiated while another class is being defined,
+       analysed by instantiate_pending in the instantiation's scope */
+    struct postponed_body {
+        entity_index c;
+        node_index body;
+        entity_index scope;
+        node_index declaration;
+    };
+    owned_array<postponed_body> postponed_bodies;
+    bool postpone_member_bodies = false;
     analysis_result function_body(node_index definition, syntax_child compound,
                                   syntax_child ctor_initializer = {});
     /* [class.base.init]: a constructor's member initializations, the
@@ -3266,6 +3395,20 @@ class semantic_analysis
     {
         return instantiations[entity_table[e].instantiation - 1]
             .template_entity;
+    }
+    /* [abi:mangle.requires-clause]: the requires-clause of the function
+       template t's template-head (none: no bits), its template parameter
+       and the concept a token of it names (0: neither) */
+    syntax_child template_constraint(entity_index t) const;
+    entity_index constraint_parameter(entity_index t, token_index i) const;
+    entity_index constraint_concept(entity_index t, token_index i) const;
+    bool punctuator_is(syntax_child c, preprocessing_op_or_punc op) const
+    {
+        return syntax_is_punctuator(tokens, c, op);
+    }
+    uint32_t token_identifier(token_index i) const
+    {
+        return tokens.identifier(i);
     }
     uint32_t specialization_argument_count(entity_index e) const
     {
@@ -3410,6 +3553,17 @@ class semantic_analysis
     };
 
   private:
+    /* [temp.deduct]/8: "Invalid types and expressions can result in a
+       deduction failure only in the immediate context": what a
+       substitution issued and made, taken back when it failed there */
+    struct substitution_mark {
+        size_t messages = 0, errors = 0, warnings = 0, fatals = 0;
+        size_t expressions = 0, uses = 0;
+        uint32_t failures = 0;
+    };
+    substitution_mark mark_substitution() const;
+    /* false (nothing undone) when the failure is not the substitution's */
+    bool undo_substitution(const substitution_mark &m);
     /* [temp.over]/1: the specializations of the templates in group
        whose deduction from the call's arguments succeeds, appended to
        candidates; with first_arguments, where each one's deduced
@@ -3419,7 +3573,15 @@ class semantic_analysis
                         const expression_meaning *meanings, uint32_t count,
                         owned_array<overload_candidate> &candidates,
                         owned_array<uint32_t> *first_arguments = nullptr,
-                        owned_array<template_argument> *all = nullptr);
+                        owned_array<template_argument> *all = nullptr,
+                        const owned_array<syntax_child> *written = nullptr,
+                        node_index written_at = 0);
+    /* a call's template-id naming several function templates: its
+       template-arguments as written, checked against each template by
+       template_candidates ([temp.over]/1), from template_callee_parts to
+       template_call */
+    owned_array<syntax_child> overloaded_written;
+    node_index overloaded_written_at = 0;
     /* [over.best.ics]: the argument a converted to the type of a parameter;
        user-defined conversions considered unless [over.best.ics]/4 says
        not */

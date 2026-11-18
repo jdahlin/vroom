@@ -94,6 +94,15 @@ bool semantic_analysis::deduce_type(qualified_type p, qualified_type a,
         entity_index pt = specialized_template(pr.entity);
         entity_index at = specialized_template(ar.entity);
         if (template_template_parameter(pt)) {
+            /* a pack among its arguments (TT<T, Rest...>), whose template
+               may take fewer parameters: not analysed */
+            for (uint32_t i = 0; i < specialization_argument_count(pr.entity);
+                 i++)
+                if (specialization_template_argument(pr.entity, i).kind ==
+                    template_argument::kind_t::pack) {
+                    deduction_unknowns++;
+                    return false;
+                }
             /* /8's TT<T>: TT a template template-parameter, deduced as
                A's template when their parameters are the same
                ([temp.arg.template]/3's matching, nothing more) */
@@ -118,6 +127,7 @@ bool semantic_analysis::deduce_type(qualified_type p, qualified_type a,
         } else if (at != pt) {
             return false;
         }
+
         uint32_t count = specialization_argument_count(pr.entity);
         for (uint32_t i = 0; i < count; i++) {
             const template_argument &x =
@@ -126,6 +136,14 @@ bool semantic_analysis::deduce_type(qualified_type p, qualified_type a,
                 specialization_template_argument(ar.entity, i);
             if (x.kind == template_argument::kind_t::type) {
                 if (!deduce_type(x.type, y.type, deduced, set, exact))
+                    return false;
+                continue;
+            }
+            /* /9: a pack's elements in turn, the pattern's own pack
+               (Ts...) the rest */
+            if (x.kind == template_argument::kind_t::pack) {
+                if (y.kind != template_argument::kind_t::pack ||
+                    !deduce_pack_argument(x, y, deduced, set))
                     return false;
                 continue;
             }
@@ -369,9 +387,12 @@ analysis_result semantic_analysis::deduce_from_call(
         /* a parameter that does not match: deduction fails, which
            overload resolution of the function templates of the name and
            its other functions decides; neither is analysed yet */
+        uint32_t unknowns = deduction_unknowns;
         if (i < fixed) {
             if (deduce_type(p, a, values, set))
                 continue;
+            if (deduction_unknowns != unknowns)
+                return not_supported(at, "temp.deduct.type");
             /* [temp.over]/1: "If, for a given function template, argument
                deduction fails or the synthesized function template
                specialization would be ill-formed, no such function is
@@ -392,6 +413,8 @@ analysis_result semantic_analysis::deduce_from_call(
         if (pack >= one.size())
             return not_supported(at, "temp.deduct.call");
         if (!deduce_type(p, a, one, one_set)) {
+            if (deduction_unknowns != unknowns)
+                return not_supported(at, "temp.deduct.type");
             if (!failed || deduction_may_succeed(type_table, p, a))
                 return not_supported(at, "temp.deduct.call");
             *failed = true;
@@ -424,6 +447,20 @@ analysis_result semantic_analysis::deduce_from_call(
         default_template_arguments(at, function_template, values, set);
     if (r != analysis_result::well_formed)
         return r;
+    /* [temp.deduct]/5: "If the function template has associated
+       constraints ([temp.constr.decl]), those constraints are checked for
+       satisfaction ([temp.constr.constr]).  If the constraints are not
+       satisfied, type deduction fails." */
+    bool satisfied = true;
+    r = template_constraints_satisfied(function_template, values, satisfied);
+    if (r != analysis_result::well_formed)
+        return r;
+    if (!satisfied) {
+        if (!failed)
+            return not_supported(at, "temp.deduct");
+        *failed = true;
+        return analysis_result::well_formed;
+    }
     deduced.clear();
     for (const template_argument &x : values)
         deduced.append(x);

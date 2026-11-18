@@ -501,6 +501,10 @@ static bool layout_class_name(const semantic_analysis &analysis,
                               vbuffer *out)
 {
     const entity &x = analysis.entity_table[c];
+    /* a class template's specialization: clang writes its arguments
+       (A<int>), not written here */
+    if (x.kind == entity_kind::class_type && x.instantiation)
+        return false;
     entity_index scope = x.enclosing;
     if (scope) {
         const entity &s = analysis.entity_table[scope];

@@ -37,7 +37,7 @@ analysis_result semantic_analysis::template_declaration(node_index n)
     /* [temp.concept]/1: "A concept is a template that defines constraints
        on its template arguments." */
     case syntax_kind::concept_definition:
-        return not_supported(n, "temp.concept");
+        return concept_definition(n, inner);
     /* [temp.alias]/1: "A template-declaration in which the declaration is
        an alias-declaration declares the identifier to be an alias
        template." */
@@ -72,13 +72,25 @@ analysis_result semantic_analysis::template_declaration(node_index n)
                 tree[only].kind == syntax_kind::elaborated_type_specifier)
                 return class_template_declaration(n, only);
             /* [temp.pre]/1: a variable template, its one init-declarator
-               with an initializer */
-            if (d.child_count == 3 &&
-                syntax_is(tree, tree.children(inner)[0],
+               with an initializer, after attributes without effect
+               (libc++'s deprecated is_pod_v) */
+            uint32_t lead = attributes_without_effect_before(inner);
+            if (d.child_count == 3 + lead &&
+                syntax_is(tree, tree.children(inner)[lead],
                           syntax_kind::decl_specifier_seq) &&
-                syntax_is(tree, tree.children(inner)[1],
-                          syntax_kind::init_declarator))
+                syntax_is(tree, tree.children(inner)[lead + 1],
+                          syntax_kind::init_declarator)) {
+                /* (a specialization's template-id after attributes: no
+                   rules yet) */
+                node_index item = tree.children(inner)[lead + 1].index();
+                if (lead && tree[item].child_count &&
+                    syntax_is(tree, tree.children(item)[0],
+                              syntax_kind::simple_template_id))
+                    return not_supported(n, "temp.pre");
+                if (node_index id = variable_specialization_id(inner))
+                    return variable_partial_specialization(n, inner, id);
                 return variable_template_definition(n, inner);
+            }
             /* [temp.fct]/1: a function template's declaration
                (template<class T> T f(T);), one declarator not in an
                init-declarator-list */
@@ -112,8 +124,26 @@ analysis_result semantic_analysis::deduction_guide(node_index n)
  * default, pack or type-constraint; a requires-clause is [temp.constr].
  * The template is one of namespace scope.
  */
+/* [temp.pre]/1: a template-head's requires-clause's constraint-expression,
+   or none */
+syntax_child semantic_analysis::head_constraint(node_index n) const
+{
+    if (!tree[n].child_count ||
+        !syntax_is(tree, tree.children(n)[0], syntax_kind::template_head))
+        return syntax_child();
+    node_index head = tree.children(n)[0].index();
+    for (uint32_t i = 0; i < tree[head].child_count; i++) {
+        syntax_child c = tree.children(head)[i];
+        if (syntax_is(tree, c, syntax_kind::requires_clause) &&
+            tree[c.index()].child_count == 2)
+            return tree.children(c.index())[1];
+    }
+    return syntax_child();
+}
+
 analysis_result semantic_analysis::template_head_parameters(
-    node_index n, owned_array<node_index> &parameters, bool packs)
+    node_index n, owned_array<node_index> &parameters, bool packs,
+    bool constrained, bool pack_anywhere)
 {
     const syntax_node &node = tree[n];
     if (node.child_count != 2 ||
@@ -125,6 +155,8 @@ analysis_result semantic_analysis::template_head_parameters(
        requires-clause is [temp.constr] */
     node_index head = tree.children(n)[0].index();
     if (!template_head_list(head, parameters))
+        return not_supported(n, "temp.pre");
+    if (head_constraint(n).bits && !constrained)
         return not_supported(n, "temp.constr");
     /* a type-parameter class identifier_opt, a template template-parameter
        template < type-parameters > class identifier_opt, a
@@ -138,11 +170,19 @@ analysis_result semantic_analysis::template_head_parameters(
             return not_supported(p, "temp.param");
         /* [temp.param]/18: "If a template-parameter is a type-parameter
            with an ellipsis prior to its optional identifier ... then the
-           template-parameter is a template parameter pack"; class ...
-           identifier here, the template's last parameter */
+           template-parameter is a template parameter pack"; /17 a
+           parameter-declaration's, int... N: the template's last
+           parameter */
         if (x.pack) {
-            if (!packs || i + 1 != parameters.size() || !x.type ||
-                x.template_template || !x.named || x.has_default)
+            /* [temp.param]/14: "If a template-parameter of a primary class
+               template ... is a template parameter pack, it shall be the
+               last template-parameter.  A template parameter pack of a
+               function template shall not be followed by another
+               template parameter unless that template parameter can be
+               deduced": a partial specialization's are all deduced
+               ([temp.class.spec]/8.3 aside) */
+            if (!packs || (i + 1 != parameters.size() && !pack_anywhere) ||
+                x.template_template || x.has_default)
                 return not_supported(p, "temp.variadic");
             continue;
         }
@@ -188,7 +228,7 @@ semantic_analysis::function_template_definition(node_index n,
 {
     entity_index outer = current_scope;
     owned_array<node_index> parameters;
-    analysis_result head = template_head_parameters(n, parameters, true);
+    analysis_result head = template_head_parameters(n, parameters, true, true);
     if (head != analysis_result::well_formed)
         return head;
     const syntax_node &d = tree[definition];
@@ -303,7 +343,8 @@ semantic_analysis::function_template_definition(node_index n,
             return not_supported(n, "temp.over.link");
         if (f.parameter_count != parameters.size() ||
             !same_template_parameters(first, f.first_parameter,
-                                      f.parameter_count))
+                                      f.parameter_count) ||
+            !same_constraints(f.declaration, n))
             continue;
         owned_array<template_argument> values;
         owned_array<bool> set;
@@ -687,7 +728,7 @@ analysis_result semantic_analysis::alias_template_definition(node_index n,
 {
     entity_index outer = current_scope;
     owned_array<node_index> parameters;
-    analysis_result r = template_head_parameters(n, parameters);
+    analysis_result r = template_head_parameters(n, parameters, true);
     if (r != analysis_result::well_formed)
         return r;
     uint32_t name = tokens.identifier(tree[alias].first_token + 1);
@@ -706,8 +747,18 @@ analysis_result semantic_analysis::alias_template_definition(node_index n,
     qualified_type pattern;
     entity_index saved_scope = current_scope;
     current_scope = scope;
+    size_t unsupported_before = unsupported.size();
     r = alias_type(alias, pattern);
     current_scope = saved_scope;
+    /* a type analysis cannot follow with the parameters unbound (T...
+       where the template named takes a parameter before its pack,
+       typename Q<T>::template X<U> of a dependent Q): it is analysed with
+       each use's arguments (alias_template_type), as it is anyway, and
+       judged there */
+    if (r == analysis_result::unsupported) {
+        unsupported.resize(unsupported_before);
+        r = analysis_result::well_formed;
+    }
     if (r != analysis_result::well_formed)
         return r;
     function_template record = new_template(
@@ -717,6 +768,107 @@ analysis_result semantic_analysis::alias_template_definition(node_index n,
     record.is_alias = true;
     hold_template_name(record, name, outer);
     return analysis_result::well_formed;
+}
+
+/*
+ * [temp.spec.partial]/1 (C++20 [temp.class.spec] with [temp.pre]/1's
+ * variable templates): template<class T> const bool v<T, void_t<T&>> =
+ * true;: a partial specialization of a variable template, recorded as a
+ * class template's is (class_specialization_definition): its arguments in
+ * terms of its parameters, which instantiate_variable matches
+ * (matching_specialization) and whose declaration it analyses with the
+ * deduced arguments.
+ */
+analysis_result semantic_analysis::variable_partial_specialization(
+    node_index n, node_index declaration, node_index id)
+{
+    entity_index outer = current_scope;
+    owned_array<node_index> parameters;
+    analysis_result r = template_head_parameters(n, parameters);
+    if (r != analysis_result::well_formed)
+        return r;
+    lookup_result x;
+    entity_index named = 0;
+    template_id_name(id, x, named);
+    uint32_t vt = variable_template_of(named);
+    const function_template primary = function_templates[vt - 1];
+    if (parameters.empty() || function_templates[vt - 1].name != named ||
+        entity_table[primary.entity].enclosing != outer ||
+        template_parameter_is_pack(primary.first_parameter +
+                                   primary.parameter_count - 1))
+        return not_supported(n, "temp.class.spec");
+    /* [temp.class.spec]/1: one declared after an instantiation it would
+       be used for: not analysed */
+    for (const instantiation_record &i : instantiations)
+        if (i.template_entity == primary.entity && i.specialization)
+            return not_supported(n, "temp.class.spec");
+    uint32_t index = 0, first = 0;
+    entity_index scope = 0;
+    r = template_parameter_scope(n, parameters, outer, 0, index, scope, first);
+    if (r != analysis_result::well_formed)
+        return r;
+    owned_array<template_argument> arguments;
+    partial_arguments++;
+    r = template_id_arguments_in(id, vt, scope, arguments);
+    partial_arguments--;
+    if (r != analysis_result::well_formed)
+        return r;
+    bool dependent = false;
+    bool identity = arguments.size() == parameters.size();
+    for (uint32_t i = 0; i < arguments.size(); i++) {
+        const template_argument &a = arguments[i];
+        if (depends(type_table, a.type) || a.template_entity)
+            dependent = true;
+        entity_index pe = template_parameter_entities[first + i];
+        if (identity)
+            identity = a.template_entity == pe ||
+                       (a.kind == template_argument::kind_t::type &&
+                        a.type == entity_table[pe].type);
+    }
+    /* [temp.class.spec]/9: more specialized than the primary */
+    if (!dependent || identity)
+        return not_supported(n, "temp.class.spec");
+    function_template record;
+    record.entity = primary.entity;
+    record.declaration = n;
+    record.declarator = declaration;
+    record.first_parameter = first;
+    record.parameter_count = static_cast<uint32_t>(parameters.size());
+    record.is_variable = true;
+    record.primary = vt;
+    record.first_pattern = static_cast<uint32_t>(template_arguments.size());
+    record.pattern_count = static_cast<uint32_t>(arguments.size());
+    for (const template_argument &a : arguments)
+        template_arguments.append(a);
+    function_templates.append(record);
+    if (!parameters.empty())
+        equivalent_partial_specializations(
+            static_cast<uint32_t>(function_templates.size()));
+    return analysis_result::well_formed;
+}
+
+/*
+ * [temp.spec.partial.general]/1 (CWG 1980): a partial specialization
+ * equivalent to another of the template (each at least as specialized as
+ * the other: their arguments the same but for the names of their
+ * parameters, void_t<typename T::a> and void_t<typename T::b> both void)
+ * redeclares it, which clang reports as a redefinition and then uses
+ * neither; the template is not used ([temp.over.link]/7: functionally
+ * equivalent but not equivalent, no diagnostic required)
+ */
+void semantic_analysis::equivalent_partial_specializations(uint32_t added)
+{
+    const function_template a = function_templates[added - 1];
+    for (uint32_t k = 0; k < function_templates.size(); k++) {
+        const function_template &o = function_templates[k];
+        if (k + 1 == added || o.primary != a.primary || !o.parameter_count)
+            continue;
+        bool unknown = false;
+        bool forward = class_at_least_as_specialized(added, k + 1, unknown);
+        bool backward = class_at_least_as_specialized(k + 1, added, unknown);
+        if (forward && backward && !unknown)
+            function_templates[a.primary - 1].unusable = true;
+    }
 }
 
 uint32_t semantic_analysis::variable_template_of(entity_index e) const
@@ -739,10 +891,11 @@ semantic_analysis::variable_template_definition(node_index n,
 {
     entity_index outer = current_scope;
     owned_array<node_index> parameters;
-    analysis_result r = template_head_parameters(n, parameters);
+    analysis_result r = template_head_parameters(n, parameters, true);
     if (r != analysis_result::well_formed)
         return r;
-    const syntax_child *parts = tree.children(declaration);
+    const syntax_child *parts = tree.children(declaration) +
+                                attributes_without_effect_before(declaration);
     node_index item = parts[1].index();
     if (tree[item].child_count != 2 ||
         syntax_is(tree, tree.children(item)[1], syntax_kind::requires_clause))
@@ -821,6 +974,9 @@ analysis_result semantic_analysis::variable_template_id(node_index n,
     entity_index named = 0;
     if (!template_id_name(n, x, named))
         return not_supported(n, "temp.names");
+    if (uint32_t ct = concept_of(named))
+        if (!x.ambiguous)
+            return concept_id(n, ct, m);
     uint32_t vt = variable_template_of(named);
     if (!vt || x.ambiguous)
         return not_supported(n, "temp.names");
@@ -828,10 +984,20 @@ analysis_result semantic_analysis::variable_template_id(node_index n,
     analysis_result r = template_id_arguments(n, vt, arguments);
     if (r != analysis_result::well_formed)
         return r;
-    for (const template_argument &a : arguments)
-        if (a.kind == template_argument::kind_t::pack ||
-            depends(type_table, a.type) || a.template_entity)
+    for (const template_argument &a : arguments) {
+        if (depends(type_table, a.type) || a.template_entity)
             return not_supported(n, "temp.dep");
+        /* a pack's elements: each known ([temp.variadic]/1) */
+        if (a.kind == template_argument::kind_t::pack) {
+            if (a.count == UINT32_MAX)
+                return not_supported(n, "temp.dep");
+            for (uint32_t k = 0; k < a.count; k++)
+                if (depends(type_table, pack_arguments[a.value + k].type) ||
+                    pack_arguments[a.value + k].template_entity ||
+                    pack_arguments[a.value + k].count == UINT32_MAX)
+                    return not_supported(n, "temp.dep");
+        }
+    }
     entity_index e = 0;
     r = instantiate_variable(n, vt, arguments.data(),
                              static_cast<uint32_t>(arguments.size()), e);
@@ -863,16 +1029,40 @@ semantic_analysis::instantiate_variable(node_index at, uint32_t vt,
     }
     if (instantiation_depth >= 64)
         return not_supported(at, "temp.inst");
+    /* [temp.class.spec.match] for variable templates: a partial
+       specialization's declaration, its parameters the deduced arguments */
+    uint32_t pattern = 0;
+    owned_array<template_argument> deduced;
+    analysis_result matched =
+        matching_specialization(at, vt, arguments, count, pattern, deduced);
+    if (matched != analysis_result::well_formed)
+        return matched;
     uint32_t index = record_instantiation(ft, arguments, count);
+    function_template definition = ft;
+    if (pattern) {
+        definition = function_templates[pattern - 1];
+        entity_index bound = entity_table.make(
+            entity_kind::block_scope, 0, entity_table[ft.entity].enclosing);
+        for (uint32_t i = 0; i < definition.parameter_count; i++)
+            bind_template_argument(
+                bound,
+                template_parameter_entities[definition.first_parameter + i],
+                deduced[i]);
+        instantiations[index].scope = bound;
+        instantiations[index].pattern = pattern;
+    }
     entity_index scope = instantiations[index].scope;
     instantiation_context context;
-    enter_instantiation(context, scope, ft.declaration);
+    enter_instantiation(context, scope, definition.declaration);
     template_member_scope = scope;
     expanding = false;
     instantiating = 0;
     variable_instantiating = index + 1;
     instantiations[index].defining = true;
-    analysis_result r = simple_declaration(ft.declarator);
+    /* (a partial specialization's declarator-id: its template-id) */
+    declarator_template_id = pattern != 0;
+    analysis_result r = simple_declaration(definition.declarator);
+    declarator_template_id = false;
     instantiations[index].defining = false;
     leave_instantiation(context);
     /* an argument that makes the declaration ill-formed: clang reports it
@@ -898,14 +1088,28 @@ analysis_result semantic_analysis::alias_template_type(node_index id,
                                                        uint32_t at,
                                                        type_index &type)
 {
-    const function_template ft = function_templates[at - 1];
     owned_array<template_argument> arguments;
     analysis_result r = template_id_arguments(id, at, arguments);
     if (r != analysis_result::well_formed)
         return r;
+    return alias_template_specialization(id, at, arguments, type);
+}
+
+/* the type alias template function_templates[at - 1] denotes with
+   arguments (one per parameter, a pack's as one) */
+analysis_result semantic_analysis::alias_template_specialization(
+    node_index id, uint32_t at, const owned_array<template_argument> &arguments,
+    type_index &type)
+{
+    const function_template ft = function_templates[at - 1];
+    analysis_result r = analysis_result::well_formed;
+    /* an enclosing template's own pack expanded into the alias's pack
+       (Numbers... unbound): its elements are not known */
     for (const template_argument &a : arguments)
         if (a.kind == template_argument::kind_t::pack)
-            return not_supported(id, "temp.variadic");
+            for (uint32_t k = 0; k < a.count; k++)
+                if (pack_arguments[a.value + k].count == UINT32_MAX)
+                    return not_supported(id, "temp.variadic");
     entity_index scope = entity_table.make(entity_kind::block_scope, 0,
                                            entity_table[ft.entity].enclosing);
     for (uint32_t i = 0; i < ft.parameter_count; i++)
@@ -935,6 +1139,28 @@ analysis_result semantic_analysis::alias_template_type(node_index id,
     /* (a cv-qualified type: template_type's callers take no cv) */
     if (t.cv())
         return not_supported(id, "temp.alias");
+    /* [temp.alias]/4 (CWG 1558): "when a template-id refers to the
+       specialization of an alias template ... any substitution failure in
+       the template arguments of the template-id is a substitution failure
+       of the instantiation": dependent arguments the type does not keep
+       (void_t<typename T::type> is void) are substituted again with each
+       instantiation, which a non-dependent type does not record; a
+       partial specialization's are (substitute_specialization) */
+    if (!partial_arguments &&
+        !depends_on_template_parameter(
+            qualified_type::make(t.unqualified(), cv_none))) {
+        for (const template_argument &a : arguments) {
+            bool dependent =
+                depends_on_template_parameter(a.type) || a.template_entity;
+            if (a.kind == template_argument::kind_t::pack)
+                for (uint32_t k = 0; k < a.count; k++)
+                    if (depends_on_template_parameter(
+                            pack_arguments[a.value + k].type))
+                        dependent = true;
+            if (dependent)
+                return not_supported(id, "temp.alias");
+        }
+    }
     type = t.unqualified();
     return analysis_result::well_formed;
 }
@@ -1084,29 +1310,25 @@ semantic_analysis::class_template_definition(node_index n, node_index specifier)
 {
     entity_index outer = current_scope;
     owned_array<node_index> parameters;
-    analysis_result r = template_head_parameters(n, parameters, true);
-    if (r != analysis_result::well_formed)
-        return r;
     /* class-head: class-key identifier base-clause_opt */
     const syntax_node &spec = tree[specifier];
     if (!spec.child_count ||
         !syntax_is(tree, tree.children(specifier)[0], syntax_kind::class_head))
         return not_supported(n, "temp.class");
     node_index head = tree.children(specifier)[0].index();
-    if (tree[head].child_count >= 2 &&
-        syntax_is(tree, tree.children(head)[1],
-                  syntax_kind::simple_template_id)) {
-        /* a partial specialization's pack (its arguments' pack
-           expansions) */
-        for (node_index p : parameters)
-            if (tree[p].child_count == 3 &&
-                syntax_is_punctuator(tokens, tree.children(p)[1],
-                                     preprocessing_op_or_punc::ELLIPSIS))
-                return not_supported(n, "temp.variadic");
+    syntax_child head_name = class_head_name(head);
+    bool specialization =
+        head_name.bits &&
+        syntax_is(tree, head_name, syntax_kind::simple_template_id);
+    analysis_result r =
+        template_head_parameters(n, parameters, true, false, specialization);
+    if (r != analysis_result::well_formed)
+        return r;
+    if (specialization) {
         return class_specialization_definition(n, specifier, parameters);
     }
-    if (tree[head].child_count < 2 || !tree.children(head)[1].is_token() ||
-        tokens[tree.children(head)[1].index()].kind != token_kind::identifier)
+    if (!head_name.is_token() ||
+        tokens[head_name.index()].kind != token_kind::identifier)
         return not_supported(n, "temp.class");
     /* a specialization declares the friend
        functions its class defines in the template's namespace
@@ -1115,7 +1337,7 @@ semantic_analysis::class_template_definition(node_index n, node_index specifier)
     for (token_index i = spec.first_token; i < spec.end_token; i++)
         if (p.keyword_of(tokens[i]) == standard_keyword::friend_)
             return not_supported(n, "class.friend");
-    uint32_t name = tokens.identifier(tree.children(head)[1].index());
+    uint32_t name = tokens.identifier(head_name.index());
     uint32_t index = 0, first = 0;
     entity_index scope = 0;
     r = template_parameter_scope(n, parameters, outer, name, index, scope,
@@ -1235,7 +1457,7 @@ analysis_result semantic_analysis::class_specialization_definition(
         return not_supported(n, rule);
     const syntax_node &spec = tree[specifier];
     node_index head = tree.children(specifier)[0].index();
-    node_index id = tree.children(head)[1].index();
+    node_index id = class_head_name(head).index();
     lookup_result x;
     entity_index named = 0;
     if (!template_id_name(id, x, named))
@@ -1250,12 +1472,6 @@ analysis_result semantic_analysis::class_specialization_definition(
         entity_table[function_templates[ct - 1].entity].enclosing != outer)
         return not_supported(n, rule);
     const function_template primary = function_templates[ct - 1];
-    /* a variadic primary's: its arguments' packs are matched exactly, not
-       deduced ([temp.class.spec.match]/2 with [temp.deduct.type]/9) */
-    if (!parameters.empty() &&
-        template_parameter_is_pack(primary.first_parameter +
-                                   primary.parameter_count - 1))
-        return not_supported(n, "temp.variadic");
     /* [temp.expl.spec]/7, [temp.class.spec]/1: one declared after a
        specialization it would be used for was instantiated makes the
        program ill-formed (no diagnostic required); any instantiation
@@ -1273,7 +1489,9 @@ analysis_result semantic_analysis::class_specialization_definition(
     /* the arguments, in the parameters' scope; what they record for
        claims is the template's */
     owned_array<template_argument> arguments;
+    partial_arguments++;
     r = template_id_arguments_in(id, ct, scope, arguments);
+    partial_arguments--;
     if (r != analysis_result::well_formed)
         return r;
     bool dependent = false;
@@ -1282,13 +1500,21 @@ analysis_result semantic_analysis::class_specialization_definition(
         const template_argument &a = arguments[i];
         if (depends(type_table, a.type) || a.template_entity)
             dependent = true;
+        if (a.kind == template_argument::kind_t::pack)
+            for (uint32_t k = 0; k < a.count; k++)
+                if (depends(type_table, pack_arguments[a.value + k].type) ||
+                    pack_arguments[a.value + k].template_entity)
+                    dependent = true;
     }
     for (uint32_t i = 0; i < arguments.size() && identity; i++) {
         entity_index pe = template_parameter_entities[first + i];
         const template_argument &a = arguments[i];
         identity = a.template_entity == pe ||
                    (a.kind == template_argument::kind_t::type &&
-                    a.type == entity_table[pe].type);
+                    a.type == entity_table[pe].type) ||
+                   (a.kind == template_argument::kind_t::pack && a.count == 1 &&
+                    pack_arguments[a.value].count == UINT32_MAX &&
+                    pack_arguments[a.value].template_entity == pe);
     }
     /* [temp.expl.spec]: no dependent argument; [temp.class.spec]/9: "The
        specialization shall be more specialized than the primary template"
@@ -1320,6 +1546,9 @@ analysis_result semantic_analysis::class_specialization_definition(
     for (const template_argument &a : arguments)
         template_arguments.append(a);
     function_templates.append(record);
+    if (!parameters.empty())
+        equivalent_partial_specializations(
+            static_cast<uint32_t>(function_templates.size()));
     return analysis_result::well_formed;
 }
 
@@ -1336,6 +1565,120 @@ analysis_result semantic_analysis::class_specialization_definition(
  * matching is /1.2's partial ordering ([temp.class.order],
  * temp.func.order.cpp).
  */
+/*
+ * [temp.class.spec.match]/2-3 (C++20 [temp.spec.partial.match]): "If the
+ * template arguments of a partial specialization cannot be deduced
+ * because of the structure of its template-parameter-list and the
+ * template-id, the program is ill-formed" ... "the deduced template
+ * arguments are substituted into" the specialization's arguments: they
+ * shall be valid and the same as the use's.  The specialization's
+ * template-id analysed again with its parameters bound to what deduction
+ * found; a failure there is no match ([temp.deduct]/8), the arguments
+ * that aliases fold kept (void_t<typename T::type> of CWG 1558)
+ */
+analysis_result semantic_analysis::substitute_specialization(
+    uint32_t specialization, const owned_array<template_argument> &deduced,
+    const template_argument *arguments, uint32_t count, bool &substituted)
+{
+    substituted = false;
+    const function_template s = function_templates[specialization - 1];
+    node_index id = 0;
+    if (s.is_variable) {
+        id = variable_specialization_id(s.declarator);
+    } else {
+        node_index head = tree.children(s.definition)[0].index();
+        id = class_head_name(head).index();
+    }
+    entity_index scope = entity_table.make(entity_kind::block_scope, 0,
+                                           entity_table[s.entity].enclosing);
+    for (uint32_t i = 0; i < s.parameter_count; i++)
+        bind_template_argument(
+            scope, template_parameter_entities[s.first_parameter + i],
+            deduced[i]);
+    substitution_mark mark = mark_substitution();
+    owned_array<template_argument> again;
+    token_index saved_horizon = lookup_horizon;
+    lookup_horizon = tree[s.declaration].first_token;
+    substituting++;
+    partial_arguments++;
+    analysis_result r = template_id_arguments_in(id, s.primary, scope, again);
+    partial_arguments--;
+    substituting--;
+    lookup_horizon = saved_horizon;
+    if (r == analysis_result::ill_formed && undo_substitution(mark))
+        return analysis_result::well_formed;
+    if (r != analysis_result::well_formed)
+        return r;
+    if (again.size() != count)
+        return analysis_result::well_formed;
+    for (uint32_t i = 0; i < count; i++)
+        if (!(again[i] == arguments[i]))
+            return analysis_result::well_formed;
+    substituted = true;
+    return analysis_result::well_formed;
+}
+
+/* [temp.deduct.type]/8: a partial specialization's argument x against
+   the argument y it is matched with, the parameters it names deduced
+   into d (set) */
+bool semantic_analysis::deduce_argument(const template_argument &x,
+                                        const template_argument &y,
+                                        owned_array<template_argument> &d,
+                                        owned_array<bool> &set)
+{
+    if (x.kind != y.kind)
+        return false;
+    if (x.kind == template_argument::kind_t::type)
+        return deduce_type(x.type, y.type, d, set, true);
+    if (!x.template_entity)
+        return x == y;
+    if (set[x.value])
+        return d[x.value] == y;
+    d[x.value] = y;
+    set[x.value] = true;
+    return true;
+}
+
+/* [temp.deduct.type]/9: the elements of a pack argument x (the
+   partial specialization's, <I1, In...>) against the elements of y, each
+   in turn; an element that is the expansion of the specialization's own
+   pack (count UINT32_MAX, its last) takes the rest of y's as its pack */
+bool semantic_analysis::deduce_pack_argument(const template_argument &x,
+                                             const template_argument &y,
+                                             owned_array<template_argument> &d,
+                                             owned_array<bool> &set)
+{
+    for (uint32_t k = 0; k < x.count; k++) {
+        const template_argument e = pack_arguments[x.value + k];
+        if (e.kind == template_argument::kind_t::pack &&
+            e.count == UINT32_MAX) {
+            /* /5.7: a pack expansion not at the end is a non-deduced
+               context: not analysed */
+            if (k + 1 != x.count) {
+                deduction_unknowns++;
+                return false;
+            }
+            if (k > y.count)
+                return false;
+            owned_array<template_argument> rest;
+            for (uint32_t r = k; r < y.count; r++)
+                rest.append(pack_arguments[y.value + r]);
+            template_argument p =
+                make_pack(rest.data(), static_cast<uint32_t>(rest.size()));
+            uint64_t at = e.value;
+            if (set[at])
+                return d[at] == p;
+            d[at] = p;
+            set[at] = true;
+            return true;
+        }
+        if (k >= y.count ||
+            !deduce_argument(e, pack_arguments[y.value + k], d, set))
+            return false;
+    }
+    return x.count == y.count;
+}
+
 analysis_result semantic_analysis::matching_specialization(
     node_index at, uint32_t class_template, const template_argument *arguments,
     uint32_t count, uint32_t &pattern, owned_array<template_argument> &deduced)
@@ -1357,23 +1700,19 @@ analysis_result semantic_analysis::matching_specialization(
             d.append(template_argument());
             set.append(false);
         }
+        uint32_t unknowns = deduction_unknowns;
         bool match = true;
         for (uint32_t i = 0; i < count && match; i++) {
             const template_argument x = template_arguments[s.first_pattern + i];
             const template_argument &y = arguments[i];
-            if (x.kind != y.kind)
-                match = false;
-            else if (x.kind == template_argument::kind_t::type)
-                match = deduce_type(x.type, y.type, d, set, true);
-            else if (!x.template_entity)
-                match = x == y;
-            else if (set[x.value])
-                match = d[x.value] == y;
-            else {
-                d[x.value] = y;
-                set[x.value] = true;
-            }
+            if (x.kind == template_argument::kind_t::pack &&
+                y.kind == template_argument::kind_t::pack)
+                match = deduce_pack_argument(x, y, d, set);
+            else
+                match = deduce_argument(x, y, d, set);
         }
+        if (deduction_unknowns != unknowns)
+            return not_supported(at, "temp.deduct.type");
         if (!match)
             continue;
         if (!s.parameter_count) {
@@ -1386,6 +1725,13 @@ analysis_result semantic_analysis::matching_specialization(
         for (uint32_t i = 0; i < s.parameter_count; i++)
             if (!set[i])
                 return not_supported(at, "temp.class.spec");
+        bool substituted = false;
+        analysis_result again =
+            substitute_specialization(k + 1, d, arguments, count, substituted);
+        if (again != analysis_result::well_formed)
+            return again;
+        if (!substituted)
+            continue;
         matches++;
         found.append(k + 1);
         first_deduced.append(static_cast<uint32_t>(all.size()));
@@ -1454,6 +1800,8 @@ analysis_result semantic_analysis::template_type(node_index id,
     entity_index named = x.entity;
     if (!named)
         named = x.unknown_entity;
+    if (!named && !qualified && is_builtin_common_type(name))
+        return builtin_common_type(id, type);
     uint32_t ct = class_template_of(named);
     if (!ct) {
         uint32_t at = alias_template_of(named);
@@ -1470,13 +1818,13 @@ analysis_result semantic_analysis::template_type(node_index id,
     for (const template_argument &a : arguments) {
         if (depends(type_table, a.type) || a.template_entity)
             dependent = true;
-        /* a pack of dependent arguments: deduction from it
-           ([temp.deduct.type]/9) is not analysed */
+        /* a pack of dependent arguments (deduced from by
+           deduce_pack_argument, [temp.deduct.type]/9) */
         if (a.kind == template_argument::kind_t::pack)
             for (uint32_t k = 0; k < a.count; k++)
                 if (depends(type_table, pack_arguments[a.value + k].type) ||
                     pack_arguments[a.value + k].template_entity)
-                    return not_supported(id, "temp.variadic");
+                    dependent = true;
     }
     if (dependent) {
         /* [temp.dep.type]/9: "A type is dependent if it is ... a
@@ -1589,6 +1937,25 @@ analysis_result semantic_analysis::template_id_arguments(
                     syntax_is_punctuator(tokens, syntax_child::token(end - 1),
                                          preprocessing_op_or_punc::ELLIPSIS))
                     end--;
+                /* a partial specialization's own pack, In... (its
+                   pattern the pack's name alone): the rest of the
+                   primary's pack, deduced when it is matched
+                   (matching_specialization) */
+                uint32_t own = 0;
+                if (end == first + 1 &&
+                    tokens[first].kind == token_kind::identifier)
+                    own = own_pack_parameter(tokens.identifier(first));
+                if (own) {
+                    if (arguments.size() < pack || pack >= count)
+                        return not_supported(id, "temp.variadic");
+                    template_argument v;
+                    v.kind = template_argument::kind_t::pack;
+                    v.template_entity = template_parameter_entities[own - 1];
+                    v.value = entity_table[v.template_entity].value;
+                    v.count = UINT32_MAX;
+                    elements.append(v);
+                    continue;
+                }
                 if (!expansion_count(first, end, times))
                     return not_supported(id, "temp.variadic");
             }
@@ -1641,6 +2008,25 @@ analysis_result semantic_analysis::template_id_arguments(
     return r;
 }
 
+/* the template parameter pack name names from the current scope (a
+   partial specialization's own, not bound to elements), its index in
+   template_parameter_entities plus one; else 0 */
+uint32_t semantic_analysis::own_pack_parameter(uint32_t name) const
+{
+    for (entity_index s = current_scope;; s = entity_table[s].enclosing) {
+        entity_index e = entity_table.find(s, name);
+        if (e) {
+            for (size_t i = template_parameter_entities.size(); i-- > 0;)
+                if (template_parameter_entities[i] == e &&
+                    template_parameter_is_pack(static_cast<uint32_t>(i)))
+                    return static_cast<uint32_t>(i + 1);
+            return 0;
+        }
+        if (!s)
+            return 0;
+    }
+}
+
 bool semantic_analysis::same_template_parameters(uint32_t first,
                                                  uint32_t other_first,
                                                  uint32_t count) const
@@ -1691,7 +2077,7 @@ semantic_analysis::class_template_declaration(node_index n,
     if (key != standard_keyword::class_ && key != standard_keyword::struct_)
         return not_supported(n, "temp.class");
     owned_array<node_index> parameters;
-    analysis_result r = template_head_parameters(n, parameters);
+    analysis_result r = template_head_parameters(n, parameters, true);
     if (r != analysis_result::well_formed)
         return r;
     uint32_t name = tokens.identifier(parts[1].index());
@@ -1991,6 +2377,19 @@ void semantic_analysis::hold_template_name(function_template &record,
     entity_table.bind(outer, name, held);
     record.name = held;
     function_templates.append(record);
+}
+
+/* the number of a simple-declaration's leading attribute-specifier-seqs
+   and gnu-attribute-specifiers whose attributes change nothing vcc
+   generates */
+uint32_t semantic_analysis::attributes_without_effect_before(
+    node_index declaration) const
+{
+    uint32_t k = 0;
+    while (k < tree[declaration].child_count &&
+           class_head_attributes_without_effect(tree.children(declaration)[k]))
+        k++;
+    return k;
 }
 
 } // namespace cplusplus

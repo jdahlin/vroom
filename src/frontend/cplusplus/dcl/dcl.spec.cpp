@@ -1487,6 +1487,15 @@ semantic_analysis::named_member_type(node_index n, token_index t,
                                      entity_index e, const char *citation,
                                      type_index &type, uint32_t &cv)
 {
+    /* [temp.res.general]/3, [dcl.type.simple]/2: the name of a
+       typename-specifier or type-name names a type; a variable, function
+       or enumerator found is ill-formed (in a substitution, a deduction
+       failure: [temp.deduct]/11.3) */
+    if (e && (entity_table[e].kind == entity_kind::variable ||
+              entity_table[e].kind == entity_kind::function ||
+              entity_table[e].kind == entity_kind::enumerator))
+        return ill_formed_at_token(t, "the qualified name does not name a type",
+                                   citation);
     if (!e || (entity_table[e].kind != entity_kind::class_type &&
                entity_table[e].kind != entity_kind::enumeration &&
                entity_table[e].kind != entity_kind::typedef_name))

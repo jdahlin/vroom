@@ -951,8 +951,13 @@ analysis_result semantic_analysis::template_callee_parts(
         owned_array<uint32_t> group;
         function_template_overloads(
             function_templates[function_template - 1].name, group);
-        if (group.size() > 1)
-            return not_supported(id.index(), "temp.over");
+        if (group.size() > 1) {
+            overloaded_written.clear();
+            for (syntax_child a : written)
+                overloaded_written.append(a);
+            overloaded_written_at = id.index();
+            return analysis_result::well_formed;
+        }
     }
     /* [temp.arg.explicit]/6: "The template argument list shall not
        specify more template-arguments than there are corresponding
@@ -972,6 +977,35 @@ analysis_result semantic_analysis::template_callee_parts(
     return analysis_result::well_formed;
 }
 
+semantic_analysis::substitution_mark
+semantic_analysis::mark_substitution() const
+{
+    substitution_mark m;
+    m.messages = diagnostics.messages.size();
+    m.errors = diagnostics.error_count;
+    m.warnings = diagnostics.warning_count;
+    m.fatals = diagnostics.fatal_count;
+    m.expressions = expressions.size();
+    m.uses = name_uses.size();
+    m.failures = definition_failures;
+    return m;
+}
+
+bool semantic_analysis::undo_substitution(const substitution_mark &m)
+{
+    /* (a definition instantiated on the way failed, or a fatal error:
+       not the substitution's own failure) */
+    if (m.failures != definition_failures ||
+        diagnostics.fatal_count != m.fatals)
+        return false;
+    diagnostics.messages.resize(m.messages);
+    diagnostics.error_count = m.errors;
+    diagnostics.warning_count = m.warnings;
+    expressions.resize(m.expressions);
+    name_uses.resize(m.uses);
+    return true;
+}
+
 /*
  * [temp.over]/1: "For each function template, if the argument deduction
  * and checking succeeds, the template-arguments (deduced and/or explicit)
@@ -987,7 +1021,8 @@ analysis_result semantic_analysis::template_candidates(
     node_index n, const owned_array<uint32_t> &group,
     const expression_meaning *meanings, uint32_t count,
     owned_array<overload_candidate> &candidates,
-    owned_array<uint32_t> *first_arguments, owned_array<template_argument> *all)
+    owned_array<uint32_t> *first_arguments, owned_array<template_argument> *all,
+    const owned_array<syntax_child> *written, node_index written_at)
 {
     for (uint32_t g : group) {
         owned_array<template_argument> d;
@@ -996,15 +1031,37 @@ analysis_result semantic_analysis::template_candidates(
            immediate context of the declaration (or of a default
            template-argument) substituted is no candidate, and no
            diagnostic: what substitution issued is taken back */
-        size_t messages = diagnostics.messages.size();
-        size_t errors = diagnostics.error_count;
-        size_t warnings = diagnostics.warning_count;
-        size_t fatals = diagnostics.fatal_count;
-        size_t expressions_before = expressions.size();
-        size_t uses_before = name_uses.size();
-        uint32_t failures = definition_failures;
+        substitution_mark mark = mark_substitution();
         substituting++;
-        analysis_result r = deduce_from_call(n, g, meanings, count, d, &failed);
+        analysis_result r = analysis_result::well_formed;
+        /* [temp.arg.explicit]/2-6: the explicit template-arguments,
+           checked against this template's parameters; more than it has,
+           or one of another kind, is no candidate ([temp.deduct]/2) */
+        if (written) {
+            if (written->size() > function_templates[g - 1].parameter_count)
+                failed = true;
+            for (size_t i = 0; !failed && i < written->size(); i++) {
+                entity_index p = template_parameter_entities
+                    [function_templates[g - 1].first_parameter + i];
+                bool type_parameter =
+                    entity_table[p].kind == entity_kind::typedef_name;
+                if (entity_table[p].kind != entity_kind::template_entity &&
+                    type_parameter !=
+                        syntax_is(tree, (*written)[i], syntax_kind::type_id)) {
+                    failed = true;
+                    break;
+                }
+                template_argument x;
+                r = template_argument_for(written_at, g,
+                                          static_cast<uint32_t>(i),
+                                          (*written)[i], d.data(), x);
+                if (r != analysis_result::well_formed)
+                    break;
+                d.append(x);
+            }
+        }
+        if (r == analysis_result::well_formed && !failed)
+            r = deduce_from_call(n, g, meanings, count, d, &failed);
         entity_index e = 0;
         const struct function_template ft = function_templates[g - 1];
         if (r == analysis_result::well_formed && !failed) {
@@ -1014,16 +1071,8 @@ analysis_result semantic_analysis::template_candidates(
             unevaluated--;
         }
         substituting--;
-        if (r == analysis_result::ill_formed &&
-            failures == definition_failures &&
-            diagnostics.fatal_count == fatals) {
-            diagnostics.messages.resize(messages);
-            diagnostics.error_count = errors;
-            diagnostics.warning_count = warnings;
-            expressions.resize(expressions_before);
-            name_uses.resize(uses_before);
+        if (r == analysis_result::ill_formed && undo_substitution(mark))
             continue;
-        }
         if (r != analysis_result::well_formed)
             return r;
         if (failed)
@@ -1048,6 +1097,12 @@ analysis_result semantic_analysis::template_call(
     const owned_array<syntax_child> &arguments,
     owned_array<expression_meaning> &early, expression_meaning &f)
 {
+    owned_array<syntax_child> written;
+    node_index written_at = overloaded_written_at;
+    for (syntax_child a : overloaded_written)
+        written.append(a);
+    overloaded_written.clear();
+    overloaded_written_at = 0;
     owned_array<qualified_type> types;
     /* (arguments analysed already: a pack expansion's, call) */
     bool given = !early.empty();
@@ -1124,9 +1179,12 @@ analysis_result semantic_analysis::template_call(
             candidates.append(c);
             first_arguments.append(0);
         }
+        const owned_array<syntax_child> *given_written = nullptr;
+        if (written_at)
+            given_written = &written;
         analysis_result added = template_candidates(
             n, group, meanings, static_cast<uint32_t>(early.size()), candidates,
-            &first_arguments, &all);
+            &first_arguments, &all, given_written, written_at);
         if (added != analysis_result::well_formed)
             return added;
         if (candidates.empty())

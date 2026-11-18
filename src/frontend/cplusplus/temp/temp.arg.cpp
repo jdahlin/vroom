@@ -51,6 +51,8 @@ void semantic_analysis::bind_template_argument(entity_index scope,
                                                const template_argument &a)
 {
     uint32_t name = entity_table[parameter].name;
+    if (a.kind == template_argument::kind_t::pack && !name)
+        return;
     if (a.kind == template_argument::kind_t::pack) {
         /* [temp.variadic]/1: a pack of its elements' names */
         owned_array<entity_index> elements;
