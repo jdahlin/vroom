@@ -735,13 +735,12 @@ analysis_result semantic_analysis::alias_template_definition(node_index n,
     size_t unsupported_before = unsupported.size();
     r = alias_type(alias, pattern);
     current_scope = saved_scope;
-    /* [temp.variadic]: a pattern of the alias's own pack that analysis
-       cannot follow unexpanded (T... where the template named takes a
-       parameter before its pack): the type is analysed with each use's
-       arguments (alias_template_type), as it is anyway */
-    if (r == analysis_result::unsupported && !parameters.empty() &&
-        template_parameter_is_pack(
-            first + static_cast<uint32_t>(parameters.size()) - 1)) {
+    /* a type analysis cannot follow with the parameters unbound (T...
+       where the template named takes a parameter before its pack,
+       typename Q<T>::template X<U> of a dependent Q): it is analysed with
+       each use's arguments (alias_template_type), as it is anyway, and
+       judged there */
+    if (r == analysis_result::unsupported) {
         unsupported.resize(unsupported_before);
         r = analysis_result::well_formed;
     }
