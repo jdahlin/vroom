@@ -1487,7 +1487,7 @@ semantic_analysis::named_member_type(node_index n, token_index t,
                                      entity_index e, const char *citation,
                                      type_index &type, uint32_t &cv)
 {
-    /* [temp.res.general]/3, [dcl.type.simple]/2: the name of a
+    /* [temp.res]/3, [dcl.type.simple]/2: the name of a
        typename-specifier or type-name names a type; a variable, function
        or enumerator found is ill-formed (in a substitution, a deduction
        failure: [temp.deduct]/11.3) */
