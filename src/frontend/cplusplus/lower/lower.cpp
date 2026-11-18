@@ -2898,6 +2898,21 @@ uint32_t c_lowering::call(const semantic_node &n)
             return 0;
         arguments.append(object);
     } else {
+        /* [ext:gnu_library_builtins] __builtin_is_constant_evaluated()
+           evaluated at run time: false ([meta.const.eval]/1) */
+        uint32_t named = n.a;
+        if (node(named).kind == semantic_kind::conversion &&
+            static_cast<conversion_kind>(node(named).op) ==
+                conversion_kind::function_to_pointer)
+            named = node(named).a;
+        if (node(named).kind == semantic_kind::entity &&
+            (analysis.entity_table[node(named).a].gnu_flags &
+             gnu_is_constant_evaluated))
+            return ast_builder_integer(
+                c,
+                AST_QUALIFIED_TYPE_UNQUALIFIED(
+                    type(record(function_type).operand, n.at)),
+                0);
         callee = expression(n.a);
         if (!callee)
             return 0;

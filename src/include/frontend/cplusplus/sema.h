@@ -132,7 +132,9 @@ struct type {
     qualified_type operand;
     /* class, enumeration: the entity; pointer to member: the class's */
     uint32_t entity = 0;
-    /* array: the bound N */
+    /* array: the bound N; in a template's own declaration a bound that is
+       a non-type template-parameter's name (T[N], [temp.deduct.type]/8's
+       T[i]) is that parameter's entity, with bound_known and bound 0 */
     uint64_t bound = 0;
     /* function: the parameter types are parameters[first_parameter ..
        first_parameter + parameter_count) */
@@ -157,6 +159,8 @@ class types
     type_index rvalue_reference_to(qualified_type referred);
     type_index array_of(qualified_type element, uint64_t bound);
     type_index array_of_unknown_bound_of(qualified_type element);
+    type_index array_of_parameter_bound(qualified_type element,
+                                        uint32_t parameter);
     type_index function(qualified_type result, const qualified_type *parameters,
                         size_t parameter_count, bool variadic,
                         bool non_throwing = false);
@@ -302,6 +306,9 @@ enum gnu_attribute_flag : uint32_t {
     /* clang's exclude_from_explicit_instantiation: an explicit
        instantiation of the class leaves the member out */
     gnu_exclude_from_explicit_instantiation = 8192,
+    /* [ext:gnu_library_builtins] __builtin_is_constant_evaluated: a
+       manifestly constant evaluation's call is true, any other false */
+    gnu_is_constant_evaluated = 16384,
 };
 /* the GNU attributes of a function's own symbol that analysis carries to
    member functions and function templates */
@@ -2467,6 +2474,10 @@ class semantic_analysis
            the evaluation of the operands beside it, nor an unknown
            condition that of both arms of a conditional */
         bool potential = false;
+        /* evaluate_analysed_expressions' evaluation of any expression,
+           which need not be manifestly constant-evaluated
+           ([expr.const]/14): __builtin_is_constant_evaluated is unknown */
+        bool any_expression = false;
         /* for the claims (evaluate_analysed_expressions): a function whose
            body begins after this token is not defined yet where the claim
            is placed ([expr.const]/5.3); 0: every body counts */
@@ -3456,6 +3467,9 @@ class semantic_analysis
        (of value category c) adjusted for deduce_type */
     void adjust_call_deduction(qualified_type &p, qualified_type &a,
                                value_category c);
+    bool deduce_bound(entity_index parameter, uint64_t bound,
+                      owned_array<template_argument> &deduced,
+                      owned_array<bool> &set);
     bool deduce_type(qualified_type p, qualified_type a,
                      owned_array<template_argument> &deduced,
                      owned_array<bool> &set, bool exact = false);

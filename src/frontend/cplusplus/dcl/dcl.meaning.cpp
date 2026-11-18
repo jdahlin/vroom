@@ -264,6 +264,28 @@ analysis_result semantic_analysis::array(node_index at,
        converted expression is a constant expression and the implicit
        conversion sequence contains only ... integral conversions other than
        narrowing conversions") */
+    /* [temp.dep.constexpr]/2: in a template's own declaration, a bound
+       that is a non-type template-parameter's name (T (&)[N]) is
+       value-dependent: the type records the parameter, which deduction
+       ([temp.deduct.type]/8's T[i]) gives a value; each instantiation
+       analyses the declarator again with the parameter bound to it */
+    if (bound->is_token() &&
+        tokens[bound->index()].kind == token_kind::identifier) {
+        lookup_result x = lookup_unqualified(tokens.identifier(bound->index()),
+                                             lookup_filter::any);
+        entity_index named = x.entity;
+        if (!named)
+            named = x.unknown_entity;
+        if (named && entity_table[named].kind == entity_kind::none &&
+            entity_table[named].instantiation &&
+            !entity_table[named].held_by_template) {
+            if (!is_integral(entity_table[named].type))
+                return not_supported(at, "temp.dep.constexpr");
+            type = qualified_type::make(
+                type_table.array_of_parameter_bound(type, named), cv_none);
+            return analysis_result::well_formed;
+        }
+    }
     expression_meaning m;
     analysis_result r = expression(*bound, m);
     if (r != analysis_result::well_formed)

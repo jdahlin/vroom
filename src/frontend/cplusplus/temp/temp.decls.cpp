@@ -1239,10 +1239,14 @@ static bool depends(const types &table, qualified_type t,
                     cv_none),
                 parameters, from);
         return true;
+    case type_kind::array:
+        /* T[N]: N a non-type template-parameter */
+        if (r.entity && (!parameters || (*parameters)[r.entity].value >= from))
+            return true;
+        return depends(table, r.operand, parameters, from);
     case type_kind::pointer:
     case type_kind::lvalue_reference:
     case type_kind::rvalue_reference:
-    case type_kind::array:
     case type_kind::pack_expansion:
         return depends(table, r.operand, parameters, from);
     case type_kind::function: {

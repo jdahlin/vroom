@@ -1811,7 +1811,11 @@ bool itanium_mangler::array_type(qualified_type t)
 {
     const struct type &r = record(t);
     text("A");
-    if (r.bound_known)
+    /* <array-type> ::= A [<dimension expression>] _ <element type>, the
+       expression a template parameter's <template-param> */
+    if (r.entity)
+        template_param(analysis.entity_table[r.entity].value);
+    else if (r.bound_known)
         number(r.bound);
     text("_");
     qualified_type element = r.operand;
