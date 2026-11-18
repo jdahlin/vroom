@@ -63,23 +63,14 @@ analysis_result semantic_analysis::template_declaration(node_index n)
                 declarators = true;
         if (!declarators) {
             const syntax_node &d = tree[inner];
-            if (d.child_count == 2 &&
-                syntax_is(tree, tree.children(inner)[0],
-                          syntax_kind::decl_specifier_seq)) {
-                node_index seq = tree.children(inner)[0].index();
-                if (tree[seq].child_count == 1 &&
-                    syntax_is(tree, tree.children(seq)[0],
-                              syntax_kind::class_specifier))
-                    return class_template_definition(
-                        n, tree.children(seq)[0].index());
-                /* [temp.class]/1's declaration without a definition
-                   (template<class T> struct S;) */
-                if (tree[seq].child_count == 1 &&
-                    syntax_is(tree, tree.children(seq)[0],
-                              syntax_kind::elaborated_type_specifier))
-                    return class_template_declaration(
-                        n, tree.children(seq)[0].index());
-            }
+            node_index only = sole_decl_specifier(inner);
+            if (only && tree[only].kind == syntax_kind::class_specifier)
+                return class_template_definition(n, only);
+            /* [temp.class]/1's declaration without a definition
+               (template<class T> struct S;) */
+            if (only &&
+                tree[only].kind == syntax_kind::elaborated_type_specifier)
+                return class_template_declaration(n, only);
             /* [temp.pre]/1: a variable template, its one init-declarator
                with an initializer */
             if (d.child_count == 3 &&
@@ -218,12 +209,10 @@ semantic_analysis::function_template_definition(node_index n,
            !syntax_is(tree, tree.children(definition)[1],
                       syntax_kind::ptr_declarator)))))
         return not_supported(n, "temp.fct");
-    uint32_t index = static_cast<uint32_t>(function_templates.size());
-    /* the scope of the template-parameters ([basic.scope.temp]) */
-    entity_index scope = entity_table.make(entity_kind::block_scope, 0, outer);
-    uint32_t first = static_cast<uint32_t>(template_parameter_entities.size());
+    uint32_t index = 0, first = 0;
+    entity_index scope = 0;
     analysis_result declared =
-        declare_template_parameters(n, parameters, scope, index, 0);
+        template_parameter_scope(n, parameters, outer, 0, index, scope, first);
     if (declared != analysis_result::well_formed)
         return declared;
     /* the declarator, in the template-parameters' scope; what it records
@@ -648,18 +637,16 @@ analysis_result semantic_analysis::alias_template_definition(node_index n,
     uint32_t name = tokens.identifier(tree[alias].first_token + 1);
     if (entity_table.find(outer, name))
         return not_supported(n, "temp.alias");
-    uint32_t index = static_cast<uint32_t>(function_templates.size());
-    entity_index scope = entity_table.make(entity_kind::block_scope, 0, outer);
-    uint32_t first = static_cast<uint32_t>(template_parameter_entities.size());
-    r = declare_template_parameters(n, parameters, scope, index, name);
+    uint32_t index = 0, first = 0;
+    entity_index scope = 0;
+    r = template_parameter_scope(n, parameters, outer, name, index, scope,
+                                 first);
     if (r != analysis_result::well_formed)
         return r;
     /* [temp.param]/14's rule is a class template's: a default after which
        one is missing is left to clang */
-    for (size_t i = 1; i < parameters.size(); i++)
-        if (template_parameter_has_default(parameters[i - 1]) &&
-            !template_parameter_has_default(parameters[i]))
-            return not_supported(n, "temp.param");
+    if (default_missing_after_one(parameters))
+        return not_supported(n, "temp.param");
     qualified_type pattern;
     entity_index saved_scope = current_scope;
     current_scope = scope;
@@ -704,18 +691,15 @@ semantic_analysis::variable_template_definition(node_index n,
     if (tree[item].child_count != 2 ||
         syntax_is(tree, tree.children(item)[1], syntax_kind::requires_clause))
         return not_supported(n, "temp.pre");
-    uint32_t index = static_cast<uint32_t>(function_templates.size());
-    entity_index scope = entity_table.make(entity_kind::block_scope, 0, outer);
-    uint32_t first = static_cast<uint32_t>(template_parameter_entities.size());
     /* (the name is not known before the declarator: the template-parameters
        are checked against it below) */
-    r = declare_template_parameters(n, parameters, scope, index, 0);
+    uint32_t index = 0, first = 0;
+    entity_index scope = 0;
+    r = template_parameter_scope(n, parameters, outer, 0, index, scope, first);
     if (r != analysis_result::well_formed)
         return r;
-    for (size_t i = 1; i < parameters.size(); i++)
-        if (template_parameter_has_default(parameters[i - 1]) &&
-            !template_parameter_has_default(parameters[i]))
-            return not_supported(n, "temp.param");
+    if (default_missing_after_one(parameters))
+        return not_supported(n, "temp.param");
     entity_index saved_scope = current_scope;
     uint32_t saved_cv = function_cv;
     current_scope = scope;
@@ -944,6 +928,88 @@ bool semantic_analysis::depends_on_template_parameter(qualified_type t) const
     return depends(type_table, t);
 }
 
+/* the scope of the template-parameters ([basic.scope.temp]) in outer, the
+   parameters declared in it (declare_template_parameters, reserved the
+   template's name), the template's record index-to-be and its first
+   parameter */
+analysis_result semantic_analysis::template_parameter_scope(
+    node_index n, const owned_array<node_index> &parameters, entity_index outer,
+    uint32_t reserved, uint32_t &index, entity_index &scope, uint32_t &first)
+{
+    index = static_cast<uint32_t>(function_templates.size());
+    scope = entity_table.make(entity_kind::block_scope, 0, outer);
+    first = static_cast<uint32_t>(template_parameter_entities.size());
+    return declare_template_parameters(n, parameters, scope, index, reserved);
+}
+
+/* whether a template-parameter without a default follows one with a
+   default ([temp.param]/14) */
+bool semantic_analysis::default_missing_after_one(
+    const owned_array<node_index> &parameters) const
+{
+    for (size_t i = 1; i < parameters.size(); i++)
+        if (template_parameter_has_default(parameters[i - 1]) &&
+            !template_parameter_has_default(parameters[i]))
+            return true;
+    return false;
+}
+
+/* template_id_arguments with the template-parameters of scope in scope;
+   what they record for claims is dropped */
+analysis_result semantic_analysis::template_id_arguments_in(
+    node_index id, uint32_t ct, entity_index scope,
+    owned_array<template_argument> &arguments)
+{
+    size_t expressions_before = expressions.size();
+    size_t uses_before = name_uses.size();
+    entity_index saved_scope = current_scope;
+    current_scope = scope;
+    analysis_result r = template_id_arguments(id, ct, arguments);
+    current_scope = saved_scope;
+    expressions.resize(expressions_before);
+    name_uses.resize(uses_before);
+    return r;
+}
+
+/* the items of a comma-separated list (written), each marked whether an
+   ellipsis follows it (expansion, [temp.variadic]/5); false for an
+   ellipsis that follows none or another */
+bool semantic_analysis::expansion_list(node_index list,
+                                       owned_array<syntax_child> &written,
+                                       owned_array<bool> &expansion) const
+{
+    for (uint32_t k = 0; k < tree[list].child_count; k++) {
+        syntax_child a = tree.children(list)[k];
+        if (syntax_is_punctuator(tokens, a, preprocessing_op_or_punc::COMMA))
+            continue;
+        if (syntax_is_punctuator(tokens, a,
+                                 preprocessing_op_or_punc::ELLIPSIS)) {
+            if (written.empty() || expansion.back())
+                return false;
+            expansion.back() = true;
+            continue;
+        }
+        written.append(a);
+        expansion.append(false);
+    }
+    return true;
+}
+
+/* a declaration's decl-specifier-seq when it is all the declaration has
+   (no declarator) and one decl-specifier, a node: that decl-specifier;
+   else 0 */
+node_index semantic_analysis::sole_decl_specifier(node_index declaration) const
+{
+    if (tree[declaration].child_count != 2 ||
+        !syntax_is(tree, tree.children(declaration)[0],
+                   syntax_kind::decl_specifier_seq))
+        return 0;
+    node_index seq = tree.children(declaration)[0].index();
+    if (tree[seq].child_count != 1 || tree.children(seq)[0].is_token())
+        return 0;
+    return tree.children(seq)[0].index();
+}
+
 bool semantic_analysis::depends_on_parameter_from(qualified_type t,
                                                   uint64_t from) const
 {
@@ -994,10 +1060,10 @@ semantic_analysis::class_template_definition(node_index n, node_index specifier)
         if (p.keyword_of(tokens[i]) == standard_keyword::friend_)
             return not_supported(n, "class.friend");
     uint32_t name = tokens.identifier(tree.children(head)[1].index());
-    uint32_t index = static_cast<uint32_t>(function_templates.size());
-    entity_index scope = entity_table.make(entity_kind::block_scope, 0, outer);
-    uint32_t first = static_cast<uint32_t>(template_parameter_entities.size());
-    r = declare_template_parameters(n, parameters, scope, index, name);
+    uint32_t index = 0, first = 0;
+    entity_index scope = 0;
+    r = template_parameter_scope(n, parameters, outer, name, index, scope,
+                                 first);
     if (r != analysis_result::well_formed)
         return r;
     /* the definition of a class template declared before
@@ -1142,23 +1208,16 @@ analysis_result semantic_analysis::class_specialization_definition(
         if (r.template_entity == primary.entity && r.specialization &&
             entity_table[r.specialization].kind == entity_kind::class_type)
             return not_supported(n, rule);
-    uint32_t index = static_cast<uint32_t>(function_templates.size());
-    entity_index scope = entity_table.make(entity_kind::block_scope, 0, outer);
-    uint32_t first = static_cast<uint32_t>(template_parameter_entities.size());
+    uint32_t index = 0, first = 0;
+    entity_index scope = 0;
     analysis_result r =
-        declare_template_parameters(n, parameters, scope, index, 0);
+        template_parameter_scope(n, parameters, outer, 0, index, scope, first);
     if (r != analysis_result::well_formed)
         return r;
     /* the arguments, in the parameters' scope; what they record for
        claims is the template's */
-    size_t expressions_before = expressions.size();
-    size_t uses_before = name_uses.size();
     owned_array<template_argument> arguments;
-    current_scope = scope;
-    r = template_id_arguments(id, ct, arguments);
-    current_scope = outer;
-    expressions.resize(expressions_before);
-    name_uses.resize(uses_before);
+    r = template_id_arguments_in(id, ct, scope, arguments);
     if (r != analysis_result::well_formed)
         return r;
     bool dependent = false;
@@ -1440,21 +1499,8 @@ analysis_result semantic_analysis::template_id_arguments(
             continue;
         }
         if (syntax_is(tree, parts[i], syntax_kind::template_argument_list)) {
-            for (uint32_t k = 0; k < tree[parts[i].index()].child_count; k++) {
-                syntax_child a = tree.children(parts[i].index())[k];
-                if (syntax_is_punctuator(tokens, a,
-                                         preprocessing_op_or_punc::COMMA))
-                    continue;
-                if (syntax_is_punctuator(tokens, a,
-                                         preprocessing_op_or_punc::ELLIPSIS)) {
-                    if (written.empty() || expansion.back())
-                        return not_supported(id, "temp.variadic");
-                    expansion.back() = true;
-                    continue;
-                }
-                written.append(a);
-                expansion.append(false);
-            }
+            if (!expansion_list(parts[i].index(), written, expansion))
+                return not_supported(id, "temp.variadic");
         } else {
             written.append(parts[i]);
             expansion.append(false);
@@ -1593,10 +1639,10 @@ semantic_analysis::class_template_declaration(node_index n,
     if (r != analysis_result::well_formed)
         return r;
     uint32_t name = tokens.identifier(parts[1].index());
-    uint32_t index = static_cast<uint32_t>(function_templates.size());
-    entity_index scope = entity_table.make(entity_kind::block_scope, 0, outer);
-    uint32_t first = static_cast<uint32_t>(template_parameter_entities.size());
-    r = declare_template_parameters(n, parameters, scope, index, name);
+    uint32_t index = 0, first = 0;
+    entity_index scope = 0;
+    r = template_parameter_scope(n, parameters, outer, name, index, scope,
+                                 first);
     if (r != analysis_result::well_formed)
         return r;
     entity_index held = entity_table.find(outer, name);
@@ -1622,10 +1668,8 @@ semantic_analysis::class_template_declaration(node_index n,
     }
     /* [temp.param]/14 (a later declaration may not supply the defaults
        before) */
-    for (size_t i = 1; i < parameters.size(); i++)
-        if (template_parameter_has_default(parameters[i - 1]) &&
-            !template_parameter_has_default(parameters[i]))
-            return not_supported(n, "temp.param");
+    if (default_missing_after_one(parameters))
+        return not_supported(n, "temp.param");
     function_template record = new_template(
         name, outer, n, index, first, static_cast<uint32_t>(parameters.size()));
     record.is_class = true;
@@ -1715,22 +1759,15 @@ semantic_analysis::member_definition_of_template(node_index n,
         !function_templates[ct - 1].definition ||
         entity_table[function_templates[ct - 1].entity].enclosing != outer)
         return not_supported(n, "temp.mem.func");
-    uint32_t index = static_cast<uint32_t>(function_templates.size());
-    entity_index scope = entity_table.make(entity_kind::block_scope, 0, outer);
-    uint32_t first = static_cast<uint32_t>(template_parameter_entities.size());
-    r = declare_template_parameters(n, parameters, scope, index, 0);
+    uint32_t index = 0, first = 0;
+    entity_index scope = 0;
+    r = template_parameter_scope(n, parameters, outer, 0, index, scope, first);
     if (r != analysis_result::well_formed)
         return r;
     /* the template-id's arguments in terms of the parameters; what they
        record for claims is the template's */
-    size_t expressions_before = expressions.size();
-    size_t uses_before = name_uses.size();
     owned_array<template_argument> arguments;
-    current_scope = scope;
-    r = template_id_arguments(id, ct, arguments);
-    current_scope = outer;
-    expressions.resize(expressions_before);
-    name_uses.resize(uses_before);
+    r = template_id_arguments_in(id, ct, scope, arguments);
     if (r != analysis_result::well_formed)
         return r;
     uint32_t pattern = 0;

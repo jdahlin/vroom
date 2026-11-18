@@ -594,21 +594,8 @@ analysis_result semantic_analysis::call(node_index n, expression_meaning &m)
         if (syntax_is(tree, c, syntax_kind::initializer_list)) {
             owned_array<syntax_child> written;
             owned_array<bool> expansion;
-            for (uint32_t i = 0; i < tree[c.index()].child_count; i++) {
-                syntax_child a = tree.children(c.index())[i];
-                if (syntax_is_punctuator(tokens, a,
-                                         preprocessing_op_or_punc::COMMA))
-                    continue;
-                if (syntax_is_punctuator(tokens, a,
-                                         preprocessing_op_or_punc::ELLIPSIS)) {
-                    if (written.empty() || expansion.back())
-                        return not_supported(n, "temp.variadic");
-                    expansion.back() = true;
-                    continue;
-                }
-                written.append(a);
-                expansion.append(false);
-            }
+            if (!expansion_list(c.index(), written, expansion))
+                return not_supported(n, "temp.variadic");
             bool any = false;
             for (bool x : expansion)
                 any = any || x;

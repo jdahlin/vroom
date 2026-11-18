@@ -19,18 +19,10 @@ analysis_result semantic_analysis::explicit_specialization(node_index n)
     const syntax_node &x = tree[n];
     if (x.child_count == 4 &&
         syntax_is(tree, tree.children(n)[3], syntax_kind::simple_declaration)) {
-        node_index inner = tree.children(n)[3].index();
-        const syntax_node &d = tree[inner];
-        if (d.child_count == 2 && syntax_is(tree, tree.children(inner)[0],
-                                            syntax_kind::decl_specifier_seq)) {
-            node_index seq = tree.children(inner)[0].index();
-            if (tree[seq].child_count == 1 &&
-                syntax_is(tree, tree.children(seq)[0],
-                          syntax_kind::class_specifier)) {
-                owned_array<node_index> none;
-                return class_specialization_definition(
-                    n, tree.children(seq)[0].index(), none);
-            }
+        node_index only = sole_decl_specifier(tree.children(n)[3].index());
+        if (only && tree[only].kind == syntax_kind::class_specifier) {
+            owned_array<node_index> none;
+            return class_specialization_definition(n, only, none);
         }
     }
     /* ... or a function template's specialization, declared or defined */

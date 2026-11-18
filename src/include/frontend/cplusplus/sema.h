@@ -2628,6 +2628,18 @@ class semantic_analysis
     analysis_result declare_template_parameters(
         node_index n, const owned_array<node_index> &parameters,
         entity_index scope, uint32_t &index, uint32_t reserved);
+    analysis_result template_parameter_scope(
+        node_index n, const owned_array<node_index> &parameters,
+        entity_index outer, uint32_t reserved, uint32_t &index,
+        entity_index &scope, uint32_t &first);
+    node_index sole_decl_specifier(node_index declaration) const;
+    bool expansion_list(node_index list, owned_array<syntax_child> &written,
+                        owned_array<bool> &expansion) const;
+    bool
+    default_missing_after_one(const owned_array<node_index> &parameters) const;
+    analysis_result
+    template_id_arguments_in(node_index id, uint32_t ct, entity_index scope,
+                             owned_array<template_argument> &arguments);
     /* [temp.arg]: the written argument for the template's parameter at
        position, given the arguments before it */
     analysis_result template_argument_for(node_index at,
