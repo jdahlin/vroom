@@ -284,11 +284,16 @@ static void dump_type_claims(const semantic_analysis &analysis,
     owned_buffer claim, spelling;
     size_t j = 0;
     for (const analysed_expression &x : analysis.expressions) {
-        while (j < analysis.declarations.size() &&
-               analysis.declarations[j].node != x.declaration)
-            j++;
-        if (j == analysis.declarations.size())
-            break;
+        /* an expression of a declaration that is none of the list (a
+           member function's body, analysed when its class is complete) is
+           left out, and the expressions after it are still claimed */
+        size_t k = j;
+        while (k < analysis.declarations.size() &&
+               analysis.declarations[k].node != x.declaration)
+            k++;
+        if (k == analysis.declarations.size())
+            continue;
+        j = k;
         analysis_result result = analysis.declarations[j].result;
         if (result != analysis_result::well_formed &&
             result != analysis_result::unsupported)
