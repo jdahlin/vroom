@@ -811,6 +811,17 @@ libstdc++ and json), since sema cannot analyse a declaration kept as tokens.
   `bench/cxx-sema.py`: 27310 declarations as clang, 0 wrong, 0 refuted
   (clang's tests define them mostly in templates).  cxx-run 152/152,
   cxx-c-suites 0 wrong.
+- Status (2026-11-18, member functions' default arguments): a complete-class
+  context ([class.mem]/6), analysed when the class is complete, before the
+  member function bodies (`member_default_arguments`, dcl.fct.default.cpp);
+  an operator function's other than operator()'s is ill-formed
+  ([over.oper]/10).  Not analysed: a default argument that may name a
+  non-static member or uses this (/8, /9), a constructor's, and default
+  arguments added by a definition outside the class (/6: the member's calls
+  then do not know its defaults).  Test:
+  `src/test/cxx/run/member-default-arguments.cpp`.  `bench/cxx-sema.py`:
+  27330 declarations as clang, 0 wrong, 448 we accept that clang rejects,
+  0 refuted.  cxx-run 156/156, cxx-c-suites 0 wrong.
 
 ### S4. Classes and the object model (parallel with S3)
 

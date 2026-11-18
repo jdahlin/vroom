@@ -867,10 +867,20 @@ analysis_result semantic_analysis::declare_with_initializer(
     for (const parameter_meaning &p : function_parameters)
         if (p.default_argument.index())
             has_default_arguments = true;
-    if (m.qualifier && has_default_arguments)
+    if (m.qualifier && has_default_arguments) {
         /* [dcl.fct.default]/6: a member function's, added to its class's
-           declaration's */
+           declaration's: what calls of the member have is not known */
+        lookup_result found = lookup_qualified(
+            m.qualifier, tokens.identifier(m.id), lookup_filter::any);
+        if (found.entity &&
+            entity_table[found.entity].kind == entity_kind::function) {
+            owned_array<entity_index> set;
+            overload_set(found.entity, set);
+            for (entity_index f : set)
+                entity_table[f].unknown_defaults = true;
+        }
         return not_supported(declaration, "dcl.fct.default");
+    }
     if (tokens.files.behavior.microsoft_extensions && s.declares_class) {
         /* Microsoft's class-virt-specifiers, struct X sealed { }: the
            parser takes the word for a declarator-id */

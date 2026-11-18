@@ -434,6 +434,8 @@ analysis_result semantic_analysis::class_definition(node_index n,
        body ... within the member-specification of the class": the bodies
        are analysed with the class complete */
     node_index outer_declaration = current_declaration;
+    result = worse(result, member_default_arguments(c));
+    current_declaration = outer_declaration;
     for (node_index body : bodies) {
         result = worse(result, member_function_body(c, body));
         current_declaration = outer_declaration;
@@ -946,10 +948,15 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
     if (r != analysis_result::well_formed)
         return r;
     /* [dcl.fct.default]: a member function's default arguments are a
-       complete-class context ([class.mem]/6), not analysed */
+       complete-class context ([class.mem]/6): analysed with the class
+       complete (member_default_arguments) */
+    bool has_defaults = false;
     for (const parameter_meaning &p : function_parameters)
         if (p.default_argument.index())
-            return not_supported(declaration, "dcl.fct.default");
+            has_defaults = true;
+    owned_array<parameter_meaning> parameters;
+    for (const parameter_meaning &p : function_parameters)
+        parameters.append(p);
     if (!m.has_id || m.qualifier)
         return not_supported(declaration, "class.mem");
     /* [ext:gnu_attributes] the declaration's and the declarator's */
@@ -1110,6 +1117,27 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
             if (checked != analysis_result::well_formed)
                 return checked;
         }
+        if (has_defaults) {
+            if (entity_table[e].operator_function &&
+                entity_table[e].implemented !=
+                    preprocessing_op_or_punc::LEFT_PARENTHESIS)
+                /* [over.oper]/10 */
+                return ill_formed(declaration,
+                                  "an operator function cannot have default "
+                                  "arguments",
+                                  "over.oper");
+            pending_default_arguments p;
+            p.function = e;
+            p.declaration = declaration;
+            p.first = static_cast<uint32_t>(member_default_parameters.size());
+            p.count = static_cast<uint32_t>(parameters.size());
+            for (const parameter_meaning &q : parameters)
+                member_default_parameters.append(q);
+            pending_defaults.append(p);
+        }
+    } else if (has_defaults) {
+        /* /3: a default argument of a member that is not a function */
+        return not_supported(declaration, "dcl.fct.default");
     } else if (s.static_) {
         /* [class.static.data]/3: "The declaration of a non-inline static
            data member in its class definition is not a definition and may

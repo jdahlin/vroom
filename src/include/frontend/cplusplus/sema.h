@@ -1202,6 +1202,19 @@ class semantic_analysis
        which the declaration n of the function f gives it */
     analysis_result default_arguments(node_index n, entity_index f,
                                       entity_kind kind);
+    /* the member functions of the classes being defined whose default
+       arguments wait for the class to be complete ([class.mem]/6): their
+       parameters are member_default_parameters[first .. first + count) */
+    struct pending_default_arguments {
+        entity_index function = 0;
+        node_index declaration = 0;
+        uint32_t first = 0, count = 0;
+    };
+    owned_array<pending_default_arguments> pending_defaults;
+    owned_array<parameter_meaning> member_default_parameters;
+    /* ... analysed now, of the complete class c */
+    bool analysing_member_defaults = false;
+    analysis_result member_default_arguments(entity_index c);
     /* the default arguments' initializations: a function's are
        [entity::first_default .. + its parameter count), 0 for a parameter
        without one */

@@ -16,9 +16,9 @@
  * So each is analysed once, where it appears, and its initialization is
  * the argument of every call that omits it (expr.post.cpp's call).  The
  * default arguments of a function of namespace scope are analysed; a
- * member function's are a complete-class context ([class.mem]/6) the
- * parser keeps as tokens, and a block-scope declaration's are its scope's
- * alone (/4): neither is analysed.
+ * member function's are a complete-class context ([class.mem]/6), analysed
+ * when its class is complete (member_default_arguments); a block-scope
+ * declaration's are its scope's alone (/4): not analysed.
  */
 #include "../cplusplus-internal.h"
 #include "frontend/cplusplus/sema.h"
@@ -50,8 +50,10 @@ analysis_result semantic_analysis::default_arguments(node_index n,
                           "declaration",
                           "dcl.fct.default");
     entity &x = entity_table[f];
-    if (x.unknown_defaults || !is_namespace(x.enclosing) || at_block_scope() ||
-        function_state.active)
+    bool member = analysing_member_defaults &&
+                  entity_table[x.enclosing].kind == entity_kind::class_type;
+    if (x.unknown_defaults || (!is_namespace(x.enclosing) && !member) ||
+        (at_block_scope() && !member) || function_state.active)
         return not_supported(n, "dcl.fct.default");
     const struct type &function = type_table[x.type.unqualified()];
     size_t count = function.parameter_count;
@@ -88,6 +90,24 @@ analysis_result semantic_analysis::default_arguments(node_index n,
         if (p.default_argument.is_token()) {
             first = p.default_argument.index();
             end = first + 1;
+        }
+        for (token_index t = first; t < end && member; t++) {
+            /* /9: "A non-static member shall not appear in a default
+               argument unless it appears as the id-expression of a class
+               member access expression or unless it is used to form a
+               pointer to member"; /8: "The keyword this shall not be
+               used in a default argument of a member function": a name
+               that may be one is not analysed */
+            if (tokens[t].kind == token_kind::keyword)
+                if (this->p.keyword_of(tokens[t]) == standard_keyword::this_)
+                    return not_supported(p.declaration, "dcl.fct.default");
+            if (tokens[t].kind != token_kind::identifier)
+                continue;
+            lookup_result found = lookup_qualified(
+                x.enclosing, tokens.identifier(t), lookup_filter::any);
+            if (found.unknown || found.ambiguous ||
+                (found.entity && entity_table[found.entity].nonstatic_member))
+                return not_supported(p.declaration, "dcl.fct.default");
         }
         for (token_index t = first; t < end; t++)
             for (const parameter_meaning &q : function_parameters)
@@ -126,6 +146,38 @@ analysis_result semantic_analysis::default_arguments(node_index n,
         default_argument_nodes.append(nodes[i]);
     x.default_arguments = trailing;
     return analysis_result::well_formed;
+}
+
+analysis_result semantic_analysis::member_default_arguments(entity_index c)
+{
+    analysis_result result = analysis_result::well_formed;
+    owned_array<pending_default_arguments> kept;
+    entity_index scope = current_scope;
+    for (const pending_default_arguments &p : pending_defaults) {
+        if (entity_table[p.function].enclosing != c) {
+            kept.append(p);
+            continue;
+        }
+        function_parameters.clear();
+        for (uint32_t i = 0; i < p.count; i++)
+            function_parameters.append(member_default_parameters[p.first + i]);
+        current_scope = c;
+        analysing_member_defaults = true;
+        analysis_result r =
+            default_arguments(p.declaration, p.function, entity_kind::function);
+        analysing_member_defaults = false;
+        current_scope = scope;
+        if (r != analysis_result::well_formed)
+            entity_table[p.function].unknown_defaults = true;
+        result = worse(result, r);
+    }
+    pending_defaults.clear();
+    for (const pending_default_arguments &p : kept)
+        pending_defaults.append(p);
+    if (pending_defaults.empty())
+        member_default_parameters.clear();
+    function_parameters.clear();
+    return result;
 }
 
 } // namespace cplusplus
