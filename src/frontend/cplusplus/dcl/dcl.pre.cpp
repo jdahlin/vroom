@@ -792,8 +792,9 @@ uint32_t semantic_analysis::leading_gnu_attributes(node_index n) const
    [[nodiscard]] before libc++'s functions */
 bool semantic_analysis::gnu_or_without_effect(node_index n) const
 {
+    uint32_t flags = 0;
     if (tree[n].kind == syntax_kind::attribute_specifier)
-        return attributes_without_effect(syntax_child::node(n));
+        return attributes_as_gnu(syntax_child::node(n), flags);
     if (tree[n].kind != syntax_kind::attribute_specifier_seq)
         return only_gnu_attributes(tree, n);
     for (uint32_t i = 0; i < tree[n].child_count; i++) {

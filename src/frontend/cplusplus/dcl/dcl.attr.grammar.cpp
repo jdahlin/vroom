@@ -510,6 +510,15 @@ bool attribute_without_effect(const char *ns, size_t ns_length,
  */
 bool semantic_analysis::attributes_without_effect(syntax_child n) const
 {
+    uint32_t flags = 0;
+    return attributes_as_gnu(n, flags) && !flags;
+}
+
+/* The same, also accepting [dcl.attr.noreturn] noreturn (and
+   gnu::noreturn), whose GCC flag goes into flags: GCC's noreturn says
+   the same */
+bool semantic_analysis::attributes_as_gnu(syntax_child n, uint32_t &flags) const
+{
     owned_array<syntax_child> work;
     work.append(n);
     while (!work.empty()) {
@@ -524,6 +533,10 @@ bool semantic_analysis::attributes_without_effect(syntax_child n) const
             const char *name;
             size_t length;
             attribute_name(spelling, &name, &length);
+            if (name_is(name, length, "noreturn")) {
+                flags |= gnu_noreturn;
+                continue;
+            }
             if (!attribute_without_effect(nullptr, 0, name, length))
                 return false;
             continue;
@@ -558,6 +571,11 @@ bool semantic_analysis::attributes_without_effect(syntax_child n) const
         size_t ns_length, length;
         attribute_name(ns_spelling, &ns, &ns_length);
         attribute_name(spelling, &name, &length);
+        if (name_is(ns, ns_length, "gnu") &&
+            name_is(name, length, "noreturn")) {
+            flags |= gnu_noreturn;
+            continue;
+        }
         if (!attribute_without_effect(ns, ns_length, name, length))
             return false;
     }

@@ -228,7 +228,8 @@ static const gnu_attribute_rule gnu_attribute_rules[] = {
        a diagnostic (unused, maybe_unused, warn_unused_result, deprecated,
        sentinel), or name an optimization vcc does not do (noclone, cold,
        hot, flatten, no_icf, no_reorder, artificial,
-       no_instrument_function) */
+       no_instrument_function), or ask for an instrumentation vcc does not
+       add (no_sanitize("cfi"): libc++'s _LIBCPP_NO_CFI) */
     {"unused", 0},
     {"maybe_unused", 0},
     {"noclone", 0},
@@ -252,6 +253,11 @@ static const gnu_attribute_rule gnu_attribute_rules[] = {
     {"no_reorder", 0},
     {"artificial", 0},
     {"no_instrument_function", 0},
+    {"no_sanitize", 0},
+    /* clang's availability(PLATFORM, introduced = V, ...): a diagnostic
+       when the deployment target is older (libc++'s
+       _LIBCPP_INTRODUCED_IN_LLVM_N_ATTRIBUTE) */
+    {"availability", 0},
 };
 
 /* the rule of an attribute's spelling, nullptr if analysis has none */
@@ -285,10 +291,14 @@ static const gnu_attribute_rule *gnu_attribute_rule_of(const char *name,
 analysis_result semantic_analysis::gnu_attribute_specifier(node_index n,
                                                            gnu_attributes &g)
 {
-    /* (standard attributes without effect: leading_gnu_attributes) */
+    /* (standard attributes without effect, or [[noreturn]]:
+       leading_gnu_attributes) */
+    uint32_t standard = 0;
     if (tree[n].kind == syntax_kind::attribute_specifier &&
-        attributes_without_effect(syntax_child::node(n)))
+        attributes_as_gnu(syntax_child::node(n), standard)) {
+        g.flags |= standard;
         return analysis_result::well_formed;
+    }
     owned_array<syntax_child> attributes;
     owned_array<node_index> work;
     work.append(n);
@@ -305,8 +315,8 @@ analysis_result semantic_analysis::gnu_attribute_specifier(node_index n,
                      syntax_is(tree, c, syntax_kind::gnu_attribute_specifier))
                 work.append(c.index());
             else if (syntax_is(tree, c, syntax_kind::attribute_specifier) &&
-                     attributes_without_effect(c))
-                continue;
+                     attributes_as_gnu(c, standard))
+                g.flags |= standard;
             else if (!c.is_token())
                 return not_supported(n, "ext.gnu");
             else if (tokens[c.index()].kind !=

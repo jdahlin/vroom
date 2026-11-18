@@ -1884,6 +1884,8 @@ class semantic_analysis
     /* [dcl.attr.grammar]: every attribute at n (an attribute-specifier,
        -seq or -list) changes nothing vcc generates */
     bool attributes_without_effect(syntax_child n) const;
+    /* ... or [[noreturn]], whose GCC flag goes into flags */
+    bool attributes_as_gnu(syntax_child n, uint32_t &flags) const;
     bool gnu_attributes_without_effect(syntax_child n) const;
     bool class_head_attributes_without_effect(syntax_child c) const;
     uint32_t attributes_without_effect_before(node_index declaration) const;
