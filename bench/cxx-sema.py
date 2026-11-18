@@ -391,6 +391,8 @@ def layout_claims(text, test):
             found.append((os.path.normpath(f), int(row), parts[2], tuple(map(int, parts[3:6])), []))
         elif not found:
             continue
+        elif parts[0] == 'vptr' and len(parts) == 2:
+            found[-1][4].append(('vptr', int(parts[1])))
         elif parts[0] in ('base', 'field') and len(parts) == 3:
             found[-1][4].append((parts[0], int(parts[1]), parts[2]))
         elif parts[0] == 'bits' and len(parts) == 4:

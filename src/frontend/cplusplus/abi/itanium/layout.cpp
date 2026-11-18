@@ -18,10 +18,10 @@
  *     IV   Finalization: the size rounded up to the alignment
  *
  * A class reaches this file only with rules analysis has: no virtual
- * functions and no virtual bases yet, so I allocates nothing and III has
- * no base to place.  Both are where S4's [class.virtual] and [class.mi]
- * continue: a virtual function declared after the data members moves
- * every one of them, which is why the layout is not made member by member.
+ * bases yet, so III has no base to place ([class.mi], R7).  A virtual
+ * function declared after the data members moves every one of them (I's
+ * virtual table pointer), which is why the layout is not made member by
+ * member.
  *
  * The ABI's prose is cited by section and said in our own words
  * (bench/cxx-spec-refs.py); -fcxx-dump=layout-claims writes what this
@@ -65,6 +65,10 @@ entity_index class_of_component(const semantic_analysis &a, const entity &m)
 bool empty_class(const semantic_analysis &a, entity_index c)
 {
     const entity &x = a.entity_table[c];
+    /* "no virtual functions": a dynamic class has its virtual table
+       pointer */
+    if (x.dynamic)
+        return false;
     for (uint32_t i = 0; i < x.member_count; i++) {
         const entity &m = a.entity_table[a.class_members[x.first_member + i]];
         if (m.bit_field && !m.bit_width)
@@ -88,7 +92,7 @@ bool empty_class(const semantic_analysis &a, entity_index c)
 bool pod_for_layout(const semantic_analysis &a, entity_index c)
 {
     const entity &x = a.entity_table[c];
-    if (x.destructor || x.base_count || x.user_copy_assignment)
+    if (x.destructor || x.base_count || x.user_copy_assignment || x.dynamic)
         return false;
     /* [impl.clang] a constructor deleted on its first declaration is no
        user-declared one here (C++11's aggregates allow it) */
@@ -273,16 +277,25 @@ void class_layout::record(entity_index of, uint64_t at)
 
 /*
  * [abi:class-types] I: sizeof(C) and dsize(C) start at zero, align(C) at
- * one.  For a dynamic class this part chooses the primary base class, or
- * allocates the virtual table pointer at offset 0; no class with a virtual
- * function or a virtual base is analysed yet ([class.virtual], [class.mi]
- * are unsupported where they are declared).
+ * one.  For a dynamic class this part chooses the primary base class (its
+ * first dynamic base, which analysis takes only as the first base:
+ * dynamic_class_record), allocated first by II at offset 0, or else
+ * allocates the virtual table pointer at offset 0, the size and alignment
+ * of a pointer.  No class with a virtual base is analysed yet
+ * ([class.mi]).
  */
 const char *class_layout::initialization()
 {
     size = 0;
     alignment = 1;
     data_bits = 0;
+    const dynamic_class *d = analysis.dynamic_of(c);
+    if (d && !d->primary_base) {
+        uint64_t pointer = analysis.pointer_size();
+        size = pointer;
+        data_bits = pointer * 8;
+        raise_alignment(pointer);
+    }
     return nullptr;
 }
 

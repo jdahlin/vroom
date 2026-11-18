@@ -439,6 +439,32 @@ struct entity {
     /* ... and, its underlying type not fixed, the type it promotes to
        ([conv.prom]/4) */
     fundamental_type promoted = fundamental_type::none;
+    /* a non-static member function: [class.virtual]/2 a virtual function
+       (declared virtual, or overriding one), pure ([class.abstract]/2),
+       and its slot in the virtual table of its class (the index of its
+       function pointer after the offset to top and the RTTI pointer,
+       [abi:vtable-components]) */
+    bool virtual_ = false, pure = false, final_function = false;
+    uint32_t vtable_slot = 0;
+    /* a class: [class.virtual]/1 a polymorphic (dynamic, [abi:definitions])
+       class: its record in semantic_analysis::dynamic_classes plus one, 0
+       if it is none */
+    uint32_t dynamic = 0;
+};
+
+/* [class.virtual], [abi:vtable-components]: what a dynamic class adds to
+   its entity: its primary base (a base class subobject entity sharing the
+   virtual table pointer at offset 0, [abi:class-types] I; 0: the class
+   allocates the pointer itself), its virtual functions' final overriders
+   by slot (semantic_analysis::vtable_slots[first_slot .. first_slot +
+   slot_count)), whether it is abstract ([class.abstract]/2) and its key
+   function ([abi:vague-vtable]: the first non-pure virtual function not
+   inline at the closing }, 0 if none) */
+struct dynamic_class {
+    entity_index primary_base = 0;
+    uint32_t first_slot = 0, slot_count = 0;
+    bool abstract = false;
+    entity_index key_function = 0;
 };
 
 /* one declaration of an entity: the syntax node that declares it */
@@ -683,7 +709,9 @@ enum class semantic_kind : uint8_t {
     /* a: the function lvalue or pointer prvalue; the arguments, each
        initialized as its parameter, are list[first .. first + count); b:
        for a non-static member function, the object's address, its
-       implicit object argument ([over.match.funcs]/4: `this`), else 0 */
+       implicit object argument ([over.match.funcs]/4: `this`), else 0;
+       c: 1 for a virtual call ([class.virtual]/16: the final overrider in
+       the object's dynamic type, through its virtual table) */
     call,
     /* a: the pointer prvalue, b: the integer prvalue (E1[E2] with the
        operands in that order) */
@@ -731,6 +759,10 @@ enum class semantic_kind : uint8_t {
        computation: the type of the allocated node, the operand's without
        the pointee's cv-qualifiers ([expr.delete]/11) */
     delete_object,
+    /* [class.cdtor]/4, [abi:vtable-ctor]: a: the address of the object
+       under construction or destruction (this), b: its class, whose
+       virtual table pointer is stored in it */
+    vtable_pointer_store,
     /* ---- statements ---- */
     /* the statements in list[first .. first + count) */
     block,
@@ -913,6 +945,17 @@ class semantic_analysis
     owned_array<entity_index> class_members;
     /* the direct base class subobjects of the classes (entity::first_base) */
     owned_array<entity_index> class_bases;
+    /* the dynamic classes (entity::dynamic) and their virtual tables'
+       functions (dynamic_class::first_slot) */
+    owned_array<dynamic_class> dynamic_classes;
+    owned_array<entity_index> vtable_slots;
+    const dynamic_class *dynamic_of(entity_index c) const
+    {
+        if (!entity_table[c].dynamic)
+            return nullptr;
+        return &dynamic_classes[entity_table[c].dynamic - 1];
+    }
+    bool abstract_class(qualified_type t) const;
     /* whether a class is trivially copyable and has a trivial destructor:
        its objects are copied as their bytes, passed in registers */
     bool trivial_class(entity_index c) const;
@@ -994,7 +1037,7 @@ class semantic_analysis
            cv-qualifier was there */
         bool has_type = false;
         bool typedef_ = false, static_ = false, extern_ = false,
-             inline_ = false, constexpr_ = false;
+             inline_ = false, constexpr_ = false, virtual_ = false;
         /* a class-specifier or elaborated-type-specifier was there: a
            declaration with no declarator declares the class
            ([dcl.pre]/5) */
@@ -1295,6 +1338,31 @@ class semantic_analysis
     /* a declarator analysed now may have a cv-qualifier-seq: a member
        declarator, or one whose declarator-id is a qualified-id */
     bool in_member_declarator = false;
+    /* [dcl.fct.spec]/2: virtual is analysed on a member-declaration's
+       decl-specifier-seq only; a member-declarator's virt-specifiers and
+       pure-specifier ([class.mem]/1) for the declarator it holds */
+    bool virtual_allowed = false;
+    /* construct() is called for a base class subobject, which may be of an
+       abstract class ([class.abstract]/2) */
+    bool constructing_base = false;
+    bool virt_override = false, virt_final = false, virt_pure = false;
+    /* the virtual functions declared, with their class, in order: a
+       class's are its new slots at its closing } (dynamic_class_record) */
+    struct declared_virtual {
+        entity_index c = 0, f = 0;
+        /* the slot of a base's virtual table it overrides, or ~0u */
+        uint32_t overrides = ~0u;
+        node_index declaration = 0;
+    };
+    owned_array<declared_virtual> declared_virtuals;
+    analysis_result dynamic_class_record(entity_index c, node_index n);
+    analysis_result virtual_member(entity_index c, entity_index e,
+                                   node_index declaration, token_index id,
+                                   bool virtual_specified);
+    uint32_t vtable_pointer_store(entity_index c, token_index at);
+    /* whether the syntax is a virt-specifier or virt-specifier-seq
+       ([class.mem]/1), and which */
+    bool virt_specifier(syntax_child d, bool &override_, bool &final_) const;
     analysis_result parameter_declaration(node_index n, qualified_type &type,
                                           bool &unnamed, token_index &id,
                                           syntax_child &default_argument);
@@ -2071,6 +2139,10 @@ const char *itanium_class_layout(semantic_analysis &analysis, entity_index c);
 bool itanium_symbol_name(const semantic_analysis &analysis,
                          const preprocessor &pp, entity_index e, vbuffer *out,
                          int variant = 2);
+/* [abi:mangling-special-vtables]: the symbol of class c's virtual table
+   (_ZTV <type>) */
+bool itanium_vtable_name(const semantic_analysis &analysis,
+                         const preprocessor &pp, entity_index c, vbuffer *out);
 
 } // namespace cplusplus
 

@@ -155,6 +155,10 @@ bool semantic_analysis::declares_move_constructor(entity_index c) const
 bool semantic_analysis::copies_bytes(entity_index c) const
 {
     const entity &x = entity_table[c];
+    /* [class.copy.ctor]/11.1: not trivial when "class X has no virtual
+       functions" fails: the copy stores the virtual table pointer of X */
+    if (x.dynamic)
+        return false;
     for (entity_index k = x.first_constructor; k;
          k = entity_table[k].next_constructor)
         if (is_copy_constructor(c, k))
@@ -482,6 +486,10 @@ semantic_analysis::construct(node_index at, qualified_type type,
     const entity &x = entity_table[c];
     if (x.kind != entity_kind::class_type)
         return not_supported(at, "class.pre");
+    /* [class.abstract]/2 (Note 3): "no objects of an abstract class can be
+       created except as subobjects of a class derived from it" */
+    if (abstract_class(type) && !constructing_base)
+        return not_supported(at, "class.abstract");
     if (arguments.empty() && trivial_defaulted_default_constructor(c))
         /* value-initialization through a trivial X() = default
            ([dcl.init]/8.2: zero-initialized): not analysed */
@@ -778,7 +786,9 @@ analysis_result semantic_analysis::ctor_initializer(syntax_child list,
             if (r != analysis_result::well_formed)
                 return r;
             initialized_value value;
+            constructing_base = entity_table[e].base_subobject;
             r = construct(n, type, arguments, object.node, value);
+            constructing_base = false;
             if (r != analysis_result::well_formed)
                 return r;
             if (semantics[value.node].kind != semantic_kind::construct)
@@ -885,17 +895,30 @@ analysis_result semantic_analysis::ctor_initializer(syntax_child list,
             return r;
         owned_array<expression_meaning> none;
         initialized_value value;
+        constructing_base = entity_table[subobjects[i]].base_subobject;
         r = construct(current_declaration, entity_table[subobjects[i]].type,
                       none, object.node, value);
+        constructing_base = false;
         if (r != analysis_result::well_formed)
             return r;
         initialized[i] =
             statement_node(semantic_kind::expression_statement, at, value.node);
     }
+    /* [class.cdtor]/4: from the members' initialization on, a virtual
+       call finds this class's final overriders: its virtual table pointer
+       stored after the bases ([abi:vtable-ctor]) */
     owned_array<uint32_t> statements;
-    for (uint32_t s : initialized)
-        if (s)
-            statements.append(s);
+    uint32_t base_count = entity_table[c].base_count;
+    for (uint32_t i = 0; i < initialized.size(); i++) {
+        if (i == base_count)
+            if (uint32_t store = vtable_pointer_store(c, at))
+                statements.append(store);
+        if (initialized[i])
+            statements.append(initialized[i]);
+    }
+    if (initialized.size() == base_count)
+        if (uint32_t store = vtable_pointer_store(c, at))
+            statements.append(store);
     built = statement_node(semantic_kind::block, at);
     if (!statements.empty()) {
         semantics[built].first =
@@ -1046,6 +1069,13 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
     for (uint32_t i = 0; i < x.member_count; i++)
         if (entity_table[class_members[x.first_member + i]].default_initializer)
             construction = true;
+    /* /3.1, [class.copy.ctor]/11.1: a class with virtual functions has
+       neither a trivial default constructor nor a trivial copy one; each
+       stores the virtual table pointer ([class.cdtor]) */
+    if (x.dynamic) {
+        construction = true;
+        copy = true;
+    }
     for (entity_index k : classes) {
         if (entity_table[k].first_constructor)
             construction = true;
@@ -1365,7 +1395,9 @@ analysis_result semantic_analysis::implicit_copy(entity_index c, node_index n,
             owned_array<expression_meaning> arguments;
             arguments.append(from);
             initialized_value value;
+            constructing_base = entity_table[e].base_subobject;
             r = construct(n, type, arguments, object.node, value);
+            constructing_base = false;
             /* [class.copy.ctor]/10: "A defaulted copy/move constructor for
                a class X is defined as deleted if X has ... a potentially
                constructed subobject type M (or array thereof) that cannot
@@ -1403,6 +1435,10 @@ analysis_result semantic_analysis::implicit_copy(entity_index c, node_index n,
         statements.append(
             statement_node(semantic_kind::expression_statement, at, assigned));
     }
+    /* [class.cdtor]/4: the copy's virtual table pointer is its class's,
+       not the source's */
+    if (uint32_t store = vtable_pointer_store(c, at))
+        statements.append(store);
     built = statement_node(semantic_kind::block, at);
     if (!statements.empty()) {
         semantics[built].first =

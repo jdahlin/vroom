@@ -417,6 +417,11 @@ analysis_result semantic_analysis::function(node_index parameters,
            be pointer to T.  After producing the list of parameter types,
            any top-level cv-qualifiers modifying a parameter type are
            deleted when forming the function type." */
+        /* [class.abstract]/3 (Note), [dcl.fct.def.general]/2: a
+           parameter of abstract class type is checked where the function
+           is defined or called: not analysed */
+        if (abstract_class(t))
+            return not_supported(declarations[k], "class.abstract");
         if (record.kind == type_kind::array)
             t = qualified_type::make(type_table.pointer_to(record.operand),
                                      cv_none);
@@ -436,6 +441,9 @@ analysis_result semantic_analysis::function(node_index parameters,
     for (const parameter_meaning &parameter : named)
         function_parameters.append(parameter);
     function_cv = cv;
+    if (abstract_class(type))
+        /* a return type of abstract class type: as a parameter's */
+        return not_supported(parameters, "class.abstract");
     type = qualified_type::make(
         type_table.function(type, list.data(), list.size(), variadic), cv_none);
     return analysis_result::well_formed;

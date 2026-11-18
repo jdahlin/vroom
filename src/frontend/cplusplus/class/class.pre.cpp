@@ -483,6 +483,10 @@ analysis_result semantic_analysis::class_definition(node_index n,
     /* [class.mem]/7: complete at the closing }, where its bases and
        members get their offsets and the class its size
        ([abi:class-types]) */
+    /* [class.virtual]: its virtual table, which the layout's
+       initialization needs ([abi:class-types] I) */
+    if (result == analysis_result::well_formed)
+        result = dynamic_class_record(c, n);
     const char *layout_rule = itanium_class_layout(*this, c);
     resume_outer();
     if (layout_rule && result == analysis_result::well_formed)
@@ -791,6 +795,9 @@ bool semantic_analysis::is_aggregate(entity_index c) const
 {
     const entity &x = entity_table[c];
     const implementation_defined_behavior &b = tokens.files.behavior;
+    /* /1.3: "no virtual functions" */
+    if (x.dynamic)
+        return false;
     /* [dcl.init.aggr]/1.1: "no user-declared or inherited constructors"
        (C++20); "no user-provided, explicit, or inherited constructors"
        before, where X() = default and = delete are not user-provided
@@ -981,23 +988,37 @@ semantic_analysis::member_declaration(entity_index c, syntax_child member,
         syntax_is(tree, tree.children(children[0].index())[0],
                   syntax_kind::elaborated_type_specifier))
         sole_elaborated = tree.children(children[0].index())[0].index();
+    bool outer_virtual_allowed = virtual_allowed;
+    virtual_allowed = true;
     analysis_result r = decl_specifier_seq(children[0].index(), s, false);
+    virtual_allowed = outer_virtual_allowed;
     sole_elaborated = 0;
     declaration_access = 0;
     if (r != analysis_result::well_formed)
         return r;
     if (node.kind == syntax_kind::function_definition) {
-        if (node.child_count != 3 ||
-            !syntax_is(tree, children[2], syntax_kind::function_body))
+        /* [dcl.fct.def.general]/1: declarator virt-specifier-seq_opt
+           function-body */
+        uint32_t body_at = 2;
+        bool override_ = false, final_ = false;
+        while (body_at < node.child_count &&
+               virt_specifier(children[body_at], override_, final_))
+            body_at++;
+        if (node.child_count != body_at + 1 ||
+            !syntax_is(tree, children[body_at], syntax_kind::function_body))
             return not_supported(n, "dcl.fct.def.general");
-        const syntax_node &b = tree[children[2].index()];
+        const syntax_node &b = tree[children[body_at].index()];
         if (b.child_count != 1 ||
-            !syntax_is(tree, tree.children(children[2].index())[0],
+            !syntax_is(tree, tree.children(children[body_at].index())[0],
                        syntax_kind::compound_statement))
             /* a ctor-initializer, a function-try-block, = default,
                = delete */
             return not_supported(n, "dcl.fct.def.general");
+        virt_override = override_;
+        virt_final = final_;
+        virt_pure = false;
         r = member_declarator(c, n, children[1], s, access, true);
+        virt_override = virt_final = false;
         if (r == analysis_result::well_formed)
             bodies.append(n);
         return r;
@@ -1068,6 +1089,31 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
             if (syntax_is_punctuator(tokens, tree.children(d.index())[i],
                                      preprocessing_op_or_punc::COLON))
                 return member_bit_field(c, declaration, d, s, access);
+        /* declarator virt-specifier-seq_opt pure-specifier_opt */
+        {
+            const syntax_child *parts = tree.children(d.index());
+            bool override_ = false, final_ = false, pure = false;
+            uint32_t i = 1;
+            while (i < node.child_count &&
+                   virt_specifier(parts[i], override_, final_))
+                i++;
+            if (i < node.child_count &&
+                syntax_is(tree, parts[i], syntax_kind::pure_specifier)) {
+                pure = true;
+                i++;
+            }
+            if (i > 1 && i == node.child_count) {
+                virt_override = override_;
+                virt_final = final_;
+                virt_pure = pure;
+                analysis_result r = member_declarator(c, declaration, parts[0],
+                                                      s, access, definition);
+                virt_override = virt_final = virt_pure = false;
+                return r;
+            }
+            if (i > 1)
+                return not_supported(d.index(), "class.mem");
+        }
         /* declarator brace-or-equal-initializer: [class.mem]/10 "A
            brace-or-equal-initializer shall appear only in the declaration
            of a data member"; for a non-static one it is a default member
@@ -1149,6 +1195,14 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
     uint32_t name = tokens.identifier(m.id);
     bool is_function =
         type_table[type.unqualified()].kind == type_kind::function;
+    /* [dcl.fct.spec]/2: "The virtual specifier shall be used only in the
+       initial declaration of a non-static class member function" */
+    if (s.virtual_ && !is_function)
+        return ill_formed_at_token(m.id,
+                                   "the virtual specifier shall be used only "
+                                   "in the declaration of a non-static "
+                                   "member function",
+                                   "dcl.fct.spec");
     if ((is_function && (m.aligned || (m.gnu_flags & gnu_packed))) ||
         (m.gnu_flags & gnu_used))
         return not_supported(declaration, "ext.gnu");
@@ -1311,6 +1365,9 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
                                   "over.oper");
             defer_default_arguments(e, declaration, parameters);
         }
+        analysis_result v = virtual_member(c, e, declaration, m.id, s.virtual_);
+        if (v != analysis_result::well_formed)
+            return v;
     } else if (has_defaults) {
         /* /3: a default argument of a member that is not a function */
         return not_supported(declaration, "dcl.fct.default");
@@ -1326,7 +1383,7 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
             return not_supported(declaration, "class.static.data");
         const struct type &record = type_table[type.unqualified()];
         if (record.kind == type_kind::lvalue_reference ||
-            record.kind == type_kind::rvalue_reference)
+            record.kind == type_kind::rvalue_reference || abstract_class(type))
             return not_supported(declaration, "class.static.data");
         e = entity_table.make(entity_kind::variable, name, c);
         entity_table[e].type = type;
@@ -1369,6 +1426,13 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
                                        "the type of a non-static data member "
                                        "shall not be an incomplete type",
                                        "class.mem");
+        /* [basic.def]/5 (a member's declaration defines it,
+           [basic.def]/2) */
+        if (abstract_class(type))
+            return ill_formed_at_token(m.id,
+                                       "the type of a non-static data member "
+                                       "shall not be an abstract class type",
+                                       "basic.def");
         if (is_void || (record.kind == type_kind::array && !record.bound_known))
             /* incomplete too; an array of unknown bound last is clang's
                flexible array member extension */
@@ -1578,7 +1642,10 @@ analysis_result semantic_analysis::member_function_definition(
         return special_member_body(definition, children[at + 1]);
     }
     specified s;
+    bool outer_virtual_allowed = virtual_allowed;
+    virtual_allowed = true;
     analysis_result r = decl_specifier_seq(children[0].index(), s, false);
+    virtual_allowed = outer_virtual_allowed;
     if (r != analysis_result::well_formed)
         return r;
     qualified_type type = s.type;
@@ -1598,9 +1665,11 @@ analysis_result semantic_analysis::member_function_definition(
             last_declared = o;
     if (!last_declared)
         return not_supported(definition, "class.mfct");
-    if (deleted_body(children[2]))
+    /* the function-body after any virt-specifier-seq */
+    syntax_child body = children[tree[definition].child_count - 1];
+    if (deleted_body(body))
         return deleted_definition(definition, last_declared);
-    return function_body(definition, tree.children(children[2].index())[0]);
+    return function_body(definition, tree.children(body.index())[0]);
 }
 
 /*
@@ -1774,6 +1843,44 @@ analysis_result semantic_analysis::static_member_definition(
     d.claimable = declarations_claimable;
     declared.append(d);
     return analysis_result::well_formed;
+}
+
+/*
+ *     virt-specifier-seq:
+ *         virt-specifier
+ *         virt-specifier-seq virt-specifier
+ *     virt-specifier:
+ *         override
+ *         final
+ *
+ * One virt-specifier is its token; more are a virt-specifier-seq node.
+ */
+bool semantic_analysis::virt_specifier(syntax_child d, bool &override_,
+                                       bool &final_) const
+{
+    auto one = [&](syntax_child t) {
+        if (!t.is_token() || tokens[t.index()].kind != token_kind::identifier)
+            return false;
+        owned_buffer spelled;
+        tokens.spelling(t.index(), spelled.get());
+        if (spelled.size() == 8 && !memcmp(spelled.data(), "override", 8)) {
+            override_ = true;
+            return true;
+        }
+        if (spelled.size() == 5 && !memcmp(spelled.data(), "final", 5)) {
+            final_ = true;
+            return true;
+        }
+        return false;
+    };
+    if (d.is_token())
+        return one(d);
+    if (!syntax_is(tree, d, syntax_kind::virt_specifier_seq))
+        return false;
+    for (uint32_t i = 0; i < tree[d.index()].child_count; i++)
+        if (!one(tree.children(d.index())[i]))
+            return false;
+    return true;
 }
 
 } // namespace cplusplus

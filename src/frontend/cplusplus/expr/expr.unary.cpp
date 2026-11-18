@@ -452,6 +452,12 @@ analysis_result semantic_analysis::unary(node_index n, expression_meaning &m)
             /* [impl.clang] the address of a class temporary: an error
                clang makes a warning (-Waddress-of-temporary) */
             return not_supported(n, "expr.unary.op");
+        /* /3.1: "If the operand is a qualified-id naming a non-static or
+           variant member m of some class C ... the result has type
+           pointer to member" ([dcl.mptr], S5) */
+        if (m.category != value_category::lvalue &&
+            syntax_is(tree, children[1], syntax_kind::qualified_id))
+            return not_supported(n, "dcl.mptr");
         if (m.category != value_category::lvalue)
             return ill_formed(n,
                               "the operand of the unary & operator shall "

@@ -368,6 +368,19 @@ analysis_result semantic_analysis::declare(node_index declaration,
            yet */
         if (is_void)
             return not_supported(declaration, "basic.types");
+        /* [basic.def]/5: "In the definition of an object, the type of that
+           object shall not be ... an abstract class type, or a (possibly
+           multi-dimensional) array thereof" (a declaration that is no
+           definition: clang's error too, from no rule found yet) */
+        if (abstract_class(type)) {
+            if (!definition)
+                return not_supported(declaration, "class.abstract");
+            return ill_formed_at_token(id,
+                                       "in the definition of an object, the "
+                                       "type of that object shall not be an "
+                                       "abstract class type",
+                                       "basic.def");
+        }
         if (record.kind == type_kind::class_type) {
             const entity &c = entity_table[record.entity];
             if (c.kind != entity_kind::class_type)

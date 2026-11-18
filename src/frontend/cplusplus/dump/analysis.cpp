@@ -527,8 +527,10 @@ static bool layout_class_name(const semantic_analysis &analysis,
  *
  * (the place of its class-key; sizeof, the data size and the alignment in
  * bytes), then a line per direct base class subobject and per non-static
- * data member or unnamed bit-field, in the layout's order:
+ * data member or unnamed bit-field, in the layout's order, after a dynamic
+ * class's own virtual table pointer:
  *
+ *     vptr <tab> 0
  *     base <tab> OFFSET <tab> NAME
  *     field <tab> OFFSET <tab> NAME
  *     bits <tab> BIT-OFFSET <tab> WIDTH <tab> NAME
@@ -559,6 +561,10 @@ static void dump_layout_claims(const semantic_analysis &analysis,
                               static_cast<unsigned long long>(x.data_size),
                               x.alignment);
         bool nameable = true;
+        const dynamic_class *d = analysis.dynamic_of(c);
+        if (d && !d->primary_base)
+            /* [abi:class-types] I: the virtual table pointer */
+            vbuffer_string_append(lines.get(), "vptr\t0\n");
         for (uint32_t i = 0; i < x.base_count; i++) {
             const entity &b =
                 analysis.entity_table[analysis.class_bases[x.first_base + i]];

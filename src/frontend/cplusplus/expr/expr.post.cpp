@@ -927,8 +927,31 @@ analysis_result semantic_analysis::call_with(
         callee = expression_node(semantic_kind::entity, named, node.first_token,
                                  member);
     }
+    /* [class.virtual]/16: "Explicit qualification with the scope operator
+       ([expr.prim.id.qual]) suppresses the virtual call mechanism" */
+    bool dispatched = false;
+    if (member && entity_table[member].virtual_) {
+        if (!node.child_count)
+            return not_supported(n, "class.virtual");
+        syntax_child name = tree.children(n)[0];
+        if (!name.is_token() &&
+            syntax_is(tree, name, syntax_kind::postfix_expression) &&
+            tree[name.index()].child_count == 3 &&
+            (syntax_is_punctuator(tokens, tree.children(name.index())[1],
+                                  preprocessing_op_or_punc::DOT) ||
+             syntax_is_punctuator(tokens, tree.children(name.index())[1],
+                                  preprocessing_op_or_punc::ARROW)))
+            name = tree.children(name.index())[2];
+        if (name.is_token() &&
+            tokens[name.index()].kind == token_kind::identifier)
+            dispatched = true;
+        else if (!syntax_is(tree, name, syntax_kind::qualified_id))
+            return not_supported(n, "class.virtual");
+    }
     m.node = expression_node(semantic_kind::call, m, node.first_token, callee,
                              object);
+    if (dispatched)
+        semantics[m.node].c = 1;
     semantics[m.node].first =
         semantics.list(argument_nodes.data(), argument_nodes.size());
     semantics[m.node].count = static_cast<uint32_t>(argument_nodes.size());

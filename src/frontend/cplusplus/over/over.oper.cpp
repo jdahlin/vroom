@@ -460,6 +460,11 @@ bool semantic_analysis::copy_assignment_operator(entity_index f,
 
 bool semantic_analysis::assigned_bitwise(entity_index c)
 {
+    /* [class.copy.assign]/9.1: a class with virtual functions: its
+       implicit copy assignment is not trivial (it keeps the virtual table
+       pointer): not analysed */
+    if (entity_table[c].dynamic)
+        return false;
     lookup_result found = lookup_qualified(
         c, operator_name(preprocessing_op_or_punc::EQUAL), lookup_filter::any);
     if (found.entity || found.unknown || found.ambiguous)

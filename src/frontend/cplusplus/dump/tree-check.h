@@ -53,7 +53,7 @@ struct tree_checker {
                /* T(args), a prvalue of class type ([expr.type.conv]/2) */
                k == semantic_kind::construct ||
                (k >= semantic_kind::new_object &&
-                k <= semantic_kind::delete_object);
+                k <= semantic_kind::vtable_pointer_store);
     }
     static bool is_initializer(semantic_kind k)
     {
@@ -248,6 +248,12 @@ struct tree_checker {
                                special_member::constructor)
                 problem(n, "no constructor");
             list(n, tree_sort::initializer, "argument");
+            break;
+        case semantic_kind::vtable_pointer_store:
+            child(n, node.a, tree_sort::expression, false, "object address");
+            prvalue(n, node.a, "object address");
+            if (!node.b || !analysis.entity_table[node.b].dynamic)
+                problem(n, "no dynamic class");
             break;
         case semantic_kind::destroy:
             child(n, node.a, tree_sort::expression, false, "object");

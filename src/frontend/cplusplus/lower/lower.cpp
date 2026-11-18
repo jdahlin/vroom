@@ -54,6 +54,9 @@ class c_lowering
         complete_symbols.resize(analysis.entity_table.size());
         for (uint32_t &s : complete_symbols)
             s = 0;
+        vtables.resize(analysis.entity_table.size());
+        for (uint32_t &s : vtables)
+            s = 0;
     }
 
     bool translation_unit();
@@ -93,6 +96,18 @@ class c_lowering
        each special member function, 0 until made; symbols has the base
        object one (C2, D2) */
     owned_array<uint32_t> complete_symbols;
+    /* [abi:vtable]: each dynamic class's virtual table symbol, 0 until
+       made, and __cxa_pure_virtual's ([abi:pure-virtual]) */
+    owned_array<uint32_t> vtables;
+    uint32_t pure_virtual = 0;
+    uint32_t vtable(entity_index k, token_index at);
+    ast_qualified_type vtable_type(entity_index k);
+    /* the address point of class k's virtual table: &vtable[2]
+       ([abi:vtable-general]: after the offset to top and the RTTI
+       pointer), a void ** */
+    uint32_t address_point(entity_index k, token_index at);
+    uint32_t virtual_function(entity_index f, uint32_t object, token_index at);
+    bool side_effect_free(uint32_t lowered) const;
     /* [stmt.dcl]/2: the automatic objects with a destructor that are in
        scope where the lowering is, in the order they were constructed,
        with the statements a break or continue leaves; in a destructor,
@@ -480,6 +495,15 @@ ast_qualified_type c_lowering::class_type(entity_index e, token_index at)
         packed.append(pack);
         widths.append(width);
     };
+    const dynamic_class *dynamic = analysis.dynamic_of(e);
+    if (dynamic && !dynamic->primary_base) {
+        /* [abi:class-types] I: the virtual table pointer at offset 0 */
+        ast_qualified_type v = ast_builder_type_basic(AST_TYPE_VOID);
+        add(ast_builder_type_pointer(c, ast_builder_type_pointer(c, v)),
+            "__vptr", 6, 0, false, -1);
+        offsets.append(0);
+        end = analysis.pointer_size();
+    }
     auto padding = [&](uint64_t bytes) {
         vbuffer_format_append(generated.get(), "__pad%u",
                               static_cast<uint32_t>(fields.size()));
@@ -553,7 +577,7 @@ ast_qualified_type c_lowering::class_type(entity_index e, token_index at)
         else if (m.offset + size > end)
             end = m.offset + size;
     }
-    if (!x.member_count) {
+    if (!x.member_count && !end) {
         /* [intro.object]/8: an empty class is one byte, a C struct without
            members none: a char of padding */
         add(byte, "__empty", 7, 0, false, -1);
@@ -1651,23 +1675,43 @@ uint32_t c_lowering::assignment(const semantic_node &n)
 uint32_t c_lowering::call(const semantic_node &n)
 {
     bool here = at_result_object;
-    uint32_t callee = expression(n.a);
-    if (!callee)
-        return 0;
     qualified_type function_type = node(n.a).type;
-    if (record(function_type).kind == type_kind::pointer)
-        function_type = record(function_type).operand;
-    else
-        callee = cast(callee, ast_builder_type_pointer(c, type_of(callee)),
-                      AST_CAST_FUNCTION_DECAY);
+    uint32_t callee = 0;
     owned_array<uint32_t> arguments;
-    if (n.b) {
-        /* the implicit object argument: the object's address, the
-           function's first parameter */
+    if (n.c) {
+        /* [class.virtual]/16: the final overrider, the function pointer in
+           the object's virtual table at the function's slot
+           ([abi:vtable-components]); the object's address is read twice,
+           so it is lowered twice when that has no effect, else held */
         uint32_t object = expression(n.b);
         if (!object)
             return 0;
+        if (!side_effect_free(object))
+            return fail("a virtual call on an object whose address has "
+                        "side effects",
+                        n.at);
+        uint32_t again = expression(n.b);
+        callee = virtual_function(node(n.a).a, again, n.at);
+        if (!callee)
+            return 0;
         arguments.append(object);
+    } else {
+        callee = expression(n.a);
+        if (!callee)
+            return 0;
+        if (record(function_type).kind == type_kind::pointer)
+            function_type = record(function_type).operand;
+        else
+            callee = cast(callee, ast_builder_type_pointer(c, type_of(callee)),
+                          AST_CAST_FUNCTION_DECAY);
+        if (n.b) {
+            /* the implicit object argument: the object's address, the
+               function's first parameter */
+            uint32_t object = expression(n.b);
+            if (!object)
+                return 0;
+            arguments.append(object);
+        }
     }
     const uint32_t *items = analysis.semantics.items(n.first);
     const struct type &ft = record(function_type);
@@ -2191,6 +2235,21 @@ uint32_t c_lowering::expression(uint32_t index)
             return fail("an allocated pointer outside new or delete", n.at);
         return make(AST_NODE_VARIABLE, allocated_type, allocated_symbol, 0, 0,
                     0, AST_NODE_FLAG_LVALUE);
+    case semantic_kind::vtable_pointer_store: {
+        /* [class.cdtor]/4: *(void ***)this = &vtable[2] */
+        uint32_t self = expression(n.a);
+        uint32_t point = address_point(n.b, n.at);
+        if (!self || !point)
+            return 0;
+        ast_qualified_type v = ast_builder_type_basic(AST_TYPE_VOID);
+        ast_qualified_type vpp =
+            ast_builder_type_pointer(c, ast_builder_type_pointer(c, v));
+        uint32_t slot = make(AST_NODE_DEREFERENCE, vpp,
+                             cast(self, ast_builder_type_pointer(c, vpp),
+                                  AST_CAST_POINTER_TO_POINTER),
+                             0, 0, 0, AST_NODE_FLAG_LVALUE);
+        return make(AST_NODE_ASSIGN, vpp, slot, point, 0, 0, 0);
+    }
     case semantic_kind::destroy: {
         uint32_t object = expression(n.a);
         if (!object)
@@ -2795,6 +2854,161 @@ uint32_t c_lowering::statement(uint32_t index)
 
 /* ---- definitions ---------------------------------------------------- */
 
+/* [abi:vtable-components]: the array of class k's virtual table: the
+   offset to top, the RTTI pointer (null: -fno-rtti until S7), then a
+   function pointer per slot */
+ast_qualified_type c_lowering::vtable_type(entity_index k)
+{
+    const dynamic_class *d = analysis.dynamic_of(k);
+    ast_qualified_type v = ast_builder_type_basic(AST_TYPE_VOID);
+    return ast_builder_type_array(c, ast_builder_type_pointer(c, v),
+                                  d->slot_count + 2, true);
+}
+
+/*
+ * [abi:vague-vtable]: "If the class has a key function ..., the virtual
+ * table is emitted in the object file containing the definition of the
+ * key function"; else it is emitted where it is used, each copy weak so
+ * that they link as one (as an inline function's, symbol: COMDAT is the
+ * C code generator's to come).  A class without linkage has a local one.
+ */
+uint32_t c_lowering::vtable(entity_index k, token_index at)
+{
+    if (vtables[k])
+        return vtables[k];
+    const dynamic_class *d = analysis.dynamic_of(k);
+    if (!d)
+        return fail("the virtual table of a class that is not dynamic", at);
+    owned_buffer name;
+    if (!itanium_vtable_name(analysis, tokens.pp, k, name.get()))
+        return fail("a virtual table whose symbol is not mangled yet", at);
+    const entity &x = analysis.entity_table[k];
+    bool here =
+        !d->key_function || analysis.entity_table[d->key_function].defined;
+    int storage = AST_STORAGE_NONE;
+    uint32_t flags = AST_SYMBOL_FLAG_GLOBAL;
+    if (!d->key_function)
+        flags |= AST_SYMBOL_FLAG_LINKONCE | AST_SYMBOL_FLAG_WEAK;
+    if (x.linkage_of_name == linkage::internal ||
+        x.linkage_of_name == linkage::none) {
+        storage = AST_STORAGE_STATIC;
+        flags = AST_SYMBOL_FLAG_GLOBAL;
+    }
+    if (!here)
+        storage = AST_STORAGE_EXTERN;
+    ast_qualified_type array = vtable_type(k);
+    uint32_t s = ast_builder_symbol(c, AST_SYMBOL_VARIABLE, name.data(),
+                                    name.size(), array, storage, flags, 0);
+    vtables[k] = s;
+    ast_builder_toplevel(c, s);
+    if (!here)
+        return s;
+    owned_array<uint32_t> runs;
+    ast_qualified_type v = ast_builder_type_basic(AST_TYPE_VOID);
+    ast_qualified_type vp = ast_builder_type_pointer(c, v);
+    for (uint32_t i = 0; i < d->slot_count; i++) {
+        entity_index f = analysis.vtable_slots[d->first_slot + i];
+        uint32_t target = 0;
+        ast_qualified_type ft = 0;
+        if (analysis.entity_table[f].pure) {
+            /* [abi:pure-virtual]: a pure virtual function's slot */
+            ft = ast_builder_type_function(c, v, nullptr, 0, 0);
+            if (!pure_virtual) {
+                pure_virtual = ast_builder_symbol(
+                    c, AST_SYMBOL_FUNCTION, "__cxa_pure_virtual", 18, ft,
+                    AST_STORAGE_NONE, AST_SYMBOL_FLAG_GLOBAL, 0);
+                ast_builder_toplevel(c, pure_virtual);
+            }
+            target = pure_virtual;
+        } else {
+            target = symbol(f, at);
+            ft = entity_type(f, at);
+        }
+        if (!target)
+            return 0;
+        ast_builder_symbol_flags_add(
+            c, target, AST_SYMBOL_FLAG_USED | AST_SYMBOL_FLAG_ADDRESS_TAKEN);
+        uint32_t function =
+            cast(make(AST_NODE_VARIABLE, ft, target, 0, 0, 0, 0),
+                 ast_builder_type_pointer(c, ft), AST_CAST_FUNCTION_DECAY);
+        runs.append(i + 2);
+        runs.append(i + 2);
+        runs.append(cast(function, vp, AST_CAST_POINTER_TO_POINTER));
+    }
+    uint32_t init = make(
+        AST_NODE_INITIALIZER, array, 0,
+        ast_builder_list(c, runs.data(), static_cast<uint32_t>(runs.size())),
+        d->slot_count, 1, 0);
+    ast_builder_symbol_body(c, s, init);
+    ast_builder_symbol_flags_add(c, s, AST_SYMBOL_FLAG_DEFINED);
+    return s;
+}
+
+uint32_t c_lowering::address_point(entity_index k, token_index at)
+{
+    uint32_t s = vtable(k, at);
+    if (!s)
+        return 0;
+    ast_builder_symbol_flags_add(c, s, AST_SYMBOL_FLAG_USED);
+    ast_qualified_type v = ast_builder_type_basic(AST_TYPE_VOID);
+    ast_qualified_type vp = ast_builder_type_pointer(c, v);
+    ast_qualified_type vpp = ast_builder_type_pointer(c, vp);
+    uint32_t table = make(AST_NODE_VARIABLE, vtable_type(k), s, 0, 0, 0,
+                          AST_NODE_FLAG_LVALUE);
+    address_taken(table);
+    uint32_t element =
+        make(AST_NODE_INDEX, vp, cast(table, vpp, AST_CAST_ARRAY_DECAY),
+             to_ptrdiff(ast_builder_integer(
+                 c, ast_builder_type_basic(AST_TYPE_INT), 2)),
+             0, 0, AST_NODE_FLAG_LVALUE);
+    return address_of(element, vpp);
+}
+
+/* the final overrider of virtual function f for the object at the address
+   object: (F *)(*(void ***)object)[slot] */
+uint32_t c_lowering::virtual_function(entity_index f, uint32_t object,
+                                      token_index at)
+{
+    ast_qualified_type v = ast_builder_type_basic(AST_TYPE_VOID);
+    ast_qualified_type vp = ast_builder_type_pointer(c, v);
+    ast_qualified_type vpp = ast_builder_type_pointer(c, vp);
+    uint32_t table = make(AST_NODE_DEREFERENCE, vpp,
+                          cast(object, ast_builder_type_pointer(c, vpp),
+                               AST_CAST_POINTER_TO_POINTER),
+                          0, 0, 0, AST_NODE_FLAG_LVALUE);
+    uint32_t slot = make(
+        AST_NODE_INDEX, vp, table,
+        to_ptrdiff(ast_builder_integer(c, ast_builder_type_basic(AST_TYPE_INT),
+                                       analysis.entity_table[f].vtable_slot)),
+        0, 0, AST_NODE_FLAG_LVALUE);
+    ast_qualified_type ft = entity_type(f, at);
+    return cast(slot, ast_builder_type_pointer(c, ft),
+                AST_CAST_POINTER_TO_POINTER);
+}
+
+/* whether evaluating the lowered expression twice is evaluating it once:
+   variables, their addresses, members, casts and reads through them */
+bool c_lowering::side_effect_free(uint32_t lowered) const
+{
+    const struct node &n = ast_builder_ast(c)->nodes[lowered];
+    switch (n.op) {
+    case AST_NODE_VARIABLE:
+    case AST_NODE_NUMBER:
+        return true;
+    case AST_NODE_INDEX:
+    case AST_NODE_BINARY:
+        return side_effect_free(n.a) && side_effect_free(n.b);
+    case AST_NODE_ADDRESS:
+    case AST_NODE_DEREFERENCE:
+    case AST_NODE_CAST:
+        return side_effect_free(n.a);
+    case AST_NODE_MEMBER:
+        return side_effect_free(n.a);
+    default:
+        return false;
+    }
+}
+
 bool c_lowering::function_definition(entity_index e)
 {
     const entity &x = analysis.entity_table[e];
@@ -3100,6 +3314,14 @@ bool c_lowering::translation_unit()
     }
     if (!dynamic.empty() && !dynamic_initialization())
         return false;
+    /* [abi:vague-vtable]: the virtual table of each class whose key
+       function this translation unit defines */
+    for (entity_index k = 1; k < analysis.entity_table.size(); k++) {
+        const dynamic_class *d = analysis.dynamic_of(k);
+        if (d && d->key_function &&
+            analysis.entity_table[d->key_function].defined && !vtable(k, 0))
+            return false;
+    }
     /* the member functions defined, in the order of their definitions */
     for (const semantic_analysis::definition_record &d : analysis.definitions) {
         const entity &x = analysis.entity_table[d.entity];

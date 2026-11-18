@@ -30,6 +30,12 @@ class itanium_mangler
     }
 
     bool mangled_name(entity_index e);
+    /* [abi:mangling-special-vtables]: <special-name> ::= TV <type> */
+    bool vtable_name(entity_index c)
+    {
+        text("_ZTV");
+        return type(analysis.entity_table[c].type);
+    }
 
   private:
     const semantic_analysis &analysis;
@@ -1137,6 +1143,13 @@ bool itanium_symbol_name(const semantic_analysis &analysis,
 {
     itanium_mangler m(analysis, pp, out, variant);
     return m.mangled_name(e);
+}
+
+bool itanium_vtable_name(const semantic_analysis &analysis,
+                         const preprocessor &pp, entity_index c, vbuffer *out)
+{
+    itanium_mangler m(analysis, pp, out, 2);
+    return m.vtable_name(c);
 }
 
 } // namespace cplusplus

@@ -53,6 +53,7 @@ const char *semantic_kind_name(semantic_kind kind)
         "allocated",
         "array_size",
         "delete_object",
+        "vtable_pointer_store",
         "block",
         "expression_statement",
         "declaration_statement",

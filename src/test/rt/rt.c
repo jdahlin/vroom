@@ -182,6 +182,9 @@ void exit(int c)
 	_exit(c);
 }
 void abort(void) { _exit(134); }
+/* the C++ ABI's pure virtual function slot ([abi:pure-virtual] in
+   doc/PLAN-cxx-sema.md R6): a call of one terminates */
+void __cxa_pure_virtual(void) { abort(); }
 void __rt_assert(const char *e, const char *f, int l, const char *fn);
 int fprintf(FILE *, const char *, ...);
 void __rt_assert(const char *e, const char *f, int l, const char *fn)
