@@ -122,6 +122,13 @@ int main()
     Tracked *empty = new Tracked[count(0)];
     delete[] empty;
     failures += noted != 7;
+
+    // value-initialization with a user-provided default constructor:
+    // default-initialization ([dcl.init]/8.1)
+    Tracked *one = new Tracked();
+    failures += one->id != next_id - 1;
+    delete one;
+    failures += noted != 8;
     printf("new-delete-arrays: %d failures\n", failures);
     return failures;
 }

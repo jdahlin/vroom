@@ -559,16 +559,31 @@ analysis_result semantic_analysis::new_expression(node_index n,
             /* [dcl.init]/11: "An object whose initializer is an empty set
                of parentheses, i.e., (), shall be value-initialized."; /8:
                (8.3) "Otherwise, the object is zero-initialized." */
+            bool user_provided = false;
             if (c)
-                /* a class's value-initialization: default-initialized,
-                   zero-initialized first unless a constructor is
-                   user-provided (8.1, 8.2) */
+                for (entity_index q = entity_table[c].first_constructor; q;
+                     q = entity_table[q].next_constructor)
+                    if (!entity_table[q].implicit &&
+                        !type_table[entity_table[q].type.unqualified()]
+                             .parameter_count)
+                        user_provided = true;
+            if (c && user_provided) {
+                /* (8.1): "if T is a (possibly cv-qualified) class type with
+                   ... a default constructor that is user-provided ..., then
+                   the object is default-initialized" */
+                r = construct(n, type, none, object.node, value);
+            } else if (c) {
+                /* (8.2): zero-initialized, then default-initialized when
+                   the default constructor is non-trivial; a default
+                   constructor with default arguments */
                 return not_supported(n, "dcl.init");
-            expression_meaning zero;
-            zero.type = qualified_type::make(type.unqualified(), cv_none);
-            zero.category = value_category::prvalue;
-            zero.evaluation = constness::constant;
-            value.node = expression_node(semantic_kind::zero, zero, at);
+            } else {
+                expression_meaning zero;
+                zero.type = qualified_type::make(type.unqualified(), cv_none);
+                zero.category = value_category::prvalue;
+                zero.evaluation = constness::constant;
+                value.node = expression_node(semantic_kind::zero, zero, at);
+            }
         } else if (k.child_count == 3 &&
                    syntax_is(tree, parts[1], syntax_kind::initializer_list)) {
             /* [dcl.init]/17.6.2: the constructor called with the
