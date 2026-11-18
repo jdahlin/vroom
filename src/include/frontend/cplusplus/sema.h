@@ -1232,6 +1232,8 @@ class semantic_analysis
     /* a rule clang enforces only when asked: ill-formed when the
        diagnostic is an error on this command line, else well-formed with
        the warning (or nothing) */
+    /* whether token at comes from a system header (# 1 "f" 3, -isystem) */
+    bool in_system_header(token_index at) const;
     analysis_result extension_used(diagnostic_id id, token_index at,
                                    const char *argument);
 

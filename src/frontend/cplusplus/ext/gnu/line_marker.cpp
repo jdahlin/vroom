@@ -44,7 +44,7 @@ void preprocessor::gnu_line_marker(const preprocessing_token &digits)
         }
         system_header |= flag.data()[0] == '3';
     }
-    (void)system_header;
+    files.mark_system_header(directive_end, system_header);
     /* clang warns of a line marker written in a source file (-Wgnu-line-marker,
        with -pedantic), not of those in its predefined macros' */
     if (inclusions.back().file->index != predefines_file)

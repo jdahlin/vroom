@@ -82,6 +82,14 @@ analysis_result semantic_analysis::extension_used(diagnostic_id id,
     return analysis_result::well_formed;
 }
 
+bool semantic_analysis::in_system_header(token_index at) const
+{
+    if (!diagnostics.files)
+        return false;
+    return diagnostics.files->in_system_header(tokens.location(at) +
+                                               diagnostics.location_base);
+}
+
 bool semantic_analysis::parsed_completely(node_index n) const
 {
     /* the nodes under n, without recursion: a tree is as deep as its

@@ -1422,6 +1422,16 @@ lines:
   declarations as clang 29470 -> 29473, 0 we reject and clang accepts,
   we accept and clang rejects 477 -> 474, 0 refuted; cxx-run 176/176;
   cxx-c-suites unchanged.
+  Rebased on S4's R0 and R1 (8bcd463d): R0's placeholder that made a
+  static initializer invoking a constexpr function unsupported
+  [basic.start.static] goes, the evaluator decides it (a constexpr member
+  function's call is unknown to it, so unsupported [expr.const] still);
+  /6's check is not made in a system header, as clang's is not (libstdc++
+  declares constexpr functions on builtins), which needed a line marker's
+  flag 3 kept (`source_files::in_system_header`).  cxx-sema: declarations
+  as clang 30080 (S4's tip alone 28677), 0 we reject and clang accepts, 0
+  refuted (types 39366, constants 15708; S4's tip 32273 and 12230);
+  cxx-run 184/184; cxx-c-suites 2214 pass, 0 wrong.
 
 ### S7. Exceptions and RTTI
 

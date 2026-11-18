@@ -477,8 +477,11 @@ analysis_result semantic_analysis::function_body(node_index definition,
                                           "dcl.constexpr"));
         /* the same rule for every argument value: the body evaluated with
            the parameters unknown fails before it reads one (clang's
-           "constexpr function never produces a constant expression") */
+           "constexpr function never produces a constant expression"; not
+           in a system header, where libstdc++ declares constexpr functions
+           on builtins clang does not fold) */
         else if (!b.has(language_feature::constexpr_without_constant_result) &&
+                 !in_system_header(first_token(compound)) &&
                  potential_constant(body) == constness::not_constant)
             result = worse(
                 result,

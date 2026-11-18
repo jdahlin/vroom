@@ -1189,13 +1189,6 @@ analysis_result semantic_analysis::declare_with_initializer(
     r = initializer(init, type, value);
     if (r != analysis_result::well_formed)
         return r;
-    /* [basic.start.static]/2: "Constant initialization is performed if a
-       variable or temporary object with static or thread storage duration
-       is constant-initialized": an initializer that invokes a constexpr
-       function or constructor may be one, which the evaluator (S6) decides */
-    if (!entity_table[declared_entity].automatic &&
-        constexpr_calls != calls_before)
-        return not_supported(declaration, "basic.start.static");
     entity_table[declared_entity].bound_unknown = false;
     /* [basic.start.static]/2: "Constant initialization is performed if a
        variable or temporary object with static or thread storage duration
