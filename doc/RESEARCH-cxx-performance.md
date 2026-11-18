@@ -103,6 +103,23 @@ is a faithful reading of `[lex.pptoken]/3.3` ("the longest sequence of
 characters that could constitute a preprocessing token") and wrong for
 speed in a way no review of its correctness finds.
 
+Fixed the same day (decision 1): the rows that start with each character
+are a table made at compile time, longest first, and the scanner compares
+only those, with no library call.
+
+| Input, `-fsyntax-only` | Before | After | clang++ |
+|---|---|---|---|
+| four C headers | 662 M | 329 M | 616 M |
+| `expand.cpp` | 1,227 M | 680 M | 768 M |
+| `verify.cpp` | 1,120 M | 604 M | 756 M |
+| the unity TU, parsing | 4,237 M, 0.40 s | 2,429 M, 0.25 s | |
+
+Whole runs are now below clang++'s.  Per token, without start-up, the C++
+front end is still at 16,000 to 17,500 instructions: 5.5 times vcc's C
+front end and 2.5 times clang++.  Token and parse output is byte-identical
+on all 553 source files of the tree; sections 1 and 2 keep the numbers
+from before the change.
+
 **Finding 2: a growable buffer per call.**  49,377 of the 58,613
 allocations for the four headers ask for between 2 and 4 KB: `vbuffer`
 takes 4,096 bytes on its first append (`common/buffer.h`), and the front
@@ -292,11 +309,10 @@ carry these rules; three things are particular to them.
   have them, and every new subclause copies its neighbours.  Following them
   in new code costs nothing: a scratch buffer on the object that lives
   across calls in place of a local owner.
-- **Worth doing now for its own sake**: finding 1.  It is one function, a
-  third or more of every run of every C++ harness (`cxx-run.py`,
-  `cxx-sema.py`, `cxx-pp.py`, the dogfood run over the tree), and of every
-  C++ compile until someone looks.  This note does not change it: the plan
-  says tests first, so it is a decision (section 8).
+- **Worth doing now for its own sake**: finding 1.  It was one function,
+  and more than a third of every run of every C++ harness (`cxx-run.py`,
+  `cxx-sema.py`, `cxx-pp.py`, the dogfood run over the tree).  Done
+  (section 2).
 - **Cheap to start recording**: P15.  A number per commit, no gate, so
   that "tuned later" has a starting line and nothing gets silently worse
   by a factor.
@@ -308,8 +324,7 @@ the test suite compiles.
 ## 8. Decisions needed
 
 1. Change `scan_preprocessing_op_or_punc` now (finding 1), outside the
-   "compliance first" order?  Recommended: yes; it is small, and it makes
-   every C++ test run faster.
+   "compliance first" order?  Decided and done, 2026-11-18.
 2. Adopt P6 and P7 as how new front-end code is written, before any lint
    exists?  Recommended: yes, and mark the lexer's and preprocessor's
    per-token functions `[[clang::nonallocating]]` as each is cleaned, so

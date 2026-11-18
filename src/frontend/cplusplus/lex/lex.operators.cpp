@@ -29,6 +29,63 @@ constexpr op_or_punc_description op_or_punc_descriptions[] = {
 #undef PREPROCESSING_OP_OR_PUNC
 };
 
+/*
+ * The rows of the table that start with one character, the longest spelling
+ * first, so that the first row that matches the source is "the longest
+ * sequence of characters that could constitute a preprocessing token"
+ * ([lex.pptoken]/3.3).  Made from the table when this file is compiled: the
+ * scanner runs for every operator and punctuator of a translation unit, and
+ * comparing the source with all rows cost a third of a parse
+ * (doc/RESEARCH-cxx-performance.md).
+ */
+struct op_or_punc_candidates {
+    uint8_t count = 0;
+    uint8_t row[8] = {};    /* indexes into op_or_punc_descriptions */
+    uint8_t length[8] = {}; /* of the row's spelling */
+};
+
+struct op_or_punc_index {
+    op_or_punc_candidates starting_with[128]; /* by basic character */
+    uint8_t longest = 0;                      /* spelling of the table */
+};
+
+constexpr op_or_punc_index make_op_or_punc_index()
+{
+    op_or_punc_index index;
+    uint8_t rows = static_cast<uint8_t>(preprocessing_op_or_punc::count);
+    for (uint8_t i = 0; i < rows; i++) {
+        const char *spelling = op_or_punc_descriptions[i].spelling;
+        uint8_t n = 0;
+        while (spelling[n])
+            n++;
+        if (n > index.longest)
+            index.longest = n;
+        op_or_punc_candidates &c =
+            index.starting_with[static_cast<unsigned char>(spelling[0])];
+        /* keep the longest first; rows of one length keep the table's
+           order (a row too many for row[] does not compile) */
+        uint8_t at = c.count;
+        while (at > 0 && c.length[at - 1] < n) {
+            c.row[at] = c.row[at - 1];
+            c.length[at] = c.length[at - 1];
+            at--;
+        }
+        c.row[at] = i;
+        c.length[at] = n;
+        c.count++;
+    }
+    return index;
+}
+
+constexpr op_or_punc_index op_or_punc_by_first_character =
+    make_op_or_punc_index();
+
+/* scan_preprocessing_op_or_punc reads this many characters ahead */
+constexpr uint8_t op_or_punc_lookahead = 4;
+static_assert(op_or_punc_by_first_character.longest <= op_or_punc_lookahead,
+              "a spelling of lex.operators.inc is longer than the scanner "
+              "reads ahead");
+
 } // namespace
 
 const char *preprocessing_op_or_punc_spelling(preprocessing_op_or_punc op)
@@ -59,18 +116,29 @@ preprocessing_op_or_punc_clang_name(preprocessing_op_or_punc op)
  *   character is neither : nor >, the < is treated as a preprocessing token
  *   by itself and not as the first character of the alternative token <:."
  *
- * Returns the end, 0 if no operator or punctuator starts at `at`.  Every
- * candidate is tried longest first against the translation characters, so a
- * splice may fall anywhere inside one.
+ * Returns the end, 0 if no operator or punctuator starts at `at`.  The
+ * candidates are the rows that start with the first character, tried longest
+ * first against the translation characters, so a splice may fall anywhere
+ * inside one.
  */
 uint32_t lexer::scan_preprocessing_op_or_punc(uint32_t at,
                                               preprocessing_op_or_punc *op,
                                               bool *spelling_differs)
 {
-    unsigned char c[5];
-    uint32_t end[5];
+    /* the first character decides the candidates: read it alone, since
+       most characters start no operator or punctuator */
+    translation_character first = peek(at);
+    if (!first.extent || first.character >= 128)
+        return 0;
+    const op_or_punc_candidates &candidates =
+        op_or_punc_by_first_character.starting_with[first.character];
+    if (!candidates.count)
+        return 0;
+
+    unsigned char c[op_or_punc_lookahead];
+    uint32_t end[op_or_punc_lookahead];
     uint32_t q = at;
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < op_or_punc_lookahead; i++) {
         translation_character t = peek(q);
         c[i] = 0;
         if (t.extent)
@@ -78,15 +146,18 @@ uint32_t lexer::scan_preprocessing_op_or_punc(uint32_t at,
         q += t.extent;
         end[i] = q;
     }
-    c[4] = 0;
 
     int best = -1;
     size_t best_length = 0;
-    for (int i = 0; i < static_cast<int>(preprocessing_op_or_punc::count);
-         i++) {
+    for (uint8_t k = 0; k < candidates.count && best < 0; k++) {
+        int i = candidates.row[k];
+        size_t n = candidates.length[k];
         const char *s = op_or_punc_descriptions[i].spelling;
-        size_t n = strlen(s);
-        if (n <= best_length || memcmp(s, c, n))
+        bool matches = true;
+        for (size_t j = 1; j < n; j++)
+            if (s[j] != c[j])
+                matches = false;
+        if (!matches)
             continue;
         /* <=> is C++20's; before it, <= and > ([diff.cpp17.expr]) */
         if (i == static_cast<int>(preprocessing_op_or_punc::SPACESHIP) &&
