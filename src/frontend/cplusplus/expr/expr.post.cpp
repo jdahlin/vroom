@@ -1434,9 +1434,7 @@ analysis_result semantic_analysis::call_with(
                              object);
     if (dispatched)
         semantics[m.node].c = 1;
-    semantics[m.node].first =
-        semantics.list(argument_nodes.data(), argument_nodes.size());
-    semantics[m.node].count = static_cast<uint32_t>(argument_nodes.size());
+    semantics.set_list(m.node, argument_nodes.data(), argument_nodes.size());
     return analysis_result::well_formed;
 }
 

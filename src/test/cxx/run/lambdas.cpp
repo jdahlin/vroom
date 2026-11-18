@@ -63,6 +63,53 @@ int by_value(Big b)
     return l();
 }
 
+/* a class whose copy constructor is user-provided: the closure's copy
+   constructor is not trivial, a function of its own (in an inline
+   function Ul...E_'s, in another $_N's) */
+struct Counted {
+    int v;
+    Counted(int x) : v(x) {}
+    Counted(const Counted &o) : v(o.v + 100) {}
+};
+
+inline int copy_counted()
+{
+    Counted t(5);
+    auto l = [t] { return t.v; };
+    auto l2 = l;
+    return l() + l2();
+}
+
+int copy_counted_here()
+{
+    Counted t(zero + 6);
+    auto l = [t] { return t.v; };
+    auto l2 = l;
+    return l() + l2();
+}
+
+/* captured by reference in a lambda whose enclosing lambda captured it by
+   copy: the enclosing closure's member, const unless that lambda is
+   mutable */
+int nested_by_reference()
+{
+    int y = 2 + zero;
+    auto m = [y] { return [&] { return y; }(); };
+    auto m2 = [=] { return [&] { return y; }(); };
+    auto m3 = [y]() mutable {
+        [&] { y++; }();
+        return y;
+    };
+    auto m4 = [y] { return [&y] { return y; }(); };
+    auto m5 = [&] { return [=] { return [&] { return y; }(); }(); };
+    int &r = y;
+    auto m6 = [r] { return [&] { return r; }(); };
+    int a = m3();
+    int b = m3();
+    return m() + m2() * 10 + a * 100 + b * 1000 + m4() * 10000 +
+           m5() * 100000 + m6() * 1000000 + (y - 2);
+}
+
 int main()
 {
     int x = 3, y = 4;
@@ -131,5 +178,7 @@ int main()
     check(in_inline(2) == 7);
     Big b = {{1, 0, 0, 0, 0, 0, 0, 2}};
     check(by_value(b) == 3);
+    check(copy_counted() == 105 + 205 && copy_counted_here() == 106 + 206);
+    check(nested_by_reference() == 2222432);
     return 0;
 }

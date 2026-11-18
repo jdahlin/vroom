@@ -330,18 +330,11 @@ analysis_result semantic_analysis::define_class_instantiation(node_index at,
                     record.template_entity &&
                 template_member_definitions[m].pattern == record.pattern)
                 define_template_member(m, index, true);
-    if (context.defining_class) {
-        /* a class being defined named the specialization: its members so
-           far again after the specialization's, one range of
-           class_members, as after a nested class (class_definition) */
-        entity &o = entity_table[context.defining_class];
-        if (o.first_member + o.member_count != class_members.size()) {
-            uint32_t first = static_cast<uint32_t>(class_members.size());
-            for (uint32_t i = 0; i < o.member_count; i++)
-                class_members.append(class_members[o.first_member + i]);
-            entity_table[context.defining_class].first_member = first;
-        }
-    }
+    /* a class being defined named the specialization: its members so far
+       again after the specialization's, as after a nested class
+       (class_definition) */
+    if (context.defining_class)
+        make_members_contiguous(context.defining_class);
     if (r == analysis_result::well_formed && c)
         return r;
     /* the class's rules broken, or not known: [temp.inst]/1 makes the

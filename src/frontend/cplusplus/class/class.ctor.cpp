@@ -707,8 +707,7 @@ semantic_analysis::construct(node_index at, qualified_type type,
     result.node = expression_node(semantic_kind::construct, made,
                                   tree[at].first_token, object, chosen);
     if (!nodes.empty()) {
-        semantics[result.node].first = semantics.list(&nodes[0], nodes.size());
-        semantics[result.node].count = static_cast<uint32_t>(nodes.size());
+        semantics.set_list(result.node, &nodes[0], nodes.size());
     }
     return analysis_result::well_formed;
 }
@@ -1040,13 +1039,9 @@ analysis_result semantic_analysis::subobject(token_index at, entity_index e,
         }
         return r;
     }
-    analysis_result r = this_pointer(at, m);
+    analysis_result r = this_object(at, m);
     if (r != analysis_result::well_formed)
         return r;
-    m.type = type_table[m.type.unqualified()].operand;
-    m.category = value_category::lvalue;
-    m.evaluation = constness::not_constant;
-    m.node = expression_node(semantic_kind::indirection, m, at, m.node);
     return to_base(at, type_table[entity_table[e].type.unqualified()].entity,
                    m);
 }
@@ -1096,9 +1091,7 @@ semantic_analysis::block_statement(token_index at,
 {
     uint32_t built = statement_node(semantic_kind::block, at);
     if (!statements.empty()) {
-        semantics[built].first =
-            semantics.list(&statements[0], statements.size());
-        semantics[built].count = static_cast<uint32_t>(statements.size());
+        semantics.set_list(built, &statements[0], statements.size());
     }
     return built;
 }
@@ -1454,35 +1447,22 @@ analysis_result semantic_analysis::implicit_definitions(entity_index c,
     current_declaration = n;
     token_index at = tree[n].first_token;
     for (entity_index f : implicit) {
-        function_state.active = true;
-        function_state.returns = qualified_type::make(
-            type_table.fundamental(fundamental_type::void_), cv_none);
-        function_state.function = f;
-        entity_index outer_scope = current_scope;
-        entity_index parameters = open_scope(0, true);
-        entity_table[parameters].enclosing = f;
-        owned_array<uint32_t> parameter_entities;
-        entity_index t =
-            entity_table.make(entity_kind::variable, 0, parameters);
-        entity_table[t].type = qualified_type::make(
-            type_table.pointer_to(qualified_type::make(
-                entity_table[c].type.unqualified(), cv_none)),
-            cv_none);
-        entity_table[t].defined = true;
-        entity_table[t].automatic = true;
-        parameter_entities.append(t);
-        function_state.this_entity = t;
+        synthesized_function sf;
+        begin_synthesized(
+            sf, f,
+            qualified_type::make(
+                type_table.fundamental(fundamental_type::void_), cv_none),
+            qualified_type::make(
+                type_table.pointer_to(qualified_type::make(
+                    entity_table[c].type.unqualified(), cv_none)),
+                cv_none));
         const struct type &ft = type_table[entity_table[f].type.unqualified()];
         entity_index source = 0;
-        if (ft.parameter_count) {
-            source = entity_table.make(entity_kind::variable, 0, parameters);
-            entity_table[source].type =
-                type_table.parameters(entity_table[f].type.unqualified())[0];
-            entity_table[source].defined = true;
-            entity_table[source].automatic = true;
-            parameter_entities.append(source);
-        }
-        current_scope = parameters;
+        if (ft.parameter_count)
+            source = synthesized_variable(
+                sf,
+                type_table.parameters(entity_table[f].type.unqualified())[0],
+                true);
         analysis_result r = analysis_result::well_formed;
         uint32_t members = 0, destructions = 0;
         if (entity_table[f].special == special_member::destructor) {
@@ -1493,22 +1473,8 @@ analysis_result semantic_analysis::implicit_definitions(entity_index c,
             r = implicit_copy(c, n, source, members);
         else
             r = ctor_initializer(syntax_child(), members);
-        uint32_t block = statement_node(semantic_kind::block, at);
-        uint32_t body = statement_node(semantic_kind::function_body, at, block,
-                                       members, destructions);
-        semantics[body].first =
-            semantics.list(&parameter_entities[0], parameter_entities.size());
-        semantics[body].count =
-            static_cast<uint32_t>(parameter_entities.size());
-        entity_table[f].definition = body;
-        definition_record record;
-        record.declaration = n;
-        record.entity = f;
-        definitions.append(record);
-        current_scope = outer_scope;
-        function_state.active = false;
-        function_state.function = 0;
-        function_state.this_entity = 0;
+        finish_synthesized(sf, n, at, statement_node(semantic_kind::block, at),
+                           members, destructions);
         if (r == analysis_result::ill_formed)
             /* [class.default.ctor]/2, [class.copy.ctor]/10: a defaulted
                special member that would be ill-formed is defined as

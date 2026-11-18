@@ -43,10 +43,10 @@ entity_index next_enclosing_function(const entities &table, entity_index f)
 
 bool visible_local_class(const entities &table, entity_index c)
 {
-    while (table[c].enclosing &&
-           table[table[c].enclosing].kind == entity_kind::class_type)
-        c = table[c].enclosing;
-    entity_index f = enclosing_function(table, c);
+    /* (a class nested in a local class: as a member of it) */
+    entity_index f = next_enclosing_function(table, c);
+    if (!f)
+        f = enclosing_function(table, c);
     if (!f)
         return false;
     for (entity_index g = next_enclosing_function(table, f); g;
@@ -199,10 +199,14 @@ bool itanium_mangler::mangled_name(entity_index e)
     const entity &x = analysis.entity_table[e];
     if (x.kind != entity_kind::variable && x.kind != entity_kind::function)
         return false;
-    if (!x.name)
+    /* (a closure type's constructor or destructor has its class's name:
+       none) */
+    if (!x.name && x.special == special_member::none)
         return false;
     size_t length = 0;
-    const char *identifier = spelling(x.name, &length);
+    const char *identifier = "";
+    if (x.name)
+        identifier = spelling(x.name, &length);
     /* an entity of the global namespace: a variable of another namespace
        is mangled, as is a function named main there */
     bool global = x.enclosing == 0;

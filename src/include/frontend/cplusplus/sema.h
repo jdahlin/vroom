@@ -397,6 +397,9 @@ struct entity {
     /* [class.default.ctor]/2: the implicit default constructor is deleted
        (a subobject without a usable default constructor) */
     bool implicit_default_deleted = false;
+    /* [expr.prim.lambda.closure]/13: a closure type's copy assignment
+       operator is deleted (a lambda-capture) */
+    bool closure_assignment_deleted = false;
     /* a function (the first of its overloads) a using-declaration names
        ([namespace.udecl]/11) */
     bool named_by_using = false;
@@ -871,9 +874,9 @@ bool same_parameters(const types &table, type_index a, type_index b);
 /* the function whose definition a block-scope entity is declared in, 0
    for an entity not in a function (abi/itanium/mangling.cpp) */
 entity_index enclosing_function(const entities &table, entity_index e);
-/* the function whose member function's definition local class c's
-   enclosing function is in, when that function is a member of a local
-   class: the next function out; 0 otherwise (abi/itanium/mangling.cpp) */
+/* the function a member of a local class (or of a class nested in one)
+   is in (for a member function of a local class: the next function out),
+   0 for any other entity (abi/itanium/mangling.cpp) */
 entity_index next_enclosing_function(const entities &table, entity_index f);
 /* [impl.clang] (clang's VisibleNoLinkage): whether c, a local class or
    closure type (or a class nested in one), is named in other translation
@@ -1175,6 +1178,13 @@ class semantic_tree
     uint32_t add(const semantic_node &n);
     /* a list of node or entity indexes: its first index */
     uint32_t list(const uint32_t *items, size_t count);
+    /* node n's list ([first, + count)): items[0 .. count) */
+    void set_list(uint32_t n, const uint32_t *items, size_t count)
+    {
+        if (count)
+            nodes[n].first = list(items, count);
+        nodes[n].count = static_cast<uint32_t>(count);
+    }
 
     const semantic_node &operator[](uint32_t n) const
     {
@@ -2075,6 +2085,10 @@ class semantic_analysis
     /* [expr.prim.this] */
     analysis_result function_this(token_index t, expression_meaning &m);
     analysis_result this_pointer(token_index t, expression_meaning &m);
+    /* *this, an lvalue ([expr.unary.op]/1); own: the function's own this
+       (function_this), not a lambda's captured one */
+    analysis_result this_object(token_index t, expression_meaning &m,
+                                bool own = false);
 
     /* ---- lambda expressions ([expr.prim.lambda], expr/expr.prim.lambda*.cpp) */
     enum class capture_default : uint8_t { none, copy, reference };
@@ -2119,6 +2133,12 @@ class semantic_analysis
        captures an entity of type t */
     analysis_result capture_type(node_index at, qualified_type t,
                                  bool by_reference, qualified_type &type);
+    /* the type of local entity e where a lambda-expression is: an
+       enclosing lambda's member when that lambda captures it by copy */
+    qualified_type enclosing_capture_type(entity_index e, size_t count,
+                                          size_t end) const;
+    /* class c's members one range of class_members again (class.pre.cpp) */
+    void make_members_contiguous(entity_index c);
     /* the closure's non-static data member of type type for a capture */
     entity_index capture_member_of(entity_index closure, qualified_type type);
     /* the entity e of an enclosing function named at t in the body: its
@@ -2692,6 +2712,25 @@ class semantic_analysis
     analysis_result implicit_special_members(entity_index c, node_index n);
     void declare_implicit(entity_index c, special_member kind, bool copy);
     analysis_result implicit_definitions(entity_index c, node_index n);
+    /* a function whose definition analysis makes itself (an implicit
+       special member, a closure type's __invoke and conversion function):
+       its parameter scope, the scope it is in, its parameters (with a
+       this_type, the this parameter first) */
+    struct synthesized_function {
+        entity_index function = 0, scope = 0, outer_scope = 0;
+        owned_array<uint32_t> parameters;
+    };
+    void begin_synthesized(synthesized_function &s, entity_index f,
+                           qualified_type returns, qualified_type this_type);
+    /* a variable of the parameter scope; a parameter is appended */
+    entity_index synthesized_variable(synthesized_function &s, qualified_type t,
+                                      bool parameter);
+    /* the function-body of block (with a constructor's member
+       initializations and a destructor's destructions), the definition
+       recorded, the function's state left */
+    void finish_synthesized(synthesized_function &s, node_index declaration,
+                            token_index at, uint32_t block,
+                            uint32_t members = 0, uint32_t destructions = 0);
     analysis_result implicit_copy(entity_index c, node_index n,
                                   entity_index source, uint32_t &built);
     /* [class.dtor]/13: after the body of the destructor of class c, the
