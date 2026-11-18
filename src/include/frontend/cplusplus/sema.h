@@ -766,20 +766,34 @@ enum class semantic_kind : uint8_t {
        the object's initialization (0: none), a construct node whose
        object is the allocated node's, or the value stored in it; c: 1 when
        the allocation function may return a null pointer, which the
-       initialization is skipped for ([expr.new]/20) */
+       initialization is skipped for ([expr.new]/20); d: for an array of
+       a class with a constructor or destructor, the element count (a
+       std::size_t prvalue, evaluated once), b then each element's
+       initialization (its object *allocated, the element), value the
+       size of the array cookie before the elements ([abi:array-cookies]:
+       0 for none) */
     new_object,
     /* the pointer (a prvalue of type) the enclosing new_object's
-       allocation returned, or the enclosing delete_object's operand */
+       allocation returned, or the enclosing delete_object's operand (in
+       an array's construction or destruction, the element's) */
     allocated,
+    /* the element count (a std::size_t prvalue) the enclosing new_object
+       or delete_object holds (new_object's d; the array cookie's) */
+    array_count,
     /* [expr.new]/9, /15: an array's size in bytes, its count a times the
-       element's size value; the size no allocation can give (all ones)
-       when the product does not fit in std::size_t */
+       element's size value plus d, the array cookie's size; the size no
+       allocation can give (all ones) when that does not fit in
+       std::size_t */
     array_size,
     /* [expr.delete]: a: the operand (a pointer prvalue), b: the
        destructor's call on *allocated (0: none), c: the deallocation
        function's call; nothing when the operand is a null pointer.
        computation: the type of the allocated node, the operand's without
-       the pointee's cv-qualifiers ([expr.delete]/11) */
+       the pointee's cv-qualifiers ([expr.delete]/11).  value: 1 when the
+       deleting destructor is called through the virtual table instead of
+       b and c; d: for an array with a cookie, its size: b is each
+       element's destruction (last first), c is given the cookie's address
+       as allocated and array_count is the cookie's count */
     delete_object,
     /* [class.cdtor]/4, [abi:vtable-ctor]: a: the address of the object
        under construction or destruction (this), b: its class, whose
@@ -2097,7 +2111,8 @@ class semantic_analysis
     analysis_result usual_deallocation(node_index n, entity_index c,
                                        bool global, bool array,
                                        entity_index &function, bool &sized,
-                                       bool class_complete = false);
+                                       bool class_complete = false,
+                                       bool cookie = false);
     /* the type of the new-type-id n ([expr.new]/1), the expression of the
        first bound of its noptr-new-declarator if any (bound) */
     analysis_result new_type_id(node_index n, qualified_type &type,

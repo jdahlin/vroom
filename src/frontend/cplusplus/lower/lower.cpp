@@ -207,9 +207,19 @@ class c_lowering
        delete_object holds (a variable of type allocated_type) */
     uint32_t allocated_symbol = 0;
     ast_qualified_type allocated_type = {};
+    /* [abi:array-cookies]: the element count array_count reads */
+    uint32_t count_symbol = 0;
+    /* an array's elements, first to last or last to first: for (size_t i
+       ...) { element = &first[i]; each } with allocated the element, as
+       the node each of new_object or delete_object lowers */
+    uint32_t element_loop(uint32_t first, ast_qualified_type object,
+                          ast_qualified_type size, uint32_t count, bool reverse,
+                          uint32_t each);
     uint32_t held_value(uint32_t value, ast_qualified_type t,
                         owned_array<uint32_t> &items);
     uint32_t new_object(const semantic_node &n);
+    uint32_t new_array(const semantic_node &n, ast_qualified_type t);
+    uint32_t delete_array(const semantic_node &n);
     uint32_t array_size(const semantic_node &n);
     uint32_t delete_object(const semantic_node &n);
     bool passed_indirectly(qualified_type t) const;
@@ -1094,6 +1104,8 @@ uint32_t c_lowering::new_object(const semantic_node &n)
     ast_qualified_type t = type(n.type, n.at);
     ast_qualified_type v = ast_builder_type_basic(AST_TYPE_VOID);
     owned_array<uint32_t> items;
+    if (n.d)
+        return new_array(n, t);
     uint32_t symbol = held_value(n.a, t, items);
     if (!symbol)
         return 0;
@@ -1160,12 +1172,233 @@ uint32_t c_lowering::new_object(const semantic_node &n)
                 0, 0);
 }
 
+uint32_t c_lowering::element_loop(uint32_t first, ast_qualified_type object,
+                                  ast_qualified_type size, uint32_t count,
+                                  bool reverse, uint32_t each)
+{
+    ast_qualified_type v = ast_builder_type_basic(AST_TYPE_VOID);
+    ast_qualified_type truth = ast_builder_type_basic(AST_TYPE_INT);
+    ast_qualified_type pointer = ast_builder_type_pointer(c, object);
+    uint32_t i = ast_builder_symbol(c, AST_SYMBOL_VARIABLE, "", 0, size,
+                                    AST_STORAGE_AUTO, 0, 1);
+    uint32_t element = ast_builder_symbol(c, AST_SYMBOL_VARIABLE, "", 0,
+                                          pointer, AST_STORAGE_AUTO, 0, 1);
+    auto index = [&] {
+        return make(AST_NODE_VARIABLE, size, i, 0, 0, 0, AST_NODE_FLAG_LVALUE);
+    };
+    auto counted = [&] {
+        return make(AST_NODE_VARIABLE, size, count, 0, 0, 0,
+                    AST_NODE_FLAG_LVALUE);
+    };
+    uint32_t outer = allocated_symbol;
+    ast_qualified_type outer_type = allocated_type;
+    allocated_symbol = element;
+    allocated_type = pointer;
+    uint32_t done = expression(each);
+    allocated_symbol = outer;
+    allocated_type = outer_type;
+    if (!done)
+        return 0;
+    uint32_t at_index = make(
+        AST_NODE_INDEX, object,
+        make(AST_NODE_VARIABLE, pointer, first, 0, 0, 0, AST_NODE_FLAG_LVALUE),
+        to_ptrdiff(index()), 0, 0, AST_NODE_FLAG_LVALUE);
+    uint32_t body_items[2] = {
+        ast_builder_node(c, AST_NODE_EXPRESSION, v,
+                         make(AST_NODE_ASSIGN, pointer,
+                              make(AST_NODE_VARIABLE, pointer, element, 0, 0, 0,
+                                   AST_NODE_FLAG_LVALUE),
+                              address_of(at_index, pointer), 0, 0, 0),
+                         0, 0, 0, 0),
+        ast_builder_node(c, AST_NODE_EXPRESSION, v, done, 0, 0, 0, 0)};
+    uint32_t body = block(body_items, 2);
+    uint32_t init, cond, step = 0;
+    if (reverse) {
+        /* for (i = count; i-- > 0;) */
+        init = make(AST_NODE_ASSIGN, size, index(), counted(), 0, 0, 0);
+        cond = make(AST_NODE_BINARY, truth,
+                    make(AST_NODE_POST_DECREMENT, size, index(), 0, 0, 0, 0),
+                    ast_builder_integer(c, size, 0), 0, LEX_TOKEN_GREATER, 0);
+    } else {
+        /* for (i = 0; i < count; i++) */
+        init = make(AST_NODE_ASSIGN, size, index(),
+                    ast_builder_integer(c, size, 0), 0, 0, 0);
+        cond = make(AST_NODE_BINARY, truth, index(), counted(), 0,
+                    LEX_TOKEN_LESS, 0);
+        step = make(AST_NODE_POST_INCREMENT, size, index(), 0, 0, 0, 0);
+    }
+    uint32_t step_body[2] = {step, body};
+    uint32_t items[3] = {
+        ast_builder_node(c, AST_NODE_DECLARATION, v, i, 0, 0, 0, 0),
+        ast_builder_node(c, AST_NODE_DECLARATION, v, element, 0, 0, 0, 0),
+        ast_builder_node(
+            c, AST_NODE_FOR, v,
+            ast_builder_node(c, AST_NODE_EXPRESSION, v, init, 0, 0, 0, 0), cond,
+            ast_builder_list(c, step_body, 2), 0, 0)};
+    return block(items, 3);
+}
+
+/* a variable symbol declared in items, assigned value if any */
+static uint32_t declared_symbol(cc *c, owned_array<uint32_t> &items,
+                                ast_qualified_type t)
+{
+    uint32_t s = ast_builder_symbol(c, AST_SYMBOL_VARIABLE, "", 0, t,
+                                    AST_STORAGE_AUTO, 0, 1);
+    items.append(ast_builder_node(c, AST_NODE_DECLARATION,
+                                  ast_builder_type_basic(AST_TYPE_VOID), s, 0,
+                                  0, 0, 0));
+    return s;
+}
+
+/* [expr.new]/22 and [abi:array-cookies]: ({ size_t k = count; char *raw =
+   allocation; T *p = (T *)raw; if (raw) { *(size_t *)raw = k; p = (T *)(raw
+   + cookie); for each element: its initialization; } p; }), the test only
+   when the allocation function may return null */
+uint32_t c_lowering::new_array(const semantic_node &n, ast_qualified_type t)
+{
+    if (target == PP_DARWIN && n.value)
+        /* Apple's arm64 cookie has the element size too */
+        return fail("an array cookie of Apple's arm64 ABI", n.at);
+    ast_qualified_type v = ast_builder_type_basic(AST_TYPE_VOID);
+    ast_qualified_type size =
+        AST_QUALIFIED_TYPE_UNQUALIFIED(type(node(n.d).type, n.at));
+    ast_qualified_type bytes =
+        ast_builder_type_pointer(c, ast_builder_type_basic(AST_TYPE_CHAR));
+    qualified_type element = record(n.type).operand;
+    ast_qualified_type object = type(element, n.at);
+    owned_array<uint32_t> items;
+    uint32_t count = held_value(n.d, size, items);
+    if (!count)
+        return 0;
+    uint32_t outer_count = count_symbol;
+    count_symbol = count;
+    uint32_t raw = held_value(n.a, bytes, items);
+    count_symbol = outer_count;
+    if (!raw)
+        return 0;
+    auto variable = [&](uint32_t s, ast_qualified_type st) {
+        return make(AST_NODE_VARIABLE, st, s, 0, 0, 0, AST_NODE_FLAG_LVALUE);
+    };
+    uint32_t p = declared_symbol(c, items, t);
+    items.append(ast_builder_node(
+        c, AST_NODE_EXPRESSION, v,
+        make(AST_NODE_ASSIGN, t, variable(p, t),
+             cast(variable(raw, bytes), t, AST_CAST_POINTER_TO_POINTER), 0, 0,
+             0),
+        0, 0, 0, 0));
+    owned_array<uint32_t> body;
+    if (n.value) {
+        ast_qualified_type counts = ast_builder_type_pointer(c, size);
+        uint32_t stored = make(
+            AST_NODE_DEREFERENCE, size,
+            cast(variable(raw, bytes), counts, AST_CAST_POINTER_TO_POINTER), 0,
+            0, 0, AST_NODE_FLAG_LVALUE);
+        body.append(ast_builder_node(
+            c, AST_NODE_EXPRESSION, v,
+            make(AST_NODE_ASSIGN, size, stored, variable(count, size), 0, 0, 0),
+            0, 0, 0, 0));
+        body.append(ast_builder_node(
+            c, AST_NODE_EXPRESSION, v,
+            make(AST_NODE_ASSIGN, t, variable(p, t),
+                 offset_pointer(variable(raw, bytes),
+                                static_cast<int64_t>(n.value), t),
+                 0, 0, 0),
+            0, 0, 0, 0));
+    }
+    if (n.b) {
+        uint32_t loop = element_loop(p, object, size, count, false, n.b);
+        if (!loop)
+            return 0;
+        body.append(loop);
+    }
+    if (!body.empty()) {
+        uint32_t made = block(body.data(), static_cast<uint32_t>(body.size()));
+        if (n.c)
+            made = ast_builder_node(c, AST_NODE_IF, v,
+                                    truth(variable(raw, bytes)), made, 0, 0, 0);
+        items.append(made);
+    }
+    items.append(ast_builder_node(c, AST_NODE_EXPRESSION, t, variable(p, t), 0,
+                                  0, 0, 0));
+    return make(AST_NODE_STATEMENT_EXPRESSION, t,
+                block(items.data(), static_cast<uint32_t>(items.size())), 0, 0,
+                0, 0);
+}
+
+/* [expr.delete]/6, /7 and [abi:array-cookies]: ({ T *p = operand; if (p) {
+   char *raw = (char *)p - cookie; size_t k = *(size_t *)raw; each element,
+   last first: its destruction; deallocation (raw, k * size + cookie); } }) */
+uint32_t c_lowering::delete_array(const semantic_node &n)
+{
+    if (target == PP_DARWIN)
+        return fail("an array cookie of Apple's arm64 ABI", n.at);
+    ast_qualified_type t = type(n.computation, n.at);
+    ast_qualified_type v = ast_builder_type_basic(AST_TYPE_VOID);
+    ast_qualified_type size = ast_builder_type_basic(AST_TYPE_UNSIGNED_LONG);
+    ast_qualified_type bytes =
+        ast_builder_type_pointer(c, ast_builder_type_basic(AST_TYPE_CHAR));
+    qualified_type element = record(n.computation).operand;
+    ast_qualified_type object =
+        type(qualified_type::make(element.unqualified(), cv_none), n.at);
+    owned_array<uint32_t> items;
+    uint32_t p = held_value(n.a, t, items);
+    if (!p)
+        return 0;
+    auto variable = [&](uint32_t s, ast_qualified_type st) {
+        return make(AST_NODE_VARIABLE, st, s, 0, 0, 0, AST_NODE_FLAG_LVALUE);
+    };
+    owned_array<uint32_t> body;
+    uint32_t raw = declared_symbol(c, body, bytes);
+    body.append(ast_builder_node(
+        c, AST_NODE_EXPRESSION, v,
+        make(AST_NODE_ASSIGN, bytes, variable(raw, bytes),
+             offset_pointer(variable(p, t), -static_cast<int64_t>(n.d), bytes),
+             0, 0, 0),
+        0, 0, 0, 0));
+    uint32_t count = declared_symbol(c, body, size);
+    uint32_t stored =
+        make(AST_NODE_DEREFERENCE, size,
+             cast(variable(raw, bytes), ast_builder_type_pointer(c, size),
+                  AST_CAST_POINTER_TO_POINTER),
+             0, 0, 0, AST_NODE_FLAG_LVALUE);
+    body.append(ast_builder_node(
+        c, AST_NODE_EXPRESSION, v,
+        make(AST_NODE_ASSIGN, size, variable(count, size), stored, 0, 0, 0), 0,
+        0, 0, 0));
+    if (n.b) {
+        uint32_t loop = element_loop(p, object, size, count, true, n.b);
+        if (!loop)
+            return 0;
+        body.append(loop);
+    }
+    uint32_t outer = allocated_symbol;
+    ast_qualified_type outer_type = allocated_type;
+    uint32_t outer_count = count_symbol;
+    allocated_symbol = raw;
+    allocated_type = bytes;
+    count_symbol = count;
+    uint32_t deallocated = expression(n.c);
+    allocated_symbol = outer;
+    allocated_type = outer_type;
+    count_symbol = outer_count;
+    if (!deallocated)
+        return 0;
+    body.append(
+        ast_builder_node(c, AST_NODE_EXPRESSION, v, deallocated, 0, 0, 0, 0));
+    items.append(ast_builder_node(
+        c, AST_NODE_IF, v, truth(variable(p, t)),
+        block(body.data(), static_cast<uint32_t>(body.size())), 0, 0, 0));
+    return make(AST_NODE_STATEMENT_EXPRESSION, v,
+                block(items.data(), static_cast<uint32_t>(items.size())), 0, 0,
+                0, 0);
+}
+
 /* [expr.new]/9: ({ size_t k = count; k > SIZE_MAX / size ? SIZE_MAX : k *
    size; }): a size no allocation function can give when the product does
    not fit, as clang passes */
 uint32_t c_lowering::array_size(const semantic_node &n)
 {
-    if (n.value == 1)
+    if (n.value == 1 && !n.d)
         return expression(n.a);
     ast_qualified_type t = AST_QUALIFIED_TYPE_UNQUALIFIED(type(n.type, n.at));
     owned_array<uint32_t> items;
@@ -1179,11 +1412,15 @@ uint32_t c_lowering::array_size(const semantic_node &n)
     auto constant = [&](uint64_t value) {
         return ast_builder_integer(c, t, static_cast<int64_t>(value));
     };
+    /* with an array cookie of d bytes: k > (SIZE_MAX - d) / size */
     uint32_t too_large =
         make(AST_NODE_BINARY, ast_builder_type_basic(AST_TYPE_INT), variable(),
-             constant(UINT64_MAX / n.value), 0, LEX_TOKEN_GREATER, 0);
+             constant((UINT64_MAX - n.d) / n.value), 0, LEX_TOKEN_GREATER, 0);
     uint32_t product = make(AST_NODE_BINARY, t, variable(), constant(n.value),
                             0, LEX_TOKEN_STAR, 0);
+    if (n.d)
+        product = make(AST_NODE_BINARY, t, product, constant(n.d), 0,
+                       LEX_TOKEN_PLUS, 0);
     uint32_t chosen = make(AST_NODE_CONDITIONAL, t, too_large,
                            constant(UINT64_MAX), product, 0, 0);
     items.append(
@@ -1198,6 +1435,8 @@ uint32_t c_lowering::delete_object(const semantic_node &n)
 {
     if (!in_function)
         return fail("a delete-expression outside a function", n.at);
+    if (n.d)
+        return delete_array(n);
     ast_qualified_type t = type(n.computation, n.at);
     ast_qualified_type v = ast_builder_type_basic(AST_TYPE_VOID);
     owned_array<uint32_t> items;
@@ -2276,6 +2515,11 @@ uint32_t c_lowering::expression(uint32_t index)
         return array_size(n);
     case semantic_kind::delete_object:
         return delete_object(n);
+    case semantic_kind::array_count:
+        if (!count_symbol)
+            return fail("an array count outside new or delete", n.at);
+        return make(AST_NODE_VARIABLE, type(n.type, n.at), count_symbol, 0, 0,
+                    0, AST_NODE_FLAG_LVALUE);
     case semantic_kind::allocated:
         if (!allocated_symbol)
             return fail("an allocated pointer outside new or delete", n.at);

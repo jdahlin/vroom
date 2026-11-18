@@ -48,8 +48,7 @@ node_index parser::delete_expression()
  * deleting destructor, called through the virtual table.
  *
  * Not analysed: an operand of class type (/2), a pointer to void or to an
- * incomplete class (/5), the array delete of a class with a destructor
- * (its cookie, [expr.new]/15), a destroying operator delete and
+ * incomplete class (/5), a destroying operator delete and
  * new-extended alignment (/10).
  */
 analysis_result semantic_analysis::delete_expression(node_index n,
@@ -126,10 +125,18 @@ analysis_result semantic_analysis::delete_expression(node_index n,
     deleted.evaluation = constness::not_constant;
     deleted.node = expression_node(semantic_kind::allocated, deleted, at);
     uint32_t destroyed = 0;
+    /* [abi:array-cookies]: an array of a class with a non-trivial
+       destructor has its count before its elements */
+    uint64_t cookie = 0;
     if (c && destroys(c)) {
         entity_index destructor = entity_table[c].destructor;
-        if (array || !destructor)
+        if (!destructor)
             return not_supported(n, "expr.delete");
+        if (array) {
+            cookie = 8;
+            if (alignment_of_type(object_type) > cookie)
+                cookie = alignment_of_type(object_type);
+        }
         r = deleted_use(at, destructor);
         if (r != analysis_result::well_formed)
             return r;
@@ -149,18 +156,39 @@ analysis_result semantic_analysis::delete_expression(node_index n,
     }
     entity_index function = 0;
     bool sized = false;
-    r = usual_deallocation(n, c, global, array, function, sized);
+    r = usual_deallocation(n, c, global, array, function, sized, false,
+                           cookie != 0);
     if (r != analysis_result::well_formed)
         return r;
     owned_array<expression_meaning> arguments;
     arguments.append(deleted);
     if (sized)
-        /* /11: "If a deallocation function with a parameter of type
+    /* /11: "If a deallocation function with a parameter of type
            std::size_t is used, the size of the deleted object in a
            single-object delete expression ... is passed as the
            corresponding argument." */
-        arguments.append(
-            integer_constant(fundamental_type::unsigned_long_int, size, at));
+    {
+        if (cookie) {
+            /* /11: "... or the size of the array plus array allocation
+               overhead in an array delete expression" */
+            expression_meaning held;
+            held.type = qualified_type::make(
+                type_table.fundamental(fundamental_type::unsigned_long_int),
+                cv_none);
+            held.category = value_category::prvalue;
+            held.evaluation = constness::not_constant;
+            expression_meaning bytes = held;
+            bytes.node = expression_node(
+                semantic_kind::array_size, bytes, at,
+                expression_node(semantic_kind::array_count, held, at));
+            semantics[bytes.node].value = size;
+            semantics[bytes.node].d = static_cast<uint32_t>(cookie);
+            arguments.append(bytes);
+        } else {
+            arguments.append(integer_constant(
+                fundamental_type::unsigned_long_int, size, at));
+        }
+    }
     expression_meaning call;
     r = call_function(n, at, function, arguments, call);
     if (r != analysis_result::well_formed)
@@ -181,9 +209,10 @@ analysis_result semantic_analysis::delete_expression(node_index n,
        function ... is looked up in the dynamic type's virtual
        destructor": [abi:vtable-components] the deleting destructor in the
        slot after the complete object one destroys and deallocates */
-    if (c && entity_table[c].destructor &&
+    if (!array && c && entity_table[c].destructor &&
         entity_table[entity_table[c].destructor].virtual_)
         semantics[m.node].value = 1;
+    semantics[m.node].d = static_cast<uint32_t>(cookie);
     return analysis_result::well_formed;
 }
 
@@ -192,10 +221,9 @@ analysis_result semantic_analysis::delete_expression(node_index n,
  * class c (0: not a class) calls, ::delete when global, delete[] when
  * array; sized when it takes the size.
  */
-analysis_result
-semantic_analysis::usual_deallocation(node_index n, entity_index c, bool global,
-                                      bool array, entity_index &function,
-                                      bool &is_sized, bool class_complete)
+analysis_result semantic_analysis::usual_deallocation(
+    node_index n, entity_index c, bool global, bool array,
+    entity_index &function, bool &is_sized, bool class_complete, bool cookie)
 {
     /* /9: "When the keyword delete in a delete-expression is preceded by
        the unary :: operator, the deallocation function's name is looked up
@@ -252,9 +280,10 @@ semantic_analysis::usual_deallocation(node_index n, entity_index c, bool global,
        function with a parameter of type std::size_t is selected.
        Otherwise, it is unspecified whether a deallocation function with a
        parameter of type std::size_t is selected."  As clang: the sized one
-       for a single object, the unsized one for an array. */
+       for a single object and an array with a cookie, the unsized one for
+       another array. */
     function = unsized;
-    if (!unsized || (sized && !in_class && !array))
+    if (!unsized || (sized && !in_class && (!array || cookie)))
         function = sized;
     is_sized = function && function == sized;
     if (!function)

@@ -360,11 +360,25 @@ analysis_result semantic_analysis::new_expression(node_index n,
     qualified_type size_type = qualified_type::make(
         type_table.fundamental(fundamental_type::unsigned_long_int), cv_none);
     expression_meaning requested;
+    /* an array of a class with a constructor or destructor: each element
+       initialized ([expr.new]/22), and, with a non-trivial destructor, the
+       element count stored before the elements for delete[]
+       ([abi:array-cookies]: "The size of the array cookie is the maximum
+       of sizeof(std::size_t) and the alignment of the element type",
+       which "is stored immediately before the first element", the
+       allocation /15's "array allocation overhead") */
+    bool elements =
+        array && c && (entity_table[c].first_constructor || destroys(c));
+    uint64_t cookie = 0;
+    expression_meaning element_count;
     if (array) {
-        if (c && (entity_table[c].first_constructor || destroys(c)))
-            return not_supported(n, "expr.new");
         if (init.bits)
             return not_supported(n, "expr.new");
+        if (elements && destroys(c)) {
+            cookie = 8;
+            if (alignment_of_type(type) > cookie)
+                cookie = alignment_of_type(type);
+        }
     }
     if (array && bound.bits) {
         /* [expr.new]/9: "If the expression in a noptr-new-declarator is
@@ -407,14 +421,24 @@ analysis_result semantic_analysis::new_expression(node_index n,
                                   "object too large",
                                   "expr.new");
             requested = integer_constant(fundamental_type::unsigned_long_int,
-                                         b.value * size, at);
+                                         b.value * size + cookie, at);
+            element_count = integer_constant(
+                fundamental_type::unsigned_long_int, b.value, at);
         } else {
             requested.type = size_type;
             requested.category = value_category::prvalue;
             requested.evaluation = constness::not_constant;
+            uint32_t counted = b.node;
+            if (elements) {
+                /* the count, held: the size's and the elements' */
+                element_count = b;
+                expression_meaning held = b;
+                counted = expression_node(semantic_kind::array_count, held, at);
+            }
             requested.node = expression_node(semantic_kind::array_size,
-                                             requested, at, b.node);
+                                             requested, at, counted);
             semantics[requested.node].value = size;
+            semantics[requested.node].d = static_cast<uint32_t>(cookie);
         }
     } else {
         if (array && known_count && size > UINT64_MAX / 2 / known_count)
@@ -422,13 +446,16 @@ analysis_result semantic_analysis::new_expression(node_index n,
                               "the expression in a noptr-new-declarator is "
                               "erroneous: the allocated object too large",
                               "expr.new");
-        if (array)
+        if (array) {
             size *= known_count;
+            element_count = integer_constant(
+                fundamental_type::unsigned_long_int, known_count, at);
+        }
         /* [expr.new]/15: "the new-expression passes the amount of space
            requested to the allocation function as the first argument of
            type std::size_t" */
-        requested =
-            integer_constant(fundamental_type::unsigned_long_int, size, at);
+        requested = integer_constant(fundamental_type::unsigned_long_int,
+                                     size + cookie, at);
     }
     /* /18: "Overload resolution is performed on a function call created by
        assembling an argument list.  The first argument is the amount of
@@ -590,6 +617,12 @@ analysis_result semantic_analysis::new_expression(node_index n,
        return null ([basic.stc.dynamic.allocation]/4) */
     if (value.node && !entity_table[function].implicit)
         semantics[m.node].c = 1;
+    if (elements) {
+        if (!entity_table[function].implicit)
+            semantics[m.node].c = 1;
+        semantics[m.node].d = element_count.node;
+        semantics[m.node].value = cookie;
+    }
     return analysis_result::well_formed;
 }
 

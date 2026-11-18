@@ -264,9 +264,11 @@ struct tree_checker {
         case semantic_kind::new_object:
             child(n, node.a, tree_sort::expression, false, "allocation");
             child(n, node.b, tree_sort::initializer, true, "initialization");
+            child(n, node.d, tree_sort::expression, true, "count");
             prvalue(n, node.a, "allocation");
             break;
         case semantic_kind::allocated:
+        case semantic_kind::array_count:
             break;
         case semantic_kind::array_size:
             child(n, node.a, tree_sort::expression, false, "count");
