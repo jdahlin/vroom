@@ -580,9 +580,7 @@ analysis_result semantic_analysis::elaborated_type_specifier(node_index n,
 {
     const syntax_node &node = tree[n];
     const syntax_child *children = tree.children(n);
-    if (!node.child_count || !children[0].is_token())
-        return not_supported(n, "dcl.type.elab");
-    standard_keyword key = p.keyword_of(tokens[children[0].index()]);
+    standard_keyword key = leading_keyword(n);
     if (!is_class_key(key))
         return not_supported(n, "dcl.type.elab");
     bool is_union = key == standard_keyword::union_;
@@ -958,8 +956,7 @@ semantic_analysis::member_declaration(entity_index c, syntax_child member,
         node_index seq = children[0].index();
         for (uint32_t i = 0; i < tree[seq].child_count; i++) {
             syntax_child x = tree.children(seq)[i];
-            if (x.is_token() &&
-                p.keyword_of(tokens[x.index()]) == standard_keyword::friend_)
+            if (is_keyword(x, standard_keyword::friend_))
                 return friend_declaration(c, n);
         }
     }

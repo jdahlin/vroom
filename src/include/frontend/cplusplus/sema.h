@@ -1003,7 +1003,41 @@ class semantic_analysis
             return nullptr;
         return &dynamic_classes[entity_table[c].dynamic - 1];
     }
+    /* t, or the innermost element type of an array t ([dcl.array]) */
+    qualified_type element_type(qualified_type t) const
+    {
+        while (type_table[t.unqualified()].kind == type_kind::array)
+            t = type_table[t.unqualified()].operand;
+        return t;
+    }
+    /* the class of type t or of its innermost array element, 0 for any
+       other type */
+    entity_index element_class(qualified_type t) const
+    {
+        const struct type &r = type_table[element_type(t).unqualified()];
+        if (r.kind != type_kind::class_type)
+            return 0;
+        return r.entity;
+    }
+    /* whether entity k is a class (not a union or an enumeration) */
+    bool is_class_entity(entity_index k) const
+    {
+        return k && entity_table[k].kind == entity_kind::class_type;
+    }
     bool abstract_class(qualified_type t) const;
+    /* the keyword node n begins with, none when it begins with a node or
+       a token that is not a keyword */
+    standard_keyword leading_keyword(node_index n) const
+    {
+        if (!tree[n].child_count || !tree.children(n)[0].is_token())
+            return standard_keyword::none;
+        return p.keyword_of(tokens[tree.children(n)[0].index()]);
+    }
+    /* whether x is the keyword k */
+    bool is_keyword(syntax_child x, standard_keyword k) const
+    {
+        return x.is_token() && p.keyword_of(tokens[x.index()]) == k;
+    }
     /* whether a class is trivially copyable and has a trivial destructor:
        its objects are copied as their bytes, passed in registers */
     bool trivial_class(entity_index c) const;

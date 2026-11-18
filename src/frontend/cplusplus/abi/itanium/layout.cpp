@@ -28,7 +28,6 @@
  * file concluded and bench/cxx-sema.py compares it with clang's
  * -fdump-record-layouts.
  */
-#include "../../cplusplus-internal.h"
 #include "frontend/cplusplus/sema.h"
 
 namespace cplusplus

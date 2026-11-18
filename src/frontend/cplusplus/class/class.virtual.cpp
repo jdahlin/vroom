@@ -438,12 +438,10 @@ void semantic_analysis::dynamic_class_offsets(entity_index c)
 /* [class.abstract]/2: whether t is (an array of) an abstract class */
 bool semantic_analysis::abstract_class(qualified_type t) const
 {
-    while (type_table[t.unqualified()].kind == type_kind::array)
-        t = type_table[t.unqualified()].operand;
-    const struct type &r = type_table[t.unqualified()];
-    if (r.kind != type_kind::class_type)
+    entity_index k = element_class(t);
+    if (!k)
         return false;
-    const dynamic_class *d = dynamic_of(r.entity);
+    const dynamic_class *d = dynamic_of(k);
     return d && d->abstract;
 }
 

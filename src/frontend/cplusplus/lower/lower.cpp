@@ -24,7 +24,6 @@
  */
 #include "../cplusplus-internal.h"
 #include "frontend/cplusplus/lower.h"
-#include "frontend/c/ccint.h"
 
 namespace cplusplus
 {
@@ -4026,13 +4025,11 @@ void c_lowering::guarded_initialization(const semantic_node &n,
     /* the guard's first byte, read with acquire semantics
        (__atomic_load_n(p, __ATOMIC_ACQUIRE)) */
     ast_qualified_type byte = ast_builder_type_basic(AST_TYPE_UNSIGNED_CHAR);
-    uint32_t load_arguments[2] = {cast(guard_address(),
-                                       ast_builder_type_pointer(c, byte),
-                                       AST_CAST_POINTER_TO_POINTER),
-                                  ast_builder_integer(c, int_type, 2)};
-    uint32_t loaded =
-        make(AST_NODE_BUILTIN, byte, 0, ast_builder_list(c, load_arguments, 2),
-             2, CC_BUILTIN_ATOMIC_LOAD_N, 0);
+    uint32_t loaded = ast_builder_atomic_load(
+        c, byte,
+        cast(guard_address(), ast_builder_type_pointer(c, byte),
+             AST_CAST_POINTER_TO_POINTER),
+        ast_builder_integer(c, int_type, 2));
     uint32_t test = make(
         AST_NODE_BINARY, int_type, cast(loaded, int_type, AST_CAST_INTEGER),
         ast_builder_integer(c, int_type, 0), 0, LEX_TOKEN_EQUAL_EQUAL, 0);

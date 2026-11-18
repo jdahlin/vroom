@@ -1044,11 +1044,7 @@ bool semantic_analysis::default_constructed(entity_index c,
         const entity &m = entity_table[class_members[x.first_member + i]];
         if (m.base_subobject || m.default_initializer)
             continue;
-        qualified_type t = m.type;
-        while (type_table[t.unqualified()].kind == type_kind::array)
-            t = type_table[t.unqualified()].operand;
-        const struct type &r = type_table[t.unqualified()];
-        if (r.kind == type_kind::class_type && r.entity == k)
+        if (element_class(m.type) == k)
             return true;
     }
     return false;

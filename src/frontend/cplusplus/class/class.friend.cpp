@@ -112,9 +112,7 @@ analysis_result semantic_analysis::friend_class(entity_index c, node_index n,
     node_index t = type.index();
     const syntax_node &node = tree[t];
     const syntax_child *parts = tree.children(t);
-    if (!node.child_count || !parts[0].is_token())
-        return not_supported(n, "class.friend");
-    standard_keyword key = p.keyword_of(tokens[parts[0].index()]);
+    standard_keyword key = leading_keyword(t);
     if (!is_class_key(key))
         return not_supported(n, "class.friend");
     if (node.child_count == 3) {
@@ -280,8 +278,7 @@ analysis_result semantic_analysis::friend_declaration(entity_index c,
         unsigned friends_seen = 0, others = 0;
         for (uint32_t i = 0; i < tree[seq].child_count; i++) {
             syntax_child x = tree.children(seq)[i];
-            if (x.is_token() &&
-                p.keyword_of(tokens[x.index()]) == standard_keyword::friend_) {
+            if (is_keyword(x, standard_keyword::friend_)) {
                 friends_seen++;
                 continue;
             }
