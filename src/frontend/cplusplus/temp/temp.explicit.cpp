@@ -51,6 +51,11 @@ analysis_result semantic_analysis::explicit_specialization(node_index n)
     analysis_result r = named_specialization(n, inner, true, false, s, index);
     if (r != analysis_result::well_formed)
         return r;
+    /* [temp.expl.spec]/14 (Note): the template's exception specification
+       is instantiated for the comparison: not here */
+    if (dependent_exception_specification(
+            instantiations[index].template_entity))
+        return not_supported(n, "except.spec");
     entity_index e = instantiations[index].specialization;
     if (!defines)
         return analysis_result::well_formed;

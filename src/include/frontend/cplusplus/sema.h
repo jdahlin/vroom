@@ -1848,6 +1848,7 @@ class semantic_analysis
     /* the type typename Q::name for a dependent Q, one per Q and name */
     type_index dependent_member_type(type_index qualifier, uint32_t name);
     type_index dependent_written_type(node_index n);
+    bool names_dependent_entity(token_index first, token_index end) const;
     owned_array<entity_index> dependent_members;
     owned_array<entity_index> dependent_written_types;
     /* a block scope in the current one, made current */
@@ -2410,6 +2411,13 @@ class semantic_analysis
        specification non-throwing */
     analysis_result noexcept_specifier(node_index n, bool member,
                                        bool &non_throwing);
+    /* ... with the function_parameters in scope ([basic.scope.param]) */
+    analysis_result parameter_scope_noexcept(node_index n, bool member,
+                                             bool &non_throwing);
+    /* the noexcept-specifiers left value-dependent in templates' own
+       declarations */
+    owned_array<node_index> dependent_exception_specifications;
+    bool dependent_exception_specification(entity_index t) const;
     /* [expr.const]/5: the evaluation of the semantic tree node as a core
        constant expression (expr/expr.const.evaluate.cpp): well_formed with
        its value in v and constant true; constant false if it is not one;

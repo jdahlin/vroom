@@ -104,27 +104,15 @@ analysis_result semantic_analysis::decltype_type(node_index n,
         return not_supported(n, "class.mem");
     /* an operand that names a template parameter (or a type that depends
        on one) is type-dependent ([temp.dep.expr]): not analysed */
-    for (token_index t = tree[n].first_token; t < tree[n].end_token; t++) {
-        if (tokens[t].kind != token_kind::identifier)
-            continue;
-        lookup_result found =
-            lookup_unqualified(tokens.identifier(t), lookup_filter::any);
-        entity_index e = found.entity;
-        /* a function template's type depends on its own parameters, not
-           the call's: only parameters, variables and type names count */
-        if (e && (entity_table[e].kind == entity_kind::none ||
-                  ((entity_table[e].kind == entity_kind::variable ||
-                    entity_table[e].kind == entity_kind::typedef_name) &&
-                   depends_on_template_parameter(entity_table[e].type)))) {
-            /* [temp.dep.type]/10.3: "denoted by decltype(expression),
-               where expression is type-dependent" a dependent type, in
-               a template's own declaration (an instantiation's names are
-               bound to arguments) */
-            if (instantiating || class_instantiating || substituting)
-                return not_supported(n, "temp.dep.expr");
-            type = qualified_type::make(dependent_written_type(n), cv_none);
-            return analysis_result::well_formed;
-        }
+    if (names_dependent_entity(tree[n].first_token, tree[n].end_token)) {
+        /* [temp.dep.type]/10.3: "denoted by decltype(expression), where
+           expression is type-dependent" a dependent type, in a template's
+           own declaration (an instantiation's names are bound to
+           arguments) */
+        if (instantiating || class_instantiating || substituting)
+            return not_supported(n, "temp.dep.expr");
+        type = qualified_type::make(dependent_written_type(n), cv_none);
+        return analysis_result::well_formed;
     }
     expression_meaning m;
     unevaluated++;
@@ -138,6 +126,31 @@ analysis_result semantic_analysis::decltype_type(node_index n,
     if (!decltype_of(m, named, type))
         return not_supported(n, "dcl.type.decltype");
     return analysis_result::well_formed;
+}
+
+/* whether a name in [first, end) denotes a template parameter, or a
+   variable or type whose type depends on one ([temp.dep.expr]); a
+   function template's type depends on its own parameters, not the
+   call's: only parameters, packs, variables and type names count */
+bool semantic_analysis::names_dependent_entity(token_index first,
+                                               token_index end) const
+{
+    for (token_index t = first; t < end; t++) {
+        if (tokens[t].kind != token_kind::identifier)
+            continue;
+        lookup_result found =
+            lookup_unqualified(tokens.identifier(t), lookup_filter::any);
+        entity_index e = found.entity;
+        if (!e)
+            continue;
+        entity_kind k = entity_table[e].kind;
+        if (k == entity_kind::none)
+            return true;
+        if ((k == entity_kind::variable || k == entity_kind::typedef_name) &&
+            depends_on_template_parameter(entity_table[e].type))
+            return true;
+    }
+    return false;
 }
 
 /* the dependent type of decltype-specifier n: one for the operands of the

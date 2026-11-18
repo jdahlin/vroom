@@ -329,6 +329,7 @@ analysis_result semantic_analysis::function(node_index parameters,
     bool may_qualify = in_member_declarator;
     /* [except.spec]/1: the noexcept-specifier */
     bool specified_exceptions = false, non_throwing = false;
+    node_index exceptions = 0;
     for (uint32_t i = node.child_count; i-- > 0;) {
         syntax_child c = tree.children(parameters)[i];
         if (syntax_is_punctuator(tokens, c,
@@ -364,11 +365,9 @@ analysis_result semantic_analysis::function(node_index parameters,
             }
             if (syntax_is(tree, c, syntax_kind::noexcept_specifier) &&
                 !specified_exceptions) {
+                /* analysed once the parameters are known */
                 specified_exceptions = true;
-                analysis_result r =
-                    noexcept_specifier(c.index(), may_qualify, non_throwing);
-                if (r != analysis_result::well_formed)
-                    return r;
+                exceptions = c.index();
                 continue;
             }
             /* a ref-qualifier, attributes, a cv-qualifier-seq of a type
@@ -529,6 +528,12 @@ analysis_result semantic_analysis::function(node_index parameters,
     function_empty_pack = empty_pack;
     function_cv = cv;
     function_exceptions_specified = specified_exceptions;
+    if (exceptions) {
+        analysis_result r =
+            parameter_scope_noexcept(exceptions, may_qualify, non_throwing);
+        if (r != analysis_result::well_formed)
+            return r;
+    }
     if (abstract_class(type))
         /* a return type of abstract class type: as a parameter's */
         return not_supported(parameters, "class.abstract");
