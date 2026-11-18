@@ -890,6 +890,10 @@ void semantic_analysis::equivalent_partial_specializations(uint32_t added)
         const function_template &o = function_templates[k];
         if (k + 1 == added || o.primary != a.primary || !o.parameter_count)
             continue;
+        /* [temp.over.link]/7: the template-heads' constraints equivalent
+           too */
+        if (!same_constraints(a.declaration, o.declaration))
+            continue;
         bool unknown = false;
         bool forward = class_at_least_as_specialized(added, k + 1, unknown);
         bool backward = class_at_least_as_specialized(k + 1, added, unknown);
@@ -1370,10 +1374,12 @@ semantic_analysis::class_template_definition(node_index n, node_index specifier)
     bool specialization =
         head_name.bits &&
         syntax_is(tree, head_name, syntax_kind::simple_template_id);
-    analysis_result r =
-        template_head_parameters(n, parameters, true, false, specialization);
+    analysis_result r = template_head_parameters(
+        n, parameters, true, specialization, specialization);
     if (r != analysis_result::well_formed)
         return r;
+    /* a partial specialization's requires-clause is checked where it is
+       matched (matching_specialization); the primary's are not analysed */
     if (specialization) {
         return class_specialization_definition(n, specifier, parameters);
     }
@@ -1569,7 +1575,12 @@ analysis_result semantic_analysis::class_specialization_definition(
     /* [temp.expl.spec]: no dependent argument; [temp.class.spec]/9: "The
        specialization shall be more specialized than the primary template"
        (the primary's own arguments are not; other cases are
-       [temp.class.order]'s, not analysed) */
+       [temp.class.order]'s, not analysed); /9 Example 1's #2: the
+       primary's arguments with a requires-clause, more constrained than
+       the unconstrained primary ([temp.constr.order]) */
+    if (identity && head_constraint(n).bits &&
+        !head_constraint(function_templates[ct - 1].declaration).bits)
+        identity = false;
     if (parameters.empty() == dependent || identity)
         return not_supported(n, rule);
     function_template record;
@@ -1781,6 +1792,15 @@ analysis_result semantic_analysis::matching_specialization(
         if (again != analysis_result::well_formed)
             return again;
         if (!substituted)
+            continue;
+        /* [temp.class.spec.match]/2: "and the deduced template arguments
+           satisfy the associated constraints of the partial
+           specialization, if any" */
+        bool satisfied = true;
+        analysis_result c = template_constraints_satisfied(k + 1, d, satisfied);
+        if (c != analysis_result::well_formed)
+            return c;
+        if (!satisfied)
             continue;
         matches++;
         found.append(k + 1);
