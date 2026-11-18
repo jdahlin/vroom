@@ -1321,9 +1321,7 @@ analysis_result semantic_analysis::aggregate_elements(
     list_meaning.evaluation = all;
     result.node = expression_node(semantic_kind::initializer_list, list_meaning,
                                   tree[list].first_token);
-    semantics[result.node].first =
-        semantics.list(elements.data(), elements.size());
-    semantics[result.node].count = static_cast<uint32_t>(elements.size());
+    semantics.set_list(result.node, elements.data(), elements.size());
     return analysis_result::well_formed;
 }
 

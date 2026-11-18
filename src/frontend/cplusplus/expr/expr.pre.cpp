@@ -36,6 +36,11 @@ analysis_result semantic_analysis::expression(syntax_child e,
     x.meaning = m;
     x.place = claim_place;
     x.placeable = current_scope == claim_scope;
+    /* in a lambda's body a claim is an unevaluated operand, where clang
+       gives a name of an entity the lambda captures by copy the entity's
+       type, not the capture's ([expr.prim.id.unqual]/2) */
+    if (current_lambda())
+        x.placeable = false;
     /* a name in its own declaration's initializer: [basic.scope.pdecl]/1
        "The point of declaration for a name is immediately after its
        complete declarator ([dcl.decl]) and before its initializer (if
@@ -113,6 +118,8 @@ analysis_result semantic_analysis::expression_kind(syntax_child e,
         return delete_expression(n, m);
     case syntax_kind::fold_expression:
         return fold(n, m);
+    case syntax_kind::lambda_expression:
+        return lambda_expression(n, m);
     case syntax_kind::simple_template_id:
         return variable_template_id(n, m);
     default:

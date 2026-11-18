@@ -149,5 +149,8 @@ LANGUAGE_FEATURE(lambda_template_parameters, cplusplus_20, never,
                  "P0428R2: a template-parameter-list after the lambda-introducer")
 LANGUAGE_FEATURE(implicit_typename, cplusplus_20, never,
                  "P0634R3: [temp.res]/5, contexts where a qualified-id names a type")
+LANGUAGE_FEATURE(default_constructible_lambdas, cplusplus_20, never,
+                 "P0624R2: a closure type without a lambda-capture has a "
+                 "default constructor and copy assignment operator")
 LANGUAGE_FEATURE(init_capture_packs, cplusplus_20, never,
                  "P0780R2: an init-capture pack, ...identifier initializer")

@@ -555,8 +555,7 @@ analysis_result semantic_analysis::substatement(syntax_child s,
     current_scope = outer;
     /* the compound-statement it is as if it were rewritten to */
     built = statement_node(semantic_kind::block, first_token(s));
-    semantics[built].first = semantics.list(&declaration, 1);
-    semantics[built].count = 1;
+    semantics.set_list(built, &declaration, 1);
     return r;
 }
 
@@ -579,8 +578,7 @@ uint32_t semantic_analysis::declaration_statements(size_t first, token_index at)
     if (each.size() == 1)
         return each[0];
     uint32_t built = statement_node(semantic_kind::declarations, at);
-    semantics[built].first = semantics.list(&each[0], each.size());
-    semantics[built].count = static_cast<uint32_t>(each.size());
+    semantics.set_list(built, &each[0], each.size());
     return built;
 }
 

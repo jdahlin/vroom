@@ -328,9 +328,19 @@ class c_lowering
     ast_qualified_type entity_type(entity_index e, token_index at);
     bool is_reference(qualified_type t) const;
     bool without_linkage(qualified_type t) const;
-    entity_index enclosing_function(entity_index e) const;
-    entity_index local_class_function(entity_index e) const;
+    /* the function whose definition a block-scope entity is in, 0 if none */
+    entity_index enclosing_function(entity_index e) const
+    {
+        return cplusplus::enclosing_function(analysis.entity_table, e);
+    }
+    /* the function a member of a local class (or of a class nested in
+       one) is in, 0 for any other entity */
+    entity_index local_class_function(entity_index e) const
+    {
+        return next_enclosing_function(analysis.entity_table, e);
+    }
     uint32_t symbol(entity_index e, token_index at, int variant = 2);
+    void symbol_linkage(entity_index e, int &storage, uint32_t &flags) const;
     void gnu_attributes(entity_index e, uint32_t s);
     void spelling(entity_index e, owned_buffer &out);
     /* a constructor or destructor called: its symbol for a call */
@@ -603,7 +613,8 @@ bool c_lowering::without_linkage(qualified_type t) const
         switch (r.kind) {
         case type_kind::class_type: {
             const entity &x = analysis.entity_table[r.entity];
-            return !x.name && !x.linkage_name;
+            return !x.name && !x.linkage_name &&
+                   !visible_local_class(analysis.entity_table, r.entity);
         }
         case type_kind::pointer:
         case type_kind::lvalue_reference:
@@ -991,31 +1002,6 @@ ast_qualified_type c_lowering::member_function_type(qualified_type object,
 
 /* ---- symbols -------------------------------------------------------- */
 
-/* the function whose definition a block-scope entity is in, 0 if none */
-entity_index c_lowering::enclosing_function(entity_index e) const
-{
-    const entities &table = analysis.entity_table;
-    entity_index s = table[e].enclosing;
-    while (s && table[s].kind == entity_kind::block_scope)
-        s = table[s].enclosing;
-    if (s && table[s].kind == entity_kind::function)
-        return s;
-    return 0;
-}
-
-/* the function a member of a local class (or of a class nested in one)
-   is in, 0 for any other entity */
-entity_index c_lowering::local_class_function(entity_index e) const
-{
-    const entities &table = analysis.entity_table;
-    entity_index c = table[e].enclosing;
-    if (!c || table[c].kind != entity_kind::class_type)
-        return 0;
-    while (table[table[c].enclosing].kind == entity_kind::class_type)
-        c = table[c].enclosing;
-    return enclosing_function(c);
-}
-
 void c_lowering::spelling(entity_index e, owned_buffer &out)
 {
     uint32_t id = analysis.entity_table[e].name;
@@ -1025,6 +1011,46 @@ void c_lowering::spelling(entity_index e, owned_buffer &out)
     /* the identifier's number is the preprocessor's plus one */
     const char *s = tokens.pp.identifier_spelling(id - 1, &length);
     vbuffer_append(out.get(), s, length);
+}
+
+/* the storage and flags of the symbol of e, a function or a variable not
+   local to a function */
+void c_lowering::symbol_linkage(entity_index e, int &storage,
+                                uint32_t &flags) const
+{
+    const entity &x = analysis.entity_table[e];
+    storage = AST_STORAGE_NONE;
+    if (x.linkage_of_name == linkage::internal &&
+        !analysis.specialization_visible(e))
+        storage = AST_STORAGE_STATIC;
+    /* [impl.clang]: an entity whose type has no linkage (an unnamed
+       class's) cannot be named in another translation unit, so its symbol
+       is local, its name unmangled as an external one's */
+    else if (x.defined && without_linkage(x.type))
+        storage = AST_STORAGE_STATIC;
+    else if (!x.defined && x.kind == entity_kind::variable)
+        storage = AST_STORAGE_EXTERN;
+    flags = AST_SYMBOL_FLAG_GLOBAL;
+    /* [basic.def.odr]/11: an inline function or variable is defined in
+       every translation unit that odr-uses it: emitted where referenced,
+       weak so that the copies link as one ([abi:vague-inline] wants a
+       COMDAT group too, which C's code generator does not make yet) */
+    instantiation_kind explicit_ = analysis.explicitly_instantiated(e);
+    if (explicit_ == instantiation_kind::definition)
+        /* [temp.explicit]/10's explicit instantiation definition: emitted
+           whether used or not, weak (clang's weak_odr) */
+        flags |= AST_SYMBOL_FLAG_WEAK;
+    else if (x.inline_ && explicit_ != instantiation_kind::declaration)
+        flags |= AST_SYMBOL_FLAG_LINKONCE | AST_SYMBOL_FLAG_WEAK;
+    /* [class.local]: a member of a local class has no linkage
+       ([basic.link]/8); [impl.clang] its symbol is local unless the
+       outermost function the class is in is inline or templated (then
+       its copies link as one) */
+    if (local_class_function(e) &&
+        !visible_local_class(analysis.entity_table, x.enclosing)) {
+        storage = AST_STORAGE_STATIC;
+        flags = AST_SYMBOL_FLAG_GLOBAL;
+    }
 }
 
 /* the C symbol of a function or variable, made at its first use: named by
@@ -1058,11 +1084,24 @@ uint32_t c_lowering::symbol(entity_index e, token_index at, int variant)
         return s;
     }
     if (!itanium_symbol_name(analysis, tokens.pp, e, name.get(), variant))
-        return fail("an entity whose symbol is not mangled yet", at);
+        return fail("an entity whose symbol is not mangled", at);
     int kind = AST_SYMBOL_VARIABLE;
     if (x.kind == entity_kind::function)
         kind = AST_SYMBOL_FUNCTION;
-    if (enclosing_function(e)) {
+    int storage = AST_STORAGE_NONE;
+    uint32_t flags = AST_SYMBOL_FLAG_GLOBAL;
+    entity_index function = enclosing_function(e);
+    if (function)
+        symbol_linkage(function, storage, flags);
+    /* [dcl.inline]/6: "A static local variable in an inline function with
+       external or module linkage always refers to the same object": a
+       static local of a function emitted weak in every translation unit
+       is weak too (clang's linkonce_odr) */
+    if (function && kind == AST_SYMBOL_VARIABLE &&
+        storage == AST_STORAGE_NONE && (flags & AST_SYMBOL_FLAG_LINKONCE))
+        flags = AST_SYMBOL_FLAG_GLOBAL | AST_SYMBOL_FLAG_LINKONCE |
+                AST_SYMBOL_FLAG_WEAK;
+    else if (function) {
         /* a local static: [basic.stc.static]/1, its symbol the mangled one
            (codegen writes an assembler name as given) */
         owned_buffer written;
@@ -1078,36 +1117,8 @@ uint32_t c_lowering::symbol(entity_index e, token_index at, int variant)
         gnu_attributes(e, s);
         return s;
     }
-    int storage = AST_STORAGE_NONE;
-    if (x.linkage_of_name == linkage::internal)
-        storage = AST_STORAGE_STATIC;
-    /* [impl.clang]: an entity whose type has no linkage (an unnamed
-       class's) cannot be named in another translation unit, so its symbol
-       is local, its name unmangled as an external one's */
-    else if (x.defined && without_linkage(x.type))
-        storage = AST_STORAGE_STATIC;
-    else if (!x.defined && kind == AST_SYMBOL_VARIABLE)
-        storage = AST_STORAGE_EXTERN;
-    uint32_t flags = AST_SYMBOL_FLAG_GLOBAL;
-    /* [basic.def.odr]/11: an inline function or variable is defined in
-       every translation unit that odr-uses it: emitted where referenced,
-       weak so that the copies link as one ([abi:vague-inline] wants a
-       COMDAT group too, which C's code generator does not make yet) */
-    instantiation_kind explicit_ = analysis.explicitly_instantiated(e);
-    if (explicit_ == instantiation_kind::definition)
-        /* [temp.explicit]/10's explicit instantiation definition: emitted
-           whether used or not, weak (clang's weak_odr) */
-        flags |= AST_SYMBOL_FLAG_WEAK;
-    else if (x.inline_ && explicit_ != instantiation_kind::declaration)
-        flags |= AST_SYMBOL_FLAG_LINKONCE | AST_SYMBOL_FLAG_WEAK;
-    /* [class.local]: a member of a local class has no linkage
-       ([basic.link]/8); [impl.clang] its symbol is local unless the
-       function the class is in is inline (then its copies link as one) */
-    entity_index local = local_class_function(e);
-    if (local && !analysis.entity_table[local].inline_) {
-        storage = AST_STORAGE_STATIC;
-        flags = AST_SYMBOL_FLAG_GLOBAL;
-    }
+    if (!function)
+        symbol_linkage(e, storage, flags);
     s = ast_builder_symbol(c, kind, name.data(), name.size(), t, storage, flags,
                            0);
     *slot = s;
@@ -4192,7 +4203,7 @@ uint32_t c_lowering::vtable(entity_index k, token_index at)
         return fail("the virtual table of a class that is not dynamic", at);
     owned_buffer name;
     if (!itanium_vtable_name(analysis, tokens.pp, k, name.get()))
-        return fail("a virtual table whose symbol is not mangled yet", at);
+        return fail("a virtual table whose symbol is not mangled", at);
     const entity &x = analysis.entity_table[k];
     bool here =
         !d->key_function || analysis.entity_table[d->key_function].defined;
@@ -4783,7 +4794,7 @@ uint32_t c_lowering::vtt_define(entity_index k, uint32_t table, int storage,
 {
     owned_buffer name;
     if (!itanium_vtt_name(analysis, tokens.pp, k, name.get()))
-        return fail("a VTT whose symbol is not mangled yet", at);
+        return fail("a VTT whose symbol is not mangled", at);
     vtt_layout layout;
     vtt_of(k, layout);
     ast_qualified_type v = ast_builder_type_basic(AST_TYPE_VOID);
@@ -5126,7 +5137,7 @@ uint32_t c_lowering::thunk(entity_index f, int64_t adjustment, token_index at,
     owned_buffer function_name;
     if (!itanium_symbol_name(analysis, tokens.pp, f, function_name.get(),
                              variant))
-        return fail("a thunk whose function's symbol is not mangled yet", at);
+        return fail("a thunk whose function's symbol is not mangled", at);
     owned_buffer name;
     if (vcall)
         vbuffer_format_append(name.get(), "_ZTv%lld_n%llu_",
@@ -5138,18 +5149,9 @@ uint32_t c_lowering::thunk(entity_index f, int64_t adjustment, token_index at,
     vbuffer_append(name.get(), function_name.data() + 2,
                    function_name.size() - 2);
     /* f's linkage, as symbol() gives it */
-    const entity &x = analysis.entity_table[f];
     int storage = AST_STORAGE_NONE;
     uint32_t flags = AST_SYMBOL_FLAG_GLOBAL;
-    if (x.inline_)
-        flags |= AST_SYMBOL_FLAG_LINKONCE | AST_SYMBOL_FLAG_WEAK;
-    entity_index local = local_class_function(f);
-    if (x.linkage_of_name == linkage::internal ||
-        (x.defined && without_linkage(x.type)) ||
-        (local && !analysis.entity_table[local].inline_)) {
-        storage = AST_STORAGE_STATIC;
-        flags = AST_SYMBOL_FLAG_GLOBAL;
-    }
+    symbol_linkage(f, storage, flags);
     uint32_t s =
         ast_builder_symbol(c, AST_SYMBOL_FUNCTION, name.data(), name.size(),
                            entity_type(f, at), storage, flags, 0);
@@ -5916,7 +5918,7 @@ void c_lowering::guarded_initialization(const semantic_node &n,
     owned_buffer name;
     if (!itanium_symbol_name(analysis, tokens.pp, e, name.get(), 0) ||
         name.size() < 2) {
-        fail("an entity whose symbol is not mangled yet", n.at);
+        fail("an entity whose symbol is not mangled", n.at);
         return;
     }
     owned_buffer guard_name;
@@ -6118,6 +6120,18 @@ bool c_lowering::translation_unit()
         if (x.kind == entity_kind::function && x.placeholder_return &&
             !x.defined)
             continue;
+        /* [impl.clang] a specialization for a closure unique to the
+           translation unit: its symbol made at its first use, which
+           numbers the closure (itanium_mangler) */
+        if (x.instantiation) {
+            owned_buffer probe;
+            analysis.number_closures = false;
+            bool mangled = itanium_symbol_name(analysis, tokens.pp, d.entity,
+                                               probe.get(), 0);
+            analysis.number_closures = true;
+            if (!mangled)
+                continue;
+        }
         if (!symbol(d.entity, 0))
             return false;
     }
@@ -6221,6 +6235,10 @@ bool lower_translation_unit(const semantic_analysis &analysis,
                             lowering_failure &why, const char *main_path)
 {
     c_lowering lowering(analysis, tokens, c, target, main_path);
+    /* [impl.clang]: the closures unique to the translation unit numbered
+       in the order their symbols are made (itanium_mangler) */
+    analysis.unnumbered_closures.clear();
+    analysis.number_closures = true;
     bool lowered = lowering.translation_unit();
     why = lowering.failure;
     return lowered;
