@@ -705,9 +705,11 @@ analysis_result semantic_analysis::enum_specifier(node_index n,
                 /* "the constant-expression in the enumerator-definition
                    shall be a converted constant expression of the
                    underlying type": [expr.const]/10, no narrowing */
-                if (!integer_holds(b, fixed, value) ||
-                    (f == fundamental_type::bool_) !=
-                        (fixed == fundamental_type::bool_))
+                /* bool to an integer type is an integral promotion
+                   ([conv.prom]/6); an integer to bool a boolean conversion
+                   that clang allows for 0 and 1 (P1401R5, a defect report
+                   against C++20): both when the value fits */
+                if (!integer_holds(b, fixed, value))
                     return ill_formed_at_token(
                         first_token(init),
                         "the constant-expression in the "
