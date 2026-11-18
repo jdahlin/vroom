@@ -1322,25 +1322,17 @@ analysis_result semantic_analysis::call_with(
        xvalue if the result type is an rvalue reference to object type, and
        a prvalue otherwise." */
     m = expression_meaning();
-    qualified_type result = function.operand;
-    const struct type record = type_table[result.unqualified()];
-    m.type = result;
-    m.category = value_category::prvalue;
-    if (record.kind == type_kind::lvalue_reference ||
-        record.kind == type_kind::rvalue_reference) {
-        m.type = record.operand;
-        m.category = value_category::lvalue;
-        if (record.kind == type_kind::rvalue_reference &&
-            type_table[record.operand.unqualified()].kind !=
-                type_kind::function)
-            m.category = value_category::xvalue;
-    }
+    call_result(function.operand, m);
     /* [expr.const]/5.2: "an invocation of a non-constexpr function"; a
        constexpr function's invocation is the evaluator's
        (evaluate_constant), and a pointer or reference may be to a function
        analysis has no declaration of */
     m.evaluation = constness::unknown;
-    if (called && !entity_table[called].constexpr_)
+    /* (a closure's function call operator may be constexpr without the
+       specifier: [expr.prim.lambda.closure]/4, evaluate_invocation) */
+    if (called && !entity_table[called].constexpr_ &&
+        !(entity_table[called].enclosing &&
+          entity_table[entity_table[called].enclosing].lambda))
         m.evaluation = constness::not_constant;
     /* a constexpr member function's invocation is the evaluator's */
     if (called && entity_table[called].constexpr_) {
@@ -1388,6 +1380,25 @@ analysis_result semantic_analysis::call_with(
         semantics.list(argument_nodes.data(), argument_nodes.size());
     semantics[m.node].count = static_cast<uint32_t>(argument_nodes.size());
     return analysis_result::well_formed;
+}
+
+/* [expr.call]/14: the type and value category of a call of a function
+   returning result */
+void semantic_analysis::call_result(qualified_type result,
+                                    expression_meaning &m) const
+{
+    const struct type record = type_table[result.unqualified()];
+    m.type = result;
+    m.category = value_category::prvalue;
+    if (record.kind == type_kind::lvalue_reference ||
+        record.kind == type_kind::rvalue_reference) {
+        m.type = record.operand;
+        m.category = value_category::lvalue;
+        if (record.kind == type_kind::rvalue_reference &&
+            type_table[record.operand.unqualified()].kind !=
+                type_kind::function)
+            m.category = value_category::xvalue;
+    }
 }
 
 } // namespace cplusplus

@@ -31,6 +31,16 @@ namespace cplusplus
 analysis_result semantic_analysis::this_pointer(token_index t,
                                                 expression_meaning &m)
 {
+    if (current_lambda())
+        return captured_this(t, m);
+    return function_this(t, m);
+}
+
+/* this in the function analysed now, its own (a lambda's function call
+   operator's: its closure object's address) */
+analysis_result semantic_analysis::function_this(token_index t,
+                                                 expression_meaning &m)
+{
     entity_index e = function_state.this_entity;
     if (!e) {
         if (current_class())
