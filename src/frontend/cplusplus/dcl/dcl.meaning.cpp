@@ -787,6 +787,33 @@ analysis_result semantic_analysis::declarator(node_index declaration,
     }
     case syntax_kind::declarator:
         return trailing_return(declaration, n, type, m);
+    case syntax_kind::gnu_declarator: {
+        /* [ext:gnu_asm_labels] declarator gnu-asm-label_opt
+           gnu-attribute-specifier-seq_opt: the label is the symbol, one
+           ordinary string-literal (concatenated or not) without escape
+           sequences here */
+        for (uint32_t k = 1; k < node.child_count; k++) {
+            if (syntax_is(tree, children[k],
+                          syntax_kind::gnu_attribute_specifier)) {
+                analysis_result r =
+                    gnu_attribute_specifier(children[k].index(), m);
+                if (r != analysis_result::well_formed)
+                    return r;
+                continue;
+            }
+            if (!syntax_is(tree, children[k], syntax_kind::gnu_asm_label) ||
+                tree[children[k].index()].child_count != 4)
+                return not_supported(n, "ext.gnu");
+            syntax_child literal = tree.children(children[k].index())[2];
+            owned_buffer written;
+            tokens.spelling(literal.index(), written.get());
+            if (!literal.is_token() || written.size() < 2 ||
+                memchr(written.data(), '\\', written.size()))
+                return not_supported(n, "ext.gnu");
+            m.asm_label = literal.index();
+        }
+        return declarator(declaration, children[0], type, m);
+    }
     case syntax_kind::operator_function_id:
         return operator_function_id(n, m);
     case syntax_kind::literal_operator_id:

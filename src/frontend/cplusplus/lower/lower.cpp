@@ -1147,6 +1147,22 @@ uint32_t c_lowering::symbol(entity_index e, token_index at, int variant)
     s = ast_builder_symbol(c, kind, name.data(), name.size(), t, storage, flags,
                            0);
     *slot = s;
+    if (x.asm_label) {
+        /* [ext:gnu_asm_labels] the symbol is the label's characters, as
+           written (codegen writes an assembler name as given): the
+           characters between each piece's quotes (sema took no escape
+           sequence) */
+        owned_buffer written, label;
+        tokens.spelling(x.asm_label, written.get());
+        bool inside = false;
+        for (size_t i = 0; i < written.size(); i++) {
+            if (written.data()[i] == '"')
+                inside = !inside;
+            else if (inside)
+                vbuffer_append(label.get(), written.data() + i, 1);
+        }
+        ast_builder_symbol_assembler_name(c, s, label.data(), label.size());
+    }
     ast_builder_toplevel(c, s);
     gnu_attributes(e, s);
     return s;

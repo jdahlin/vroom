@@ -518,6 +518,9 @@ struct entity {
     token_index section = 0;
     /* ... and an abi_tag attribute's string-literal, 0 if none */
     token_index abi_tag = 0;
+    /* [ext:gnu_asm_labels] a function's or variable's asm label: the
+       string-literal that is its symbol, 0 if none */
+    token_index asm_label = 0;
     /* [dcl.link]/1: a function or variable with C language linkage,
        whose name is its symbol */
     bool c_language_linkage = false;
@@ -1568,6 +1571,8 @@ class semantic_analysis
         uint64_t aligned = 0;
         uint32_t gnu_flags = 0;
         token_index section = 0, abi_tag = 0;
+        /* [ext:gnu_asm_labels] the asm label's string-literal, 0 if none */
+        token_index asm_label = 0;
         /* the declarator-id is ~ class-name: a destructor ([class.dtor]/1) */
         bool destructor = false;
         /* the declarator-id is an operator-function-id ([over.oper]/1) */

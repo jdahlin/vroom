@@ -350,7 +350,7 @@ semantic_analysis::named_specialization(node_index n, node_index declaration,
         type_table[type.unqualified()].kind != type_kind::function)
         return not_supported(n, rule);
     if (s.typedef_ || s.static_ || s.extern_ || s.gnu_flags || m.gnu_flags ||
-        s.aligned || m.aligned || s.section || m.section)
+        s.aligned || m.aligned || s.section || m.section || m.asm_label)
         return not_supported(n, rule);
     /* [temp.explicit]/3: "An explicit instantiation of a function
        template ... shall not use the inline, constexpr, or consteval
@@ -594,6 +594,7 @@ analysis_result semantic_analysis::member_explicit_instantiation(
         m.literal_operator || m.destructor || defaults || s.typedef_ ||
         s.static_ || s.extern_ || s.inline_ || s.constexpr_ || s.gnu_flags ||
         m.gnu_flags || s.aligned || m.aligned || s.section || m.section ||
+        m.asm_label ||
         type_table[type.unqualified()].kind != type_kind::function)
         return not_supported(n, "temp.explicit");
     const entity c = entity_table[m.qualifier];

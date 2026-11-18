@@ -513,6 +513,32 @@ analysis_result semantic_analysis::declare(node_index declaration,
        is the one this declaration redeclares; with none, it declares another
        function of the set */
     entity_index overloads = 0;
+    /* [basic.scope.scope]/4, [temp.over]/1: a function declared after a
+       function template of the name in the same scope: the name is held by
+       the template (function_template_definition), the function one of the
+       non-template functions a call of it weighs (template_name_functions);
+       a declaration of one of them with the same parameters redeclares it */
+    entity_index held_name = 0;
+    if (prior && kind == entity_kind::function && !qualified &&
+        entity_table[prior].kind == entity_kind::none &&
+        entity_table[prior].held_by_template &&
+        entity_table[prior].enclosing == scope && !c_language) {
+        /* (only while a usable template holds it) */
+        bool usable = false;
+        for (const function_template &t : function_templates)
+            if (t.name == prior && !t.unusable)
+                usable = true;
+        if (!usable)
+            return not_supported(declaration, "basic.scope.declarative");
+        held_name = prior;
+        prior = 0;
+        for (const template_name_function &x : template_name_functions)
+            if (x.name == held_name &&
+                same_parameters(type_table,
+                                entity_table[x.function].type.unqualified(),
+                                type.unqualified()))
+                prior = x.function;
+    }
     if (prior && kind == entity_kind::function &&
         entity_table[prior].kind == entity_kind::function) {
         entity_index same = 0;
@@ -696,7 +722,7 @@ analysis_result semantic_analysis::declare(node_index declaration,
             implied = linkage::internal;
             unnamed_type = true;
         }
-        if (!overloads)
+        if (!overloads && !held_name)
             no_claims_after_hiding(name);
         if (overloads && entity_table[overloads].named_by_using)
             /* [namespace.udecl]/11: a using-declaration names the
@@ -719,6 +745,11 @@ analysis_result semantic_analysis::declare(node_index declaration,
                 last = entity_table[last].next_overload;
             entity_table[last].next_overload = e;
             entity_table[e].hidden_type = entity_table[overloads].hidden_type;
+        } else if (held_name) {
+            template_name_function x;
+            x.name = held_name;
+            x.function = e;
+            template_name_functions.append(x);
         } else {
             entity_table.bind(scope, name, e);
         }

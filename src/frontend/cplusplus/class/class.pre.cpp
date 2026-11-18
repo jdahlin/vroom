@@ -1403,6 +1403,9 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
     m.gnu_flags |= s.gnu_flags;
     if (!m.section)
         m.section = s.section;
+    /* [ext:gnu_asm_labels] a member's: not yet */
+    if (m.asm_label)
+        return not_supported(declaration, "ext.gnu");
     if (!m.abi_tag)
         m.abi_tag = s.abi_tag;
     if (!s.has_type)
@@ -1766,7 +1769,7 @@ analysis_result semantic_analysis::member_typedef(
     const specified &s, const declarator_meaning &m, uint8_t access)
 {
     if (s.static_ || s.inline_ || s.constexpr_ || s.virtual_ || s.gnu_flags ||
-        s.aligned || m.aligned || m.gnu_flags || m.section)
+        s.aligned || m.aligned || m.gnu_flags || m.section || m.asm_label)
         return not_supported(declaration, "dcl.typedef");
     uint32_t name = tokens.identifier(id);
     if (name == entity_table[c].name)

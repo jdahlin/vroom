@@ -306,7 +306,7 @@ semantic_analysis::parameter_declaration(node_index n, qualified_type &type,
        the type of the function it points to, the others have no rules for
        a parameter */
     if (r == analysis_result::well_formed &&
-        (m.gnu_flags || m.aligned || m.section))
+        (m.gnu_flags || m.aligned || m.section || m.asm_label))
         return not_supported(n, "ext.gnu");
     return r;
 }
