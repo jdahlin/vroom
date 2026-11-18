@@ -292,6 +292,7 @@ relative to it); `TODO.md` stays at the top.
 make -C src -j 6 vcc                # all vcc tools, hosted in GNU C++20
 make -C src -j 6 vcc VCC_LANG=c     # build the implementation as C11
 make -C src -j 6 vcc VCC_UNITY= OUT=../build/src-parts   # file by file: each file compiles alone
+make -C src -k -j 6 cplusplus-check # the C++ front end's files, each alone with its flags (CPLUSPLUS_FLAGS: no RTTI, no C++ library, -Werror; ~3 s)
 bench/vcc-diff.py ref -j 6          # clang -E references (once, ~1 min)
 bench/vcc-diff.py cmp -j 6 --kernel # preprocessor parity, kernel TUs
 bench/vcc-diff.py cmp -j 6          # ... including host tools (scripts/)

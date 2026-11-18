@@ -161,6 +161,11 @@ PP_OBJ  = $(call o,$(PP_SRC)) $(SPLIT_OBJ) $(call mod,vir) $(call o,$(VIRA_SRC))
 cxxlower_SRC = $(wildcard frontend/cplusplus/lower/*.cpp)
 cplusplus_SRC = $(filter-out $(cxxlower_SRC),$(wildcard frontend/cplusplus/*/*.cpp frontend/cplusplus/ext/*/*.cpp frontend/cplusplus/abi/*/*.cpp))
 CXX_OBJ = $(if $(filter c++,$(VCC_LANG)),$(call mod,cplusplus) $(call o,$(cxxlower_SRC)))
+# its subset of C++ (doc/PLAN-cxx-spec.md, Conventions), held by the compiler:
+# no RTTI, no C++ library header (C headers only), no object with a static
+# constructor or destructor, and no warning
+CPLUSPLUS_FLAGS = -fno-rtti -nostdinc++ -Wglobal-constructors -Wexit-time-destructors -Werror
+$(OBJ)/unity/cplusplus.o $(call o,$(cplusplus_SRC) $(cxxlower_SRC)): XFLAGS = $(CPLUSPLUS_FLAGS)
 # one module's objects: its unity TU, or its files
 mod = $(if $(VCC_UNITY),$(OBJ)/unity/$(1).o,$(call o,$($(1)_SRC)))
 AS_SRC  = $(AS_FILES) $(as_SRC) $(obj_SRC)
@@ -193,7 +198,7 @@ $(UNITY_C): $(OBJ)/unity/%.cpp: FORCE
 	@if cmp -s $@.tmp $@; then rm $@.tmp; else mv $@.tmp $@; fi
 
 $(UNITY_C:.cpp=.o): %.o: %.cpp Makefile $(LANG_STAMP) $(BOOTSTRAP_COMPILER)
-	$(VCC_CC) $(VCC_DIALECT) $(VCC_FAST) $(VCC_LTO) -MMD -MP -MF $(@:.o=.dep) -c $< -o $@
+	$(VCC_CC) $(VCC_DIALECT) $(VCC_FAST) $(VCC_LTO) $(XFLAGS) -MMD -MP -MF $(@:.o=.dep) -c $< -o $@
 
 FORCE:
 .PHONY: FORCE
@@ -341,6 +346,14 @@ $(C_COMPAT_CHECK): check-c-compat/%: %
 	$(HOST_CC) -x c -std=c11 $(VCC_FAST) -Wc++-compat $(CXX_CHECK_FLAGS) $<
 $(CXX_CHECK): check-cxx/%: %
 	$(HOST_CXX) $(VCC_FAST) $(VCC_CXX_DIALECT) $(CXX_CHECK_FLAGS) $<
+
+# Every file of the C++ front end compiles alone (the default build compiles
+# them as one TU), with the front end's flags: make -k -j 6 cplusplus-check
+CPLUSPLUS_CHECK = $(addprefix check-cplusplus/,$(cplusplus_SRC) $(cxxlower_SRC))
+.PHONY: cplusplus-check $(CPLUSPLUS_CHECK)
+cplusplus-check: $(CPLUSPLUS_CHECK)
+$(CPLUSPLUS_CHECK): check-cplusplus/%: %
+	$(HOST_CXX) $(VCC_CXX_DIALECT) $(VCC_FAST) $(CPLUSPLUS_FLAGS) -fsyntax-only $<
 
 # ---- fuzzing (test/fuzz/; see AGENTS.md) ----
 # libFuzzer from Homebrew LLVM when it has one, else the standalone driver

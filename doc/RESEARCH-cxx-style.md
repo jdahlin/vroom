@@ -5,7 +5,8 @@ force are `STYLE.md` (files, names, comments) and the Conventions of
 `PLAN-cxx-spec.md`; this note measures the code against candidate rules,
 looks at how other projects enforce theirs, and proposes a rule set and a
 lint written on vcc's own C++ front end, run on vcc's own sources in CI.
-Section 8 lists the decisions it needs.
+Section 8 lists the decisions it needs.  Step 1 of section 7 (the flags) was
+done the same day; sections 1 to 6 describe the tree before it.
 
 ## 1. The question
 
@@ -453,11 +454,14 @@ tried here.
 
 ## 7. Order of work
 
-1. **Flags, no code**: `-fno-rtti -nostdinc++ -Wglobal-constructors
-   -Wexit-time-destructors -Werror` for the C++ front end (it compiles with
-   all of them today; rules 1-4); run the conditional-operator hook in CI;
-   fix the two files and gate `VCC_UNITY=` for the front end (rule 28).
-   Rule 5 can move from the hook into the compiler as GCC has it:
+1. **Flags, no code.**  Done 2026-11-18: `CPLUSPLUS_FLAGS` in
+   `src/Makefile` (`-fno-rtti -nostdinc++ -Wglobal-constructors
+   -Wexit-time-destructors -Werror`) for the front end's objects (rules
+   1-4); CI runs the conditional-operator hook on all files; the two files
+   include `sema.h`, and `make cplusplus-check` compiles each of the 140
+   files alone with those flags, a step of `ci/premerge.sh arm64` (rule 28).
+   Clean with Apple clang and Debian's clang 23.1.6, also with the
+   sanitizers' flags.  Still open: rule 5 can move from the hook into the compiler as GCC has it:
    `#pragma GCC poison malloc calloc realloc free strdup strndup` after the
    front end's internal header has included `owned.h`.  Tried: the front
    end's unity translation unit compiles with it once `common/softfloat.h`,

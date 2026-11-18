@@ -57,7 +57,12 @@ the old names.
   hook `no-raw-allocation` enforces it, and CI runs it on every file.
 - **C++20 without exceptions, RTTI or the standard library**: namespace
   `cplusplus`, `enum class`, classes with member functions, RAII.  The module
-  is not built with `VCC_LANG=c`.
+  is not built with `VCC_LANG=c`.  The compiler holds it: the front end's
+  objects are built with `-fno-rtti -nostdinc++` (C headers only), with
+  `-Wglobal-constructors -Wexit-time-destructors` (no object with a static
+  constructor or destructor) and `-Werror` (`CPLUSPLUS_FLAGS`,
+  `src/Makefile`); `make -C src -k -j 6 cplusplus-check` compiles each file
+  alone with them, in CI too.
 - **Data from clang once** (`src/tools/gen-cplusplus-data.py`): the text,
   class and group of every Lex/Common diagnostic, the -W group tree, the
   keyword table with its KEY* conditions (TokenKinds.def), XID_Start and

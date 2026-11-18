@@ -46,8 +46,9 @@ jobs:
             base=${PUSH_BASE:-HEAD^}
           fi
           pre-commit run clang-format --from-ref "$base" --to-ref HEAD --show-diff-on-failure
-          # every file it covers, not only the changed ones: it is a grep
+          # every file they cover, not only the changed ones: they are text scans
           pre-commit run no-raw-allocation --all-files
+          pre-commit run no-conditional-operator --all-files
   arm64:
     uses: ./.github/workflows/arm64.yml
   # x86-64 runners: asan, tsan and the x86-host steps
