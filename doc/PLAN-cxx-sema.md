@@ -1360,6 +1360,23 @@ lines:
   refuted; lowering 401 -> 418 files, 0 refuted.  cxx-run 428/428 (107
   programs); cxx-c-suites 0 wrong, no pass lost but the known [cpp.pragma]
   and pr109318.
+- Status (2026-11-18, step 4 after review): [conv.qual] of member pointers
+  (`same_pointer_level`: "pointer to member of class C_i" is a P_i of
+  `similar` and `qualification_convertible`; conversion
+  `member_pointer_qualification`, the same value), alone or after
+  [conv.mem]/2, in implicit conversions, overload ranking (Exact Match,
+  [over.ics.rank]/3.2.5), the composite type of `==` (the union of the
+  members' cv-qualifiers) and static_casts both ways.  `.*` on a prvalue
+  materializes its temporary ([basic.lval]/7) and is an xvalue, so `mk().*pm
+  = 1` and `&(mk().*pm)` are ill-formed for their real reason; a prvalue of
+  a class with a destructor, or an aggregate's temporary, stays
+  unsupported [class.temporary].  `&` of a bit-field is one check citing
+  [class.bit]/3, ill-formed (clang's error) for `&s.b` and `&S::b`.
+  Tests added to `member-pointers.cpp`.  `bench/cxx-sema.py`: declarations
+  54506 -> 54535 as clang, 12 we reject and clang accepts (the same), 2398
+  we accept and clang rejects, all 0 refuted.  cxx-run 428/428 (107
+  programs); cxx-c-suites 0 wrong; quality redundant_tokens 58937,
+  duplicate_runs_across_files 351, unchanged.
 
 ### S6. Constant evaluation and templates
 
