@@ -212,6 +212,16 @@ uint64_t semantic_analysis::size_of_type(qualified_type t) const
         }
     case type_kind::pointer:
         return b.long_width / 8;
+    case type_kind::pointer_to_member:
+        /* [abi:data-member-pointers]: "The basic ABI properties of data
+           member pointer types are those of ptrdiff_t."
+           [abi:member-function-pointers]: "the basic ABI properties of
+           member function pointer types are those of the following class
+           ... struct { fnptr_t ptr; ptrdiff_t adj; };" */
+        if (type_table[record.operand.unqualified()].kind ==
+            type_kind::function)
+            return 2 * (b.long_width / 8);
+        return b.long_width / 8;
     case type_kind::lvalue_reference:
     case type_kind::rvalue_reference:
         return size_of_type(record.operand);
@@ -244,6 +254,9 @@ uint64_t semantic_analysis::alignment_of_type(qualified_type t) const
         return alignment_of_type(record.operand);
     case type_kind::class_type:
         return entity_table[record.entity].alignment;
+    case type_kind::pointer_to_member:
+        /* (ptrdiff_t's, and the pair's: its members') */
+        return tokens.files.behavior.long_width / 8;
     case type_kind::fundamental:
         if (record.fundamental == fundamental_type::builtin_va_list)
             return 8;
@@ -464,9 +477,20 @@ analysis_result semantic_analysis::unary(node_index n, expression_meaning &m)
         o == preprocessing_op_or_punc::MINUS_MINUS)
         return increment(n, children[1],
                          o == preprocessing_op_or_punc::MINUS_MINUS, false, m);
+    /* [expr.unary.op]/4: "A pointer to member is only formed when an
+       explicit & is used and its operand is a qualified-id not enclosed in
+       parentheses." */
+    node_index outer_operand = member_pointer_operand;
+    member_pointer_operand = 0;
+    if (o == preprocessing_op_or_punc::AMPERSAND &&
+        syntax_is(tree, children[1], syntax_kind::qualified_id))
+        member_pointer_operand = children[1].index();
     analysis_result r = expression(children[1], m);
+    member_pointer_operand = outer_operand;
     if (r != analysis_result::well_formed)
         return r;
+    if (m.node && semantics[m.node].kind == semantic_kind::member_pointer)
+        return analysis_result::well_formed;
     const implementation_defined_behavior &b = tokens.files.behavior;
     token_index at = children[0].index();
     /* [over.unary]: an operand of class or enumeration type
@@ -485,29 +509,15 @@ analysis_result semantic_analysis::unary(node_index n, expression_meaning &m)
             /* [impl.clang] the address of a class temporary: an error
                clang makes a warning (-Waddress-of-temporary) */
             return not_supported(n, "expr.unary.op");
-        /* /3.1: "If the operand is a qualified-id naming a non-static or
-           variant member m of some class C ... the result has type
-           pointer to member" ([dcl.mptr], S5) */
-        if (syntax_is(tree, children[1], syntax_kind::qualified_id) &&
-            (m.category != value_category::lvalue ||
-             (m.node && semantics[m.node].kind == semantic_kind::member)))
-            return not_supported(n, "dcl.mptr");
+        /* (/3.1, a pointer to member, is member_pointer_constant's) */
         if (m.category != value_category::lvalue)
             return ill_formed(n,
                               "the operand of the unary & operator shall "
                               "be an lvalue",
                               "expr.unary.op");
-        /* [expr.unary.op]/5: "The operand of & shall not be a bit-field."
-           (clang's error) */
         if (m.bit_field_width)
-            return not_supported(n, "class.bit");
-        m.type = qualified_type::make(type_table.pointer_to(m.type), cv_none);
-        m.category = value_category::prvalue;
-        if (m.evaluation == constness::constant)
-            m.evaluation = constness::unknown;
-        m.entity = 0;
-        m.string_literal = 0;
-        m.node = expression_node(semantic_kind::address, m, at, m.node);
+            return address_of_bit_field(tree[n].first_token);
+        address_of_glvalue(at, m);
         return analysis_result::well_formed;
     }
     case preprocessing_op_or_punc::STAR: {
@@ -601,6 +611,81 @@ analysis_result semantic_analysis::unary(node_index n, expression_meaning &m)
     }
     m.node = expression_node(semantic_kind::unary, m, at, m.node, 0,
                              static_cast<uint8_t>(o));
+    return analysis_result::well_formed;
+}
+
+/* [expr.unary.op]/3.2: "if the operand is an lvalue of type T, the
+   resulting expression is a prvalue of type "pointer to T" whose result is
+   a pointer to the designated object": m becomes it */
+void semantic_analysis::address_of_glvalue(token_index at,
+                                           expression_meaning &m)
+{
+    m.type = qualified_type::make(type_table.pointer_to(m.type), cv_none);
+    m.category = value_category::prvalue;
+    if (m.evaluation == constness::constant)
+        m.evaluation = constness::unknown;
+    m.entity = 0;
+    m.string_literal = 0;
+    m.node = expression_node(semantic_kind::address, m, at, m.node);
+}
+
+/* [class.bit]/3: "The address-of operator & shall not be applied to a
+   bit-field, so there are no pointers to bit-fields." */
+analysis_result semantic_analysis::address_of_bit_field(token_index t)
+{
+    return ill_formed_at_token(t,
+                               "the address-of operator & shall not be "
+                               "applied to a bit-field",
+                               "class.bit");
+}
+
+/*
+ * [expr.unary.op]/3.1: "If the operand is a qualified-id naming a
+ * non-static or variant member m of some class C with type T, the result
+ * has type "pointer to member of class C of type T" and is a prvalue
+ * designating C::m."  C is the class m is declared in, whatever class the
+ * nested-name-specifier names.
+ */
+analysis_result
+semantic_analysis::member_pointer_constant(token_index t, entity_index e,
+                                           expression_meaning &m)
+{
+    const entity &x = entity_table[e];
+    entity_index c = x.enclosing;
+    if (x.kind != entity_kind::variable && x.kind != entity_kind::function)
+        return not_supported(current_declaration, "expr.unary.op");
+    if (!c || entity_table[c].kind != entity_kind::class_type ||
+        !entity_table[c].name)
+        /* a variant member of an anonymous union: its offset is the
+           union's plus its own */
+        return not_supported(current_declaration, "expr.unary.op");
+    if (!accessible(e))
+        return ill_formed_at_token(t,
+                                   "a private or protected member's name can "
+                                   "be used only by members and friends of "
+                                   "the class in which it is declared",
+                                   "class.access");
+    if (x.bit_field)
+        return address_of_bit_field(t);
+    const struct type &member = type_table[x.type.unqualified()];
+    if (member.kind == type_kind::lvalue_reference ||
+        member.kind == type_kind::rvalue_reference)
+        /* [dcl.mptr]/3: "A pointer to member shall not point to ... a
+           member with reference type" */
+        return ill_formed_at_token(t,
+                                   "a pointer to member shall not point to a "
+                                   "member with reference type",
+                                   "dcl.mptr");
+    if (x.kind == entity_kind::function && x.member_cv)
+        /* the function types analysis makes have no cv-qualifier-seq
+           ([dcl.fct]/1) */
+        return not_supported(current_declaration, "dcl.fct");
+    m = expression_meaning();
+    m.type =
+        qualified_type::make(type_table.pointer_to_member(c, x.type), cv_none);
+    m.category = value_category::prvalue;
+    m.evaluation = constness::unknown;
+    m.node = expression_node(semantic_kind::member_pointer, m, t, e);
     return analysis_result::well_formed;
 }
 

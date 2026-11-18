@@ -1327,6 +1327,56 @@ lines:
   prvalue through a virtual base.  `bench/cxx-sema.py`: declarations
   54051 -> 54065 as clang, 12 we reject and clang accepts, 2396 we accept
   and clang rejects, 0 refuted; cxx-run 420/420 (105 programs).
+- Status (2026-11-18, step 4: pointers to members): [dcl.mptr]'s
+  declarator (`pointer_operator`, `dcl/dcl.meaning.cpp`; an enumeration or
+  namespace is ill-formed, so are reference and void members), `&C::m`
+  ([expr.unary.op]/4, `member_pointer_constant`), `.*` and `->*`
+  (`expr/expr.mptr.oper.cpp`: node `member_pointer_access`, the object
+  converted to the member's class, a member function's result called in
+  `call`), [conv.mem]'s null and base-to-derived conversions and
+  [expr.static.cast]/12's way back (`expr/conv.mem.cpp`;
+  `member_pointer_along_path` sums the offsets of `accessible_path`, the
+  path walk `pointer_along_path` now shares), equality with composite types,
+  [conv.bool], assignment, overload ranking (to bool, from null).  Lowered as
+  the Itanium/AArch64 ABI: a data member pointer is a ptrdiff_t, null -1; a
+  member function pointer {ptr, adj} with adj twice the this-adjustment, a
+  virtual function as its vtable offset and adj's low bit; static data
+  initialized at namespace scope, -1 for an uninitialized one.  Mangled `M
+  class member` (clang's).  Tests: `src/test/cxx/run/member-pointers.cpp`,
+  `member-pointers-initialization.cpp`.  Not analysed: member functions with
+  a cv- or ref-qualifier (not in the type table), member pointers as
+  template arguments and in deduction, an implicit conversion sequence
+  through [conv.mem]/2 (rank unknown), const_cast and reinterpret_cast of
+  member pointers, relational comparison, `.*` on a prvalue class, members
+  of anonymous unions, composite types of member function pointers of
+  different classes, conversion functions to a member pointer.  Not
+  lowered: zero-initializing an aggregate holding a data member pointer
+  other than as a constant, a call through a member pointer whose result
+  is returned through memory.  `bench/cxx-sema.py`: declarations 54065 ->
+  54506 as clang, 12 we reject and clang accepts (the same 12), 2396 ->
+  2398 we accept and clang rejects, unsupported 68748 -> 68305; declared
+  types 26976 -> 27010, types 67258 -> 67644, constants 27370 -> 27490,
+  lookup 20042 -> 20331, symbols 2346 -> 2385, layout 14767 -> 14806, all 0
+  refuted; lowering 401 -> 418 files, 0 refuted.  cxx-run 428/428 (107
+  programs); cxx-c-suites 0 wrong, no pass lost but the known [cpp.pragma]
+  and pr109318.
+- Status (2026-11-18, step 4 after review): [conv.qual] of member pointers
+  (`same_pointer_level`: "pointer to member of class C_i" is a P_i of
+  `similar` and `qualification_convertible`; conversion
+  `member_pointer_qualification`, the same value), alone or after
+  [conv.mem]/2, in implicit conversions, overload ranking (Exact Match,
+  [over.ics.rank]/3.2.5), the composite type of `==` (the union of the
+  members' cv-qualifiers) and static_casts both ways.  `.*` on a prvalue
+  materializes its temporary ([basic.lval]/7) and is an xvalue, so `mk().*pm
+  = 1` and `&(mk().*pm)` are ill-formed for their real reason; a prvalue of
+  a class with a destructor, or an aggregate's temporary, stays
+  unsupported [class.temporary].  `&` of a bit-field is one check citing
+  [class.bit]/3, ill-formed (clang's error) for `&s.b` and `&S::b`.
+  Tests added to `member-pointers.cpp`.  `bench/cxx-sema.py`: declarations
+  54506 -> 54535 as clang, 12 we reject and clang accepts (the same), 2398
+  we accept and clang rejects, all 0 refuted.  cxx-run 428/428 (107
+  programs); cxx-c-suites 0 wrong; quality redundant_tokens 58937,
+  duplicate_runs_across_files 351, unchanged.
 
 ### S6. Constant evaluation and templates
 

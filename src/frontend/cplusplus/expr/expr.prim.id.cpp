@@ -762,6 +762,8 @@ analysis_result semantic_analysis::qualified_id(node_index n,
         if (r != analysis_result::well_formed)
             return r;
     }
+    if (x.nonstatic_member && n == member_pointer_operand)
+        return member_pointer_constant(t, e, m);
     if (x.nonstatic_member)
         return implicit_member_access(t, e, m);
     if (x.kind != entity_kind::function && x.kind != entity_kind::variable)

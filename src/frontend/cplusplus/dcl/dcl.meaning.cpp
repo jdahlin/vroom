@@ -116,19 +116,62 @@ analysis_result semantic_analysis::pointer_operator(node_index op,
                                                     declarator_meaning &m)
 {
     const syntax_node &node = tree[op];
+    entity_index member_class = 0;
     for (uint32_t i = 0; i < node.child_count; i++) {
         syntax_child c = tree.children(op)[i];
         if (syntax_is_attribute(tree, c))
             return not_supported(op, "dcl.attr");
-        if (syntax_is(tree, c, syntax_kind::nested_name_specifier))
-            return not_supported(op, "dcl.mptr");
+        if (syntax_is(tree, c, syntax_kind::nested_name_specifier)) {
+            /* [dcl.mptr]/1: "In a declaration T D where D has the form
+                   nested-name-specifier * attribute-specifier-seq_opt
+                   cv-qualifier-seq_opt D1
+               and the nested-name-specifier denotes a class, ... the type
+               of the identifier of D is "derived-declarator-type-list
+               cv-qualifier-seq pointer to member of class
+               nested-name-specifier of type T"." */
+            nominated_scope scope;
+            analysis_result r = nested_name_specifier(c.index(), scope);
+            if (r != analysis_result::well_formed)
+                return r;
+            if (!scope.global && !scope.dependent &&
+                (is_namespace(scope.entity) ||
+                 entity_table[scope.entity].kind == entity_kind::enumeration))
+                return ill_formed(op,
+                                  "the nested-name-specifier of a pointer to "
+                                  "member declarator shall denote a class",
+                                  "dcl.mptr");
+            if (scope.global || scope.dependent ||
+                entity_table[scope.entity].kind != entity_kind::class_type)
+                return not_supported(op, "dcl.mptr");
+            member_class = scope.entity;
+            continue;
+        }
         if (syntax_is_punctuator(tokens, c, preprocessing_op_or_punc::STAR)) {
             /* [dcl.ref]/5: "There shall be ... no pointers to references." */
             type_kind k = type_table[type.unqualified()].kind;
             if (k == type_kind::lvalue_reference ||
-                k == type_kind::rvalue_reference)
+                k == type_kind::rvalue_reference) {
+                if (member_class)
+                    /* [dcl.mptr]/3: "A pointer to member shall not point
+                       to ... a member with reference type" */
+                    return ill_formed(op,
+                                      "a pointer to member shall not point "
+                                      "to a member with reference type",
+                                      "dcl.mptr");
                 return ill_formed(
                     op, "there shall be no pointers to references", "dcl.ref");
+            }
+            if (member_class) {
+                /* [dcl.mptr]/3: "or "cv void"" */
+                if (fundamental_of(type) == fundamental_type::void_)
+                    return ill_formed(op,
+                                      "a pointer to member shall not point "
+                                      "to cv void",
+                                      "dcl.mptr");
+                type = qualified_type::make(
+                    type_table.pointer_to_member(member_class, type), cv_none);
+                continue;
+            }
             type = qualified_type::make(type_table.pointer_to(type), cv_none);
         } else if (syntax_is_punctuator(tokens, c,
                                         preprocessing_op_or_punc::AMPERSAND)) {
@@ -747,6 +790,11 @@ analysis_result semantic_analysis::declarator(node_index declaration,
         has_head = true;
         head = children[1];
         i = 3;
+        /* the suffixes are of the type the parenthesized declarator
+           derives from (a pointer's or a pointer to member's function
+           type, [dcl.mptr]/1), whose cv-qualifier-seq is not a member
+           function's ([dcl.fct]/6) */
+        in_member_declarator = false;
     } else if (node.child_count && children[0].is_token() &&
                tokens[children[0].index()].kind == token_kind::identifier) {
         has_head = true;

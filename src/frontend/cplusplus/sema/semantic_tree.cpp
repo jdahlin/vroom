@@ -44,6 +44,8 @@ const char *semantic_kind_name(semantic_kind kind)
         "subscript",
         "member",
         "bound_member_function",
+        "member_pointer",
+        "member_pointer_access",
         "zero",
         "initializer_list",
         "bind_reference",

@@ -136,7 +136,7 @@ int semantic_analysis::compare_standard_conversions(
        qualified type), a reference binding's T is the type it refers to,
        its top-level cv-qualifiers dropped */
     if (!a.implicit_object && !b.implicit_object && !(ta == tb) &&
-        is_pointer(ta) && is_pointer(tb) && similar(ta, tb)) {
+        (is_pointer(ta) || is_member_pointer(ta)) && similar(ta, tb)) {
         int c = prefer(qualification_convertible(ta, tb),
                        qualification_convertible(tb, ta));
         if (c)

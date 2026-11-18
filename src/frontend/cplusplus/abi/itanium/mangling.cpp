@@ -598,13 +598,11 @@ bool itanium_mangler::template_args(entity_index c, entity_index function)
     uint32_t count = analysis.specialization_argument_count(c);
     for (uint32_t i = 0; i < count; i++) {
         uint32_t pack = analysis.specialization_pack(c, i);
-        /* [abi:mangle.template-arg]: a function template's non-type
-           parameter of a dependent type,
-
-               <template-arg> ::= Tn <type> <template-arg>
-
-           its type in the template's own terms (T_), as clang 17 and
-           later mangle it */
+        /* [impl.clang]: a function template's non-type parameter of a
+           dependent type is mangled as "Tn", its type, then the argument
+           (a later revision of [abi:mangle.template-arg] than the one
+           quoted here); its type in the template's own terms (T_), as
+           clang 17 and later mangle it */
         qualified_type declared;
         if (function &&
             analysis.dependent_parameter_type(function, i, declared)) {
@@ -673,13 +671,13 @@ bool itanium_mangler::template_template_arg(entity_index t, uint32_t parameter)
 
 /* argument i of c's (its element - 1 if element) */
 /*
- * [abi:mangle.template-arg] a value-dependent argument, [abi:expressions]:
+ * [abi:mangle.template-arg] a value-dependent argument:
  *
  *     <template-arg> ::= X <expression> E
- *     <expression> ::= nt <expression>
- *                  ::= <unresolved-name>
- *     <unresolved-name> ::= sr <unresolved-qualifier-level>+ E
- *                           <base-unresolved-name>
+ *
+ * [impl.clang]: the expression is "nt" before a name written with a
+ * nested-name-specifier, then "sr", the qualifier levels, "E" and the
+ * base name ([abi:expressions]' unresolved-name, as clang spells it).
  *
  * Q<args>::name as written, Q unqualified; clang makes the qualifier
  * level no candidate, its template-args' types are as anywhere.
@@ -1300,6 +1298,17 @@ bool itanium_mangler::type(qualified_type t)
     } else if (r.kind == type_kind::rvalue_reference) {
         text("O");
         done = type(r.operand);
+    } else if (r.kind == type_kind::pointer_to_member) {
+        /* [abi:mangle.pointer-to-member-type]: "Pointer-to-member types
+           encode the class and member types":
+
+               <pointer-to-member-type> ::= M <class type> <member type>
+        */
+        text("M");
+        done =
+            type(qualified_type::make(
+                analysis.entity_table[r.entity].type.unqualified(), cv_none)) &&
+            type(r.operand);
     } else if (r.kind == type_kind::pack_expansion) {
         /* [abi:mangle.function-type]: a pack expansion,
 

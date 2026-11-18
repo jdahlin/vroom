@@ -74,6 +74,17 @@ analysis_result semantic_analysis::operand_value(node_index at,
                           "member access can be used only as the left-hand "
                           "operand of a member function call",
                           "expr.ref");
+    if (m.node &&
+        semantics[m.node].kind == semantic_kind::member_pointer_access &&
+        type_table[m.type.unqualified()].kind == type_kind::function)
+        /* [expr.mptr.oper]/6: "If the result of .* or ->* is a function,
+           then that result can be used only as the operand for the
+           function call operator ()." */
+        return ill_formed(at,
+                          "if the result of .* or ->* is a function, then "
+                          "that result can be used only as the operand for "
+                          "the function call operator ()",
+                          "expr.mptr.oper");
     if (m.category == value_category::prvalue)
         return analysis_result::well_formed;
     const struct type record = type_table[m.type.unqualified()];
@@ -529,7 +540,7 @@ bool semantic_analysis::similar(qualified_type a, qualified_type b) const
         return true;
     const struct type x = type_table[a.unqualified()];
     const struct type y = type_table[b.unqualified()];
-    if (x.kind == type_kind::pointer && y.kind == type_kind::pointer)
+    if (same_pointer_level(x, y))
         return similar(x.operand, y.operand);
     if (x.kind == type_kind::array && y.kind == type_kind::array) {
         if (x.bound_known && y.bound_known && x.bound != y.bound)
@@ -537,6 +548,19 @@ bool semantic_analysis::similar(qualified_type a, qualified_type b) const
         return similar(x.operand, y.operand);
     }
     return false;
+}
+
+/*
+ * [conv.qual]/1: a P_i of a cv-decomposition is "pointer to" or "pointer
+ * to member of class C_i of type": the same P_i in both types
+ */
+bool semantic_analysis::same_pointer_level(const struct type &x,
+                                           const struct type &y) const
+{
+    if (x.kind == type_kind::pointer && y.kind == type_kind::pointer)
+        return true;
+    return x.kind == type_kind::pointer_to_member &&
+           y.kind == type_kind::pointer_to_member && x.entity == y.entity;
 }
 
 /*
@@ -597,7 +621,7 @@ bool semantic_analysis::qualification_convertible(qualified_type from,
 {
     const struct type f0 = type_table[from.unqualified()];
     const struct type t0 = type_table[to.unqualified()];
-    if (f0.kind != type_kind::pointer || t0.kind != type_kind::pointer)
+    if (!same_pointer_level(f0, t0))
         return false;
     qualified_type f = f0.operand, t = t0.operand;
     bool const_above = true;
@@ -618,7 +642,7 @@ bool semantic_analysis::qualification_convertible(qualified_type from,
         const struct type pf = type_table[f.unqualified()];
         const struct type pt = type_table[t.unqualified()];
         bool level_differs = cvf != cvt, leaf = false;
-        if (pf.kind == type_kind::pointer && pt.kind == type_kind::pointer) {
+        if (same_pointer_level(pf, pt)) {
         } else if (pf.kind == type_kind::array && pt.kind == type_kind::array) {
             if (pf.bound_known && pt.bound_known && pf.bound != pt.bound)
                 return false;
@@ -702,7 +726,8 @@ analysis_result semantic_analysis::implicit_conversion(node_index at,
                 convert_arithmetic(m, t);
                 return analysis_result::well_formed;
             }
-            if (t == fundamental_type::bool_ && is_pointer(m.type)) {
+            if (t == fundamental_type::bool_ &&
+                (is_pointer(m.type) || is_member_pointer(m.type))) {
                 /* [conv.bool]/1: "A prvalue of arithmetic, unscoped
                    enumeration, pointer, or pointer-to-member type can be
                    converted to a prvalue of type bool." */
@@ -748,18 +773,17 @@ analysis_result semantic_analysis::implicit_conversion(node_index at,
         }
         return not_supported(at, "conv");
     }
+    bool handled = false;
+    analysis_result member = member_pointer_conversion(at, m, to, handled);
+    if (handled || member != analysis_result::well_formed)
+        return member;
     if (target.kind != type_kind::pointer)
         return not_supported(at, "conv");
     /* [conv.ptr]/1: "A null pointer constant is an integer literal with
        value zero or a prvalue of type std::nullptr_t.  A null pointer
        constant can be converted to a pointer type" */
     if (m.zero_literal || from == fundamental_type::std_nullptr_t) {
-        m.type = to;
-        m.zero_literal = false;
-        m.value = 0;
-        if (m.evaluation == constness::unknown)
-            m.evaluation = constness::constant;
-        converted(m, conversion_kind::null_pointer);
+        null_pointer_constant_to(m, to, conversion_kind::null_pointer);
         return analysis_result::well_formed;
     }
     if (is_pointer(m.type)) {
@@ -831,6 +855,24 @@ analysis_result semantic_analysis::implicit_conversion(node_index at,
     if (from == fundamental_type::none)
         return not_supported(at, "conv");
     return ill_formed(at, rule, "dcl.init");
+}
+
+/* [conv.ptr]/1: "A null pointer constant can be converted to a pointer
+   type; the result is the null pointer value of that type"; [conv.mem]/1
+   likewise (kind null_member_pointer), whose value analysis does not
+   keep */
+void semantic_analysis::null_pointer_constant_to(expression_meaning &m,
+                                                 qualified_type to,
+                                                 conversion_kind kind)
+{
+    m.type = to;
+    m.zero_literal = false;
+    m.value = 0;
+    if (kind == conversion_kind::null_member_pointer)
+        m.evaluation = constness::unknown;
+    else if (m.evaluation == constness::unknown)
+        m.evaluation = constness::constant;
+    converted(m, kind);
 }
 
 /*
