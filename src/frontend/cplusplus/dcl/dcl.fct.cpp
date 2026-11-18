@@ -258,6 +258,11 @@ analysis_result semantic_analysis::parameter_declaration(node_index n,
                           "cv-qualifier shall appear in a complete "
                           "decl-specifier-seq",
                           "dcl.type");
+    /* [ext:gnu_attributes] among a parameter's decl-specifiers: noreturn
+       changes the type of the function it points to, the others have no
+       rules for a parameter */
+    if (s.gnu_flags || s.aligned || s.section)
+        return not_supported(n, "ext.gnu");
     type = s.type;
     unnamed = true;
     if (node.child_count == 1)
@@ -269,6 +274,12 @@ analysis_result semantic_analysis::parameter_declaration(node_index n,
     unnamed = !m.has_id;
     if (m.has_id)
         id = m.id;
+    /* [ext:gnu_attributes] an attribute on a parameter: noreturn changes
+       the type of the function it points to, the others have no rules for
+       a parameter */
+    if (r == analysis_result::well_formed &&
+        (m.gnu_flags || m.aligned || m.section))
+        return not_supported(n, "ext.gnu");
     return r;
 }
 

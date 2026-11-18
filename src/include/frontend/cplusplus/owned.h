@@ -1,8 +1,8 @@
 /*
  * owned.h: the C++ front end's memory, held by owners.
  *
- * Code in src/frontend/cplusplus, src/include/frontend/cplusplus and
- * src/bin/cxxlex never calls free(), malloc(), realloc() or strdup() itself
+ * Code in src/frontend/cplusplus and src/include/frontend/cplusplus never
+ * calls free(), malloc(), realloc() or strdup() itself
  * (the pre-commit hook no-raw-allocation enforces it): what it allocates
  * belongs to one of the owners below, whose destructor gives it back when
  * the owner goes out of scope (RAII).  This header is the one place those

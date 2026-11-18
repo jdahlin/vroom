@@ -31,6 +31,33 @@ static bool driver_input_is_source(const char *a)
     return false;
 }
 
+/* an option the C++ front end reads itself (frontend/cplusplus/lower/compile.cpp:
+   compile_arguments); the driver may handle it too */
+static bool driver_cxx_argument(const char *a)
+{
+    static const char *const exact[] = {"-w",
+                                        "-pedantic",
+                                        "--pedantic",
+                                        "-pedantic-errors",
+                                        "--pedantic-errors",
+                                        "-fms-extensions",
+                                        "-fms-compatibility",
+                                        "-fchar8_t",
+                                        "-fno-char8_t",
+                                        "-trigraphs",
+                                        "-ftrigraphs",
+                                        "-fno-trigraphs",
+                                        "-fdollars-in-identifiers",
+                                        "-fno-dollars-in-identifiers",
+                                        "-fno-operator-names"};
+
+    for (size_t i = 0; i < sizeof exact / sizeof *exact; i++)
+        if (!strcmp(a, exact[i]))
+            return true;
+    return (a[0] == '-' && a[1] == 'W' && a[2] && a[3] != ',') ||
+           !strncmp(a, "-fcxx-", 6);
+}
+
 /* 0 to go on; 1: the job ends (status and message set); 2: return 1 at once, as the loop did on
    an invalid -ftls-model= (without the job's cleanup) */
 VPRIV __attribute__((noinline)) int driver_cmdline_parse(struct driver_job *job,
@@ -44,6 +71,15 @@ VPRIV __attribute__((noinline)) int driver_cmdline_parse(struct driver_job *job,
                                        : NULL)
         const char *v;
 
+        if (driver_cxx_argument(a)) {
+            if (!job->cxx_arguments)
+                job->cxx_arguments = (const char **)(calloc(
+                    (size_t)argc + 1, sizeof(*job->cxx_arguments)));
+            job->cxx_arguments[job->cxx_argument_count++] = a;
+            /* -fcxx-*: the C++ front end's alone */
+            if (!strncmp(a, "-fcxx-", 6))
+                continue;
+        }
         if (!strcmp(a, "--cmp") && i + 1 < argc) {
             job->compare_file = argv[++i];
             continue;

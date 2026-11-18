@@ -437,7 +437,16 @@ node_index parser::declarator_id(declarator_facts &facts)
         return 0;
     facts.has_id = true;
     facts.id_first = position;
-    if (qualifier && known && names.kind_of(scope) == scope_kind::class_) {
+    /* ... and one that names a member of a namespace in the namespace
+       ([basic.lookup.qual]/3: "names following the qualified-id are looked
+       up in the scope of the member's class or namespace"), when the
+       declaration is in a namespace (which encloses the member's,
+       [namespace.memdef]/2); a friend declaration in a class still finds
+       the class's names */
+    if (qualifier && known &&
+        (names.kind_of(scope) == scope_kind::class_ ||
+         (names.kind_of(scope) == scope_kind::namespace_ &&
+          names.kind_of(names.current()) == scope_kind::namespace_))) {
         facts.has_member_of = true;
         facts.member_of = scope;
     }
@@ -509,19 +518,36 @@ node_index parser::declarator_id(declarator_facts &facts)
  * identifier. ... Otherwise, the type of the expression is the type of the
  * result. ... The expression is an lvalue if the
  * entity is a function, variable, structured binding, data member, or
- * template parameter object and a prvalue otherwise".  At global namespace
- * scope, unqualified lookup ([basic.lookup.unqual]) finds the declaration
- * of the name there before; a name it does not find may be one a
- * namespace or a using-directive analysis has no rules for declares.
+ * template parameter object and a prvalue otherwise".  Unqualified lookup
+ * ([basic.lookup.unqual]) finds the declaration; a name it does not find
+ * may be one a declaration analysis has no rules for declares, or a
+ * function argument-dependent lookup would find ([basic.lookup.argdep]).
  */
 analysis_result semantic_analysis::id_expression(token_index t,
                                                  expression_meaning &m)
 {
-    entity_index e = lookup(tokens.identifier(t));
+    uint32_t name = tokens.identifier(t);
+    lookup_result found = lookup_unqualified(name, lookup_filter::any);
+    if (found.ambiguous)
+        return ill_formed_at_token(t,
+                                   "a name found in two different namespaces "
+                                   "whose declarations do not declare the "
+                                   "same entity is ill-formed",
+                                   "namespace.udir");
+    entity_index e = found.entity;
+    if (!e && !found.unknown)
+        e = library_builtin(name);
     if (!e)
-        e = library_builtin(tokens.identifier(t));
-    if (!e || entity_table[e].kind == entity_kind::none)
         return not_supported(current_declaration, "basic.lookup.unqual");
+    return named_entity(t, e, m);
+}
+
+analysis_result semantic_analysis::named_entity(token_index t, entity_index e,
+                                                expression_meaning &m)
+{
+    if (entity_table[e].kind == entity_kind::none)
+        return not_supported(current_declaration, "basic.lookup.unqual");
+    used(t, e);
     if (entity_table[e].kind == entity_kind::enumerator)
         return enumerator_value(t, e, m);
     const entity &x = entity_table[e];
@@ -573,13 +599,25 @@ analysis_result semantic_analysis::id_expression(token_index t,
  *     qualified-id:
  *         nested-name-specifier template_opt unqualified-id
  *
- * /2: "A nested-name-specifier that denotes a class ... nominates that
- * class.  If a nested-name-specifier N of a declarative
- * nested-name-specifier nominates a class C, ... the nested-name-specifier
- * is ... looked up in C" ([basic.lookup.qual]/1).  A class-name of the
- * global namespace followed by an identifier: a static member function,
- * or in a member function of that class a non-static member (made a class
- * member access as an unqualified name is, [class.mfct.non-static]/2).
+ * /2: "A nested-name-specifier that denotes a class, optionally followed by
+ * the keyword template, and then followed by the name of a member of
+ * either that class or one of its base classes, is a qualified-id ... The
+ * result is the member.  The type of the result is the type of the member.
+ * The result is an lvalue if the member is a static member function or a
+ * data member and a prvalue otherwise."  /3: "A nested-name-specifier that
+ * denotes a namespace ... followed by the name of a member of that
+ * namespace (or the name of a member of a namespace made visible by a
+ * using-directive), is a qualified-id ... The result is the member. ... The
+ * result is an lvalue if the member is a function, a variable, or a
+ * structured binding ([dcl.struct.bind]) and a prvalue otherwise."  /4: "A
+ * nested-name-specifier that denotes an enumeration ([dcl.enum]), followed
+ * by the name of an enumerator of that enumeration, is a qualified-id that
+ * refers to the enumerator."
+ *
+ * The name after the nested-name-specifier is looked up in the scope it
+ * nominates ([basic.lookup.qual]); in a member function a non-static
+ * member so named is a class member access as an unqualified name is
+ * ([class.mfct.non-static]/2).
  */
 analysis_result semantic_analysis::qualified_id(node_index n,
                                                 expression_meaning &m)
@@ -591,20 +629,17 @@ analysis_result semantic_analysis::qualified_id(node_index n,
         !parts[1].is_token() ||
         tokens[parts[1].index()].kind != token_kind::identifier)
         return not_supported(n, "expr.prim.id.qual");
-    node_index nested = parts[0].index();
-    const syntax_child *names = tree.children(nested);
-    if (tree[nested].child_count != 2 || !names[0].is_token() ||
-        tokens[names[0].index()].kind != token_kind::identifier)
-        return not_supported(n, "basic.lookup.qual");
-    entity_index c = lookup(tokens.identifier(names[0].index()));
-    if (c && entity_table[c].kind == entity_kind::enumeration) {
-        /* [expr.prim.id.qual]/4: "A nested-name-specifier that denotes an
-           enumeration ([dcl.enum]), followed by the name of an enumerator
-           of that enumeration, is a qualified-id that refers to the
-           enumerator."  An unscoped enumeration's enumerators are bound in
-           it as well as in its enclosing scope (enum_specifier) */
-        token_index t = parts[1].index();
-        entity_index e = entity_table.find(c, tokens.identifier(t));
+    nominated_scope scope;
+    analysis_result r = nested_name_specifier(parts[0].index(), scope);
+    if (r != analysis_result::well_formed)
+        return r;
+    token_index t = parts[1].index();
+    uint32_t name = tokens.identifier(t);
+    entity_index c = scope.entity;
+    if (!is_namespace(c) && entity_table[c].kind == entity_kind::enumeration) {
+        /* an unscoped enumeration's enumerators are bound in it as well as
+           in its enclosing scope (enum_specifier) */
+        entity_index e = entity_table.find(c, name);
         if (!e || entity_table[e].kind != entity_kind::enumerator) {
             if (entity_table[c].underlying == fundamental_type::none)
                 return not_supported(n, "dcl.enum");
@@ -615,27 +650,43 @@ analysis_result semantic_analysis::qualified_id(node_index n,
                                        "enumeration",
                                        "expr.prim.id.qual");
         }
+        used(t, e);
         m = expression_meaning();
         return enumerator_value(t, e, m);
     }
-    if (!c || entity_table[c].kind != entity_kind::class_type)
-        return not_supported(n, "basic.lookup.qual");
-    token_index t = parts[1].index();
-    entity_index e = entity_table.find(c, tokens.identifier(t));
-    if (e && entity_table[e].kind == entity_kind::none)
+    lookup_result found = lookup_qualified(c, name, lookup_filter::any);
+    if (found.ambiguous)
+        /* [namespace.qual]/3: "if the use of m is not one that allows a
+           unique declaration to be chosen from S(X, m), the program is
+           ill-formed" */
+        return ill_formed_at_token(t,
+                                   "the use of a name is ill-formed if it "
+                                   "does not allow a unique declaration to "
+                                   "be chosen from those found in the "
+                                   "namespaces",
+                                   "namespace.qual");
+    if (found.unknown)
         return not_supported(n, "over");
+    entity_index e = found.entity;
+    if (is_namespace(c)) {
+        /* [namespace.qual]/3: "if S(X, m) is the empty set, the program is
+           ill-formed"; a name not found may be one a declaration analysis
+           has no rules for declares */
+        if (!e)
+            return not_supported(n, "basic.lookup.qual");
+        m = expression_meaning();
+        return named_entity(t, e, m);
+    }
     if (!e)
-        /* [basic.lookup.qual]/1: "If a :: scope resolution operator in a
-           nested-name-specifier is not preceded by a decltype-specifier,
-           lookup of the name preceding that :: considers only namespaces,
-           types, and templates whose specializations are types."; the
-           name after it is looked up in the class ([class.member.lookup]):
-           finding nothing, clang's "no member named" */
+        /* [class.qual]/1: the name after it is looked up in the class
+           ([class.member.lookup]): finding nothing, clang's "no member
+           named" */
         return ill_formed_at_token(t,
                                    "a qualified name shall name a member of "
                                    "the class its nested-name-specifier "
                                    "nominates",
                                    "basic.lookup.qual");
+    used(t, e);
     if (entity_table[e].kind == entity_kind::enumerator) {
         if (!accessible(e))
             return ill_formed_at_token(t,

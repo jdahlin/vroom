@@ -605,6 +605,10 @@ class source_files
        evaluation was seen (#pragma STDC, float_control, fenv_access,
        clang fp): constant evaluation leaves floating-point values unknown */
     bool floating_point_pragma = false;
+    /* a pragma that changes the layout of classes was seen (#pragma pack,
+       ms_struct, options align): analysis has no rules for them, so the
+       classes of the translation unit are not laid out */
+    bool layout_pragma = false;
     /* text that is not a file: the predefined macros, the command line's,
        or a preprocessing token phase 4 spelled ("<scratch space>") */
     entry &add_text(const char *name, const char *text, size_t length,
@@ -663,6 +667,10 @@ struct preprocessor_options {
     /* -D and -U, in command line order, as the #define and #undef lines of
        clang's "<command line>" file */
     owned_array<char> command_line;
+    /* #define lines appended to "<built-in>" after the predefined macros:
+       the target's and options' macros a driver computed (clang's
+       InitPreprocessor) */
+    owned_array<char> built_in;
     /* clang's -undef: of the predefined macros only those the standards
        name (__cplusplus, __STDC*), and the dynamic ones (__FILE__, ...) */
     bool predefined_macros = true;

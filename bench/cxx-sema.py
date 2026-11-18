@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""The C++ front end's semantic analysis (src/frontend/cplusplus, through
-cxxsema) against clang, on clang's conformance tests (doc/PLAN-cxx-sema.md,
+"""The C++ front end's semantic analysis (src/frontend/cplusplus, through the
+driver: vpp -fcxx-dump=, src/frontend/cplusplus/dump/dump.h) against clang, on clang's conformance tests (doc/PLAN-cxx-sema.md,
 C3).
 
 Tests: clang/test/CXX/**/*.cpp (organized by the standard's paragraphs),
@@ -8,10 +8,10 @@ clang/test/SemaCXX and SemaTemplate when bench/fetch-testsuites.sh llvm has
 them (work/testsuites), and src/test/cxx/sema/{spec,gram}/*.cpp.  For each
 %clang_cc1 RUN line (the option sets bench/cxx-pp.py reads), per run:
 
-  crash    cxxsema ends with status 0 or 1, within the time limit, never
+  crash    vpp ends with status 0 or 1, within the time limit, never
            by a signal
   verdict  per declaration of the translation unit that starts in the test
-           file, cxxsema -dump-analysis against the lines where clang
+           file, -fcxx-dump=analysis against the lines where clang
            reports an error:
              agree        well-formed and clang has no error in its lines,
                           or ill-formed and clang has one
@@ -25,19 +25,19 @@ them (work/testsuites), and src/test/cxx/sema/{spec,gram}/*.cpp.  For each
              not parsed   the parser's (an erroneous node, or one kept as
                           tokens), or clang's error there is one of syntax
 
-  tree     cxxsema -check-tree: the semantic tree of every well-formed
+  tree     -fcxx-dump=check-tree: the semantic tree of every well-formed
            definition is complete and agrees with each expression's
-           recorded type and value category (src/bin/cxxsema/tree-check.h);
+           recorded type and value category (dump/tree-check.h);
            a problem is a failure
 
-  declared cxxsema -declaration-claims gives each name a declaration
-           declared and the type analysis gave it, in cxxparse's format;
+  declared -fcxx-dump=declaration-claims gives each name a declaration
+           declared and the type analysis gave it, in declarator-claims' format;
            bench/cxx-parse.py's check has clang compile
                static_assert(__is_same(decltype(NAME), CLAIM));
            after the declaration: verified, refuted (a failure), in a
            declaration clang rejects, or not checkable
-  types    cxxsema -type-claims gives each expression with a type its type
-           and value category (src/bin/cxxsema/type-claims.h); after the
+  types    -fcxx-dump=type-claims gives each expression with a type its type
+           and value category (dump/type-claims.h); after the
            expression's declaration clang compiles
                static_assert(__is_same(decltype((E)), CLAIM));
            verified, refuted (a failure), or not checkable (E does not
@@ -46,13 +46,21 @@ them (work/testsuites), and src/test/cxx/sema/{spec,gram}/*.cpp.  For each
                static_assert((E) == VALUE);
            `bench/cxx-sema.py selftest` checks this path on claims written
            by hand, some of them wrong.
-  symbols  on a run clang accepts without an error, cxxsema -symbols gives
+  lookup   -fcxx-dump=lookup-claims gives each name whose lookup analysis
+           resolved the declaration it found (the place of the name in the
+           entity's first declaration); clang's AST (-ast-dump=json) gives
+           the declaration each DeclRefExpr and MemberExpr at that place
+           refers to, followed to its first redeclaration: verified,
+           refuted (a failure: the gate of S2), or not checkable (clang has
+           no reference there: a type name, a namespace; or an error on the
+           line)
+  symbols  on a run clang accepts without an error, -fcxx-dump=symbols gives
            the symbol of each function and variable a well-formed
            declaration defines (src/frontend/cplusplus/abi/itanium/); clang
            -O0 compiles the file and each must be one its object defines
            (llvm-nm): verified, refuted (a failure), or not emitted (clang
            leaves out an unused entity with internal linkage).
-  lowering on the same runs, cxxsema -S -O0 (the tree lowered to C's AST,
+  lowering on the same runs, vpp -S -O0 (the tree lowered to C's AST,
            C's code generator): its assembly must assemble (clang -cc1as)
            and the object define exactly the functions and variables
            clang -O0's does: lowered, refuted (a failure), or not lowered
@@ -76,6 +84,7 @@ import glob
 import importlib.util
 import os
 import hashlib
+import json
 import re
 import subprocess
 import sys
@@ -91,7 +100,7 @@ R = cxxpp.R
 OURS = os.path.join(R, 'src', 'test', 'cxx', 'sema')
 LLVM_TEST = cxxparse.LLVM_TEST
 # clang -cc1 has plain char signed unless told otherwise; the driver tells
-# it so for aarch64 Linux, the target cxxsema analyses for
+# it so for aarch64 Linux, the target vpp analyses for
 TARGET = cxxparse.TRIPLE + ['-fno-signed-char']
 ALIASES = ['-mconstructor-aliases']
 SUITES = ('CXX', 'SemaCXX', 'SemaTemplate')
@@ -217,10 +226,10 @@ def check_type_claims(test, opts, clang, claims, cache=True):
     return counts, refuted
 
 
-def type_claims(cxxsema, opts, test):
-    """cxxsema -type-claims: the claims about the test file itself"""
+def type_claims(vpp, opts, test):
+    """-fcxx-dump=type-claims: the claims about the test file itself"""
     cwd = os.path.dirname(test)
-    r = cxxparse.run([cxxsema, '-type-claims'] + opts + [os.path.basename(test)], cwd)
+    r = cxxparse.run(cxxpp.vpp_command(vpp, 'type-claims', opts, os.path.basename(test)), cwd)
     if r[0] not in (0, 1):
         return []
     found = []
@@ -239,7 +248,7 @@ int g(...);
 int *const volatile *(*fp)[3];
 struct S { int m; };
 """
-# (expression, claim, value, expected): the encodings cxxsema -selftest
+# (expression, claim, value, expected): the encodings -fcxx-dump=selftest
 # checks that its encoder writes, and claims that must be refuted or
 # unchecked
 SELFTEST_CLAIMS = [
@@ -304,12 +313,143 @@ def clang_defined(test, opts, clang):
     return cxxparse.cached('symbols' + ''.join(TARGET + ALIASES), clang, test, opts, compile_and_list)
 
 
-def check_symbols(test, opts, clang, cxxsema):
-    """cxxsema -symbols against the symbols clang -O0's object defines:
+def clang_references(test, opts, clang):
+    """{(line, column): {(file, line, column), ...}}: per place in the test
+    file where clang's AST has a DeclRefExpr or a MemberExpr, the places of
+    redeclaration chains of what it refers to, first declaration first
+    (cached)"""
+    cwd, name = os.path.dirname(test), os.path.basename(test)
+
+    def compute():
+        r = cxxparse.run([clang, '-cc1'] + TARGET + ['-x', 'c++'] + opts +
+                         ['-fsyntax-only', '-ast-dump=json', name], cwd, timeout=120)
+        if r[0] == 'timeout' or not r[1].strip():
+            return None
+        try:
+            root = json.loads(r[1])
+        except ValueError:
+            return None
+        # clang writes a place's file and line only where they change from
+        # the place written before it: the walk is in the order written
+        state = {'file': None, 'line': None}
+
+        def place(loc):
+            """the place of a location object, None in a macro or invalid"""
+            if not isinstance(loc, dict) or not loc:
+                return None
+            if 'spellingLoc' in loc or 'expansionLoc' in loc:
+                place(loc.get('spellingLoc'))
+                place(loc.get('expansionLoc'))
+                return None
+            if 'file' in loc:
+                state['file'] = loc['file']
+            if 'line' in loc:
+                state['line'] = loc['line']
+            if 'col' not in loc or state['file'] is None:
+                return None
+            return (os.path.normpath(state['file']), state['line'], loc['col'])
+
+        declared, previous, uses = {}, {}, []
+        stack = [iter([root])]
+        while stack:
+            try:
+                node = next(stack[-1])
+            except StopIteration:
+                stack.pop()
+                continue
+            if isinstance(node, list):
+                stack.append(iter(node))
+                continue
+            if not isinstance(node, dict):
+                continue
+            here = end = None
+            children = []
+            for key, value in node.items():
+                if key == 'loc':
+                    here = place(value)
+                elif key == 'range' and isinstance(value, dict):
+                    place(value.get('begin'))
+                    end = place(value.get('end'))
+                elif isinstance(value, (dict, list)) and key not in ('referencedDecl', 'type'):
+                    children.append(value)
+            kind = node.get('kind', '')
+            if kind.endswith('Decl') and 'id' in node and here:
+                declared[node['id']] = here
+                if 'previousDecl' in node:
+                    previous[node['id']] = node['previousDecl']
+            if kind == 'DeclRefExpr' and end and isinstance(node.get('referencedDecl'), dict):
+                uses.append((end, node['referencedDecl'].get('id')))
+            elif kind == 'MemberExpr' and end and node.get('referencedMemberDecl'):
+                uses.append((end, node['referencedMemberDecl']))
+            stack.append(iter(children))
+        main = os.path.normpath(name)
+        found = {}
+        for (f, line, column), decl in uses:
+            if f != main:
+                continue
+            chain, seen = [], set()
+            while decl in declared and decl not in seen:
+                seen.add(decl)
+                chain.append(list(declared[decl]))
+                decl = previous.get(decl)
+            if chain:
+                found.setdefault(f'{line}:{column}', []).append(chain[::-1])
+        return found
+    return cxxparse.cached('lookup-chain' + ''.join(TARGET), clang, test, opts, compute)
+
+
+def check_lookup_claims(test, opts, clang, vpp, error_lines, unanalysed_lines):
+    """-fcxx-dump=lookup-claims against clang_references: a Counter, and the
+    refuted.  A name whose entity clang declared first in a declaration we
+    did not analyse (unsupported, ill-formed, not parsed) and we first at a
+    later declaration of clang's chain is not checkable"""
+    cwd, name = os.path.dirname(test), os.path.basename(test)
+    counts, refuted = collections.Counter(), []
+    r = cxxparse.run(cxxpp.vpp_command(vpp, 'lookup-claims', opts, name), cwd)
+    if r[0] not in (0, 1):
+        return counts, refuted
+    claims = []
+    for line in r[1].split('\n'):
+        parts = line.split('\t')
+        if len(parts) == 5 and os.path.normpath(parts[0]) == os.path.normpath(name):
+            row, column = map(int, parts[1].split(':'))
+            f, drow, dcolumn = parts[4].rsplit(':', 2)
+            claims.append((row, column, parts[2], parts[3], (os.path.normpath(f), int(drow), int(dcolumn))))
+    if not claims:
+        return counts, refuted
+    lines = open(test, 'rb').read().decode('latin-1').split('\n')
+    if cxxparse.has_line_directive(lines):
+        counts['unchecked'] += len(claims)
+        return counts, refuted
+    theirs = clang_references(test, opts, clang)
+    if theirs is None:
+        counts['unchecked'] += len(claims)
+        return counts, refuted
+    for row, column, spelled, kind, declared in claims:
+        chains = theirs.get(f'{row}:{column}')
+        found = [c[0] for c in chains or []]
+        later = [c[:c.index(list(declared))] for c in chains or [] if list(declared) in c[1:]]
+        if not found or row in error_lines:
+            counts['unchecked'] += 1
+        elif list(declared) in found:
+            counts['verified'] += 1
+        elif any(all(d[0] == os.path.normpath(name) and d[1] in unanalysed_lines for d in earlier)
+                 for earlier in later):
+            counts['unchecked'] += 1
+        else:
+            counts['refuted'] += 1
+            refuted.append(f'{row}:{column}: `{spelled}` finds the {kind} declared at '
+                           f'{declared[1]}:{declared[2]}, clang the one at '
+                           f'{", ".join(f"{d[1]}:{d[2]}" for d in found[:2])}')
+    return counts, refuted
+
+
+def check_symbols(test, opts, clang, vpp):
+    """-fcxx-dump=symbols against the symbols clang -O0's object defines:
     a Counter, and the refuted"""
     cwd, name = os.path.dirname(test), os.path.basename(test)
     counts, refuted = collections.Counter(), []
-    ours = cxxparse.run([cxxsema, '-symbols'] + opts + [name], cwd)
+    ours = cxxparse.run(cxxpp.vpp_command(vpp, 'symbols', opts, name), cwd)
     if ours[0] not in (0, 1) or not ours[1].strip():
         return counts, refuted
     defined = clang_defined(test, opts, clang)
@@ -334,7 +474,9 @@ def check_symbols(test, opts, clang, cxxsema):
     return counts, refuted
 
 
-NOT_LOWERED = re.compile(r'^cxxsema: not lowered: (.*?) at ', re.M)
+# the driver's message when lowering has no rule (lower/compile.cpp)
+NOT_LOWERED = re.compile(r'^[^\n]*:\d+:\d+: error: (?:the rules of (\[[^\]]*\]) are not implemented yet|'
+                         r'C\+\+ code generation does not handle (.*) yet)$', re.M)
 
 
 def object_symbols(nm, obj, cwd):
@@ -346,21 +488,22 @@ def object_symbols(nm, obj, cwd):
     return {s for s in listed[1].split() if not s.startswith(('$', '.L'))}
 
 
-def check_lowering(test, opts, clang, cxxsema):
-    """cxxsema -S -O0 on a file clang compiles: the assembly assembles and
+def check_lowering(test, opts, clang, vpp):
+    """vpp -S -O0 on a file clang compiles: the assembly assembles and
     the object defines what clang -O0's does.  A Counter (lowered, refuted,
     incomplete: a declaration not well-formed for us, or the reason
     lowering stopped), and the refuted"""
     cwd, name = os.path.dirname(test), os.path.basename(test)
     counts, refuted = collections.Counter(), []
-    ours = cxxparse.run([cxxsema, '-S', '-O0'] + opts + [name], cwd, timeout=60)
+    ours = cxxparse.run([vpp, '-x', 'c++', '-nostdinc', '--target=' + cxxparse.TRIPLE[1], '-S', '-O0', '-o', '-'] +
+                        opts + [name], cwd, timeout=60)
     if ours[0] not in (0, 1):
-        refuted.append(f'cxxsema -S: status {ours[0]}: {ours[2].strip().splitlines()[-1:]}')
+        refuted.append(f'vpp -S: status {ours[0]}: {ours[2].strip().splitlines()[-1:]}')
         counts['refuted'] += 1
         return counts, refuted
     if ours[0] == 1:
         m = NOT_LOWERED.search(ours[2])
-        counts['not: ' + (m.group(1) if m else 'an error of our parser or analysis')] += 1
+        counts['not: ' + ((m.group(1) or m.group(2)) if m else 'an error of our parser or analysis')] += 1
         return counts, refuted
     defined = clang_defined(test, opts, clang)
     if defined is None:
@@ -373,7 +516,7 @@ def check_lowering(test, opts, clang, cxxsema):
                           '-o', obj, asm], d, timeout=60)
         if r[0] != 0:
             counts['refuted'] += 1
-            refuted.append(f'the assembly of cxxsema -S does not assemble: {r[2].strip().splitlines()[:1]}')
+            refuted.append(f'the assembly of vpp -S does not assemble: {r[2].strip().splitlines()[:1]}')
             return counts, refuted
         made = object_symbols(os.path.join(os.path.dirname(clang), 'llvm-nm'), obj, d)
     if made is None:
@@ -381,20 +524,20 @@ def check_lowering(test, opts, clang, cxxsema):
     expected = {s for s in defined if not s.startswith(('$', '.L'))}
     if made != expected:
         counts['refuted'] += 1
-        refuted.append(f'cxxsema -S defines {sorted(made - expected)[:3]} clang -O0 does not, '
+        refuted.append(f'vpp -S defines {sorted(made - expected)[:3]} clang -O0 does not, '
                        f'not {sorted(expected - made)[:3]}')
         return counts, refuted
     counts['lowered'] += 1
     return counts, refuted
 
 
-def check(test, opts, clang, cxxsema):
+def check(test, opts, clang, vpp):
     cwd = os.path.dirname(test)
     name = os.path.basename(test)
     res = {'test': test, 'opts': opts, 'fail': [], 'verdict': collections.Counter(),
            'unsupported': collections.Counter(), 'types': collections.Counter()}
-    ours = cxxparse.run([cxxsema, '-dump-analysis', '-check-tree'] + opts + [name], cwd)
-    if ours[0] == 2 and 'unsupported -std' in ours[2]:
+    ours = cxxparse.run(cxxpp.vpp_command(vpp, 'analysis,check-tree', opts, name), cwd)
+    if cxxpp.unsupported_edition(ours[0], ours[2]):
         res['skip'] = ours[2].strip()
         return res
     if ours[0] not in (0, 1):
@@ -421,6 +564,7 @@ def check(test, opts, clang, cxxsema):
     fatal_line = int(fatal.group(1)) if fatal else None
     known = KNOWN.get(relative(test), set())
     rejected = []
+    unanalysed_lines = set()
     for line in ours[1].splitlines():
         if line.startswith('tree '):
             res['fail'].append(('tree', line[5:]))
@@ -433,6 +577,8 @@ def check(test, opts, clang, cxxsema):
             continue
         first, last, result = int(m.group(3)), int(m.group(6)), m.group(8)
         lines = range(first, last + 1)
+        if result != 'well-formed':
+            unanalysed_lines.update(lines)
         if fatal_line is not None and first > fatal_line:
             res['verdict']['after_fatal'] += 1
         elif result == 'not-parsed' or any(n in syntax_lines for n in lines):
@@ -456,16 +602,21 @@ def check(test, opts, clang, cxxsema):
     for m in CLANG_ERROR.finditer(c[2]):
         if m.group(1) == name:
             every_error_line.add(int(m.group(2)))
-    cxxparse.check_claims(test, opts, clang, cxxsema, res, every_error_line, expression_mode=None,
+    cxxparse.check_claims(test, opts, clang, vpp, res, every_error_line, expression_output=None,
+                          declaration_output='declaration-claims',
                           target=TARGET[len(cxxparse.TRIPLE):])
-    res['types'], refuted = check_type_claims(test, opts, clang, type_claims(cxxsema, opts, test))
+    res['types'], refuted = check_type_claims(test, opts, clang, type_claims(vpp, opts, test))
     for r in refuted:
         res['fail'].append(('types', r))
+    res['lookup'], refuted = check_lookup_claims(test, opts, clang, vpp, every_error_line,
+                                                    unanalysed_lines)
+    for r in refuted:
+        res['fail'].append(('lookup', r))
     if c[0] == 0 and not CLANG_ERROR.search(c[2]):
-        res['symbols'], refuted = check_symbols(test, opts, clang, cxxsema)
+        res['symbols'], refuted = check_symbols(test, opts, clang, vpp)
         for r in refuted:
             res['fail'].append(('symbols', r))
-        res['lowering'], refuted = check_lowering(test, opts, clang, cxxsema)
+        res['lowering'], refuted = check_lowering(test, opts, clang, vpp)
         for r in refuted:
             res['fail'].append(('lower', r))
     if rejected:
@@ -486,7 +637,7 @@ def main():
     ap.add_argument('patterns', nargs='*')
     a = ap.parse_args()
     clang = cxxpp.find_clang()
-    cxxsema = cxxparse.find_tool(a.bin_dir, 'cxxsema')
+    vpp = cxxpp.find_vpp(a.bin_dir or os.environ.get('VCC_BIN'))
     resource_include = os.path.join(
         subprocess.run([clang, '-print-resource-dir'], capture_output=True, text=True).stdout.strip(), 'include')
     missing = [s for s in SUITES if not os.path.isdir(os.path.join(LLVM_TEST, s))]
@@ -511,9 +662,10 @@ def main():
         for opts in sets:
             jobs.append((t, opts + extra))
     with concurrent.futures.ThreadPoolExecutor(a.j) as ex:
-        results = list(ex.map(lambda j: check(j[0], j[1], clang, cxxsema), jobs))
+        results = list(ex.map(lambda j: check(j[0], j[1], clang, vpp), jobs))
     verdict, unsupported, types = collections.Counter(), collections.Counter(), collections.Counter()
     declared, symbols, lowering = collections.Counter(), collections.Counter(), collections.Counter()
+    lookup = collections.Counter()
     crashes = failures = skipped = 0
     seen = set()
     for r in results:
@@ -523,6 +675,7 @@ def main():
         types.update(r['types'])
         declared.update(r.get('declarators', {}))
         symbols.update(r.get('symbols', {}))
+        lookup.update(r.get('lookup', {}))
         lowering.update(r.get('lowering', {}))
         kinds = {k for k, _ in r['fail']}
         crashes += 'crash' in kinds
@@ -544,6 +697,8 @@ def main():
     print(f'types: {types["verified"]} claims verified, {types["refuted"]} refuted, '
           f'{types["unchecked"]} not checkable; constants: {types["value_verified"]} verified, '
           f'{types["value_refuted"]} refuted')
+    print(f'lookup: {lookup["verified"]} names found as clang finds them, {lookup["refuted"]} refuted, '
+          f'{lookup["unchecked"]} not checkable')
     print(f'symbols: {symbols["verified"]} verified, {symbols["refuted"]} refuted, '
           f'{symbols["not_emitted"]} not emitted by clang, {symbols["unsupported"]} unsupported')
     reasons = sorted(((n, k[5:]) for k, n in lowering.items() if k.startswith('not: ')), reverse=True)

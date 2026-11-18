@@ -552,8 +552,17 @@ analysis_result semantic_analysis::enum_specifier(node_index n,
     x.scoped = scoped;
     x.fixed_underlying = is_fixed;
     x.access = declaration_access;
-    if (!scope)
+    if (is_namespace(scope)) {
+        /* [basic.link]/4: a named enumeration of namespace scope has its
+           namespace's linkage */
         x.linkage_of_name = linkage::external;
+        if (within_unnamed_namespace(scope))
+            x.linkage_of_name = linkage::internal;
+    } else if (defining_class) {
+        /* [basic.link]/5: a member enumeration has the linkage of its
+           class's name */
+        x.linkage_of_name = entity_table[defining_class].linkage_of_name;
+    }
     x.type = qualified_type::make(
         type_table.of_entity(type_kind::enumeration, e), cv_none);
     entity_table.add_declaration(e, current_declaration);
@@ -567,6 +576,20 @@ analysis_result semantic_analysis::enum_specifier(node_index n,
     entity_table[e].underlying = fixed;
 
     owned_array<entity_index> enumerators_declared;
+    /* [dcl.enum]/5: "Following the closing brace of an enum-specifier, each
+       enumerator has the type of its enumeration", so a claim placed after
+       the declaration about an expression of the enumerator-list would be
+       about another type: none is made (the scope claims are placed in is
+       no scope while the list is analysed) */
+    struct claims_off {
+        entity_index &scope;
+        entity_index saved;
+        ~claims_off()
+        {
+            scope = saved;
+        }
+    } no_claims = {claim_scope, claim_scope};
+    claim_scope = UINT32_MAX;
     __int128 previous = -1;
     fundamental_type previous_type = fundamental_type::int_;
     if (is_fixed)

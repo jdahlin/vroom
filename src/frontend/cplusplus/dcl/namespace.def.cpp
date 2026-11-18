@@ -25,6 +25,7 @@
  * namespace-body passes its declaration-seq through.
  */
 #include "../cplusplus-internal.h"
+#include "frontend/cplusplus/sema.h"
 
 namespace cplusplus
 {
@@ -252,6 +253,372 @@ node_index parser::linkage_specification()
             return 0;
     }
     return finish_node(syntax_kind::linkage_specification, mark, first);
+}
+
+/* ---- semantic analysis ---------------------------------------------- */
+
+/*
+ * [namespace.def]/2: "In a named-namespace-definition, the identifier is
+ * the name of the namespace.  If the identifier, when looked up, refers to
+ * a namespace-name (but not a namespace-alias) that was introduced in the
+ * namespace in which the named-namespace-definition appears or that was
+ * introduced in a member of the inline namespace set of that namespace, the
+ * namespace-definition extends the previously-declared namespace.
+ * Otherwise, the identifier is introduced as a namespace-name into the
+ * declarative region in which the named-namespace-definition appears."
+ * /9: "A nested-namespace-definition with an enclosing-namespace-specifier
+ * E, identifier I and namespace-body B is equivalent to" namespace E {
+ * inline_opt namespace I { B } } "where the optional inline is present if
+ * and only if the identifier I is preceded by inline."
+ *
+ * [namespace.def]/5: "The inline keyword may be used on a
+ * namespace-definition that extends a namespace only if it was previously
+ * used on the namespace-definition that initially declared the
+ * namespace-name for that namespace."  /7: "Members of an inline namespace
+ * can be used in most respects as though they were members of the enclosing
+ * namespace.  Specifically, ... a using-directive that names the inline
+ * namespace is implicitly inserted into the enclosing namespace as for an
+ * unnamed namespace".
+ *
+ * [namespace.unnamed]/1: "An unnamed-namespace-definition behaves as if it
+ * were replaced by"
+ *     inline_opt namespace unique { }
+ *     using namespace unique ;
+ *     namespace unique { namespace-body }
+ * "where inline appears if and only if it appears in the
+ * unnamed-namespace-definition and all occurrences of unique in a
+ * translation unit are replaced by the same identifier, and this identifier
+ * differs from all other identifiers in the translation unit."
+ *
+ * The declarations of the namespace-body are analysed one by one, each a
+ * declaration of its own in semantic_analysis::declarations: the definition
+ * itself has a record only when it is not well-formed.
+ */
+analysis_result semantic_analysis::namespace_definition(node_index n)
+{
+    const syntax_node &node = tree[n];
+    /* [namespace.def]/1 (the grammar): a namespace-definition is a
+       declaration of a namespace-body or the translation unit */
+    if (!is_namespace(current_scope) || defining_class || function_state.active)
+        return not_supported(n, "namespace.def");
+    struct component {
+        uint32_t name = 0;
+        token_index at = 0;
+        bool inline_ = false;
+    };
+    owned_array<component> components;
+    bool inline_next = false;
+    bool body = false;
+    /* the tokens before the '{': inline, namespace, the names and ::, and
+       those of an enclosing-namespace-specifier */
+    owned_array<syntax_child> head;
+    for (uint32_t i = 0; i < node.child_count && !body; i++) {
+        syntax_child c = tree.children(n)[i];
+        if (syntax_is(tree, c, syntax_kind::enclosing_namespace_specifier)) {
+            for (uint32_t k = 0; k < tree[c.index()].child_count; k++)
+                head.append(tree.children(c.index())[k]);
+            continue;
+        }
+        if (!c.is_token())
+            /* an attribute-specifier-seq, GNU attributes (abi_tag changes
+               the members' symbols) */
+            return not_supported(n, "dcl.attr");
+        if (syntax_is_punctuator(tokens, c,
+                                 preprocessing_op_or_punc::LEFT_BRACE))
+            body = true;
+        else
+            head.append(c);
+    }
+    if (!body)
+        return not_supported(n, "namespace.def");
+    for (syntax_child c : head) {
+        if (!c.is_token())
+            return not_supported(n, "namespace.def");
+        const token &t = tokens[c.index()];
+        if (t.kind == token_kind::identifier) {
+            component x;
+            x.name = tokens.identifier(c.index());
+            x.at = c.index();
+            x.inline_ = inline_next;
+            inline_next = false;
+            components.append(x);
+            continue;
+        }
+        if (p.keyword_of(t) == standard_keyword::inline_)
+            inline_next = true;
+    }
+    if (components.empty()) {
+        component unnamed;
+        unnamed.at = node.first_token;
+        unnamed.inline_ = inline_next;
+        components.append(unnamed);
+    }
+    entity_index scope = current_scope;
+    for (const component &x : components) {
+        entity_index e = 0;
+        if (x.name) {
+            /* the name looked up in the namespace and its inline namespace
+               set */
+            lookup_result found =
+                lookup_in_namespace(scope, x.name, lookup_filter::any);
+            e = entity_table.find(scope, x.name);
+            if (!e && found.entity &&
+                entity_table[found.entity].kind ==
+                    entity_kind::namespace_entity &&
+                entity_table[found.entity].name == x.name) {
+                /* introduced in a member of the inline namespace set: its
+                   namespace is reached from scope through inline
+                   namespaces alone */
+                entity_index y = entity_table[found.entity].enclosing;
+                while (y != scope && y && entity_table[y].inline_)
+                    y = entity_table[y].enclosing;
+                if (y == scope)
+                    e = found.entity;
+            }
+        } else {
+            for (const using_directive_record &u : using_directives)
+                if (u.scope == scope && !entity_table[u.nominated].name &&
+                    entity_table[u.nominated].enclosing == scope)
+                    e = u.nominated;
+        }
+        if (e) {
+            const entity &prior = entity_table[e];
+            if (prior.kind == entity_kind::none)
+                return not_supported(n, "basic.scope.declarative");
+            /* [basic.scope.declarative]/4: "Given a set of declarations in
+               a single declarative region, each of which specifies the same
+               unqualified name, they shall all refer to the same entity, or
+               all refer to functions and function templates": the name is
+               something else's, or a namespace-alias ([namespace.def]/2:
+               "but not a namespace-alias") */
+            if (prior.kind != entity_kind::namespace_entity ||
+                prior.name != x.name)
+                return ill_formed_at_token(
+                    x.at,
+                    "declarations of the same name in a declarative region "
+                    "shall all refer to the same entity, or all to functions",
+                    "basic.scope.declarative");
+            /* [namespace.def]/5 */
+            if (x.inline_ && !prior.inline_)
+                return ill_formed_at_token(
+                    x.at,
+                    "the inline keyword may be used on a "
+                    "namespace-definition that extends a namespace only if "
+                    "it was previously used on the namespace-definition "
+                    "that initially declared the namespace-name",
+                    "namespace.def");
+        } else {
+            e = entity_table.make(entity_kind::namespace_entity, x.name, scope);
+            entity &made = entity_table[e];
+            made.inline_ = x.inline_;
+            made.defined = true;
+            /* [basic.link]/4: "An unnamed namespace or a namespace declared
+               directly or indirectly within an unnamed namespace has
+               internal linkage.  All other namespaces have external
+               linkage." */
+            made.linkage_of_name = linkage::external;
+            if (within_unnamed_namespace(e))
+                made.linkage_of_name = linkage::internal;
+            if (x.name)
+                entity_table.bind(scope, x.name, e);
+            if (!x.name || x.inline_) {
+                using_directive_record u;
+                u.scope = scope;
+                u.nominated = e;
+                using_directives.append(u);
+                entity_table[scope].has_using_directive = true;
+            }
+        }
+        entity_table.add_declaration(e, n);
+        scope = e;
+    }
+    entity_index outer = current_scope;
+    entity_index outer_claims = claim_scope;
+    current_scope = scope;
+    /* claims about the expressions of a declaration are placed after it,
+       in its namespace */
+    claim_scope = scope;
+    declaration_seq_in(n);
+    current_scope = outer;
+    claim_scope = outer_claims;
+    current_declaration = n;
+    return analysis_result::well_formed;
+}
+
+/*
+ * [basic.lookup.udir]/1: "In a using-directive or
+ * namespace-alias-definition, during the lookup for a namespace-name or for
+ * a name in a nested-name-specifier only namespace names are considered."
+ * The namespace the name denotes ([namespace.alias]/2: a namespace-alias
+ * is "a synonym for the name of the namespace" it was defined to).
+ */
+analysis_result semantic_analysis::named_namespace(node_index at,
+                                                   node_index qualifier,
+                                                   token_index name,
+                                                   entity_index &n)
+{
+    lookup_result found;
+    if (qualifier) {
+        nominated_scope scope;
+        analysis_result r = nested_name_specifier(qualifier, scope);
+        if (r != analysis_result::well_formed)
+            return r;
+        if (!is_namespace(scope.entity))
+            return not_supported(at, "basic.lookup.udir");
+        found = lookup_in_namespace(scope.entity, tokens.identifier(name),
+                                    lookup_filter::namespaces);
+    } else {
+        found = lookup_unqualified(tokens.identifier(name),
+                                   lookup_filter::namespaces);
+    }
+    if (found.ambiguous)
+        return ill_formed_at_token(name,
+                                   "a name found in two different namespaces "
+                                   "whose declarations do not declare the "
+                                   "same entity is ill-formed",
+                                   "namespace.udir");
+    /* one not found may be a namespace a declaration analysis has no
+       rules for declares */
+    if (!found.entity ||
+        entity_table[found.entity].kind != entity_kind::namespace_entity)
+        return not_supported(at, "basic.lookup.udir");
+    used(name, found.entity);
+    n = found.entity;
+    return analysis_result::well_formed;
+}
+
+/*
+ * [namespace.udir]/1: "A using-directive shall not appear in class scope,
+ * but may appear in namespace scope or in block scope."  /2: "A
+ * using-directive specifies that the names in the nominated namespace can
+ * be used in the scope in which the using-directive appears after the
+ * using-directive."  /3: "A using-directive does not add any members to
+ * the declarative region in which it appears."  The directive is recorded
+ * with its scope; unqualified and qualified lookup use it
+ * (basic/basic.lookup.cpp).
+ */
+analysis_result semantic_analysis::using_directive(node_index n)
+{
+    const syntax_node &node = tree[n];
+    const syntax_child *children = tree.children(n);
+    entity_index scope = current_scope;
+    /* until the directive is analysed, what it makes visible is not
+       known */
+    auto unknown = [&](analysis_result r) {
+        if (r != analysis_result::well_formed)
+            entity_table[scope].unknown_names = true;
+        return r;
+    };
+    if (defining_class)
+        return unknown(not_supported(n, "namespace.udir"));
+    node_index qualifier = 0;
+    token_index name = 0;
+    for (uint32_t i = 0; i < node.child_count; i++) {
+        syntax_child c = children[i];
+        if (syntax_is(tree, c, syntax_kind::nested_name_specifier)) {
+            qualifier = c.index();
+            continue;
+        }
+        if (!c.is_token())
+            /* an attribute-specifier-seq */
+            return unknown(not_supported(n, "dcl.attr"));
+        if (tokens[c.index()].kind == token_kind::identifier)
+            name = c.index();
+    }
+    if (!name)
+        return unknown(not_supported(n, "namespace.udir"));
+    entity_index nominated = 0;
+    analysis_result r = named_namespace(n, qualifier, name, nominated);
+    if (r != analysis_result::well_formed)
+        return unknown(r);
+    for (const using_directive_record &u : using_directives)
+        if (u.scope == scope && u.nominated == nominated)
+            return analysis_result::well_formed;
+    using_directive_record u;
+    u.scope = scope;
+    u.nominated = nominated;
+    using_directives.append(u);
+    entity_table[scope].has_using_directive = true;
+    return analysis_result::well_formed;
+}
+
+/*
+ * [namespace.alias]/1: "A namespace-alias-definition declares an alternate
+ * name for a namespace"; /2: "The identifier in a
+ * namespace-alias-definition is a synonym for the name of the namespace
+ * denoted by the qualified-namespace-specifier and becomes a
+ * namespace-alias."  /3: "In a declarative region, a
+ * namespace-alias-definition can be used to redefine a namespace-alias
+ * declared in that declarative region to refer only to the namespace to
+ * which it already refers."  A name of the region that is something else's
+ * is [basic.scope.declarative]/4's.  The alias is the namespace bound under
+ * another name in the scope.
+ */
+analysis_result semantic_analysis::namespace_alias_definition(node_index n)
+{
+    const syntax_node &node = tree[n];
+    const syntax_child *children = tree.children(n);
+    if (defining_class || node.child_count < 4 || !children[1].is_token() ||
+        tokens[children[1].index()].kind != token_kind::identifier)
+        return not_supported(n, "namespace.alias");
+    token_index alias = children[1].index();
+    node_index qualifier = 0;
+    token_index name = 0;
+    syntax_child named = children[3];
+    if (syntax_is(tree, named, syntax_kind::qualified_namespace_specifier)) {
+        const syntax_child *parts = tree.children(named.index());
+        if (tree[named.index()].child_count != 2 ||
+            !syntax_is(tree, parts[0], syntax_kind::nested_name_specifier) ||
+            !parts[1].is_token())
+            return not_supported(n, "namespace.alias");
+        qualifier = parts[0].index();
+        name = parts[1].index();
+    } else if (named.is_token() &&
+               tokens[named.index()].kind == token_kind::identifier) {
+        name = named.index();
+    } else {
+        return not_supported(n, "namespace.alias");
+    }
+    entity_index nominated = 0;
+    analysis_result r = named_namespace(n, qualifier, name, nominated);
+    if (r != analysis_result::well_formed)
+        return r;
+    entity_index scope = current_scope;
+    uint32_t alias_name = tokens.identifier(alias);
+    entity_index prior = entity_table.find(scope, alias_name);
+    if (prior) {
+        if (entity_table[prior].kind == entity_kind::none)
+            return not_supported(n, "basic.scope.declarative");
+        if (prior == nominated)
+            /* /3: the alias again; (or the namespace's own name in its
+               scope, which clang accepts too) */
+            return analysis_result::well_formed;
+        /* [basic.scope.declarative]/4: "they shall all refer to the same
+           entity, or all refer to functions and function templates" */
+        return ill_formed_at_token(alias,
+                                   "declarations of the same name in a "
+                                   "declarative region shall all refer to "
+                                   "the same entity, or all to functions",
+                                   "basic.scope.declarative");
+    }
+    entity_table.bind(scope, alias_name, nominated);
+    return analysis_result::well_formed;
+}
+
+/* the declarations between the braces of a namespace-definition */
+void semantic_analysis::declaration_seq_in(node_index container)
+{
+    const syntax_node &node = tree[container];
+    for (uint32_t i = 0; i < node.child_count; i++) {
+        syntax_child c = tree.children(container)[i];
+        if (!syntax_is(tree, c, syntax_kind::declaration_seq))
+            continue;
+        for (uint32_t k = 0; k < tree[c.index()].child_count; k++) {
+            syntax_child d = tree.children(c.index())[k];
+            if (!d.is_token())
+                declaration(d.index());
+        }
+    }
 }
 
 } // namespace cplusplus

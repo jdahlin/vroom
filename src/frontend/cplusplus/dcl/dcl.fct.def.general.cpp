@@ -232,6 +232,7 @@ analysis_result semantic_analysis::function_body(node_index definition,
                     function_state.labels[i].point.at,
                     "labels shall not be redeclared within a function",
                     "stmt.label");
+    entity_index outer_scope = current_scope;
     entity_index parameters = open_scope(0, true);
     /* the scope the parameters are declared in is the function's
        (entity::enclosing), and its blocks' local names are the function's
@@ -341,9 +342,9 @@ analysis_result semantic_analysis::function_body(node_index definition,
                                       "declarations with initialization",
                                       "stmt.dcl"));
     }
-    current_scope = 0;
+    current_scope = outer_scope;
     claim_place = 0;
-    claim_scope = 0;
+    claim_scope = outer_scope;
     function_state.active = false;
     function_state.function = 0;
     function_state.this_entity = 0;

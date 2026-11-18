@@ -103,13 +103,30 @@ bool semantic_analysis::parsed_completely(node_index n) const
     return true;
 }
 
+/* whether the node is a namespace-definition ([namespace.def]) */
+static bool is_namespace_definition(const syntax_tree &tree, node_index n)
+{
+    syntax_kind kind = tree[n].kind;
+    return kind == syntax_kind::named_namespace_definition ||
+           kind == syntax_kind::unnamed_namespace_definition ||
+           kind == syntax_kind::nested_namespace_definition;
+}
+
 analysis_result semantic_analysis::declaration(node_index n)
 {
     analysed_declaration d;
     d.node = n;
     current_declaration = n;
     size_t unsupported_before = unsupported.size();
-    if (!parsed_completely(n))
+    if (is_namespace_definition(tree, n)) {
+        /* the declarations of its body are analysed as declarations of
+           their own: one of them not parsed does not make the namespace
+           so, and the definition has no record unless it is not
+           well-formed itself */
+        d.result = namespace_definition(n);
+        if (d.result == analysis_result::well_formed)
+            return d.result;
+    } else if (!parsed_completely(n))
         d.result = analysis_result::not_parsed;
     else
         d.result = declaration_by_kind(n);
@@ -132,6 +149,17 @@ analysis_result semantic_analysis::declaration_by_kind(node_index n)
         return function_definition(n);
     case syntax_kind::linkage_specification:
         return linkage_specification(n);
+    case syntax_kind::named_namespace_definition:
+    case syntax_kind::unnamed_namespace_definition:
+    case syntax_kind::nested_namespace_definition:
+        /* in a linkage-specification */
+        return namespace_definition(n);
+    case syntax_kind::using_directive:
+        return using_directive(n);
+    case syntax_kind::namespace_alias_definition:
+        return namespace_alias_definition(n);
+    case syntax_kind::using_declaration:
+        return using_declaration(n);
     default:
         return not_supported(n);
     }

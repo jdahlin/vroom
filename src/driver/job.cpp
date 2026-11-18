@@ -173,6 +173,15 @@ static void driver_job_pp_options_finish(struct driver_job *job,
     job->pp_options.main = job->stdin_src ? "<stdin>" : job->main_file;
     job->pp_options.main_src = job->stdin_src,
     job->pp_options.main_len = job->stdin_len;
+    if (job->cxx && job->syntax_only) {
+        /* a C++ compile: the C++ front end reads the file and the
+           predefines itself (driver_job_compile_cplusplus); C's
+           preprocessor only reports the code generator's diagnostics, so it
+           reads neither (a C rule must not end the C++ job) */
+        job->pp_options.predef = "";
+        job->pp_options.main_src = "";
+        job->pp_options.main_len = 0;
+    }
     job->pp_options.unsigned_char =
         job->unsigned_char >= 0 ? job->unsigned_char : job->target_linux;
     job->pp_options.cwd = env->cwd;
@@ -234,6 +243,15 @@ static int driver_job_compile_cplusplus(struct driver_job *job, pp *p,
     o.predefines_length = job->predefines.length - 1; /* (its '\0') */
     o.search = &job->pp_options;
     o.errfd = job->errfd;
+    o.arguments = job->cxx_arguments;
+    o.argument_count = job->cxx_argument_count;
+    o.embed_directories = job->embed_directories;
+    o.embed_directory_count = job->embed_count;
+    {
+        size_t l = strlen(main);
+        o.preprocessed_input = (l > 2 && !strcmp(main + l - 2, ".i")) ||
+                               (l > 3 && !strcmp(main + l - 3, ".ii"));
+    }
     return cplusplus_compile(&o, p, co) || pp_error_count(p) ? 1 : 0;
 #else
     (void)job, (void)p, (void)env, (void)co;

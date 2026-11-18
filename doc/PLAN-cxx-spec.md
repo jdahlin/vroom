@@ -4,6 +4,15 @@ Status: proof of concept, for review of architecture, naming and comments
 before more is built on it.  Replaces `src/frontend/cxx/` (PLAN-cxx.md) step
 by step once it covers what that front end does.
 
+Since 2026-11-17 the tools this plan names (`cxxlex`, `cxxparse`,
+`cxxsema`) are gone: their outputs are the driver's, `vpp -x c++
+-fsyntax-only -fcxx-dump=WHAT FILE` (`src/frontend/cplusplus/dump/dump.h`;
+`-dump-tokens` is `tokens`, `-dump-raw-tokens` `raw-tokens`, `-E -dM`
+`definitions`, `-dump-declarations` `declarations`, cxxparse's
+`-declaration-claims` `declarator-claims`, `-dump-analysis` `analysis`,
+`-selftest` `selftest`; `-fcxx-dump=help` lists them).  The text below keeps
+the old names.
+
 ## Conventions (to review)
 
 - **Layout mirrors the standard.**  `src/frontend/cplusplus/<clause>/<stable

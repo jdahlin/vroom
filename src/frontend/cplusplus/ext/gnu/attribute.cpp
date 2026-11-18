@@ -215,7 +215,7 @@ static const gnu_attribute_rule gnu_attribute_rules[] = {
     {"noclone", 0},
     {"const", 0},
     {"pure", 0},
-    {"nothrow", 0},
+    {"nothrow", gnu_nothrow},
     {"leaf", 0},
     {"cold", 0},
     {"hot", 0},

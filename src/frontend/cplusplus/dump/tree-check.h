@@ -1,5 +1,5 @@
 /*
- * tree-check.h: cxxsema -check-tree (doc/PLAN-cxx-sema.md 3.2, S1d): the
+ * tree-check.h: -fcxx-dump=check-tree (doc/PLAN-cxx-sema.md 3.2, S1d): the
  * semantic tree of every well-formed definition is complete enough to be
  * lowered, and agrees with what analysis recorded.
  *
@@ -21,8 +21,8 @@
  *
  * which bench/cxx-sema.py counts as a failure of the run.
  */
-#ifndef VCC_CXXSEMA_TREE_CHECK_H
-#define VCC_CXXSEMA_TREE_CHECK_H
+#ifndef VCC_CPLUSPLUS_DUMP_TREE_CHECK_H
+#define VCC_CPLUSPLUS_DUMP_TREE_CHECK_H
 
 namespace
 {

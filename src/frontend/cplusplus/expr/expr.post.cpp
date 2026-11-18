@@ -529,8 +529,88 @@ analysis_result semantic_analysis::call(node_index n, expression_meaning &m)
 {
     const syntax_node &node = tree[n];
     const syntax_child *children = tree.children(n);
+    owned_array<syntax_child> arguments;
+    if (node.child_count == 4) {
+        syntax_child c = children[2];
+        if (syntax_is(tree, c, syntax_kind::initializer_list)) {
+            for (uint32_t i = 0; i < tree[c.index()].child_count; i++) {
+                syntax_child a = tree.children(c.index())[i];
+                if (syntax_is_punctuator(tokens, a,
+                                         preprocessing_op_or_punc::COMMA))
+                    continue;
+                if (syntax_is_punctuator(tokens, a,
+                                         preprocessing_op_or_punc::ELLIPSIS))
+                    return not_supported(n, "temp.variadic");
+                arguments.append(a);
+            }
+        } else {
+            arguments.append(c);
+        }
+    } else if (node.child_count != 3) {
+        return not_supported(n, "expr.call");
+    }
     expression_meaning f;
-    analysis_result r = expression(children[0], f);
+    analysis_result r = analysis_result::well_formed;
+    /* the arguments analysed before the function is known, for
+       argument-dependent lookup: each one's meaning, or none for a
+       braced-init-list (which has no type) */
+    owned_array<expression_meaning> early;
+    bool looked_up = false;
+    if (children[0].is_token() &&
+        tokens[children[0].index()].kind == token_kind::identifier) {
+        /* [basic.lookup.argdep]/3: "Let X be the lookup set produced by
+           unqualified lookup and let Y be the lookup set produced by argument
+           dependent lookup (defined as follows).  If X contains (3.1) a
+           declaration of a class member, or (3.2) a block-scope function
+           declaration that is not a using-declaration, or (3.3) a declaration
+           that is neither a function nor a function template then Y is empty.
+           Otherwise Y is the set of declarations found in the namespaces
+           associated with the argument types as described below.  The set of
+           declarations found by the lookup of the name is the union of X and
+           Y." */
+        token_index t = children[0].index();
+        uint32_t name = tokens.identifier(t);
+        lookup_result x = lookup_unqualified(name, lookup_filter::any);
+        bool dependent = !x.ambiguous && !x.unknown;
+        if (x.entity) {
+            const entity &fx = entity_table[x.entity];
+            dependent = fx.kind == entity_kind::function &&
+                        is_namespace(fx.enclosing) &&
+                        (is_namespace(x.found_in) ||
+                         entity_table.bound_by_using(x.found_in, name));
+        }
+        if (dependent) {
+            owned_array<qualified_type> types;
+            for (syntax_child a : arguments) {
+                expression_meaning e;
+                if (!syntax_is(tree, a, syntax_kind::braced_init_list)) {
+                    r = expression(a, e);
+                    if (r != analysis_result::well_formed)
+                        return r;
+                    types.append(e.type);
+                }
+                early.append(e);
+            }
+            owned_array<entity_index> set;
+            if (x.entity)
+                set.append(x.entity);
+            if (!argument_dependent_lookup(name, types, set))
+                return not_supported(n, "basic.lookup.argdep");
+            /* more than one function: an overload set ([over.match]) */
+            if (set.size() > 1)
+                return not_supported(n, "over");
+            if (set.size() == 1 && set[0] != x.entity) {
+                /* found by argument-dependent lookup alone: no claim is
+                   made about the name, which names nothing elsewhere */
+                r = named_entity(t, set[0], f);
+                if (r != analysis_result::well_formed)
+                    return r;
+                looked_up = true;
+            }
+        }
+    }
+    if (!looked_up)
+        r = expression(children[0], f);
     if (r != analysis_result::well_formed)
         return r;
     qualified_type function_type = f.type;
@@ -565,26 +645,6 @@ analysis_result semantic_analysis::call(node_index n, expression_meaning &m)
                               "expr.call");
         }
     }
-    owned_array<syntax_child> arguments;
-    if (node.child_count == 4) {
-        syntax_child c = children[2];
-        if (syntax_is(tree, c, syntax_kind::initializer_list)) {
-            for (uint32_t i = 0; i < tree[c.index()].child_count; i++) {
-                syntax_child a = tree.children(c.index())[i];
-                if (syntax_is_punctuator(tokens, a,
-                                         preprocessing_op_or_punc::COMMA))
-                    continue;
-                if (syntax_is_punctuator(tokens, a,
-                                         preprocessing_op_or_punc::ELLIPSIS))
-                    return not_supported(n, "temp.variadic");
-                arguments.append(a);
-            }
-        } else {
-            arguments.append(c);
-        }
-    } else if (node.child_count != 3) {
-        return not_supported(n, "expr.call");
-    }
     const struct type function = type_table[function_type.unqualified()];
     size_t count = function.parameter_count;
     owned_array<uint32_t> argument_nodes;
@@ -614,7 +674,10 @@ analysis_result semantic_analysis::call(node_index n, expression_meaning &m)
                 r = list_initialization(a.index(), parameter, false, value);
             } else {
                 expression_meaning e;
-                r = expression(a, e);
+                if (i < early.size())
+                    e = early[i];
+                else
+                    r = expression(a, e);
                 /* an argument that is one token is reported at the call */
                 node_index at = n;
                 if (!a.is_token())
@@ -635,7 +698,10 @@ analysis_result semantic_analysis::call(node_index n, expression_meaning &m)
         if (syntax_is(tree, a, syntax_kind::braced_init_list))
             return not_supported(n, "expr.call");
         expression_meaning e;
-        r = expression(a, e);
+        if (i < early.size())
+            e = early[i];
+        else
+            r = expression(a, e);
         if (r == analysis_result::well_formed)
             r = operand_value(node_of(a), e);
         if (r != analysis_result::well_formed)
@@ -688,8 +754,12 @@ analysis_result semantic_analysis::call(node_index n, expression_meaning &m)
             m.category = value_category::xvalue;
     }
     /* [expr.const]/5.2: "an invocation of a non-constexpr function": no
-       function analysis has a declaration of is constexpr */
-    m.evaluation = constness::not_constant;
+       function analysis has a declaration of is constexpr, but a pointer
+       or reference may be to one it has none of */
+    m.evaluation = constness::unknown;
+    if (member ||
+        (f.entity && entity_table[f.entity].kind == entity_kind::function))
+        m.evaluation = constness::not_constant;
     uint32_t callee = f.node;
     if (member) {
         /* the member function, as an lvalue of its type; the object's

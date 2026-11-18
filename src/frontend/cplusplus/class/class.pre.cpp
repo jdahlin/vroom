@@ -44,7 +44,7 @@ uint64_t align_up(uint64_t n, uint64_t alignment)
    a class of namespace scope */
 const char *semantic_analysis::inner_class_rule(entity_index scope) const
 {
-    if (!scope)
+    if (is_namespace(scope))
         return nullptr;
     if (entity_table[scope].kind == entity_kind::class_type)
         return "class.nest";
@@ -61,22 +61,25 @@ analysis_result semantic_analysis::class_specifier(node_index n,
 {
     analysis_result r = class_definition(n, type);
     if (r == analysis_result::well_formed || !tree[n].child_count ||
-        !syntax_is(tree, tree.children(n)[0], syntax_kind::class_head) ||
-        current_scope || function_state.active || defining_class)
+        !syntax_is(tree, tree.children(n)[0], syntax_kind::class_head))
         return r;
-    /* a class of namespace scope whose definition is not analysed: its
-       name is held, so that a later elaborated-type-specifier or
-       class-name does not find (or declare) another class */
+    /* a class whose definition is not analysed: its name is held in the
+       scope it would be declared in, so that a later
+       elaborated-type-specifier or class-name does not find (or declare)
+       another class */
+    entity_index held_in = current_scope;
+    if (defining_class)
+        held_in = defining_class;
     node_index head = tree.children(n)[0].index();
     for (uint32_t i = 1; i < tree[head].child_count; i++) {
         syntax_child c = tree.children(head)[i];
         if (!c.is_token() || tokens[c.index()].kind != token_kind::identifier)
             continue;
         uint32_t name = tokens.identifier(c.index());
-        entity_index e = entity_table.find(0, name);
+        entity_index e = entity_table.find(held_in, name);
         if (!e) {
-            e = entity_table.make(entity_kind::none, name, 0);
-            entity_table.bind(0, name, e);
+            e = entity_table.make(entity_kind::none, name, held_in);
+            entity_table.bind(held_in, name, e);
         } else if (entity_table[e].kind == entity_kind::class_type) {
             entity_table[e].kind = entity_kind::none;
             entity_table[e].size = 0;
@@ -119,11 +122,29 @@ analysis_result semantic_analysis::class_definition(node_index n,
     /* [class.pre]/1: "A class-specifier whose class-head omits the
        class-head-name defines an unnamed class." */
     bool unnamed = h.child_count == 1;
-    if (!unnamed &&
-        (!head_children[1].is_token() ||
-         tokens[head_children[1].index()].kind != token_kind::identifier))
-        /* a class-head-name with a nested-name-specifier, attributes */
+    /* class-head-name: nested-name-specifier_opt class-name */
+    token_index head_name = 0;
+    node_index head_qualifier = 0;
+    if (!unnamed && head_children[1].is_token() &&
+        tokens[head_children[1].index()].kind == token_kind::identifier) {
+        head_name = head_children[1].index();
+    } else if (!unnamed && syntax_is(tree, head_children[1],
+                                     syntax_kind::class_head_name)) {
+        node_index hn = head_children[1].index();
+        const syntax_child *name_parts = tree.children(hn);
+        if (tree[hn].child_count != 2 ||
+            !syntax_is(tree, name_parts[0],
+                       syntax_kind::nested_name_specifier) ||
+            !name_parts[1].is_token() ||
+            tokens[name_parts[1].index()].kind != token_kind::identifier)
+            /* a simple-template-id */
+            return not_supported(n, "class.pre");
+        head_qualifier = name_parts[0].index();
+        head_name = name_parts[1].index();
+    } else if (!unnamed) {
+        /* attributes */
         return not_supported(n, "class.pre");
+    }
     bool has_bases =
         h.child_count == 3 && !unnamed &&
         syntax_is(tree, head_children[2], syntax_kind::base_clause);
@@ -134,6 +155,9 @@ analysis_result semantic_analysis::class_definition(node_index n,
     if (key != standard_keyword::class_ && key != standard_keyword::struct_ &&
         key != standard_keyword::union_)
         return not_supported(n, "class.pre");
+    /* #pragma pack and the like change the layout: no rules yet */
+    if (tokens.files.layout_pragma)
+        return not_supported(n, "cpp.pragma");
     /* [class.union]/1: "A union shall not have base classes." (clang's
        error) */
     if (key == standard_keyword::union_ && has_bases)
@@ -148,15 +172,103 @@ analysis_result semantic_analysis::class_definition(node_index n,
     entity_index scope = current_scope;
     if (outer)
         scope = outer;
-    if (has_bases && scope)
+    if (head_qualifier) {
+        /* [class.pre]/3: "If a class-head-name contains a
+           nested-name-specifier, the class-specifier shall refer to a
+           class that was previously declared directly in the class or
+           namespace to which the nested-name-specifier refers, or in an
+           element of the inline namespace set of that namespace (i.e., not
+           merely inherited or introduced by a using-declaration), and the
+           class-specifier shall appear in a namespace enclosing the
+           previous declaration."  A member of a namespace; a nested class
+           defined outside its class has no rules yet */
+        if (outer || at_block_scope() || function_state.active)
+            return not_supported(n, "class.pre");
+        nominated_scope q;
+        analysis_result qr = nested_name_specifier(head_qualifier, q);
+        if (qr != analysis_result::well_formed)
+            return qr;
+        if (!is_namespace(q.entity)) {
+            /* [class.nest]/3: "If class X is defined in a namespace scope,
+               a nested class Y may be declared in class X and later defined
+               in the definition of class X or be later defined in a
+               namespace scope enclosing the definition of class X." */
+            entity_index y =
+                entity_table.find(q.entity, tokens.identifier(head_name));
+            if (y && entity_table[y].hidden_type)
+                y = entity_table[y].hidden_type;
+            bool declared = y &&
+                            entity_table[y].kind == entity_kind::class_type &&
+                            entity_table[y].enclosing == q.entity;
+            if (!declared ||
+                entity_table[q.entity].kind != entity_kind::class_type ||
+                !is_namespace(entity_table[q.entity].enclosing)) {
+                /* the class this would define is not known to be
+                   incomplete from here on */
+                if (declared) {
+                    entity_table[y].kind = entity_kind::none;
+                    entity_table[y].size = 0;
+                }
+                return not_supported(n, "class.nest");
+            }
+            scope = q.entity;
+        } else {
+            lookup_result found = lookup_in_namespace(
+                q.entity, tokens.identifier(head_name), lookup_filter::types);
+            if (!found.entity ||
+                entity_table[found.entity].kind != entity_kind::class_type ||
+                entity_table[found.entity].enclosing != found.found_in)
+                return not_supported(n, "class.pre");
+            bool directly = true;
+            for (entity_index y = found.found_in; y != q.entity;
+                 y = entity_table[y].enclosing)
+                if (!y || !entity_table[y].inline_)
+                    directly = false;
+            if (!directly ||
+                !namespace_encloses(current_scope, found.found_in) ||
+                current_scope == found.found_in) {
+                /* (in its own namespace: clang's extra qualification, a
+                   warning): the class may be defined here all the same */
+                entity_table[found.entity].kind = entity_kind::none;
+                entity_table[found.entity].size = 0;
+                return not_supported(n, "class.pre");
+            }
+            scope = found.found_in;
+        }
+    }
+    if (has_bases && !is_namespace(scope))
         return not_supported(n, inner_class_rule(scope));
     token_index id = head_children[0].index();
     uint32_t name = 0;
     entity_index c = 0;
     if (!unnamed) {
-        id = head_children[1].index();
+        id = head_name;
         name = tokens.identifier(id);
         c = entity_table.find(scope, name);
+        /* a name a using-declaration brought into the scope: the class
+           defined would conflict with it or, as a Microsoft extension,
+           define the class it names */
+        if (c && entity_table.bound_by_using(scope, name)) {
+            if (entity_table[c].kind == entity_kind::class_type &&
+                tokens.files.behavior.microsoft_extensions) {
+                entity_table[c].kind = entity_kind::none;
+                entity_table[c].size = 0;
+            }
+            return not_supported(n, "namespace.udecl");
+        }
+    }
+    /* [basic.scope.hiding]/2: "If a class name or enumeration name and a
+       variable, data member, function, or enumerator are declared in the same
+       declarative region (in any order) with the same name ..., the class or
+       enumeration name is hidden wherever the variable, data member, function,
+       or enumerator name is visible.": the one that hides the class defined
+       here */
+    entity_index hider = 0;
+    if (c && entity_table[c].enclosing == scope &&
+        (entity_table[c].kind == entity_kind::variable ||
+         entity_table[c].kind == entity_kind::function)) {
+        hider = c;
+        c = entity_table[c].hidden_type;
     }
     if (unnamed) {
         /* [basic.link]/4: an unnamed class has no linkage until a typedef
@@ -194,14 +306,21 @@ analysis_result semantic_analysis::class_definition(node_index n,
         c = entity_table.make(entity_kind::class_type, name, scope);
         /* [basic.link]/2.3: a local class's name has no linkage; a nested
            class's is its enclosing class's */
-        if (!scope)
+        /* [basic.link]/4: a named class of namespace scope has the
+           linkage of its namespace */
+        if (is_namespace(scope) && within_unnamed_namespace(scope))
+            entity_table[c].linkage_of_name = linkage::internal;
+        else if (is_namespace(scope))
             entity_table[c].linkage_of_name = linkage::external;
         else if (outer)
             entity_table[c].linkage_of_name =
                 entity_table[outer].linkage_of_name;
         entity_table[c].type = qualified_type::make(
             type_table.of_entity(type_kind::class_type, c), cv_none);
-        entity_table.bind(scope, name, c);
+        if (hider)
+            entity_table[hider].hidden_type = c;
+        else
+            entity_table.bind(scope, name, c);
     }
     if (outer)
         entity_table[c].access = declaration_access;
@@ -345,47 +464,219 @@ analysis_result semantic_analysis::elaborated_type_specifier(node_index n,
 {
     const syntax_node &node = tree[n];
     const syntax_child *children = tree.children(n);
-    if (node.child_count != 2 || !children[0].is_token() ||
-        !children[1].is_token() ||
-        tokens[children[1].index()].kind != token_kind::identifier)
+    if (!node.child_count || !children[0].is_token())
         return not_supported(n, "dcl.type.elab");
     standard_keyword key = p.keyword_of(tokens[children[0].index()]);
     if (key != standard_keyword::class_ && key != standard_keyword::struct_ &&
         key != standard_keyword::union_)
         return not_supported(n, "dcl.type.elab");
     bool is_union = key == standard_keyword::union_;
-    uint32_t name = tokens.identifier(children[1].index());
-    if (current_scope || function_state.active || defining_class) {
-        /* [basic.lookup.elab]/2: a class found by lookup from a block or
-           class scope; one not found would be declared in the innermost
-           enclosing namespace or block scope ([basic.scope.pdecl]/7) */
-        entity_index found = lookup(name);
-        if (!found || entity_table[found].kind != entity_kind::class_type)
+    if (node.child_count == 3 &&
+        syntax_is(tree, children[1], syntax_kind::nested_name_specifier) &&
+        children[2].is_token() &&
+        tokens[children[2].index()].kind == token_kind::identifier) {
+        /* [basic.lookup.elab]/3: "If the elaborated-type-specifier has a
+           nested-name-specifier, qualified name lookup is performed, as
+           described in [basic.lookup.qual], but ignoring any non-type names
+           that have been declared.  If the name lookup does not find a
+           previously declared type-name, the elaborated-type-specifier is
+           ill-formed." */
+        nominated_scope q;
+        analysis_result r = nested_name_specifier(children[1].index(), q);
+        if (r != analysis_result::well_formed)
+            return r;
+        token_index t = children[2].index();
+        lookup_result found = lookup_qualified(q.entity, tokens.identifier(t),
+                                               lookup_filter::types);
+        if (found.ambiguous)
+            return ill_formed_at_token(t,
+                                       "the use of a name is ill-formed if "
+                                       "it does not allow a unique "
+                                       "declaration to be chosen from those "
+                                       "found in the namespaces",
+                                       "namespace.qual");
+        entity_index c = found.entity;
+        /* one not found may be declared by a declaration analysis has no
+           rules for */
+        if (!c)
             return not_supported(n, "basic.lookup.elab");
-        /* [dcl.type.elab]/3: the class-key agrees with the class's */
-        if (entity_table[found].union_ != is_union)
-            return not_supported(n, "dcl.type.elab");
-        type = entity_table[found].type.unqualified();
-        return analysis_result::well_formed;
-    }
-    entity_index c = entity_table.find(0, name);
-    if (c) {
+        if (entity_table[c].kind == entity_kind::typedef_name)
+            /* [dcl.type.elab]/2: "If the identifier or simple-template-id
+               resolves to a typedef-name ..., the elaborated-type-specifier
+               is ill-formed." */
+            return ill_formed_at_token(t,
+                                       "if the identifier resolves to a "
+                                       "typedef-name, the "
+                                       "elaborated-type-specifier is "
+                                       "ill-formed",
+                                       "dcl.type.elab");
         if (entity_table[c].kind != entity_kind::class_type)
             return not_supported(n, "basic.lookup.elab");
         if (entity_table[c].union_ != is_union)
             return not_supported(n, "dcl.type.elab");
+        used(t, c);
         type = entity_table[c].type.unqualified();
         return analysis_result::well_formed;
     }
-    c = entity_table.make(entity_kind::class_type, name, 0);
-    entity_table[c].linkage_of_name = linkage::external;
+    if (node.child_count != 2 || !children[1].is_token() ||
+        tokens[children[1].index()].kind != token_kind::identifier)
+        return not_supported(n, "dcl.type.elab");
+    token_index id = children[1].index();
+    uint32_t name = tokens.identifier(id);
+    bool sole = sole_elaborated == n;
+    /* [basic.scope.pdecl]/7.2: "if the elaborated-type-specifier is used in
+       the decl-specifier-seq or parameter-declaration-clause of a function
+       defined in namespace scope, the identifier is declared as a
+       class-name in the namespace that contains the declaration;
+       otherwise, except as a friend declaration, the identifier is
+       declared in the smallest namespace or block scope that contains the
+       declaration": the scope a class it declares is declared in */
+    entity_index target = current_scope;
+    if (is_namespace(target) && defining_class) {
+        target = defining_class;
+        while (!is_namespace(target) &&
+               entity_table[target].kind == entity_kind::class_type)
+            target = entity_table[target].enclosing;
+    }
+    /* a function parameter scope (a mem-initializer's expressions) is no
+       block */
+    if (!is_namespace(target) &&
+        (entity_table[target].kind != entity_kind::block_scope ||
+         entity_table[target].parameter_scope))
+        return not_supported(n, "basic.scope.pdecl");
+    entity_index c = 0;
+    if (sole && defining_class) {
+        /* [class.nest]: a nested class declared; one declared before in
+           the class is named again */
+        entity_index e = entity_table.find(defining_class, name);
+        if (e && entity_table[e].hidden_type)
+            e = entity_table[e].hidden_type;
+        if (!e) {
+            /* [class.nest]/3: "If class X is defined in a namespace scope,
+               a nested class Y may be declared in class X and later defined
+               in the definition of class X or be later defined in a
+               namespace scope enclosing the definition of class X." */
+            c = declare_class(defining_class, name, is_union);
+            entity_table[c].access = declaration_access;
+            entity_table[c].linkage_of_name =
+                entity_table[defining_class].linkage_of_name;
+            type = entity_table[c].type.unqualified();
+            return analysis_result::well_formed;
+        }
+        if (entity_table[e].kind != entity_kind::class_type ||
+            entity_table[e].enclosing != defining_class)
+            return not_supported(n, "class.nest");
+        c = e;
+    } else if (sole) {
+        /* [basic.scope.pdecl]/7.1: only the scope that contains the
+           declaration is searched: a class of an enclosing scope is not
+           the one declared */
+        entity_index e = entity_table.find(target, name);
+        if (e && (entity_table[e].kind == entity_kind::none ||
+                  entity_table.bound_by_using(target, name)))
+            return not_supported(n, "basic.lookup.elab");
+        if (e && entity_table[e].kind == entity_kind::class_type &&
+            entity_table[e].enclosing == target) {
+            c = e;
+        } else if (e && entity_table[e].hidden_type) {
+            c = entity_table[e].hidden_type;
+            if (entity_table[c].kind != entity_kind::class_type)
+                return not_supported(n, "basic.lookup.elab");
+        } else if (e && entity_table[e].kind != entity_kind::variable &&
+                   entity_table[e].kind != entity_kind::function) {
+            /* a typedef-name, an enumeration, a namespace of the name:
+               clang's error, by more than one rule */
+            return not_supported(n, "basic.lookup.elab");
+        } else {
+            c = declare_class(target, name, is_union);
+            type = entity_table[c].type.unqualified();
+            return analysis_result::well_formed;
+        }
+    } else {
+        /* [basic.lookup.elab]/2: "If the elaborated-type-specifier has no
+           nested-name-specifier, and unless the elaborated-type-specifier
+           appears in a declaration with the following form:" class-key
+           attribute-specifier-seq_opt identifier ; "the identifier is looked up
+           according to [basic.lookup.unqual] but ignoring any non-type names
+           that have been declared. ... If the elaborated-type-specifier is
+           introduced by the class-key and this lookup does not find a
+           previously declared type-name, or if the elaborated-type-specifier
+           appears in a declaration with the form" above, "the
+           elaborated-type-specifier is a declaration that introduces the
+           class-name as described in [basic.scope.pdecl]." */
+        lookup_result found = lookup_unqualified(name, lookup_filter::types);
+        if (found.ambiguous)
+            return ill_formed_at_token(id,
+                                       "a name found in two different "
+                                       "namespaces whose declarations do not "
+                                       "declare the same entity is ill-formed",
+                                       "namespace.udir");
+        if (found.unknown)
+            return not_supported(n, "basic.lookup.elab");
+        c = found.entity;
+        if (!c) {
+            /* declared in target; a name bound there by a declaration
+               analysis did not follow, or by a using-declaration, may be
+               the class's */
+            entity_index e = entity_table.find(target, name);
+            if (e && (entity_table[e].kind == entity_kind::none ||
+                      entity_table.bound_by_using(target, name)))
+                return not_supported(n, "basic.lookup.elab");
+            c = declare_class(target, name, is_union);
+            type = entity_table[c].type.unqualified();
+            return analysis_result::well_formed;
+        }
+        if (entity_table[c].kind == entity_kind::typedef_name)
+            /* [dcl.type.elab]/2: "If the identifier or simple-template-id
+               resolves to a typedef-name, the elaborated-type-specifier is
+               ill-formed." */
+            return ill_formed_at_token(id,
+                                       "if the identifier resolves to a "
+                                       "typedef-name, the "
+                                       "elaborated-type-specifier is "
+                                       "ill-formed",
+                                       "dcl.type.elab");
+        if (entity_table[c].kind != entity_kind::class_type)
+            return not_supported(n, "basic.lookup.elab");
+    }
+    /* [dcl.type.elab]/3: "The class-key or enum keyword present in the
+       elaborated-type-specifier shall agree in kind with the declaration to
+       which the name in the elaborated-type-specifier refers ... the union
+       class-key shall be used to refer to a union" */
+    if (entity_table[c].union_ != is_union)
+        return not_supported(n, "dcl.type.elab");
+    used(id, c);
+    type = entity_table[c].type.unqualified();
+    return analysis_result::well_formed;
+}
+
+/*
+ * [basic.scope.pdecl]/7: the class an elaborated-type-specifier declares
+ * in scope (a namespace or a block), incomplete until a class-specifier
+ * defines it.  [basic.scope.hiding]/2: a variable or function of the name
+ * declared in the scope hides it.
+ */
+entity_index semantic_analysis::declare_class(entity_index scope, uint32_t name,
+                                              bool is_union)
+{
+    entity_index c = entity_table.make(entity_kind::class_type, name, scope);
+    /* [basic.link]/4: a named class of namespace scope has its namespace's
+       linkage; [basic.link]/8: one of a block scope none */
+    if (is_namespace(scope)) {
+        entity_table[c].linkage_of_name = linkage::external;
+        if (within_unnamed_namespace(scope))
+            entity_table[c].linkage_of_name = linkage::internal;
+    }
     entity_table[c].union_ = is_union;
     entity_table[c].type = qualified_type::make(
         type_table.of_entity(type_kind::class_type, c), cv_none);
     entity_table.add_declaration(c, current_declaration);
-    entity_table.bind(0, name, c);
-    type = entity_table[c].type.unqualified();
-    return analysis_result::well_formed;
+    entity_index hider = entity_table.find(scope, name);
+    if (hider)
+        entity_table[hider].hidden_type = c;
+    else
+        entity_table.bind(scope, name, c);
+    return c;
 }
 
 /*
@@ -443,17 +734,39 @@ bool semantic_analysis::accessible(entity_index member,
     const entity &x = entity_table[member];
     if (!x.access)
         return true;
-    entity_index here = current_class();
-    if (here == x.enclosing)
-        return true;
-    if (x.access != 1 || !here)
-        return false;
-    bool ambiguous = false;
-    if (!base_step(here, x.enclosing, ambiguous))
-        return false;
-    if (!object_class || !x.nonstatic_member || object_class == here)
-        return true;
-    return base_step(object_class, here, ambiguous) != 0;
+    /* the classes the name is used in a member of: the class of the
+       function analysed, the class whose member-specification is
+       analysed, the class of a static data member's definition
+       ([class.static.data]/2: its initializer "is in the scope of its
+       class"), and the classes around each of them: [class.access.nest]/1
+       "A nested class is a member and as such has the same access rights
+       as any other member."; [class.local]/1 a local class "has the same
+       access to names outside the function as does the enclosing
+       function" */
+    entity_index starts[3] = {0, defining_class, 0};
+    if (function_state.active)
+        starts[0] = function_state.function;
+    if (!is_namespace(current_scope))
+        starts[2] = current_scope;
+    for (entity_index start : starts) {
+        for (entity_index here = start; !is_namespace(here);
+             here = entity_table[here].enclosing) {
+            if (entity_table[here].kind != entity_kind::class_type)
+                continue;
+            if (here == x.enclosing)
+                return true;
+            if (x.access != 1)
+                continue;
+            bool ambiguous = false;
+            if (!base_step(here, x.enclosing, ambiguous))
+                continue;
+            if (!object_class || !x.nonstatic_member || object_class == here)
+                return true;
+            if (base_step(object_class, here, ambiguous))
+                return true;
+        }
+    }
+    return false;
 }
 
 /* ---- [class.mem] -------------------------------------------------------- */
@@ -474,6 +787,14 @@ semantic_analysis::member_declaration(entity_index c, syntax_child member,
     const syntax_child *children = tree.children(n);
     if (node.kind == syntax_kind::empty_declaration)
         return analysis_result::well_formed;
+    if (node.kind == syntax_kind::using_declaration) {
+        /* [namespace.udecl]/2: a using-declaration is a
+           member-declaration */
+        declaration_access = access;
+        analysis_result r = using_declaration(n);
+        declaration_access = 0;
+        return r;
+    }
     if (node.kind != syntax_kind::member_declaration &&
         node.kind != syntax_kind::function_definition)
         return not_supported(n);
@@ -509,7 +830,18 @@ semantic_analysis::member_declaration(entity_index c, syntax_child member,
     }
     specified s;
     declaration_access = access;
+    /* [basic.scope.pdecl]/7.1: class-key identifier ; declares a nested
+       class */
+    sole_elaborated = 0;
+    if (node.kind == syntax_kind::member_declaration && node.child_count == 2 &&
+        syntax_is_punctuator(tokens, children[1],
+                             preprocessing_op_or_punc::SEMICOLON) &&
+        tree[children[0].index()].child_count == 1 &&
+        syntax_is(tree, tree.children(children[0].index())[0],
+                  syntax_kind::elaborated_type_specifier))
+        sole_elaborated = tree.children(children[0].index())[0].index();
     analysis_result r = decl_specifier_seq(children[0].index(), s, false);
+    sole_elaborated = 0;
     declaration_access = 0;
     if (r != analysis_result::well_formed)
         return r;
@@ -559,11 +891,14 @@ semantic_analysis::member_declaration(entity_index c, syntax_child member,
            struct so is clang's extension: neither is analysed yet */
         if (declares_unnamed_class(children[0].index()))
             return not_supported(n, "class.union.anon");
-        /* [class.nest]/1: a nested class's definition */
+        /* [class.nest]/1: a nested class's definition, or its declaration
+           ([class.nest]/3) */
         const syntax_node &seq = tree[children[0].index()];
         if (plain && seq.child_count == 1 &&
-            syntax_is(tree, tree.children(children[0].index())[0],
-                      syntax_kind::class_specifier))
+            (syntax_is(tree, tree.children(children[0].index())[0],
+                       syntax_kind::class_specifier) ||
+             syntax_is(tree, tree.children(children[0].index())[0],
+                       syntax_kind::elaborated_type_specifier)))
             return analysis_result::well_formed;
         /* a nested class, an anonymous union */
         return not_supported(n, "class.mem");
@@ -654,6 +989,22 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
                                    "from the class",
                                    "class.mem");
     entity_index prior = entity_table.find(c, name);
+    /* [basic.scope.hiding]/2: "If a class name or enumeration name and a
+       variable, data member, function, or enumerator are declared in the same
+       declarative region (in any order) with the same name ..., the class or
+       enumeration name is hidden wherever the variable, data member, function,
+       or enumerator name is visible." */
+    entity_index hides = 0;
+    if (prior && entity_table[prior].enclosing == c &&
+        (entity_table[prior].kind == entity_kind::class_type ||
+         entity_table[prior].kind == entity_kind::enumeration)) {
+        hides = prior;
+        prior = 0;
+    }
+    if (prior && entity_table[prior].enclosing != c)
+        /* a name a using-declaration or a member enumeration's enumerator
+           brought into the class */
+        return not_supported(declaration, "class.mem");
     if (prior) {
         if (is_function && entity_table[prior].kind == entity_kind::function) {
             /* an overload set of member functions */
@@ -676,7 +1027,7 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
                                    "class.mem");
     }
     entity_index e = 0;
-    if (is_function && entity_table[c].enclosing)
+    if (is_function && !is_namespace(entity_table[c].enclosing))
         return not_supported(declaration,
                              inner_class_rule(entity_table[c].enclosing));
     if (is_function) {
@@ -704,7 +1055,7 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
            be of an incomplete type other than cv void." */
         if (s.inline_)
             return not_supported(declaration, "class.static.data");
-        if (entity_table[c].enclosing)
+        if (!is_namespace(entity_table[c].enclosing))
             /* [class.local]/4: "A local class cannot have static data
                members"; a nested class's needs a <nested-name> of two
                classes */
@@ -800,6 +1151,7 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
     entity_table[e].linkage_of_name = entity_table[c].linkage_of_name;
     entity_table[e].access = access;
     entity_table.add_declaration(e, declaration);
+    entity_table[e].hidden_type = hides;
     entity_table.bind(c, name, e);
     last_declared = e;
     return analysis_result::well_formed;
@@ -997,7 +1349,7 @@ analysis_result semantic_analysis::member_redeclaration(
     qualified_type type, const specified &s, bool definition)
 {
     last_declared = 0;
-    if (current_scope || function_state.active)
+    if (at_block_scope() || function_state.active)
         return not_supported(declaration, "class.mfct");
     if (type_table[type.unqualified()].kind != type_kind::function)
         /* (init_declarator analyses a static data member's definition) */
@@ -1044,7 +1396,7 @@ analysis_result semantic_analysis::static_member_definition(
     entity_index &declared_entity)
 {
     declared_entity = 0;
-    if (current_scope || function_state.active)
+    if (at_block_scope() || function_state.active)
         return not_supported(declaration, "class.static.data");
     if (s.typedef_ || s.inline_ || s.constexpr_)
         return not_supported(declaration, "class.static.data");

@@ -64,6 +64,8 @@ analysis_result semantic_analysis::member_access(token_index at, entity_index e,
                                                  expression_meaning &m)
 {
     entity_index object_class = type_table[m.type.unqualified()].entity;
+    if (aggregate_prvalue(m))
+        return not_supported(current_declaration, "class.temporary");
     if (!accessible(e, object_class))
         /* [class.access]/1.1: "private; that is, its name can be used only
            by members and friends of the class in which it is declared" */

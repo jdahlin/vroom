@@ -5,6 +5,15 @@ Status: plan, for review before any code (2026-11-17).  Continues
 (layout mirrors the standard, the standard's terms as names, comments cite
 and quote, extensions in `ext/`, owners, no conditional operator).
 
+Since 2026-11-17 the tools this plan names (`cxxlex`, `cxxparse`,
+`cxxsema`) are gone: their outputs are the driver's, `vpp -x c++
+-fsyntax-only -fcxx-dump=WHAT FILE` (`src/frontend/cplusplus/dump/dump.h`;
+`-dump-tokens` is `tokens`, `-dump-raw-tokens` `raw-tokens`, `-E -dM`
+`definitions`, `-dump-declarations` `declarations`, cxxparse's
+`-declaration-claims` `declarator-claims`, `-dump-analysis` `analysis`,
+`-selftest` `selftest`; `-fcxx-dump=help` lists them).  The text below keeps
+the old names.
+
 The parser gives a syntax tree of the grammar's nonterminals with tokens by
 index, and `declared_names`, a stand-in for lookup that knows only whether a
 name is a type, a template or a namespace.  Code generation reads
@@ -124,8 +133,9 @@ src/frontend/cplusplus/
   dcl/dcl.init.list.cpp, dcl.meaning.cpp, ...
   class/, over/, temp/, except/
   abi/itanium/mangling.cpp, layout.cpp, vtable.cpp, rtti.cpp, guard.cpp, calls.cpp
-  lower/                   semantic program -> struct ast
-src/bin/cxxsema/           the tool: -dump-entities, the claims of section 4
+  lower/                   semantic program -> struct ast; compile.cpp the driver's entry
+  dump/                    the developer outputs, the claims of section 4:
+                           vpp -x c++ -fsyntax-only -fcxx-dump=WHAT (dump.h)
 ```
 
 A subclause's file holds its grammar (written) and its rules (new): the
@@ -633,6 +643,40 @@ libstdc++ and json), since sema cannot analyse a declaration kept as tokens.
 - Sema replaces `declared_names` for the parser.
 - Gate: lookup claims 0 wrong on clang's tests and on the libstdc++ headers
   outside templates; C7 (V4a no worse).
+- Status (2026-11-17, done outside templates and overloads): one lookup
+  (`basic/basic.lookup.cpp`) for unqualified names (scopes outward,
+  using-directives placed at the nearest enclosing namespace of both,
+  transitively; class member lookup), qualified names ([namespace.qual]
+  with inline namespaces, nested-name-specifiers through typedefs),
+  argument-dependent lookup in calls, elaborated type specifiers
+  ([basic.lookup.elab], [basic.scope.pdecl]/7) and hiding
+  ([basic.scope.hiding]).  Bindings are per scope, so a name can be bound
+  in several (namespace aliases, using-declarations, block-scope extern
+  declarations with [basic.link]/6,7's linkage).  Namespaces: definitions,
+  extension, inline and unnamed ones, aliases, using-directives,
+  using-declarations at namespace and block scope and as members naming a
+  base's member; qualified definitions of namespace members and nested
+  classes.  Mangling: namespace prefixes as substitutions, `St`,
+  `12_GLOBAL__N_1`, internal `L`, C-linkage names in namespaces.
+  Unsupported with their subclause: a set of overloads found by a
+  using-declaration ([over]), inheriting constructors, names found in two
+  namespaces through directives that are functions.
+  cxx-sema: declarations as clang 8036 -> 24559, 13 -> 0 we reject,
+  declared types, types, constants, symbols and lowering 0 refuted, files
+  lowered 108 -> 206; cxx-parse unchanged (6 refuted declared types as
+  before); cxx-run 116/116 (`namespaces.cpp`, `qualified-names.cpp`,
+  `hiding-and-elaborated.cpp`, `using.cpp`, `block-linkage.cpp`); C5.1
+  2199 -> 2206 passing, 0 wrong.  Lookup claims (`-fcxx-dump=lookup-claims`:
+  each name's use and the first declaration of what it finds, against the
+  declaration clang's `-ast-dump=json` refers to, followed back through its
+  redeclaration chain): 9388 as clang, 0 refuted, 3332 not checkable (no
+  DeclRefExpr in clang's AST, a line clang rejects, or clang's first
+  declaration in one we do not analyse); [dcl.link]/7's C-linkage functions
+  and variables shared across namespaces.  The developer tools cxxlex,
+  cxxparse and cxxsema are gone: their outputs are `vpp -x c++
+  -fsyntax-only -fcxx-dump=...`.  `declared_names` still serves the parser:
+  sema runs after it, so replacing it waits for parsing and analysis per
+  declaration (S5's templates need the same).
 
 ### S3. Overloading and calls
 

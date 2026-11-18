@@ -5,6 +5,15 @@ Status: plan, for review before any code (2026-11-16).  Continues
 (layout mirrors the standard, the standard's terms as names, comments cite
 and quote, extensions in `ext/`, owners, no conditional operator).
 
+Since 2026-11-17 the tools this plan names (`cxxlex`, `cxxparse`,
+`cxxsema`) are gone: their outputs are the driver's, `vpp -x c++
+-fsyntax-only -fcxx-dump=WHAT FILE` (`src/frontend/cplusplus/dump/dump.h`;
+`-dump-tokens` is `tokens`, `-dump-raw-tokens` `raw-tokens`, `-E -dM`
+`definitions`, `-dump-declarations` `declarations`, cxxparse's
+`-declaration-claims` `declarator-claims`, `-dump-analysis` `analysis`,
+`-selftest` `selftest`; `-fcxx-dump=help` lists them).  The text below keeps
+the old names.
+
 The parser turns the tokens of phase 7 into a syntax tree of the grammar's
 nonterminals.  It is syntactic analysis ([lex.phases]/1.7 "syntactically ...
 analyzed") plus the one piece of semantics the grammar itself depends on:

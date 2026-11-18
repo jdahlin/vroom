@@ -1,6 +1,6 @@
 // [dcl.meaning], [dcl.ptr], [dcl.ref], [dcl.mptr], [dcl.array], [dcl.fct],
 // [dcl.type.simple] Table 14: the type each declarator gives its name, which
-// clang checks against cxxparse -declaration-claims (bench/cxx-parse.py).
+// clang checks against -fcxx-dump=declarator-claims (bench/cxx-parse.py).
 struct S {
   int m;
   int f(char) const;

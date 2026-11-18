@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""The C++ front end's parser (src/frontend/cplusplus, through cxxparse)
+"""The C++ front end's parser (src/frontend/cplusplus, through the driver:
+vpp -fcxx-dump=, src/frontend/cplusplus/dump/dump.h)
 against clang, on clang's parser tests (doc/PLAN-cxx-parse.md, V4-V6).
 
 Tests: clang/test/Parser/*.cpp and clang/test/CXX/**/*.cpp of the
@@ -7,12 +8,12 @@ llvm-project checkout bench/fetch-testsuites.sh llvm makes (work/testsuites),
 and src/test/cxx/parse/{spec,gram}/*.cpp.  For each %clang_cc1 RUN line (the
 option sets bench/cxx-pp.py reads), per run:
 
-  tokens   cxxparse -dump-tokens is cxxlex -dump-tokens byte for byte: the
+  tokens   -fcxx-dump=parser-tokens is -fcxx-dump=tokens byte for byte: the
            parser's token stream adds and loses nothing (V6)
-  crash    cxxparse -fsyntax-only ends with status 0 or 1, within the time
+  crash    vpp ends with status 0 or 1, within the time
            limit, never by a signal (V5; run it with --bin-dir build/ccs-asan)
   decls    where each declaration of the translation unit starts and ends:
-           cxxparse -dump-declarations against the top-level declarations of
+           -fcxx-dump=declarations against the top-level declarations of
            clang -cc1 -ast-dump=json, for runs where clang reports no error of
            its Parse or Lexical categories.  Every one of clang's
            declarations lies inside one of ours, and every one of ours starts
@@ -23,7 +24,7 @@ option sets bench/cxx-pp.py reads), per run:
            more memory than the machine has).
   syntax   (from P1) declarations without an (unparsed) node: accepted or
            rejected as clang does (V4a); counted, not compared, in P0
-  claims   (from P3) cxxparse -expression-claims gives each expression and
+  claims   (from P3) -fcxx-dump=expression-claims gives each expression and
            the same tokens with the operands of every operator in
            parentheses, as the tree groups them.  After the expression's
            declaration, clang compiles
@@ -36,7 +37,7 @@ option sets bench/cxx-pp.py reads), per run:
            reading), refuted when one fails or P does not compile where E
            does, and not checkable when E itself does not compile there
            (a parameter's name, an erroneous test).  C++11 and later runs.
-           cxxparse -declaration-claims gives each declared name and the type
+           -fcxx-dump=declarator-claims gives each declared name and the type
            its decl-specifier-seq and declarator give it ([dcl.meaning]),
            built of alias templates that say how: pointer_to<array_of<
            function<int(char)>, (3)>>.  clang compiles
@@ -48,11 +49,11 @@ option sets bench/cxx-pp.py reads), per run:
            function is verified when one of its overloads has the type).
 
   --mutate N   also N token mutants (a token deleted, duplicated, or a
-               bracket inserted) of each test, through cxxparse only: the
+               bracket inserted) of each test, through the parser only: the
                crash check alone (V5)
 
 clang's side is cached in work/cxx-parse-ref (VCC_PARSE_NOCACHE=1 asks it
-again), so a run after the first costs about cxxparse's time.
+again), so a run after the first costs about vcc's time.
 VCC_PARSE_UNCHECKED=1 lists the declared names clang has no type for.
 
 Usage: bench/cxx-parse.py [-v] [-j N] [--bin-dir DIR] [--mutate N] [PATTERN...]
@@ -133,15 +134,6 @@ def cached(what, clang, test, opts, compute):
         json.dump(value, f)
     os.replace(tmp, path)
     return value
-
-
-def find_tool(bin_dir, name):
-    for d in ([bin_dir] if bin_dir else []) + [os.path.join(R, 'build', 'linux', 'src'), os.path.join(R, 'build', 'src')]:
-        p = os.path.join(d, name)
-        if os.path.exists(p):
-            # each run's directory is its test's: the path must not be relative
-            return os.path.abspath(p)
-    sys.exit(f'cxx-parse: no {name}; make -C src {name}')
 
 
 def tests():
@@ -309,15 +301,15 @@ def compare_declarations(ours, theirs, main, error_lines, macros):
     return ''
 
 
-def check(test, opts, clang, cxxlex, cxxparse):
+def check(test, opts, clang, vpp):
     cwd = os.path.dirname(test)
     name = os.path.basename(test)
     lang = ['-x', 'c++']
     res = {'test': test, 'opts': opts, 'fail': []}
     # tokens: the stream through the parser is the lexer's
-    lt = run([cxxlex, '-dump-tokens', '-phase4-diagnostics-only'] + opts + [name], cwd)
-    pt = run([cxxparse, '-dump-tokens', '-phase4-diagnostics-only'] + opts + [name], cwd)
-    if pt[0] == 2 and 'unsupported -std' in pt[2]:
+    lt = run(cxxpp.vpp_command(vpp, 'tokens', opts, name, ['-fcxx-phase4-diagnostics-only']), cwd)
+    pt = run(cxxpp.vpp_command(vpp, 'parser-tokens', opts, name, ['-fcxx-phase4-diagnostics-only']), cwd)
+    if cxxpp.unsupported_edition(pt[0], pt[2]):
         res['skip'] = pt[2].strip()
         return res
     if pt[0] not in (0, 1):
@@ -325,10 +317,10 @@ def check(test, opts, clang, cxxlex, cxxparse):
     elif lt[1] != pt[1]:
         a, b = lt[1].splitlines(), pt[1].splitlines()
         i = next((k for k in range(min(len(a), len(b))) if a[k] != b[k]), min(len(a), len(b)))
-        res['fail'].append(('tokens', f'line {i + 1}: cxxlex {a[i] if i < len(a) else "<end>"!r} '
-                                      f'cxxparse {b[i] if i < len(b) else "<end>"!r}'))
+        res['fail'].append(('tokens', f'line {i + 1}: tokens {a[i] if i < len(a) else "<end>"!r} '
+                                      f'parser-tokens {b[i] if i < len(b) else "<end>"!r}'))
     # crash, and our declarations
-    ours = run([cxxparse, '-dump-declarations', '-stats'] + opts + [name], cwd)
+    ours = run(cxxpp.vpp_command(vpp, 'declarations,parser-stats', opts, name), cwd)
     if ours[0] not in (0, 1):
         res['fail'].append(('crash', f'status {ours[0]}: {ours[2].strip().splitlines()[-1:]}'))
         return res
@@ -424,7 +416,7 @@ def check(test, opts, clang, cxxlex, cxxparse):
         res['fail'].append(('syntax', f'we reject the declaration at {b[0]}:{b[1]}, clang accepts it'))
     for b in res['syntax']['we_accept']:
         res['fail'].append(('syntax', f'we accept the declaration at {b[0]}:{b[1]}, clang rejects it'))
-    check_claims(test, opts, clang, cxxparse, res, {line for line, column in any_errors})
+    check_claims(test, opts, clang, vpp, res, {line for line, column in any_errors})
     if CLANG_SYNTAX_ERROR.search(c[2]):
         res['clang_syntax_error'] = True
         return res
@@ -456,7 +448,7 @@ def check(test, opts, clang, cxxlex, cxxparse):
 
 CLAIMS_FILE = 'cxx-claims'
 DECLARATORS_FILE = 'cxx-declarators'
-# what cxxparse -declaration-claims builds its claims of (declarator-claims.h)
+# what -fcxx-dump=declarator-claims builds its claims of (declarator-claims.h)
 PRELUDE = """namespace vcc_claim {
 template <class T> using pointer_to = T *;
 template <class T> using lvalue_reference_to = T &;
@@ -471,13 +463,13 @@ template <class F> using function = F;
 """
 
 
-def claim_lines(cxxparse, mode, opts, test, fields):
-    """the lines of cxxparse MODE about the test file itself, split at tabs;
-    bytes as characters, as the test file is read"""
+def claim_lines(vpp, output, opts, test, fields):
+    """the lines of vpp -fcxx-dump=OUTPUT about the test file itself, split
+    at tabs; bytes as characters, as the test file is read"""
     cwd = os.path.dirname(test)
     try:
-        out = subprocess.run([cxxparse, mode] + opts + [os.path.basename(test)], cwd=cwd, capture_output=True,
-                             timeout=TIMEOUT)
+        out = subprocess.run(cxxpp.vpp_command(vpp, output, opts, os.path.basename(test)), cwd=cwd,
+                             capture_output=True, timeout=TIMEOUT)
     except subprocess.TimeoutExpired:
         return []
     if out.returncode not in (0, 1):
@@ -499,12 +491,14 @@ def has_line_directive(lines):
     return any(LINE_DIRECTIVE.match(line) for line in lines)
 
 
-def check_claims(test, opts, clang, cxxparse, res, error_lines, expression_mode='-expression-claims', target=()):
+def check_claims(test, opts, clang, vpp, res, error_lines, expression_output='expression-claims',
+                 declaration_output='declarator-claims', target=()):
     """V4b: see the module's docstring.  res['claims'] and
     res['declarators'] get the counts, res['fail'] one entry per refuted
     claim.  error_lines: the lines clang reports an error on in the test as
-    it is.  cxxparse is any tool that writes the claims (cxxsema too, with
-    expression_mode None); target: options for clang after the triple."""
+    it is.  The claims are vpp's -fcxx-dump=EXPRESSION_OUTPUT (none if None)
+    and DECLARATION_OUTPUT (the analysis's: declaration-claims); target:
+    options for clang after the triple."""
     counts = {'value': 0, 'type': 0, 'refuted': 0, 'unchecked': 0}
     declarators = {'verified': 0, 'overload': 0, 'refuted': 0, 'rejected': 0, 'unchecked': 0}
     res['claims'] = counts
@@ -515,11 +509,11 @@ def check_claims(test, opts, clang, cxxparse, res, error_lines, expression_mode=
     cwd = os.path.dirname(test)
     name = os.path.basename(test)
     claims = []
-    for place, e, p in (claim_lines(cxxparse, expression_mode, opts, test, 4) if expression_mode else []):
+    for place, e, p in (claim_lines(vpp, expression_output, opts, test, 4) if expression_output else []):
         row, column = map(int, place.split(':'))
         claims.append((row, column, e.strip(), p.strip()))
     declared = []
-    for said, place, kind, declared_name, claim in claim_lines(cxxparse, '-declaration-claims', opts, test, 6):
+    for said, place, kind, declared_name, claim in claim_lines(vpp, declaration_output, opts, test, 6):
         row, column = map(int, place.split(':'))
         declared.append((row, column, tuple(map(int, said.split('-'))), kind, declared_name, claim))
     if not claims and not declared:
@@ -663,16 +657,17 @@ def mutants(test, n, seed):
             yield k, text[:a] + rnd.choice('([{)]}<>;') + text[a:]
 
 
-def check_mutants(test, opts, cxxparse, n):
+def check_mutants(test, opts, vpp, n):
     fails = []
     with tempfile.TemporaryDirectory() as td:
         for k, text in mutants(test, n, 0):
             path = os.path.join(td, f'm{k}.cpp')
             with open(path, 'w', encoding='utf-8') as f:
                 f.write(text)
-            st, _, err = run([cxxparse, '-fsyntax-only'] + opts + [path], os.path.dirname(test), timeout=10)
-            if st == 2 and 'unsupported -std' in err:
-                break  # an edition cxxparse does not have: the run is skipped
+            # the parse alone (parser-stats stops after it)
+            st, _, err = run(cxxpp.vpp_command(vpp, 'parser-stats', opts, path), os.path.dirname(test), timeout=10)
+            if cxxpp.unsupported_edition(st, err):
+                break  # an edition vcc does not have: the run is skipped
             if st not in (0, 1):
                 keep = os.path.join(R, 'build', 'cxx-parse-mutants')
                 os.makedirs(keep, exist_ok=True)
@@ -692,8 +687,7 @@ def main():
     ap.add_argument('patterns', nargs='*')
     a = ap.parse_args()
     clang = cxxpp.find_clang()
-    cxxlex = find_tool(a.bin_dir, 'cxxlex')
-    cxxparse = find_tool(a.bin_dir, 'cxxparse')
+    vpp = cxxpp.find_vpp(a.bin_dir or os.environ.get('VCC_BIN'))
     resource_include = os.path.join(
         subprocess.run([clang, '-print-resource-dir'], capture_output=True, text=True).stdout.strip(), 'include')
     jobs = []
@@ -714,17 +708,16 @@ def main():
         if not sets and (OURS in t):
             sets = [['-std=c++20']]
         # a test that includes a header of clang's resource directory
-        # (<stddef.h>, ...) finds it as clang -cc1 does; cxxparse has no
-        # system directories of its own
+        # (<stddef.h>, ...) finds it as clang -cc1 does; vpp gets -nostdinc
         extra = []
         if re.search(r'^\s*#\s*include\s*<', text, re.M):
             extra = ['-isystem', resource_include]
         for opts in sets:
             jobs.append((t, opts + extra))
     with concurrent.futures.ThreadPoolExecutor(a.j) as ex:
-        results = list(ex.map(lambda j: check(j[0], j[1], clang, cxxlex, cxxparse), jobs))
+        results = list(ex.map(lambda j: check(j[0], j[1], clang, vpp), jobs))
         if a.mutate:
-            results += list(ex.map(lambda j: check_mutants(j[0], j[1], cxxparse, a.mutate),
+            results += list(ex.map(lambda j: check_mutants(j[0], j[1], vpp, a.mutate),
                                    [j for i, j in enumerate(jobs) if j[0] != jobs[i - 1][0] or i == 0]))
     counts = {'tokens': 0, 'crash': 0, 'decls': 0, 'syntax': 0, 'claims': 0, 'unchecked': 0}
     claims = {'value': 0, 'type': 0, 'refuted': 0, 'unchecked': 0}

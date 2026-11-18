@@ -103,6 +103,10 @@ void preprocessor::execute_pragma(const preprocessing_token *t, size_t count,
         (count > 1 && spelled_as(files, t[0], "clang") &&
          spelled_as(files, t[1], "fp")))
         files.floating_point_pragma = true;
+    if (spelled_as(files, t[0], "pack") ||
+        spelled_as(files, t[0], "ms_struct") ||
+        spelled_as(files, t[0], "options") || spelled_as(files, t[0], "align"))
+        files.layout_pragma = true;
     if (!known_pragma(*this, t[0]))
         diagnostics.issue(diagnostic_id::warn_pragma_ignored, t[0].location);
 }

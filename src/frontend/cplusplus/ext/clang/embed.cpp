@@ -21,7 +21,7 @@
  * each also spelled __name__.  __has_embed (in cpp.cond.cpp) uses the same
  * parameters: 0 if the resource is not found (or a parameter is unknown), 1
  * if it has bytes, 2 if it is empty.  The bytes are spelled in a piece of
- * scratch text named "<embed>", which cxxlex shows as clang's one
+ * scratch text named "<embed>", which -fcxx-dump=tokens shows as clang's one
  * annot_embed token.
  */
 #include <stdio.h>

@@ -78,11 +78,12 @@ arm64)
 	step memory-cells-generated python3 src/tools/gen-memory-cells.py --check
 	# the C++ front end's citations and quoted grammar against docs/cxx-spec
 	step cxx-spec-refs python3 bench/cxx-spec-refs.py
-	step cxxparse-selftest "$BUILD/cxxparse" -selftest
-	step cxxsema-selftest "$BUILD/cxxsema" -selftest
+	# the C++ front end's tables and the claims' encoding (-fcxx-dump=selftest, dump/dump.h)
+	: >"$BUILD/empty.cpp"
+	step cxx-selftest "$BUILD/vpp" -x c++ -fsyntax-only -fcxx-dump=selftest "$BUILD/empty.cpp"
 	# the type claims' path through clang, on claims written by hand (doc/PLAN-cxx-sema.md C4)
 	step cxx-sema-claims env PATH="${LLVM:-/usr/lib/llvm-23}/bin:$PATH" python3 bench/cxx-sema.py selftest
-	# C++ programs lowered to C's AST (cxxsema -S, -O0..-O3) run as clang++'s under qemu
+	# C++ programs lowered to C's AST (vpp -c, -O0..-O3) run as clang++'s under qemu
 	step cxx-run      python3 bench/cxx-run.py -j "$J"
 	# the suites at each code generator (doc/OPTIMIZATION.md): -O2 VIR (the default), -O1 the
 	# direct emitter, -O3 VIR with the vectorizer and its checks (verifier, allocation check)

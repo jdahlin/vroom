@@ -522,7 +522,7 @@ void preprocessor::directive_define(const preprocessing_token &directive)
        definition and the two replacement lists are identical, otherwise the
        program is ill-formed": [impl.clang] clang warns */
     int32_t previous = identifiers[m.name].macro;
-    if (previous >= 0 && !system_header_at(name.location)) {
+    if (previous >= 0 && !system_header_at(name.location) && !m.predefined) {
         const macro_definition &old = macros[previous];
         if (is_language_defined(old))
             diagnostics.issue(diagnostic_id::ext_pp_redef_builtin_macro,
@@ -685,7 +685,12 @@ void preprocessor::directive_undef(const preprocessing_token &directive)
     uint32_t id = identifier(name);
     int32_t m = identifiers[id].macro;
     if (m >= 0) {
-        if (is_language_defined(macros[m]) && !system_header_at(name.location))
+        /* [impl.clang] not in "<built-in>" itself: a driver's predefines
+           undefine what an option turns off (-fno-exceptions:
+           __cpp_exceptions) */
+        bool in_predefines = inclusions.back().file->index == predefines_file;
+        if (is_language_defined(macros[m]) &&
+            !system_header_at(name.location) && !in_predefines)
             diagnostics.issue(diagnostic_id::ext_pp_undef_builtin_macro,
                               name.location);
         warn_unused_macro(m);

@@ -344,6 +344,16 @@ analysis_result semantic_analysis::increment(node_index n, syntax_child operand,
     if (m.category != value_category::lvalue || (m.type.cv() & cv_const))
         return ill_formed(n, "the operand shall be a modifiable lvalue",
                           subclause);
+    /* [over.match.oper]/1: "If no operand of an operator in an expression
+       has a type that is a class or an enumeration, the operator is assumed
+       to be a built-in operator": for one that has, an overloaded operator
+       function may be the meaning */
+    {
+        type_kind operand_kind = type_table[m.type.unqualified()].kind;
+        if (operand_kind == type_kind::class_type ||
+            operand_kind == type_kind::enumeration)
+            return not_supported(n, "over.match.oper");
+    }
     fundamental_type t = fundamental_of(m.type);
     /* [diff.cpp14.expr]/1: ++ of a bool operand, deprecated, removed in
        C++17 */

@@ -222,6 +222,33 @@ static bool at_offset_zero(const semantic_analysis &a, const types &table,
     return false;
 }
 
+/* whether a subobject at offset 0 of class c2 (c2 itself, or a base or
+   member it has there) has the type of one at offset 0 of class c1: the
+   two cannot both be placed at one address ([abi:layout]) */
+static bool share_offset_zero(const semantic_analysis &a, const types &table,
+                              entity_index c1, entity_index c2)
+{
+    if (at_offset_zero(a, table, c1, c2))
+        return true;
+    const entity &x = a.entity_table[c2];
+    for (uint32_t i = 0; i < x.base_count; i++) {
+        const entity &b = a.entity_table[a.class_bases[x.first_base + i]];
+        if (!b.offset &&
+            share_offset_zero(a, table, c1, table[b.type.unqualified()].entity))
+            return true;
+    }
+    for (uint32_t i = 0; i < x.member_count; i++) {
+        const entity &m = a.entity_table[a.class_members[x.first_member + i]];
+        qualified_type t = m.type;
+        while (table[t.unqualified()].kind == type_kind::array)
+            t = table[t.unqualified()].operand;
+        if (!m.offset && table[t.unqualified()].kind == type_kind::class_type &&
+            share_offset_zero(a, table, c1, table[t.unqualified()].entity))
+            return true;
+    }
+    return false;
+}
+
 /*
  * The base-clause of the class c being defined, defined with class-key
  * key.  [class.derived]/2: "A class-or-decltype shall denote a (possibly
@@ -291,16 +318,28 @@ analysis_result semantic_analysis::base_clause(entity_index c, node_index n,
                 }
             }
         }
-        if (!name.is_token() ||
-            tokens[name.index()].kind != token_kind::identifier)
-            /* a nested-name-specifier, a simple-template-id, decltype */
+        /* [class.derived]/2: "A class-or-decltype shall denote a (possibly
+           cv-qualified) class type that is not an incompletely defined class
+           ... During the lookup for a base class name, non-type names are
+           ignored": a type-name, or one after a nested-name-specifier (a
+           simple-template-id or decltype has no rules yet) */
+        token_index id = 0;
+        entity_index base = 0;
+        if (!name.is_token() &&
+            !syntax_is(tree, name, syntax_kind::class_or_decltype))
             return not_supported(n, "class.derived");
-        token_index id = name.index();
-        entity_index base = lookup(tokens.identifier(id));
-        if (!base || entity_table[base].kind != entity_kind::class_type)
-            /* a typedef-name, or a class whose definition was not
-               analysed */
-            return not_supported(n, "class.derived");
+        {
+            size_t before = unsupported.size();
+            analysis_result named = named_class(name, n, base, id);
+            if (named == analysis_result::ill_formed)
+                return named;
+            if (named != analysis_result::well_formed) {
+                /* a class whose definition was not analysed, a name not
+                   found */
+                unsupported.resize(before);
+                return not_supported(n, "class.derived");
+            }
+        }
         const entity &bx = entity_table[base];
         if (!bx.size)
             return ill_formed_at_token(id,
@@ -331,7 +370,7 @@ analysis_result semantic_analysis::base_clause(entity_index c, node_index n,
                zero size"; [abi:layout]: an empty base at offset 0, unless
                a subobject of its type is already there */
             for (uint32_t k = 0; k < entity_table[c].base_count; k++)
-                if (at_offset_zero(
+                if (share_offset_zero(
                         *this, type_table,
                         type_table
                             [entity_table
@@ -345,6 +384,18 @@ analysis_result semantic_analysis::base_clause(entity_index c, node_index n,
         } else {
             entity_table[e].field = entity_table[c].member_count;
             entity_table[e].offset = align_to(layout_size, alignment);
+            /* at offset 0 with an empty base placed there before */
+            for (uint32_t k = 0;
+                 !entity_table[e].offset && k < entity_table[c].base_count; k++)
+                if (share_offset_zero(
+                        *this, type_table,
+                        type_table
+                            [entity_table
+                                 [class_bases[entity_table[c].first_base + k]]
+                                     .type.unqualified()]
+                                .entity,
+                        base))
+                    return not_supported(n, "class.derived");
             uint64_t taken = entity_table[base].data_size;
             if (pod_for_layout(*this, type_table, base))
                 taken = entity_table[base].size;
@@ -377,9 +428,9 @@ analysis_result semantic_analysis::empty_base_conflict(entity_index c,
     for (uint32_t i = 0; i < x.base_count; i++) {
         const entity &b = entity_table[class_bases[x.first_base + i]];
         if (b.field == UINT32_MAX &&
-            at_offset_zero(*this, type_table,
-                           type_table[t.unqualified()].entity,
-                           type_table[b.type.unqualified()].entity))
+            share_offset_zero(*this, type_table,
+                              type_table[b.type.unqualified()].entity,
+                              type_table[t.unqualified()].entity))
             return not_supported(n, "class.derived");
     }
     return analysis_result::well_formed;
@@ -452,6 +503,8 @@ entity_index semantic_analysis::class_member_lookup(entity_index c,
 analysis_result semantic_analysis::to_base(token_index at, entity_index base,
                                            expression_meaning &m)
 {
+    if (aggregate_prvalue(m) && type_table[m.type.unqualified()].entity != base)
+        return not_supported(current_declaration, "class.temporary");
     for (;;) {
         entity_index c = type_table[m.type.unqualified()].entity;
         if (c == base)

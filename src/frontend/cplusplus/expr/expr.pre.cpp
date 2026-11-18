@@ -6,7 +6,7 @@
  * that specifies a computation."  Each nonterminal's rules are in the file
  * of its subclause (expr.prim.cpp, expr.unary.cpp, expr.compound.cpp ...);
  * here they are dispatched, and every expression with a meaning is
- * recorded for the type and constant claims (cxxsema -type-claims).
+ * recorded for the type and constant claims (-fcxx-dump=type-claims).
  */
 #include "../cplusplus-internal.h"
 #include "frontend/cplusplus/sema.h"
