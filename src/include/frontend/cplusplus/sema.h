@@ -1086,6 +1086,8 @@ class semantic_analysis
         bool has_type = false;
         bool typedef_ = false, static_ = false, extern_ = false,
              inline_ = false, constexpr_ = false, virtual_ = false;
+        /* [class.friend]: the friend specifier (only where friend_allowed) */
+        bool friend_ = false;
         /* a class-specifier or elaborated-type-specifier was there: a
            declaration with no declarator declares the class
            ([dcl.pre]/5) */
@@ -1256,6 +1258,32 @@ class semantic_analysis
        blocks: members of their namespaces whose names are not bound
        there */
     owned_array<entity_index> block_declared;
+    /* [class.friend]/1: a class's friends.  A friend class not declared
+       yet ([namespace.memdef]/3: the elaborated-type-specifier declares it
+       in the innermost enclosing namespace, where ordinary lookup does
+       not find it) is the class of that name and scope declared later
+       (befriended 0); a function first declared by a friend declaration
+       is in block_declared, unbound in its namespace until declared
+       there, and found by argument-dependent lookup through the
+       granting class ([basic.lookup.argdep]/4.3) */
+    struct friend_record {
+        entity_index granting = 0;
+        entity_index befriended = 0;
+        entity_index scope = 0;
+        uint32_t name = 0;
+    };
+    owned_array<friend_record> friends;
+    analysis_result friend_declaration(entity_index c, node_index n);
+    analysis_result friend_class(entity_index c, node_index n,
+                                 syntax_child type);
+    analysis_result friend_function(entity_index c, node_index n);
+    bool friend_names(const friend_record &f, entity_index e) const;
+    bool grants(entity_index k, entity_index e) const;
+    bool in_friend_of(entity_index k) const;
+    /* a function of block_declared whose name and parameter-type-list
+       are these, in namespace scope, 0 if none */
+    entity_index declared_unbound(entity_index scope, uint32_t name,
+                                  qualified_type type) const;
     /* [basic.scope.hiding]/2: the class or enumeration of the scope that
        the variable or function declare() declares now hides, 0 if none */
     entity_index declaration_hides = 0;
@@ -1390,6 +1418,9 @@ class semantic_analysis
        decl-specifier-seq only; a member-declarator's virt-specifiers and
        pure-specifier ([class.mem]/1) for the declarator it holds */
     bool virtual_allowed = false;
+    /* [class.friend]: friend is analysed on a friend declaration's
+       decl-specifier-seq only */
+    bool friend_allowed = false;
     /* construct() is called for a base class subobject, which may be of an
        abstract class ([class.abstract]/2) */
     bool constructing_base = false;

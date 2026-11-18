@@ -531,8 +531,7 @@ bool semantic_analysis::associated_with(
  * templates are ignored.  (4.3) Any namespace-scope friend functions or friend
  * function templates declared in classes with reachable definitions in the set
  * of associated entities are visible within their respective namespaces even if
- * they are not visible during an ordinary lookup."  A class with a friend
- * declaration is not analysed yet, so no argument has its type.
+ * they are not visible during an ordinary lookup."
  */
 bool semantic_analysis::argument_dependent_lookup(
     uint32_t name, const owned_array<qualified_type> &arguments,
@@ -576,6 +575,33 @@ bool semantic_analysis::argument_dependent_lookup(
             if (other == e)
                 seen = true;
         if (!seen)
+            found.append(e);
+    }
+    /* /4.3: the friend functions of the associated classes not declared
+       in their namespaces */
+    for (const friend_record &f : friends) {
+        entity_index e = f.befriended;
+        if (!e || entity_table[e].kind != entity_kind::function ||
+            entity_table[e].name != name)
+            continue;
+        bool associated = false, visible = false;
+        for (entity_index k : classes)
+            if (k == f.granting)
+                associated = true;
+        for (entity_index n : namespaces)
+            if (n == entity_table[e].enclosing)
+                visible = true;
+        if (!associated || !visible)
+            continue;
+        for (entity_index o =
+                 entity_table.find(entity_table[e].enclosing, name);
+             o; o = entity_table[o].next_overload)
+            if (o == e)
+                visible = false;
+        for (entity_index other : found)
+            if (other == e)
+                visible = false;
+        if (visible)
             found.append(e);
     }
     return true;

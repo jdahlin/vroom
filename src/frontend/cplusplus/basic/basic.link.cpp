@@ -237,7 +237,12 @@ analysis_result semantic_analysis::declare(node_index declaration,
             (kind == entity_kind::function || kind == entity_kind::variable))
             for (entity_index e : block_declared)
                 if (entity_table[e].enclosing == scope &&
-                    entity_table[e].name == name) {
+                    entity_table[e].name == name &&
+                    (kind != entity_kind::function ||
+                     entity_table[e].kind != entity_kind::function ||
+                     same_parameters(type_table,
+                                     entity_table[e].type.unqualified(),
+                                     type.unqualified()))) {
                     /* [dcl.array]/8: a bound given in the block is not
                        this scope's */
                     if (!(entity_table[e].type == type) &&
@@ -477,6 +482,10 @@ analysis_result semantic_analysis::declare(node_index declaration,
             if (same_parameters(type_table, entity_table[o].type.unqualified(),
                                 type.unqualified()))
                 same = o;
+        /* a function declared before by a friend declaration only
+           ([namespace.memdef]/3), whose name is bound to others */
+        if (!same && !qualified && declared_unbound(scope, name, type))
+            return not_supported(declaration, "class.friend");
         if (!same && qualified)
             /* [dcl.meaning]/1: "the declaration shall refer to a previously
                declared member of the class or namespace to which the

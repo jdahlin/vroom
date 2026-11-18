@@ -858,7 +858,9 @@ entity_index semantic_analysis::current_class() const
  * in a member of a derived class D is accessed "through a pointer to,
  * reference to, or object of the class D itself (or any class derived
  * from D)": object_class, the class of the object expression (0: *this).
- * There are no friends yet.
+ * [class.friend]/2: "Declaring a class to be a friend implies that private
+ * and protected members of the class granting friendship can be named in the
+ * base-specifiers and member declarations of the befriended class."
  */
 bool semantic_analysis::accessible(entity_index member,
                                    entity_index object_class) const
@@ -875,6 +877,19 @@ bool semantic_analysis::accessible(entity_index member,
        as any other member."; [class.local]/1 a local class "has the same
        access to names outside the function as does the enclosing
        function" */
+    /* the use is in a member of class k */
+    auto as_member_of = [&](entity_index k) -> bool {
+        if (k == x.enclosing)
+            return true;
+        if (x.access != 1)
+            return false;
+        bool ambiguous = false;
+        if (!base_step(k, x.enclosing, ambiguous))
+            return false;
+        if (!object_class || !x.nonstatic_member || object_class == k)
+            return true;
+        return base_step(object_class, k, ambiguous) != 0;
+    };
     entity_index starts[3] = {0, defining_class, 0};
     if (function_state.active)
         starts[0] = function_state.function;
@@ -883,18 +898,14 @@ bool semantic_analysis::accessible(entity_index member,
     for (entity_index start : starts) {
         for (entity_index here = start; !is_namespace(here);
              here = entity_table[here].enclosing) {
+            /* [class.access]/1: a friend of the class (or, for a
+               protected member, of a class derived from it) */
+            for (const friend_record &f : friends)
+                if (friend_names(f, here) && as_member_of(f.granting))
+                    return true;
             if (entity_table[here].kind != entity_kind::class_type)
                 continue;
-            if (here == x.enclosing)
-                return true;
-            if (x.access != 1)
-                continue;
-            bool ambiguous = false;
-            if (!base_step(here, x.enclosing, ambiguous))
-                continue;
-            if (!object_class || !x.nonstatic_member || object_class == here)
-                return true;
-            if (base_step(object_class, here, ambiguous))
+            if (as_member_of(here))
                 return true;
         }
     }
@@ -930,6 +941,16 @@ semantic_analysis::member_declaration(entity_index c, syntax_child member,
     if (node.kind != syntax_kind::member_declaration &&
         node.kind != syntax_kind::function_definition)
         return not_supported(n);
+    if (node.child_count &&
+        syntax_is(tree, children[0], syntax_kind::decl_specifier_seq)) {
+        node_index seq = children[0].index();
+        for (uint32_t i = 0; i < tree[seq].child_count; i++) {
+            syntax_child x = tree.children(seq)[i];
+            if (x.is_token() &&
+                p.keyword_of(tokens[x.index()]) == standard_keyword::friend_)
+                return friend_declaration(c, n);
+        }
+    }
 
     /* a constructor or destructor: no decl-specifier-seq, or one of
        function-specifiers alone ([class.ctor]/1: "Each decl-specifier in

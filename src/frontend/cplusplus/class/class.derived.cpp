@@ -345,8 +345,9 @@ entity_index semantic_analysis::class_member_lookup(entity_index c,
  * a member subobject, [intro.object]/2), the value category kept.
  * [class.access.base]/4: the base is accessible where an invented public
  * member of it would be: through a public base anywhere, through a
- * private or protected one in the derived class's own members (friends
- * and further derived classes are not analysed).
+ * private or protected one in the derived class's own members and its
+ * friends ([class.access.base]/5.2; further derived classes are not
+ * analysed).
  */
 analysis_result semantic_analysis::to_base(token_index at, entity_index base,
                                            expression_meaning &m)
@@ -363,7 +364,8 @@ analysis_result semantic_analysis::to_base(token_index at, entity_index base,
             return not_supported(current_declaration, "class.derived");
         if (ambiguous)
             return not_supported(current_declaration, "class.member.lookup");
-        if (entity_table[step].access && current_class() != c) {
+        if (entity_table[step].access && current_class() != c &&
+            !in_friend_of(c)) {
             if (current_class())
                 return not_supported(current_declaration, "class.access.base");
             return ill_formed_at_token(at,
@@ -431,7 +433,8 @@ analysis_result semantic_analysis::pointer_to_base(token_index at,
         entity_index step = base_step(c, to, ambiguous);
         if (ambiguous)
             return not_supported(current_declaration, "class.member.lookup");
-        if (entity_table[step].access && current_class() != c) {
+        if (entity_table[step].access && current_class() != c &&
+            !in_friend_of(c)) {
             if (current_class())
                 return not_supported(current_declaration, "class.access.base");
             return ill_formed_at_token(at,

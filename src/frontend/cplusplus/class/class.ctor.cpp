@@ -1134,6 +1134,10 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
              copy_ok = copies_bytes(k);
         for (entity_index q = sub.first_constructor; q;
              q = entity_table[q].next_constructor) {
+            /* [class.access]/1: c a friend of k may call it, where an
+               aggregate initialization may not (not analysed) */
+            if (entity_table[q].access && grants(k, c))
+                return not_supported(n, "class.friend");
             if (entity_table[q].access || entity_table[q].deleted)
                 continue;
             if (!type_table[entity_table[q].type.unqualified()].parameter_count)
@@ -1153,8 +1157,11 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
             entity_table[c].implicit_default_deleted = true;
         }
         if ((!copy_ok && !declares_copy) ||
+            /* [class.copy.ctor]/10.2, [class.default.ctor]/2.7: an
+               implicit constructor beside a subobject's inaccessible
+               destructor is deleted */
             (sub.destructor && entity_table[sub.destructor].access &&
-             !x.destructor))
+             (!x.destructor || !declares_copy || !x.first_constructor)))
             return not_supported(n, "class.default.ctor");
     }
     bool user_constructors = x.first_constructor != 0;

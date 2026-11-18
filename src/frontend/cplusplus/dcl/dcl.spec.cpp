@@ -991,7 +991,7 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
     simple_type_keywords k;
     uint32_t cv = cv_none;
     unsigned const_ = 0, volatile_ = 0, typedef_ = 0, static_ = 0, extern_ = 0,
-             inline_ = 0, constexpr_ = 0, virtual_ = 0;
+             inline_ = 0, constexpr_ = 0, virtual_ = 0, friend_ = 0;
     type_index named = 0;
     bool declares_class = false, declares_enumeration = false;
     token_index named_at = 0, duplicate = 0;
@@ -1235,6 +1235,11 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
                 return not_supported(seq, specifier_subclause(kw));
             count(virtual_, t, "virtual");
             break;
+        case standard_keyword::friend_:
+            if (!friend_allowed)
+                return not_supported(seq, specifier_subclause(kw));
+            count(friend_, t, "friend");
+            break;
         default:
             return not_supported(seq, specifier_subclause(kw));
         }
@@ -1319,6 +1324,7 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
     s.extern_ = extern_;
     s.inline_ = inline_;
     s.virtual_ = virtual_ != 0;
+    s.friend_ = friend_ != 0;
     s.constexpr_ = constexpr_;
     if (type)
         s.type = add_cv(qualified_type::make(type, cv_none), cv);
