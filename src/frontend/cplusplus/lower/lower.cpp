@@ -4388,18 +4388,35 @@ uint32_t c_lowering::vtable_pointer_stores(const semantic_node &n)
 /* [conv.ptr]/3, [expr.static.cast]/11: "The null pointer value is
    converted to the null pointer value of the destination type": p ? p +
    offset : 0, p read twice; an object's address (never null, e.g. to an
-   empty base the layout moved, [abi:class-types] II) without the check */
+   empty base the layout moved, [abi:class-types] II) without the check.
+   The non-virtual base conversions n's operand is made of add their
+   offsets to the one check */
 uint32_t c_lowering::null_checked_offset(const semantic_node &n, int64_t offset,
                                          ast_qualified_type t)
 {
-    uint32_t p = expression(n.a);
+    uint32_t operand = n.a;
+    for (;;) {
+        const semantic_node &x = node(operand);
+        if (x.kind != semantic_kind::conversion)
+            break;
+        conversion_kind k = static_cast<conversion_kind>(x.op);
+        int64_t by = static_cast<int64_t>(analysis.entity_table[x.b].offset);
+        if (k == conversion_kind::base_to_derived)
+            by = -by;
+        else if (k != conversion_kind::derived_to_base ||
+                 analysis.entity_table[x.b].virtual_base)
+            break;
+        offset += by;
+        operand = x.a;
+    }
+    uint32_t p = expression(operand);
     if (!p)
         return 0;
-    if (node(n.a).kind == semantic_kind::address)
+    if (node(operand).kind == semantic_kind::address)
         return offset_pointer(p, offset, t);
     uint32_t again = 0;
     if (side_effect_free(p)) {
-        again = expression(n.a);
+        again = expression(operand);
     } else {
         /* (e.g. a pointer to the virtual base it is in, read from the
            virtual table): a temporary holds it */

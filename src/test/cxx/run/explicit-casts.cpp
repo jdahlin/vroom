@@ -27,6 +27,25 @@ struct Deeper : Derived {
     int e;
 };
 typedef Box Alias;
+/* bases at nonzero offsets on both sides of a two-step path */
+struct Pad {
+    char p;
+};
+struct Wide {
+    long w;
+};
+struct Middle : Wide, Derived {
+    int m;
+};
+struct Outer : Pad, Middle {
+    int o;
+};
+/* the cast notation ignores access ([expr.cast]/4) */
+struct Hidden : private Base, protected Other {
+    int h;
+    Base *base() { return this; }
+};
+struct Incomplete;
 
 static int cast_int(Int i) { return static_cast<int>(i) + int(i) + (int)i; }
 static long cast_long(Int i) { return static_cast<long>(i) + (long)i; }
@@ -54,6 +73,20 @@ static unsigned long address(int *p)
 }
 static unsigned &pun(int &i) { return reinterpret_cast<unsigned &>(i); }
 static int &&moved(int &i) { return static_cast<int &&>(i); }
+static Base *up_two(Outer *o) { return static_cast<Base *>(o); }
+static Outer *down_far(Other *o) { return static_cast<Outer *>(o); }
+static Other *hidden_other(Hidden *h) { return (Other *)h; }
+static Hidden *from_other(Other *o) { return (Hidden *)o; }
+static Incomplete *opaque(Derived *d) { return (Incomplete *)d; }
+static long null_integer() { return reinterpret_cast<long>(nullptr); }
+static Base slice(const Derived &d) { return static_cast<Base>(d); }
+static int temporary(long v)
+{
+    const int &r = static_cast<const int &>(v + 1);
+    int &&s = static_cast<int &&>(4);
+    s += r;
+    return s;
+}
 
 int main()
 {
@@ -104,5 +137,24 @@ int main()
     Base *bx = &x;
     if ((Base *)xx != bx || static_cast<Base *>(down(o)) != bx)
         return 14;
+    Outer w;
+    w.b = 15;
+    w.c = 16;
+    Outer *nothing = 0;
+    if (up_two(&w)->b != 15 || down_far(static_cast<Other *>(&w)) != &w ||
+        up_two(nothing) != 0 || down_far(0) != 0)
+        return 15;
+    Hidden h;
+    Other *ho = hidden_other(&h);
+    if ((char *)ho != (char *)&h + sizeof(Base) || from_other(ho) != &h ||
+        (Hidden *)h.base() != &h)
+        return 16;
+    if ((void *)opaque(dx) != (void *)dx || null_integer() != 0 ||
+        static_cast<bool>(nullptr))
+        return 17;
+    if (slice(x).b != 1 || static_cast<Base>(w).b != 15 || ((Base)w).b != 15)
+        return 18;
+    if (temporary(2) != 7)
+        return 19;
     return 0;
 }

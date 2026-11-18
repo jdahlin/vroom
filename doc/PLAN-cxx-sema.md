@@ -1276,7 +1276,7 @@ lines:
   pointers to classes one derived from the other (`class_pointer_cast`):
   to a base by `pointer_to_base`, to a derived class by the new
   `pointer_to_derived` ([expr.static.cast]/11; conversion
-  `base_to_derived`, one per base on the way, lowered as the base's offset
+  `base_to_derived`, lowered as the base's offset
   subtracted after a null check, the code `derived_to_base` shares in
   `null_checked_offset`); the cast notation through public non-virtual
   bases only.  To a reference (`reference_cast`): the same glvalue, or the
@@ -1304,6 +1304,29 @@ lines:
   cxx-run 420/420 (105 programs); cxx-c-suites 0 wrong, no pass lost (the
   four lost passes it reports, [cpp.pragma] and pr109318, fail at the
   starting commit too).
+  After review (2026-11-18): the pointer conversions between a class and
+  its base on one non-virtual path are one routine, `pointer_along_path`
+  (`class/class.derived.cpp`), for both directions and for the cast
+  notation (which skips the access checks, [expr.cast]/4); the steps come
+  from `nonvirtual_path`, which `single_nonvirtual_path` shares.  One
+  conversion per base at a nonzero offset, and `null_checked_offset` folds
+  a chain of them into one null check, so an upcast across two nonzero
+  offsets is no longer refused.  An ambiguous base of a downcast is
+  ill-formed ([expr.static.cast]/11), no longer unsupported.  Now
+  analysed: the cast notation through a private or protected base and to
+  an incomplete class (the reinterpret_cast, as clang),
+  `reinterpret_cast<long>(nullptr)` ([expr.reinterpret.cast]/4),
+  `static_cast<bool>(nullptr)` ([conv.bool]), a cast to a base class
+  slicing a derived glvalue (`static_cast<B>(d)`, a class with no
+  constructors), and a reference to const or rvalue reference to a
+  non-class type bound to a temporary (`static_cast<const int &>(3)`,
+  `static_cast<int &&>(4)`, `(const unsigned char &)i`: `reference_binding`,
+  the temporary's address).  Still not analysed: such a temporary in a
+  constant expression (unsupported by the evaluator) or of a class type,
+  the cast notation through a virtual or ambiguous base, slicing a
+  prvalue through a virtual base.  `bench/cxx-sema.py`: declarations
+  54051 -> 54065 as clang, 12 we reject and clang accepts, 2396 we accept
+  and clang rejects, 0 refuted; cxx-run 420/420 (105 programs).
 
 ### S6. Constant evaluation and templates
 

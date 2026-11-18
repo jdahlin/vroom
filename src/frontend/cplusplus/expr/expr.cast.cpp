@@ -305,6 +305,27 @@ analysis_result semantic_analysis::explicit_conversion(node_index at,
             return not_supported(at, "expr.cast");
         return no_cast(at, kinds);
     }
+    if (from == fundamental_type::std_nullptr_t &&
+        target.fundamental == fundamental_type::bool_ && by_static)
+        /* [conv.bool]/1: "For direct-initialization, a prvalue of type
+           std::nullptr_t can be converted to a prvalue of type bool; the
+           resulting value is false." */
+        return implicit_conversion(at, m, to, true);
+    if (from == fundamental_type::std_nullptr_t &&
+        fundamental_type_is_integral(target.fundamental) &&
+        (kinds & cast_reinterpret)) {
+        /* [expr.reinterpret.cast]/4: "A value of type std::nullptr_t can be
+           converted to an integral type; the conversion has the same
+           meaning and validity as a conversion of (void*)0 to the integral
+           type." */
+        qualified_type void_pointer = qualified_type::make(
+            type_table.pointer_to(qualified_type::make(
+                type_table.fundamental(fundamental_type::void_), cv_none)),
+            cv_none);
+        r = implicit_conversion(at, m, void_pointer, true);
+        if (r != analysis_result::well_formed)
+            return r;
+    }
     if (is_pointer(m.type)) {
         fundamental_type t = target.fundamental;
         if (t == fundamental_type::bool_ && by_static)
@@ -458,12 +479,8 @@ analysis_result semantic_analysis::pointer_conversion(node_index at,
  * [expr.static.cast]/11 to a derived class; each then a const_cast if the
  * target's pointee is less cv-qualified.  [expr.cast]/4: "in performing a
  * static_cast in the following situations the conversion is valid even if
- * the base class is inaccessible": the cast notation's here only through
- * public non-virtual bases.  [expr.cast]/5: "If both the operand and
- * destination types are class types and one or both are incomplete, it is
- * unspecified whether the static_cast or the reinterpret_cast
- * interpretation is used": not analysed.  handled is false for the other
- * pointers.
+ * the base class is inaccessible": the cast notation's here only on one
+ * path of non-virtual bases.  handled is false for the other pointers.
  */
 analysis_result semantic_analysis::class_pointer_cast(node_index at,
                                                       qualified_type to,
@@ -479,12 +496,13 @@ analysis_result semantic_analysis::class_pointer_cast(node_index at,
     if (fp.kind != type_kind::class_type || tp.kind != type_kind::class_type ||
         fp.entity == tp.entity || !(kinds & cast_static))
         return analysis_result::well_formed;
-    if (!entity_table[fp.entity].size || !entity_table[tp.entity].size) {
-        if (kinds == cast_static)
-            return analysis_result::well_formed;
-        handled = true;
-        return not_supported(at, "expr.cast");
-    }
+    /* [expr.cast]/5: "If both the operand and destination types are class
+       types and one or both are incomplete, it is unspecified whether the
+       static_cast or the reinterpret_cast interpretation is used"
+       ([impl.clang]: the reinterpret_cast's); a static_cast alone needs
+       complete classes ([expr.static.cast]/11, [conv.ptr]/3) */
+    if (!entity_table[fp.entity].size || !entity_table[tp.entity].size)
+        return analysis_result::well_formed;
     bool ambiguous = false;
     bool upward = base_step(fp.entity, tp.entity, ambiguous) != 0;
     bool to_derived =
@@ -498,7 +516,7 @@ analysis_result semantic_analysis::class_pointer_cast(node_index at,
         derived = tp.entity;
         base = fp.entity;
     }
-    if (kinds != cast_static && !public_nonvirtual_path(derived, base))
+    if (kinds != cast_static && !single_nonvirtual_path(derived, base))
         return not_supported(at, "expr.cast");
     bool lesser = pointee.cv() & ~target_pointee.cv();
     if (lesser && !(kinds & cast_const))
@@ -514,7 +532,12 @@ analysis_result semantic_analysis::class_pointer_cast(node_index at,
         cv_none);
     token_index t = tree[at].first_token;
     analysis_result r = analysis_result::well_formed;
-    if (upward)
+    if (kinds != cast_static)
+        /* [expr.cast]/4: "in performing a static_cast in the following
+           situations the conversion is valid even if the base class is
+           inaccessible" */
+        r = pointer_along_path(t, derived, base, via, to_derived, false, m);
+    else if (upward)
         r = pointer_to_base(t, fp.entity, tp.entity, via, m);
     else
         r = pointer_to_derived(t, fp.entity, tp.entity, via, m);
@@ -547,10 +570,10 @@ analysis_result semantic_analysis::class_pointer_cast(node_index at,
  *     "pointer to T1"."
  *
  * Each of the last three an lvalue's address converted as a pointer, then
- * the object it points to.  A reference that may bind a temporary (to
- * const, or an rvalue reference, of another type: [expr.static.cast]/4),
- * a prvalue operand, an xvalue of another type and a function are not
- * analysed.
+ * the object it points to; a temporary bound to the reference
+ * ([expr.static.cast]/4) the same, the temporary's address.  A temporary
+ * of a class, a prvalue operand otherwise, an xvalue of another type and
+ * a function are not analysed.
  */
 analysis_result semantic_analysis::reference_cast(node_index at,
                                                   qualified_type to,
@@ -564,32 +587,51 @@ analysis_result semantic_analysis::reference_cast(node_index at,
     if (lvalue_reference)
         category = value_category::lvalue;
     if (type_table[referenced.unqualified()].kind == type_kind::function ||
-        m.category == value_category::prvalue || m.bit_field_width)
+        m.bit_field_width)
         return not_supported(at, "expr.cast");
     bool same = referenced.unqualified() == m.type.unqualified();
-    if (lvalue_reference && m.category != value_category::lvalue)
-        return not_supported(at, "expr.cast");
-    if (same && m.type.cv() == referenced.cv() && m.category == category &&
-        (kinds & (cast_static | cast_const)))
-        /* the glvalue itself */
-        return analysis_result::well_formed;
-    if (m.category != value_category::lvalue)
-        return not_supported(at, "expr.cast");
-    const struct type &from = type_table[m.type.unqualified()];
-    const struct type &into = type_table[referenced.unqualified()];
-    bool related = false;
-    if (from.kind == type_kind::class_type &&
-        into.kind == type_kind::class_type && !same) {
-        bool ambiguous = false;
-        related = base_step(from.entity, into.entity, ambiguous) ||
-                  base_step(into.entity, from.entity, ambiguous);
-    }
+    bool scalars =
+        type_table[referenced.unqualified()].kind != type_kind::class_type &&
+        type_table[m.type.unqualified()].kind != type_kind::class_type;
     bool may_bind_temporary = !lvalue_reference || referenced.cv() == cv_const;
-    if (!related && !same && (kinds & cast_static) &&
-        (kinds == cast_static || may_bind_temporary))
-        /* [expr.static.cast]/4: "T t(E);" may bind the reference to a
-           temporary of the converted value */
-        return not_supported(at, "expr.static.cast");
+    /* [expr.static.cast]/4: "T t(E); for some invented temporary variable
+       t and then using the temporary variable as the result of the
+       conversion": a reference to const or an rvalue reference, neither to
+       a class, bound by [dcl.init.ref]/5 (reference_binding) to a prvalue
+       or to a glvalue of another type, the temporary its prvalue
+       materializes ([conv.rval]) */
+    bool temporary = (kinds & cast_static) && scalars && may_bind_temporary &&
+                     (m.category == value_category::prvalue || !same);
+    if (temporary) {
+        analysis_result r = reference_binding(at, m, to);
+        if (r != analysis_result::well_formed)
+            return r;
+    } else {
+        if (m.category == value_category::prvalue)
+            return not_supported(at, "expr.cast");
+        if (lvalue_reference && m.category != value_category::lvalue)
+            return not_supported(at, "expr.cast");
+        if (same && m.type.cv() == referenced.cv() && m.category == category &&
+            (kinds & (cast_static | cast_const)))
+            /* the glvalue itself */
+            return analysis_result::well_formed;
+        if (m.category != value_category::lvalue)
+            return not_supported(at, "expr.cast");
+        const struct type &from = type_table[m.type.unqualified()];
+        const struct type &into = type_table[referenced.unqualified()];
+        bool related = false;
+        if (from.kind == type_kind::class_type &&
+            into.kind == type_kind::class_type && !same) {
+            bool ambiguous = false;
+            related = base_step(from.entity, into.entity, ambiguous) ||
+                      base_step(into.entity, from.entity, ambiguous);
+        }
+        if (!related && !same && (kinds & cast_static) &&
+            (kinds == cast_static || may_bind_temporary))
+            /* [expr.static.cast]/4: "T t(E);" may bind the reference to a
+               temporary of the converted value */
+            return not_supported(at, "expr.static.cast");
+    }
     token_index t = tree[at].first_token;
     expression_meaning address;
     address.type = qualified_type::make(type_table.pointer_to(m.type), cv_none);
@@ -597,12 +639,16 @@ analysis_result semantic_analysis::reference_cast(node_index at,
     address.evaluation = constness::unknown;
     if (m.evaluation == constness::not_constant)
         address.evaluation = constness::not_constant;
+    qualified_type pointer =
+        qualified_type::make(type_table.pointer_to(referenced), cv_none);
+    if (temporary)
+        address.type = pointer;
     address.node = expression_node(semantic_kind::address, address, t, m.node);
-    analysis_result r = pointer_conversion(
-        at, qualified_type::make(type_table.pointer_to(referenced), cv_none),
-        address, kinds);
-    if (r != analysis_result::well_formed)
-        return r;
+    if (!temporary) {
+        analysis_result r = pointer_conversion(at, pointer, address, kinds);
+        if (r != analysis_result::well_formed)
+            return r;
+    }
     m = expression_meaning();
     m.type = referenced;
     m.category = category;

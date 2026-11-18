@@ -2397,9 +2397,18 @@ class semantic_analysis
     analysis_result pointer_to_derived(token_index at, entity_index from,
                                        entity_index to, qualified_type type,
                                        expression_meaning &m);
-    /* [expr.cast]/4: whether every base on the way from class c to its
-       base is a public non-virtual one */
-    bool public_nonvirtual_path(entity_index c, entity_index base) const;
+    /* the non-virtual bases from class c to its base, outermost first */
+    bool nonvirtual_path(entity_index c, entity_index base,
+                         owned_array<entity_index> &steps) const;
+    /* [expr.cast]/4: whether class c has one base subobject base, on a
+       non-virtual path */
+    bool single_nonvirtual_path(entity_index c, entity_index base) const;
+    /* the pointer m between class derived and its base on a non-virtual
+       path, to type, to the base or to the derived class */
+    analysis_result pointer_along_path(token_index at, entity_index derived,
+                                       entity_index base, qualified_type type,
+                                       bool to_derived, bool access,
+                                       expression_meaning &m);
     analysis_result defaulted_or_deleted_special_member(
         entity_index c, node_index n, syntax_child d, syntax_child body,
         uint8_t access, bool constexpr_specified, bool virtual_specified);

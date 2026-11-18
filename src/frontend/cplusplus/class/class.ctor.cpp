@@ -1819,10 +1819,16 @@ analysis_result semantic_analysis::class_direct_initialization(
     } else if (!entity_table[c].first_constructor) {
         /* T(x): "the type conversion expression is equivalent to the
            corresponding cast expression" ([expr.type.conv]/2): of the
-           class's own type, a copy; C++20's parenthesized aggregate
-           initialization is not analysed */
+           class's own type or of a class derived from it, a copy (of the
+           base class subobject, as the declaration T t(x) is); C++20's
+           parenthesized aggregate initialization is not analysed */
+        bool ambiguous = false;
         if (arguments.size() != 1 ||
-            arguments[0].type.unqualified() != type.unqualified())
+            (arguments[0].type.unqualified() != type.unqualified() &&
+             (type_table[arguments[0].type.unqualified()].kind !=
+                  type_kind::class_type ||
+              !base_step(type_table[arguments[0].type.unqualified()].entity, c,
+                         ambiguous))))
             return not_supported(n, "expr.type.conv");
         r = initialize_with(n, arguments[0], type, true, false, value);
     } else if (is_aggregate(c) &&
