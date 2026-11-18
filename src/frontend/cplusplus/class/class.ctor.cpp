@@ -73,9 +73,12 @@ bool semantic_analysis::declares_special_member(entity_index c,
  * template of a class of namespace scope is known: its declaration is not
  * analysed beyond its form, and a construction of the class, which would
  * consider it ([over.match.ctor]), is not analysed either (construct).
+ * Any other member function template defined in the class is
+ * member_function_template's.
  */
 analysis_result semantic_analysis::member_template_declaration(entity_index c,
-                                                               node_index n)
+                                                               node_index n,
+                                                               uint8_t access)
 {
     const syntax_node &node = tree[n];
     if (node.child_count != 2 ||
@@ -98,6 +101,12 @@ analysis_result semantic_analysis::member_template_declaration(entity_index c,
        explicit-specifier" (and consteval, [dcl.consteval]) */
     uint32_t at = leading_gnu_attributes(inner);
     const syntax_child *dc = tree.children(inner);
+    if (d.kind == syntax_kind::function_definition && at < d.child_count &&
+        !declares_special_member(c, dc[at]) &&
+        !(at + 1 < d.child_count &&
+          syntax_is(tree, dc[at], syntax_kind::decl_specifier_seq) &&
+          declares_special_member(c, dc[at + 1])))
+        return member_function_template(c, n, inner, access);
     if (at < d.child_count &&
         syntax_is(tree, dc[at], syntax_kind::decl_specifier_seq)) {
         node_index seq = dc[at].index();

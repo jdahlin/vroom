@@ -1095,7 +1095,7 @@ semantic_analysis::member_declaration(entity_index c, syntax_child member,
                               declarator_meaning(), access);
     }
     if (node.kind == syntax_kind::template_declaration)
-        return member_template_declaration(c, n);
+        return member_template_declaration(c, n, access);
     if (node.kind != syntax_kind::member_declaration &&
         node.kind != syntax_kind::function_definition)
         return not_supported(n);

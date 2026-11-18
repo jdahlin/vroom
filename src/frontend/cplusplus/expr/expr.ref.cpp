@@ -301,6 +301,9 @@ analysis_result semantic_analysis::member_reference(node_index n,
            function's */
         return not_supported(n, "expr.ref");
     token_index name = children[2].index();
+    /* (the call's callee name, which analysing the object expression's
+       calls changes) */
+    token_index callee = overloaded_callee;
     analysis_result r = expression(children[0], m);
     if (r != analysis_result::well_formed)
         return r;
@@ -370,8 +373,16 @@ analysis_result semantic_analysis::member_reference(node_index n,
     entity_index e = class_member_lookup(c, tokens.identifier(name), ambiguous);
     if (ambiguous)
         return not_supported(n, "class.member.lookup");
-    if (e && entity_table[e].kind == entity_kind::none)
+    if (e && entity_table[e].kind == entity_kind::none) {
+        /* [temp.mem]/1: member function templates, called: the call
+           deduces their arguments (member_template_call) */
+        if (name == callee && member_function_template_of(e)) {
+            member_template_name = e;
+            member_template_object = m;
+            return analysis_result::well_formed;
+        }
         return not_supported(n, "over");
+    }
     if (!e)
         return ill_formed_at_token(name,
                                    "the id-expression shall name a member "

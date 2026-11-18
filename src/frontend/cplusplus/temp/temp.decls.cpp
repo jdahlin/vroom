@@ -664,7 +664,9 @@ uint32_t semantic_analysis::function_template_of(entity_index held) const
             !function_templates[i].unusable &&
             !function_templates[i].is_class &&
             !function_templates[i].is_alias &&
-            !function_templates[i].is_variable)
+            !function_templates[i].is_variable &&
+            /* (a member function template: member_function_template_of) */
+            is_namespace(entity_table[function_templates[i].entity].enclosing))
             return static_cast<uint32_t>(i + 1);
     return 0;
 }
