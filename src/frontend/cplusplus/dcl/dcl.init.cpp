@@ -984,11 +984,13 @@ analysis_result semantic_analysis::class_list_initialization(
            value-initialized"; [dcl.init]/8.1: "if T is a (possibly
            cv-qualified) class type with ... a user-provided ... default
            constructor, then the object is default-initialized" */
-        if (!clauses.empty() || !entity_table[c].first_constructor)
-            /* (3.7) with narrowing checked ([over.match.list]) */
+        if (clauses.empty() && entity_table[c].first_constructor) {
+            owned_array<expression_meaning> none;
+            return construct(list, type, none, 0, result);
+        }
+        if (clauses.empty() || !entity_table[c].first_constructor)
             return not_supported(list, "over.match.list");
-        owned_array<expression_meaning> none;
-        return construct(list, type, none, 0, result);
+        return constructor_list_initialization(list, clauses, type, result);
     }
     if (clauses.size() == 1 &&
         !syntax_is(tree, clauses[0], syntax_kind::braced_init_list)) {
@@ -1006,6 +1008,100 @@ analysis_result semantic_analysis::class_list_initialization(
     if (r != analysis_result::well_formed)
         return r;
     return too_many_clauses(list, clauses, next);
+}
+
+/*
+ * [dcl.init.list]/3.7: "Otherwise, if T is a class type, constructors are
+ * considered.  The applicable constructors are enumerated and the best one
+ * is chosen through overload resolution ([over.match], [over.match.list]).
+ * If a narrowing conversion (see below) is required to convert any of the
+ * arguments, the program is ill-formed."  [over.match.list]/1.2: without
+ * an initializer-list constructor, "the candidate functions are all the
+ * constructors of the class T and the argument list consists of the
+ * elements of the initializer list".  A constructor taking a class named
+ * initializer_list (3.6), and braced elements, are not analysed; explicit
+ * constructors are not declared yet ([class.ctor]), so copy-list-
+ * initialization never chooses one.
+ */
+analysis_result semantic_analysis::constructor_list_initialization(
+    node_index list, const owned_array<syntax_child> &clauses,
+    qualified_type type, initialized_value &result)
+{
+    entity_index c = type_table[type.unqualified()].entity;
+    for (entity_index k = entity_table[c].first_constructor; k;
+         k = entity_table[k].next_constructor) {
+        const struct type &f = type_table[entity_table[k].type.unqualified()];
+        if (!f.parameter_count)
+            continue;
+        qualified_type first =
+            type_table.parameters(entity_table[k].type.unqualified())[0];
+        const struct type &p = type_table[first.unqualified()];
+        if (p.kind == type_kind::lvalue_reference ||
+            p.kind == type_kind::rvalue_reference)
+            first = p.operand;
+        const struct type &named = type_table[first.unqualified()];
+        if (named.kind == type_kind::class_type && named.entity != c)
+            return not_supported(list, "over.match.list");
+    }
+    owned_array<expression_meaning> arguments;
+    for (syntax_child clause : clauses) {
+        if (syntax_is(tree, clause, syntax_kind::braced_init_list))
+            return not_supported(list, "over.match.list");
+        expression_meaning e;
+        analysis_result r = expression(clause, e);
+        if (r != analysis_result::well_formed)
+            return r;
+        arguments.append(e);
+    }
+    /* the arguments before the conversions overload resolution adds */
+    owned_array<expression_meaning> before;
+    for (const expression_meaning &e : arguments)
+        before.append(e);
+    analysis_result r = construct(list, type, arguments, 0, result);
+    if (r != analysis_result::well_formed)
+        return r;
+    entity_index chosen = semantics[result.node].b;
+    if (!chosen || semantics[result.node].kind != semantic_kind::construct)
+        return not_supported(list, "over.match.list");
+    const qualified_type *parameters =
+        type_table.parameters(entity_table[chosen].type.unqualified());
+    uint32_t count =
+        type_table[entity_table[chosen].type.unqualified()].parameter_count;
+    for (size_t i = 0; i < before.size() && i < count; i++) {
+        qualified_type to = parameters[i];
+        const struct type &p = type_table[to.unqualified()];
+        bool reference = p.kind == type_kind::lvalue_reference ||
+                         p.kind == type_kind::rvalue_reference;
+        if (reference)
+            to = p.operand;
+        if (type_table[before[i].type.unqualified()].kind ==
+                type_kind::class_type ||
+            type_table[to.unqualified()].kind == type_kind::class_type)
+            continue;
+        node_index at = list;
+        if (!clauses[i].is_token())
+            at = clauses[i].index();
+        expression_meaning value = before[i];
+        r = operand_value(at, value);
+        if (r != analysis_result::well_formed)
+            return r;
+        bool narrows = false;
+        r = narrowing(at, value, to, narrows);
+        if (r != analysis_result::well_formed)
+            return r;
+        /* [impl.clang] into a reference's temporary: its own warning
+           group (-Wc++11-narrowing-const-reference) */
+        if (narrows &&
+            (reference || tokens.files.behavior.microsoft_extensions))
+            return not_supported(at, "dcl.init.list");
+        if (narrows) {
+            r = extension_used(diagnostic_id::sema_narrowing,
+                               tree[at].first_token, nullptr);
+            if (r != analysis_result::well_formed)
+                return r;
+        }
+    }
+    return analysis_result::well_formed;
 }
 
 /* [dcl.init.aggr]/11: "An initializer-list is ill-formed if the number of
@@ -1070,6 +1166,28 @@ analysis_result semantic_analysis::aggregate_elements(
         if (target.kind != type_kind::array)
             element = types[i];
         initialized_value one;
+        const struct type &of_element = type_table[element.unqualified()];
+        if (next >= clauses.size() &&
+            of_element.kind == type_kind::class_type &&
+            entity_table[of_element.entity].kind == entity_kind::class_type &&
+            (entity_table[of_element.entity].first_constructor ||
+             destroys(of_element.entity)))
+            /* (5.2): an element left out is copy-initialized from an empty
+               initializer list: a constructor call, not analysed */
+            return not_supported(list, "dcl.init.aggr");
+        if (next >= clauses.size() &&
+            (of_element.kind == type_kind::lvalue_reference ||
+             of_element.kind == type_kind::rvalue_reference) &&
+            !(target.kind != type_kind::array && defaults[i]))
+            /* (5.2): "If the element is not a reference, the element is
+               copy-initialized from an empty initializer list"; (5.3):
+               "Otherwise, the program is ill-formed" */
+            return ill_formed(list,
+                              "an element of reference type that is not "
+                              "explicitly initialized and has no default "
+                              "member initializer makes the program "
+                              "ill-formed",
+                              "dcl.init.aggr");
         if (next < clauses.size()) {
             analysis_result r =
                 aggregate_element(list, clauses, next, element, one);

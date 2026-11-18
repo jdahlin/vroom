@@ -323,6 +323,9 @@ struct entity {
     /* a class: its default constructor is declared = default
        ([dcl.fct.def.default]), declared as the implicit one is */
     bool defaulted_default_constructor = false;
+    /* [class.default.ctor]/2: the implicit default constructor is deleted
+       (a subobject without a usable default constructor) */
+    bool implicit_default_deleted = false;
     uint64_t offset = 0;
     /* a class: its non-static data members, in declaration order, are
        semantic_analysis::class_members[first_member .. first_member +
@@ -916,6 +919,7 @@ class semantic_analysis
     bool declares_move_constructor(entity_index c) const;
     bool copy_assignment_deleted(entity_index c) const;
     bool default_constructor_deleted(entity_index c) const;
+    bool default_constructed(entity_index c, entity_index k) const;
     entity_index implicitly_movable(syntax_child operand);
     /* whether destroying an object of class c runs code */
     bool destroys(entity_index c) const;
@@ -1481,6 +1485,9 @@ class semantic_analysis
     class_list_initialization(node_index list,
                               const owned_array<syntax_child> &clauses,
                               qualified_type type, initialized_value &result);
+    analysis_result constructor_list_initialization(
+        node_index list, const owned_array<syntax_child> &clauses,
+        qualified_type type, initialized_value &result);
     analysis_result too_many_clauses(node_index list,
                                      const owned_array<syntax_child> &clauses,
                                      size_t next);

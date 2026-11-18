@@ -508,6 +508,9 @@ analysis_result semantic_analysis::new_expression(node_index n,
            performed."  /7: "If a program calls for the
            default-initialization of an object of a const-qualified type
            T, T shall be a const-default-constructible class type" */
+        if (c && entity_table[c].kind == entity_kind::class_type &&
+            default_constructor_deleted(c))
+            return not_supported(n, "class.default.ctor");
         if (c && entity_table[c].first_constructor) {
             r = construct(n, type, none, object.node, value);
         } else if (type.cv() & cv_const) {

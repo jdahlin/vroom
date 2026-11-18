@@ -855,8 +855,27 @@ analysis_result semantic_analysis::ctor_initializer(syntax_child list,
                 return r;
             continue;
         }
-        const struct type &record =
-            type_table[entity_table[subobjects[i]].type.unqualified()];
+        qualified_type declared = entity_table[subobjects[i]].type;
+        const struct type &record = type_table[declared.unqualified()];
+        if (record.kind == type_kind::lvalue_reference ||
+            record.kind == type_kind::rvalue_reference ||
+            ((declared.cv() & cv_const) &&
+             (record.kind == type_kind::fundamental ||
+              record.kind == type_kind::pointer ||
+              record.kind == type_kind::enumeration)))
+            /* [dcl.init]/12, /7: a reference default-initialized, or an
+               object of const-qualified type that is no class */
+            return ill_formed(current_declaration,
+                              "a reference member or a const member of "
+                              "non-class type is not initialized by the "
+                              "constructor",
+                              "class.base.init");
+        if (record.kind == type_kind::class_type &&
+            entity_table[record.entity].kind == entity_kind::class_type &&
+            default_constructor_deleted(record.entity))
+            /* its implicit default constructor is deleted
+               ([class.default.ctor]/2) */
+            return not_supported(current_declaration, "class.default.ctor");
         if (record.kind != type_kind::class_type ||
             !entity_table[record.entity].first_constructor)
             continue;
@@ -935,6 +954,32 @@ void semantic_analysis::subobject_classes(entity_index c,
         if (type_table[t.unqualified()].kind == type_kind::class_type)
             out.append(type_table[t.unqualified()].entity);
     }
+}
+
+/* whether the implicit default constructor of class c default-constructs a
+   subobject of class k: a base, or a member (or array of them) without a
+   default member initializer ([class.base.init]/9.1) */
+bool semantic_analysis::default_constructed(entity_index c,
+                                            entity_index k) const
+{
+    const entity &x = entity_table[c];
+    for (uint32_t i = 0; i < x.base_count; i++)
+        if (type_table[entity_table[class_bases[x.first_base + i]]
+                           .type.unqualified()]
+                .entity == k)
+            return true;
+    for (uint32_t i = 0; i < x.member_count; i++) {
+        const entity &m = entity_table[class_members[x.first_member + i]];
+        if (m.base_subobject || m.default_initializer)
+            continue;
+        qualified_type t = m.type;
+        while (type_table[t.unqualified()].kind == type_kind::array)
+            t = type_table[t.unqualified()].operand;
+        const struct type &r = type_table[t.unqualified()];
+        if (r.kind == type_kind::class_type && r.entity == k)
+            return true;
+    }
+    return false;
 }
 
 bool semantic_analysis::destroys(entity_index c) const
@@ -1024,7 +1069,9 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
             /* [class.copy.ctor]/8: the implicit move constructor, which
                moves the subobject, is not declared yet */
             return not_supported(n, "class.copy.ctor");
-        bool default_ok = !sub.first_constructor, copy_ok = copies_bytes(k);
+        bool default_ok =
+                 !sub.first_constructor && !sub.implicit_default_deleted,
+             copy_ok = copies_bytes(k);
         for (entity_index q = sub.first_constructor; q;
              q = entity_table[q].next_constructor) {
             if (entity_table[q].access || entity_table[q].deleted)
@@ -1034,8 +1081,18 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
             if (is_copy_constructor(k, q))
                 copy_ok = true;
         }
-        if ((construction && !default_ok && !x.first_constructor) ||
-            (!copy_ok && !declares_copy) ||
+        if (construction && !default_ok && !x.first_constructor &&
+            default_constructed(c, k)) {
+            /* C++03 has no deleted functions: the implicit default
+               constructor's definition is ill-formed, reported at the
+               class */
+            if (!tokens.files.behavior.has(language_feature::rvalue_references))
+                return not_supported(n, "class.default.ctor");
+            /* [class.default.ctor]/2: the implicit default constructor is
+               deleted, an error only where it is used */
+            entity_table[c].implicit_default_deleted = true;
+        }
+        if ((!copy_ok && !declares_copy) ||
             (sub.destructor && entity_table[sub.destructor].access &&
              !x.destructor))
             return not_supported(n, "class.default.ctor");
@@ -1053,7 +1110,7 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
             user_copy = true;
     if (copy && !user_copy)
         declare_implicit(c, special_member::constructor, true);
-    if (!user_constructors &&
+    if (!user_constructors && !entity_table[c].implicit_default_deleted &&
         (construction || entity_table[c].first_constructor))
         declare_implicit(c, special_member::constructor, false);
     if (destruction && !entity_table[c].destructor)
@@ -1077,6 +1134,8 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
 bool semantic_analysis::default_constructor_deleted(entity_index c) const
 {
     const entity &x = entity_table[c];
+    if (x.implicit_default_deleted)
+        return true;
     if (x.union_)
         return false;
     /* a user-declared constructor and no X() = default: no implicit
