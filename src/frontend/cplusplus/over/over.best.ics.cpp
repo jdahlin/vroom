@@ -478,7 +478,7 @@ semantic_analysis::implicit_conversion_sequence(const expression_meaning &a,
     const struct type y = type_table[a.type.unqualified()];
     if (y.kind == type_kind::class_type) {
         /* to a type that is no class: by a conversion function of the
-           argument's class ([over.ics.user]/1: "the second standard
+           argument's class ([over.ics.user]/2: "The second standard
            conversion sequence converts the result of the user-defined
            conversion to the target type") */
         if (!user_defined)
@@ -498,17 +498,7 @@ semantic_analysis::implicit_conversion_sequence(const expression_meaning &a,
             return of_form(sequence::form::bad);
         /* the second standard conversion sequence, kept in the sequence
            for [over.ics.rank]/3.3 */
-        qualified_type result =
-            type_table[entity_table[f].type.unqualified()].operand;
-        expression_meaning value;
-        value.type = result;
-        value.category = value_category::prvalue;
-        const struct type &r = type_table[result.unqualified()];
-        if (r.kind == type_kind::lvalue_reference ||
-            r.kind == type_kind::rvalue_reference) {
-            value.type = r.operand;
-            value.category = value_category::lvalue;
-        }
+        expression_meaning value = conversion_function_result(f);
         sequence s = standard_conversion_sequence(value, parameter);
         if (s.kind != sequence::form::standard)
             return of_form(sequence::form::unknown);

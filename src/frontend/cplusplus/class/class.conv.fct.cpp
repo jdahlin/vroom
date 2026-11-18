@@ -82,7 +82,7 @@ using sequence = semantic_analysis::conversion_sequence;
 
 /* the spelling operator <conversion>, which no identifier has: the name
    of every conversion function, told apart by its type */
-uint32_t semantic_analysis::conversion_function_name()
+uint32_t semantic_analysis::conversion_function_name() const
 {
     static const char rest[] = " <conversion>";
     return operator_identifier(rest, sizeof rest - 1);
@@ -139,16 +139,16 @@ analysis_result semantic_analysis::conversion_type(node_index id,
 }
 
 /*
- * [class.conv.fct]/1: "A declaration whose declarator-id has an
- * unqualified-id that is a conversion-function-id declares a conversion
- * function; its declarator shall be a function declarator ([dcl.fct]) of
- * the form
- *     noptr-declarator parameters-and-qualifiers
- * ... A conversion function shall have no non-object parameters and shall
- * be a non-static member function of a class or class template X; its
- * declared return type is the conversion-type-id"; "No return type can be
- * specified" ([class.conv.fct]/1, [dcl.fct]/12: the decl-specifier-seq has
- * no defining-type-specifier).  The declarators are the member's
+ * [class.conv.fct]/1: "A member function of a class X having no parameters
+ * with a name of the form
+ *     conversion-function-id:
+ *         operator conversion-type-id
+ * specifies a conversion from X to the type specified by the
+ * conversion-type-id.  Such functions are called conversion functions.  A
+ * decl-specifier in the decl-specifier-seq of a conversion function (if
+ * any) shall be neither a defining-type-specifier nor static.  The type of
+ * the conversion function ([dcl.fct]) is "function taking no parameter
+ * returning conversion-type-id"."  The declarators are the member's
  * (member_declarators), with the conversion-type-id's type as the
  * decl-specifier-seq's.
  */
@@ -238,25 +238,25 @@ node_index semantic_analysis::conversion_function_id_of(node_index n) const
     return 0;
 }
 
+entity_index semantic_analysis::own_conversion_functions(entity_index c) const
+{
+    return entity_table.find(c, conversion_function_name());
+}
+
 entity_index
 semantic_analysis::conversion_function_declared_by(entity_index c,
                                                    node_index definition)
 {
-    for (entity_index f = entity_table.find(c, conversion_function_name()); f;
+    for (entity_index f = own_conversion_functions(c); f;
          f = entity_table[f].next_overload)
         if (declared_by(f, definition))
             return f;
     return 0;
 }
 
-bool semantic_analysis::has_conversion_functions(entity_index c) const
+bool semantic_analysis::base_has_conversion_functions(entity_index c) const
 {
     const entity &x = entity_table[c];
-    if (x.kind != entity_kind::class_type ||
-        entity_table.find(
-            c,
-            const_cast<semantic_analysis *>(this)->conversion_function_name()))
-        return true;
     for (uint32_t i = 0; i < x.base_count; i++)
         if (has_conversion_functions(
                 type_table[entity_table[class_bases[x.first_base + i]]
@@ -266,24 +266,56 @@ bool semantic_analysis::has_conversion_functions(entity_index c) const
     return false;
 }
 
+bool semantic_analysis::has_conversion_functions(entity_index c) const
+{
+    return entity_table[c].kind != entity_kind::class_type ||
+           own_conversion_functions(c) || base_has_conversion_functions(c);
+}
+
 /*
- * [over.match.conv]/1: "Under the conditions specified in [dcl.init], as
- * part of an initialization of an object of non-class type, a conversion
- * function can be invoked to convert an initializer expression of class
- * type to the type of the object being initialized. ... The permissible
- * types for non-explicit conversion functions are those that can be
- * converted to type T via a standard conversion sequence.  For
- * direct-initialization, the permissible types for explicit conversion
- * functions are those that can be converted to type T with a (possibly
- * trivial) qualification conversion" (the type itself, here); /2: "The
- * argument list has one argument, which is the initializer expression.
- * [Note: This argument will be compared against the implicit object
- * parameter of the conversion functions.]"  [over.match.best]/2.2: then
- * "the context is an initialization by user-defined conversion ... and the
+ * [over.match.conv]/1: "A call to a conversion function returning
+ * "reference to X" is a glvalue of type X"; [expr.call]/14: "A function
+ * call is an lvalue if the result type is an lvalue reference type or an
+ * rvalue reference to function type, an xvalue if the result type is an
+ * rvalue reference to object type, and a prvalue otherwise."
+ */
+expression_meaning
+semantic_analysis::conversion_function_result(entity_index f) const
+{
+    qualified_type result =
+        type_table[entity_table[f].type.unqualified()].operand;
+    expression_meaning value;
+    value.type = result;
+    value.category = value_category::prvalue;
+    const struct type &r = type_table[result.unqualified()];
+    if (r.kind == type_kind::lvalue_reference) {
+        value.type = r.operand;
+        value.category = value_category::lvalue;
+    } else if (r.kind == type_kind::rvalue_reference) {
+        value.type = r.operand;
+        value.category = value_category::xvalue;
+        if (type_table[r.operand.unqualified()].kind == type_kind::function)
+            value.category = value_category::lvalue;
+    }
+    return value;
+}
+
+/*
+ * [over.match.conv]/1: "The conversion functions of S and its base classes
+ * are considered.  Those non-explicit conversion functions that are not
+ * hidden within S and yield type T or a type that can be converted to type
+ * T via a standard conversion sequence ([over.ics.scs]) are candidate
+ * functions.  For direct-initialization, those explicit conversion
+ * functions that are not hidden within S and yield type T or a type that
+ * can be converted to type T with a qualification conversion ([conv.qual])
+ * are also candidate functions."  /2: "The argument list has one argument,
+ * which is the initializer expression."  [over.match.best]/2.2: then "the
+ * context is an initialization by user-defined conversion ... and the
  * standard conversion sequence from the return type of F1 to the
  * destination type ... is a better conversion sequence than the standard
  * conversion sequence from the return type of F2".  Only the class's own
- * conversion functions: one with base classes is not analysed.
+ * conversion functions: one with base classes that have some is not
+ * analysed.
  */
 entity_index
 semantic_analysis::conversion_function_for(const expression_meaning &m,
@@ -296,38 +328,28 @@ semantic_analysis::conversion_function_for(const expression_meaning &m,
         unknown = true;
         return 0;
     }
-    uint32_t name = conversion_function_name();
-    entity_index first = entity_table.find(c, name);
     /* a base class's conversion functions (inherited by
        [class.conv.fct]/4) are not analysed: a class with them is
        unknown */
-    const entity &x = entity_table[c];
-    for (uint32_t i = 0; i < x.base_count; i++)
-        if (has_conversion_functions(
-                type_table[entity_table[class_bases[x.first_base + i]]
-                               .type.unqualified()]
-                    .entity)) {
-            unknown = true;
-            return 0;
-        }
+    if (base_has_conversion_functions(c)) {
+        unknown = true;
+        return 0;
+    }
     entity_index best = 0;
     sequence best_object, best_second;
-    for (entity_index f = first; f; f = entity_table[f].next_overload) {
+    for (entity_index f = own_conversion_functions(c); f;
+         f = entity_table[f].next_overload) {
         const entity &x = entity_table[f];
         if (!x.conversion_function)
             continue;
-        qualified_type result = type_table[x.type.unqualified()].operand;
-        expression_meaning value;
-        value.type = result;
-        value.category = value_category::prvalue;
-        const struct type r = type_table[result.unqualified()];
-        if (r.kind == type_kind::lvalue_reference ||
-            r.kind == type_kind::rvalue_reference) {
-            value.type = r.operand;
-            value.category = value_category::lvalue;
-        }
+        expression_meaning value = conversion_function_result(f);
+        /* explicit: the type itself or a qualification conversion to it */
         if (x.explicit_ &&
-            (!direct || value.type.unqualified() != to.unqualified()))
+            (!direct ||
+             (value.type.unqualified() != to.unqualified() &&
+              !qualification_convertible(
+                  qualified_type::make(value.type.unqualified(), cv_none),
+                  qualified_type::make(to.unqualified(), cv_none)))))
             continue;
         sequence object = object_sequence(m, f);
         if (object.kind != sequence::form::standard)

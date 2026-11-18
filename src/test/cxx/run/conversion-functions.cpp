@@ -26,6 +26,17 @@ struct Ref {
     int v;
     operator int &() { return v; }
 };
+/* explicit, to a type a qualification conversion makes const int *
+   ([over.match.conv]/1) */
+static int seven = 7;
+struct Pointer {
+    explicit operator int *() { return &seven; }
+};
+/* an rvalue reference result: an xvalue ([expr.call]/14) */
+struct Moved {
+    int v;
+    operator int &&() { return static_cast<int &&>(v); }
+};
 
 static int twice(int x) { return 2 * x; }
 /* [over.ics.rank]/3.3: one conversion function, the better second
@@ -57,6 +68,13 @@ int main()
     Ref r = {3};
     int &rv = r;
     rv = 5;
+    Pointer pointer;
+    const int *seen(pointer);
+    Moved moved = {9};
+    int mi = moved;
+    long ml = moved;
+    if (*seen != 7 || mi != 9 || ml != 9)
+        return 3;
     if (which(i) != 1)
         return 2;
     if (a != 20 || twice(i) != 40 || as_long(i) != 20 || *p != 'y' ||

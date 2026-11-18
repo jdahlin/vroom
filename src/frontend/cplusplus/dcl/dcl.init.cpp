@@ -460,13 +460,8 @@ analysis_result semantic_analysis::reference_binding(node_index at,
         bool const_lvalue = !rvalue_reference && (t1.cv() & cv_const) &&
                             !(t1.cv() & cv_volatile);
         if (!const_lvalue) {
-            entity_index c2 = y.entity;
-            uint32_t count = 0;
-            for (entity_index f =
-                     entity_table.find(c2, conversion_function_name());
-                 f; f = entity_table[f].next_overload)
-                count++;
-            if (count > 1)
+            entity_index f = own_conversion_functions(y.entity);
+            if (f && entity_table[f].next_overload)
                 return not_supported(at, "over.match.ref");
         }
         bool converted = false;

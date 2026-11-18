@@ -27,8 +27,9 @@
  *
  * What analysis has: user-declared constructors and a destructor of a class
  * whose non-virtual bases and members they construct and destroy
- * ([class.base.init], [class.dtor]/13); no defaulted explicit, defaulted, deleted, constexpr or virtual ones, no
- * default arguments, no delegating constructor.
+ * ([class.base.init], [class.dtor]/13), explicit ones among them (not
+ * defaulted); no defaulted, deleted, constexpr or virtual ones, no default
+ * arguments, no delegating constructor.
  */
 #include "../cplusplus-internal.h"
 #include "frontend/cplusplus/sema.h"
@@ -238,11 +239,9 @@ bool semantic_analysis::function_specifiers_only(node_index seq,
  */
 analysis_result semantic_analysis::special_member_declarator(
     entity_index c, node_index declaration, syntax_child d, uint8_t access,
-    bool definition, bool constexpr_specified, bool virtual_specified)
+    bool definition, bool constexpr_specified, bool virtual_specified,
+    bool explicit_specified)
 {
-    /* set by member_declaration for this declaration alone */
-    bool explicit_specified = special_member_explicit;
-    special_member_explicit = false;
     qualified_type type = qualified_type::make(
         type_table.fundamental(fundamental_type::void_), cv_none);
     declarator_meaning m;

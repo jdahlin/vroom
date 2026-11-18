@@ -2425,19 +2425,14 @@ class semantic_analysis
                                          const specified &s, bool definition);
     /* [class.ctor], [class.dtor]: a member-declaration without a
        decl-specifier-seq: a constructor or destructor of c */
-    analysis_result special_member_declarator(entity_index c,
-                                              node_index declaration,
-                                              syntax_child d, uint8_t access,
-                                              bool definition,
-                                              bool constexpr_specified = false,
-                                              bool virtual_specified = false);
+    analysis_result special_member_declarator(
+        entity_index c, node_index declaration, syntax_child d, uint8_t access,
+        bool definition, bool constexpr_specified = false,
+        bool virtual_specified = false, bool explicit_specified = false);
     /* virtual_specified: in a class, where virtual is one of them */
     bool function_specifiers_only(node_index seq, bool &constexpr_specified,
                                   bool *virtual_specified = nullptr,
                                   bool *explicit_specified = nullptr) const;
-    /* the constructor special_member_declarator declares is explicit
-       ([dcl.fct.spec]/3) */
-    bool special_member_explicit = false;
     /* the function-body of a constructor or destructor definition
        (last_declared): ctor-initializer_opt compound-statement */
     analysis_result special_member_body(node_index definition,
@@ -3230,13 +3225,18 @@ class semantic_analysis
        parameter of the member function f */
     conversion_sequence object_sequence(const expression_meaning &object,
                                         entity_index f) const;
-    /* [over.match.conv]: the conversion function that converts the object
-       m (of class type) to the type to, a type that is no class; 0 when
-       none does, with ambiguous or unknown (analysis cannot tell) set */
     /* whether class c or a base class of it declares a conversion
        function ([class.conv.fct]/4: "Conversion functions are
        inherited") */
     bool has_conversion_functions(entity_index c) const;
+    /* ... a base class of c does */
+    bool base_has_conversion_functions(entity_index c) const;
+    /* the first conversion function class c itself declares (the others
+       follow by next_overload), 0 if none */
+    entity_index own_conversion_functions(entity_index c) const;
+    /* the value a call of the conversion function f gives: its type and
+       value category ([expr.call]/14) */
+    expression_meaning conversion_function_result(entity_index f) const;
     /* the conversion-function-id that is the declarator-id of the
        member-declaration or function-definition n, 0 if none */
     node_index conversion_function_id_of(node_index n) const;
@@ -3244,6 +3244,9 @@ class semantic_analysis
        none */
     entity_index conversion_function_declared_by(entity_index c,
                                                  node_index definition);
+    /* [over.match.conv]: the conversion function that converts the object
+       m (of class type) to the type to, a type that is no class; 0 when
+       none does, with ambiguous or unknown (analysis cannot tell) set */
     entity_index conversion_function_for(const expression_meaning &m,
                                          qualified_type to, bool direct,
                                          bool &ambiguous, bool &unknown);
@@ -3320,10 +3323,10 @@ class semantic_analysis
     uint32_t operator_name(preprocessing_op_or_punc op);
     /* operator followed by the spelling rest, as an identifier number (no
        identifier is spelt so) */
-    uint32_t operator_identifier(const char *rest, size_t length);
+    uint32_t operator_identifier(const char *rest, size_t length) const;
     /* [class.conv.fct]: the name every conversion function has here (its
        type tells them apart), and the conversion-type-id's type */
-    uint32_t conversion_function_name();
+    uint32_t conversion_function_name() const;
     analysis_result conversion_type(node_index id, qualified_type &type);
     /* [class.conv.fct]: a member-declaration whose declarator-id is a
        conversion-function-id, in class c */

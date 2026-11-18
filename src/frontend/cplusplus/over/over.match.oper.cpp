@@ -12,9 +12,10 @@
  * built-in operator is to be invoked to implement the operator."
  *
  * Built-in candidates ([over.built]) for an operand of a class with
- * conversion functions are not formed (unsupported, but for ! && ||
- * without an operator function); for an operand of another class none is
- * viable; for an
+ * conversion functions are not formed: such an operand is not supported,
+ * but for ! && || when no operator function is a candidate (their
+ * operands are then contextually converted to bool, not analysed here);
+ * for an operand of another class none is viable; for an
  * operand of enumeration type one may be, and an operator function is
  * chosen only where it is better than every built-in candidate could be.
  * C++20's rewritten candidates (/3.4) are those of operator== and
@@ -66,10 +67,12 @@ analysis_result semantic_analysis::overloaded_operator(
     if (!any_class && !any_enumeration)
         return analysis_result::well_formed;
     /* an operand of a class with conversion functions: built-in candidates
-       ([over.built]) may be viable, which are not formed; ! && || alone
-       when no operator function is declared, whose operands are
-       contextually converted to bool ([over.match.oper]/7, [expr.unary.op]/9,
-       [expr.log.and]/1, [expr.log.or]/1) */
+       ([over.built]) may be viable, which are not formed.  ! && || go on
+       here only to find whether an operator function is a candidate:
+       with one, not supported (below); with none, their operands are
+       contextually converted to bool ([over.match.oper]/7,
+       [expr.unary.op]/9, [expr.log.and]/1, [expr.log.or]/1) by the
+       built-in operator, not by this function */
     bool converts = false;
     for (const expression_meaning &e : operands) {
         const struct type &t = type_table[e.type.unqualified()];

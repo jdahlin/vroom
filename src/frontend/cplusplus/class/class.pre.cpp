@@ -1046,7 +1046,6 @@ semantic_analysis::member_declaration(entity_index c, syntax_child member,
                                  &virtual_specified, &explicit_specified) &&
         declares_special_member(c, children[1]))
         at = 1;
-    special_member_explicit = explicit_specified;
     if (!node.child_count || at ||
         !syntax_is(tree, children[0], syntax_kind::decl_specifier_seq)) {
         /* [class.mem]/12: "The decl-specifier-seq may be omitted in
@@ -1077,9 +1076,9 @@ semantic_analysis::member_declaration(entity_index c, syntax_child member,
                                       preprocessing_op_or_punc::SEMICOLON))
                 /* = default, = delete, a pure-specifier */
                 return not_supported(n, "dcl.fct.def");
-            return special_member_declarator(c, n, children[at], access, false,
-                                             constexpr_specified,
-                                             virtual_specified);
+            return special_member_declarator(
+                c, n, children[at], access, false, constexpr_specified,
+                virtual_specified, explicit_specified);
         }
         if (node.child_count != at + 2 ||
             !syntax_is(tree, children[at + 1], syntax_kind::function_body))
@@ -1100,9 +1099,9 @@ semantic_analysis::member_declaration(entity_index c, syntax_child member,
                 c, n, children[at], children[at + 1], access,
                 constexpr_specified, virtual_specified);
         }
-        analysis_result r =
-            special_member_declarator(c, n, children[at], access, true,
-                                      constexpr_specified, virtual_specified);
+        analysis_result r = special_member_declarator(
+            c, n, children[at], access, true, constexpr_specified,
+            virtual_specified, explicit_specified);
         if (r == analysis_result::well_formed)
             bodies.append(n);
         return r;
