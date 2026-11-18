@@ -903,12 +903,12 @@ analysis_result semantic_analysis::call_with(
                 type_kind::function)
             m.category = value_category::xvalue;
     }
-    /* [expr.const]/5.2: "an invocation of a non-constexpr function": no
-       function analysis has a declaration of is constexpr, but a pointer
-       or reference may be to one it has none of */
+    /* [expr.const]/5.2: "an invocation of a non-constexpr function"; a
+       constexpr function's invocation is the evaluator's
+       (evaluate_constant), and a pointer or reference may be to a function
+       analysis has no declaration of */
     m.evaluation = constness::unknown;
-    if (member ||
-        (f.entity && entity_table[f.entity].kind == entity_kind::function))
+    if (called && !entity_table[called].constexpr_)
         m.evaluation = constness::not_constant;
     /* a constexpr member function's invocation is the evaluator's */
     if (called && entity_table[called].constexpr_) {

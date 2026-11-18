@@ -974,15 +974,12 @@ analysis_result semantic_analysis::declare_with_initializer(
         kind = entity_kind::typedef_name;
     else if (type_table[type.unqualified()].kind == type_kind::function)
         kind = entity_kind::function;
-    if (s.constexpr_ && kind == entity_kind::function)
-        /* a constexpr function's rules ([dcl.constexpr]/3) */
-        return not_supported(declaration, "dcl.constexpr");
     /* [ext:gnu_attributes] noreturn on what is no function (a pointer to
        function, a typedef-name): GCC and clang make it part of the
        function type pointed to */
     if ((gnu_flags & gnu_noreturn) && kind != entity_kind::function)
         return not_supported(declaration, "ext.gnu");
-    if (s.constexpr_) {
+    if (s.constexpr_ && kind == entity_kind::variable) {
         /* [dcl.constexpr]/10: "A constexpr specifier used in an object
            declaration declares the object as const.  Such an object shall
            have literal type and shall be initialized." */
@@ -1177,6 +1174,22 @@ analysis_result semantic_analysis::declare_with_initializer(
         constexpr_calls != calls_before)
         return not_supported(declaration, "basic.start.static");
     entity_table[declared_entity].bound_unknown = false;
+    /* [basic.start.static]/2: "Constant initialization is performed if a
+       variable or temporary object with static or thread storage duration
+       is constant-initialized": whether an initializer that invokes a
+       constexpr function is one is the evaluator's, which cannot tell yet
+       (lowering would initialize it dynamically, as clang does not) */
+    if (!entity_table[declared_entity].automatic &&
+        constexpr_calls != calls_before &&
+        value.evaluation == constness::unknown) {
+        constant_value v;
+        bool constant = false;
+        r = evaluate_constant(declaration, value.node, v, constant);
+        if (r != analysis_result::well_formed)
+            return r;
+        if (constant)
+            return not_supported(declaration, "basic.start.static");
+    }
     const struct type record = type_table[type.unqualified()];
     /* [basic.def]/5: "In the definition of an object, the type of that
        object shall not be an incomplete type" */
@@ -1211,8 +1224,26 @@ analysis_result semantic_analysis::declare_with_initializer(
                                        "the initialization shall be a "
                                        "constant expression",
                                        "dcl.constexpr");
-        if (value.evaluation == constness::unknown)
+        if (value.evaluation == constness::unknown) {
+            /* what analysis did not fold: the evaluator's, which has no
+               value to give yet: an initializer it evaluates is
+               unsupported until lowering takes the value as static data
+               (lowering emits a call as a call) */
+            constant_value v;
+            bool constant = false;
+            analysis_result r =
+                evaluate_constant(declaration, value.node, v, constant);
+            if (r != analysis_result::well_formed)
+                return r;
+            if (!constant)
+                return ill_formed_at_token(m.id,
+                                           "in any constexpr variable "
+                                           "declaration, the full-expression "
+                                           "of the initialization shall be a "
+                                           "constant expression",
+                                           "dcl.constexpr");
             return not_supported(declaration, "expr.const");
+        }
     }
     /* [expr.const]/3: "A variable is usable in constant expressions after
        its initializing declaration is encountered if it is a constexpr

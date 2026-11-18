@@ -154,8 +154,13 @@ analysis_result semantic_analysis::constant_expression(
     node_index at, const expression_meaning &m, bool &constant)
 {
     constant = false;
-    if (m.evaluation == constness::unknown)
-        return not_supported(at, "expr.const");
+    if (m.evaluation == constness::unknown) {
+        /* what the operators could not fold: the evaluator's */
+        if (!m.node)
+            return not_supported(at, "expr.const");
+        constant_value v;
+        return evaluate_constant(at, m.node, v, constant);
+    }
     constant = m.evaluation == constness::constant;
     return analysis_result::well_formed;
 }

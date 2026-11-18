@@ -1249,6 +1249,29 @@ lines:
   static_assert's).  cxx-sema 0 we reject, 0 refuted (types 33262,
   constants 13335, lookup 10063 verified); cxx-run 124/124; cxx-c-suites
   2206 pass, 0 wrong, the 8 lost passes S3's commit has (`#pragma pack`).
+  Commit 2 done: the evaluator's skeleton.  `constant_value` (integer to
+  128 bits, floating, long double, pointer, lvalue, array, class object,
+  union object) and [implimits]/2's two quantities in `sema.h`;
+  `expr/expr.const.evaluate.cpp`: `evaluate_constant`, a case for every
+  `semantic_kind` (a node analysis folded gives its value, integer or
+  double; the others unsupported [expr.const]), `evaluate_call` and
+  `evaluate_statement` with the depth and full-expression counters.
+  `constant_expression` and a constexpr variable's initializer ask it for
+  what analysis did not fold.  Non-member constexpr functions are
+  declared and called ([dcl.constexpr]/1: inline; /3's rules on the body
+  not checked), their invocations `unknown` rather than `not_constant`; an
+  initializer of a variable of static storage duration that invokes one
+  is unsupported [basic.start.static], since /2 makes it constant
+  initialization when it can be (clang folds `int g = square(7);`).
+  Constexpr member functions stay unsupported (S4), as do `consteval`
+  ([dcl.constexpr]) and `constinit` ([dcl.constinit]).  Not done, for
+  when the evaluator gives values: lowering a value as static data, and
+  a `constant-claims` dump kind (constants ride on `type-claims`).
+  `src/test/cxx/run/constexpr-functions.cpp`.  cxx-sema: declarations as
+  clang 26169 -> 26813, 0 we reject, 0 refuted (types 40156, constants
+  15574, lookup 11445, symbols 1461 verified), we accept and clang
+  rejects 447 -> 511 (the bodies' rules); cxx-run 128/128; cxx-c-suites
+  unchanged.
 
 ### S7. Exceptions and RTTI
 

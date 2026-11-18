@@ -658,6 +658,15 @@ analysis_result semantic_analysis::declare(node_index declaration,
        where it is used; an entity is inline once a declaration says so */
     if (s.inline_)
         entity_table[declared_entity].inline_ = true;
+    /* [dcl.constexpr]/1: "A function or static data member declared with
+       the constexpr or consteval specifier is implicitly an inline function
+       or variable"; a function's other rules ([dcl.constexpr]/3, its body's
+       /3.4) are not checked yet */
+    if (s.constexpr_ &&
+        entity_table[declared_entity].kind == entity_kind::function) {
+        entity_table[declared_entity].inline_ = true;
+        entity_table[declared_entity].constexpr_ = true;
+    }
     declared_name d;
     d.declaration = declaration;
     d.outermost = current_declaration;

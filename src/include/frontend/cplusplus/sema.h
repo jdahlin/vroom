@@ -649,6 +649,53 @@ struct declared_name {
 
 /* ---- values of constant expressions (expr/expr.const.cpp) ---- */
 
+/* [expr.const]/11: the value a constant expression's evaluation gives, as
+   the evaluator of the semantic tree (expr/expr.const.evaluate.cpp)
+   computes it.  Only integer and double are filled today; the other kinds
+   are the shapes [basic.types] objects have, which the evaluator answers
+   unsupported ([expr.const]) for until it models them. */
+enum class constant_value_kind : uint8_t {
+    none,
+    /* [basic.fundamental]/11, up to 128 bits */
+    integer,
+    /* [basic.fundamental]/12: float and double as binary64; long double
+       as binary128 (softfloat.h), not filled yet */
+    floating,
+    long_double,
+    /* [basic.compound]/3: a null pointer value, or an object's address
+       and an offset in it: designator is the entity, offset bytes */
+    pointer,
+    /* a glvalue: the object it designates, as pointer */
+    lvalue,
+    /* [dcl.array]: elements, [class.mem]: members, [class.union]: the
+       active member: values in constant_evaluation::elements */
+    array,
+    class_object,
+    union_object,
+};
+
+struct constant_value {
+    constant_value_kind kind = constant_value_kind::none;
+    unsigned __int128 integer = 0;
+    double floating = 0;
+    /* pointer and lvalue: the entity designated, 0 for a null pointer;
+       the byte offset in it */
+    entity_index designator = 0;
+    uint64_t offset = 0;
+    /* array, class_object, union_object: the values of the elements or
+       members are elements[first .. first + count); union_object: count 1,
+       member the active member */
+    uint32_t first = 0, count = 0;
+    entity_index member = 0;
+};
+
+/* [implimits]/2's quantities for constant evaluation, the bracketed
+   numbers: "Recursive constexpr function invocations [512]",
+   "Full-expressions evaluated within a core constant expression
+   [1048576]" */
+constexpr uint32_t constexpr_invocation_limit = 512;
+constexpr uint32_t constant_full_expression_limit = 1048576;
+
 /* [basic.fundamental]/2: the integer types; [basic.fundamental]/12: the
    floating-point types (_BitInt and _Float16 are neither here: analysis
    has no rules for them yet) */
@@ -1721,6 +1768,34 @@ class semantic_analysis
        type bool, from the expression e */
     analysis_result bool_constant_expression(node_index at, syntax_child e,
                                              bool &constant, bool &value);
+    /* [expr.const]/5: the evaluation of the semantic tree node as a core
+       constant expression (expr/expr.const.evaluate.cpp): well_formed with
+       its value in v and constant true; constant false if it is not one;
+       unsupported where the evaluator has no rules yet */
+    analysis_result evaluate_constant(node_index at, uint32_t node,
+                                      constant_value &v, bool &constant);
+    /* one evaluation's state: the objects of the evaluation (locals and
+       parameters of the constexpr functions it calls, [expr.const]/5.8:
+       their lifetime began within it), the depth of invocations and the
+       full-expressions evaluated, against [implimits] */
+    struct constant_evaluation {
+        owned_array<constant_value> elements;
+        struct object {
+            entity_index entity = 0;
+            uint32_t frame = 0;
+            constant_value value;
+        };
+        owned_array<object> objects;
+        uint32_t depth = 0;
+        uint32_t full_expressions = 0;
+    };
+    analysis_result evaluate_node(constant_evaluation &state, uint32_t node,
+                                  constant_value &v, bool &constant);
+    analysis_result evaluate_statement(constant_evaluation &state,
+                                       uint32_t node, bool &constant,
+                                       bool &returned, constant_value &result);
+    analysis_result evaluate_call(constant_evaluation &state, uint32_t node,
+                                  constant_value &v, bool &constant);
 
     /* ---- initialization ([dcl.init]) ---- */
     struct initialized_value {
