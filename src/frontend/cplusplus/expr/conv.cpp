@@ -588,18 +588,8 @@ bool semantic_analysis::function_pointer_convertible(qualified_type from,
     const struct type t0 = type_table[to.unqualified()];
     if (f0.kind != type_kind::pointer || t0.kind != type_kind::pointer)
         return false;
-    const struct type f = type_table[f0.operand.unqualified()];
-    const struct type t = type_table[t0.operand.unqualified()];
-    if (f.kind != type_kind::function || t.kind != type_kind::function ||
-        !f.non_throwing || t.non_throwing || !(f.operand == t.operand) ||
-        f.variadic != t.variadic || f.parameter_count != t.parameter_count)
-        return false;
-    const qualified_type *fp = type_table.parameters(f0.operand.unqualified());
-    const qualified_type *tp = type_table.parameters(t0.operand.unqualified());
-    for (uint32_t i = 0; i < f.parameter_count; i++)
-        if (!(fp[i] == tp[i]))
-            return false;
-    return true;
+    return type_table[f0.operand.unqualified()].non_throwing &&
+           differ_in_exceptions(f0.operand, t0.operand);
 }
 
 bool semantic_analysis::qualification_convertible(qualified_type from,

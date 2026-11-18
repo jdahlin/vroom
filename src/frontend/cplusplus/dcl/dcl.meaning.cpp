@@ -306,6 +306,26 @@ token_index semantic_analysis::declarator_id(syntax_child d) const
     return 0;
 }
 
+/* whether a template-declaration's innermost declaration is a
+   function-definition or a simple-declaration with declarators */
+static bool declares_by_declarator(const syntax_tree &tree, node_index n)
+{
+    while ((tree[n].kind == syntax_kind::template_declaration ||
+            tree[n].kind == syntax_kind::explicit_specialization) &&
+           tree[n].child_count &&
+           !tree.children(n)[tree[n].child_count - 1].is_token())
+        n = tree.children(n)[tree[n].child_count - 1].index();
+    if (tree[n].kind == syntax_kind::function_definition)
+        return true;
+    if (tree[n].kind != syntax_kind::simple_declaration)
+        return false;
+    for (uint32_t i = 0; i < tree[n].child_count; i++)
+        if (syntax_is(tree, tree.children(n)[i],
+                      syntax_kind::init_declarator_list))
+            return true;
+    return false;
+}
+
 /*
  * A declaration not analysed (unsupported or not parsed) still declares
  * its names, and a later declaration of one of them is a redeclaration whose
@@ -366,6 +386,12 @@ void semantic_analysis::hold_names(node_index declaration)
                          (node.kind == syntax_kind::simple_declaration ||
                           node.kind == syntax_kind::function_definition ||
                           node.kind == syntax_kind::condition);
+    /* a template of a function or of declarators: what its declarator-ids
+       name (below), not the types its declaration names (an explicit
+       specialization's name is a template-id: all its names held) */
+    if (!by_declarator && node.kind == syntax_kind::template_declaration &&
+        parsed_completely(declaration))
+        by_declarator = declares_by_declarator(tree, declaration);
     if (node.kind == syntax_kind::using_directive) {
         /* [namespace.udir]: what it makes visible is not known */
         entity_table[current_scope].unknown_names = true;
@@ -496,7 +522,8 @@ void semantic_analysis::hold_names(node_index declaration)
     } else if (node.kind == syntax_kind::condition) {
         if (node.child_count > 1)
             ids.append(declarator_id(tree.children(declaration)[1]));
-    } else {
+    } else if (node.kind != syntax_kind::template_declaration) {
+        /* (a template's: its declaration's, below) */
         declarator_ids(declaration);
     }
     /* a template's declaration: its declarator-ids too, which may be in
@@ -911,15 +938,20 @@ analysis_result semantic_analysis::declarator(node_index declaration,
     if (!has_head)
         return analysis_result::well_formed;
     analysis_result r = declarator(declaration, head, type, m);
-    if (r != analysis_result::well_formed)
-        return r;
-    /* [except.spec]/8: "The exception specification for an implicitly-
-       declared destructor, or a destructor without a noexcept-specifier,
-       is potentially-throwing if and only if any of the destructors for
-       any of its potentially constructed subobjects is potentially-
-       throwing" (none is, of the classes analysed); /12: "A deallocation
-       function with no explicit noexcept-specifier has a non-throwing
-       exception specification." */
+    if (r == analysis_result::well_formed)
+        implicitly_non_throwing(m, type);
+    return r;
+}
+
+/* [except.spec]/8: "The exception specification for an implicitly-
+   declared destructor, or a destructor without a noexcept-specifier, is
+   potentially-throwing if and only if any of the destructors for any of its
+   potentially constructed subobjects is potentially-throwing" (none is, of
+   the classes analysed); /12: "A deallocation function with no explicit
+   noexcept-specifier has a non-throwing exception specification." */
+void semantic_analysis::implicitly_non_throwing(const declarator_meaning &m,
+                                                qualified_type &type)
+{
     const struct type &f = type_table[type.unqualified()];
     bool deallocation = m.allocation == allocation_function::delete_ ||
                         m.allocation == allocation_function::delete_array;
@@ -936,7 +968,6 @@ analysis_result semantic_analysis::declarator(node_index declaration,
                                 f.variadic, true),
             type.cv());
     }
-    return r;
 }
 
 } // namespace cplusplus

@@ -157,19 +157,10 @@ semantic_analysis::clang_type_transformation(node_index n, qualified_type &type)
         uint32_t name = tokens.identifier(keyword);
         /* the operand: its type and cv-qualifiers */
         uint64_t operand = (uint64_t(t.cv()) << 32) | t.unqualified();
-        for (entity_index e : type_transformations)
-            if (entity_table[e].value == operand &&
-                entity_table[e].name == name) {
-                type = entity_table[e].type;
-                return analysis_result::well_formed;
-            }
-        entity_index e =
-            entity_table.make(entity_kind::type_transformation, name, 0);
-        entity_table[e].value = operand;
-        entity_table[e].type = qualified_type::make(
-            type_table.of_entity(type_kind::dependent, e), cv_none);
-        type_transformations.append(e);
-        type = entity_table[e].type;
+        type = qualified_type::make(
+            dependent_type(type_transformations,
+                           entity_kind::type_transformation, name, operand),
+            cv_none);
         return analysis_result::well_formed;
     }
     const struct type *k = &type_table[t.unqualified()];

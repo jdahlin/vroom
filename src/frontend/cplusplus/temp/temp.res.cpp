@@ -139,14 +139,24 @@ analysis_result semantic_analysis::typename_type(node_index n, type_index &type,
 type_index semantic_analysis::dependent_member_type(type_index qualifier,
                                                     uint32_t name)
 {
-    for (entity_index e : dependent_members)
-        if (entity_table[e].value == qualifier && entity_table[e].name == name)
+    return dependent_type(dependent_members, entity_kind::dependent_member,
+                          name, qualifier);
+}
+
+/* a dependent type of kind, hash-consed in list on name and value: the
+   same for the same parts ([temp.over.link]) */
+type_index semantic_analysis::dependent_type(owned_array<entity_index> &list,
+                                             entity_kind kind, uint32_t name,
+                                             uint64_t value)
+{
+    for (entity_index e : list)
+        if (entity_table[e].value == value && entity_table[e].name == name)
             return entity_table[e].type.unqualified();
-    entity_index e = entity_table.make(entity_kind::dependent_member, name, 0);
-    entity_table[e].value = qualifier;
+    entity_index e = entity_table.make(kind, name, 0);
+    entity_table[e].value = value;
     entity_table[e].type = qualified_type::make(
         type_table.of_entity(type_kind::dependent, e), cv_none);
-    dependent_members.append(e);
+    list.append(e);
     return entity_table[e].type.unqualified();
 }
 

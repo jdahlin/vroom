@@ -235,8 +235,11 @@ semantic_analysis::function_template_definition(node_index n,
     name_uses.resize(uses_before);
     if (r != analysis_result::well_formed)
         return r;
+    /* an operator function template (libc++'s byte& operator<<=(byte&,
+       _Integer)): its name is operator@ ([over.oper]); not new or delete */
     if (!m.has_id || m.qualifier || m.qualified_namespace ||
-        m.operator_function || m.literal_operator || function_cv ||
+        m.allocation != allocation_function::none || m.literal_operator ||
+        function_cv ||
         type_table[type.unqualified()].kind != type_kind::function)
         return not_supported(n, "temp.fct");
     /* [ext:gnu_attributes] its specializations' symbols' (given them at
@@ -373,6 +376,10 @@ semantic_analysis::function_template_definition(node_index n,
     entity_table[t].defined = defines;
     entity_table[t].inline_ = s.inline_;
     entity_table[t].constexpr_ = s.constexpr_;
+    /* [over.oper]: an operator function template's specializations are
+       operator functions (named by the operator: [abi:mangling-operator]) */
+    entity_table[t].operator_function = m.operator_function;
+    entity_table[t].implemented = m.implemented;
     /* [basic.link]/3.1: a function template declared static has internal
        linkage */
     if (s.static_)
@@ -406,8 +413,18 @@ semantic_analysis::function_template_definition(node_index n,
     size_t before = entity_table.size();
     /* (another function template of the name, group, keeps it: the
        name's templates are overloaded, [temp.over]) */
+    /* (an operator function template is followed: operator expressions
+       find it, over.match.oper) */
+    bool operators_were_held = operators_held;
     hold_names(n);
+    operators_held = operators_were_held;
     entity_index held = entity_table.find(outer, name);
+    if (!held && m.operator_function) {
+        /* (hold_names holds identifiers: an operator's name is held here) */
+        held = entity_table.make(entity_kind::none, name, outer);
+        entity_table[held].held_by_template = true;
+        entity_table.bind(outer, name, held);
+    }
     record.name = held;
     bool overload = (!group.empty() || !functions.empty()) && own &&
                     held == prior &&

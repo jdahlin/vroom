@@ -1515,6 +1515,10 @@ class semantic_analysis
     /* the ellipsis of the last parameter-declaration's declarator, if it
        declares a function parameter pack, else 0 */
     token_index declared_pack = 0;
+    /* [except.spec]/8, /12: a destructor's or deallocation function's type
+       non-throwing without a noexcept-specifier */
+    void implicitly_non_throwing(const declarator_meaning &m,
+                                 qualified_type &type);
     analysis_result declarator(node_index declaration, syntax_child d,
                                qualified_type &type, declarator_meaning &m);
     token_index declarator_id(syntax_child d) const;
@@ -1748,6 +1752,9 @@ class semantic_analysis
                                 bool &unknown) const;
     /* [temp.res]/3: typename-specifier, as a type */
     analysis_result typename_type(node_index n, type_index &type, uint32_t &cv);
+    /* a dependent type of kind, one per name and value in list */
+    type_index dependent_type(owned_array<entity_index> &list, entity_kind kind,
+                              uint32_t name, uint64_t value);
     /* the type typename Q::name for a dependent Q, one per Q and name */
     type_index dependent_member_type(type_index qualifier, uint32_t name);
     owned_array<entity_index> dependent_members;
@@ -3347,6 +3354,16 @@ class semantic_analysis
     };
 
   private:
+    /* [temp.over]/1: the specializations of the templates in group
+       whose deduction from the call's arguments succeeds, appended to
+       candidates; with first_arguments, where each one's deduced
+       arguments start in all */
+    analysis_result
+    template_candidates(node_index n, const owned_array<uint32_t> &group,
+                        const expression_meaning *meanings, uint32_t count,
+                        owned_array<overload_candidate> &candidates,
+                        owned_array<uint32_t> *first_arguments = nullptr,
+                        owned_array<template_argument> *all = nullptr);
     /* [over.best.ics]: the argument a converted to the type of a parameter;
        user-defined conversions considered unless [over.best.ics]/4 says
        not */
