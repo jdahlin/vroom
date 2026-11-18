@@ -931,6 +931,8 @@ bool semantic_analysis::is_aggregate(entity_index c) const
             language_feature::aggregates_without_user_declared_constructors) &&
         x.defaulted_default_constructor)
         return false;
+    if (x.constructor_template)
+        return false;
     for (entity_index k = x.first_constructor; k;
          k = entity_table[k].next_constructor)
         if (!entity_table[k].implicit &&
@@ -1088,6 +1090,8 @@ semantic_analysis::member_declaration(entity_index c, syntax_child member,
         return member_typedef(c, n, node.first_token + 1, type, s,
                               declarator_meaning(), access);
     }
+    if (node.kind == syntax_kind::template_declaration)
+        return member_template_declaration(c, n);
     if (node.kind != syntax_kind::member_declaration &&
         node.kind != syntax_kind::function_definition)
         return not_supported(n);

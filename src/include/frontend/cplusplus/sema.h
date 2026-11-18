@@ -486,6 +486,11 @@ struct entity {
     /* a class: its user-declared constructors (a chain through
        next_constructor) and destructor, 0 if none */
     entity_index first_constructor = 0, destructor = 0;
+    /* a class: [temp.mem]/1 the first constructor template it declares
+       (its template-declaration), 0 if none.  Such a class has a
+       user-declared constructor; the template is not analysed, and a
+       construction of the class that would consider it is not either */
+    node_index constructor_template = 0;
     /* a non-static data member that is a bit-field ([class.bit]): its
        width and the offset of its first bit in the class (offset is the
        byte that bit is in); an unnamed one (name 0) is in the layout but
@@ -2662,6 +2667,9 @@ class semantic_analysis
     /* [dcl.type.elab]: class-key identifier, the class's type */
     analysis_result elaborated_type_specifier(node_index n, type_index &type);
     /* [class.mem]: one member-declaration of the class being defined */
+    /* [temp.mem]/1: the member template n (a template-declaration) of
+       class c */
+    analysis_result member_template_declaration(entity_index c, node_index n);
     analysis_result member_declaration(entity_index c, syntax_child n,
                                        uint8_t access,
                                        owned_array<node_index> &bodies);

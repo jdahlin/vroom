@@ -65,6 +65,72 @@ bool semantic_analysis::declares_special_member(entity_index c,
 }
 
 /*
+ * [temp.mem]/1: "A template can be declared within a class or class
+ * template; such a template is called a member template."  [temp.mem]/5:
+ * a constructor template is never a copy or move constructor; it is a
+ * user-declared constructor ([dcl.init.aggr]/1.1, [class.default.ctor]/1:
+ * no default constructor is implicitly declared).  Only a constructor
+ * template of a class of namespace scope is known: its declaration is not
+ * analysed beyond its form, and a construction of the class, which would
+ * consider it ([over.match.ctor]), is not analysed either (construct).
+ */
+analysis_result semantic_analysis::member_template_declaration(entity_index c,
+                                                               node_index n)
+{
+    const syntax_node &node = tree[n];
+    if (node.child_count != 2 ||
+        !syntax_is(tree, tree.children(n)[0], syntax_kind::template_head) ||
+        tree.children(n)[1].is_token())
+        return not_supported(n, "temp.mem");
+    owned_array<node_index> parameters;
+    if (!template_head_list(tree.children(n)[0].index(), parameters) ||
+        parameters.empty() || head_constraint(n).bits)
+        return not_supported(n, "temp.mem");
+    node_index inner = tree.children(n)[1].index();
+    const syntax_node &d = tree[inner];
+    if ((d.kind != syntax_kind::function_definition &&
+         d.kind != syntax_kind::member_declaration) ||
+        !is_namespace(entity_table[c].enclosing))
+        return not_supported(n, "temp.mem");
+    /* [ext:gnu_attributes] before it all; [class.ctor]/1: "Each
+       decl-specifier in the decl-specifier-seq of a constructor
+       declaration (if any) shall be friend, inline, constexpr, or an
+       explicit-specifier" (and consteval, [dcl.consteval]) */
+    uint32_t at = leading_gnu_attributes(inner);
+    const syntax_child *dc = tree.children(inner);
+    if (at < d.child_count &&
+        syntax_is(tree, dc[at], syntax_kind::decl_specifier_seq)) {
+        node_index seq = dc[at].index();
+        for (uint32_t i = 0; i < tree[seq].child_count; i++) {
+            syntax_child x = tree.children(seq)[i];
+            if (syntax_is(tree, x, syntax_kind::gnu_attribute_specifier))
+                continue;
+            if (!x.is_token())
+                return not_supported(n, "temp.mem");
+            switch (p.keyword_of(tokens[x.index()])) {
+            case standard_keyword::constexpr_:
+            case standard_keyword::consteval_:
+            case standard_keyword::inline_:
+            case standard_keyword::explicit_:
+                continue;
+            default:
+                return not_supported(n, "temp.mem");
+            }
+        }
+        at++;
+    }
+    /* a constructor's declarator, not a destructor's (which [temp.mem]/3
+       does not allow a template of) */
+    if (at >= d.child_count || !declares_special_member(c, dc[at]) ||
+        syntax_is(tree, tree.children(dc[at].index())[0],
+                  syntax_kind::unqualified_id))
+        return not_supported(n, "temp.mem");
+    if (!entity_table[c].constructor_template)
+        entity_table[c].constructor_template = n;
+    return analysis_result::well_formed;
+}
+
+/*
  * [class.base.init]/9.1: member e initialized from its default member
  * initializer ([class.mem]/10), analysed in the constructor ([class.mem]/6:
  * a complete-class context, `this` its object), and stored as by an
@@ -578,6 +644,10 @@ semantic_analysis::construct(node_index at, qualified_type type,
         /* value-initialization through a trivial X() = default
            ([dcl.init]/8.2: zero-initialized): not analysed */
         return not_supported(at, "dcl.init");
+    /* [temp.mem]/1: a constructor template is a candidate too
+       (member_template_declaration) */
+    if (x.constructor_template)
+        return not_supported(at, "temp.mem");
     /* [over.match.ctor]/1: "the candidate functions are all the
        constructors of the class of the object being initialized" */
     owned_array<overload_candidate> candidates;
@@ -1276,7 +1346,15 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
              (!x.destructor || !declares_copy || !x.first_constructor)))
             return not_supported(n, "class.default.ctor");
     }
-    bool user_constructors = x.first_constructor != 0;
+    /* [temp.mem]/1: a constructor template is user-declared; the copy
+       constructor declared beside it makes every construction of the
+       class one construct refuses */
+    bool user_constructors =
+        x.first_constructor != 0 || x.constructor_template != 0;
+    if (x.constructor_template) {
+        construction = true;
+        copy = true;
+    }
     /* [dcl.fct.def.default]: X() = default beside other constructors: the
        default constructor, trivial or not, that a default-initialization
        chooses */
