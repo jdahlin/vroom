@@ -161,8 +161,10 @@ struct tree_checker {
                 analysis.semantics[node.a].category == value_category::prvalue)
                 problem(n, "the operand of an lvalue-to-rvalue conversion is "
                            "a prvalue");
-            if (node.op ==
-                    static_cast<uint8_t>(conversion_kind::derived_to_base) &&
+            if ((node.op ==
+                     static_cast<uint8_t>(conversion_kind::derived_to_base) ||
+                 node.op ==
+                     static_cast<uint8_t>(conversion_kind::base_to_derived)) &&
                 (!node.b || !analysis.entity_table[node.b].base_subobject))
                 problem(n, "no base subobject");
             /* the conversions of a glvalue, and the discarding of any

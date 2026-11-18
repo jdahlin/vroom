@@ -690,16 +690,9 @@ analysis_result semantic_analysis::pointer_to_base(token_index at,
     }
     for (entity_index c = from; c != to;) {
         entity_index step = nonvirtual_step(c, to);
-        if (entity_table[step].access && current_class() != c &&
-            !in_friend_of(c)) {
-            if (current_class())
-                return not_supported(current_declaration, "class.access.base");
-            return ill_formed_at_token(at,
-                                       "if B is an inaccessible base class of "
-                                       "D, a program that necessitates this "
-                                       "conversion is ill-formed",
-                                       "conv.ptr");
-        }
+        analysis_result r = base_pointer_access(at, c, step);
+        if (r != analysis_result::well_formed)
+            return r;
         /* the conversion names the one step at a nonzero offset, whose
            offset the lowering adds (else the first step) */
         if (entity_table[step].offset) {
@@ -722,6 +715,97 @@ analysis_result semantic_analysis::pointer_to_base(token_index at,
     if (m.node)
         semantics[m.node].b = first;
     return analysis_result::well_formed;
+}
+
+/* [conv.ptr]/3: "If B is an inaccessible or ambiguous base class of D, a
+   program that necessitates this conversion is ill-formed": the direct
+   non-virtual base step of class c */
+analysis_result semantic_analysis::base_pointer_access(token_index at,
+                                                       entity_index c,
+                                                       entity_index step)
+{
+    if (!entity_table[step].access || current_class() == c || in_friend_of(c))
+        return analysis_result::well_formed;
+    if (current_class())
+        return not_supported(current_declaration, "class.access.base");
+    return ill_formed_at_token(at,
+                               "if B is an inaccessible base class of D, a "
+                               "program that necessitates this conversion is "
+                               "ill-formed",
+                               "conv.ptr");
+}
+
+/*
+ * [expr.static.cast]/11: "A prvalue of type "pointer to cv1 B", where B is
+ * a class type, can be converted to a prvalue of type "pointer to cv2 D",
+ * where D is a complete class derived from B, if cv2 is the same
+ * cv-qualification as, or greater cv-qualification than, cv1.  If B is a
+ * virtual base class of D or a base class of a virtual base class of D, or
+ * if no valid standard conversion from "pointer to D" to "pointer to B"
+ * exists, the program is ill-formed.  The null pointer value is converted
+ * to the null pointer value of the destination type."  m, a pointer to
+ * class from (B), to a pointer to its derived class to (D), of type type
+ * (the caller checks the cv-qualifiers): one conversion per base on the
+ * way, innermost first, each the lowering's subtraction of the base's
+ * offset after a null check.
+ */
+analysis_result semantic_analysis::pointer_to_derived(token_index at,
+                                                      entity_index from,
+                                                      entity_index to,
+                                                      qualified_type type,
+                                                      expression_meaning &m)
+{
+    if (base_subobjects(to, from) != 1)
+        return not_supported(current_declaration, "class.member.lookup");
+    if (!nonvirtual_subobjects(to, from))
+        return ill_formed_at_token(at,
+                                   "if B is a virtual base class of D or a "
+                                   "base class of a virtual base class of D, "
+                                   "the program is ill-formed",
+                                   "expr.static.cast");
+    owned_array<entity_index> steps;
+    for (entity_index c = to; c != from;) {
+        entity_index step = nonvirtual_step(c, from);
+        /* "or if no valid standard conversion from "pointer to D" to
+           "pointer to B" exists" */
+        analysis_result r = base_pointer_access(at, c, step);
+        if (r != analysis_result::well_formed)
+            return r;
+        steps.append(step);
+        c = type_table[entity_table[step].type.unqualified()].entity;
+    }
+    uint32_t cv = type_table[type.unqualified()].operand.cv();
+    for (size_t i = steps.size(); i--;) {
+        entity_index step = steps[i];
+        entity_index enclosing = entity_table[step].enclosing;
+        m.type = qualified_type::make(
+            type_table.pointer_to(qualified_type::make(
+                entity_table[enclosing].type.unqualified(), cv)),
+            cv_none);
+        if (m.evaluation == constness::constant)
+            m.evaluation = constness::unknown;
+        converted(m, conversion_kind::base_to_derived);
+        if (m.node)
+            semantics[m.node].b = step;
+    }
+    m.type = type;
+    return analysis_result::well_formed;
+}
+
+/* [expr.cast]/4: every base from class c to its base public and
+   non-virtual, one path */
+bool semantic_analysis::public_nonvirtual_path(entity_index c,
+                                               entity_index base) const
+{
+    if (base_subobjects(c, base) != 1 || !nonvirtual_subobjects(c, base))
+        return false;
+    while (c != base) {
+        entity_index step = nonvirtual_step(c, base);
+        if (!step || entity_table[step].access)
+            return false;
+        c = type_table[entity_table[step].type.unqualified()].entity;
+    }
+    return true;
 }
 
 /* the direct non-virtual base of c through which a non-virtual path leads

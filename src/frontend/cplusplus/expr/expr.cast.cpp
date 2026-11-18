@@ -58,18 +58,24 @@ node_index parser::cast_expression()
  *
  * can be performed using the cast notation of explicit type conversion."
  * "If a conversion can be interpreted in more than one of the ways listed
- * above, the interpretation that appears first in the list is used".
- * Analysis has them for the fundamental types and pointers to them:
+ * above, the interpretation that appears first in the list is used".  One
+ * function has the rules of all of them, kinds (cast_kinds) the casts it
+ * may use: the cast notation's, or one named cast's.  Analysis has:
  *
  *   - to cv void, [expr.static.cast]/6;
+ *   - to a class, [expr.static.cast]/4: "T t(E);", a direct-initialization
+ *     (class_direct_initialization, as T(E));
+ *   - from a class to another type, [expr.static.cast]/4 by a conversion
+ *     function ([dcl.init]/17.7, conversion_function_call);
  *   - between arithmetic types, [expr.static.cast]/4 (an implicit
  *     conversion) and /10;
  *   - the other implicit conversions ([expr.static.cast]/4: "An expression
- *     e can be explicitly converted to a type T if there is an implicit
- *     conversion sequence from e to T"): a null pointer constant to a
+ *     E can be explicitly converted to a type T if there is an implicit
+ *     conversion sequence from E to T"): a null pointer constant to a
  *     pointer, a pointer to bool, a pointer to a pointer by [conv.ptr]/2
  *     or [conv.qual];
  *   - between pointers otherwise, pointer_conversion;
+ *   - to a reference, reference_cast;
  *   - a pointer to an integral type, [expr.reinterpret.cast]/4: "A pointer
  *     can be explicitly converted to any integral type large enough to
  *     hold all values of its type";
@@ -87,13 +93,55 @@ static const char cast_rule[] =
     "static_cast, or a reinterpret_cast, and those followed by a "
     "const_cast";
 
+/* the rule a conversion none of the casts in kinds performs breaks: a
+   named cast's "No other conversion" sentence ([expr.static.cast]/5,
+   [expr.const.cast]/1, [expr.reinterpret.cast]/1) */
+static const char *cast_rule_of(uint8_t kinds, const char *&label)
+{
+    switch (kinds) {
+    case cast_static:
+        label = "expr.static.cast";
+        return "no other conversion shall be performed explicitly using a "
+               "static_cast";
+    case cast_const:
+        label = "expr.const.cast";
+        return "no other conversion shall be performed explicitly using "
+               "const_cast";
+    case cast_reinterpret:
+        label = "expr.reinterpret.cast";
+        return "no other conversion can be performed explicitly using "
+               "reinterpret_cast";
+    default:
+        label = "expr.cast";
+        return cast_rule;
+    }
+}
+
+analysis_result semantic_analysis::no_cast(node_index at, uint8_t kinds)
+{
+    const char *label = nullptr;
+    const char *rule = cast_rule_of(kinds, label);
+    /* [impl.clang] Microsoft's mode has casts of its own (a static_cast
+       between pointers to functions and to objects) */
+    if (tokens.files.behavior.microsoft_extensions)
+        return not_supported(at, label);
+    return ill_formed(at, rule, label);
+}
+
 analysis_result semantic_analysis::explicit_conversion(node_index at,
                                                        qualified_type to,
-                                                       expression_meaning &m)
+                                                       expression_meaning &m,
+                                                       uint8_t kinds)
 {
     const struct type target = type_table[to.unqualified()];
+    bool by_static = kinds & cast_static;
+    if (target.kind == type_kind::lvalue_reference ||
+        target.kind == type_kind::rvalue_reference)
+        return reference_cast(at, to, m, kinds);
     if (target.kind == type_kind::fundamental &&
         target.fundamental == fundamental_type::void_) {
+        if (!by_static)
+            return no_cast(at, kinds);
         /* [expr.static.cast]/6: "Any expression can be explicitly converted
            to type cv void, in which case it becomes a discarded-value
            expression." */
@@ -107,6 +155,53 @@ analysis_result semantic_analysis::explicit_conversion(node_index at,
         m.node = operand;
         converted(m, conversion_kind::to_void);
         return analysis_result::well_formed;
+    }
+    if (target.kind == type_kind::class_type) {
+        if (!by_static)
+            return no_cast(at, kinds);
+        /* [expr.static.cast]/4: "if overload resolution for a
+           direct-initialization of an object or reference of type T from
+           E would find at least one viable function, T t(E); for some
+           invented temporary variable t and then using the temporary
+           variable as the result of the conversion" */
+        owned_array<expression_meaning> arguments;
+        arguments.append(m);
+        return class_direct_initialization(at, target.entity, arguments, m);
+    }
+    if (type_table[m.type.unqualified()].kind == type_kind::class_type) {
+        if (!by_static)
+            return no_cast(at, kinds);
+        if (target.kind != type_kind::fundamental &&
+            target.kind != type_kind::pointer && !enumeration_of(to))
+            return not_supported(at, "expr.static.cast");
+        /* [expr.static.cast]/4 with [dcl.init]/17.7: "the source type is a
+           (possibly cv-qualified) class type, conversion functions are
+           considered", then the second standard conversion sequence */
+        bool converted = false;
+        analysis_result r =
+            conversion_function_call(at, m, to, true, converted);
+        if (r != analysis_result::well_formed)
+            return r;
+        if (!converted)
+            return no_cast(at, kinds);
+        r = operand_value(at, m);
+        if (r != analysis_result::well_formed)
+            return r;
+        return implicit_conversion(at, m, to, true);
+    }
+    if (kinds == cast_reinterpret && m.type.unqualified() == to.unqualified() &&
+        (is_integral(to) || enumeration_of(to) || is_pointer(to))) {
+        /* [expr.reinterpret.cast]/2: "An expression of integral,
+           enumeration, pointer, or pointer-to-member type can be explicitly
+           converted to its own type; such a cast yields the value of its
+           operand."  (A bit-field's value of its own type is not
+           analysed.) */
+        if (m.bit_field_width)
+            return not_supported(at, "expr.reinterpret.cast");
+        analysis_result r = operand_value(at, m);
+        if (r == analysis_result::well_formed)
+            m.type = qualified_type::make(to.unqualified(), cv_none);
+        return r;
     }
     if (target.kind == type_kind::enumeration) {
         /* [expr.static.cast]/10: "A value of integral or enumeration type
@@ -134,8 +229,10 @@ analysis_result semantic_analysis::explicit_conversion(node_index at,
             if (fundamental_of(m.type) == fundamental_type::none &&
                 !is_pointer(m.type))
                 return not_supported(at, "expr.cast");
-            return ill_formed(at, cast_rule, "expr.cast");
+            return no_cast(at, kinds);
         }
+        if (!by_static)
+            return no_cast(at, kinds);
         /* [conv.fpint]/1: "The conversion truncates; that is, the
            fractional part is discarded.  The behavior is undefined if the
            truncated value cannot be represented in the destination type."
@@ -169,21 +266,34 @@ analysis_result semantic_analysis::explicit_conversion(node_index at,
        type; an unscoped one converts so implicitly */
     if (target.kind == type_kind::fundamental &&
         type_table[m.type.unqualified()].kind == type_kind::enumeration) {
+        if (!by_static)
+            return no_cast(at, kinds);
         if (!enumeration_as_underlying(m))
             return not_supported(at, "dcl.enum");
     }
     if (is_arithmetic(to) && is_arithmetic(m.type)) {
+        if (!by_static)
+            return no_cast(at, kinds);
         convert_arithmetic(m, target.fundamental);
         return analysis_result::well_formed;
     }
     fundamental_type from = fundamental_of(m.type);
     qualified_type result = qualified_type::make(to.unqualified(), cv_none);
     if (target.kind == type_kind::pointer) {
-        if (m.zero_literal || from == fundamental_type::std_nullptr_t)
+        if (m.zero_literal && by_static)
             return implicit_conversion(at, m, to, true);
+        if (from == fundamental_type::std_nullptr_t) {
+            /* [expr.reinterpret.cast]/9: "A null pointer constant of type
+               std::nullptr_t cannot be converted to a pointer type" */
+            if (!by_static)
+                return no_cast(at, kinds);
+            return implicit_conversion(at, m, to, true);
+        }
         if (is_pointer(m.type))
-            return pointer_conversion(at, to, m);
+            return pointer_conversion(at, to, m, kinds);
         if (is_integral(m.type)) {
+            if (!(kinds & cast_reinterpret))
+                return no_cast(at, kinds);
             /* [expr.const]/5: "a reinterpret_cast" is not a core constant
                expression */
             m.type = result;
@@ -193,14 +303,14 @@ analysis_result semantic_analysis::explicit_conversion(node_index at,
         }
         if (from == fundamental_type::none)
             return not_supported(at, "expr.cast");
-        return ill_formed(at, cast_rule, "expr.cast");
+        return no_cast(at, kinds);
     }
     if (is_pointer(m.type)) {
         fundamental_type t = target.fundamental;
-        if (t == fundamental_type::bool_)
+        if (t == fundamental_type::bool_ && by_static)
             return implicit_conversion(at, m, to, true);
-        if (!fundamental_type_is_integral(t))
-            return ill_formed(at, cast_rule, "expr.cast");
+        if (!fundamental_type_is_integral(t) || !(kinds & cast_reinterpret))
+            return no_cast(at, kinds);
         /* (the targets' pointers have 64 bits) */
         if (fundamental_type_width(tokens.files.behavior, t) < 64)
             return ill_formed(at,
@@ -217,22 +327,26 @@ analysis_result semantic_analysis::explicit_conversion(node_index at,
        conversions, the rest not analysed yet */
     if (from == fundamental_type::none)
         return not_supported(at, "expr.cast");
-    if (target.fundamental == fundamental_type::std_nullptr_t)
+    if (target.fundamental == fundamental_type::std_nullptr_t && by_static)
         return implicit_conversion(at, m, to, true);
     return not_supported(at, "expr.cast");
 }
 
 /*
- * A pointer to a pointer by a cast ([expr.cast]/4's list, in order):
+ * A pointer to a pointer by the casts in kinds ([expr.cast]/4's list, in
+ * order):
  *
  *   - the static_casts that are implicit conversions: the same type,
  *     [conv.qual], [conv.ptr]/2's "pointer to cv void";
  *   - a const_cast, [expr.const.cast]/3: "For two similar types T1 and T2
  *     ([conv.qual]), a prvalue of type T1 may be explicitly converted to
  *     the type T2 using a const_cast";
+ *   - between pointers to classes one derived from the other,
+ *     class_pointer_cast;
  *   - [expr.static.cast]/13: "A prvalue of type "pointer to cv1 void" can
  *     be converted to a prvalue of type "pointer to cv2 T", where T is an
- *     object type", then a const_cast if cv2 is less;
+ *     object type and cv2 is the same cv-qualification as, or greater
+ *     cv-qualification than, cv1", then a const_cast if cv2 is less;
  *   - a reinterpret_cast, then a const_cast: [expr.reinterpret.cast]/7
  *     "An object pointer can be explicitly converted to an object pointer
  *     of a different type", /6 "A function pointer can be explicitly
@@ -241,36 +355,60 @@ analysis_result semantic_analysis::explicit_conversion(node_index at,
  *     versa is conditionally-supported" ([impl.clang]: supported, the
  *     same address).
  *
- * A pointer to a class is not analysed yet: a static_cast between a base
- * and a derived class ([expr.static.cast]/11) can change the address.
+ * [expr.static.cast]/1: "The static_cast operator shall not cast away
+ * constness", nor a reinterpret_cast ([expr.reinterpret.cast]/2): of a
+ * pointer to a pointer, [expr.const.cast]/7, a pointee's cv-qualifier the
+ * target's lacks; analysis has it for pointers to what is no pointer.
  * The last two are not core constant expressions ([expr.const]/5: "a
  * conversion from type cv void* to a pointer-to-object type", "a
  * reinterpret_cast").
  */
 analysis_result semantic_analysis::pointer_conversion(node_index at,
                                                       qualified_type to,
-                                                      expression_meaning &m)
+                                                      expression_meaning &m,
+                                                      uint8_t kinds)
 {
     qualified_type result = qualified_type::make(to.unqualified(), cv_none);
     qualified_type pointee = type_table[m.type.unqualified()].operand;
     qualified_type target_pointee = type_table[to.unqualified()].operand;
     const struct type fp = type_table[pointee.unqualified()];
     const struct type tp = type_table[target_pointee.unqualified()];
-    if (fp.kind == type_kind::class_type || tp.kind == type_kind::class_type)
-        return not_supported(at, "expr.static.cast");
+    bool by_static = kinds & cast_static;
+    bool by_const = kinds & cast_const;
     bool to_void = tp.kind == type_kind::fundamental &&
                    tp.fundamental == fundamental_type::void_;
-    if (m.type.unqualified() == to.unqualified() ||
-        qualification_convertible(m.type, to) ||
-        (to_void && is_object_pointer(m.type) &&
-         !(pointee.cv() & ~target_pointee.cv())))
+    bool from_void = fp.kind == type_kind::fundamental &&
+                     fp.fundamental == fundamental_type::void_;
+    /* [basic.type.qualifier]/3: "An array type whose elements are
+       cv-qualified is also considered to have the same cv-qualifications
+       as its elements." */
+    auto qualifiers = [&](qualified_type t) {
+        uint32_t cv = t.cv();
+        while (type_table[t.unqualified()].kind == type_kind::array) {
+            t = type_table[t.unqualified()].operand;
+            cv |= t.cv();
+        }
+        return cv;
+    };
+    bool lesser = qualifiers(pointee) & ~qualifiers(target_pointee);
+    if (by_static && (m.type.unqualified() == to.unqualified() ||
+                      qualification_convertible(m.type, to) ||
+                      (to_void && is_object_pointer(m.type) && !lesser)))
         return implicit_conversion(at, m, to, true);
-    if (similar(m.type, to)) {
+    /* [expr.const.cast]/9: "conversions between pointers to functions
+       are not covered" */
+    if (by_const && tp.kind != type_kind::function && similar(m.type, to)) {
+        if (m.type.unqualified() == to.unqualified())
+            return analysis_result::well_formed;
         m.type = result;
         converted(m, conversion_kind::qualification_cast);
         return analysis_result::well_formed;
     }
-    if (to_void && is_object_pointer(m.type)) {
+    bool handled = false;
+    analysis_result r = class_pointer_cast(at, to, m, kinds, handled);
+    if (handled || r != analysis_result::well_formed)
+        return r;
+    if (by_static && by_const && to_void && is_object_pointer(m.type)) {
         /* [expr.cast]/4: "a static_cast followed by a const_cast": to
            "pointer to cv void" with the pointee's cv-qualifiers
            ([conv.ptr]/2), then the qualification cast */
@@ -278,16 +416,198 @@ analysis_result semantic_analysis::pointer_conversion(node_index at,
             type_table.pointer_to(qualified_type::make(
                 target_pointee.unqualified(), pointee.cv())),
             cv_none);
-        analysis_result r = implicit_conversion(at, m, via, true);
+        r = implicit_conversion(at, m, via, true);
         if (r != analysis_result::well_formed)
             return r;
         m.type = result;
         converted(m, conversion_kind::qualification_cast);
         return analysis_result::well_formed;
     }
+    bool to_object = tp.kind != type_kind::function && !to_void;
+    bool by_reinterpret = kinds & cast_reinterpret;
+    if (by_static && from_void && to_object && (!lesser || by_const))
+        by_reinterpret = true;
+    if (!by_reinterpret)
+        return no_cast(at, kinds);
+    if (lesser && !by_const)
+        return ill_formed(at,
+                          "the reinterpret_cast operator shall not cast away "
+                          "constness",
+                          "expr.reinterpret.cast");
+    if (!lesser && !by_const &&
+        (fp.kind == type_kind::pointer || tp.kind == type_kind::pointer))
+        /* [expr.const.cast]/7 at the levels below the first */
+        return not_supported(at, "expr.const.cast");
     m.type = result;
-    m.evaluation = constness::not_constant;
+    /* [expr.const]/5: "a reinterpret_cast", "a conversion from type cv
+       void* to a pointer-to-object type" (which a later revision allows:
+       not claimed) */
+    if (from_void && by_static) {
+        if (m.evaluation == constness::constant)
+            m.evaluation = constness::unknown;
+    } else {
+        m.evaluation = constness::not_constant;
+    }
     converted(m, conversion_kind::pointer_cast);
+    return analysis_result::well_formed;
+}
+
+/*
+ * Between pointers to classes, one a base of the other, the static_casts:
+ * [conv.ptr]/3 (an implicit conversion, [expr.static.cast]/4) to a base,
+ * [expr.static.cast]/11 to a derived class; each then a const_cast if the
+ * target's pointee is less cv-qualified.  [expr.cast]/4: "in performing a
+ * static_cast in the following situations the conversion is valid even if
+ * the base class is inaccessible": the cast notation's here only through
+ * public non-virtual bases.  [expr.cast]/5: "If both the operand and
+ * destination types are class types and one or both are incomplete, it is
+ * unspecified whether the static_cast or the reinterpret_cast
+ * interpretation is used": not analysed.  handled is false for the other
+ * pointers.
+ */
+analysis_result semantic_analysis::class_pointer_cast(node_index at,
+                                                      qualified_type to,
+                                                      expression_meaning &m,
+                                                      uint8_t kinds,
+                                                      bool &handled)
+{
+    handled = false;
+    qualified_type pointee = type_table[m.type.unqualified()].operand;
+    qualified_type target_pointee = type_table[to.unqualified()].operand;
+    const struct type fp = type_table[pointee.unqualified()];
+    const struct type tp = type_table[target_pointee.unqualified()];
+    if (fp.kind != type_kind::class_type || tp.kind != type_kind::class_type ||
+        fp.entity == tp.entity || !(kinds & cast_static))
+        return analysis_result::well_formed;
+    if (!entity_table[fp.entity].size || !entity_table[tp.entity].size) {
+        if (kinds == cast_static)
+            return analysis_result::well_formed;
+        handled = true;
+        return not_supported(at, "expr.cast");
+    }
+    bool ambiguous = false;
+    bool upward = base_step(fp.entity, tp.entity, ambiguous) != 0;
+    bool to_derived =
+        !upward && base_step(tp.entity, fp.entity, ambiguous) != 0;
+    if (!upward && !to_derived)
+        return analysis_result::well_formed;
+    handled = true;
+    entity_index derived = fp.entity;
+    entity_index base = tp.entity;
+    if (to_derived) {
+        derived = tp.entity;
+        base = fp.entity;
+    }
+    if (kinds != cast_static && !public_nonvirtual_path(derived, base))
+        return not_supported(at, "expr.cast");
+    bool lesser = pointee.cv() & ~target_pointee.cv();
+    if (lesser && !(kinds & cast_const))
+        return ill_formed(at,
+                          "the static_cast operator shall not cast away "
+                          "constness",
+                          "expr.static.cast");
+    /* the static_cast keeps the operand's cv-qualifiers where the target
+       has fewer, the const_cast then drops them */
+    qualified_type via = qualified_type::make(
+        type_table.pointer_to(qualified_type::make(
+            target_pointee.unqualified(), target_pointee.cv() | pointee.cv())),
+        cv_none);
+    token_index t = tree[at].first_token;
+    analysis_result r = analysis_result::well_formed;
+    if (upward)
+        r = pointer_to_base(t, fp.entity, tp.entity, via, m);
+    else
+        r = pointer_to_derived(t, fp.entity, tp.entity, via, m);
+    if (r != analysis_result::well_formed || !lesser)
+        return r;
+    m.type = qualified_type::make(to.unqualified(), cv_none);
+    converted(m, conversion_kind::qualification_cast);
+    return analysis_result::well_formed;
+}
+
+/*
+ * A cast to a reference ([expr.cast]/1: "The result is an lvalue if T is an
+ * lvalue reference type or an rvalue reference to function type and an
+ * xvalue if T is an rvalue reference to object type"):
+ *
+ *   - [expr.static.cast]/3: "A glvalue of type cv1 T1 can be cast to type
+ *     rvalue reference to cv2 T2 if cv2 T2 is reference-compatible with
+ *     cv1 T1"; an lvalue to an lvalue reference to the same type
+ *     likewise ([expr.static.cast]/4, a reference binding);
+ *   - [expr.const.cast]/4: "an lvalue of type T1 can be explicitly
+ *     converted to an lvalue of type T2 using the cast const_cast<T2&>" if
+ *     "a pointer to T1 can be explicitly converted to the type "pointer to
+ *     T2" using a const_cast";
+ *   - [expr.static.cast]/2: "An lvalue of type "cv1 B", where B is a class
+ *     type, can be cast to type "reference to cv2 D", where D is a class
+ *     derived from B", and to a base class by the reference binding of
+ *     /4: as the pointers;
+ *   - [expr.reinterpret.cast]/11: "The result is that of
+ *     *reinterpret_cast<T2 *>(p) where p is a pointer to x of type
+ *     "pointer to T1"."
+ *
+ * Each of the last three an lvalue's address converted as a pointer, then
+ * the object it points to.  A reference that may bind a temporary (to
+ * const, or an rvalue reference, of another type: [expr.static.cast]/4),
+ * a prvalue operand, an xvalue of another type and a function are not
+ * analysed.
+ */
+analysis_result semantic_analysis::reference_cast(node_index at,
+                                                  qualified_type to,
+                                                  expression_meaning &m,
+                                                  uint8_t kinds)
+{
+    const struct type target = type_table[to.unqualified()];
+    qualified_type referenced = target.operand;
+    bool lvalue_reference = target.kind == type_kind::lvalue_reference;
+    value_category category = value_category::xvalue;
+    if (lvalue_reference)
+        category = value_category::lvalue;
+    if (type_table[referenced.unqualified()].kind == type_kind::function ||
+        m.category == value_category::prvalue || m.bit_field_width)
+        return not_supported(at, "expr.cast");
+    bool same = referenced.unqualified() == m.type.unqualified();
+    if (lvalue_reference && m.category != value_category::lvalue)
+        return not_supported(at, "expr.cast");
+    if (same && m.type.cv() == referenced.cv() && m.category == category &&
+        (kinds & (cast_static | cast_const)))
+        /* the glvalue itself */
+        return analysis_result::well_formed;
+    if (m.category != value_category::lvalue)
+        return not_supported(at, "expr.cast");
+    const struct type &from = type_table[m.type.unqualified()];
+    const struct type &into = type_table[referenced.unqualified()];
+    bool related = false;
+    if (from.kind == type_kind::class_type &&
+        into.kind == type_kind::class_type && !same) {
+        bool ambiguous = false;
+        related = base_step(from.entity, into.entity, ambiguous) ||
+                  base_step(into.entity, from.entity, ambiguous);
+    }
+    bool may_bind_temporary = !lvalue_reference || referenced.cv() == cv_const;
+    if (!related && !same && (kinds & cast_static) &&
+        (kinds == cast_static || may_bind_temporary))
+        /* [expr.static.cast]/4: "T t(E);" may bind the reference to a
+           temporary of the converted value */
+        return not_supported(at, "expr.static.cast");
+    token_index t = tree[at].first_token;
+    expression_meaning address;
+    address.type = qualified_type::make(type_table.pointer_to(m.type), cv_none);
+    address.category = value_category::prvalue;
+    address.evaluation = constness::unknown;
+    if (m.evaluation == constness::not_constant)
+        address.evaluation = constness::not_constant;
+    address.node = expression_node(semantic_kind::address, address, t, m.node);
+    analysis_result r = pointer_conversion(
+        at, qualified_type::make(type_table.pointer_to(referenced), cv_none),
+        address, kinds);
+    if (r != analysis_result::well_formed)
+        return r;
+    m = expression_meaning();
+    m.type = referenced;
+    m.category = category;
+    m.evaluation = address.evaluation;
+    m.node = expression_node(semantic_kind::indirection, m, t, address.node);
     return analysis_result::well_formed;
 }
 
