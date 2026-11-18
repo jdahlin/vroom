@@ -120,6 +120,8 @@ analysis_result semantic_analysis::expression_kind(syntax_child e,
         return fold(n, m);
     case syntax_kind::lambda_expression:
         return lambda_expression(n, m);
+    case syntax_kind::noexcept_expression:
+        return noexcept_operator(n, m);
     case syntax_kind::simple_template_id:
         return variable_template_id(n, m);
     default:

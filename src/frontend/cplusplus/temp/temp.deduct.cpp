@@ -343,10 +343,12 @@ analysis_result semantic_analysis::deduce_from_call(
         *failed = true;
         return analysis_result::well_formed;
     }
+    /* the template parameter pack, wherever it is ([temp.param]/14: the
+       parameters after it deduced or with defaults) */
     uint32_t pack = ft.parameter_count;
-    if (ft.parameter_count &&
-        template_parameter_is_pack(ft.first_parameter + ft.parameter_count - 1))
-        pack = ft.parameter_count - 1;
+    for (uint32_t i = 0; i < ft.parameter_count; i++)
+        if (template_parameter_is_pack(ft.first_parameter + i))
+            pack = i;
     /* [temp.arg.explicit]/3: "A template argument list may be specified
        when referring to a specialization of a function template"; /6:
        "The template argument list shall not specify more

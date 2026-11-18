@@ -1848,6 +1848,7 @@ class semantic_analysis
     /* the type typename Q::name for a dependent Q, one per Q and name */
     type_index dependent_member_type(type_index qualifier, uint32_t name);
     type_index dependent_written_type(node_index n);
+    bool names_dependent_entity(token_index first, token_index end) const;
     owned_array<entity_index> dependent_members;
     owned_array<entity_index> dependent_written_types;
     /* a block scope in the current one, made current */
@@ -1886,6 +1887,8 @@ class semantic_analysis
     bool gnu_attributes_without_effect(syntax_child n) const;
     bool class_head_attributes_without_effect(syntax_child c) const;
     uint32_t attributes_without_effect_before(node_index declaration) const;
+    bool pack_only_expanded(uint32_t name, token_index first,
+                            token_index end) const;
     bool declares_unnamed_class(node_index seq) const;
     /* [ext:gnu_library_builtins] the function __builtin_NAME (an
        identifier) declares at its first use, 0 if it is not one */
@@ -2264,6 +2267,9 @@ class semantic_analysis
                                            expression_meaning &b);
     /* [expr.cond] */
     analysis_result conditional(node_index n, expression_meaning &m);
+    analysis_result noexcept_operator(node_index n, expression_meaning &m);
+    analysis_result potentially_throwing(node_index n, uint32_t x,
+                                         bool &throwing);
     analysis_result conditional_operands(node_index n,
                                          const expression_meaning &c,
                                          expression_meaning e2,
@@ -2405,6 +2411,13 @@ class semantic_analysis
        specification non-throwing */
     analysis_result noexcept_specifier(node_index n, bool member,
                                        bool &non_throwing);
+    /* ... with the function_parameters in scope ([basic.scope.param]) */
+    analysis_result parameter_scope_noexcept(node_index n, bool member,
+                                             bool &non_throwing);
+    /* the noexcept-specifiers left value-dependent in templates' own
+       declarations */
+    owned_array<node_index> dependent_exception_specifications;
+    bool dependent_exception_specification(entity_index t) const;
     /* [expr.const]/5: the evaluation of the semantic tree node as a core
        constant expression (expr/expr.const.evaluate.cpp): well_formed with
        its value in v and constant true; constant false if it is not one;
@@ -3290,6 +3303,8 @@ class semantic_analysis
     /* [temp.param]/4: a non-type parameter's dependent type
        (typename enable_if<B, int>::type) with the arguments before it */
     entity_index dependent_value_entity(syntax_child written);
+    entity_index dependent_variable_specialization(node_index id,
+                                                   entity_index e);
     owned_array<entity_index> dependent_values;
     analysis_result substituted_parameter_type(uint32_t template_index,
                                                uint32_t position,
@@ -3550,6 +3565,7 @@ class semantic_analysis
     /* the statement functions give the statement's node in built (when
        well-formed) */
     analysis_result statement(syntax_child s, uint32_t &built);
+    analysis_result attributed_statement(node_index n, uint32_t &built);
     /* a substatement ([stmt.pre]/2): a block scope of its own whose
        outermost names shall not redeclare conflicts' */
     analysis_result substatement(syntax_child s, entity_index conflicts,
@@ -3693,6 +3709,19 @@ class semantic_analysis
         if (a.kind != template_argument::kind_t::pack)
             return 0;
         return a.count + 1;
+    }
+    /* whether element of argument i is a template's own pack expanded,
+       not bound to elements (res<A...> in its own declaration): the
+       pack parameter's entity (a type parameter's typedef-name), 0 if
+       not */
+    entity_index specialization_own_pack(entity_index e, uint32_t i,
+                                         uint32_t element) const
+    {
+        const template_argument &a =
+            specialization_template_argument(e, i, element);
+        if (a.kind != template_argument::kind_t::pack || a.count != UINT32_MAX)
+            return 0;
+        return a.template_entity;
     }
     /* whether the argument is a value (non-type, integral): its
        magnitude, and whether it is negative; or, in a template's own

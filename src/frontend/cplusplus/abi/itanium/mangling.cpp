@@ -762,9 +762,23 @@ bool itanium_mangler::template_args(entity_index c, entity_index function)
                <template-arg> ::= J <template-arg>* E
         */
         text("J");
-        for (uint32_t k = 1; k < pack; k++)
+        for (uint32_t k = 1; k < pack; k++) {
+            /* a template's own pack expanded (res<A...> in its own
+               declaration): [abi:mangle.type]'s pack expansion of the
+               parameter, <type> ::= Dp <type> */
+            if (entity_index own = analysis.specialization_own_pack(c, i, k)) {
+                /* (a non-type or template pack: not mangled yet) */
+                if (analysis.entity_table[own].kind !=
+                    entity_kind::typedef_name)
+                    return false;
+                text("Dp");
+                if (!type(analysis.entity_table[own].type))
+                    return false;
+                continue;
+            }
             if (!template_arg(c, i, k))
                 return false;
+        }
         text("E");
     }
     text("E");
@@ -828,6 +842,15 @@ bool itanium_mangler::dependent_value(entity_index d)
         return false;
     entity_index q = record(x.type).entity;
     const entity &spec = analysis.entity_table[q];
+    if (x.value == 4) {
+        /* a variable template's specialization, v<args>: [abi:expressions]'
+           unresolved-name, <source-name> <template-args> */
+        text("X");
+        if (!source_name(spec.name) || !template_args(q))
+            return false;
+        text("E");
+        return true;
+    }
     text("X");
     if (x.value & 2)
         text("nt");

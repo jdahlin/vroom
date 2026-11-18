@@ -228,7 +228,10 @@ semantic_analysis::function_template_definition(node_index n,
 {
     entity_index outer = current_scope;
     owned_array<node_index> parameters;
-    analysis_result head = template_head_parameters(n, parameters, true, true);
+    /* [temp.param]/14: a function template's pack may be followed by
+       parameters that are deduced or have defaults */
+    analysis_result head =
+        template_head_parameters(n, parameters, true, true, true);
     if (head != analysis_result::well_formed)
         return head;
     const syntax_node &d = tree[definition];
@@ -301,13 +304,26 @@ semantic_analysis::function_template_definition(node_index n,
        outside one is ill-formed (/7), which the template's own declarator
        does not tell apart from a pattern analysis has no rules for: the
        last parameter's type the only pack expansion, a function parameter
-       pack of the template parameter pack (the last) */
+       pack of the template parameter pack (its only one) */
     {
         uint32_t last = static_cast<uint32_t>(parameters.size()) - 1;
-        bool pack = template_parameter_is_pack(first + last);
+        uint32_t packs = 0;
+        for (uint32_t i = 0; i < parameters.size(); i++)
+            if (template_parameter_is_pack(first + i)) {
+                last = i;
+                packs++;
+            }
+        if (packs > 1)
+            return not_supported(n, "temp.variadic");
+        bool pack = packs == 1;
         const struct type ft = type_table[type.unqualified()];
         const qualified_type *list = type_table.parameters(type.unqualified());
-        if (pack && depends(type_table, ft.operand, &entity_table, last))
+        /* the return type: the pack named only in pack expansions
+           (res<A...>), each name of it followed by ... */
+        if (pack && depends(type_table, ft.operand, &entity_table, last) &&
+            !pack_only_expanded(
+                entity_table[template_parameter_entities[first + last]].name,
+                tree[dc[0].index()].first_token, tree[dc[0].index()].end_token))
             return not_supported(n, "temp.variadic");
         for (uint32_t i = 0; i < ft.parameter_count; i++) {
             const struct type pt = type_table[list[i].unqualified()];
@@ -784,7 +800,10 @@ analysis_result semantic_analysis::variable_partial_specialization(
 {
     entity_index outer = current_scope;
     owned_array<node_index> parameters;
-    analysis_result r = template_head_parameters(n, parameters);
+    /* [temp.param]/14: a partial specialization's packs are deduced,
+       wherever they are */
+    analysis_result r =
+        template_head_parameters(n, parameters, true, false, true);
     if (r != analysis_result::well_formed)
         return r;
     lookup_result x;
@@ -793,9 +812,7 @@ analysis_result semantic_analysis::variable_partial_specialization(
     uint32_t vt = variable_template_of(named);
     const function_template primary = function_templates[vt - 1];
     if (parameters.empty() || function_templates[vt - 1].name != named ||
-        entity_table[primary.entity].enclosing != outer ||
-        template_parameter_is_pack(primary.first_parameter +
-                                   primary.parameter_count - 1))
+        entity_table[primary.entity].enclosing != outer)
         return not_supported(n, "temp.class.spec");
     /* [temp.class.spec]/1: one declared after an instantiation it would
        be used for: not analysed */
@@ -819,11 +836,21 @@ analysis_result semantic_analysis::variable_partial_specialization(
         const template_argument &a = arguments[i];
         if (depends(type_table, a.type) || a.template_entity)
             dependent = true;
+        if (a.kind == template_argument::kind_t::pack)
+            for (uint32_t k = 0; k < a.count; k++)
+                if (depends(type_table, pack_arguments[a.value + k].type) ||
+                    pack_arguments[a.value + k].template_entity)
+                    dependent = true;
+    }
+    for (uint32_t i = 0; i < arguments.size() && identity; i++) {
         entity_index pe = template_parameter_entities[first + i];
-        if (identity)
-            identity = a.template_entity == pe ||
-                       (a.kind == template_argument::kind_t::type &&
-                        a.type == entity_table[pe].type);
+        const template_argument &a = arguments[i];
+        identity = a.template_entity == pe ||
+                   (a.kind == template_argument::kind_t::type &&
+                    a.type == entity_table[pe].type) ||
+                   (a.kind == template_argument::kind_t::pack && a.count == 1 &&
+                    pack_arguments[a.value].count == UINT32_MAX &&
+                    pack_arguments[a.value].template_entity == pe);
     }
     /* [temp.class.spec]/9: more specialized than the primary */
     if (!dependent || identity)
@@ -1104,18 +1131,41 @@ analysis_result semantic_analysis::alias_template_specialization(
     const function_template ft = function_templates[at - 1];
     analysis_result r = analysis_result::well_formed;
     /* an enclosing template's own pack expanded into the alias's pack
-       (Numbers... unbound): its elements are not known */
-    for (const template_argument &a : arguments)
+       (Numbers... unbound): its elements are not known.  Forwarded whole
+       to a pack parameter (libc++'s __invoke_result_t<_Args...>), the
+       parameter's name is bound to the enclosing pack itself, so that the
+       alias denotes what its type-id with that pack written there would
+       ([temp.alias]/2); anything else is refused */
+    owned_array<entity_index> forwarded;
+    for (uint32_t i = 0; i < ft.parameter_count; i++) {
+        const template_argument &a = arguments[i];
+        entity_index whole = 0;
         if (a.kind == template_argument::kind_t::pack)
-            for (uint32_t k = 0; k < a.count; k++)
-                if (pack_arguments[a.value + k].count == UINT32_MAX)
+            for (uint32_t k = 0; k < a.count; k++) {
+                const template_argument &x = pack_arguments[a.value + k];
+                if (x.count != UINT32_MAX)
+                    continue;
+                if (a.count != 1 ||
+                    !template_parameter_is_pack(ft.first_parameter + i) ||
+                    entity_table[x.template_entity].kind !=
+                        entity_kind::typedef_name)
                     return not_supported(id, "temp.variadic");
+                whole = x.template_entity;
+            }
+        forwarded.append(whole);
+    }
     entity_index scope = entity_table.make(entity_kind::block_scope, 0,
                                            entity_table[ft.entity].enclosing);
-    for (uint32_t i = 0; i < ft.parameter_count; i++)
-        bind_template_argument(
-            scope, template_parameter_entities[ft.first_parameter + i],
-            arguments[i]);
+    for (uint32_t i = 0; i < ft.parameter_count; i++) {
+        entity_index parameter =
+            template_parameter_entities[ft.first_parameter + i];
+        if (forwarded[i]) {
+            entity_table.bind(scope, entity_table[parameter].name,
+                              forwarded[i]);
+            continue;
+        }
+        bind_template_argument(scope, parameter, arguments[i]);
+    }
     entity_index saved_scope = current_scope;
     token_index saved_horizon = lookup_horizon;
     bool saved_expanding = expanding;
@@ -2390,6 +2440,22 @@ uint32_t semantic_analysis::attributes_without_effect_before(
            class_head_attributes_without_effect(tree.children(declaration)[k]))
         k++;
     return k;
+}
+
+/* [temp.variadic]/7: whether each of the tokens [first, end) that is the
+   pack's name is directly followed by ... (a pattern of the pack alone,
+   A...) */
+bool semantic_analysis::pack_only_expanded(uint32_t name, token_index first,
+                                           token_index end) const
+{
+    for (token_index t = first; t < end; t++)
+        if (tokens[t].kind == token_kind::identifier &&
+            tokens.identifier(t) == name &&
+            (t + 1 >= end ||
+             !syntax_is_punctuator(tokens, syntax_child::token(t + 1),
+                                   preprocessing_op_or_punc::ELLIPSIS)))
+            return false;
+    return true;
 }
 
 } // namespace cplusplus
