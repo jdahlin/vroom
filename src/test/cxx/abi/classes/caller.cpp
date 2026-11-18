@@ -25,6 +25,16 @@ int main()
     Derived d = derived_make(100, 20, 3);
     printf("derived %d %d %d sum %d\n", d.i, d.c, d.d, derived_sum(d));
 
+    More more;
+    more.i = 1;
+    more.c = 2;
+    more.d = 3;
+    Comparable same;
+    comparable_set(&same, 7, 8);
+    comparable_set(&more, 7, 8);
+    printf("more %d sum %d same %d\n", static_cast<int>(sizeof(More)),
+           more_sum(more), same == more);
+
     WithEmpty w;
     w.x = 12;
     Empty e;

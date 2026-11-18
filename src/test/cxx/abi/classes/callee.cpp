@@ -78,6 +78,25 @@ Derived derived_make(int i, char c, char d)
     return Derived(i, c, d);
 }
 
+bool Comparable::operator==(const Comparable &other) const
+{
+    return i == other.i && c == other.c;
+}
+
+int more_sum(const More &m)
+{
+    return m.i + m.c * 10 + m.d * 100;
+}
+
+/* a whole Comparable, its padding too: More's d is not in it */
+void comparable_set(Comparable *to, int i, char c)
+{
+    Comparable from;
+    from.i = i;
+    from.c = c;
+    *to = from;
+}
+
 int with_empty(WithEmpty w, Empty e, int after)
 {
     (void)e;

@@ -443,6 +443,10 @@ bool semantic_analysis::copy_assignment_operator(entity_index f,
     const entity &x = entity_table[f];
     if (!x.nonstatic_member || x.enclosing != c)
         return false;
+    /* an operator+ or operator== of that parameter is none */
+    if (!x.operator_function ||
+        x.implemented != preprocessing_op_or_punc::EQUAL)
+        return false;
     const struct type &function = type_table[x.type.unqualified()];
     if (function.parameter_count != 1 || function.variadic)
         return false;

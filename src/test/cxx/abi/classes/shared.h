@@ -24,6 +24,18 @@ struct Derived : NonPod {
     char d;
 };
 
+/* a POD for the purpose of layout all the same: operator== is no copy
+   assignment operator, and More's member comes after its padding */
+struct Comparable {
+    bool operator==(const Comparable &other) const;
+    int i;
+    char c;
+};
+
+struct More : Comparable {
+    char d;
+};
+
 struct WithEmpty : Empty {
     int x;
 };
@@ -70,6 +82,8 @@ Pod pod_swap(Pod p);
 int derived_sum(const Derived &d);
 Derived derived_make(int i, char c, char d);
 int with_empty(WithEmpty w, Empty e, int after);
+int more_sum(const More &m);
+void comparable_set(Comparable *to, int i, char c);
 int bits_sum(Bits b);
 Bits bits_make(unsigned a, int b, unsigned c, char d);
 Either either_of(int i);
