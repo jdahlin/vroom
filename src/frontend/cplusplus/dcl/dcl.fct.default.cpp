@@ -40,6 +40,17 @@ analysis_result semantic_analysis::default_arguments(node_index n,
             any = true;
     if (!any)
         return analysis_result::well_formed;
+    /* [temp.inst]/4: a function template specialization a default
+       argument names is not "referenced in a context that requires a
+       function definition to exist" until the argument is used in a
+       call (clang's choice: the rule is [temp.inst]/11's "required") */
+    struct unevaluated_scope {
+        unsigned &depth;
+        ~unevaluated_scope()
+        {
+            depth--;
+        }
+    } in_default = {++unevaluated};
     /* /3: "A default argument shall be specified only in the
        parameter-declaration-clause of a function declaration or
        lambda-declarator or in a template-parameter" */

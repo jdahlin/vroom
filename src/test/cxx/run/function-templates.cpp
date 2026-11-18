@@ -2,7 +2,9 @@
    arguments (by value, by reference, through pointers and arrays, a
    forwarding reference), one specialization per argument list, a template
    calling another, recursion, a constexpr template in a constant
-   expression, a template of a namespace ([temp.fct], [temp.deduct.call],
+   expression, a template of a namespace, explicit template arguments
+   (all, some, converting the arguments they determine) and qualified
+   calls ([temp.fct], [temp.deduct.call], [temp.arg.explicit],
    [temp.inst]). */
 #include <stdio.h>
 
@@ -52,7 +54,12 @@ template <class T> static int field_sum(const T &v) { return v.a + v.b; }
 namespace math {
 template <class T> T square(T x) { return x * x; }
 long squares() { return square(3L) + square(4L); }
+namespace inner {
+template <class T> T negate(T x) { return -x; }
+} // namespace inner
 } // namespace math
+
+template <class To, class From> To convert(From x) { return x; }
 
 int main()
 {
@@ -84,6 +91,12 @@ int main()
     pair p = {3, 4};
     if (field_sum(p) != 7 || math::squares() != 25)
         failures |= 256;
+    if (convert<int>(2.75) != 2 || convert<char, int>(65) != 'A' ||
+        larger<long>(3, 'a') != 97 || sizeof(larger<char>(1, 2)) != 1)
+        failures |= 512;
+    if (math::square(5) != 25 || math::square<double>(1) != 1.0 ||
+        math::inner::negate<short>(7) != -7 || ::larger(1, 2) != 2)
+        failures |= 1024;
     printf("%d\n", failures);
     return failures;
 }

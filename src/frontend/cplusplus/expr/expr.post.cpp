@@ -580,6 +580,27 @@ analysis_result semantic_analysis::call(node_index n, expression_meaning &m)
     }
     expression_meaning f;
     analysis_result r = analysis_result::well_formed;
+    {
+        /* [over.match.funcs]/8: "In each case where a candidate is a
+           function template, candidate function template specializations
+           are generated using template argument deduction"; the name is a
+           function template's alone */
+        token_index name = 0;
+        uint32_t ft = 0;
+        bool qualified = false;
+        owned_array<template_argument> specified;
+        r = template_callee(children[0], name, ft, specified, qualified);
+        if (r != analysis_result::well_formed)
+            return r;
+        if (ft) {
+            owned_array<expression_meaning> early;
+            r = template_call(n, name, ft, specified, qualified, arguments,
+                              early, f);
+            if (r != analysis_result::well_formed)
+                return r;
+            return call_with(n, f, f.type, 0, 0, arguments, early, m);
+        }
+    }
     /* the arguments analysed before the function is known, for
        argument-dependent lookup or overload resolution: each one's
        meaning, or none for a braced-init-list (which has no type) */
@@ -603,16 +624,6 @@ analysis_result semantic_analysis::call(node_index n, expression_meaning &m)
         token_index t = children[0].index();
         uint32_t name = tokens.identifier(t);
         lookup_result x = lookup_unqualified(name, lookup_filter::any);
-        if (uint32_t ft = function_template_of(x.unknown_entity)) {
-            /* [over.match.funcs]/8: "In each case where a candidate is a
-               function template, candidate function template
-               specializations are generated using template argument
-               deduction"; the name is a function template's alone */
-            r = template_call(n, t, ft, arguments, early, f);
-            if (r != analysis_result::well_formed)
-                return r;
-            looked_up = true;
-        }
         bool dependent = !x.ambiguous && !x.unknown;
         if (x.entity) {
             const entity &fx = entity_table[x.entity];
@@ -764,8 +775,114 @@ analysis_result semantic_analysis::call(node_index n, expression_meaning &m)
  * arguments' associated namespaces, which overload resolution would weigh
  * against the specialization: not analysed.
  */
+analysis_result semantic_analysis::template_callee(
+    syntax_child callee, token_index &name, uint32_t &function_template,
+    owned_array<template_argument> &specified, bool &qualified)
+{
+    name = 0;
+    function_template = 0;
+    qualified = false;
+    if (callee.is_token()) {
+        if (tokens[callee.index()].kind != token_kind::identifier)
+            return analysis_result::well_formed;
+        name = callee.index();
+        lookup_result x =
+            lookup_unqualified(tokens.identifier(name), lookup_filter::any);
+        function_template = function_template_of(x.unknown_entity);
+        return analysis_result::well_formed;
+    }
+    /* (the uses a callee that is no template's records are recorded
+       again by its analysis as an expression) */
+    size_t uses_before = name_uses.size();
+    analysis_result r = template_callee_parts(callee, name, function_template,
+                                              specified, qualified);
+    if (!function_template)
+        name_uses.resize(uses_before);
+    return r;
+}
+
+analysis_result semantic_analysis::template_callee_parts(
+    syntax_child callee, token_index &name, uint32_t &function_template,
+    owned_array<template_argument> &specified, bool &qualified)
+{
+    syntax_child id = callee;
+    nominated_scope scope;
+    if (syntax_is(tree, callee, syntax_kind::qualified_id)) {
+        /* [namespace.qual]: a function template of a namespace */
+        const syntax_node &q = tree[callee.index()];
+        if (q.child_count != 2 ||
+            !syntax_is(tree, tree.children(callee.index())[0],
+                       syntax_kind::nested_name_specifier))
+            return analysis_result::well_formed;
+        id = tree.children(callee.index())[1];
+        analysis_result r = nested_name_specifier(
+            tree.children(callee.index())[0].index(), scope);
+        if (r != analysis_result::well_formed)
+            return r;
+        if (!is_namespace(scope.entity))
+            return analysis_result::well_formed;
+        qualified = true;
+    }
+    owned_array<syntax_child> written;
+    if (id.is_token()) {
+        if (!qualified || tokens[id.index()].kind != token_kind::identifier)
+            return analysis_result::well_formed;
+        name = id.index();
+    } else if (syntax_is(tree, id, syntax_kind::simple_template_id)) {
+        const syntax_node &t = tree[id.index()];
+        const syntax_child *parts = tree.children(id.index());
+        if (t.child_count < 3 || !parts[0].is_token() ||
+            tokens[parts[0].index()].kind != token_kind::identifier)
+            return analysis_result::well_formed;
+        name = parts[0].index();
+        for (uint32_t i = 2; i + 1 < t.child_count; i++) {
+            if (syntax_is(tree, parts[i],
+                          syntax_kind::template_argument_list)) {
+                for (uint32_t k = 0; k < tree[parts[i].index()].child_count;
+                     k++) {
+                    syntax_child a = tree.children(parts[i].index())[k];
+                    if (!syntax_is_punctuator(tokens, a,
+                                              preprocessing_op_or_punc::COMMA))
+                        written.append(a);
+                }
+            } else {
+                written.append(parts[i]);
+            }
+        }
+    } else {
+        return analysis_result::well_formed;
+    }
+    lookup_result x;
+    if (qualified)
+        x = lookup_qualified(scope.entity, tokens.identifier(name),
+                             lookup_filter::any);
+    else
+        x = lookup_unqualified(tokens.identifier(name), lookup_filter::any);
+    function_template = function_template_of(x.unknown_entity);
+    if (!function_template) {
+        /* a template-id of no function template analysis knows: what it
+           was before */
+        if (!written.empty() || !qualified)
+            return not_supported(id.index(), "temp.names");
+        return analysis_result::well_formed;
+    }
+    /* [temp.arg.type]/1: "A template-argument for a template-parameter
+       which is a type shall be a type-id." */
+    for (syntax_child a : written) {
+        if (!syntax_is(tree, a, syntax_kind::type_id))
+            return not_supported(id.index(), "temp.arg");
+        template_argument x;
+        analysis_result r = type_id(a.index(), x.type);
+        if (r != analysis_result::well_formed)
+            return r;
+        specified.append(x);
+    }
+    return analysis_result::well_formed;
+}
+
 analysis_result semantic_analysis::template_call(
     node_index n, token_index name, uint32_t function_template,
+    owned_array<template_argument> &specified, bool qualified,
     const owned_array<syntax_child> &arguments,
     owned_array<expression_meaning> &early, expression_meaning &f)
 {
@@ -780,13 +897,14 @@ analysis_result semantic_analysis::template_call(
         types.append(e.type);
         early.append(e);
     }
+    /* [basic.lookup.argdep]/1: for an unqualified name only */
     owned_array<entity_index> others;
-    if (!argument_dependent_lookup(
-            tokens.identifier(name), types, others,
-            function_templates[function_template - 1].name) ||
-        !others.empty())
+    if (!qualified && (!argument_dependent_lookup(
+                           tokens.identifier(name), types, others,
+                           function_templates[function_template - 1].name) ||
+                       !others.empty()))
         return not_supported(n, "basic.lookup.argdep");
-    owned_array<template_argument> deduced;
+    owned_array<template_argument> &deduced = specified;
     const expression_meaning *meanings = nullptr;
     if (!early.empty())
         meanings = &early[0];

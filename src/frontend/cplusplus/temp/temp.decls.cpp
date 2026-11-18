@@ -259,24 +259,26 @@ uint32_t semantic_analysis::function_template_of(entity_index held) const
     return 0;
 }
 
-/* whether a type is made of a template-parameter type */
-static bool depends(const types &table, qualified_type t)
+/* whether a type is made of a template-parameter type, of one at
+   position from or after if from is given */
+static bool depends(const types &table, qualified_type t,
+                    const entities *parameters = nullptr, uint64_t from = 0)
 {
     const struct type &r = table[t.unqualified()];
     switch (r.kind) {
     case type_kind::template_parameter:
-        return true;
+        return !parameters || (*parameters)[r.entity].value >= from;
     case type_kind::pointer:
     case type_kind::lvalue_reference:
     case type_kind::rvalue_reference:
     case type_kind::array:
-        return depends(table, r.operand);
+        return depends(table, r.operand, parameters, from);
     case type_kind::function: {
-        if (depends(table, r.operand))
+        if (depends(table, r.operand, parameters, from))
             return true;
         const qualified_type *p = table.parameters(t.unqualified());
         for (uint32_t i = 0; i < r.parameter_count; i++)
-            if (depends(table, p[i]))
+            if (depends(table, p[i], parameters, from))
                 return true;
         return false;
     }
@@ -366,12 +368,29 @@ semantic_analysis::deduce_from_call(node_index at, uint32_t function_template,
         return not_supported(at, "temp.deduct.call");
     const qualified_type *parameters =
         type_table.parameters(type.unqualified());
+    /* [temp.arg.explicit]/3: "A template argument list may be specified
+       when referring to a specialization of a function template"; /6:
+       "The template argument list shall not specify more
+       template-arguments than there are corresponding
+       template-parameters" (clang: no candidate) */
+    uint32_t specified = static_cast<uint32_t>(deduced.size());
+    if (specified > ft.parameter_count)
+        return not_supported(at, "temp.arg.explicit");
     owned_array<qualified_type> values;
-    for (uint32_t i = 0; i < ft.parameter_count; i++)
-        values.append(qualified_type());
+    for (uint32_t i = 0; i < ft.parameter_count; i++) {
+        qualified_type v;
+        if (i < specified)
+            v = deduced[i].type;
+        values.append(v);
+    }
     for (uint32_t i = 0; i < count; i++) {
         qualified_type p = parameters[i];
-        if (!depends(type_table, p))
+        /* /7: "Implicit conversions will be performed on a function
+           argument to convert it to the type of the corresponding function
+           parameter if the parameter type contains no template-parameters
+           that participate in template argument deduction", which those
+           explicitly specified do not */
+        if (!depends(type_table, p, &entity_table, specified))
             continue;
         qualified_type a = arguments[i].type;
         const struct type ar = type_table[a.unqualified()];
@@ -423,6 +442,7 @@ semantic_analysis::deduce_from_call(node_index at, uint32_t function_template,
         if (!deduce_type(p, a, values))
             return not_supported(at, "temp.deduct.call");
     }
+    deduced.clear();
     for (const qualified_type &v : values) {
         /* [temp.deduct]/1's "all of the template arguments shall have
            values": one deduced from no argument */

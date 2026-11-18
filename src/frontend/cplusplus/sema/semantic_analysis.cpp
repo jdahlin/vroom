@@ -200,6 +200,7 @@ void semantic_analysis::translation_unit()
     tree.declarations(&all);
     for (node_index n : all)
         declaration(n);
+    instantiate_pending();
 }
 
 } // namespace cplusplus

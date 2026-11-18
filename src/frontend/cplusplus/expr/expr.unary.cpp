@@ -279,7 +279,11 @@ analysis_result semantic_analysis::size_of(node_index n, bool alignment,
            function-to-pointer standard conversions are not applied to the
            operand of sizeof." */
         expression_meaning e;
+        /* [expr.sizeof]/1: "The operand is either an expression, which is
+           an unevaluated operand ([expr.prop])" */
+        unevaluated++;
         analysis_result r = expression(children[1], e);
+        unevaluated--;
         if (r != analysis_result::well_formed)
             return r;
         /* [expr.sizeof]/1: "The sizeof operator shall not be applied to

@@ -2318,6 +2318,12 @@ class semantic_analysis
         entity_index specialization = 0;
         /* inputs[first_input .. + input_count) */
         uint32_t first_input = 0, input_count = 0;
+        /* a function template's: the scope its template-parameters'
+           names name the arguments in, whether its definition is
+           instantiated, waits (pending_definitions) or is being
+           analysed */
+        entity_index scope = 0;
+        bool defined = false, pending = false, defining = false;
     };
     /* [temp.fct]/1: a function template: its entity (template_entity,
        whose type is the function type with the type parameters' types,
@@ -2340,6 +2346,17 @@ class semantic_analysis
        instantiations nest ([temp.inst]/16) */
     uint32_t instantiating = 0;
     unsigned instantiation_depth = 0;
+    /* an unevaluated operand ([expr.prop]/1) or a default argument is
+       analysed: a specialization named there needs no definition
+       ([temp.inst]/5) */
+    unsigned unevaluated = 0;
+    /* the specializations whose definitions wait for the end of the
+       translation unit ([temp.point]/7) */
+    owned_array<uint32_t> pending_definitions;
+    /* the definition of instantiations[index]'s specialization */
+    analysis_result instantiate_definition(node_index at, uint32_t index);
+    /* the definitions pending_definitions waits for */
+    void instantiate_pending();
     /* in an instantiation, the template's first token: a namespace's
        name declared after it is not the template's to find
        (lookup_unqualified) */
@@ -2349,9 +2366,21 @@ class semantic_analysis
     /* a call whose name is a function template's (expr.post.cpp) */
     analysis_result template_call(node_index n, token_index name,
                                   uint32_t function_template,
+                                  owned_array<template_argument> &specified,
+                                  bool qualified,
                                   const owned_array<syntax_child> &arguments,
                                   owned_array<expression_meaning> &early,
                                   expression_meaning &f);
+    /* a callee that names a function template: f, f<A...>, N::f or
+       N::f<A...>; its name, the template (plus one, 0 if the callee is no
+       template's name) and the template-arguments given */
+    analysis_result template_callee(syntax_child callee, token_index &name,
+                                    uint32_t &function_template,
+                                    owned_array<template_argument> &specified,
+                                    bool &qualified);
+    analysis_result template_callee_parts(
+        syntax_child callee, token_index &name, uint32_t &function_template,
+        owned_array<template_argument> &specified, bool &qualified);
     /* declare()'s part for a specialization an instantiation makes */
     analysis_result declare_specialization(node_index declaration,
                                            token_index id, qualified_type type,
@@ -2372,7 +2401,8 @@ class semantic_analysis
                                 uint32_t count, entity_index &specialization);
     /* [temp.deduct]/1: "When a function template specialization is
        referenced, all of the template arguments shall have values"; the
-       arguments deduced from a call's ([temp.deduct.call]) */
+       arguments deduced from a call's ([temp.deduct.call]); on entry
+       those the call specifies ([temp.arg.explicit]) */
     analysis_result deduce_from_call(node_index at, uint32_t function_template,
                                      const expression_meaning *arguments,
                                      uint32_t count,

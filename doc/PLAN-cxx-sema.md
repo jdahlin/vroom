@@ -1483,6 +1483,22 @@ lines:
   but for a use-after-free in the parser's recovery
   (`parser::unparsed_declaration`, SemaTemplate/explicit-instantiation.cpp),
   which is older than this.
+  Then explicit template arguments and qualified calls: `template_callee`
+  (expr.post.cpp) takes `f`, `f<A...>`, `N::f` and `N::f<A...>` (type
+  arguments, [temp.arg.type]/1; a namespace's template found by
+  [namespace.qual], no argument-dependent lookup); deduction starts from
+  the arguments given and leaves out the parameters they determine, whose
+  arguments convert ([temp.arg.explicit]/7).  A specialization's
+  declaration and definition are now instantiated apart ([temp.inst]/5):
+  the declaration where a call names it, the definition at once for a
+  constexpr template and otherwise after the translation unit's
+  declarations ([temp.point]/7, as clang), and not for a call in an
+  unevaluated operand (sizeof) or a default argument (`unevaluated`).  A
+  definition analysis has no rules for makes the template's declaration
+  unsupported.  cxx-sema: declarations as clang 31770, 0 we reject and
+  clang accepts, 0 refuted (types 40137, lookup 14272, symbols 1723); we
+  accept and clang rejects 943; cxx-run 192/192; cxx-c-suites 2214 pass,
+  0 wrong.
 
 ### S7. Exceptions and RTTI
 
