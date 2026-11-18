@@ -407,7 +407,7 @@ analysis_result semantic_analysis::special_member_declarator(
 /*
  * A constructor or destructor whose function-body is = default or
  * = delete.  [dcl.fct.def.delete]/1: a deleted definition; /2 a use of it
- * is ill-formed (a constructor's; a deleted destructor is not analysed).
+ * is ill-formed (a constructor's, a delete-expression's destructor).
  * [dcl.fct.def.default]/5: "Explicitly-defaulted functions and
  * implicitly-declared functions are collectively called defaulted
  * functions, and the implementation shall provide implicit definitions
@@ -427,8 +427,12 @@ analysis_result semantic_analysis::defaulted_or_deleted_special_member(
         if (r != analysis_result::well_formed)
             return r;
         const entity &f = entity_table[last_declared];
+        /* a deleted destructor (libc++'s __nat): the class's destructor,
+           deleted, which a delete-expression checks (deleted_use); an
+           object of the class is never destroyed in a well-formed
+           program */
         if (f.special == special_member::destructor)
-            return not_supported(n, "dcl.fct.def.delete");
+            return deleted_definition(n, last_declared);
         /* X(X&) = delete or X(X&&) = delete: which one a return of a local
            chooses depends on [class.copy.elision]/3's implicit move, not
            analysed */

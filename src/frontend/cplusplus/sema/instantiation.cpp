@@ -316,8 +316,10 @@ analysis_result semantic_analysis::define_class_instantiation(node_index at,
     declaration_access = 0;
     instantiating = 0;
     class_instantiating = index + 1;
+    postpone_member_bodies = context.defining_class != 0;
     type_index type = 0;
     analysis_result r = class_specifier(definition.definition, type);
+    postpone_member_bodies = false;
     leave_instantiation(context);
     instantiations[index].defining = false;
     c = instantiations[index].specialization;
@@ -348,6 +350,14 @@ analysis_result semantic_analysis::define_class_instantiation(node_index at,
    translation unit's declarations (each may use more) */
 void semantic_analysis::instantiate_pending()
 {
+    for (size_t i = 0; i < postponed_bodies.size(); i++) {
+        const postponed_body b = postponed_bodies[i];
+        instantiation_context context;
+        enter_instantiation(context, b.scope, b.declaration);
+        member_function_body(b.c, b.body);
+        leave_instantiation(context);
+    }
+    postponed_bodies.clear();
     for (size_t i = 0; i < pending_definitions.size(); i++) {
         uint32_t index = pending_definitions[i];
         if (!instantiations[index].pending)
@@ -445,7 +455,9 @@ analysis_result semantic_analysis::declare_variable_specialization(
     variable_instantiating = 0;
     /* (a copy: making the entity can move the table) */
     const entity t = entity_table[instantiations[index].template_entity];
-    if (s.constexpr_ != t.constexpr_ || s.static_ || s.extern_ || s.typedef_)
+    bool explicit_ = instantiations[index].explicit_specialization;
+    if ((s.constexpr_ != t.constexpr_ && !explicit_) || s.static_ ||
+        s.extern_ || s.typedef_)
         return not_supported(declaration, "temp.inst");
     entity_index e =
         entity_table.make(entity_kind::variable, t.name, t.enclosing);
@@ -453,7 +465,8 @@ analysis_result semantic_analysis::declare_variable_specialization(
     entity_table[e].linkage_of_name = t.linkage_of_name;
     if (type_without_external_linkage(type))
         entity_table[e].linkage_of_name = linkage::internal;
-    entity_table[e].inline_ = true;
+    /* ([temp.expl.spec]/12: an explicit specialization's as declared) */
+    entity_table[e].inline_ = !explicit_ || s.inline_;
     entity_table[e].constexpr_ = s.constexpr_;
     entity_table[e].defined = true;
     entity_table[e].instantiation = index + 1;

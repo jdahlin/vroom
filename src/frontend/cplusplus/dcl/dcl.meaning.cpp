@@ -90,10 +90,15 @@ analysis_result semantic_analysis::reference(node_index at, bool rvalue,
             return ill_formed(at, "there shall be no references to references",
                               "dcl.ref");
     }
-    /* a reference to cv void: clang's error, a rule not found yet */
+    /* [dcl.ref]/1: "A declarator that specifies the type "reference to cv
+       void" is ill-formed." (in a substitution, a deduction failure:
+       [temp.deduct]/11.4) */
     if (referred.kind == type_kind::fundamental &&
         referred.fundamental == fundamental_type::void_)
-        return not_supported(at, "dcl.ref");
+        return ill_formed(at,
+                          "a declarator that specifies the type \"reference "
+                          "to cv void\" is ill-formed",
+                          "dcl.ref");
     type = reference_to(type, rvalue);
     m.reference_made = true;
     return analysis_result::well_formed;
@@ -771,6 +776,18 @@ analysis_result semantic_analysis::declarator(node_index declaration,
         m.id = children[0].index();
         m.conversion_function = true;
         tokens.name_token(m.id, conversion_function_name());
+        return analysis_result::well_formed;
+    case syntax_kind::simple_template_id:
+        /* [temp.expl.spec]/1: a specialization's template-id, the whole
+           declarator (a variable template's) */
+        if (!declarator_template_id || !node.child_count ||
+            !children[0].is_token() ||
+            tokens[children[0].index()].kind != token_kind::identifier)
+            return not_supported(n);
+        declarator_template_id = false;
+        m.template_id = n;
+        m.has_id = true;
+        m.id = children[0].index();
         return analysis_result::well_formed;
     default:
         return not_supported(n);

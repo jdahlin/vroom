@@ -162,9 +162,8 @@ semantic_analysis::conversion_function_member(entity_index c, node_index n,
     specified s;
     uint32_t first = 0;
     /* [ext:gnu_attributes] attributes before the declaration */
-    while (first < node.child_count &&
-           syntax_is(tree, children[first],
-                     syntax_kind::gnu_attribute_specifier)) {
+    uint32_t lead = leading_gnu_attributes(n);
+    while (first < lead) {
         analysis_result r = gnu_attribute_specifier(children[first].index(), s);
         if (r != analysis_result::well_formed)
             return r;

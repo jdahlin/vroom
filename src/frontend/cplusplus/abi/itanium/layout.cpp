@@ -91,7 +91,10 @@ bool empty_class(const semantic_analysis &a, entity_index c)
 bool pod_for_layout(const semantic_analysis &a, entity_index c)
 {
     const entity &x = a.entity_table[c];
-    if (x.destructor || x.base_count || x.user_copy_assignment || x.dynamic)
+    /* [impl.clang] a destructor or copy assignment operator deleted on its
+       first declaration is no user-declared one here, as constructors */
+    if ((x.destructor && !a.entity_table[x.destructor].deleted) ||
+        x.base_count || x.user_copy_assignments || x.dynamic)
         return false;
     /* [impl.clang] a constructor deleted on its first declaration is no
        user-declared one here (C++11's aggregates allow it) */
@@ -303,6 +306,10 @@ const char *class_layout::initialization()
     size = 0;
     alignment = 1;
     data_bits = 0;
+    /* [dcl.align]: the class's own alignment-specifiers, before its
+       bases and members (clang's) */
+    if (table[c].requested_alignment)
+        raise_alignment(table[c].requested_alignment);
     const dynamic_class *d = analysis.dynamic_of(c);
     if (d && !d->primary_base) {
         uint64_t pointer = analysis.pointer_size();

@@ -285,6 +285,10 @@ static const gnu_attribute_rule *gnu_attribute_rule_of(const char *name,
 analysis_result semantic_analysis::gnu_attribute_specifier(node_index n,
                                                            gnu_attributes &g)
 {
+    /* (standard attributes without effect: leading_gnu_attributes) */
+    if (tree[n].kind == syntax_kind::attribute_specifier &&
+        attributes_without_effect(syntax_child::node(n)))
+        return analysis_result::well_formed;
     owned_array<syntax_child> attributes;
     owned_array<node_index> work;
     work.append(n);
@@ -300,6 +304,9 @@ analysis_result semantic_analysis::gnu_attribute_specifier(node_index n,
             else if (syntax_is(tree, c, syntax_kind::gnu_attribute_list) ||
                      syntax_is(tree, c, syntax_kind::gnu_attribute_specifier))
                 work.append(c.index());
+            else if (syntax_is(tree, c, syntax_kind::attribute_specifier) &&
+                     attributes_without_effect(c))
+                continue;
             else if (!c.is_token())
                 return not_supported(n, "ext.gnu");
             else if (tokens[c.index()].kind !=

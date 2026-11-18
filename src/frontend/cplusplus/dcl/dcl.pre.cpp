@@ -782,9 +782,29 @@ uint32_t semantic_analysis::leading_gnu_attributes(node_index n) const
 {
     uint32_t k = 0;
     while (k < tree[n].child_count && !tree.children(n)[k].is_token() &&
-           only_gnu_attributes(tree, tree.children(n)[k].index()))
+           gnu_or_without_effect(tree.children(n)[k].index()))
         k++;
     return k;
+}
+
+/* GCC's attributes, or standard ones without effect
+   (attributes_without_effect), which gnu_attribute_specifier passes over:
+   [[nodiscard]] before libc++'s functions */
+bool semantic_analysis::gnu_or_without_effect(node_index n) const
+{
+    if (tree[n].kind == syntax_kind::attribute_specifier)
+        return attributes_without_effect(syntax_child::node(n));
+    if (tree[n].kind != syntax_kind::attribute_specifier_seq)
+        return only_gnu_attributes(tree, n);
+    for (uint32_t i = 0; i < tree[n].child_count; i++) {
+        syntax_child c = tree.children(n)[i];
+        if (c.is_token())
+            return false;
+        if (!syntax_is(tree, c, syntax_kind::gnu_attribute_specifier) &&
+            !gnu_or_without_effect(c.index()))
+            return false;
+    }
+    return true;
 }
 
 /*

@@ -186,9 +186,16 @@ analysis_result semantic_analysis::bind_anonymous_members(entity_index c,
     return analysis_result::well_formed;
 }
 
+/* (class_definition) */
 analysis_result semantic_analysis::class_definition(node_index n,
                                                     type_index &type)
 {
+    /* a class template's specialization defined while another class is
+       (postpone_member_bodies, define_class_instantiation) */
+    bool postpone = postpone_member_bodies;
+    postpone_member_bodies = false;
+    entity_index postponed_scope = current_scope;
+    node_index postponed_declaration = current_declaration;
     const syntax_node &node = tree[n];
     const syntax_child *children = tree.children(n);
     if (!node.child_count ||
@@ -196,12 +203,36 @@ analysis_result semantic_analysis::class_definition(node_index n,
         return not_supported(n, "class.pre");
     node_index head = children[0].index();
     const syntax_node &h = tree[head];
-    const syntax_child *head_children = tree.children(head);
-    if (!h.child_count || !head_children[0].is_token())
+    /* class-key attribute-specifier-seq_opt class-head-name ...: the
+       alignment-specifiers left out of head_children, kept in alignas */
+    owned_array<syntax_child> head_list;
+    owned_array<node_index> alignas_list;
+    for (uint32_t i = 0; i < h.child_count; i++) {
+        syntax_child c = tree.children(head)[i];
+        bool only_alignment =
+            i && syntax_is(tree, c, syntax_kind::attribute_specifier_seq);
+        for (uint32_t k = 0; only_alignment && k < tree[c.index()].child_count;
+             k++)
+            only_alignment = syntax_is(tree, tree.children(c.index())[k],
+                                       syntax_kind::alignment_specifier);
+        if (only_alignment) {
+            for (uint32_t k = 0; k < tree[c.index()].child_count; k++)
+                alignas_list.append(tree.children(c.index())[k].index());
+        } else if (i && syntax_is(tree, c, syntax_kind::alignment_specifier)) {
+            alignas_list.append(c.index());
+        } else if (i && class_head_attributes_without_effect(c)) {
+            /* [dcl.attr.deprecated] and the like: nothing generated */
+        } else {
+            head_list.append(c);
+        }
+    }
+    const syntax_child *head_children = head_list.data();
+    uint32_t head_count = static_cast<uint32_t>(head_list.size());
+    if (!head_count || !head_children[0].is_token())
         return not_supported(n, "class.pre");
     /* [class.pre]/1: "A class-specifier whose class-head omits the
        class-head-name defines an unnamed class." */
-    bool unnamed = h.child_count == 1;
+    bool unnamed = head_count == 1;
     /* class-head-name: nested-name-specifier_opt class-name */
     token_index head_name = 0;
     node_index head_qualifier = 0;
@@ -236,9 +267,9 @@ analysis_result semantic_analysis::class_definition(node_index n,
         return not_supported(n, "class.pre");
     }
     bool has_bases =
-        h.child_count == 3 && !unnamed &&
+        head_count == 3 && !unnamed &&
         syntax_is(tree, head_children[2], syntax_kind::base_clause);
-    if (h.child_count > 2 && !has_bases)
+    if (head_count > 2 && !has_bases)
         /* a class-virt-specifier, a base-clause of an unnamed class */
         return not_supported(n, "class.derived");
     standard_keyword key = p.keyword_of(tokens[head_children[0].index()]);
@@ -502,6 +533,15 @@ analysis_result semantic_analysis::class_definition(node_index n,
     analysis_result result = analysis_result::well_formed;
     if (has_bases)
         result = base_clause(c, head_children[2].index(), key);
+    entity_table[c].requested_alignment = 0;
+    for (node_index a : alignas_list) {
+        uint64_t alignment = 0;
+        if (result == analysis_result::well_formed)
+            result = alignment_specifier(a, alignment);
+        if (alignment > entity_table[c].requested_alignment)
+            entity_table[c].requested_alignment =
+                static_cast<uint32_t>(alignment);
+    }
     if (result != analysis_result::well_formed) {
         resume_outer();
         entity_table[c].kind = entity_kind::none;
@@ -585,6 +625,20 @@ analysis_result semantic_analysis::class_definition(node_index n,
            at its closing } */
         for (node_index body : bodies)
             nested_bodies.append(deferred_body{c, body});
+    } else if (postpone) {
+        /* [temp.inst]/4: a member function's definition is instantiated
+           where it is used; the class that named this specialization
+           (template<class D> struct base { ... static_cast<D *>(this) ...
+           }; struct d : base<d>) is complete only after it: the bodies
+           wait for the end of the translation unit (instantiate_pending) */
+        for (node_index body : bodies)
+            postponed_bodies.append(postponed_body{c, body, postponed_scope,
+                                                   postponed_declaration});
+        for (size_t i = nested_start; i < nested_bodies.size(); i++)
+            postponed_bodies.append(
+                postponed_body{nested_bodies[i].c, nested_bodies[i].body,
+                               postponed_scope, postponed_declaration});
+        nested_bodies.resize(nested_start);
     } else {
         size_t nested_end = nested_bodies.size();
         for (node_index body : bodies) {
@@ -1167,11 +1221,12 @@ analysis_result semantic_analysis::member_declarators(
             !syntax_is(tree, children[body_at], syntax_kind::function_body))
             return not_supported(n, "dcl.fct.def.general");
         const syntax_node &b = tree[children[body_at].index()];
-        if (b.child_count != 1 ||
-            !syntax_is(tree, tree.children(children[body_at].index())[0],
-                       syntax_kind::compound_statement))
-            /* a ctor-initializer, a function-try-block, = default,
-               = delete */
+        /* = delete: member_function_definition's deleted_definition */
+        if (!deleted_body(children[body_at]) &&
+            (b.child_count != 1 ||
+             !syntax_is(tree, tree.children(children[body_at].index())[0],
+                        syntax_kind::compound_statement)))
+            /* a ctor-initializer, a function-try-block, = default */
             return not_supported(n, "dcl.fct.def.general");
         virt_override = override_;
         virt_final = final_;
@@ -1511,9 +1566,16 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
                 operator_function_declaration(declaration, e);
             if (checked != analysis_result::well_formed)
                 return checked;
-            if (copy_assignment_operator(e, entity_table[e].enclosing))
-                entity_table[entity_table[e].enclosing].user_copy_assignment =
-                    true;
+            /* (one deleted on this, its first, declaration: not counted,
+               layout's pod_for_layout reads the count at the class's end,
+               before the bodies) */
+            bool deleted_here =
+                definition &&
+                deleted_body(tree.children(
+                    declaration)[tree[declaration].child_count - 1]);
+            if (copy_assignment_operator(e, entity_table[e].enclosing) &&
+                !deleted_here)
+                entity_table[entity_table[e].enclosing].user_copy_assignments++;
         }
         if (m.conversion_function) {
             /* [class.conv.fct]/1: "A conversion function shall have no
@@ -2041,6 +2103,80 @@ bool semantic_analysis::virt_specifier(syntax_child d, bool &override_,
         if (!one(tree.children(d.index())[i]))
             return false;
     return true;
+}
+
+/* a class-head's class-head-name (or what is in its place), after the
+   class-key and alignment-specifiers; none in an unnamed class's */
+syntax_child semantic_analysis::class_head_name(node_index head) const
+{
+    for (uint32_t i = 1; i < tree[head].child_count; i++) {
+        syntax_child c = tree.children(head)[i];
+        if (syntax_is(tree, c, syntax_kind::alignment_specifier) ||
+            class_head_attributes_without_effect(c))
+            continue;
+        bool only_alignment =
+            syntax_is(tree, c, syntax_kind::attribute_specifier_seq);
+        for (uint32_t k = 0; only_alignment && k < tree[c.index()].child_count;
+             k++)
+            only_alignment = syntax_is(tree, tree.children(c.index())[k],
+                                       syntax_kind::alignment_specifier);
+        if (!only_alignment)
+            return c;
+    }
+    return syntax_child();
+}
+
+/*
+ * [dcl.align]/2: "When the alignment-specifier is of the form alignas(
+ * constant-expression ): the constant-expression shall be an integral
+ * constant expression; if the constant expression does not evaluate to an
+ * alignment value, or evaluates to an extended alignment and the
+ * implementation does not support that alignment in the context of the
+ * declaration, the program is ill-formed."  /3: "An alignment-specifier of
+ * the form alignas( type-id ) has the same effect as alignas(alignof(
+ * type-id ))."  /4: zero has no effect.  A pack expansion: no rules yet.
+ */
+analysis_result semantic_analysis::alignment_specifier(node_index n,
+                                                       uint64_t &alignment)
+{
+    alignment = 0;
+    const syntax_child *parts = tree.children(n);
+    if (tree[n].child_count != 4)
+        return not_supported(n, "dcl.align");
+    if (syntax_is(tree, parts[2], syntax_kind::type_id)) {
+        qualified_type t;
+        analysis_result r = type_id(parts[2].index(), t);
+        if (r != analysis_result::well_formed)
+            return r;
+        const struct type &record = type_table[t.unqualified()];
+        if (record.kind == type_kind::function ||
+            (record.kind == type_kind::array && !record.bound_known))
+            return not_supported(n, "dcl.align");
+        alignment = alignment_of_type(t);
+        /* an incomplete type, void: not known */
+        if (!alignment)
+            return not_supported(n, "dcl.align");
+        return analysis_result::well_formed;
+    }
+    expression_meaning e;
+    analysis_result r = expression(parts[2], e);
+    if (r != analysis_result::well_formed)
+        return r;
+    if (!is_integral(e.type) || e.category != value_category::prvalue)
+        return not_supported(n, "dcl.align");
+    bool constant = false;
+    r = constant_expression(n, e, constant);
+    if (r != analysis_result::well_formed)
+        return r;
+    if (!constant)
+        return not_supported(n, "dcl.align");
+    alignment = e.value;
+    /* [basic.align]/4: "Every alignment value shall be a non-negative
+       integral power of two"; clang's limit 2^29 */
+    if (alignment && ((alignment & (alignment - 1)) || alignment > (1u << 28)))
+        return ill_formed(n, "an alignment shall be a power of two",
+                          "dcl.align");
+    return analysis_result::well_formed;
 }
 
 /* class c's members one range of class_members again, at its end, after
