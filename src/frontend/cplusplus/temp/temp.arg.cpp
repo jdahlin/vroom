@@ -128,6 +128,18 @@ entity_index semantic_analysis::dependent_value_entity(syntax_child written)
         negated = true;
         written = tree.children(written.index())[1];
     }
+    /* an alias template's parameter bound to such an argument: that
+       argument */
+    if (!negated && written.is_token() &&
+        tokens[written.index()].kind == token_kind::identifier) {
+        lookup_result x = lookup_unqualified(tokens.identifier(written.index()),
+                                             lookup_filter::any);
+        if (x.entity &&
+            entity_table[x.entity].kind == entity_kind::dependent_value)
+            return x.entity;
+    }
+    if (!negated && syntax_is(tree, written, syntax_kind::simple_template_id))
+        return dependent_variable_specialization(written.index(), e);
     if (!syntax_is(tree, written, syntax_kind::qualified_id) ||
         tree[written.index()].child_count != 2)
         return e;
@@ -163,6 +175,83 @@ entity_index semantic_analysis::dependent_value_entity(syntax_child written)
     entity_table[e].type = type;
     entity_table[e].name = name;
     entity_table[e].value = value;
+    dependent_values.append(e);
+    return e;
+}
+
+/* [temp.dep.constexpr]/2: a variable template's specialization v<args>
+   with a dependent argument, as a value-dependent template-argument
+   (enable_if_t<is_fp<T>, bool>): a dependent specialization of the
+   variable template (one per arguments), which [abi:mangle.template-arg]
+   spells X <source-name> <template-args> E (value 4); e if it is not
+   one */
+entity_index
+semantic_analysis::dependent_variable_specialization(node_index id,
+                                                     entity_index e)
+{
+    const syntax_node &t = tree[id];
+    const syntax_child *parts = tree.children(id);
+    if (t.child_count < 3 || !parts[0].is_token() ||
+        tokens[parts[0].index()].kind != token_kind::identifier)
+        return e;
+    lookup_result x = lookup_unqualified(tokens.identifier(parts[0].index()),
+                                         lookup_filter::any);
+    entity_index named = x.entity;
+    if (!named)
+        named = x.unknown_entity;
+    uint32_t vt = variable_template_of(named);
+    if (!vt)
+        return e;
+    size_t unsupported_before = unsupported.size();
+    owned_array<template_argument> arguments;
+    analysis_result r = template_id_arguments(id, vt, arguments);
+    unsupported.resize(unsupported_before);
+    if (r != analysis_result::well_formed)
+        return e;
+    bool dependent = false;
+    for (const template_argument &a : arguments)
+        if (a.kind == template_argument::kind_t::pack ||
+            depends_on_template_parameter(a.type) || a.template_entity)
+            dependent = true;
+    if (!dependent)
+        return e;
+    entity_index v = function_templates[vt - 1].entity;
+    entity_index s = 0;
+    for (const instantiation_record &i : instantiations) {
+        if (i.template_entity != v || i.argument_count != arguments.size() ||
+            !i.specialization ||
+            entity_table[i.specialization].kind !=
+                entity_kind::template_specialization)
+            continue;
+        bool same = true;
+        for (uint32_t k = 0; k < i.argument_count && same; k++)
+            same = template_arguments[i.first_argument + k] == arguments[k];
+        if (same)
+            s = i.specialization;
+    }
+    if (!s) {
+        instantiation_record record;
+        record.template_entity = v;
+        record.first_argument =
+            static_cast<uint32_t>(template_arguments.size());
+        record.argument_count = static_cast<uint32_t>(arguments.size());
+        for (const template_argument &a : arguments)
+            template_arguments.append(a);
+        s = entity_table.make(entity_kind::template_specialization,
+                              entity_table[v].name, entity_table[v].enclosing);
+        entity_table[s].type = qualified_type::make(
+            type_table.of_entity(type_kind::dependent, s), cv_none);
+        entity_table[s].instantiation =
+            static_cast<uint32_t>(instantiations.size()) + 1;
+        record.specialization = s;
+        instantiations.append(record);
+    }
+    qualified_type type = entity_table[s].type;
+    for (entity_index d : dependent_values)
+        if (entity_table[d].type == type && entity_table[d].value == 4)
+            return d;
+    entity_table[e].type = type;
+    entity_table[e].value = 4;
     dependent_values.append(e);
     return e;
 }

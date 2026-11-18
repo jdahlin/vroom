@@ -842,6 +842,15 @@ bool itanium_mangler::dependent_value(entity_index d)
         return false;
     entity_index q = record(x.type).entity;
     const entity &spec = analysis.entity_table[q];
+    if (x.value == 4) {
+        /* a variable template's specialization, v<args>: [abi:expressions]'
+           unresolved-name, <source-name> <template-args> */
+        text("X");
+        if (!source_name(spec.name) || !template_args(q))
+            return false;
+        text("E");
+        return true;
+    }
     text("X");
     if (x.value & 2)
         text("nt");
