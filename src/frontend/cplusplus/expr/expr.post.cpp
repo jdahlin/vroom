@@ -462,6 +462,14 @@ analysis_result semantic_analysis::postfix(node_index n, expression_meaning &m)
             r = expression(children[2], i);
         if (r != analysis_result::well_formed)
             return r;
+        /* [over.sub]/1: "the operator function is selected by overload
+           resolution ([over.match.oper])" */
+        bool handled = false;
+        r = binary_operator_function(
+            n, children[1].index(), preprocessing_op_or_punc::LEFT_BRACKET,
+            children[0], a, children[2], i, handled, m);
+        if (r != analysis_result::well_formed || handled)
+            return r;
         expression_meaning *base = &a, *index = &i;
         auto is_array = [&](const expression_meaning &x) {
             return type_table[x.type.unqualified()].kind == type_kind::array;
@@ -552,9 +560,12 @@ analysis_result semantic_analysis::call(node_index n, expression_meaning &m)
     expression_meaning f;
     analysis_result r = analysis_result::well_formed;
     /* the arguments analysed before the function is known, for
-       argument-dependent lookup: each one's meaning, or none for a
-       braced-init-list (which has no type) */
+       argument-dependent lookup or overload resolution: each one's
+       meaning, or none for a braced-init-list (which has no type) */
     owned_array<expression_meaning> early;
+    /* the functions argument-dependent lookup found, with unqualified
+       lookup's */
+    owned_array<entity_index> found_by_adl;
     bool looked_up = false;
     if (children[0].is_token() &&
         tokens[children[0].index()].kind == token_kind::identifier) {
@@ -583,7 +594,19 @@ analysis_result semantic_analysis::call(node_index n, expression_meaning &m)
             owned_array<qualified_type> types;
             for (syntax_child a : arguments) {
                 expression_meaning e;
-                if (!syntax_is(tree, a, syntax_kind::braced_init_list)) {
+                token_index name = 0;
+                if (entity_index named = named_overload_set(a, name)) {
+                    /* [basic.lookup.argdep]/2: "If an argument is the name
+                       or address of an overload set, its associated
+                       entities and namespaces are the union of those
+                       associated with each of the members of the set";
+                       the argument is analysed for its parameter
+                       ([over.over], call_with) */
+                    owned_array<entity_index> members;
+                    overload_set(named, members);
+                    for (entity_index f : members)
+                        types.append(entity_table[f].type);
+                } else if (!syntax_is(tree, a, syntax_kind::braced_init_list)) {
                     r = expression(a, e);
                     if (r != analysis_result::well_formed)
                         return r;
@@ -596,23 +619,58 @@ analysis_result semantic_analysis::call(node_index n, expression_meaning &m)
                 set.append(x.entity);
             if (!argument_dependent_lookup(name, types, set))
                 return not_supported(n, "basic.lookup.argdep");
-            /* more than one function: an overload set ([over.match]) */
-            if (set.size() > 1)
-                return not_supported(n, "over");
-            if (set.size() == 1 && set[0] != x.entity) {
+            /* the functions of the sets found: [over.call.func]/3's
+               candidate functions */
+            for (entity_index e : set)
+                overload_set(e, found_by_adl);
+            if (!x.entity && !set.empty()) {
                 /* found by argument-dependent lookup alone: no claim is
                    made about the name, which names nothing elsewhere */
+                overloaded_callee = t;
                 r = named_entity(t, set[0], f);
+                overloaded_callee = 0;
                 if (r != analysis_result::well_formed)
                     return r;
                 looked_up = true;
             }
         }
     }
-    if (!looked_up)
+    if (!looked_up) {
+        overloaded_callee = callee_name(children[0]);
         r = expression(children[0], f);
+        overloaded_callee = 0;
+    }
     if (r != analysis_result::well_formed)
         return r;
+    if (type_table[f.type.unqualified()].kind == type_kind::class_type) {
+        /* [over.call]/1: "where the postfix-expression is of class type,
+           the operator function is selected by overload resolution
+           ([over.call.object])" and the expression "interpreted as
+           postfix-expression . operator () (expression-list_opt)" */
+        owned_array<syntax_child> syntax;
+        owned_array<expression_meaning> operands;
+        syntax.append(children[0]);
+        operands.append(f);
+        for (syntax_child a : arguments) {
+            if (syntax_is(tree, a, syntax_kind::braced_init_list))
+                return not_supported(n, "over.ics.list");
+            expression_meaning e;
+            r = expression(a, e);
+            if (r != analysis_result::well_formed)
+                return r;
+            syntax.append(a);
+            operands.append(e);
+        }
+        bool handled = false;
+        r = overloaded_operator(n, children[1].index(),
+                                preprocessing_op_or_punc::LEFT_PARENTHESIS,
+                                false, syntax, operands, handled, m);
+        if (r != analysis_result::well_formed || handled)
+            return r;
+        /* [over.call.object]/2: no surrogate call functions (no conversion
+           functions are analysed) */
+        return not_supported(n, "over.call.object");
+    }
     qualified_type function_type = f.type;
     /* [expr.call]/2: "For a call to a non-static member function, the
        postfix expression shall be an implicit ([class.mfct.non-static],
@@ -645,6 +703,60 @@ analysis_result semantic_analysis::call(node_index n, expression_meaning &m)
                               "expr.call");
         }
     }
+    /* [over.call.func]/3: the candidate functions of the name's overload
+       set, one or more */
+    entity_index named = member;
+    if (!named && f.node && semantics[f.node].kind == semantic_kind::entity &&
+        f.entity && entity_table[f.entity].kind == entity_kind::function)
+        named = f.entity;
+    owned_array<entity_index> set;
+    if (named)
+        overload_set(named, set);
+    for (entity_index e : found_by_adl)
+        overload_set(e, set);
+    if (set.size() > 1) {
+        r = resolve_call(n, arguments, early, set, object, f);
+        if (r != analysis_result::well_formed)
+            return r;
+        function_type = f.type;
+        if (member)
+            member = semantics[f.node].b;
+    }
+    return call_with(n, f, function_type, object, member, arguments, early, m);
+}
+
+/*
+ * [expr.call]/7: "When a function is called, each parameter is initialized
+ * with its corresponding argument."  The call of f, its function chosen.
+ */
+analysis_result semantic_analysis::call_function(
+    node_index n, token_index at, entity_index f,
+    const owned_array<expression_meaning> &arguments, expression_meaning &m)
+{
+    analysis_result r = deleted_use(at, f);
+    if (r != analysis_result::well_formed)
+        return r;
+    const entity &x = entity_table[f];
+    expression_meaning callee;
+    callee.type = x.type;
+    callee.category = value_category::lvalue;
+    callee.evaluation = constness::constant;
+    callee.entity = f;
+    callee.node = expression_node(semantic_kind::entity, callee, at, f);
+    owned_array<syntax_child> syntax;
+    for (size_t i = 0; i < arguments.size(); i++)
+        syntax.append(syntax_child{});
+    return call_with(n, callee, x.type, 0, 0, syntax, arguments, m);
+}
+
+analysis_result semantic_analysis::call_with(
+    node_index n, expression_meaning &f, qualified_type function_type,
+    uint32_t object, entity_index member,
+    const owned_array<syntax_child> &arguments,
+    const owned_array<expression_meaning> &early, expression_meaning &m)
+{
+    analysis_result r = analysis_result::well_formed;
+    const syntax_node &node = tree[n];
     const struct type function = type_table[function_type.unqualified()];
     size_t count = function.parameter_count;
     owned_array<uint32_t> argument_nodes;
@@ -654,7 +766,17 @@ analysis_result semantic_analysis::call(node_index n, expression_meaning &m)
        function exists and is unique, overload resolution succeeds ...
        Otherwise overload resolution fails and the invocation is
        ill-formed." */
-    if (arguments.size() < count ||
+    entity_index called = member;
+    if (!called && f.entity &&
+        entity_table[f.entity].kind == entity_kind::function)
+        called = f.entity;
+    size_t defaults = 0;
+    if (called)
+        defaults = entity_table[called].default_arguments;
+    if (called && entity_table[called].unknown_defaults &&
+        arguments.size() < count)
+        return not_supported(n, "dcl.fct.default");
+    if (arguments.size() + defaults < count ||
         (arguments.size() > count && !function.variadic))
         return ill_formed(n,
                           "to be a viable function, a candidate function "
@@ -674,13 +796,14 @@ analysis_result semantic_analysis::call(node_index n, expression_meaning &m)
                 r = list_initialization(a.index(), parameter, false, value);
             } else {
                 expression_meaning e;
-                if (i < early.size())
+                if (i < early.size() && early[i].node)
                     e = early[i];
                 else
-                    r = expression(a, e);
+                    /* [over.over]/1: "a parameter of a function" */
+                    r = target_expression(a, parameter, e);
                 /* an argument that is one token is reported at the call */
                 node_index at = n;
-                if (!a.is_token())
+                if (!a.is_token() && a.index())
                     at = a.index();
                 if (r == analysis_result::well_formed)
                     r = initialize_with(at, e, parameter, false, false, value);
@@ -698,7 +821,7 @@ analysis_result semantic_analysis::call(node_index n, expression_meaning &m)
         if (syntax_is(tree, a, syntax_kind::braced_init_list))
             return not_supported(n, "expr.call");
         expression_meaning e;
-        if (i < early.size())
+        if (i < early.size() && early[i].node)
             e = early[i];
         else
             r = expression(a, e);
@@ -735,6 +858,12 @@ analysis_result semantic_analysis::call(node_index n, expression_meaning &m)
         }
         argument_nodes.append(e.node);
     }
+    /* [expr.call]/7: "If there is no corresponding argument, the default
+       argument for the parameter is used." ([dcl.fct.default]/9: evaluated
+       at each call) */
+    for (size_t i = arguments.size(); i < count; i++)
+        argument_nodes.append(
+            default_argument_nodes[entity_table[called].first_default + i]);
     /* [expr.call]/14: "A function call is an lvalue if the result type is
        an lvalue reference type or an rvalue reference to function type, an
        xvalue if the result type is an rvalue reference to object type, and

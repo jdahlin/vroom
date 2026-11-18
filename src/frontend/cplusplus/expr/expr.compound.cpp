@@ -701,6 +701,23 @@ analysis_result semantic_analysis::binary(node_index n, expression_meaning &m)
     r = expression(children[2], right);
     if (r != analysis_result::well_formed)
         return r;
+    /* [over.match.oper]/2: an operand of class or enumeration type (.*
+       is not overloadable) */
+    bool handled = false;
+    if (op != preprocessing_op_or_punc::DOT_STAR)
+        r = binary_operator_function(n, at, op, children[0], left, children[2],
+                                     right, handled, m);
+    if (r != analysis_result::well_formed || handled)
+        return r;
+    if (op == preprocessing_op_or_punc::SPACESHIP)
+        /* [expr.spaceship]: the built-in three-way comparison, whose
+           result is of a type of <compare> */
+        return not_supported(n, "expr.spaceship");
+    if (op == preprocessing_op_or_punc::DOT_STAR ||
+        op == preprocessing_op_or_punc::ARROW_STAR)
+        /* the built-in pointer-to-member operators: no pointers to
+           members are analysed */
+        return not_supported(n, "expr.mptr.oper");
     if (op == preprocessing_op_or_punc::AMPERSAND_AMPERSAND ||
         op == preprocessing_op_or_punc::BAR_BAR) {
         /* [expr.log.and]/1: "The operands are both contextually converted
@@ -985,6 +1002,25 @@ analysis_result semantic_analysis::comma(node_index n, expression_meaning &m)
         analysis_result r = expression(children[i], e);
         if (r != analysis_result::well_formed)
             return r;
+        if (any) {
+            /* [over.match.oper]/2: an operand of class or enumeration type;
+               the left operand is the comma expression before ((a, b), c) */
+            syntax_child left = {};
+            if (i == 2)
+                left = children[0];
+            bool handled = false;
+            expression_meaning result;
+            r = binary_operator_function(n, children[i - 1].index(),
+                                         preprocessing_op_or_punc::COMMA, left,
+                                         m, children[i], e, handled, result);
+            if (r != analysis_result::well_formed)
+                return r;
+            if (handled) {
+                so_far = combined_constness(so_far, m.evaluation);
+                m = result;
+                continue;
+            }
+        }
         uint32_t previous = m.node;
         if (any)
             so_far = combined_constness(so_far, m.evaluation);

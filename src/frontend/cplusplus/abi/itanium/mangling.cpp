@@ -72,6 +72,7 @@ class itanium_mangler
     bool unscoped_name(entity_index e);
     bool unqualified_name(entity_index e);
     bool source_name(uint32_t identifier);
+    bool operator_name(const entity &x);
     bool ctor_dtor_name(special_member which);
     void number(uint64_t n);
     bool local_name(entity_index e, entity_index function);
@@ -368,6 +369,20 @@ bool itanium_mangler::unqualified_name(entity_index e)
         text("L");
     if (x.special != special_member::none)
         return ctor_dtor_name(x.special);
+    if (x.operator_function)
+        return operator_name(x);
+    if (x.kind == entity_kind::function && x.name) {
+        /* [abi:mangling-operator]: "<operator-name> ::= li <source-name>
+           # operator \"\"": a literal operator, named operator""X */
+        size_t length = 0;
+        const char *bytes = spelling(x.name, &length);
+        if (length > 10 && !memcmp(bytes, "operator\"\"", 10)) {
+            text("li");
+            number(length - 10);
+            vbuffer_append(out, bytes + 10, length - 10);
+            return true;
+        }
+    }
     /* [dcl.typedef]/9: an unnamed class's name for linkage purposes */
     if (!x.name && (x.kind == entity_kind::class_type ||
                     x.kind == entity_kind::enumeration))
@@ -418,6 +433,214 @@ bool itanium_mangler::source_name(uint32_t identifier)
     const char *bytes = spelling(identifier, &length);
     number(length);
     vbuffer_append(out, bytes, length);
+    return true;
+}
+
+/*
+ * [abi:mangling-operator]:
+ *
+ *     <operator-name> ::= nw        # new
+ *                     ::= na        # new[]
+ *                     ::= dl        # delete
+ *                     ::= da        # delete[]
+ *                     ::= ps        # + (unary)
+ *                     ::= ng        # - (unary)
+ *                     ::= ad        # & (unary)
+ *                     ::= de        # * (unary)
+ *                     ::= co        # ~
+ *                     ::= pl        # +
+ *                     ::= mi        # -
+ *                     ::= ml        # *
+ *                     ::= dv        # /
+ *                     ::= rm        # %
+ *                     ::= an        # &
+ *                     ::= or        # |
+ *                     ::= eo        # ^
+ *                     ::= pL        # +=
+ *                     ::= mI        # -=
+ *                     ::= mL        # *=
+ *                     ::= dV        # /=
+ *                     ::= rM        # %=
+ *                     ::= aN        # &=
+ *                     ::= oR        # |=
+ *                     ::= eO        # ^=
+ *                     ::= ls        # <<
+ *                     ::= lS        # <<=
+ *                     ::= eq        # ==
+ *                     ::= ne        # !=
+ *                     ::= lt        # <
+ *                     ::= le        # <=
+ *                     ::= nt        # !
+ *                     ::= aa        # &&
+ *                     ::= oo        # ||
+ *                     ::= pp        # ++ (postfix in <expression> context)
+ *                     ::= mm        # --
+ *                     ::= aS        # =
+ *                     ::= cl        # ()
+ *                     ::= ix        # []
+ *                     ::= cm        # ,
+ *                     ::= pm        # ->*
+ *                     ::= pt        # ->
+ *                     ::= ss        # <=>
+ *
+ * and rs (>>), rS (>>=), gt (>) and ge (>=), whose lines the grammar
+ * index lost.  The unary forms of + - & * are the operator functions of one operand,
+ * the implicit object parameter counted ([over.unary]/1).
+ */
+bool itanium_mangler::operator_name(const entity &x)
+{
+    const types &table = analysis.type_table;
+    uint32_t operands = table[x.type.unqualified()].parameter_count;
+    if (x.nonstatic_member)
+        operands++;
+    bool unary = operands == 1;
+    const char *code = nullptr;
+    switch (x.allocation) {
+    case allocation_function::new_:
+        text("nw");
+        return true;
+    case allocation_function::new_array:
+        text("na");
+        return true;
+    case allocation_function::delete_:
+        text("dl");
+        return true;
+    case allocation_function::delete_array:
+        text("da");
+        return true;
+    default:
+        break;
+    }
+    switch (x.implemented) {
+    case preprocessing_op_or_punc::PLUS:
+        code = "pl";
+        if (unary)
+            code = "ps";
+        break;
+    case preprocessing_op_or_punc::MINUS:
+        code = "mi";
+        if (unary)
+            code = "ng";
+        break;
+    case preprocessing_op_or_punc::AMPERSAND:
+        code = "an";
+        if (unary)
+            code = "ad";
+        break;
+    case preprocessing_op_or_punc::STAR:
+        code = "ml";
+        if (unary)
+            code = "de";
+        break;
+    case preprocessing_op_or_punc::TILDE:
+        code = "co";
+        break;
+    case preprocessing_op_or_punc::SLASH:
+        code = "dv";
+        break;
+    case preprocessing_op_or_punc::PERCENT:
+        code = "rm";
+        break;
+    case preprocessing_op_or_punc::BAR:
+        code = "or";
+        break;
+    case preprocessing_op_or_punc::CARET:
+        code = "eo";
+        break;
+    case preprocessing_op_or_punc::PLUS_EQUAL:
+        code = "pL";
+        break;
+    case preprocessing_op_or_punc::MINUS_EQUAL:
+        code = "mI";
+        break;
+    case preprocessing_op_or_punc::STAR_EQUAL:
+        code = "mL";
+        break;
+    case preprocessing_op_or_punc::SLASH_EQUAL:
+        code = "dV";
+        break;
+    case preprocessing_op_or_punc::PERCENT_EQUAL:
+        code = "rM";
+        break;
+    case preprocessing_op_or_punc::AMPERSAND_EQUAL:
+        code = "aN";
+        break;
+    case preprocessing_op_or_punc::BAR_EQUAL:
+        code = "oR";
+        break;
+    case preprocessing_op_or_punc::CARET_EQUAL:
+        code = "eO";
+        break;
+    case preprocessing_op_or_punc::LESS_LESS:
+        code = "ls";
+        break;
+    case preprocessing_op_or_punc::GREATER_GREATER:
+        code = "rs";
+        break;
+    case preprocessing_op_or_punc::LESS_LESS_EQUAL:
+        code = "lS";
+        break;
+    case preprocessing_op_or_punc::GREATER_GREATER_EQUAL:
+        code = "rS";
+        break;
+    case preprocessing_op_or_punc::EQUAL_EQUAL:
+        code = "eq";
+        break;
+    case preprocessing_op_or_punc::EXCLAMATION_EQUAL:
+        code = "ne";
+        break;
+    case preprocessing_op_or_punc::LESS:
+        code = "lt";
+        break;
+    case preprocessing_op_or_punc::GREATER:
+        code = "gt";
+        break;
+    case preprocessing_op_or_punc::LESS_EQUAL:
+        code = "le";
+        break;
+    case preprocessing_op_or_punc::GREATER_EQUAL:
+        code = "ge";
+        break;
+    case preprocessing_op_or_punc::EXCLAMATION:
+        code = "nt";
+        break;
+    case preprocessing_op_or_punc::AMPERSAND_AMPERSAND:
+        code = "aa";
+        break;
+    case preprocessing_op_or_punc::BAR_BAR:
+        code = "oo";
+        break;
+    case preprocessing_op_or_punc::PLUS_PLUS:
+        code = "pp";
+        break;
+    case preprocessing_op_or_punc::MINUS_MINUS:
+        code = "mm";
+        break;
+    case preprocessing_op_or_punc::EQUAL:
+        code = "aS";
+        break;
+    case preprocessing_op_or_punc::LEFT_PARENTHESIS:
+        code = "cl";
+        break;
+    case preprocessing_op_or_punc::LEFT_BRACKET:
+        code = "ix";
+        break;
+    case preprocessing_op_or_punc::COMMA:
+        code = "cm";
+        break;
+    case preprocessing_op_or_punc::ARROW_STAR:
+        code = "pm";
+        break;
+    case preprocessing_op_or_punc::ARROW:
+        code = "pt";
+        break;
+    case preprocessing_op_or_punc::SPACESHIP:
+        code = "ss";
+        break;
+    default:
+        return false;
+    }
+    text(code);
     return true;
 }
 

@@ -434,6 +434,8 @@ analysis_result semantic_analysis::class_definition(node_index n,
        body ... within the member-specification of the class": the bodies
        are analysed with the class complete */
     node_index outer_declaration = current_declaration;
+    result = worse(result, member_default_arguments(c));
+    current_declaration = outer_declaration;
     for (node_index body : bodies) {
         result = worse(result, member_function_body(c, body));
         current_declaration = outer_declaration;
@@ -940,10 +942,21 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
     declarator_meaning m;
     function_cv = 0;
     in_member_declarator = true;
+    function_parameters.clear();
     analysis_result r = declarator(declaration, d, type, m);
     in_member_declarator = false;
     if (r != analysis_result::well_formed)
         return r;
+    /* [dcl.fct.default]: a member function's default arguments are a
+       complete-class context ([class.mem]/6): analysed with the class
+       complete (member_default_arguments) */
+    bool has_defaults = false;
+    for (const parameter_meaning &p : function_parameters)
+        if (p.default_argument.index())
+            has_defaults = true;
+    owned_array<parameter_meaning> parameters;
+    for (const parameter_meaning &p : function_parameters)
+        parameters.append(p);
     if (!m.has_id || m.qualifier)
         return not_supported(declaration, "class.mem");
     /* [ext:gnu_attributes] the declaration's and the declarator's */
@@ -1005,12 +1018,50 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
         /* a name a using-declaration or a member enumeration's enumerator
            brought into the class */
         return not_supported(declaration, "class.mem");
-    if (prior) {
-        if (is_function && entity_table[prior].kind == entity_kind::function) {
-            /* an overload set of member functions */
-            entity_table[prior].kind = entity_kind::none;
-            return not_supported(declaration, "over");
+    entity_index overloads = 0;
+    if (prior && is_function &&
+        entity_table[prior].kind == entity_kind::function &&
+        entity_table[prior].special == special_member::none) {
+        /* [over.load]/2: "Certain function declarations cannot be
+           overloaded: Function declarations that differ only in the return
+           type ... Member function declarations with the same name, the
+           same parameter-type-list, and the same trailing
+           requires-clause cannot be overloaded if any of them is a static
+           member function declaration."  The cv-qualifier-seq of a member
+           function is part of its type ([dcl.fct]/1), so one that differs
+           in it is another function */
+        for (entity_index o = prior; o; o = entity_table[o].next_overload) {
+            const entity &x = entity_table[o];
+            if (!same_parameters(type_table, x.type.unqualified(),
+                                 type.unqualified()))
+                continue;
+            if (x.member_cv == function_cv &&
+                x.nonstatic_member == !s.static_ && x.type == type)
+                /* [class.mem]/5 */
+                return ill_formed_at_token(m.id,
+                                           "a member shall not be declared "
+                                           "twice in the member-specification",
+                                           "class.mem");
+            if (x.member_cv == function_cv && x.nonstatic_member == !s.static_)
+                return ill_formed_at_token(m.id,
+                                           "function declarations that differ "
+                                           "only in the return type cannot be "
+                                           "overloaded",
+                                           "over.load");
+            if (x.nonstatic_member != !s.static_)
+                return ill_formed_at_token(m.id,
+                                           "member function declarations "
+                                           "with the same name and the same "
+                                           "parameter-type-list cannot be "
+                                           "overloaded if any of them is a "
+                                           "static member function "
+                                           "declaration",
+                                           "over.load");
         }
+        overloads = prior;
+        prior = 0;
+    }
+    if (prior) {
         if (entity_table[prior].kind == entity_kind::none)
             return not_supported(declaration, "over");
         owned_buffer spelling;
@@ -1049,6 +1100,46 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
            ([dcl.inline])" */
         entity_table[e].inline_ = definition || s.inline_;
         entity_table[e].defined = definition;
+        if (m.operator_function) {
+            entity_table[e].operator_function = true;
+            entity_table[e].implemented = m.implemented;
+            entity_table[e].allocation = m.allocation;
+            analysis_result checked =
+                operator_function_declaration(declaration, e);
+            if (checked != analysis_result::well_formed)
+                return checked;
+            if (copy_assignment_operator(e, entity_table[e].enclosing))
+                entity_table[entity_table[e].enclosing].user_copy_assignment =
+                    true;
+        }
+        if (m.literal_operator) {
+            analysis_result checked =
+                literal_operator_declaration(declaration, e);
+            if (checked != analysis_result::well_formed)
+                return checked;
+        }
+        if (has_defaults) {
+            if (entity_table[e].allocation != allocation_function::none)
+                /* [basic.stc.dynamic.allocation]/1: "The first parameter
+                   shall not have an associated default argument"; which
+                   parameter has one is known once the defaults are
+                   analysed, after the class */
+                return not_supported(declaration,
+                                     "basic.stc.dynamic.allocation");
+            if (entity_table[e].operator_function &&
+                entity_table[e].allocation == allocation_function::none &&
+                entity_table[e].implemented !=
+                    preprocessing_op_or_punc::LEFT_PARENTHESIS)
+                /* [over.oper]/10 */
+                return ill_formed(declaration,
+                                  "an operator function cannot have default "
+                                  "arguments",
+                                  "over.oper");
+            defer_default_arguments(e, declaration, parameters);
+        }
+    } else if (has_defaults) {
+        /* /3: a default argument of a member that is not a function */
+        return not_supported(declaration, "dcl.fct.default");
     } else if (s.static_) {
         /* [class.static.data]/3: "The declaration of a non-inline static
            data member in its class definition is not a definition and may
@@ -1152,7 +1243,16 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
     entity_table[e].access = access;
     entity_table.add_declaration(e, declaration);
     entity_table[e].hidden_type = hides;
-    entity_table.bind(c, name, e);
+    if (overloads) {
+        /* another member function of the set, last in its chain */
+        entity_index last = overloads;
+        while (entity_table[last].next_overload)
+            last = entity_table[last].next_overload;
+        entity_table[last].next_overload = e;
+        entity_table[e].hidden_type = entity_table[overloads].hidden_type;
+    } else {
+        entity_table.bind(c, name, e);
+    }
     last_declared = e;
     return analysis_result::well_formed;
 }
@@ -1327,9 +1427,17 @@ analysis_result semantic_analysis::member_function_body(entity_index c,
     in_member_declarator = false;
     if (r != analysis_result::well_formed)
         return r;
-    last_declared = entity_table.find(c, tokens.identifier(m.id));
+    /* the function of the name this definition declared (one of an
+       overload set) */
+    last_declared = 0;
+    for (entity_index o = entity_table.find(c, tokens.identifier(m.id)); o;
+         o = entity_table[o].next_overload)
+        if (declared_by(o, definition))
+            last_declared = o;
     if (!last_declared)
         return not_supported(definition, "class.mfct");
+    if (deleted_body(children[2]))
+        return deleted_definition(definition, last_declared);
     return function_body(definition, tree.children(children[2].index())[0]);
 }
 
@@ -1359,6 +1467,14 @@ analysis_result semantic_analysis::member_redeclaration(
     entity_index e = entity_table.find(qualifier, tokens.identifier(id));
     if (e && entity_table[e].kind == entity_kind::none)
         return not_supported(declaration, "over");
+    /* [dcl.meaning]/1: the member function of the set it declares again */
+    for (entity_index o = e; o && entity_table[o].kind == entity_kind::function;
+         o = entity_table[o].next_overload)
+        if (entity_table[o].type == type &&
+            entity_table[o].member_cv == function_cv) {
+            e = o;
+            break;
+        }
     if (!e || entity_table[e].kind != entity_kind::function ||
         !(entity_table[e].type == type) ||
         entity_table[e].member_cv != function_cv)

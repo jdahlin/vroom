@@ -547,12 +547,35 @@ analysis_result semantic_analysis::named_entity(token_index t, entity_index e,
 {
     if (entity_table[e].kind == entity_kind::none)
         return not_supported(current_declaration, "basic.lookup.unqual");
-    used(t, e);
+    /* [over.over]: the function target_expression chose for the name */
+    bool chosen = t && t == overload_target_token;
+    if (chosen)
+        e = overload_target_choice;
+    /* [over.over]/1 (below): an overload set's name names no one function */
+    if (entity_table[e].kind != entity_kind::function ||
+        !entity_table[e].next_overload || t == overloaded_callee || chosen)
+        used(t, e);
     if (entity_table[e].kind == entity_kind::enumerator)
         return enumerator_value(t, e, m);
     const entity &x = entity_table[e];
     if (x.kind != entity_kind::variable && x.kind != entity_kind::function)
         return not_supported(current_declaration, "expr.prim.id");
+    /* [over.over]/1: "An id-expression whose terminal name refers to an
+       overload set S and that appears without arguments is resolved to a
+       function, a pointer to function, or a pointer to member function for
+       a specific function that is chosen from a set of functions selected
+       from S determined based on the target type required in the context":
+       not analysed; the name of a function called is [over.call.func]'s */
+    if (x.kind == entity_kind::function && x.next_overload &&
+        t != overloaded_callee && !chosen)
+        return not_supported(current_declaration, "over.over");
+    /* [dcl.fct.def.delete]/2 (of an overload set: the function chosen,
+       resolve_call) */
+    if (x.kind == entity_kind::function && (!x.next_overload || chosen)) {
+        analysis_result r = deleted_use(t, e);
+        if (r != analysis_result::well_formed)
+            return r;
+    }
     if (x.nonstatic_member)
         return implicit_member_access(t, e, m);
     if (x.enclosing &&
@@ -686,7 +709,9 @@ analysis_result semantic_analysis::qualified_id(node_index n,
                                    "the class its nested-name-specifier "
                                    "nominates",
                                    "basic.lookup.qual");
-    used(t, e);
+    if (entity_table[e].kind != entity_kind::function ||
+        !entity_table[e].next_overload || t == overloaded_callee)
+        used(t, e);
     if (entity_table[e].kind == entity_kind::enumerator) {
         if (!accessible(e))
             return ill_formed_at_token(t,
@@ -699,6 +724,15 @@ analysis_result semantic_analysis::qualified_id(node_index n,
         return enumerator_value(t, e, m);
     }
     const entity &x = entity_table[e];
+    /* [over.over]/1, [dcl.fct.def.delete]/2 (named_entity) */
+    if (x.kind == entity_kind::function && x.next_overload &&
+        t != overloaded_callee)
+        return not_supported(n, "over.over");
+    if (x.kind == entity_kind::function && !x.next_overload) {
+        analysis_result r = deleted_use(t, e);
+        if (r != analysis_result::well_formed)
+            return r;
+    }
     if (x.nonstatic_member)
         return implicit_member_access(t, e, m);
     if (x.kind != entity_kind::function && x.kind != entity_kind::variable)

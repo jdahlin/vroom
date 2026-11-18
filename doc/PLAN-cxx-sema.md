@@ -685,6 +685,191 @@ libstdc++ and json), since sema cannot analyse a declaration kept as tokens.
   [over.built], [over.literal]; function-to-pointer and the reference
   bindings of [dcl.init.ref].
 - Gate: overload claims 0 wrong; CXX/over.
+- Status (2026-11-18, overload resolution, default arguments, deleted
+  functions; operators not started): overload sets are a chain of
+  functions (`entity::next_overload`, declared by `basic.link.cpp` and
+  `class.pre.cpp` with [over.load]'s checks); `over/` has one file per
+  subclause: implicit conversion sequences (`over.best.ics.cpp`, a class
+  conversion exactly as the analysed classes have no conversion functions
+  or explicit constructors), their ranking (`over.ics.rank.cpp`, with
+  clang's reading of CWG2352 in /3.2.1 and /3.2.5), viability and the best
+  viable function (`over.match.cpp`; constructors use it too) and calls by
+  name, member access included (`over.match.call.cpp`): the callee node,
+  its claim and access are of the function chosen.  Default arguments
+  (`dcl/dcl.fct.default.cpp`) of namespace-scope functions, merged per /4;
+  a function whose defaults are not analysed or are another scope's is
+  `unknown_defaults` and a call that needs them is unsupported.
+  `= delete` (`dcl/dcl.fct.def.delete.cpp`).  An aggregate argument is
+  lowered as a compound literal.  Tests: `src/test/cxx/run/overloading.cpp`,
+  `default-arguments.cpp`.  `bench/cxx-sema.py`: 26169 declarations as
+  clang (S2: 24590), 0 we reject that clang accepts, 447 we accept that
+  clang rejects (S2: 413), 0 refuted; lookup 10063 verified (S2: 9388),
+  symbols 1458 (S2: 1400), lowering 211 files (S2: 206); CXX/over 1101 as
+  clang, 0 wrong.  cxx-run 124/124; cxx-c-suites 0 wrong (its eight
+  `#pragma pack` entries in the passing list fail on main too).
+- Status (2026-11-18, operator functions): `over/over.oper.cpp` names an
+  operator-function-id (operator@ as an identifier number, so declaration
+  and lookup are unchanged) and checks [over.oper]/7-10 and [over.inc];
+  `over/over.match.oper.cpp` forms the member, non-member and (C++20)
+  rewritten and reversed operator== candidates of a unary, binary,
+  compound assignment, increment or decrement operator with an operand of
+  class or enumeration type, and makes the expression a call of the
+  function chosen (`!` around a rewritten !=); [over.match.best]/2.8-2.9's
+  tie-breaks are in `best_viable_function`.  Built-in candidates are not
+  formed: none is viable for an operand of class type (no conversion
+  functions), and for an enumeration operand the operator function is
+  taken only when it beats every built-in candidate (all arguments Exact
+  Match, a comparison's own parameter-type-list).  A declaration not
+  analysed that has the keyword operator makes every operator on a class
+  or enumeration unsupported from there (`operators_held`).  The mangler
+  writes [abi:mangling-operator]'s codes.  Also: a braced-init-list
+  returned for a class lowers as a compound literal; an lvalue reference
+  returned by name is no implicitly movable entity.  Tests:
+  `src/test/cxx/run/operators.cpp`.  `bench/cxx-sema.py`: 26564
+  declarations as clang, 0 we reject that clang accepts, 448 we accept
+  that clang rejects, 0 refuted; lookup 10128, symbols 1484, lowering 212
+  files; CXX/over 1234 as clang (1101 before), 0 wrong; type claims fell
+  from 33262 to 32792 (constants 13335 to 13182): operators of enumeration
+  operands in translation units with an operator declaration analysis did
+  not follow are no longer taken as built-in.  cxx-run 128/128,
+  cxx-c-suites 0 wrong.  Left, as `not_supported`: operator=, (), [], ->,
+  ->*, comma, unary &, <=> and the allocation functions (=, () and []:
+  below), members defined
+  outside their class, [over.ics.list] and [over.match.list], member functions'
+  default arguments, static and non-static members in one set.  The parser
+  takes `(a < b) + (b < a)` for a template-id (the function is not parsed).
+- Status (2026-11-18, [over.over]): `over/over.over.cpp`'s
+  `target_expression` analyses an expression for a target type: an
+  unqualified name of an overload set of non-member functions (in
+  parentheses, after &) is the function whose type is the target's
+  function type (named_entity takes the token for it).  The targets: an
+  initialized object or reference, the left side of =, a function's
+  parameter (an argument found by argument-dependent lookup is analysed for
+  its parameter; one of an overloaded callee is not analysed), the return
+  value, a cast.  A function that differs only in its exception
+  specification or return type, a member function (a pointer to member)
+  and a qualified name are not analysed.  Test:
+  `src/test/cxx/run/overload-address.cpp`.  `bench/cxx-sema.py`: 26592
+  declarations as clang, 0 wrong, 0 refuted; lookup 10161; CXX/over 1259
+  as clang.  cxx-run 132/132, cxx-c-suites 0 wrong.
+- Status (2026-11-18, [over.literal]): `over/over.literal.cpp`.  A
+  literal-operator-id names the function operator""X (an identifier, so
+  declaration and lookup are any function's); its declaration is checked
+  against /1 (an empty string-literal), /2 (a namespace-scope function),
+  /3 (the parameter-declaration-clauses, no default argument) and /6 (no C
+  language linkage); it mangles as `li <source-name>`.  A
+  user-defined-literal ([lex.ext]) is a call of the operator unqualified
+  lookup finds: an integer literal's with parameter unsigned long long
+  (/3), a character literal's with the type of ch (/6), a string literal's
+  as (str, len) by overload resolution (/5).  Not analysed: literal
+  operator templates, raw literal operators called for numbers, floating
+  literals, suffixes without `_` ([usrlit.suffix]: the standard
+  library's).  Test: `src/test/cxx/run/user-defined-literals.cpp`.
+  `bench/cxx-sema.py`: 26683 declarations as clang, 0 we reject that
+  clang accepts, 448 we accept that clang rejects, 0 refuted; symbols
+  1487.  cxx-run 136/136, cxx-c-suites 0 wrong.
+- Status (2026-11-18, operator=, () and []): [over.ass], [over.call] and
+  [over.sub] in `over/over.oper.cpp` (non-static members alone; static
+  operator() and operator[], C++23's, and C++23's operator[] of several
+  parameters not analysed) and `over.match.oper.cpp` (member candidates
+  alone, Table 15).  a = b with a user-declared operator= is overload
+  resolution among them when one is a copy assignment operator
+  ([class.copy.assign]/1; otherwise the implicit one would be a candidate:
+  not analysed); the built-in class assignment is kept for classes whose
+  subobjects declare none (`assigned_bitwise`).  A user-declared copy
+  assignment makes a class no POD for layout ([abi:pod]).  Also: two
+  user-defined conversion sequences ranked alike are not_supported, not an
+  ambiguity ([over.ics.rank]/3.3); && before C++11 is clang's extension.
+  Test: `src/test/cxx/run/operators-member.cpp`.  `bench/cxx-sema.py`:
+  27208 declarations as clang, 0 we reject that clang accepts, 448 we
+  accept that clang rejects, 0 refuted; lookup 10591, symbols 1496,
+  lowering 216.  cxx-run 140/140, cxx-c-suites 0 wrong.
+- Status (2026-11-18, comma, ->*, unary & and ->): the comma, ->* and
+  unary & operator functions go through `overloaded_operator` like the
+  other binary and unary ones (the built-in ->* and .*, pointers to
+  members, are not analysed); [over.ref]'s x->m applies operator-> while
+  the result is of class type (`expr.ref.cpp`; a chain of 16, or a cycle,
+  is not analysed).  Mangled cm, pm, ad and pt.  Test:
+  `src/test/cxx/run/operators-rest.cpp`.  `bench/cxx-sema.py`: 27290
+  declarations as clang, 0 wrong, 448 we accept that clang rejects, 0
+  refuted; lookup 10786.  cxx-run 144/144, cxx-c-suites 0 wrong.
+- Status (2026-11-18, <=>): operator<=> is declared (C++20), mangled ss,
+  and called for x <=> y of class or enumeration operands; the relational
+  operators have its rewritten candidates, x <=> y and the synthesized
+  y <=> x ([over.match.oper]/3.4), interpreted as (x <=> y) @ 0 or
+  0 @ (y <=> x) (/8) when its result is of arithmetic type.  Not analysed:
+  the built-in <=> and the comparison category types of <compare> (so
+  neither a reversed x <=> y nor std::strong_ordering results), and an
+  enumeration's rewritten candidates.  Test:
+  `src/test/cxx/run/three-way.cpp`.  `bench/cxx-sema.py`: 27309
+  declarations as clang, 0 wrong, 448 we accept that clang rejects, 0
+  refuted.  cxx-run 148/148, cxx-c-suites 0 wrong.  Left: the allocation
+  functions.
+- Status (2026-11-18, members defined outside their class): a declarator-id
+  X::operator@ (`dcl.meaning.cpp`) defines the member operator function
+  declared in X.  Test: `src/test/cxx/run/operators-out-of-class.cpp`.
+  `bench/cxx-sema.py`: 27310 declarations as clang, 0 wrong, 0 refuted
+  (clang's tests define them mostly in templates).  cxx-run 152/152,
+  cxx-c-suites 0 wrong.
+- Status (2026-11-18, member functions' default arguments): a complete-class
+  context ([class.mem]/6), analysed when the class is complete, before the
+  member function bodies (`member_default_arguments`, dcl.fct.default.cpp);
+  an operator function's other than operator()'s is ill-formed
+  ([over.oper]/10).  Not analysed: a default argument that may name a
+  non-static member or uses this (/8, /9), and default
+  arguments added by a definition outside the class (/6: the member's calls
+  then do not know its defaults).  Test:
+  `src/test/cxx/run/member-default-arguments.cpp`.  `bench/cxx-sema.py`:
+  27330 declarations as clang, 0 wrong, 448 we accept that clang rejects,
+  0 refuted.  cxx-run 156/156, cxx-c-suites 0 wrong.
+- Status (2026-11-18, constructors' default arguments): deferred like
+  other member functions' (`defer_default_arguments`) and taken by
+  `construct` for the parameters a call leaves; a constructor whose
+  default arguments make it a default constructor is one.  Not analysed:
+  a constructor of first parameter X, X& or X&& whose other parameters
+  have default arguments (a copy or move constructor, [class.copy.ctor]/1),
+  and an implicitly-defined special member that would be ill-formed
+  (deleted, [class.default.ctor]/2).  Test:
+  `src/test/cxx/run/constructor-default-arguments.cpp`.
+  `bench/cxx-sema.py`: 27355 declarations as clang, 0 wrong, 448 we accept
+  that clang rejects, 0 refuted.  cxx-run 160/160, cxx-c-suites 0 wrong.
+- Status (2026-11-18, [over.ics.list]): a braced-init-list argument of an
+  overloaded call with one element that is no list, for parameters of
+  scalar type, has the element's conversion sequence (/10.1); the call
+  then list-initializes the parameter (`resolve_call`, `list_clauses`
+  shared with `list_initialization`).  Not analysed: other lists (/10.2
+  {}), and class (/7, /8), std::initializer_list (/5), array (/6) and
+  reference (/9) parameters.  Test: `src/test/cxx/run/overload-braced.cpp`.
+  `bench/cxx-sema.py` unchanged (27355 as clang, 0 wrong: clang's tests
+  pass lists to classes).  cxx-run 164/164, cxx-c-suites 0 wrong.
+- Status (2026-11-18, new and delete): the allocation and deallocation
+  functions ([basic.stc.dynamic]): declarations of operator new, new[],
+  delete and delete[] with their rules (/allocation/1, /deallocation/1-3,
+  [class.free]/1: a member one is static), the implicit global ones of /2
+  (the sized operator delete from C++14, N3778; no std::align_val_t forms),
+  mangled nw, na, dl, da.  new-expressions (`expr/expr.new.cpp`):
+  new-type-id or ( type-id ), one array bound (its size checked for
+  overflow at run time as clang does, SIZE_MAX when it does not fit),
+  placement arguments, class-specific allocation functions found before the
+  global ones unless ::new (/11), default-, value- and direct-initialization
+  and braced-init-lists of one object; the initialization skipped for a null
+  pointer from an allocation function that is not an implicit one (/20).
+  delete-expressions (`expr/expr.delete.cpp`): the destructor, then the usual
+  deallocation function of [expr.delete]/10 (the sized global one for one
+  object, as clang), nothing for a null pointer.  Semantic nodes
+  new_object, allocated, array_size, delete_object, lowered as statement
+  expressions.  Not analysed: arrays of classes with constructors or
+  destructors (cookies), an array with a new-initializer, more than one
+  bound, a placeholder type, new-extended alignment, value-initialization
+  of a class, a destroying operator delete, an operand of class type, the
+  deallocation when the initialization throws (/25); a new-expression when
+  an operator new or delete spelled in the translation unit was not
+  analysed and lookup may miss it.  Test: `src/test/cxx/run/new-delete.cpp`
+  (it does not count calls of the replaceable functions: clang -O2 omits
+  them, /12).  `bench/cxx-sema.py`: 28046 declarations as clang, 0 wrong,
+  449 we accept that clang rejects, 0 refuted.  cxx-run 168/168,
+  cxx-c-suites 0 wrong (its `#pragma pack` programs are not yet, as at the
+  previous commit).
 
 ### S4. Classes and the object model (parallel with S3)
 

@@ -130,6 +130,10 @@ analysis_result semantic_analysis::pointer_operator(node_index op,
         } else if (syntax_is_punctuator(
                        tokens, c,
                        preprocessing_op_or_punc::AMPERSAND_AMPERSAND)) {
+            if (!tokens.files.behavior.has(language_feature::rvalue_references))
+                /* [ext.clang] an rvalue reference before C++11, an
+                   extension (an error with -pedantic-errors) */
+                return not_supported(op, "ext.clang");
             analysis_result r = reference(op, true, type, m);
             if (r != analysis_result::well_formed)
                 return r;
@@ -304,6 +308,13 @@ void semantic_analysis::hold_names(node_index declaration)
 {
     owned_array<token_index> ids;
     const syntax_node &node = tree[declaration];
+    /* [over.oper]/1: an operator function, or a conversion function, it
+       may declare: the meaning of operators on classes and enumerations is
+       not known from now on */
+    for (token_index t = node.first_token; t < node.end_token; t++)
+        if (tokens[t].kind == token_kind::keyword &&
+            p.keyword_of(tokens[t]) == standard_keyword::operator_)
+            operators_held = true;
     if (node.kind == syntax_kind::linkage_specification) {
         /* extern "C" { ... }: the declarations in it are the scope's */
         for (uint32_t i = 0; i < node.child_count; i++) {
@@ -574,6 +585,10 @@ analysis_result semantic_analysis::declarator(node_index declaration,
     case syntax_kind::declarator:
         /* a trailing-return-type */
         return not_supported(n, "dcl.fct");
+    case syntax_kind::operator_function_id:
+        return operator_function_id(n, m);
+    case syntax_kind::literal_operator_id:
+        return literal_operator_id(n, m);
     default:
         return not_supported(n);
     }
@@ -594,6 +609,15 @@ analysis_result semantic_analysis::declarator(node_index declaration,
         i = 3;
     } else if (node.child_count && children[0].is_token() &&
                tokens[children[0].index()].kind == token_kind::identifier) {
+        has_head = true;
+        head = children[0];
+        i = 1;
+    } else if (node.child_count &&
+               (syntax_is(tree, children[0],
+                          syntax_kind::operator_function_id) ||
+                syntax_is(tree, children[0],
+                          syntax_kind::literal_operator_id))) {
+        /* [over.oper]/1, [over.literal]/1: an operator function's name */
         has_head = true;
         head = children[0];
         i = 1;
@@ -619,10 +643,15 @@ analysis_result semantic_analysis::declarator(node_index declaration,
             m.destructor = true;
             name = tree.children(name.index())[1];
         }
+        /* [over.oper]/1: an operator function's name, X::operator@ */
+        bool operator_name =
+            !m.destructor &&
+            syntax_is(tree, name, syntax_kind::operator_function_id);
         if (qualified.child_count != 2 ||
             !syntax_is(tree, parts[0], syntax_kind::nested_name_specifier) ||
-            !name.is_token() ||
-            tokens[name.index()].kind != token_kind::identifier)
+            (!operator_name &&
+             (!name.is_token() ||
+              tokens[name.index()].kind != token_kind::identifier)))
             return not_supported(q, "dcl.meaning");
         analysis_result r = declarator_qualifier(parts[0].index(), m);
         if (r != analysis_result::well_formed)

@@ -336,6 +336,18 @@ analysis_result semantic_analysis::increment(node_index n, syntax_child operand,
     analysis_result r = expression(operand, m);
     if (r != analysis_result::well_formed)
         return r;
+    {
+        /* [over.inc]: an operand of class or enumeration type
+           ([over.match.oper]/2) */
+        preprocessing_op_or_punc op = preprocessing_op_or_punc::PLUS_PLUS;
+        if (decrement)
+            op = preprocessing_op_or_punc::MINUS_MINUS;
+        bool handled = false;
+        r = unary_operator_function(n, tree[n].first_token, op, postfix,
+                                    operand, m, handled);
+        if (r != analysis_result::well_formed || handled)
+            return r;
+    }
     const char *subclause = "expr.pre.incr";
     if (postfix)
         subclause = "expr.post.incr";
@@ -419,6 +431,12 @@ analysis_result semantic_analysis::unary(node_index n, expression_meaning &m)
         return r;
     const implementation_defined_behavior &b = tokens.files.behavior;
     token_index at = children[0].index();
+    /* [over.unary]: an operand of class or enumeration type
+       ([over.match.oper]/2) */
+    bool handled = false;
+    r = unary_operator_function(n, at, o, false, children[1], m, handled);
+    if (r != analysis_result::well_formed || handled)
+        return r;
     switch (o) {
     case preprocessing_op_or_punc::AMPERSAND: {
         /* [expr.unary.op]/3: "The operand shall be an lvalue or a

@@ -234,12 +234,13 @@ node_index parser::parameter_declaration()
  * [dcl.fct]/5: "The type of each parameter (including function parameter
  * packs) is determined from its own decl-specifier-seq and declarator."
  */
-analysis_result semantic_analysis::parameter_declaration(node_index n,
-                                                         qualified_type &type,
-                                                         bool &unnamed,
-                                                         token_index &id)
+analysis_result
+semantic_analysis::parameter_declaration(node_index n, qualified_type &type,
+                                         bool &unnamed, token_index &id,
+                                         syntax_child &default_argument)
 {
     id = 0;
+    default_argument = syntax_child();
     const syntax_node &node = tree[n];
     const syntax_child *children = tree.children(n);
     if (!node.child_count ||
@@ -265,10 +266,22 @@ analysis_result semantic_analysis::parameter_declaration(node_index n,
         return not_supported(n, "ext.gnu");
     type = s.type;
     unnamed = true;
-    if (node.child_count == 1)
+    /* [dcl.fct.default]/1: "If an initializer-clause is specified in a
+       parameter-declaration this initializer-clause is used as a default
+       argument" (default_arguments analyses it) */
+    uint32_t declarator_count = node.child_count;
+    for (uint32_t i = 1; i + 1 < node.child_count; i++)
+        if (syntax_is_punctuator(tokens, children[i],
+                                 preprocessing_op_or_punc::EQUAL)) {
+            if (i + 2 != node.child_count)
+                return not_supported(n, "dcl.fct.default");
+            default_argument = children[i + 1];
+            declarator_count = i;
+        }
+    if (declarator_count == 1)
         return analysis_result::well_formed;
-    if (node.child_count > 2)
-        return not_supported(n, "dcl.fct.default");
+    if (declarator_count > 2)
+        return not_supported(n, "dcl.fct");
     declarator_meaning m;
     r = declarator(n, children[1], type, m);
     unnamed = !m.has_id;
@@ -378,8 +391,9 @@ analysis_result semantic_analysis::function(node_index parameters,
         qualified_type t;
         bool unnamed = true;
         token_index id = 0;
-        analysis_result r =
-            parameter_declaration(declarations[k], t, unnamed, id);
+        syntax_child default_argument;
+        analysis_result r = parameter_declaration(declarations[k], t, unnamed,
+                                                  id, default_argument);
         if (r != analysis_result::well_formed)
             return r;
         const struct type &record = type_table[t.unqualified()];
@@ -412,6 +426,8 @@ analysis_result semantic_analysis::function(node_index parameters,
         parameter_meaning parameter;
         parameter.id = id;
         parameter.type = t;
+        parameter.declaration = declarations[k];
+        parameter.default_argument = default_argument;
         named.append(parameter);
     }
     /* the last function declarator to finish is a function definition's

@@ -129,10 +129,21 @@ analysis_result semantic_analysis::special_member_declarator(
     declarator_meaning m;
     function_cv = 0;
     in_member_declarator = true;
+    function_parameters.clear();
     analysis_result r = declarator(declaration, d, type, m);
     in_member_declarator = false;
     if (r != analysis_result::well_formed)
         return r;
+    /* [dcl.fct.default]: a member function's default arguments are a
+       complete-class context ([class.mem]/6): analysed with the class
+       complete (member_default_arguments) */
+    owned_array<parameter_meaning> listed;
+    bool has_defaults = false;
+    for (const parameter_meaning &p : function_parameters) {
+        listed.append(p);
+        if (p.default_argument.index())
+            has_defaults = true;
+    }
     if (!m.has_id || m.qualifier || m.aligned ||
         (m.gnu_flags & (gnu_packed | gnu_used)))
         return not_supported(declaration, "class.ctor");
@@ -163,6 +174,20 @@ analysis_result semantic_analysis::special_member_declarator(
                                        "in the member-specification",
                                        "class.mem");
     } else {
+        if (has_defaults && f.parameter_count > 1 &&
+            listed.size() == f.parameter_count &&
+            listed[1].default_argument.index()) {
+            /* [class.copy.ctor]/1, /5: a first parameter of X, X& or
+               X&& and the other parameters' default arguments: a copy or
+               move constructor, or ill-formed (X), not told apart */
+            qualified_type first = parameters[0];
+            const struct type &r = type_table[first.unqualified()];
+            if (r.kind == type_kind::lvalue_reference ||
+                r.kind == type_kind::rvalue_reference)
+                first = r.operand;
+            if (first.unqualified() == entity_table[c].type.unqualified())
+                return not_supported(declaration, "class.copy.ctor");
+        }
         for (uint32_t i = 0; i < f.parameter_count; i++) {
             /* [class.copy.ctor]/5: "A declaration of a constructor for a
                class X is ill-formed if its first parameter is of type cv X
@@ -202,6 +227,8 @@ analysis_result semantic_analysis::special_member_declarator(
     x.access = access;
     x.linkage_of_name = entity_table[c].linkage_of_name;
     entity_table.add_declaration(e, declaration);
+    if (has_defaults)
+        defer_default_arguments(e, declaration, listed);
     if (kind == special_member::destructor) {
         entity_table[c].destructor = e;
     } else if (!entity_table[c].first_constructor) {
@@ -247,82 +274,6 @@ analysis_result semantic_analysis::expression_list_meanings(
     return analysis_result::well_formed;
 }
 
-namespace
-{
-
-/* [over.ics.rank] for what analysis compares: 0 an identity conversion
-   (the argument's type is the parameter's, or what its reference refers
-   to), 1 a standard conversion between arithmetic types or to a pointer,
-   -1 none analysis knows */
-int conversion_rank(const types &table, const expression_meaning &argument,
-                    qualified_type parameter)
-{
-    const struct type *p = &table[parameter.unqualified()];
-    if (p->kind == type_kind::lvalue_reference ||
-        p->kind == type_kind::rvalue_reference) {
-        qualified_type referred = p->operand;
-        if (referred.unqualified() != argument.type.unqualified())
-            return -1;
-        /* [dcl.init.ref]/5: a non-const lvalue reference binds to an
-           lvalue only, and only as cv-qualified as it is */
-        if (!(referred.cv() & cv_const) &&
-            (argument.category != value_category::lvalue ||
-             (argument.type.cv() & ~referred.cv())))
-            return -1;
-        return 0;
-    }
-    if (parameter.unqualified() == argument.type.unqualified())
-        return 0;
-    const struct type &a = table[argument.type.unqualified()];
-    bool arithmetic_p = p->kind == type_kind::fundamental &&
-                        p->fundamental != fundamental_type::void_ &&
-                        p->fundamental != fundamental_type::std_nullptr_t;
-    bool arithmetic_a = a.kind == type_kind::fundamental &&
-                        a.fundamental != fundamental_type::void_ &&
-                        a.fundamental != fundamental_type::std_nullptr_t;
-    if (arithmetic_p && arithmetic_a)
-        return 1;
-    if (p->kind == type_kind::pointer &&
-        (a.kind == type_kind::array || a.kind == type_kind::pointer ||
-         (a.kind == type_kind::fundamental &&
-          a.fundamental == fundamental_type::std_nullptr_t)))
-        return 1;
-    return -1;
-}
-
-} // namespace
-
-/* whether an argument of a derived class (or a pointer to one) converts
-   to parameter, a reference to (or a pointer to) a base of it
-   ([dcl.init.ref]/5, [conv.ptr]/3) */
-bool semantic_analysis::derived_to_base_conversion(
-    const expression_meaning &argument, qualified_type parameter) const
-{
-    const struct type &p = type_table[parameter.unqualified()];
-    qualified_type from = argument.type;
-    qualified_type to = p.operand;
-    if (p.kind == type_kind::pointer) {
-        if (type_table[from.unqualified()].kind != type_kind::pointer)
-            return false;
-        from = type_table[from.unqualified()].operand;
-    } else if (p.kind == type_kind::lvalue_reference) {
-        if (!(to.cv() & cv_const) &&
-            argument.category != value_category::lvalue)
-            return false;
-    } else if (p.kind != type_kind::rvalue_reference) {
-        return false;
-    }
-    if (from.cv() & ~to.cv())
-        return false;
-    const struct type &a = type_table[from.unqualified()];
-    const struct type &b = type_table[to.unqualified()];
-    if (a.kind != type_kind::class_type || b.kind != type_kind::class_type ||
-        entity_table[a.entity].kind != entity_kind::class_type)
-        return false;
-    bool ambiguous = false;
-    return base_step(a.entity, b.entity, ambiguous) != 0;
-}
-
 /*
  * [dcl.init]/17.6.2: "Otherwise, if the initialization is
  * direct-initialization, or if it is copy-initialization where the
@@ -334,11 +285,9 @@ bool semantic_analysis::derived_to_base_conversion(
  * initialize the object, with the initializer expression or
  * expression-list as its argument(s)."
  *
- * Overload resolution of [over.match.best] for the conversions
- * conversion_rank tells apart: a candidate is better when none of its
- * conversions is worse and one is better; no unique best one is not
- * analysed.  The implicitly-declared copy constructor ([class.copy.ctor]/6)
- * of a class that declares none copies the object's bytes (trivial_class).
+ * [over.match.ctor]/1: the candidates are the class's constructors and its
+ * implicitly-declared copy constructor ([class.copy.ctor]/6), which for a
+ * class that declares none copies the object's bytes (copies_bytes).
  */
 analysis_result
 semantic_analysis::construct(node_index at, qualified_type type,
@@ -349,40 +298,22 @@ semantic_analysis::construct(node_index at, qualified_type type,
     const entity &x = entity_table[c];
     if (x.kind != entity_kind::class_type)
         return not_supported(at, "class.pre");
-    owned_array<entity_index> viable;
-    owned_array<int> ranks;
+    /* [over.match.ctor]/1: "the candidate functions are all the
+       constructors of the class of the object being initialized" */
+    owned_array<overload_candidate> candidates;
     for (entity_index k = x.first_constructor; k;
          k = entity_table[k].next_constructor) {
-        const struct type &f = type_table[entity_table[k].type.unqualified()];
-        if (f.parameter_count != arguments.size())
-            continue;
-        const qualified_type *p =
-            type_table.parameters(entity_table[k].type.unqualified());
-        bool ok = true;
-        size_t first = ranks.size();
-        for (size_t i = 0; i < arguments.size() && ok; i++) {
-            int rank = conversion_rank(type_table, arguments[i], p[i]);
-            if (rank < 0 && derived_to_base_conversion(arguments[i], p[i]))
-                /* [over.best.ics]/6: "the conversion of a derived class
-                   to a base class ... is a derived-to-base Conversion";
-                   [over.ics.rank]/3.2: of Conversion rank */
-                rank = 1;
-            if (rank < 0)
-                ok = false;
-            ranks.append(rank);
-        }
-        if (!ok) {
-            ranks.resize(first);
-            continue;
-        }
-        viable.append(k);
+        overload_candidate one;
+        one.function = k;
+        one.type = entity_table[k].type;
+        candidates.append(one);
     }
     /* the implicitly-declared copy constructor X(const X&)
        ([class.copy.ctor]/6: "If the class definition does not explicitly
        declare a copy constructor, a non-explicit one is declared
-       implicitly"), trivial for the members analysis has */
-    bool implicit_copy = arguments.size() == 1 &&
-                         arguments[0].type.unqualified() == type.unqualified();
+       implicitly"), trivial for the members analysis has; a class that
+       declares a move constructor has it deleted, and is not told apart */
+    bool implicit_copy = true;
     for (entity_index k = x.first_constructor; k && implicit_copy;
          k = entity_table[k].next_constructor) {
         const struct type &f = type_table[entity_table[k].type.unqualified()];
@@ -398,12 +329,38 @@ semantic_analysis::construct(node_index at, qualified_type type,
             implicit_copy = false;
     }
     if (implicit_copy) {
-        if (!viable.empty())
-            return not_supported(at, "over.match.best");
+        qualified_type parameter = qualified_type::make(
+            type_table.lvalue_reference_to(
+                qualified_type::make(type.unqualified(), cv_const)),
+            cv_none);
+        overload_candidate copy;
+        copy.type = qualified_type::make(
+            type_table.function(
+                qualified_type::make(
+                    type_table.fundamental(fundamental_type::void_), cv_none),
+                &parameter, 1, false),
+            cv_none);
+        candidates.append(copy);
+    }
+    size_t best = 0;
+    analysis_result resolved =
+        best_viable_function(at, candidates, nullptr, arguments, best);
+    if (resolved != analysis_result::well_formed)
+        return resolved;
+    entity_index chosen = candidates[best].function;
+    if (!chosen) {
         if (!copies_bytes(c))
             /* [class.copy.ctor]/14: the implicitly-defined copy
                constructor copies each base and member by its own */
             return not_supported(at, "class.copy.ctor");
+        bool ambiguous = false;
+        entity_index from = type_table[arguments[0].type.unqualified()].entity;
+        if (from != c && base_step(from, c, ambiguous)) {
+            /* its const X& bound to the base class subobject */
+            analysis_result r = to_base(tree[at].first_token, c, arguments[0]);
+            if (r != analysis_result::well_formed)
+                return r;
+        }
         result.evaluation = constness::unknown;
         result.value = 0;
         analysis_result r = operand_value(at, arguments[0]);
@@ -412,51 +369,17 @@ semantic_analysis::construct(node_index at, qualified_type type,
         result.node = arguments[0].node;
         return analysis_result::well_formed;
     }
-    if (viable.empty()) {
-        /* no constructor whose parameters analysis can match: either none
-           is viable ([over.match.viable], ill-formed) or a conversion
-           analysis does not know is */
-        bool arity = false;
-        for (entity_index k = x.first_constructor; k;
-             k = entity_table[k].next_constructor)
-            if (type_table[entity_table[k].type.unqualified()]
-                    .parameter_count == arguments.size())
-                arity = true;
-        if (!arity && x.first_constructor)
-            return ill_formed(at,
-                              "to be a viable function, a candidate function "
-                              "shall have enough parameters to agree in "
-                              "number with the arguments in the list",
-                              "over.match.viable");
-        return not_supported(at, "over.match");
-    }
-    size_t n = arguments.size();
-    size_t best = 0;
-    bool unique = true;
-    for (size_t i = 1; i < viable.size(); i++) {
-        bool better = false, worse_ = false;
-        for (size_t k = 0; k < n; k++) {
-            if (ranks[i * n + k] < ranks[best * n + k])
-                better = true;
-            if (ranks[i * n + k] > ranks[best * n + k])
-                worse_ = true;
-        }
-        if (better && !worse_) {
-            best = i;
-            unique = true;
-        } else if (better == worse_) {
-            unique = false;
-        }
-    }
-    if (!unique)
-        return not_supported(at, "over.match.best");
-    entity_index chosen = viable[best];
     if (!accessible(chosen))
         return ill_formed(at,
                           "a private or protected member's name can be used "
                           "only by members and friends of the class in which "
                           "it is declared",
                           "class.access");
+    /* [dcl.fct.def.delete]/2 */
+    analysis_result deleted = deleted_use(tree[at].first_token, chosen);
+    if (deleted != analysis_result::well_formed)
+        return deleted;
+    size_t n = arguments.size();
     const qualified_type *p =
         type_table.parameters(entity_table[chosen].type.unqualified());
     owned_array<uint32_t> nodes;
@@ -469,6 +392,16 @@ semantic_analysis::construct(node_index at, qualified_type type,
         if (r != analysis_result::well_formed)
             return r;
         nodes.append(one.node);
+    }
+    /* [dcl.fct.default]/1: the default arguments of the parameters left */
+    size_t count =
+        type_table[entity_table[chosen].type.unqualified()].parameter_count;
+    for (size_t i = n; i < count; i++) {
+        const entity &k = entity_table[chosen];
+        if (k.unknown_defaults || !k.first_default ||
+            !default_argument_nodes[k.first_default + i])
+            return not_supported(at, "dcl.fct.default");
+        nodes.append(default_argument_nodes[k.first_default + i]);
     }
     expression_meaning made;
     made.type = qualified_type::make(type.unqualified(), cv_none);
@@ -833,6 +766,13 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
     }
     owned_array<entity_index> classes;
     subobject_classes(c, classes);
+    /* [class.copy.assign]/12 before C++11: the implicit copy assignment
+       operator that calls a subobject's user-declared one (clang defines
+       it, and reports what its call breaks, at the class) */
+    if (!tokens.files.behavior.has(language_feature::rvalue_references))
+        for (entity_index k : classes)
+            if (!assigned_bitwise(k))
+                return not_supported(n, "class.copy.assign");
     bool construction = false, destruction = false, copy = false;
     for (entity_index k : classes) {
         if (entity_table[k].first_constructor)
@@ -1012,6 +952,11 @@ analysis_result semantic_analysis::implicit_definitions(entity_index c,
         function_state.active = false;
         function_state.function = 0;
         function_state.this_entity = 0;
+        if (r == analysis_result::ill_formed)
+            /* [class.default.ctor]/2, [class.copy.ctor]/10: a defaulted
+               special member that would be ill-formed is defined as
+               deleted (an error only where it is used): not analysed */
+            return not_supported(n, "class.default.ctor");
         if (r != analysis_result::well_formed)
             return r;
     }
@@ -1060,6 +1005,17 @@ analysis_result semantic_analysis::implicit_copy(entity_index c, node_index n,
             arguments.append(from);
             initialized_value value;
             r = construct(n, type, arguments, object.node, value);
+            /* [class.copy.ctor]/10: "A defaulted copy/move constructor for
+               a class X is defined as deleted if X has ... a potentially
+               constructed subobject type M (or array thereof) that cannot
+               be copied/moved because overload resolution
+               ([over.match]), as applied to find M's corresponding
+               constructor, results in an ambiguity or a function that is
+               deleted or inaccessible"; /7 gives X(X&) when a subobject's
+               copy constructor takes a non-const reference: neither is
+               analysed */
+            if (r == analysis_result::ill_formed)
+                return not_supported(n, "class.copy.ctor");
             if (r != analysis_result::well_formed)
                 return r;
             statements.append(statement_node(
@@ -1196,10 +1152,16 @@ analysis_result semantic_analysis::special_member_definition(node_index n)
         type_table.fundamental(fundamental_type::void_), cv_none);
     declarator_meaning m;
     function_cv = 0;
+    function_parameters.clear();
     analysis_result r = declarator(n, children[0], type, m);
     in_member_declarator = false;
     if (r != analysis_result::well_formed)
         return r;
+    /* [dcl.fct.default]/6: default arguments added to the class's
+       declaration's, not analysed */
+    for (const parameter_meaning &p : function_parameters)
+        if (p.default_argument.index())
+            return not_supported(n, "dcl.fct.default");
     entity_index c = m.qualifier;
     if (!c || !m.has_id || m.aligned || (m.gnu_flags & (gnu_packed | gnu_used)))
         return not_supported(n, "dcl.fct.def.general");

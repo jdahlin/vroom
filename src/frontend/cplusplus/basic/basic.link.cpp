@@ -56,6 +56,10 @@ bool differ_in_major_bound(const types &table, qualified_type a,
            x.operand == y.operand && x.bound_known != y.bound_known;
 }
 
+} // namespace
+
+/* [over.load]/3, [dcl.fct]/4: whether two function types have the same
+   parameter-type-list */
 bool same_parameters(const types &table, type_index a, type_index b)
 {
     const type &x = table[a];
@@ -67,8 +71,6 @@ bool same_parameters(const types &table, type_index a, type_index b)
             return false;
     return true;
 }
-
-} // namespace
 
 /* [basic.link]/4: a class or enumeration of an unnamed namespace has
    internal linkage, an unnamed one without a typedef name for linkage
@@ -443,6 +445,49 @@ analysis_result semantic_analysis::declare(node_index declaration,
     bool in_unnamed = within_unnamed_namespace(scope);
     if (in_unnamed && implied == linkage::external)
         implied = linkage::internal;
+    /* [over.pre]/1: "When two or more different declarations are specified
+       for a single name in the same scope, that name is said to be
+       overloaded"; [over.load]/1: "Not all function declarations can be
+       overloaded."  A function of the name with the same parameter-type-list
+       is the one this declaration redeclares; with none, it declares another
+       function of the set */
+    entity_index overloads = 0;
+    if (prior && kind == entity_kind::function &&
+        entity_table[prior].kind == entity_kind::function) {
+        entity_index same = 0;
+        for (entity_index o = prior; o && !same;
+             o = entity_table[o].next_overload)
+            if (same_parameters(type_table, entity_table[o].type.unqualified(),
+                                type.unqualified()))
+                same = o;
+        if (!same && qualified)
+            /* [dcl.meaning]/1: "the declaration shall refer to a previously
+               declared member of the class or namespace to which the
+               qualifier refers" */
+            return ill_formed_at_token(id,
+                                       "a qualified declaration shall refer "
+                                       "to a previously declared member of "
+                                       "the namespace",
+                                       "dcl.meaning");
+        if (!same) {
+            /* [dcl.link]/6: "At most one function with a particular name
+               can have C language linkage."  /1: "All function types,
+               function names with external linkage, and variable names with
+               external linkage have a language linkage": a function with
+               internal linkage has none */
+            for (entity_index o = prior; o; o = entity_table[o].next_overload)
+                if (c_language && !s.static_ && !in_unnamed &&
+                    entity_table[o].c_language_linkage &&
+                    entity_table[o].linkage_of_name != linkage::internal)
+                    return ill_formed_at_token(id,
+                                               "at most one function with a "
+                                               "particular name can have C "
+                                               "language linkage",
+                                               "dcl.link");
+            overloads = prior;
+        }
+        prior = same;
+    }
     if (prior) {
         entity &e = entity_table[prior];
         /* declared by a declaration not analysed (hold_names) */
@@ -469,13 +514,7 @@ analysis_result semantic_analysis::declare(node_index declaration,
                                            "type to refer to a different type",
                                            "dcl.typedef");
         } else if (kind == entity_kind::function) {
-            if (!same_parameters(type_table, e.type.unqualified(),
-                                 type.unqualified())) {
-                /* another function of the name: an overload set, which
-                   expressions cannot name yet */
-                e.kind = entity_kind::none;
-                return not_supported(declaration, "over");
-            }
+            /* (a function of the same parameters: overloads above) */
             /* [over.load]/2: "Function declarations that differ only in the
                return type, the exception specification, or both cannot be
                overloaded." */
@@ -559,7 +598,8 @@ analysis_result semantic_analysis::declare(node_index declaration,
             implied = linkage::internal;
             unnamed_type = true;
         }
-        no_claims_after_hiding(name);
+        if (!overloads)
+            no_claims_after_hiding(name);
         entity_index e = entity_table.make(kind, name, scope);
         entity_table[e].hidden_type = hides;
         entity_table[e].unnamed_type_linkage = unnamed_type;
@@ -567,7 +607,17 @@ analysis_result semantic_analysis::declare(node_index declaration,
         entity_table[e].linkage_of_name = implied;
         entity_table[e].defined = definition;
         entity_table.add_declaration(e, declaration);
-        entity_table.bind(scope, name, e);
+        if (overloads) {
+            /* another function of the set: last in its chain, the name
+               still bound to the first */
+            entity_index last = overloads;
+            while (entity_table[last].next_overload)
+                last = entity_table[last].next_overload;
+            entity_table[last].next_overload = e;
+            entity_table[e].hidden_type = entity_table[overloads].hidden_type;
+        } else {
+            entity_table.bind(scope, name, e);
+        }
         declared_entity = e;
     }
     /* [basic.def.odr]/11: "A definition of an inline function or variable

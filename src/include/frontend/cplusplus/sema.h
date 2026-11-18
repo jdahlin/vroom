@@ -217,6 +217,15 @@ enum class constness : uint8_t { constant, not_constant, unknown };
 
 /* [special]: a member function a class's objects are made and ended by */
 enum class special_member : uint8_t { none, constructor, destructor };
+/* [basic.stc.dynamic]/1: operator new, operator new[], operator delete
+   and operator delete[] */
+enum class allocation_function : uint8_t {
+    none,
+    new_,
+    new_array,
+    delete_,
+    delete_array
+};
 
 /* [ext:gnu_attributes] the GNU attributes analysis has rules for, as a
    function's or variable's flags */
@@ -339,6 +348,37 @@ struct entity {
     special_member special = special_member::none;
     /* a constructor: the class's next one, 0 at the last */
     entity_index next_constructor = 0;
+    /* a function: [over.pre]/1 "When two or more different declarations
+       are specified for a single name in the same scope, that name is said
+       to be overloaded": the scope's next function of the name, 0 at the
+       last.  The name is bound to the first; the others are reached
+       through it (overload_set) */
+    entity_index next_overload = 0;
+    /* a function: [dcl.fct.def.delete]/1 a deleted function */
+    bool deleted = false;
+    /* a function: [dcl.fct.default]/1 the number of its last parameters
+       that have a default argument (default_argument) */
+    uint32_t default_arguments = 0;
+    /* ... and where its parameters' are in
+       semantic_analysis::default_argument_nodes (0: none has one) */
+    uint32_t first_default = 0;
+    /* ... not known: a declaration's default arguments were not analysed,
+       or it is in another scope than the first ([dcl.fct.default]/4: "For
+       non-template functions, default arguments can be added in later
+       declarations of a function that appear within the same scope.
+       Declarations that appear in different scopes have completely distinct
+       sets of default arguments.") */
+    bool unknown_defaults = false;
+    /* a function: [over.oper]/1 an operator function, and the operator
+       it implements (its name is operator_name's) */
+    bool operator_function = false;
+    preprocessing_op_or_punc implemented = {};
+    /* ... or one of the allocation and deallocation functions
+       ([basic.stc.dynamic]/1) */
+    allocation_function allocation = allocation_function::none;
+    /* a class: it declares a copy assignment operator
+       ([class.copy.assign]/1) */
+    bool user_copy_assignment = false;
     /* a class: its user-declared constructors (a chain through
        next_constructor) and destructor, 0 if none */
     entity_index first_constructor = 0, destructor = 0;
@@ -540,6 +580,9 @@ uint64_t floating_kept(double v);
 /* the cv-qualifiers of a type, an array's those of its elements
    ([basic.type.qualifier]/3) */
 uint32_t cv_of(const types &table, qualified_type t);
+/* whether the function types a and b have the same parameter-type-list
+   ([dcl.fct]/4) */
+bool same_parameters(const types &table, type_index a, type_index b);
 
 /* [basic.lval]/1: "Every expression belongs to exactly one of the
    fundamental classifications in this taxonomy: lvalue, xvalue, or
@@ -648,6 +691,25 @@ enum class semantic_kind : uint8_t {
     /* [class.dtor]/13: a destructor called: a: the object (a glvalue), b:
        the destructor */
     destroy,
+    /* [expr.new]: a: the allocation function's call (a void* prvalue), b:
+       the object's initialization (0: none), a construct node whose
+       object is the allocated node's, or the value stored in it; c: 1 when
+       the allocation function may return a null pointer, which the
+       initialization is skipped for ([expr.new]/20) */
+    new_object,
+    /* the pointer (a prvalue of type) the enclosing new_object's
+       allocation returned, or the enclosing delete_object's operand */
+    allocated,
+    /* [expr.new]/9, /15: an array's size in bytes, its count a times the
+       element's size value; the size no allocation can give (all ones)
+       when the product does not fit in std::size_t */
+    array_size,
+    /* [expr.delete]: a: the operand (a pointer prvalue), b: the
+       destructor's call on *allocated (0: none), c: the deallocation
+       function's call; nothing when the operand is a null pointer.
+       computation: the type of the allocated node, the operand's without
+       the pointee's cv-qualifiers ([expr.delete]/11) */
+    delete_object,
     /* ---- statements ---- */
     /* the statements in list[first .. first + count) */
     block,
@@ -947,6 +1009,12 @@ class semantic_analysis
         token_index section = 0;
         /* the declarator-id is ~ class-name: a destructor ([class.dtor]/1) */
         bool destructor = false;
+        /* the declarator-id is an operator-function-id ([over.oper]/1) */
+        bool operator_function = false;
+        preprocessing_op_or_punc implemented = {};
+        allocation_function allocation = allocation_function::none;
+        /* the declarator-id is a literal-operator-id ([over.literal]) */
+        bool literal_operator = false;
     };
     analysis_result declarator(node_index declaration, syntax_child d,
                                qualified_type &type, declarator_meaning &m);
@@ -1157,7 +1225,35 @@ class semantic_analysis
     struct parameter_meaning {
         token_index id = 0;
         qualified_type type;
+        /* its parameter-declaration, and the initializer-clause of its
+           default argument ([dcl.fct.default]/1), none if it has none */
+        node_index declaration = 0;
+        syntax_child default_argument;
     };
+    /* [dcl.fct.default]: the default arguments of function_parameters,
+       which the declaration n of the function f gives it */
+    analysis_result default_arguments(node_index n, entity_index f,
+                                      entity_kind kind);
+    /* the member functions of the classes being defined whose default
+       arguments wait for the class to be complete ([class.mem]/6): their
+       parameters are member_default_parameters[first .. first + count) */
+    struct pending_default_arguments {
+        entity_index function = 0;
+        node_index declaration = 0;
+        uint32_t first = 0, count = 0;
+    };
+    owned_array<pending_default_arguments> pending_defaults;
+    owned_array<parameter_meaning> member_default_parameters;
+    /* ... analysed now, of the complete class c */
+    bool analysing_member_defaults = false;
+    analysis_result member_default_arguments(entity_index c);
+    /* ... of the member function f declared by declaration: kept for then */
+    void defer_default_arguments(entity_index f, node_index declaration,
+                                 const owned_array<parameter_meaning> &list);
+    /* the default arguments' initializations: a function's are
+       [entity::first_default .. + its parameter count), 0 for a parameter
+       without one */
+    owned_array<uint32_t> default_argument_nodes;
     owned_array<parameter_meaning> function_parameters;
     /* the cv-qualifier-seq of the function declarator analysed last
        ([dcl.fct]/6: only a member function's) */
@@ -1166,7 +1262,8 @@ class semantic_analysis
        declarator, or one whose declarator-id is a qualified-id */
     bool in_member_declarator = false;
     analysis_result parameter_declaration(node_index n, qualified_type &type,
-                                          bool &unnamed, token_index &id);
+                                          bool &unnamed, token_index &id,
+                                          syntax_child &default_argument);
     /* cv-qualifiers added to a type: to an array's elements
        ([basic.type.qualifier]/3), none to a reference or a function type
        ([dcl.ref]/1, [dcl.fct]/7) */
@@ -1200,6 +1297,13 @@ class semantic_analysis
     analysis_result expression_kind(syntax_child e, expression_meaning &m);
     /* [expr.prim.literal], [lex.literal] */
     analysis_result literal(token_index t, expression_meaning &m);
+    /* [lex.string]: the string literal token t (its suffix, if any, not
+       counted), false if its element type is none analysis has */
+    bool string_literal_meaning(token_index t, expression_meaning &m);
+    /* a constant prvalue of the fundamental type with the value, at the
+       token at, with its node */
+    expression_meaning integer_constant(fundamental_type type, uint64_t value,
+                                        token_index at);
     /* [expr.prim.id.unqual] */
     analysis_result id_expression(token_index t, expression_meaning &m);
     /* [expr.prim.id.qual] */
@@ -1280,6 +1384,11 @@ class semantic_analysis
     analysis_result operand_value(node_index at, expression_meaning &m);
     /* [conv.prom] */
     void promote(expression_meaning &m);
+    /* the type the integral prvalue m promotes to (its own type when no
+       integral promotion applies, [conv.prom]/5 for a bit-field), and the
+       type an integral type promotes to */
+    fundamental_type integral_promotion(const expression_meaning &m) const;
+    fundamental_type promotion_of(fundamental_type t) const;
     /* the enumeration t, 0 if t is no complete enumeration */
     entity_index enumeration_of(qualified_type t) const;
     /* a prvalue of enumeration type as its underlying type
@@ -1333,6 +1442,12 @@ class semantic_analysis
                                     bool list, initialized_value &result);
     analysis_result list_initialization(node_index list, qualified_type &type,
                                         bool direct, initialized_value &result);
+    /* the initializer-clauses of the braced-init-list list */
+    analysis_result list_clauses(node_index list,
+                                 owned_array<syntax_child> &clauses);
+    analysis_result list_initialization_of(
+        node_index list, const owned_array<syntax_child> &clauses,
+        qualified_type &type, bool direct, initialized_value &result);
     /* [dcl.init.list]/3 for a class: an aggregate's elements, each from
        its clause or from an empty list */
     analysis_result
@@ -1421,8 +1536,6 @@ class semantic_analysis
     analysis_result base_clause(entity_index c, node_index n,
                                 standard_keyword key);
     analysis_result empty_base_conflict(entity_index c, node_index n);
-    bool derived_to_base_conversion(const expression_meaning &argument,
-                                    qualified_type parameter) const;
     /* [conv.ptr]/3: the pointer m to class from as a pointer to its base
        to, of type type */
     analysis_result pointer_to_base(token_index at, entity_index from,
@@ -1611,6 +1724,248 @@ class semantic_analysis
     bool in_scope(jump_point variable, jump_point at) const;
     /* [expr.call] */
     analysis_result call(node_index n, expression_meaning &m);
+
+    /* ---- overloading ([over]) ---- */
+  public:
+    /* [over.best.ics]/1: "An implicit conversion sequence is a sequence of
+       conversions used to convert an argument in a function call to the
+       type of the corresponding parameter of the function being called":
+       what [over.ics.rank] compares of one */
+    struct conversion_sequence {
+        enum class form : uint8_t {
+            /* no implicit conversion sequence: the candidate is not
+               viable ([over.match.viable]/3) */
+            bad,
+            standard,
+            user_defined,
+            ellipsis,
+            /* one analysis cannot tell (a class it did not follow) */
+            unknown,
+        };
+        form kind = form::bad;
+        /* [over.ics.scs]/3: the rank of the standard conversion sequence
+           (a user-defined one's second): 0 Exact Match, 1 Promotion, 2
+           Conversion */
+        uint8_t rank = 0;
+        /* the identity conversion: none but lvalue transformations
+           ([over.ics.rank]/3.2.1) */
+        bool identity = true;
+        /* [conv.bool] from a pointer ([over.ics.rank]/4.1) */
+        bool pointer_to_bool = false;
+        /* to cv void* ([over.ics.rank]/4.4.1) */
+        bool to_void_pointer = false;
+        /* [conv.prom]/4: an enumeration with a fixed underlying type to it
+           ([over.ics.rank]/4.2) */
+        bool to_underlying = false;
+        /* a reference binding ([over.ics.ref]): to an rvalue reference, to
+           an rvalue (a temporary too), to a function lvalue; of the
+           implicit object parameter ([over.match.funcs]/4) */
+        bool reference = false, rvalue_reference = false, binds_rvalue = false,
+             function_lvalue = false, implicit_object = false;
+        /* the implicit object parameter of a static member function, which
+           "is considered to match any object" ([over.match.funcs]/4) */
+        bool any_object = false;
+        /* [over.best.ics]/10: an ambiguous conversion sequence */
+        bool ambiguous = false;
+        /* the type converted to: the parameter's, or the type a
+           reference refers to */
+        qualified_type target;
+        /* a derived-to-base Conversion ([over.best.ics]/6, [conv.ptr]/3):
+           its classes */
+        entity_index base_from = 0, base_to = 0;
+        /* a user-defined conversion sequence: the converting constructor
+           ([over.ics.user]/1) */
+        entity_index function = 0;
+    };
+    /* [over.match.funcs]: a candidate function, or (function 0) the
+       implicitly-declared copy constructor of the class constructed,
+       whose type is type */
+    struct overload_candidate {
+        entity_index function = 0;
+        qualified_type type;
+        /* [over.match.oper]/3: a member candidate among non-member ones:
+           the first argument is its implied object argument, the rest
+           its parameters' */
+        bool member = false;
+        /* [over.match.oper]/3.4: a rewritten candidate (an operator== for
+           x != y or y == x), and one synthesized with the order of its two
+           parameters reversed */
+        bool rewritten = false, reversed = false;
+    };
+
+  private:
+    /* [over.best.ics]: the argument a converted to the type of a parameter;
+       user-defined conversions considered unless [over.best.ics]/4 says
+       not */
+    conversion_sequence
+    implicit_conversion_sequence(const expression_meaning &a,
+                                 qualified_type parameter, bool user_defined);
+    conversion_sequence
+    standard_conversion_sequence(const expression_meaning &a,
+                                 qualified_type to);
+    conversion_sequence reference_sequence(const expression_meaning &a,
+                                           qualified_type reference,
+                                           bool user_defined);
+    conversion_sequence class_sequence(const expression_meaning &a,
+                                       qualified_type to, bool user_defined);
+    /* [over.match.funcs]/4-5: the object expression to the implicit object
+       parameter of the member function f */
+    conversion_sequence object_sequence(const expression_meaning &object,
+                                        entity_index f) const;
+    /* [over.ics.rank]: less than 0 when a is the better conversion
+       sequence, more than 0 when b is, 0 when neither is */
+    int compare_conversions(const conversion_sequence &a,
+                            const conversion_sequence &b) const;
+    int compare_standard_conversions(const conversion_sequence &a,
+                                     const conversion_sequence &b) const;
+    /* [over.match.viable], [over.match.best]: the best viable function of
+       the candidates for the arguments (and the object expression of a
+       member function call, or none): its index; ill-formed when there is
+       no unique one */
+    analysis_result
+    best_viable_function(node_index at,
+                         const owned_array<overload_candidate> &candidates,
+                         const expression_meaning *object,
+                         const owned_array<expression_meaning> &arguments,
+                         size_t &chosen, bool *none_viable = nullptr);
+    /* the functions of the overload set whose first is e
+       (entity::next_overload), each once, added to out */
+    void overload_set(entity_index e, owned_array<entity_index> &out) const;
+    /* [over.call.func]: the token of the name a call's postfix-expression
+       is, and the call's callee f made the best viable function of the
+       set (its implied object argument's address object, 0 if none) */
+    token_index callee_name(syntax_child c) const;
+    /* [dcl.fct.def.delete]: whether a function-body is = delete ;, the
+       function f so defined by the definition n, and (ill-formed) a
+       reference to f if it is deleted */
+    bool deleted_body(syntax_child body) const;
+    analysis_result deleted_definition(node_index n, entity_index f);
+    analysis_result deleted_use(token_index at, entity_index f);
+    analysis_result resolve_call(node_index n,
+                                 const owned_array<syntax_child> &arguments,
+                                 owned_array<expression_meaning> &early,
+                                 const owned_array<entity_index> &set,
+                                 uint32_t object, expression_meaning &f);
+    /* the token of the name of a function being called whose overload set
+       overload resolution chooses from ([over.call.func]); 0 elsewhere,
+       where a name of an overload set is [over.over]'s */
+    token_index overloaded_callee = 0;
+    /* [expr.call]: the call of the function f (whose type is function_type;
+       a member function's object's address object, member the function)
+       with the arguments, those analysed so far in early: m */
+    analysis_result call_with(node_index n, expression_meaning &f,
+                              qualified_type function_type, uint32_t object,
+                              entity_index member,
+                              const owned_array<syntax_child> &arguments,
+                              const owned_array<expression_meaning> &early,
+                              expression_meaning &m);
+    /* [expr.call]: the call of the function f, named at the token at
+       (but not by its name: a literal operator, an allocation function),
+       with the analysed arguments, each initialized as its parameter: m */
+    analysis_result
+    call_function(node_index n, token_index at, entity_index f,
+                  const owned_array<expression_meaning> &arguments,
+                  expression_meaning &m);
+    /* [over.over]: the expression e analysed for the target type target:
+       a name of an overload set (perhaps in parentheses, after &) as the
+       function whose type the target's function type is; others as
+       expression() does */
+    analysis_result target_expression(syntax_child e, qualified_type target,
+                                      expression_meaning &m);
+    /* the first function of the overload set e names that way (its name's
+       token at), 0 if e is no such name */
+    entity_index named_overload_set(syntax_child e, token_index &at) const;
+    /* ... the token of that name and the function chosen, which
+       named_entity takes it for (0 elsewhere) */
+    token_index overload_target_token = 0;
+    entity_index overload_target_choice = 0;
+    /* ---- [over.oper] operator functions (over/over.oper.cpp) ---- */
+    /* the name of the operator function of op, as an identifier number
+       (operator+ for both forms of +, [over.unary]/2) */
+    uint32_t operator_name(preprocessing_op_or_punc op);
+    /* operator followed by the spelling rest, as an identifier number (no
+       identifier is spelt so) */
+    uint32_t operator_identifier(const char *rest, size_t length);
+    /* the operator-function-id node id as a declarator-id */
+    analysis_result operator_function_id(node_index id, declarator_meaning &m);
+    /* [over.oper]/7-10: the rules of the declaration n of operator
+       function f */
+    analysis_result operator_function_declaration(node_index n, entity_index f);
+    /* [basic.stc.dynamic.allocation]/1, [basic.stc.dynamic.deallocation]/1-3,
+       [class.free]/1: the rules of the declaration n of the allocation or
+       deallocation function f */
+    analysis_result allocation_function_declaration(node_index n,
+                                                    entity_index f);
+    /* the name of an allocation or deallocation function */
+    uint32_t allocation_function_name(allocation_function kind);
+    /* [basic.stc.dynamic]/2: the global allocation and deallocation
+       functions implicitly declared, declared once */
+    void implicit_allocation_functions();
+    bool allocation_functions_declared = false;
+    /* the declarations of allocation and deallocation functions analysed;
+       when the translation unit spells operator new or operator delete
+       more often, a function lookup misses may be the one a call would
+       choose (allocation_names_spelled) */
+    uint32_t allocation_declarations_analysed = 0;
+    uint32_t allocation_names_spelled();
+    /* [expr.new]/11, [expr.delete]/9: the functions named kind found in
+       class c (0: none; in_class) or else in the global scope */
+    analysis_result allocation_functions(node_index n, allocation_function kind,
+                                         entity_index c,
+                                         owned_array<entity_index> &set,
+                                         bool &in_class);
+
+    /* [expr.new] and [expr.delete]: the expressions */
+    analysis_result new_expression(node_index n, expression_meaning &m);
+    analysis_result delete_expression(node_index n, expression_meaning &m);
+    /* the type of the new-type-id n ([expr.new]/1), the expression of the
+       first bound of its noptr-new-declarator if any (bound) */
+    analysis_result new_type_id(node_index n, qualified_type &type,
+                                syntax_child &bound);
+    /* a declaration analysis did not follow may declare an operator
+       function (hold_names): what an operator means is not known */
+    bool operators_held = false;
+    /* [class.copy.assign]/1: f is a copy assignment operator of class c */
+    bool copy_assignment_operator(entity_index f, entity_index c) const;
+    /* [class.copy.assign]/12: the implicit copy assignment of class c
+       assigns its members as the built-in operator does (no member's
+       assignment is a user-provided operator=) */
+    bool assigned_bitwise(entity_index c);
+    /* ---- [over.literal] literal operators (over/over.literal.cpp) ---- */
+    /* the name of the literal operator of the literal suffix identifier
+       suffix, as an identifier number */
+    uint32_t literal_operator_name(const char *suffix, size_t length);
+    /* the literal-operator-id node id as a declarator-id */
+    analysis_result literal_operator_id(node_index id, declarator_meaning &m);
+    /* [over.literal]/2-6: the rules of the declaration n of literal
+       operator f */
+    analysis_result literal_operator_declaration(node_index n, entity_index f);
+    /* [lex.ext]: the user-defined-literal t as its literal operator's call */
+    analysis_result user_defined_literal(token_index t, expression_meaning &m);
+    /* [over.match.oper]: the operator op applied to the analysed operands
+       (their syntax, for the call), at the token at: handled when an
+       operator function is chosen (m its call), not when the operator is
+       the built-in one.  postfix: a++ or a--, whose operator function has
+       a second parameter of type int */
+    analysis_result
+    overloaded_operator(node_index n, token_index at,
+                        preprocessing_op_or_punc op, bool postfix,
+                        const owned_array<syntax_child> &syntax,
+                        owned_array<expression_meaning> &operands,
+                        bool &handled, expression_meaning &m);
+    /* ... of one operand (its syntax s): the operand becomes the operator
+       function's call when one is chosen (handled) */
+    analysis_result unary_operator_function(node_index n, token_index at,
+                                            preprocessing_op_or_punc op,
+                                            bool postfix, syntax_child s,
+                                            expression_meaning &operand,
+                                            bool &handled);
+    /* ... of two: m the call when one is chosen (handled) */
+    analysis_result binary_operator_function(
+        node_index n, token_index at, preprocessing_op_or_punc op,
+        syntax_child left_syntax, const expression_meaning &left,
+        syntax_child right_syntax, const expression_meaning &right,
+        bool &handled, expression_meaning &m);
     /* the initialization of type from the analysed expression m */
     analysis_result initialize_with(node_index at, expression_meaning &m,
                                     qualified_type type, bool direct, bool list,

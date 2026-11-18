@@ -615,7 +615,8 @@ analysis_result semantic_analysis::initialize_from(node_index at,
                           "characters",
                           "dcl.init");
     }
-    analysis_result r = expression(clause, m);
+    /* [over.over]/1: "an object or reference being initialized" */
+    analysis_result r = target_expression(clause, type, m);
     if (r != analysis_result::well_formed)
         return r;
     return initialize_with(at, m, type, direct, list, result);
@@ -755,9 +756,19 @@ analysis_result
 semantic_analysis::list_initialization(node_index list, qualified_type &type,
                                        bool direct, initialized_value &result)
 {
+    owned_array<syntax_child> clauses;
+    analysis_result gathered = list_clauses(list, clauses);
+    if (gathered != analysis_result::well_formed)
+        return gathered;
+    return list_initialization_of(list, clauses, type, direct, result);
+}
+
+analysis_result
+semantic_analysis::list_clauses(node_index list,
+                                owned_array<syntax_child> &clauses)
+{
     const syntax_node &node = tree[list];
     const syntax_child *children = tree.children(list);
-    owned_array<syntax_child> clauses;
     for (uint32_t i = 0; i < node.child_count; i++) {
         syntax_child c = children[i];
         if (syntax_is_punctuator(tokens, c,
@@ -786,6 +797,14 @@ semantic_analysis::list_initialization(node_index list, qualified_type &type,
             return not_supported(list, "dcl.init.aggr");
         clauses.append(c);
     }
+    return analysis_result::well_formed;
+}
+
+analysis_result semantic_analysis::list_initialization_of(
+    node_index list, const owned_array<syntax_child> &clauses,
+    qualified_type &type, bool direct, initialized_value &result)
+{
+    const syntax_node &node = tree[list];
     const struct type target = type_table[type.unqualified()];
     if (target.kind == type_kind::array) {
         /* [dcl.init.list]/3.3: "if T is a character array and the

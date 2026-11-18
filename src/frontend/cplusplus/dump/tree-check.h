@@ -51,7 +51,9 @@ struct tree_checker {
                 k <= semantic_kind::bound_member_function) ||
                k == semantic_kind::condition_declaration ||
                /* T(args), a prvalue of class type ([expr.type.conv]/2) */
-               k == semantic_kind::construct;
+               k == semantic_kind::construct ||
+               (k >= semantic_kind::new_object &&
+                k <= semantic_kind::delete_object);
     }
     static bool is_initializer(semantic_kind k)
     {
@@ -252,6 +254,23 @@ struct tree_checker {
             if (!node.b || analysis.entity_table[node.b].special !=
                                special_member::destructor)
                 problem(n, "no destructor");
+            break;
+        case semantic_kind::new_object:
+            child(n, node.a, tree_sort::expression, false, "allocation");
+            child(n, node.b, tree_sort::initializer, true, "initialization");
+            prvalue(n, node.a, "allocation");
+            break;
+        case semantic_kind::allocated:
+            break;
+        case semantic_kind::array_size:
+            child(n, node.a, tree_sort::expression, false, "count");
+            prvalue(n, node.a, "count");
+            break;
+        case semantic_kind::delete_object:
+            child(n, node.a, tree_sort::expression, false, "operand");
+            child(n, node.b, tree_sort::initializer, true, "destruction");
+            child(n, node.c, tree_sort::expression, false, "deallocation");
+            prvalue(n, node.a, "operand");
             break;
         case semantic_kind::block:
         case semantic_kind::declarations:

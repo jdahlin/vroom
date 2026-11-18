@@ -274,8 +274,9 @@ analysis_result semantic_analysis::cast(node_index n, expression_meaning &m)
         return not_supported(n, "expr.cast");
     qualified_type to;
     analysis_result r = type_id(children[1].index(), to);
+    /* [over.over]/1: "an explicit type conversion" */
     if (r == analysis_result::well_formed)
-        r = expression(children[3], m);
+        r = target_expression(children[3], to, m);
     if (r != analysis_result::well_formed)
         return r;
     /* C++03 [expr.const]/1: "Floating literals can appear only if they are

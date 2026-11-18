@@ -23,6 +23,7 @@
  * A template-id of an operator-function-id or literal-operator-id is P7's.
  */
 #include "../cplusplus-internal.h"
+#include "frontend/cplusplus/sema.h"
 
 namespace cplusplus
 {
@@ -166,6 +167,306 @@ node_index parser::operator_unqualified_id()
     if (at(preprocessing_op_or_punc::LESS))
         return template_id_rest(mark, first, syntax_kind::template_id);
     return n;
+}
+
+/* ---- semantic analysis ---- */
+
+uint32_t semantic_analysis::operator_name(preprocessing_op_or_punc op)
+{
+    const char *rest = preprocessing_op_or_punc_spelling(op);
+    if (op == preprocessing_op_or_punc::LEFT_PARENTHESIS)
+        rest = "()";
+    else if (op == preprocessing_op_or_punc::LEFT_BRACKET)
+        rest = "[]";
+    return operator_identifier(rest, strlen(rest));
+}
+
+uint32_t semantic_analysis::operator_identifier(const char *rest, size_t length)
+{
+    /* the spelling operator@, which no identifier has */
+    owned_buffer spelling;
+    vbuffer_string_append(spelling.get(), "operator");
+    vbuffer_append(spelling.get(), rest, length);
+    return tokens.pp.identifier(spelling.data(), spelling.size()) + 1;
+}
+
+uint32_t semantic_analysis::allocation_function_name(allocation_function kind)
+{
+    const char *rest = " new";
+    switch (kind) {
+    case allocation_function::new_array:
+        rest = " new[]";
+        break;
+    case allocation_function::delete_:
+        rest = " delete";
+        break;
+    case allocation_function::delete_array:
+        rest = " delete[]";
+        break;
+    default:
+        break;
+    }
+    return operator_identifier(rest, strlen(rest));
+}
+
+/*
+ * The operator-function-id of a declarator: operator @, operator (),
+ * operator [], or an allocation or deallocation function's name
+ * ([basic.stc.dynamic]/1).  co_await is not analysed.
+ */
+analysis_result semantic_analysis::operator_function_id(node_index id,
+                                                        declarator_meaning &m)
+{
+    const syntax_node &node = tree[id];
+    const syntax_child *children = tree.children(id);
+    operators_held = true;
+    if ((node.child_count == 2 || node.child_count == 4) &&
+        children[1].is_token() &&
+        tokens[children[1].index()].kind == token_kind::keyword &&
+        (p.keyword_of(tokens[children[1].index()]) == standard_keyword::new_ ||
+         p.keyword_of(tokens[children[1].index()]) ==
+             standard_keyword::delete_)) {
+        bool is_new =
+            p.keyword_of(tokens[children[1].index()]) == standard_keyword::new_;
+        bool array = node.child_count == 4;
+        allocation_function kind = allocation_function::delete_;
+        if (is_new && array)
+            kind = allocation_function::new_array;
+        else if (is_new)
+            kind = allocation_function::new_;
+        else if (array)
+            kind = allocation_function::delete_array;
+        /* a declaration of a global one redeclares the implicit
+           declaration ([basic.stc.dynamic]/2) */
+        implicit_allocation_functions();
+        operators_held = false;
+        m.has_id = true;
+        m.id = children[0].index();
+        m.operator_function = true;
+        m.allocation = kind;
+        tokens.name_token(m.id, allocation_function_name(kind));
+        return analysis_result::well_formed;
+    }
+    if (node.child_count < 2 || node.child_count > 3 ||
+        !children[0].is_token() || !children[1].is_token() ||
+        tokens[children[1].index()].kind != token_kind::operator_or_punctuator)
+        /* co_await */
+        return not_supported(id, "over.oper");
+    preprocessing_op_or_punc op = preprocessing_op_or_punc_primary(
+        tokens[children[1].index()].op_or_punc);
+    if (node.child_count == 3 &&
+        op != preprocessing_op_or_punc::LEFT_PARENTHESIS &&
+        op != preprocessing_op_or_punc::LEFT_BRACKET)
+        return not_supported(id, "over.oper");
+    switch (op) {
+    case preprocessing_op_or_punc::SPACESHIP:
+        if (!tokens.files.behavior.has(
+                language_feature::three_way_comparison_operator))
+            return not_supported(id, "over.oper");
+        break;
+    default:
+        break;
+    }
+    operators_held = false;
+    m.has_id = true;
+    m.id = children[0].index();
+    m.operator_function = true;
+    m.implemented = op;
+    tokens.name_token(m.id, operator_name(op));
+    return analysis_result::well_formed;
+}
+
+namespace
+{
+
+/* the operators that have a unary form ([expr.unary.op]/1, [over.oper]/2)
+   and those that have only one */
+bool has_unary_form(preprocessing_op_or_punc op)
+{
+    switch (op) {
+    case preprocessing_op_or_punc::PLUS:
+    case preprocessing_op_or_punc::MINUS:
+    case preprocessing_op_or_punc::STAR:
+    case preprocessing_op_or_punc::AMPERSAND:
+    case preprocessing_op_or_punc::TILDE:
+    case preprocessing_op_or_punc::EXCLAMATION:
+        return true;
+    default:
+        return false;
+    }
+}
+
+bool only_unary(preprocessing_op_or_punc op)
+{
+    return op == preprocessing_op_or_punc::TILDE ||
+           op == preprocessing_op_or_punc::EXCLAMATION;
+}
+
+} // namespace
+
+analysis_result semantic_analysis::operator_function_declaration(node_index n,
+                                                                 entity_index f)
+{
+    if (entity_table[f].allocation != allocation_function::none)
+        return allocation_function_declaration(n, f);
+    const entity &x = entity_table[f];
+    preprocessing_op_or_punc op = x.implemented;
+    const struct type &function = type_table[x.type.unqualified()];
+    const qualified_type *parameters =
+        type_table.parameters(x.type.unqualified());
+    bool member = x.enclosing &&
+                  entity_table[x.enclosing].kind == entity_kind::class_type;
+    bool call = op == preprocessing_op_or_punc::LEFT_PARENTHESIS;
+    bool subscript = op == preprocessing_op_or_punc::LEFT_BRACKET;
+    if ((call || subscript) && member && !x.nonstatic_member)
+        /* C++23's static operator() and operator[] (P1169, P2589), an
+           extension of clang's before */
+        return not_supported(n, "over.call");
+    /* [over.oper]/7: "An operator function shall either be a non-static
+       member function or be a non-member function that has at least one
+       parameter whose type is a class, a reference to a class, an
+       enumeration, or a reference to an enumeration." */
+    if (member && !x.nonstatic_member)
+        return ill_formed(n,
+                          "an operator function shall either be a "
+                          "non-static member function or be a non-member "
+                          "function",
+                          "over.oper");
+    if (!member) {
+        bool of_class = false;
+        for (uint32_t i = 0; i < function.parameter_count; i++) {
+            qualified_type t = parameters[i];
+            const struct type &r = type_table[t.unqualified()];
+            if (r.kind == type_kind::lvalue_reference ||
+                r.kind == type_kind::rvalue_reference)
+                t = r.operand;
+            type_kind k = type_table[t.unqualified()].kind;
+            if (k == type_kind::class_type || k == type_kind::enumeration)
+                of_class = true;
+        }
+        if (!of_class)
+            return ill_formed(n,
+                              "a non-member operator function shall have at "
+                              "least one parameter whose type is a class, a "
+                              "reference to a class, an enumeration, or a "
+                              "reference to an enumeration",
+                              "over.oper");
+    }
+    /* [over.ass]/1: "A simple assignment operator function shall be a
+       non-static member function."  [over.call]/1: "A function call
+       operator function is a function named operator() that is a
+       non-static member function with an arbitrary number of parameters.
+       It may have default arguments."  [over.sub]/1: "A subscripting
+       operator function is a function named operator[] that is a
+       non-static member function with exactly one parameter." */
+    if ((call || subscript || op == preprocessing_op_or_punc::EQUAL) &&
+        !x.nonstatic_member)
+        return ill_formed(n,
+                          "a simple assignment, function call or "
+                          "subscripting operator function shall be a "
+                          "non-static member function",
+                          "over.oper");
+    if (call)
+        return analysis_result::well_formed;
+    if (op == preprocessing_op_or_punc::ARROW) {
+        /* [over.ref]/1: "A class member access operator function is a
+           function named operator-> that is a non-static member function
+           taking no parameters." */
+        if (!x.nonstatic_member || function.parameter_count ||
+            function.variadic)
+            return ill_formed(n,
+                              "a class member access operator function "
+                              "shall be a non-static member function taking "
+                              "no parameters",
+                              "over.ref");
+        return analysis_result::well_formed;
+    }
+    if (subscript && (function.parameter_count != 1 || function.variadic)) {
+        if (tokens.files.behavior.has(
+                language_feature::multidimensional_subscript))
+            /* C++23's operator[] of any number of parameters */
+            return not_supported(n, "over.sub");
+        return ill_formed(n,
+                          "a subscripting operator function shall have "
+                          "exactly one parameter",
+                          "over.sub");
+    }
+    /* [over.oper]/10: "An operator function cannot have default arguments
+       ([dcl.fct.default]), except where explicitly stated below.  Operator
+       functions cannot have more or fewer parameters than the number
+       required for the corresponding operator" */
+    if (x.default_arguments)
+        return ill_formed(n,
+                          "an operator function cannot have default "
+                          "arguments",
+                          "over.oper");
+    uint32_t operands = function.parameter_count;
+    if (member)
+        operands++;
+    bool count_ok = operands == 2 && !only_unary(op);
+    if (operands == 1)
+        count_ok = has_unary_form(op) ||
+                   op == preprocessing_op_or_punc::PLUS_PLUS ||
+                   op == preprocessing_op_or_punc::MINUS_MINUS;
+    if (!count_ok || function.variadic)
+        return ill_formed(n,
+                          "operator functions cannot have more or fewer "
+                          "parameters than the number required for the "
+                          "corresponding operator",
+                          "over.oper");
+    if (op == preprocessing_op_or_punc::PLUS_PLUS ||
+        op == preprocessing_op_or_punc::MINUS_MINUS) {
+        /* [over.inc]/1: "a non-static member function with one parameter
+           (which shall be of type int) or a non-member function with two
+           parameters (the second of which shall be of type int)" */
+        if (operands == 2 &&
+            fundamental_of(parameters[function.parameter_count - 1]) !=
+                fundamental_type::int_)
+            return ill_formed(n,
+                              "the parameter of a postfix increment or "
+                              "decrement operator function shall be of type "
+                              "int",
+                              "over.inc");
+    }
+    return analysis_result::well_formed;
+}
+
+/*
+ * [class.copy.assign]/1: "A user-declared copy assignment operator
+ * X::operator= is a non-static non-template member function of class X
+ * with exactly one parameter of type X, X&, const X&, volatile X&, or const
+ * volatile X&."
+ */
+bool semantic_analysis::copy_assignment_operator(entity_index f,
+                                                 entity_index c) const
+{
+    const entity &x = entity_table[f];
+    if (!x.nonstatic_member || x.enclosing != c)
+        return false;
+    const struct type &function = type_table[x.type.unqualified()];
+    if (function.parameter_count != 1 || function.variadic)
+        return false;
+    qualified_type p = type_table.parameters(x.type.unqualified())[0];
+    const struct type &r = type_table[p.unqualified()];
+    if (r.kind == type_kind::lvalue_reference)
+        p = r.operand;
+    const struct type &t = type_table[p.unqualified()];
+    return t.kind == type_kind::class_type && t.entity == c;
+}
+
+bool semantic_analysis::assigned_bitwise(entity_index c)
+{
+    lookup_result found = lookup_qualified(
+        c, operator_name(preprocessing_op_or_punc::EQUAL), lookup_filter::any);
+    if (found.entity || found.unknown || found.ambiguous)
+        return false;
+    owned_array<entity_index> classes;
+    subobject_classes(c, classes);
+    for (entity_index k : classes)
+        if (entity_table[k].kind == entity_kind::class_type &&
+            !assigned_bitwise(k))
+            return false;
+    return true;
 }
 
 } // namespace cplusplus

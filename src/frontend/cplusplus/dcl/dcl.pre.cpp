@@ -702,8 +702,10 @@ analysis_result semantic_analysis::function_definition(node_index n)
     if (!f || entity_table[f].kind != entity_kind::function ||
         body.is_token() || !body.index())
         return not_supported(n, "dcl.fct.def.general");
-    /* function-body: compound-statement; a ctor-initializer, a
-       function-try-block, = default and = delete are not analysed yet */
+    /* function-body: compound-statement, = delete ; a ctor-initializer, a
+       function-try-block and = default are not analysed yet */
+    if (deleted_body(body))
+        return deleted_definition(n, f);
     const syntax_node &b = tree[body.index()];
     if (b.child_count != 1 || !syntax_is(tree, tree.children(body.index())[0],
                                          syntax_kind::compound_statement))
@@ -853,11 +855,32 @@ analysis_result semantic_analysis::declare_with_initializer(
     qualified_type type = s.type;
     declarator_meaning m;
     function_cv = 0;
+    /* the parameters of this declarator's function declarator, if it has
+       one (function sets them) */
+    function_parameters.clear();
     analysis_result r = declarator(declaration, d, type, m);
     if (r != analysis_result::well_formed)
         return r;
     if (!m.has_id)
         return not_supported(declaration, "dcl.meaning");
+    bool has_default_arguments = false;
+    for (const parameter_meaning &p : function_parameters)
+        if (p.default_argument.index())
+            has_default_arguments = true;
+    if (m.qualifier && has_default_arguments) {
+        /* [dcl.fct.default]/6: a member function's, added to its class's
+           declaration's: what calls of the member have is not known */
+        lookup_result found = lookup_qualified(
+            m.qualifier, tokens.identifier(m.id), lookup_filter::any);
+        if (found.entity &&
+            entity_table[found.entity].kind == entity_kind::function) {
+            owned_array<entity_index> set;
+            overload_set(found.entity, set);
+            for (entity_index f : set)
+                entity_table[f].unknown_defaults = true;
+        }
+        return not_supported(declaration, "dcl.fct.default");
+    }
     if (tokens.files.behavior.microsoft_extensions && s.declares_class) {
         /* Microsoft's class-virt-specifiers, struct X sealed { }: the
            parser takes the word for a declarator-id */
@@ -981,6 +1004,21 @@ analysis_result semantic_analysis::declare_with_initializer(
         qualified_declarator = false;
         if (r == analysis_result::well_formed && m.qualified_namespace)
             current_scope = entity_table[declared_entity].enclosing;
+        if (r == analysis_result::well_formed) {
+            r = default_arguments(declaration, declared_entity, kind);
+            if (r != analysis_result::well_formed &&
+                kind == entity_kind::function && declared_entity)
+                entity_table[declared_entity].unknown_defaults = true;
+        }
+        if (r == analysis_result::well_formed && m.operator_function &&
+            kind == entity_kind::function) {
+            entity_table[declared_entity].operator_function = true;
+            entity_table[declared_entity].implemented = m.implemented;
+            entity_table[declared_entity].allocation = m.allocation;
+            r = operator_function_declaration(declaration, declared_entity);
+        }
+        if (r == analysis_result::well_formed && m.literal_operator)
+            r = literal_operator_declaration(declaration, declared_entity);
     }
     last_declared = declared_entity;
     if (r == analysis_result::well_formed && !s.typedef_ &&
@@ -1046,6 +1084,21 @@ analysis_result semantic_analysis::declare_with_initializer(
                 return r;
             entity_table[declared_entity].definition = value.node;
         }
+    }
+    if (r == analysis_result::well_formed && !initialized &&
+        entity_table[declared_entity].automatic && function_state.active &&
+        !tokens.files.behavior.has(language_feature::rvalue_references)) {
+        /* C++03's [stmt.dcl]/3: "unless the variable has POD type and is
+           declared without an initializer": a class's POD-ness before
+           C++11 is not analysed */
+        qualified_type t = entity_table[declared_entity].type;
+        while (type_table[t.unqualified()].kind == type_kind::array)
+            t = type_table[t.unqualified()].operand;
+        const struct type &k = type_table[t.unqualified()];
+        if (k.kind == type_kind::class_type &&
+            entity_table[k.entity].kind == entity_kind::class_type &&
+            !assigned_bitwise(k.entity))
+            return not_supported(declaration, "stmt.dcl");
     }
     if (r != analysis_result::well_formed || !initialized)
         return r;

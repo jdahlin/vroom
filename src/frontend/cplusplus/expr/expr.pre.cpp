@@ -56,6 +56,8 @@ analysis_result semantic_analysis::expression_kind(syntax_child e,
     if (e.is_token()) {
         const token &t = tokens[e.index()];
         /* true, false and nullptr are keywords that are literals */
+        if (t.literal == literal_kind::user_defined_literal)
+            return user_defined_literal(e.index(), m);
         if (t.literal != literal_kind::none) {
             /* the value of a literal analysis does not evaluate (a long
                double's) is the token's */
@@ -86,6 +88,8 @@ analysis_result semantic_analysis::expression_kind(syntax_child e,
         return postfix(n, m);
     case syntax_kind::cast_expression:
         return cast(n, m);
+    case syntax_kind::pm_expression:
+    case syntax_kind::compare_expression:
     case syntax_kind::multiplicative_expression:
     case syntax_kind::additive_expression:
     case syntax_kind::shift_expression:
@@ -103,6 +107,10 @@ analysis_result semantic_analysis::expression_kind(syntax_child e,
         return assignment(n, m);
     case syntax_kind::expression:
         return comma(n, m);
+    case syntax_kind::new_expression:
+        return new_expression(n, m);
+    case syntax_kind::delete_expression:
+        return delete_expression(n, m);
     default:
         return not_supported(n);
     }

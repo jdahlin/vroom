@@ -115,9 +115,19 @@ analysis_result semantic_analysis::assignment(node_index n,
         tokens[children[1].index()].op_or_punc);
     expression_meaning left, right;
     analysis_result r = expression(children[0], left);
-    if (r == analysis_result::well_formed)
+    /* [over.over]/1: "the left side of an assignment" */
+    if (r == analysis_result::well_formed &&
+        op == preprocessing_op_or_punc::EQUAL)
+        r = target_expression(children[2], left.type, right);
+    else if (r == analysis_result::well_formed)
         r = expression(children[2], right);
     if (r != analysis_result::well_formed)
+        return r;
+    /* [over.match.oper]/2: an operand of class or enumeration type */
+    bool handled = false;
+    r = binary_operator_function(n, children[1].index(), op, children[0], left,
+                                 children[2], right, handled, m);
+    if (r != analysis_result::well_formed || handled)
         return r;
     const struct type record = type_table[left.type.unqualified()];
     if (record.kind == type_kind::class_type)
@@ -268,6 +278,11 @@ analysis_result semantic_analysis::class_assignment(node_index n,
                           "expr.ass");
     if (right.type.unqualified() != left.type.unqualified())
         return not_supported(n, "over.match.oper");
+    /* [class.copy.assign]/12: the implicitly-defined copy assignment
+       operator "performs memberwise copy assignment of its subobjects":
+       one that calls an operator function is not analysed */
+    if (!assigned_bitwise(c))
+        return not_supported(n, "class.copy.assign");
     const entity &x = entity_table[c];
     for (uint32_t i = 0; i < x.member_count; i++)
         if (cv_of(type_table,
