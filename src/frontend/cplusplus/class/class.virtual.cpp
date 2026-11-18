@@ -379,7 +379,7 @@ analysis_result semantic_analysis::dynamic_class_record(entity_index c,
                         overrides_function(v.f, vtable_slots.back())) {
                         vtable_slots.back() = v.f;
                         vtable_own.back() = true;
-                        /* [abi:thunks]: overriding a function of a virtual
+                        /* [abi:mangling-special-thunks]: overriding a function of a virtual
                            base needs a virtual thunk (its vcall offset):
                            not made */
                         if (virtual_class)
@@ -484,7 +484,7 @@ analysis_result semantic_analysis::dynamic_class_record(entity_index c,
 /*
  * After class c's layout: each secondary virtual table's subobject offset
  * (its base subobject's offset plus the table's offset in that base) and
- * the adjustment of each slot the class overrides there ([abi:thunks]: a
+ * the adjustment of each slot the class overrides there ([abi:mangling-special-thunks]: a
  * non-virtual thunk subtracts the subobject's offset from this).
  */
 void semantic_analysis::dynamic_class_offsets(entity_index c)

@@ -153,7 +153,7 @@ analysis_result semantic_analysis::friend_class(entity_index c, node_index n,
         if (x.kind == entity_kind::class_type && x.enclosing == space &&
             found.found_in == space &&
             !entity_table.bound_by_using(space, name)) {
-            /* the class declared before (its key is [dcl.type.elab]/5's,
+            /* the class declared before (its key is [dcl.type.elab]/3's,
                which is not checked) */
             if (x.union_ != (key == standard_keyword::union_))
                 return not_supported(n, "dcl.type.elab");

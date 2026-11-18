@@ -223,7 +223,7 @@ class c_lowering
     ast_qualified_type structor_type(entity_index e, token_index at);
     uint32_t vtable_pointer_stores(const semantic_node &n);
     bool definition_body(entity_index e, uint32_t s, int variant);
-    /* [abi:thunks]: the non-virtual thunk of virtual function f that adds
+    /* [abi:mangling-special-thunks]: the non-virtual thunk of virtual function f that adds
        adjustment to this, declared or (where f is defined) defined */
     struct thunk_record {
         entity_index f = 0;
@@ -4180,7 +4180,7 @@ uint32_t c_lowering::offset_pointer(uint32_t p, int64_t offset,
 }
 
 /*
- * [abi:thunks]: a non-virtual thunk of f: "adjusts the this pointer by a
+ * [abi:mangling-special-thunks]: a non-virtual thunk of f: "adjusts the this pointer by a
  * constant offset" and calls f, named _ZThn <offset> _ <f's encoding>
  * ([abi:mangling-special-thunks]).  It is defined where f is (with f's
  * linkage), declared elsewhere.

@@ -36,7 +36,8 @@ class itanium_mangler
         text("_ZTV");
         return type(analysis.entity_table[c].type);
     }
-    /* <special-name> ::= TT <type>, the VTT ([abi:vtable-ctor-vtt]) */
+    /* [abi:mangling-special-vtables]: <special-name> ::= TT <type>, the VTT
+       ([abi:vtable-ctor-vtt]) */
     bool vtt_name(entity_index c)
     {
         text("_ZTT");

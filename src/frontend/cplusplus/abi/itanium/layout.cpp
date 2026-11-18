@@ -107,7 +107,7 @@ bool pod_for_layout(const semantic_analysis &a, entity_index c)
            C++11, so no C++03 POD) */
         if (m.access || m.default_initializer)
             return false;
-        /* C++03 [class]/4: a POD-struct has no "non-static data members of
+        /* C++03 clause 9 paragraph 4: a POD-struct has no "non-static data members of
            type ... reference" */
         type_kind kind = a.type_table[m.type.unqualified()].kind;
         if (kind == type_kind::lvalue_reference ||
