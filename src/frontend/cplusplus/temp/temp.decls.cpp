@@ -514,15 +514,16 @@ analysis_result semantic_analysis::declare_template_parameters(
             current_scope = saved;
             if (r != analysis_result::well_formed)
                 return r;
-            /* [temp.param]/4 with a type that is one of this template's
-               type parameters declared before it (template <class T, T v>,
-               libc++'s integral_constant): an argument gives its type
-               (template_argument_for); any other dependent type has no
-               rules yet */
+            /* [temp.param]/4 with a type that depends on this template's
+               parameters declared before it: template <class T, T v>
+               (libc++'s integral_constant), whose argument gives its
+               type, or typename enable_if<B, int>::type = 0 (libc++'s
+               SFINAE), analysed again with the arguments
+               (template_argument_for) */
             bool own_parameter_type =
                 own_type_parameter_position(type, scope, first) != UINT32_MAX;
-            if ((!own_parameter_type && (!structural_parameter_type(type) ||
-                                         depends(type_table, type))) ||
+            if ((!own_parameter_type && !depends(type_table, type) &&
+                 !structural_parameter_type(type)) ||
                 sp.typedef_ || sp.static_ || sp.extern_ || sp.constexpr_ ||
                 sp.inline_ || sp.gnu_flags)
                 return not_supported(node, "temp.param");

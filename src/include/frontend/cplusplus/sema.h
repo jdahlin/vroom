@@ -226,6 +226,16 @@ enum class entity_kind : uint8_t {
        type_kind::dependent of it, value the operand (cv << 32 | its
        type_index), name the keyword's identifier */
     type_transformation,
+    /* not an entity: [temp.dep.constexpr] a value-dependent template
+       argument other than a parameter's name (is_integral<T>::value), in
+       a template's own declaration; the template_argument's
+       template_entity, its value no parameter's position (UINT32_MAX).
+       An instantiation analyses the argument again with its arguments.
+       What mangling knows of it: for [!] Q<args>::name written so, type
+       the dependent Q<args>, name the member's identifier, value 1 (3 if
+       negated), one entity for the same three ([temp.over.link]); else
+       value 0, an entity of its own */
+    dependent_value,
     /* not an entity: a block scope or a function parameter scope
        ([basic.scope.block], [basic.scope.param]), the scope the names
        declared in it are bound in */
@@ -2917,6 +2927,14 @@ class semantic_analysis
                                           syntax_child written,
                                           const template_argument *before,
                                           template_argument &out);
+    /* [temp.param]/4: a non-type parameter's dependent type
+       (typename enable_if<B, int>::type) with the arguments before it */
+    entity_index dependent_value_entity(syntax_child written);
+    owned_array<entity_index> dependent_values;
+    analysis_result substituted_parameter_type(uint32_t template_index,
+                                               uint32_t position,
+                                               const template_argument *before,
+                                               qualified_type &type);
     /* [temp.param]/6: a non-type template-parameter's type with rules
        here; one whose arguments are addresses */
     bool structural_parameter_type(qualified_type t) const;
@@ -3212,6 +3230,22 @@ class semantic_analysis
     bool specialization_value(entity_index e, uint32_t i, uint64_t &magnitude,
                               bool &negative, uint32_t &parameter,
                               uint32_t element = 0) const;
+    /* whether the argument is a value-dependent expression
+       (entity_kind::dependent_value), which is not mangled yet */
+    bool specialization_dependent_value(entity_index e, uint32_t i,
+                                        uint32_t element = 0) const;
+    /* that argument's entity (an entity_kind::dependent_value) */
+    entity_index specialization_entity(entity_index e, uint32_t i,
+                                       uint32_t element = 0) const
+    {
+        return specialization_template_argument(e, i, element).template_entity;
+    }
+    /* whether the function template t's template-parameter at i is a
+       non-type one of a dependent type (template <class T, T v>): that
+       type, which [abi:mangle.template-arg] mangles after Tn before the
+       argument */
+    bool dependent_parameter_type(entity_index t, uint32_t i,
+                                  qualified_type &type) const;
     /* whether the argument is a template ([temp.arg.template]/1): the
        class template, or in a template's own declaration the template
        template-parameter it names (also its position plus one in

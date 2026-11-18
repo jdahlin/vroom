@@ -95,7 +95,8 @@ class itanium_mangler
     bool encoding(entity_index e);
     bool specialization_encoding(entity_index e);
     bool class_template_args(entity_index c);
-    bool template_args(entity_index c);
+    bool template_args(entity_index c, entity_index function = 0);
+    bool dependent_value(entity_index d);
     bool template_arg(entity_index c, uint32_t i, uint32_t element);
     bool template_template_arg(entity_index t, uint32_t parameter);
     void template_param(uint64_t position)
@@ -256,7 +257,7 @@ bool itanium_mangler::specialization_encoding(entity_index e)
     candidate c;
     c.scope = pattern_of;
     candidates.append(c);
-    if (!template_args(e))
+    if (!template_args(e, pattern_of))
         return false;
     if (nested)
         text("E");
@@ -591,12 +592,28 @@ bool itanium_mangler::class_template_args(entity_index c)
  * its parameter's type, then the value, n before a negative one's
  * magnitude; a bool's 0 or 1.
  */
-bool itanium_mangler::template_args(entity_index c)
+bool itanium_mangler::template_args(entity_index c, entity_index function)
 {
     text("I");
     uint32_t count = analysis.specialization_argument_count(c);
     for (uint32_t i = 0; i < count; i++) {
         uint32_t pack = analysis.specialization_pack(c, i);
+        /* [abi:mangle.template-arg]: a function template's non-type
+           parameter of a dependent type,
+
+               <template-arg> ::= Tn <type> <template-arg>
+
+           its type in the template's own terms (T_), as clang 17 and
+           later mangle it */
+        qualified_type declared;
+        if (function &&
+            analysis.dependent_parameter_type(function, i, declared)) {
+            if (pack)
+                return false;
+            text("Tn");
+            if (!type(declared))
+                return false;
+        }
         if (!pack) {
             if (!template_arg(c, i, 0))
                 return false;
@@ -655,6 +672,38 @@ bool itanium_mangler::template_template_arg(entity_index t, uint32_t parameter)
 }
 
 /* argument i of c's (its element - 1 if element) */
+/*
+ * [abi:mangle.template-arg] a value-dependent argument, [abi:expressions]:
+ *
+ *     <template-arg> ::= X <expression> E
+ *     <expression> ::= nt <expression>
+ *                  ::= <unresolved-name>
+ *     <unresolved-name> ::= sr <unresolved-qualifier-level>+ E
+ *                           <base-unresolved-name>
+ *
+ * Q<args>::name as written, Q unqualified; clang makes the qualifier
+ * level no candidate, its template-args' types are as anywhere.
+ */
+bool itanium_mangler::dependent_value(entity_index d)
+{
+    const entity &x = analysis.entity_table[d];
+    if (!x.value)
+        return false;
+    entity_index q = record(x.type).entity;
+    const entity &spec = analysis.entity_table[q];
+    text("X");
+    if (x.value & 2)
+        text("nt");
+    text("sr");
+    if (!source_name(spec.name) || !template_args(q))
+        return false;
+    text("E");
+    if (!source_name(x.name))
+        return false;
+    text("E");
+    return true;
+}
+
 bool itanium_mangler::template_arg(entity_index c, uint32_t i, uint32_t element)
 {
     uint64_t v = 0;
@@ -683,6 +732,8 @@ bool itanium_mangler::template_arg(entity_index c, uint32_t i, uint32_t element)
             text("E");
         return true;
     }
+    if (analysis.specialization_dependent_value(c, i, element))
+        return dependent_value(analysis.specialization_entity(c, i, element));
     if (!analysis.specialization_value(c, i, v, negative, parameter, element))
         return type(analysis.specialization_argument(c, i, element));
     if (parameter) {

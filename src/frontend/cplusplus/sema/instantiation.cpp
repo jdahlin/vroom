@@ -490,6 +490,10 @@ bool semantic_analysis::specialization_value(entity_index e, uint32_t i,
     parameter = 0;
     if (a.kind != template_argument::kind_t::value)
         return false;
+    /* (a value-dependent expression: not mangled yet) */
+    if (a.template_entity &&
+        entity_table[a.template_entity].kind == entity_kind::dependent_value)
+        return false;
     if (a.template_entity) {
         parameter = static_cast<uint32_t>(a.value) + 1;
         return true;
@@ -501,6 +505,33 @@ bool semantic_analysis::specialization_value(entity_index e, uint32_t i,
         magnitude = 0 - a.value;
     }
     return true;
+}
+
+bool semantic_analysis::specialization_dependent_value(entity_index e,
+                                                       uint32_t i,
+                                                       uint32_t element) const
+{
+    const template_argument &a =
+        specialization_template_argument(e, i, element);
+    return a.kind == template_argument::kind_t::value && a.template_entity &&
+           entity_table[a.template_entity].kind == entity_kind::dependent_value;
+}
+
+bool semantic_analysis::dependent_parameter_type(entity_index t, uint32_t i,
+                                                 qualified_type &type) const
+{
+    for (const function_template &ft : function_templates) {
+        if (ft.entity != t || i >= ft.parameter_count)
+            continue;
+        const entity &p =
+            entity_table[template_parameter_entities[ft.first_parameter + i]];
+        if (p.kind != entity_kind::none ||
+            !depends_on_template_parameter(p.type))
+            return false;
+        type = p.type;
+        return true;
+    }
+    return false;
 }
 
 bool semantic_analysis::specialization_template_name(entity_index e, uint32_t i,

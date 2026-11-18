@@ -413,7 +413,17 @@ void semantic_analysis::hold_names(node_index declaration)
                    preprocessing_op_or_punc_primary(x.op_or_punc) ==
                        preprocessing_op_or_punc::COLON_COLON;
         };
-        for (token_index t = node.first_token; t < node.end_token; t++) {
+        /* not a template-head's: its names are the template's parameters
+           and what their types and defaults name ([temp.param]) */
+        token_index start = node.first_token;
+        for (node_index x = declaration;
+             tree[x].kind == syntax_kind::template_declaration &&
+             tree[x].child_count >= 2 &&
+             syntax_is(tree, tree.children(x)[0], syntax_kind::template_head) &&
+             !tree.children(x)[tree[x].child_count - 1].is_token();
+             x = tree.children(x)[tree[x].child_count - 1].index())
+            start = tree[tree.children(x)[0].index()].end_token;
+        for (token_index t = start; t < node.end_token; t++) {
             const token &tok = tokens[t];
             /* a name before or after :: is a qualifier or a member of
                another scope declared again ([dcl.meaning]/1), not a name
