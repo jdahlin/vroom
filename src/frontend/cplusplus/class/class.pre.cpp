@@ -319,12 +319,48 @@ analysis_result semantic_analysis::class_definition(node_index n,
             scope = found.found_in;
         }
     }
+    /* a class template's specialization (instantiate_class): a class of
+       the template's scope that no name binds there */
+    uint32_t specialization = class_instantiating;
+    class_instantiating = 0;
     if (has_bases && !is_namespace(scope))
         return not_supported(n, inner_class_rule(scope));
     token_index id = head_children[0].index();
     uint32_t name = 0;
     entity_index c = 0;
-    if (!unnamed) {
+    if (specialization) {
+        if (unnamed || head_qualifier || outer)
+            return not_supported(n, "temp.class");
+        id = head_name;
+        name = tokens.identifier(id);
+        c = entity_table.make(entity_kind::class_type, name, scope);
+        entity_table[c].linkage_of_name = linkage::external;
+        if (within_unnamed_namespace(scope))
+            entity_table[c].linkage_of_name = linkage::internal;
+        entity_table[c].type = qualified_type::make(
+            type_table.of_entity(type_kind::class_type, c), cv_none);
+        entity_table[c].instantiation = specialization;
+        instantiation_record &record = instantiations[specialization - 1];
+        record.specialization = c;
+        /* [class.pre]/2: "The class-name is also bound in the scope of the
+           class (template) itself; this is known as the
+           injected-class-name."  The template-parameters' names with it,
+           each its argument ([temp.arg.type]) */
+        entity_table.bind(c, name, c);
+        const function_template &ft = function_templates
+            [entity_table[record.template_entity].instantiation - 1];
+        for (uint32_t i = 0; i < ft.parameter_count; i++) {
+            uint32_t p =
+                entity_table[template_parameter_entities[ft.first_parameter +
+                                                         i]]
+                    .name;
+            entity_index e = entity_table.make(entity_kind::typedef_name, p, c);
+            entity_table[e].type =
+                template_arguments[record.first_argument + i].type;
+            entity_table[e].defined = true;
+            entity_table.bind(c, p, e);
+        }
+    } else if (!unnamed) {
         id = head_name;
         name = tokens.identifier(id);
         c = entity_table.find(scope, name);
@@ -354,7 +390,8 @@ analysis_result semantic_analysis::class_definition(node_index n,
         c = entity_table[c].hidden_type;
     }
     bool redeclared = false;
-    if (unnamed) {
+    if (specialization) {
+    } else if (unnamed) {
         /* [basic.link]/4: an unnamed class has no linkage until a typedef
            names it for linkage purposes (declare) */
         c = entity_table.make(entity_kind::class_type, 0, scope);
@@ -1677,7 +1714,10 @@ analysis_result semantic_analysis::member_function_definition(
         declarator_meaning m;
         function_cv = 0;
         in_member_declarator = true;
+        entity_index saved_class = defining_class;
+        defining_class = c;
         analysis_result r = declarator(definition, children[at], type, m);
+        defining_class = saved_class;
         in_member_declarator = false;
         if (r != analysis_result::well_formed)
             return r;
@@ -1694,19 +1734,25 @@ analysis_result semantic_analysis::member_function_definition(
             return not_supported(definition, "class.ctor");
         return special_member_body(definition, children[at + 1]);
     }
+    /* [basic.scope.class]: the declarator's names are looked up in the
+       class, as when its declaration was analysed (a class template's
+       parameters are bound there) */
+    entity_index saved_class = defining_class;
+    defining_class = c;
     specified s;
     bool outer_virtual_allowed = virtual_allowed;
     virtual_allowed = true;
     analysis_result r = decl_specifier_seq(children[0].index(), s, false);
     virtual_allowed = outer_virtual_allowed;
-    if (r != analysis_result::well_formed)
-        return r;
     qualified_type type = s.type;
     declarator_meaning m;
-    function_cv = 0;
-    in_member_declarator = true;
-    r = declarator(definition, children[1], type, m);
-    in_member_declarator = false;
+    if (r == analysis_result::well_formed) {
+        function_cv = 0;
+        in_member_declarator = true;
+        r = declarator(definition, children[1], type, m);
+        in_member_declarator = false;
+    }
+    defining_class = saved_class;
     if (r != analysis_result::well_formed)
         return r;
     /* the function of the name this definition declared (one of an

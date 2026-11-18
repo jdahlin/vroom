@@ -1499,6 +1499,28 @@ lines:
   clang accepts, 0 refuted (types 40137, lookup 14272, symbols 1723); we
   accept and clang rejects 943; cxx-run 192/192; cxx-c-suites 2214 pass,
   0 wrong.
+  Then class templates of namespace scope with type parameters
+  (`class_template_definition`, temp.decls.cpp): a template-id names a
+  specialization (`template_type`, from a decl-specifier or after a
+  nested-name-specifier), instantiated there (`instantiate_class`,
+  instantiation.cpp) by analysing the class-specifier again with the
+  parameters bound to the arguments, the injected-class-name bound to the
+  specialization ([temp.local]/1); member functions are defined as the
+  class's.  A template-id with a dependent argument in a template's own
+  declaration is a dependent type ([temp.dep.type]/9), and `TT<T>`
+  parameters deduce from a specialization's arguments.  Mangling: the
+  template name as a candidate, `S_` for it, `Sa`/`Sb` for std's (not
+  `Ss`, `Si`, `So`, `Sd`).  An instantiation's errors make the use
+  unsupported, not the template ([temp.inst]/1: clang reports them "in
+  instantiation of" at the use).  Not yet: default template arguments,
+  non-type parameters, partial and explicit specializations, member
+  templates, a member's default arguments ([temp.inst]/3), a function type
+  as an argument ([temp.spec]/8), friends ([class.friend]/6: the template
+  is unsupported), and instantiation only where a complete type is needed
+  ([temp.inst]/2: today a template-id instantiates).  cxx-sema:
+  declarations as clang 36772, 0 we reject and clang accepts, 0 refuted
+  (types 41066, lookup 14639, symbols 1743, layouts 10142); we accept and
+  clang rejects 1862; cxx-run 196/196; cxx-c-suites unchanged.
 
 ### S7. Exceptions and RTTI
 

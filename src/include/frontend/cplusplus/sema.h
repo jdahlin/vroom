@@ -2338,6 +2338,9 @@ class semantic_analysis
         node_index declaration = 0, definition = 0;
         uint32_t first_parameter = 0, parameter_count = 0;
         bool unusable = false;
+        /* a class template ([temp.class]): definition is its
+           class-specifier */
+        bool is_class = false;
     };
     owned_array<function_template> function_templates;
     owned_array<entity_index> template_parameter_entities;
@@ -2363,6 +2366,26 @@ class semantic_analysis
     token_index lookup_horizon = 0;
     /* the function template whose name the held entity is, plus one */
     uint32_t function_template_of(entity_index held) const;
+    /* the class template the entity names (its held name, or one of its
+       specializations as its injected-class-name), plus one */
+    uint32_t class_template_of(entity_index e) const;
+    /* [temp.pre]/1: a template-head's type parameters */
+    analysis_result
+    template_head_parameters(node_index n, owned_array<node_index> &parameters);
+    /* [temp.class]: a class template defined at namespace scope */
+    analysis_result class_template_definition(node_index n,
+                                              node_index specifier);
+    /* [temp.names]/1: a simple-template-id that names a class template's
+       specialization, as a type; in the scope given (0: unqualified) */
+    analysis_result template_type(node_index id, entity_index scope,
+                                  bool qualified, type_index &type);
+    /* [temp.inst]/2: the class template specialization, instantiated */
+    analysis_result instantiate_class(node_index at, uint32_t class_template,
+                                      const template_argument *arguments,
+                                      uint32_t count, entity_index &c);
+    /* the instantiation whose class the class-specifier analysed now
+       defines (its record's index plus one) */
+    uint32_t class_instantiating = 0;
     /* a call whose name is a function template's (expr.post.cpp) */
     analysis_result template_call(node_index n, token_index name,
                                   uint32_t function_template,

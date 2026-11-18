@@ -1010,7 +1010,8 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
             syntax_is(tree, c, syntax_kind::elaborated_type_specifier) ||
             syntax_is(tree, c, syntax_kind::enum_specifier) ||
             syntax_is(tree, c, syntax_kind::elaborated_enum_specifier) ||
-            syntax_is(tree, c, syntax_kind::simple_type_specifier))
+            syntax_is(tree, c, syntax_kind::simple_type_specifier) ||
+            syntax_is(tree, c, syntax_kind::simple_template_id))
             continue;
         /* an attribute specifier has rules unless a class-specifier is
            among the specifiers */
@@ -1078,6 +1079,8 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
             } else if (syntax_is(tree, c,
                                  syntax_kind::elaborated_enum_specifier))
                 r = elaborated_enum_specifier(c.index(), class_type);
+            else if (syntax_is(tree, c, syntax_kind::simple_template_id))
+                r = template_type(c.index(), 0, false, class_type);
             else if (syntax_is(tree, c, syntax_kind::simple_type_specifier)) {
                 uint32_t named_cv = 0;
                 r = qualified_type_name(c.index(), class_type, named_cv);
@@ -1371,8 +1374,16 @@ analysis_result semantic_analysis::qualified_type_name(node_index n,
         /* [temp.names]: nested-name-specifier template_opt
            simple-template-id */
         if (node.child_count == 2 &&
-            syntax_is(tree, parts[1], syntax_kind::simple_template_id))
-            return not_supported(n, "temp.names");
+            syntax_is(tree, parts[0], syntax_kind::nested_name_specifier) &&
+            syntax_is(tree, parts[1], syntax_kind::simple_template_id)) {
+            nominated_scope scope;
+            analysis_result r = nested_name_specifier(parts[0].index(), scope);
+            if (r != analysis_result::well_formed)
+                return r;
+            if (!is_namespace(scope.entity))
+                return not_supported(n, "temp.names");
+            return template_type(parts[1].index(), scope.entity, true, type);
+        }
         return not_supported(n, "dcl.type.simple");
     }
     nominated_scope scope;

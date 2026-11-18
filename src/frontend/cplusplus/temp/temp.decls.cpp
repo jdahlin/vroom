@@ -54,8 +54,20 @@ analysis_result semantic_analysis::template_declaration(node_index n)
             if (syntax_is(tree, tree.children(inner)[i],
                           syntax_kind::init_declarator_list))
                 declarators = true;
-        if (!declarators)
+        if (!declarators) {
+            const syntax_node &d = tree[inner];
+            if (d.child_count == 2 &&
+                syntax_is(tree, tree.children(inner)[0],
+                          syntax_kind::decl_specifier_seq)) {
+                node_index seq = tree.children(inner)[0].index();
+                if (tree[seq].child_count == 1 &&
+                    syntax_is(tree, tree.children(seq)[0],
+                              syntax_kind::class_specifier))
+                    return class_template_definition(
+                        n, tree.children(seq)[0].index());
+            }
             return not_supported(n, "temp.class");
+        }
         /* a function template's declaration or a variable template: which
            needs the declarator's type */
         return not_supported(n, "temp.pre");
@@ -87,32 +99,24 @@ analysis_result semantic_analysis::deduction_guide(node_index n)
 }
 
 /*
- * [temp.fct]/1: "A function template defines an unbounded set of related
- * functions."  One defined at namespace scope with type parameters only
- * (template<class T, typename U> R f(P...) { ... }): its declarator is
- * analysed with each parameter's name a typedef-name of its
- * template-parameter type, which gives the template's function type (what
- * deduction compares a call's arguments with, and what the specialization's
- * name encodes, [abi:mangle.function-type]); its body is analysed per
- * specialization (instantiate).  The template's name stays the one
- * hold_names binds, which a call finds (call, expr.post.cpp); any other use
- * of it is [temp.names].
+ * [temp.pre]/1: the template-head's template-parameter-list: type
+ * parameters of the form class identifier (typename identifier), with no
+ * default, pack or type-constraint; a requires-clause is [temp.constr].
+ * The template is one of namespace scope.
  */
 analysis_result
-semantic_analysis::function_template_definition(node_index n,
-                                                node_index definition)
+semantic_analysis::template_head_parameters(node_index n,
+                                            owned_array<node_index> &parameters)
 {
     const syntax_node &node = tree[n];
     if (node.child_count != 2 ||
         !syntax_is(tree, tree.children(n)[0], syntax_kind::template_head))
         return not_supported(n, "temp.pre");
-    entity_index outer = current_scope;
-    if (!is_namespace(outer) || defining_class)
+    if (!is_namespace(current_scope) || defining_class)
         return not_supported(n, "temp.mem");
     /* template-head: template < template-parameter-list >; a
        requires-clause is [temp.constr] */
     node_index head = tree.children(n)[0].index();
-    owned_array<node_index> parameters;
     for (uint32_t i = 0; i < tree[head].child_count; i++) {
         syntax_child c = tree.children(head)[i];
         if (c.is_token())
@@ -143,6 +147,30 @@ semantic_analysis::function_template_definition(node_index n,
     }
     if (parameters.empty())
         return not_supported(n, "temp.param");
+    return analysis_result::well_formed;
+}
+
+/*
+ * [temp.fct]/1: "A function template defines an unbounded set of related
+ * functions."  One defined at namespace scope with type parameters only
+ * (template<class T, typename U> R f(P...) { ... }): its declarator is
+ * analysed with each parameter's name a typedef-name of its
+ * template-parameter type, which gives the template's function type (what
+ * deduction compares a call's arguments with, and what the specialization's
+ * name encodes, [abi:mangle.function-type]); its body is analysed per
+ * specialization (instantiate).  The template's name stays the one
+ * hold_names binds, which a call finds (call, expr.post.cpp); any other use
+ * of it is [temp.names].
+ */
+analysis_result
+semantic_analysis::function_template_definition(node_index n,
+                                                node_index definition)
+{
+    entity_index outer = current_scope;
+    owned_array<node_index> parameters;
+    analysis_result head = template_head_parameters(n, parameters);
+    if (head != analysis_result::well_formed)
+        return head;
     const syntax_node &d = tree[definition];
     if (leading_gnu_attributes(definition) || d.child_count != 3 ||
         !syntax_is(tree, tree.children(definition)[0],
@@ -254,6 +282,24 @@ uint32_t semantic_analysis::function_template_of(entity_index held) const
 {
     for (size_t i = 0; i < function_templates.size(); i++)
         if (function_templates[i].name == held && held &&
+            !function_templates[i].unusable && !function_templates[i].is_class)
+            return static_cast<uint32_t>(i + 1);
+    return 0;
+}
+
+uint32_t semantic_analysis::class_template_of(entity_index e) const
+{
+    if (!e)
+        return 0;
+    /* [temp.local]/1: "the injected-class-name can be used as a
+       template-name or a type-name.  When it is used with a
+       template-argument-list ... it refers to the specified class template
+       specialization" */
+    if (entity_table[e].kind == entity_kind::class_type &&
+        entity_table[e].instantiation)
+        return entity_table[specialized_template(e)].instantiation;
+    for (size_t i = 0; i < function_templates.size(); i++)
+        if (function_templates[i].name == e && function_templates[i].is_class &&
             !function_templates[i].unusable)
             return static_cast<uint32_t>(i + 1);
     return 0;
@@ -268,6 +314,8 @@ static bool depends(const types &table, qualified_type t,
     switch (r.kind) {
     case type_kind::template_parameter:
         return !parameters || (*parameters)[r.entity].value >= from;
+    case type_kind::dependent:
+        return true;
     case type_kind::pointer:
     case type_kind::lvalue_reference:
     case type_kind::rvalue_reference:
@@ -285,6 +333,201 @@ static bool depends(const types &table, qualified_type t,
     default:
         return false;
     }
+}
+
+/*
+ * [temp.class]/1: "A class template defines the layout and operations for
+ * an unbounded set of related types."  One defined at namespace scope
+ * (template<class T> struct S { ... };): its class-specifier is analysed
+ * per specialization (instantiate_class), the template's name bound to a
+ * held entity that a simple-template-id finds (template_type).
+ */
+analysis_result
+semantic_analysis::class_template_definition(node_index n, node_index specifier)
+{
+    entity_index outer = current_scope;
+    owned_array<node_index> parameters;
+    analysis_result r = template_head_parameters(n, parameters);
+    if (r != analysis_result::well_formed)
+        return r;
+    /* class-head: class-key identifier base-clause_opt */
+    const syntax_node &spec = tree[specifier];
+    if (!spec.child_count ||
+        !syntax_is(tree, tree.children(specifier)[0], syntax_kind::class_head))
+        return not_supported(n, "temp.class");
+    node_index head = tree.children(specifier)[0].index();
+    if (tree[head].child_count < 2 || !tree.children(head)[1].is_token() ||
+        tokens[tree.children(head)[1].index()].kind != token_kind::identifier)
+        return not_supported(n, "temp.class");
+    /* a specialization declares the friend
+       functions its class defines in the template's namespace
+       ([class.friend]/6), which a lookup there would find; friends have
+       no rules yet */
+    for (token_index i = spec.first_token; i < spec.end_token; i++)
+        if (p.keyword_of(tokens[i]) == standard_keyword::friend_)
+            return not_supported(n, "class.friend");
+    uint32_t name = tokens.identifier(tree.children(head)[1].index());
+    uint32_t index = static_cast<uint32_t>(function_templates.size());
+    entity_index scope = entity_table.make(entity_kind::block_scope, 0, outer);
+    uint32_t first = static_cast<uint32_t>(template_parameter_entities.size());
+    for (size_t i = 0; i < parameters.size(); i++) {
+        token_index id = tree.children(parameters[i])[1].index();
+        uint32_t p = tokens.identifier(id);
+        /* [temp.local]/6 */
+        if (entity_table.find(scope, p) || p == name)
+            return ill_formed_at_token(id,
+                                       "the name of a template-parameter "
+                                       "shall not be redeclared within its "
+                                       "scope",
+                                       "temp.local");
+        entity_index e = entity_table.make(entity_kind::typedef_name, p, scope);
+        entity_table[e].type = qualified_type::make(
+            type_table.of_entity(type_kind::template_parameter, e), cv_none);
+        entity_table[e].value = i;
+        entity_table[e].defined = true;
+        entity_table[e].instantiation = index + 1;
+        entity_table.bind(scope, p, e);
+        template_parameter_entities.append(e);
+    }
+    entity_index t =
+        entity_table.make(entity_kind::template_entity, name, outer);
+    entity_table[t].defined = true;
+    entity_table[t].instantiation = index + 1;
+    entity_table[t].linkage_of_name = linkage::external;
+    if (within_unnamed_namespace(outer))
+        entity_table[t].linkage_of_name = linkage::internal;
+    entity_table.add_declaration(t, n);
+    function_template record;
+    record.entity = t;
+    record.declaration = n;
+    record.definition = specifier;
+    record.first_parameter = first;
+    record.parameter_count = static_cast<uint32_t>(parameters.size());
+    record.is_class = true;
+    /* the name, held: one bound already declares something else too (a
+       class, another template's forward declaration) */
+    entity_index held = entity_table.find(outer, name);
+    if (held) {
+        record.unusable = true;
+        entity_table[held].kind = entity_kind::none;
+        entity_table[held].held_by_template = true;
+        for (function_template &other : function_templates)
+            if (other.name == held)
+                other.unusable = true;
+    } else {
+        held = entity_table.make(entity_kind::none, name, outer);
+        entity_table[held].held_by_template = true;
+        entity_table.bind(outer, name, held);
+    }
+    record.name = held;
+    function_templates.append(record);
+    return analysis_result::well_formed;
+}
+
+/*
+ * [temp.names]/1 with [temp.arg.type]/1: template-name <
+ * template-argument-list > naming a class template, its arguments type-ids;
+ * the specialization instantiated ([temp.inst]/2), its type the type.
+ */
+analysis_result semantic_analysis::template_type(node_index id,
+                                                 entity_index scope,
+                                                 bool qualified,
+                                                 type_index &type)
+{
+    const syntax_node &t = tree[id];
+    const syntax_child *parts = tree.children(id);
+    if (t.child_count < 3 || !parts[0].is_token() ||
+        tokens[parts[0].index()].kind != token_kind::identifier)
+        return not_supported(id, "temp.names");
+    uint32_t name = tokens.identifier(parts[0].index());
+    lookup_result x;
+    if (qualified)
+        x = lookup_qualified(scope, name, lookup_filter::any);
+    else
+        x = lookup_unqualified(name, lookup_filter::any);
+    entity_index named = x.entity;
+    if (!named)
+        named = x.unknown_entity;
+    uint32_t ct = class_template_of(named);
+    if (!ct)
+        return not_supported(id, "temp.names");
+    owned_array<template_argument> arguments;
+    for (uint32_t i = 2; i + 1 < t.child_count; i++) {
+        owned_array<syntax_child> written;
+        if (syntax_is(tree, parts[i], syntax_kind::template_argument_list)) {
+            for (uint32_t k = 0; k < tree[parts[i].index()].child_count; k++) {
+                syntax_child a = tree.children(parts[i].index())[k];
+                if (!syntax_is_punctuator(tokens, a,
+                                          preprocessing_op_or_punc::COMMA))
+                    written.append(a);
+            }
+        } else {
+            written.append(parts[i]);
+        }
+        for (syntax_child a : written) {
+            if (!syntax_is(tree, a, syntax_kind::type_id))
+                return not_supported(id, "temp.arg");
+            template_argument v;
+            analysis_result r = type_id(a.index(), v.type);
+            if (r != analysis_result::well_formed)
+                return r;
+            arguments.append(v);
+        }
+    }
+    /* [temp.arg]/4 (no default template-arguments): one argument per
+       parameter, else clang's "too few/many template arguments" */
+    if (arguments.size() != function_templates[ct - 1].parameter_count)
+        return not_supported(id, "temp.arg");
+    bool dependent = false;
+    for (const template_argument &a : arguments)
+        if (depends(type_table, a.type))
+            dependent = true;
+    if (dependent) {
+        /* [temp.dep.type]/9: "A type is dependent if it is ... a
+           simple-template-id in which either the template name is a
+           template parameter or any of the template arguments is a
+           dependent type": a template's own declarator names it (not
+           instantiated); one per template and arguments */
+        entity_index t = function_templates[ct - 1].entity;
+        for (const instantiation_record &x : instantiations) {
+            if (x.template_entity != t || x.argument_count != arguments.size())
+                continue;
+            bool same = true;
+            for (uint32_t i = 0; i < x.argument_count && same; i++)
+                same = template_arguments[x.first_argument + i].type ==
+                       arguments[i].type;
+            if (same) {
+                type = entity_table[x.specialization].type.unqualified();
+                return analysis_result::well_formed;
+            }
+        }
+        instantiation_record record;
+        record.template_entity = t;
+        record.first_argument =
+            static_cast<uint32_t>(template_arguments.size());
+        record.argument_count = static_cast<uint32_t>(arguments.size());
+        for (const template_argument &a : arguments)
+            template_arguments.append(a);
+        uint32_t index = static_cast<uint32_t>(instantiations.size());
+        entity_index e =
+            entity_table.make(entity_kind::template_specialization,
+                              entity_table[t].name, entity_table[t].enclosing);
+        entity_table[e].type = qualified_type::make(
+            type_table.of_entity(type_kind::dependent, e), cv_none);
+        entity_table[e].instantiation = index + 1;
+        entity_table[e].linkage_of_name = entity_table[t].linkage_of_name;
+        record.specialization = e;
+        instantiations.append(record);
+        type = entity_table[e].type.unqualified();
+        return analysis_result::well_formed;
+    }
+    entity_index c = 0;
+    analysis_result r = instantiate_class(
+        id, ct, &arguments[0], static_cast<uint32_t>(arguments.size()), c);
+    if (r != analysis_result::well_formed)
+        return r;
+    type = entity_table[c].type.unqualified();
+    return analysis_result::well_formed;
 }
 
 /*
@@ -317,6 +560,22 @@ bool semantic_analysis::deduce_type(qualified_type p, qualified_type a,
     }
     if (!depends(type_table, p))
         return p == a;
+    if (pr.kind == type_kind::dependent) {
+        /* [temp.deduct.type]/8's TT<T>: a class template's specialization,
+           whose arguments are deduced from those of A's, a
+           specialization of the same template */
+        const struct type &ar = type_table[a.unqualified()];
+        if (ar.kind != type_kind::class_type || p.cv() != a.cv() ||
+            !entity_table[ar.entity].instantiation ||
+            specialized_template(ar.entity) != specialized_template(pr.entity))
+            return false;
+        uint32_t count = specialization_argument_count(pr.entity);
+        for (uint32_t i = 0; i < count; i++)
+            if (!deduce_type(specialization_argument(pr.entity, i),
+                             specialization_argument(ar.entity, i), deduced))
+                return false;
+        return true;
+    }
     const struct type &ar = type_table[a.unqualified()];
     if (pr.kind != ar.kind || p.cv() != a.cv())
         return false;

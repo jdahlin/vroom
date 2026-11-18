@@ -94,6 +94,8 @@ class itanium_mangler
     }
     bool encoding(entity_index e);
     bool specialization_encoding(entity_index e);
+    bool class_template_args(entity_index c);
+    bool template_args(entity_index c);
     bool name(entity_index e);
     bool unscoped_name(entity_index e);
     bool unqualified_name(entity_index e);
@@ -339,6 +341,13 @@ bool itanium_mangler::prefix(entity_index scope)
     }
     if (is_class && substitution(c.type))
         return true;
+    if (is_class && c.instantiation &&
+        substitution(analysis.specialized_template(scope))) {
+        if (!template_args(scope))
+            return false;
+        add_candidate(c.type);
+        return true;
+    }
     if (!is_class && substitution(scope))
         return true;
     /* a local class: the function scope (function_scope) came before the
@@ -349,6 +358,8 @@ bool itanium_mangler::prefix(entity_index scope)
     if (c.enclosing && !local && !prefix(c.enclosing))
         return false;
     if (!unqualified_name(scope))
+        return false;
+    if (is_class && !class_template_args(scope))
         return false;
     if (is_class) {
         add_candidate(c.type);
@@ -396,12 +407,46 @@ bool itanium_mangler::class_enum_type(qualified_type t)
     entity_index c = record(t).entity;
     const entities &table = analysis.entity_table;
     const entity &x = table[c];
-    if (x.kind != entity_kind::class_type && x.kind != entity_kind::enumeration)
+    if (x.kind != entity_kind::class_type &&
+        x.kind != entity_kind::enumeration &&
+        x.kind != entity_kind::template_specialization)
         return false;
     if (!x.name && !x.linkage_name)
         return false;
+    /* [abi:mangling-compression]: a template's name seen before, with its
+       prefix, is a <substitution> before the arguments */
+    if (x.instantiation && substitution(analysis.specialized_template(c)))
+        return template_args(c);
+    if (x.instantiation && is_std(x.enclosing)) {
+        /* [abi:mangling-compression]:
+         *
+         *     <substitution> ::= Sa
+         *     <substitution> ::= Sb
+         *
+         * ::std::allocator and ::std::basic_string, not candidates
+         * themselves; the abbreviations of whole specializations (Ss, Si,
+         * So, Sd) are not made, so those are not mangled */
+        size_t length = 0;
+        const char *identifier = spelling(x.name, &length);
+        uint32_t count = analysis.specialization_argument_count(c);
+        bool string = length == 12 && !memcmp(identifier, "basic_string", 12);
+        if (length == 9 && !memcmp(identifier, "allocator", 9)) {
+            text("Sa");
+            return template_args(c);
+        }
+        if (string && count < 3) {
+            text("Sb");
+            return template_args(c);
+        }
+        bool stream =
+            (length == 13 && (!memcmp(identifier, "basic_istream", 13) ||
+                              !memcmp(identifier, "basic_ostream", 13))) ||
+            (length == 14 && !memcmp(identifier, "basic_iostream", 14));
+        if (string || stream)
+            return false;
+    }
     if (x.enclosing == 0 || is_std(x.enclosing))
-        return unscoped_name(c);
+        return unscoped_name(c) && class_template_args(c);
     if (entity_index local = local_function(c)) {
         /* [abi:mangling-scope]: a local class, or one nested in it */
         if (!function_scope(local))
@@ -418,6 +463,42 @@ bool itanium_mangler::class_enum_type(qualified_type t)
         return false;
     if (!unqualified_name(c))
         return false;
+    if (!class_template_args(c))
+        return false;
+    text("E");
+    return true;
+}
+
+/*
+ * A class template's specialization ([abi:mangle.name]):
+ *
+ *     <unscoped-template-name> ::= <unscoped-name>
+ *     <prefix> ::= <template-prefix> <template-args>
+ *
+ * after the class's name, the template's name as a substitution candidate,
+ * then the arguments; nothing for another class.
+ */
+bool itanium_mangler::class_template_args(entity_index c)
+{
+    const entity &x = analysis.entity_table[c];
+    if ((x.kind != entity_kind::class_type &&
+         x.kind != entity_kind::template_specialization) ||
+        !x.instantiation)
+        return true;
+    candidate t;
+    t.scope = analysis.specialized_template(c);
+    candidates.append(t);
+    return template_args(c);
+}
+
+/* <template-args> of a class template's specialization c */
+bool itanium_mangler::template_args(entity_index c)
+{
+    text("I");
+    uint32_t count = analysis.specialization_argument_count(c);
+    for (uint32_t i = 0; i < count; i++)
+        if (!type(analysis.specialization_argument(c, i)))
+            return false;
     text("E");
     return true;
 }
@@ -956,7 +1037,7 @@ bool itanium_mangler::type(qualified_type t)
     else if (r.kind == type_kind::array)
         done = array_type(t);
     else if (r.kind == type_kind::class_type ||
-             r.kind == type_kind::enumeration)
+             r.kind == type_kind::enumeration || r.kind == type_kind::dependent)
         done = class_enum_type(t);
     else if (r.kind == type_kind::template_parameter) {
         /* [abi:mangle.template-param]:

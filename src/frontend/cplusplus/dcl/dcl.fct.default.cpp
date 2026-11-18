@@ -38,6 +38,11 @@ analysis_result semantic_analysis::default_arguments(node_index n,
     for (const parameter_meaning &p : function_parameters)
         if (p.default_argument.index())
             any = true;
+    if (any && entity_table[current_scope].kind == entity_kind::class_type &&
+        entity_table[current_scope].instantiation)
+        /* [temp.inst]/3: a member of a class template's specialization
+           has its default arguments instantiated when a call uses them */
+        return not_supported(n, "temp.inst");
     if (!any)
         return analysis_result::well_formed;
     /* [temp.inst]/4: a function template specialization a default
