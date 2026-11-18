@@ -680,13 +680,24 @@ analysis_result semantic_analysis::class_definition(node_index n,
 analysis_result semantic_analysis::elaborated_type_specifier(node_index n,
                                                              type_index &type)
 {
-    const syntax_node &node = tree[n];
     const syntax_child *children = tree.children(n);
+    uint32_t child_count = tree[n].child_count;
+    /* the attribute-specifier-seq (or GNU attributes, libc++'s
+       _LIBCPP_EXPORTED_FROM_ABI) after the class-key: left out when none
+       changes what vcc generates (class_head_attributes_without_effect) */
+    owned_array<syntax_child> kept;
+    if (child_count > 2 && class_head_attributes_without_effect(children[1])) {
+        for (uint32_t i = 0; i < child_count; i++)
+            if (i != 1)
+                kept.append(children[i]);
+        children = kept.data();
+        child_count--;
+    }
     standard_keyword key = leading_keyword(n);
     if (!is_class_key(key))
         return not_supported(n, "dcl.type.elab");
     bool is_union = key == standard_keyword::union_;
-    if (node.child_count == 3 &&
+    if (child_count == 3 &&
         syntax_is(tree, children[1], syntax_kind::nested_name_specifier) &&
         children[2].is_token() &&
         tokens[children[2].index()].kind == token_kind::identifier) {
@@ -733,7 +744,7 @@ analysis_result semantic_analysis::elaborated_type_specifier(node_index n,
         type = entity_table[c].type.unqualified();
         return analysis_result::well_formed;
     }
-    if (node.child_count != 2 || !children[1].is_token() ||
+    if (child_count != 2 || !children[1].is_token() ||
         tokens[children[1].index()].kind != token_kind::identifier)
         return not_supported(n, "dcl.type.elab");
     token_index id = children[1].index();

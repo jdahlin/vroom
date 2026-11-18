@@ -608,6 +608,23 @@ bool semantic_analysis::gnu_attributes_without_effect(syntax_child n) const
                 !children[0].is_token())
                 return false;
             name_token = children[0];
+            /* visibility("default") (libc++'s _LIBCPP_EXPORTED_FROM_ABI):
+               the visibility every symbol vcc emits has already
+               (gnu_attribute_specifier's rule) */
+            owned_buffer spelling, value;
+            tokens.spelling(name_token.index(), spelling.get());
+            const char *name;
+            size_t length;
+            attribute_name(spelling, &name, &length);
+            if (name_is(name, length, "visibility")) {
+                if (node.child_count != 4 || !children[2].is_token())
+                    return false;
+                tokens.spelling(children[2].index(), value.get());
+                if (value.size() != 9 || memcmp(value.data(), "\"default\"", 9))
+                    return false;
+                any = true;
+                continue;
+            }
         }
         /* __attribute__ ( ( , ) ): not names */
         if (tokens[name_token.index()].kind != token_kind::identifier)
