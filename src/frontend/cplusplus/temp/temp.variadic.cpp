@@ -70,6 +70,20 @@ bool semantic_analysis::template_parameter_form(
         out.named = true;
         out.id = c[k].index();
         k++;
+    } else if (!out.type && !out.pack && k < x.child_count &&
+               syntax_is(tree, c[k], syntax_kind::noptr_declarator) &&
+               tree[c[k].index()].child_count == 2 &&
+               syntax_is_punctuator(tokens, tree.children(c[k].index())[0],
+                                    preprocessing_op_or_punc::ELLIPSIS) &&
+               tree.children(c[k].index())[1].is_token() &&
+               tokens[tree.children(c[k].index())[1].index()].kind ==
+                   token_kind::identifier) {
+        /* [temp.param]/17: a non-type template parameter pack, int... N
+           (the parser's declarator: the ellipsis, then the name) */
+        out.pack = true;
+        out.named = true;
+        out.id = tree.children(c[k].index())[1].index();
+        k++;
     } else if (!out.type && k < x.child_count && !c[k].is_token()) {
         out.has_declarator = true;
         out.declarator = c[k];

@@ -1772,6 +1772,7 @@ class semantic_analysis
        class template specialization c's class-specifier names one of the
        template-parameters (bound in c) */
     bool dependent_base_specifier(entity_index c, syntax_child name) const;
+    uint32_t own_pack_parameter(uint32_t name) const;
     analysis_result base_class_name(syntax_child name, node_index n,
                                     entity_index &base, token_index &id);
     bool in_dependent_base_only(entity_index c, uint32_t name,
@@ -3193,6 +3194,10 @@ class semantic_analysis
     bool deduce_type(qualified_type p, qualified_type a,
                      owned_array<template_argument> &deduced,
                      owned_array<bool> &set, bool exact = false);
+    /* each time deduction met a form it does not analyse (a pack not at
+       the end, a template template-parameter's pack) and answered false
+       without knowing: a caller that compares the count refuses */
+    uint32_t deduction_unknowns = 0;
     /* t without the cv-qualifiers cv, an array's taken from its elements
        ([basic.type.qualifier]/3) */
     qualified_type remove_cv(qualified_type t, uint32_t cv);
@@ -3217,6 +3222,13 @@ class semantic_analysis
     owned_array<template_argument> pack_arguments;
     template_argument make_pack(const template_argument *elements,
                                 uint32_t count);
+    bool deduce_argument(const template_argument &x, const template_argument &y,
+                         owned_array<template_argument> &d,
+                         owned_array<bool> &set);
+    bool deduce_pack_argument(const template_argument &x,
+                              const template_argument &y,
+                              owned_array<template_argument> &d,
+                              owned_array<bool> &set);
     /* a template parameter pack: template_parameter_entities[i]'s */
     bool template_parameter_is_pack(uint32_t i) const;
     /* [temp.variadic]/1: an instantiation's packs (entity_kind::pack, the
