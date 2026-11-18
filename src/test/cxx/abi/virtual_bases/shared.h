@@ -3,7 +3,9 @@
    the caller's class D constructs and destroys the callee's B and C with
    their base object variants and its own VTT's sub-VTTs
    ([abi:vtable-ctor-vtt]), whose construction virtual tables are the
-   caller's. */
+   caller's.  A's destructor is virtual and B overrides A's function:
+   the caller's table for A-in-D has the callee's virtual thunks
+   ([abi:mangling-special-thunks]) and the vcall offsets they read. */
 #ifndef SHARED_H
 #define SHARED_H
 
@@ -13,7 +15,7 @@ extern int traced;
 /* their virtual tables, VTTs and constructors are the callee's */
 struct A {
     A(int a);
-    ~A();
+    virtual ~A();
     virtual int value() const;
     int a;
 };
@@ -21,6 +23,7 @@ struct A {
 struct B : virtual A {
     B(int b);
     ~B();
+    int value() const override;
     virtual int from_b() const;
     int b;
 };

@@ -203,6 +203,8 @@ class c_lowering
        the vbase offset in its virtual table ([abi:vtable-components]) */
     uint32_t virtual_base_address(uint32_t p, uint32_t again, entity_index k,
                                   entity_index v, ast_qualified_type t);
+    uint32_t table_adjusted(uint32_t p, uint32_t again, int64_t index,
+                            ast_qualified_type t);
     /* lowering a constructor's or destructor's body as one variant
        ([abi:mangling-special-ctor-dtor]): 1 complete object, 2 base object
        (which takes the VTT after this and leaves the virtual bases out),
@@ -225,15 +227,43 @@ class c_lowering
     bool definition_body(entity_index e, uint32_t s, int variant);
     /* [abi:mangling-special-thunks]: the non-virtual thunk of virtual function f that adds
        adjustment to this, declared or (where f is defined) defined */
+    /* and the virtual thunk ([abi:mangling-special-thunks] _ZTv): this
+       plus adjustment, then plus the vcall offset at vcall bytes from
+       the address point of the table it then points to; variant: a
+       destructor's (1 complete object, 0 deleting) */
     struct thunk_record {
         entity_index f = 0;
-        int64_t adjustment = 0;
+        int64_t adjustment = 0, vcall = 0;
+        int variant = 2;
         uint32_t symbol = 0;
         bool defined = false;
     };
     owned_array<thunk_record> thunks;
-    uint32_t thunk(entity_index f, int64_t adjustment, token_index at);
+    uint32_t thunk(entity_index f, int64_t adjustment, token_index at,
+                   int64_t vcall = 0, int variant = 2);
     bool thunk_definitions(entity_index f, token_index at);
+    bool thunk_body(const thunk_record &r, token_index at);
+    /* [abi:vtable-components]: the functions of virtual base v's vcall
+       offsets, in order (v's own final overriders: the first of each
+       signature in its tables not in its virtual bases) */
+    struct vcall_entry {
+        entity_index f = 0;
+        uint32_t group = 0, slot = 0;
+    };
+    void vcall_functions(entity_index v, owned_array<vcall_entry> &out) const;
+    /* slot i of group g, a virtual base's own table (offset 0 in it): the
+       virtual base's own function there, and where the vcall offset a
+       virtual thunk reads is (bytes from the address point, 0: the slot
+       needs none, its function is the virtual base's own) */
+    entity_index virtual_slot_own(const vtable_group &g, uint32_t i) const;
+    int64_t vcall_offset_offset(const vtable_group &g, uint32_t i) const;
+    /* the offset of the subobject of class f in the table's class k (the
+       table's coordinates); false if not found once */
+    bool subobject_location(const table_spec &t, entity_index f,
+                            int64_t &out) const;
+    /* set when a vcall offset's overrider was not located (the table is
+       then refused) */
+    mutable bool vcall_unknown = false;
     /* &((char *)p)[offset] as a pointer of type t */
     uint32_t offset_pointer(uint32_t p, int64_t offset, ast_qualified_type t);
     uint32_t virtual_function(entity_index f, uint32_t object, token_index at,
@@ -3570,7 +3600,41 @@ void c_lowering::group_offsets(const table_spec &t, uint32_t group,
     if (!virtual_class)
         return;
     const dynamic_class *vd = analysis.dynamic_of(virtual_class);
-    owned_array<entity_index> seen;
+    const dynamic_class *kd = analysis.dynamic_of(t.k);
+    owned_array<vcall_entry> entries;
+    vcall_functions(virtual_class, entries);
+    for (const vcall_entry &e : entries) {
+        const vtable_group &vg =
+            analysis.vtable_groups[vd->first_group + e.group];
+        int64_t own = static_cast<int64_t>(vg.offset) +
+                      analysis.vtable_adjustments[vg.first_slot + e.slot];
+        /* the final overrider in k's table for the virtual base's
+           subobject, if k is not the virtual base itself */
+        entity_index f = e.f;
+        for (uint32_t h = 0; h < kd->group_count && t.k != virtual_class; h++) {
+            const vtable_group &kg =
+                analysis.vtable_groups[kd->first_group + h];
+            if (kg.in_virtual_base == virtual_class &&
+                kg.offset_in_virtual == vg.offset &&
+                kg.subobject_class == vg.subobject_class)
+                f = analysis.vtable_slots[kg.first_slot + e.slot];
+        }
+        int64_t location = 0;
+        if (f == e.f) {
+            out.append(own);
+            continue;
+        }
+        if (!subobject_location(t, analysis.entity_table[f].enclosing,
+                                location))
+            vcall_unknown = true;
+        out.append(location - at);
+    }
+}
+
+void c_lowering::vcall_functions(entity_index v,
+                                 owned_array<vcall_entry> &out) const
+{
+    const dynamic_class *vd = analysis.dynamic_of(v);
     for (uint32_t h = 0; h < vd->group_count; h++) {
         const vtable_group &vg = analysis.vtable_groups[vd->first_group + h];
         if (vg.in_virtual_base)
@@ -3578,16 +3642,88 @@ void c_lowering::group_offsets(const table_spec &t, uint32_t group,
         for (uint32_t k = 0; k < vg.slot_count; k++) {
             entity_index f = analysis.vtable_slots[vg.first_slot + k];
             bool repeated = false;
-            for (entity_index e : seen)
+            for (const vcall_entry &e : out)
                 repeated =
-                    repeated || e == f || analysis.overrides_function(f, e);
+                    repeated || e.f == f || analysis.overrides_function(f, e.f);
             if (repeated)
                 continue;
-            seen.append(f);
-            out.append(static_cast<int64_t>(vg.offset) +
-                       analysis.vtable_adjustments[vg.first_slot + k]);
+            vcall_entry e;
+            e.f = f;
+            e.group = h;
+            e.slot = k;
+            out.append(e);
         }
     }
+}
+
+entity_index c_lowering::virtual_slot_own(const vtable_group &g,
+                                          uint32_t i) const
+{
+    const dynamic_class *vd = analysis.dynamic_of(g.in_virtual_base);
+    for (uint32_t h = 0; vd && h < vd->group_count; h++) {
+        const vtable_group &vg = analysis.vtable_groups[vd->first_group + h];
+        if (!vg.in_virtual_base && vg.offset == g.offset_in_virtual &&
+            vg.subobject_class == g.subobject_class)
+            return analysis.vtable_slots[vg.first_slot + i];
+    }
+    return 0;
+}
+
+int64_t c_lowering::vcall_offset_offset(const vtable_group &g, uint32_t i) const
+{
+    if (!g.in_virtual_base || g.offset_in_virtual)
+        return 0;
+    entity_index own = virtual_slot_own(g, i);
+    if (!own || own == analysis.vtable_slots[g.first_slot + i])
+        return 0;
+    owned_array<vcall_entry> entries;
+    vcall_functions(g.in_virtual_base, entries);
+    const dynamic_class *sd = analysis.dynamic_of(g.subobject_class);
+    for (uint32_t j = 0; j < entries.size(); j++)
+        if (entries[j].f == own ||
+            analysis.overrides_function(own, entries[j].f))
+            return -static_cast<int64_t>(analysis.pointer_size()) *
+                   (3 + static_cast<int64_t>(sd->vbase_entry_count) + j);
+    return 0;
+}
+
+/* f is t.k, one of its virtual bases, a non-virtual base of it or of
+   one of its virtual bases (one such subobject) */
+bool c_lowering::subobject_location(const table_spec &t, entity_index f,
+                                    int64_t &out) const
+{
+    auto nonvirtual = [&](entity_index from, int64_t at) {
+        while (from != f) {
+            entity_index step = analysis.nonvirtual_step(from, f);
+            at += static_cast<int64_t>(analysis.entity_table[step].offset);
+            from = record(analysis.entity_table[step].type).entity;
+        }
+        return at;
+    };
+    if (f == t.k || analysis.nonvirtual_subobjects(t.k, f) == 1) {
+        out = nonvirtual(t.k, 0);
+        return true;
+    }
+    if (analysis.nonvirtual_subobjects(t.k, f))
+        return false;
+    uint32_t found = 0;
+    const entity &x = analysis.entity_table[t.k];
+    for (uint32_t i = 0; i < x.virtual_base_count; i++) {
+        entity_index w =
+            record(
+                analysis
+                    .entity_table
+                        [analysis.class_virtual_bases[x.first_virtual_base + i]]
+                    .type)
+                .entity;
+        if (w != f && analysis.nonvirtual_subobjects(w, f) != 1)
+            continue;
+        found++;
+        out = nonvirtual(
+            w, static_cast<int64_t>(virtual_base_offset(t.layout, w)) -
+                   static_cast<int64_t>(t.base_offset));
+    }
+    return found == 1;
 }
 
 uint32_t c_lowering::table_length(const table_spec &t) const
@@ -3857,14 +3993,25 @@ bool c_lowering::table_definition(const table_spec &t, uint32_t s,
                one */
             bool destructor =
                 analysis.entity_table[f].special == special_member::destructor;
+            /* [abi:mangling-special-thunks]: an overrider outside the
+               virtual base whose table this is: its virtual thunk */
+            int64_t vcall = vcall_offset_offset(group, i);
             if (destructor && i && analysis.vtable_slots[slot - 1] == f) {
                 ft = entity_type(f, at);
                 if (!deleting_destructor(f, at, false))
                     return false;
                 target = deleting_symbols[f];
+                if (vcall || adjustment)
+                    target = thunk(f, adjustment, at, vcall, 0);
+            } else if (destructor && (vcall || adjustment)) {
+                ft = entity_type(f, at);
+                target = thunk(f, adjustment, at, vcall, 1);
             } else if (destructor) {
                 ft = entity_type(f, at);
                 target = special_callee(f, at);
+            } else if (vcall && !analysis.entity_table[f].pure) {
+                target = thunk(f, adjustment, at, vcall);
+                ft = entity_type(f, at);
             } else if (analysis.entity_table[f].pure) {
                 /* [abi:pure-virtual]: a pure virtual function's slot */
                 ft = ast_builder_type_function(c, v, nullptr, 0, 0);
@@ -3896,6 +4043,10 @@ bool c_lowering::table_definition(const table_spec &t, uint32_t s,
         }
         start += 2 + group.slot_count;
     }
+    if (vcall_unknown)
+        return fail("a vcall offset whose final overrider's subobject is not "
+                    "found once",
+                    at);
     ast_qualified_type array =
         ast_builder_type_array(c, vp, table_length(t), true);
     uint32_t init = make(
@@ -3998,10 +4149,18 @@ uint32_t c_lowering::virtual_base_address(uint32_t p, uint32_t again,
         index++;
     if (index == d->vbase_entry_count)
         return fail("a virtual base without a vbase offset", 0);
+    /* the vbase offset: ((ptrdiff_t *)*(char **)p)[-3 - index] */
+    return table_adjusted(p, again, -3 - static_cast<int64_t>(index), t);
+}
+
+/* &((char *)again)[((ptrdiff_t *)*(char **)p)[index]] as a t: p (and
+   again, a second copy of it) moved by an offset in its virtual table */
+uint32_t c_lowering::table_adjusted(uint32_t p, uint32_t again, int64_t index,
+                                    ast_qualified_type t)
+{
     ast_qualified_type byte = ast_builder_type_basic(AST_TYPE_CHAR);
     ast_qualified_type bytes = ast_builder_type_pointer(c, byte);
     ast_qualified_type ptrdiff = ast_builder_type_ptrdiff(c);
-    /* the vbase offset: ((ptrdiff_t *)*(char **)p)[-3 - index] */
     if (!p || !again)
         return 0;
     uint32_t table = make(AST_NODE_DEREFERENCE, bytes,
@@ -4012,8 +4171,8 @@ uint32_t c_lowering::virtual_base_address(uint32_t p, uint32_t again,
         make(AST_NODE_INDEX, ptrdiff,
              cast(table, ast_builder_type_pointer(c, ptrdiff),
                   AST_CAST_POINTER_TO_POINTER),
-             ast_builder_integer(c, ptrdiff, -3 - static_cast<int64_t>(index)),
-             0, 0, AST_NODE_FLAG_LVALUE);
+             ast_builder_integer(c, ptrdiff, static_cast<uint64_t>(index)), 0,
+             0, AST_NODE_FLAG_LVALUE);
     uint32_t at = make(AST_NODE_INDEX, byte,
                        cast(again, bytes, AST_CAST_POINTER_TO_POINTER), offset,
                        0, 0, AST_NODE_FLAG_LVALUE);
@@ -4199,27 +4358,36 @@ uint32_t c_lowering::offset_pointer(uint32_t p, int64_t offset,
 }
 
 /*
- * [abi:mangling-special-thunks]: a non-virtual thunk of f: "adjusts the this pointer by a
- * constant offset" and calls f, named _ZThn <offset> _ <f's encoding>
- * ([abi:mangling-special-thunks]).  It is defined where f is (with f's
- * linkage), declared elsewhere.
+ * [abi:mangling-special-thunks]: a thunk of f.  A non-virtual one "adjusts
+ * the this pointer by a constant offset" and calls f, named _ZThn <offset>
+ * _ <f's encoding>; a virtual one adjusts it by the vcall offset its
+ * virtual table has ([abi:vtable-components]: "the vcall offset ... is
+ * used to adjust this"), named _ZTv 0 _ n<vcall offset's offset> _ <f's
+ * encoding>; a destructor's for its complete object (D1) or deleting (D0)
+ * variant.  It is defined where f is (with f's linkage), declared
+ * elsewhere.
  */
-uint32_t c_lowering::thunk(entity_index f, int64_t adjustment, token_index at)
+uint32_t c_lowering::thunk(entity_index f, int64_t adjustment, token_index at,
+                           int64_t vcall, int variant)
 {
     for (const thunk_record &t : thunks)
-        if (t.f == f && t.adjustment == adjustment)
+        if (t.f == f && t.adjustment == adjustment && t.vcall == vcall &&
+            t.variant == variant)
             return t.symbol;
     owned_buffer function_name;
-    if (!itanium_symbol_name(analysis, tokens.pp, f, function_name.get()))
+    if (!itanium_symbol_name(analysis, tokens.pp, f, function_name.get(),
+                             variant))
         return fail("a thunk whose function's symbol is not mangled yet", at);
     owned_buffer name;
-    vbuffer_format_append(name.get(), "_ZThn%llu_",
-                          static_cast<unsigned long long>(-adjustment));
+    if (vcall)
+        vbuffer_format_append(name.get(), "_ZTv%lld_n%llu_",
+                              static_cast<long long>(adjustment),
+                              static_cast<unsigned long long>(-vcall));
+    else
+        vbuffer_format_append(name.get(), "_ZThn%llu_",
+                              static_cast<unsigned long long>(-adjustment));
     vbuffer_append(name.get(), function_name.data() + 2,
                    function_name.size() - 2);
-    uint32_t target = symbol(f, at);
-    if (!target)
-        return 0;
     /* f's linkage, as symbol() gives it */
     const entity &x = analysis.entity_table[f];
     int storage = AST_STORAGE_NONE;
@@ -4240,14 +4408,16 @@ uint32_t c_lowering::thunk(entity_index f, int64_t adjustment, token_index at)
     thunk_record r;
     r.f = f;
     r.adjustment = adjustment;
+    r.vcall = vcall;
+    r.variant = variant;
     r.symbol = s;
     thunks.append(r);
     return s;
 }
 
 /* where virtual function f is defined: its thunks, one per adjustment
-   its class's virtual table group has for it, each
-   return f((C *)((char *)this + adjustment), arguments...) */
+   its class's virtual table group has for it (a destructor's slot pair
+   two, D1's and D0's) */
 bool c_lowering::thunk_definitions(entity_index f, token_index at)
 {
     const entity &x = analysis.entity_table[f];
@@ -4255,80 +4425,111 @@ bool c_lowering::thunk_definitions(entity_index f, token_index at)
     if (!d)
         return true;
     for (uint32_t g = 1; g < d->group_count; g++) {
-        const vtable_group &group = analysis.vtable_groups[d->first_group + g];
+        /* a copy: thunk() and the definitions below do not touch the
+           analysis, but keep no reference across them */
+        const vtable_group group = analysis.vtable_groups[d->first_group + g];
         for (uint32_t i = 0; i < group.slot_count; i++) {
             uint32_t slot = group.first_slot + i;
             int64_t adjustment = analysis.vtable_adjustments[slot];
-            if (analysis.vtable_slots[slot] != f || !adjustment)
+            int64_t vcall = vcall_offset_offset(group, i);
+            if (analysis.vtable_slots[slot] != f || (!adjustment && !vcall))
                 continue;
-            uint32_t s = thunk(f, adjustment, at);
+            int variant = 2;
+            if (x.special == special_member::destructor) {
+                variant = 1;
+                if (i && analysis.vtable_slots[slot - 1] == f)
+                    variant = 0;
+            }
+            if (!variant && !deleting_destructor(f, at, false))
+                return false;
+            uint32_t s = thunk(f, adjustment, at, vcall, variant);
             if (!s)
                 return false;
+            thunk_record r;
             bool done = false;
             for (thunk_record &t : thunks)
                 if (t.symbol == s) {
                     done = t.defined;
                     t.defined = true;
+                    r = t;
                 }
-            if (done)
-                continue;
-            const struct type &ft = record(x.type);
-            if (ft.variadic || passed_indirectly(ft.operand))
-                return fail("a thunk of a variadic function or one returning "
-                            "a class by address",
-                            at);
-            ast_qualified_type function = entity_type(f, at);
-            const qualified_type *types =
-                analysis.type_table.parameters(x.type.unqualified());
-            owned_array<ast_qualified_type> parameter_types;
-            parameter_types.append(ast_builder_type_pointer(
-                c,
-                type(qualified_type::make(
-                         analysis.entity_table[x.enclosing].type.unqualified(),
-                         x.member_cv),
-                     at)));
-            for (uint32_t k = 0; k < ft.parameter_count; k++)
-                parameter_types.append(parameter_type(types[k], at));
-            uint32_t count = ft.parameter_count + 1;
-            owned_array<uint32_t> forwarded, arguments;
-            for (uint32_t k = 0; k < count; k++) {
-                ast_qualified_type t = parameter_types[k];
-                uint32_t p = ast_builder_symbol(c, AST_SYMBOL_VARIABLE, "", 0,
-                                                t, AST_STORAGE_AUTO, 0, 1);
-                ast_builder_symbol_flags_add(c, p, AST_SYMBOL_FLAG_PARAMETER);
-                forwarded.append(p);
-                uint32_t value = make(AST_NODE_VARIABLE, t, p, 0, 0, 0,
-                                      AST_NODE_FLAG_LVALUE);
-                if (!k)
-                    value = offset_pointer(value, adjustment, t);
-                arguments.append(value);
-            }
-            uint32_t target = symbol(f, at);
-            ast_builder_symbol_flags_add(c, target, AST_SYMBOL_FLAG_USED);
-            uint32_t callee = cast(
-                make(AST_NODE_VARIABLE, function, target, 0, 0, 0, 0),
-                ast_builder_type_pointer(c, function), AST_CAST_FUNCTION_DECAY);
-            ast_qualified_type result = type(ft.operand, at);
-            uint32_t call =
-                make(AST_NODE_CALL, result, callee,
-                     ast_builder_list(c, arguments.data(), count), count, 0, 0);
-            ast_qualified_type v = ast_builder_type_basic(AST_TYPE_VOID);
-            uint32_t statement_node = 0;
-            if (record(ft.operand).kind == type_kind::fundamental &&
-                AST_QUALIFIED_TYPE_UNQUALIFIED(result) == v)
-                statement_node = ast_builder_node(c, AST_NODE_EXPRESSION, v,
-                                                  call, 0, 0, 0, 0);
-            else
-                statement_node =
-                    ast_builder_node(c, AST_NODE_RETURN, v, call, 0, 0, 0, 0);
-            uint32_t body = block(&statement_node, 1);
-            struct node &b = ast_builder_ast(c)->nodes[body];
-            b.a = ast_builder_list(c, forwarded.data(), count);
-            b.aux = static_cast<uint16_t>(count);
-            ast_builder_symbol_body(c, s, body);
-            ast_builder_symbol_flags_add(c, s, AST_SYMBOL_FLAG_DEFINED);
+            if (!done && !thunk_body(r, at))
+                return false;
         }
     }
+    return true;
+}
+
+/* the thunk's definition: return f(adjusted this, arguments...), this
+   adjusted by ((char *)this + adjustment) and then by the vcall offset
+   *(ptrdiff_t *)(*(char **)this + vcall) */
+bool c_lowering::thunk_body(const thunk_record &r, token_index at)
+{
+    entity_index f = r.f;
+    const entity &x = analysis.entity_table[f];
+    const struct type &ft = record(x.type);
+    if (ft.variadic || passed_indirectly(ft.operand))
+        return fail("a thunk of a variadic function or one returning "
+                    "a class by address",
+                    at);
+    ast_qualified_type function = entity_type(f, at);
+    const qualified_type *types =
+        analysis.type_table.parameters(x.type.unqualified());
+    owned_array<ast_qualified_type> parameter_types;
+    parameter_types.append(ast_builder_type_pointer(
+        c, type(qualified_type::make(
+                    analysis.entity_table[x.enclosing].type.unqualified(),
+                    x.member_cv),
+                at)));
+    for (uint32_t k = 0; k < ft.parameter_count; k++)
+        parameter_types.append(parameter_type(types[k], at));
+    uint32_t count = ft.parameter_count + 1;
+    owned_array<uint32_t> forwarded, arguments;
+    for (uint32_t k = 0; k < count; k++) {
+        ast_qualified_type t = parameter_types[k];
+        uint32_t p = ast_builder_symbol(c, AST_SYMBOL_VARIABLE, "", 0, t,
+                                        AST_STORAGE_AUTO, 0, 1);
+        ast_builder_symbol_flags_add(c, p, AST_SYMBOL_FLAG_PARAMETER);
+        forwarded.append(p);
+        auto read = [&] {
+            return make(AST_NODE_VARIABLE, t, p, 0, 0, 0, AST_NODE_FLAG_LVALUE);
+        };
+        uint32_t value = read();
+        if (!k && r.adjustment)
+            value = offset_pointer(value, r.adjustment, t);
+        if (!k && r.vcall)
+            /* the vcall offset at r.vcall bytes from the address point */
+            value = table_adjusted(
+                read(), value,
+                r.vcall / static_cast<int64_t>(analysis.pointer_size()), t);
+        arguments.append(value);
+    }
+    uint32_t target = symbol(f, at, r.variant);
+    if (!target)
+        return false;
+    ast_builder_symbol_flags_add(c, target, AST_SYMBOL_FLAG_USED);
+    uint32_t callee =
+        cast(make(AST_NODE_VARIABLE, function, target, 0, 0, 0, 0),
+             ast_builder_type_pointer(c, function), AST_CAST_FUNCTION_DECAY);
+    ast_qualified_type result = type(ft.operand, at);
+    uint32_t call =
+        make(AST_NODE_CALL, result, callee,
+             ast_builder_list(c, arguments.data(), count), count, 0, 0);
+    ast_qualified_type v = ast_builder_type_basic(AST_TYPE_VOID);
+    uint32_t statement_node = 0;
+    if (record(ft.operand).kind == type_kind::fundamental &&
+        AST_QUALIFIED_TYPE_UNQUALIFIED(result) == v)
+        statement_node =
+            ast_builder_node(c, AST_NODE_EXPRESSION, v, call, 0, 0, 0, 0);
+    else
+        statement_node =
+            ast_builder_node(c, AST_NODE_RETURN, v, call, 0, 0, 0, 0);
+    uint32_t body = block(&statement_node, 1);
+    struct node &b = ast_builder_ast(c)->nodes[body];
+    b.a = ast_builder_list(c, forwarded.data(), count);
+    b.aux = static_cast<uint16_t>(count);
+    ast_builder_symbol_body(c, r.symbol, body);
+    ast_builder_symbol_flags_add(c, r.symbol, AST_SYMBOL_FLAG_DEFINED);
     return true;
 }
 

@@ -1033,6 +1033,8 @@ class semantic_analysis
        base is one subobject however many paths lead to it) */
     uint32_t nonvirtual_subobjects(entity_index c, entity_index base) const;
     uint32_t base_subobjects(entity_index c, entity_index base) const;
+    /* the direct non-virtual base of c on a non-virtual path to base */
+    entity_index nonvirtual_step(entity_index c, entity_index base) const;
     /* the dynamic classes (entity::dynamic) and their virtual tables'
        functions (dynamic_class::first_slot) */
     owned_array<dynamic_class> dynamic_classes;
@@ -1527,6 +1529,9 @@ class semantic_analysis
     owned_array<declared_virtual> declared_virtuals;
     analysis_result dynamic_class_record(entity_index c, node_index n);
     bool primary_base_choice(entity_index c, entity_index &primary) const;
+    entity_index virtual_base_overrider(entity_index c, entity_index v,
+                                        const vtable_group &bg, uint32_t k,
+                                        bool &ambiguous) const;
     analysis_result virtual_member(entity_index c, entity_index e,
                                    node_index declaration, token_index id,
                                    bool virtual_specified);
@@ -1812,7 +1817,6 @@ class semantic_analysis
        when more than one path leads to it ([class.member.lookup]) */
     entity_index base_step(entity_index c, entity_index base,
                            bool &ambiguous) const;
-    entity_index nonvirtual_step(entity_index c, entity_index base) const;
     entity_index virtual_route(entity_index c, entity_index base) const;
     bool virtual_base_accessible(entity_index c, entity_index v) const;
     bool public_path_to(entity_index c, entity_index v) const;

@@ -1,4 +1,10 @@
+#include <stdlib.h>
+
 #include "shared.h"
+
+typedef unsigned long size_t;
+void operator delete(void *p) { free(p); }
+void operator delete(void *p, size_t) { free(p); }
 
 int trace[16];
 int traced;
@@ -26,6 +32,11 @@ B::B(int b) : A(100), b(b)
 B::~B()
 {
     trace[traced++] = -2;
+}
+
+int B::value() const
+{
+    return a + 1000;
 }
 
 int B::from_b() const
