@@ -94,6 +94,11 @@ class itanium_mangler
     }
     bool encoding(entity_index e);
     bool specialization_encoding(entity_index e);
+    bool constraint_expression(entity_index t, syntax_child c);
+    bool punctuator(syntax_child c, preprocessing_op_or_punc op) const
+    {
+        return analysis.punctuator_is(c, op);
+    }
     bool class_template_args(entity_index c);
     bool template_args(entity_index c, entity_index function = 0);
     bool dependent_value(entity_index d);
@@ -259,6 +264,17 @@ bool itanium_mangler::specialization_encoding(entity_index e)
     candidates.append(c);
     if (!template_args(e, pattern_of))
         return false;
+    /* [abi:mangle.template-args]: <template-args> ::= I <template-arg>+
+       [Q <requires-clause expression>] E; the requires-clause of the
+       template-head */
+    syntax_child constraint = analysis.template_constraint(pattern_of);
+    if (constraint.bits) {
+        out->n--;
+        text("Q");
+        if (!constraint_expression(pattern_of, constraint))
+            return false;
+        text("E");
+    }
     if (nested)
         text("E");
     /* a variable template's specialization: <data name> */
@@ -266,6 +282,78 @@ bool itanium_mangler::specialization_encoding(entity_index e)
         return true;
     qualified_type pattern = table[pattern_of].type;
     return type(record(pattern).operand) && bare_function_type(pattern);
+}
+
+/*
+ * [abi:mangle.expression] of a requires-clause, as far as it is written
+ * with concept-ids of the template's parameters (each an
+ * <unresolved-name> with its <template-args>), !, && and ||:
+ *
+ *     <expression> ::= <operator-name> <expression>          # nt
+ *                  ::= <operator-name> <expression> <expression> # aa, oo
+ *
+ * Parentheses are not mangled.  Anything else: not mangled yet.
+ */
+bool itanium_mangler::constraint_expression(entity_index t, syntax_child c)
+{
+    if (c.is_token())
+        return false;
+    const syntax_tree &tree = analysis.syntax();
+    const syntax_node &node = tree[c.index()];
+    const syntax_child *parts = tree.children(c.index());
+    switch (node.kind) {
+    case syntax_kind::constraint_logical_or_expression:
+    case syntax_kind::constraint_logical_and_expression:
+    case syntax_kind::logical_or_expression:
+    case syntax_kind::logical_and_expression:
+        if (node.child_count != 3)
+            return false;
+        if (node.kind == syntax_kind::constraint_logical_or_expression ||
+            node.kind == syntax_kind::logical_or_expression)
+            text("oo");
+        else
+            text("aa");
+        return constraint_expression(t, parts[0]) &&
+               constraint_expression(t, parts[2]);
+    case syntax_kind::primary_expression:
+        if (node.child_count != 3 ||
+            !punctuator(parts[0], preprocessing_op_or_punc::LEFT_PARENTHESIS))
+            return false;
+        return constraint_expression(t, parts[1]);
+    case syntax_kind::unary_expression:
+        if (node.child_count != 2 ||
+            !punctuator(parts[0], preprocessing_op_or_punc::EXCLAMATION))
+            return false;
+        text("nt");
+        return constraint_expression(t, parts[1]);
+    case syntax_kind::simple_template_id: {
+        if (!parts[0].is_token() ||
+            !analysis.constraint_concept(t, parts[0].index()))
+            return false;
+        if (!source_name(analysis.token_identifier(parts[0].index())))
+            return false;
+        text("I");
+        for (uint32_t i = 2; i + 1 < node.child_count; i++) {
+            if (punctuator(parts[i], preprocessing_op_or_punc::COMMA))
+                continue;
+            syntax_child a = parts[i];
+            /* a type-id that is one template parameter's name */
+            while (!a.is_token() && tree[a.index()].child_count == 1 &&
+                   (tree[a.index()].kind == syntax_kind::type_id ||
+                    tree[a.index()].kind == syntax_kind::type_specifier_seq))
+                a = tree.children(a.index())[0];
+            if (!a.is_token())
+                return false;
+            entity_index pe = analysis.constraint_parameter(t, a.index());
+            if (!pe || !type(analysis.entity_table[pe].type))
+                return false;
+        }
+        text("E");
+        return true;
+    }
+    default:
+        return false;
+    }
 }
 
 /*

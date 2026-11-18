@@ -424,6 +424,20 @@ analysis_result semantic_analysis::deduce_from_call(
         default_template_arguments(at, function_template, values, set);
     if (r != analysis_result::well_formed)
         return r;
+    /* [temp.deduct]/5: "If the function template has associated
+       constraints ([temp.constr.decl]), those constraints are checked for
+       satisfaction ([temp.constr.constr]).  If the constraints are not
+       satisfied, type deduction fails." */
+    bool satisfied = true;
+    r = template_constraints_satisfied(function_template, values, satisfied);
+    if (r != analysis_result::well_formed)
+        return r;
+    if (!satisfied) {
+        if (!failed)
+            return not_supported(at, "temp.deduct");
+        *failed = true;
+        return analysis_result::well_formed;
+    }
     deduced.clear();
     for (const template_argument &x : values)
         deduced.append(x);

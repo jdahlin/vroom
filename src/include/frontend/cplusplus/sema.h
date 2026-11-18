@@ -2819,6 +2819,9 @@ class semantic_analysis
         /* a variable template ([temp.pre]/1): declarator is its
            simple-declaration */
         bool is_variable = false;
+        /* a concept ([temp.concept]): definition is its
+           constraint-expression */
+        bool is_concept = false;
         /* a template template-parameter ([temp.param]/1): the class
            template its name stands for in the template's own
            declaration, never instantiated (a specialization of it is a
@@ -2926,6 +2929,16 @@ class semantic_analysis
                                                     node_index id);
     analysis_result variable_specialization(node_index n, node_index inner,
                                             node_index id);
+    /* [temp.concept]: a concept-definition; the concept the held name e
+       is, plus one; [temp.names]/8: a concept-id's value */
+    analysis_result concept_definition(node_index n, node_index definition);
+    uint32_t concept_of(entity_index e) const;
+    analysis_result concept_id(node_index n, uint32_t ct,
+                               expression_meaning &m);
+    /* [temp.constr.constr]: whether constraint-expression e is satisfied,
+       the template parameters bound in scope */
+    analysis_result constraint_satisfied(syntax_child e, entity_index scope,
+                                         token_index horizon, bool &satisfied);
     /* the variable template the held name e is, plus one */
     uint32_t variable_template_of(entity_index e) const;
     /* [temp.pre]/1: a variable template defined at namespace scope */
@@ -2949,7 +2962,33 @@ class semantic_analysis
     /* [temp.pre]/1: a template-head's parameters */
     analysis_result
     template_head_parameters(node_index n, owned_array<node_index> &parameters,
-                             bool packs = false);
+                             bool packs = false, bool constrained = false);
+    syntax_child head_constraint(node_index n) const;
+    /* [temp.constr.atomic]/3: the satisfaction of a concept-id, once per
+       concept and arguments (a later different result would be ill-formed,
+       no diagnostic required; clang keeps the first, as here).  Its
+       arguments are satisfaction_arguments[first .. + count) */
+    struct satisfaction {
+        uint32_t concept_template = 0, first = 0, count = 0;
+        bool satisfied = false;
+        /* not known: its check was unsupported */
+        bool unknown = false;
+    };
+    owned_array<satisfaction> satisfactions;
+    owned_array<template_argument> satisfaction_arguments;
+    uint32_t template_record(entity_index t) const;
+    analysis_result
+    concept_satisfied(node_index at, uint32_t ct,
+                      const owned_array<template_argument> &arguments,
+                      bool &satisfied);
+    bool same_constraints(node_index a, node_index b);
+    bool same_token_spelling(token_index a, token_index b);
+    /* [temp.deduct]/5: whether the function template's constraints are
+       satisfied by the arguments deduced */
+    analysis_result
+    template_constraints_satisfied(uint32_t function_template,
+                                   const owned_array<template_argument> &values,
+                                   bool &satisfied);
     /* a template-parameter's identifier (after the ellipsis of a pack's) */
     token_index template_parameter_id(node_index parameter) const;
     /* [temp.param]/1's template-parameter, as written: a type-parameter
@@ -3284,6 +3323,20 @@ class semantic_analysis
     {
         return instantiations[entity_table[e].instantiation - 1]
             .template_entity;
+    }
+    /* [abi:mangle.requires-clause]: the requires-clause of the function
+       template t's template-head (none: no bits), its template parameter
+       and the concept a token of it names (0: neither) */
+    syntax_child template_constraint(entity_index t) const;
+    entity_index constraint_parameter(entity_index t, token_index i) const;
+    entity_index constraint_concept(entity_index t, token_index i) const;
+    bool punctuator_is(syntax_child c, preprocessing_op_or_punc op) const
+    {
+        return syntax_is_punctuator(tokens, c, op);
+    }
+    uint32_t token_identifier(token_index i) const
+    {
+        return tokens.identifier(i);
     }
     uint32_t specialization_argument_count(entity_index e) const
     {

@@ -98,6 +98,9 @@ bool semantic_analysis::template_head_list(
             parameters.append(c.index());
             continue;
         }
+        /* (its requires-clause: head_constraint) */
+        if (syntax_is(tree, c, syntax_kind::requires_clause))
+            continue;
         if (!syntax_is(tree, c, syntax_kind::template_parameter_list))
             return false;
         for (uint32_t k = 0; k < tree[c.index()].child_count; k++) {

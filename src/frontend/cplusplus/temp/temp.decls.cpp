@@ -37,7 +37,7 @@ analysis_result semantic_analysis::template_declaration(node_index n)
     /* [temp.concept]/1: "A concept is a template that defines constraints
        on its template arguments." */
     case syntax_kind::concept_definition:
-        return not_supported(n, "temp.concept");
+        return concept_definition(n, inner);
     /* [temp.alias]/1: "A template-declaration in which the declaration is
        an alias-declaration declares the identifier to be an alias
        template." */
@@ -115,8 +115,27 @@ analysis_result semantic_analysis::deduction_guide(node_index n)
  * default, pack or type-constraint; a requires-clause is [temp.constr].
  * The template is one of namespace scope.
  */
-analysis_result semantic_analysis::template_head_parameters(
-    node_index n, owned_array<node_index> &parameters, bool packs)
+/* [temp.pre]/1: a template-head's requires-clause's constraint-expression,
+   or none */
+syntax_child semantic_analysis::head_constraint(node_index n) const
+{
+    if (!tree[n].child_count ||
+        !syntax_is(tree, tree.children(n)[0], syntax_kind::template_head))
+        return syntax_child();
+    node_index head = tree.children(n)[0].index();
+    for (uint32_t i = 0; i < tree[head].child_count; i++) {
+        syntax_child c = tree.children(head)[i];
+        if (syntax_is(tree, c, syntax_kind::requires_clause) &&
+            tree[c.index()].child_count == 2)
+            return tree.children(c.index())[1];
+    }
+    return syntax_child();
+}
+
+analysis_result
+semantic_analysis::template_head_parameters(node_index n,
+                                            owned_array<node_index> &parameters,
+                                            bool packs, bool constrained)
 {
     const syntax_node &node = tree[n];
     if (node.child_count != 2 ||
@@ -128,6 +147,8 @@ analysis_result semantic_analysis::template_head_parameters(
        requires-clause is [temp.constr] */
     node_index head = tree.children(n)[0].index();
     if (!template_head_list(head, parameters))
+        return not_supported(n, "temp.pre");
+    if (head_constraint(n).bits && !constrained)
         return not_supported(n, "temp.constr");
     /* a type-parameter class identifier_opt, a template template-parameter
        template < type-parameters > class identifier_opt, a
@@ -191,7 +212,7 @@ semantic_analysis::function_template_definition(node_index n,
 {
     entity_index outer = current_scope;
     owned_array<node_index> parameters;
-    analysis_result head = template_head_parameters(n, parameters, true);
+    analysis_result head = template_head_parameters(n, parameters, true, true);
     if (head != analysis_result::well_formed)
         return head;
     const syntax_node &d = tree[definition];
@@ -306,7 +327,8 @@ semantic_analysis::function_template_definition(node_index n,
             return not_supported(n, "temp.over.link");
         if (f.parameter_count != parameters.size() ||
             !same_template_parameters(first, f.first_parameter,
-                                      f.parameter_count))
+                                      f.parameter_count) ||
+            !same_constraints(f.declaration, n))
             continue;
         owned_array<template_argument> values;
         owned_array<bool> set;
@@ -925,6 +947,9 @@ analysis_result semantic_analysis::variable_template_id(node_index n,
     entity_index named = 0;
     if (!template_id_name(n, x, named))
         return not_supported(n, "temp.names");
+    if (uint32_t ct = concept_of(named))
+        if (!x.ambiguous)
+            return concept_id(n, ct, m);
     uint32_t vt = variable_template_of(named);
     if (!vt || x.ambiguous)
         return not_supported(n, "temp.names");
