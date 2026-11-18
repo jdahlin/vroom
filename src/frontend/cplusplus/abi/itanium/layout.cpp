@@ -91,7 +91,10 @@ bool empty_class(const semantic_analysis &a, entity_index c)
 bool pod_for_layout(const semantic_analysis &a, entity_index c)
 {
     const entity &x = a.entity_table[c];
-    if (x.destructor || x.base_count || x.user_copy_assignment || x.dynamic)
+    /* [impl.clang] a destructor or copy assignment operator deleted on its
+       first declaration is no user-declared one here, as constructors */
+    if ((x.destructor && !a.entity_table[x.destructor].deleted) ||
+        x.base_count || x.user_copy_assignments || x.dynamic)
         return false;
     /* [impl.clang] a constructor deleted on its first declaration is no
        user-declared one here (C++11's aggregates allow it) */

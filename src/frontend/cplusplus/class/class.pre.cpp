@@ -1215,11 +1215,12 @@ analysis_result semantic_analysis::member_declarators(
             !syntax_is(tree, children[body_at], syntax_kind::function_body))
             return not_supported(n, "dcl.fct.def.general");
         const syntax_node &b = tree[children[body_at].index()];
-        if (b.child_count != 1 ||
-            !syntax_is(tree, tree.children(children[body_at].index())[0],
-                       syntax_kind::compound_statement))
-            /* a ctor-initializer, a function-try-block, = default,
-               = delete */
+        /* = delete: member_function_definition's deleted_definition */
+        if (!deleted_body(children[body_at]) &&
+            (b.child_count != 1 ||
+             !syntax_is(tree, tree.children(children[body_at].index())[0],
+                        syntax_kind::compound_statement)))
+            /* a ctor-initializer, a function-try-block, = default */
             return not_supported(n, "dcl.fct.def.general");
         virt_override = override_;
         virt_final = final_;
@@ -1559,9 +1560,16 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
                 operator_function_declaration(declaration, e);
             if (checked != analysis_result::well_formed)
                 return checked;
-            if (copy_assignment_operator(e, entity_table[e].enclosing))
-                entity_table[entity_table[e].enclosing].user_copy_assignment =
-                    true;
+            /* (one deleted on this, its first, declaration: not counted,
+               layout's pod_for_layout reads the count at the class's end,
+               before the bodies) */
+            bool deleted_here =
+                definition &&
+                deleted_body(tree.children(
+                    declaration)[tree[declaration].child_count - 1]);
+            if (copy_assignment_operator(e, entity_table[e].enclosing) &&
+                !deleted_here)
+                entity_table[entity_table[e].enclosing].user_copy_assignments++;
         }
         if (m.conversion_function) {
             /* [class.conv.fct]/1: "A conversion function shall have no

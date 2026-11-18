@@ -1048,6 +1048,11 @@ uint32_t c_lowering::symbol(entity_index e, token_index at, int variant)
         return *slot;
     if (x.kind != entity_kind::function && x.kind != entity_kind::variable)
         return fail("an entity that is not a function or variable", at);
+    /* [dcl.fct.def.delete]/2: a deleted function is never called in a
+       well-formed program (a deleted destructor's object destroyed: the
+       analysis does not see each destruction) */
+    if (x.kind == entity_kind::function && x.deleted)
+        return fail("a call of a deleted function", at);
     if (x.kind == entity_kind::variable && x.nonstatic_member)
         return fail("a non-static data member as an object", at);
     ast_qualified_type t = entity_type(e, at);
@@ -6123,6 +6128,9 @@ bool c_lowering::translation_unit()
            symbol (clang emits none) */
         if (x.kind == entity_kind::function && x.placeholder_return &&
             !x.defined)
+            continue;
+        /* a deleted function: no symbol ([dcl.fct.def.delete]) */
+        if (x.kind == entity_kind::function && x.deleted)
             continue;
         /* a function declared, not defined, whose symbol is not mangled
            yet (a specialization of a template whose signature names a

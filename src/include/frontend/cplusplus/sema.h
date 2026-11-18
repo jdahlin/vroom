@@ -477,9 +477,9 @@ struct entity {
        conversion_function_name's, shared by all; explicit_ when declared
        explicit ([class.conv.fct]/2) */
     bool conversion_function = false, explicit_ = false;
-    /* a class: it declares a copy assignment operator
-       ([class.copy.assign]/1) */
-    bool user_copy_assignment = false;
+    /* a class: the copy assignment operators it declares
+       ([class.copy.assign]/1) not deleted on their first declaration */
+    uint32_t user_copy_assignments = 0;
     /* a class: its user-declared constructors (a chain through
        next_constructor) and destructor, 0 if none */
     entity_index first_constructor = 0, destructor = 0;
