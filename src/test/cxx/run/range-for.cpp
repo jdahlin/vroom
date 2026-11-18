@@ -82,6 +82,15 @@ int sum_const(const Vec &v)
     return s;
 }
 
+/* a range of enumeration type: begin(range) and end(range) found by
+   argument-dependent lookup ([stmt.ranged]/1.3) */
+namespace digits {
+enum Set { low, high };
+int values[2][3] = {{1, 2, 3}, {7, 8, 9}};
+int *begin(Set s) { return values[s]; }
+int *end(Set s) { return values[s] + 3; }
+} // namespace digits
+
 int main()
 {
     int a[5] = {1, 2, 3, 4, 5};
@@ -170,6 +179,13 @@ int main()
         check(s == 4);
     }
     check(live == 0);
+
+    s = 0;
+    for (int x : digits::high)
+        s += x;
+    for (const int &x : digits::low)
+        s += x;
+    check(s == 24 + 6);
 
     /* in a function template's specializations */
     check(total(a) == 30);

@@ -546,14 +546,23 @@ analysis_result semantic_analysis::binary(node_index n, expression_meaning &m)
     r = expression(children[2], right);
     if (r != analysis_result::well_formed)
         return r;
+    return binary_of(n, at, op, children[0], left, children[2], right, m);
+}
+
+analysis_result semantic_analysis::binary_of(
+    node_index n, token_index at, preprocessing_op_or_punc op,
+    syntax_child left_syntax, expression_meaning &left,
+    syntax_child right_syntax, expression_meaning &right, expression_meaning &m)
+{
     /* [over.match.oper]/2: an operand of class or enumeration type (.*
        is not overloadable) */
     bool handled = false;
-    if (op != preprocessing_op_or_punc::DOT_STAR)
-        r = binary_operator_function(n, at, op, children[0], left, children[2],
-                                     right, handled, m);
-    if (r != analysis_result::well_formed || handled)
-        return r;
+    if (op != preprocessing_op_or_punc::DOT_STAR) {
+        analysis_result r = binary_operator_function(
+            n, at, op, left_syntax, left, right_syntax, right, handled, m);
+        if (r != analysis_result::well_formed || handled)
+            return r;
+    }
     return builtin_binary(n, at, op, left, right, m);
 }
 

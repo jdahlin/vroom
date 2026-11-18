@@ -25,8 +25,6 @@
 #include "frontend/cplusplus/sema.h"
 #include "stmt.ambig.h"
 
-#include <string.h>
-
 namespace cplusplus
 {
 
@@ -280,17 +278,14 @@ analysis_result semantic_analysis::exposition_variable(
     return named_entity(at, v, variable, false);
 }
 
-/* [stmt.ranged]/1: begin-expr or end-expr (end) for range, the variable
-   range named, of class type: range.begin() (member) or begin(range) */
+/* [stmt.ranged]/1: begin-expr or end-expr (name begin or end) for range,
+   the variable range named: range.name() (member, of class type) or
+   name(range) */
 analysis_result semantic_analysis::range_call(node_index n, token_index at,
                                               const expression_meaning &range,
-                                              bool end, bool member,
+                                              uint32_t name, bool member,
                                               expression_meaning &m)
 {
-    const char *spelling = "begin";
-    if (end)
-        spelling = "end";
-    uint32_t name = tokens.pp.identifier(spelling, strlen(spelling)) + 1;
     owned_array<syntax_child> arguments;
     owned_array<expression_meaning> early;
     owned_array<entity_index> set;
@@ -349,8 +344,6 @@ analysis_result semantic_analysis::range_call(node_index n, token_index at,
         if (member)
             chosen = semantics[f.node].b;
     }
-    if (!member)
-        chosen = 0;
     return call_with(n, f, f.type, object, chosen, arguments, early, m);
 }
 
@@ -448,32 +441,34 @@ analysis_result semantic_analysis::range_based_for(node_index n,
         expression_meaning base = range;
         r = builtin_binary(n, at, preprocessing_op_or_punc::PLUS, base, bound,
                            last);
-    } else if (record.kind == type_kind::class_type) {
-        /* "if the for-range-initializer is an expression of class type C,
-           the unqualified-ids begin and end are looked up in the scope of C
-           as if by class member access lookup ([basic.lookup.classref]),
-           and if both find at least one declaration, begin-expr and
-           end-expr are range.begin() and range.end(), respectively;
-           otherwise, begin-expr and end-expr are begin(range) and
-           end(range)" */
-        entity_index c = record.entity;
-        if (entity_table[c].kind != entity_kind::class_type ||
-            !entity_table[c].size)
-            return failed(not_supported(n, "stmt.ranged"));
-        bool ambiguous = false;
+    } else {
         uint32_t begin_name = tokens.pp.identifier("begin", 5) + 1;
         uint32_t end_name = tokens.pp.identifier("end", 3) + 1;
-        bool member = class_member_lookup(c, begin_name, ambiguous) &&
-                      class_member_lookup(c, end_name, ambiguous);
-        if (ambiguous)
-            return failed(not_supported(n, "class.member.lookup"));
-        r = range_call(n, at, range, false, member, first);
+        bool member = false;
+        if (record.kind == type_kind::class_type) {
+            /* /1.2: "if the for-range-initializer is an expression of class
+               type C, the unqualified-ids begin and end are looked up in
+               the scope of C as if by class member access lookup
+               ([basic.lookup.classref]), and if both find at least one
+               declaration, begin-expr and end-expr are range.begin() and
+               range.end(), respectively;" */
+            entity_index c = record.entity;
+            if (entity_table[c].kind != entity_kind::class_type ||
+                !entity_table[c].size)
+                return failed(not_supported(n, "stmt.ranged"));
+            bool ambiguous = false;
+            member = class_member_lookup(c, begin_name, ambiguous) &&
+                     class_member_lookup(c, end_name, ambiguous);
+            if (ambiguous)
+                return failed(not_supported(n, "class.member.lookup"));
+        }
+        /* /1.3: "otherwise, begin-expr and end-expr are begin(range) and
+           end(range), respectively, where begin and end are looked up in
+           the associated namespaces ([basic.lookup.argdep])." (range_call:
+           of a type with none, int *, nothing is found) */
+        r = range_call(n, at, range, begin_name, member, first);
         if (r == analysis_result::well_formed)
-            r = range_call(n, at, range, true, member, last);
-    } else {
-        /* begin(range) of another type: associated namespaces of none
-           (an enumeration's may have some) */
-        r = not_supported(n, "stmt.ranged");
+            r = range_call(n, at, range, end_name, member, last);
     }
     if (r != analysis_result::well_formed)
         return failed(r);
@@ -491,13 +486,8 @@ analysis_result semantic_analysis::range_based_for(node_index n,
     items.append(declared);
     /* begin != end */
     expression_meaning left = begin, right = end, condition;
-    bool handled = false;
-    r = binary_operator_function(
-        n, at, preprocessing_op_or_punc::EXCLAMATION_EQUAL, syntax_child(),
-        left, syntax_child(), right, handled, condition);
-    if (r == analysis_result::well_formed && !handled)
-        r = builtin_binary(n, at, preprocessing_op_or_punc::EXCLAMATION_EQUAL,
-                           left, right, condition);
+    r = binary_of(n, at, preprocessing_op_or_punc::EXCLAMATION_EQUAL,
+                  syntax_child(), left, syntax_child(), right, condition);
     if (r == analysis_result::well_formed)
         r = contextual_bool(n, condition);
     if (r != analysis_result::well_formed)
@@ -509,11 +499,7 @@ analysis_result semantic_analysis::range_based_for(node_index n,
         return failed(r);
     /* for-range-declaration = * begin ; */
     expression_meaning element = begin;
-    handled = false;
-    r = unary_operator_function(n, at, preprocessing_op_or_punc::STAR, false,
-                                syntax_child(), element, handled);
-    if (r == analysis_result::well_formed && !handled)
-        r = indirection_of(n, at, element);
+    r = indirection_of(n, at, syntax_child(), element);
     if (r != analysis_result::well_formed)
         return failed(r);
     uint32_t variable = 0;
@@ -575,15 +561,25 @@ analysis_result semantic_analysis::for_range_declaration(
                           "for-range-declaration, each decl-specifier shall "
                           "be either a type-specifier or constexpr",
                           "stmt.ranged");
-    if (s.declares_class)
-        return not_supported(at, "stmt.ranged");
+    {
+        /* "The decl-specifier-seq shall not define a class or
+           enumeration." */
+        node_index seq = children[0].index();
+        for (uint32_t i = 0; i < tree[seq].child_count; i++) {
+            syntax_child c = tree.children(seq)[i];
+            if (syntax_is(tree, c, syntax_kind::class_specifier) ||
+                syntax_is(tree, c, syntax_kind::enum_specifier))
+                return ill_formed(at,
+                                  "the decl-specifier-seq shall not define a "
+                                  "class or enumeration",
+                                  "stmt.ranged");
+        }
+    }
     size_t first = block_variables.size();
     bool claimable = declarations_claimable;
     declarations_claimable = false;
-    supplied_initializer = &element;
     r = declare_with_initializer(at, children[1], syntax_child(), true, s,
-                                 false);
-    supplied_initializer = nullptr;
+                                 false, &element);
     declarations_claimable = claimable;
     if (r != analysis_result::well_formed) {
         block_variables.resize(first);

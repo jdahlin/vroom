@@ -503,6 +503,8 @@ analysis_result semantic_analysis::unary(node_index n, expression_meaning &m)
         return analysis_result::well_formed;
     const implementation_defined_behavior &b = tokens.files.behavior;
     token_index at = children[0].index();
+    if (o == preprocessing_op_or_punc::STAR)
+        return indirection_of(n, at, children[1], m);
     /* [over.unary]: an operand of class or enumeration type
        ([over.match.oper]/2) */
     bool handled = false;
@@ -530,8 +532,6 @@ analysis_result semantic_analysis::unary(node_index n, expression_meaning &m)
         address_of_glvalue(at, m);
         return analysis_result::well_formed;
     }
-    case preprocessing_op_or_punc::STAR:
-        return indirection_of(n, at, m);
     case preprocessing_op_or_punc::PLUS:
     case preprocessing_op_or_punc::MINUS:
     case preprocessing_op_or_punc::TILDE: {
@@ -598,10 +598,21 @@ analysis_result semantic_analysis::unary(node_index n, expression_meaning &m)
     return analysis_result::well_formed;
 }
 
-/* [expr.unary.op]/1: *m, the built-in operator of the operand analysed */
+/* [expr.unary.op]/1: *m of the operand analysed as m (its syntax operand,
+   none for an operand [stmt.ranged]/1 makes) */
 analysis_result semantic_analysis::indirection_of(node_index n, token_index at,
+                                                  syntax_child operand,
                                                   expression_meaning &m)
 {
+    {
+        /* [over.unary]: an operand of class or enumeration type
+           ([over.match.oper]/2) */
+        bool handled = false;
+        analysis_result r = unary_operator_function(
+            n, at, preprocessing_op_or_punc::STAR, false, operand, m, handled);
+        if (r != analysis_result::well_formed || handled)
+            return r;
+    }
     /* [expr.unary.op]/1: "the expression to which it is applied shall
        be a pointer to an object type, or a pointer to a function type
        and the result is an lvalue referring to the object or function

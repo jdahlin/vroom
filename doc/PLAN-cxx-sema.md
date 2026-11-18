@@ -1441,7 +1441,7 @@ lines:
   built-in operators (`increment_of`, `indirection_of`, split out of
   their syntax-driven callers); the for-range-declaration is declared
   by `declare_with_initializer` with the element as its initializer
-  (`supplied_initializer`).  begin-expr and end-expr: an array's `range`
+  (its `supplied` parameter).  begin-expr and end-expr: an array's `range`
   and `range + N`, a class's members `begin`/`end` (overload
   resolution among them), else `begin(range)`/`end(range)` by
   argument-dependent lookup alone (`range_call`); different begin and
@@ -1450,9 +1450,19 @@ lines:
   Test `range-for.cpp`.  Not supported: structured bindings in the
   for-range-declaration (step 7), a braced-init-list as the range
   (std::initializer_list), an attribute-specifier-seq on the
-  declaration, member or free `begin`/`end` templates, a range of
-  other than array or class type, and a temporary range of a class
-  with a destructor (reference_binding's [class.temporary]/6).
+  declaration, member or free `begin`/`end` templates, and any class
+  prvalue bound to a reference: a class temporary as the range
+  (`for (int x : R{})`, with a trivial R too) and `const E &` bound
+  to a class prvalue from `*begin` (both refused at reference_binding's
+  [class.temporary]).  A range of other than array or class type
+  takes `begin(range)` by argument-dependent lookup (an enumeration's
+  namespace); none found, as for `int *`, is ill-formed, as clang
+  reports.  A for-range-declaration defining a class or enumeration
+  is ill-formed ([stmt.ranged]/2).  2026-11-18 review: the supplied
+  initializer a parameter, `binary_of` and `indirection_of` shared with
+  the expression paths; declarations 55926 -> 55935 as clang (types
+  69149 -> 69145, constants 27979 -> 27975: claims of declarations now
+  rejected as clang rejects them), the rest unchanged.
   `bench/cxx-sema.py`: declarations 55874 -> 55926 as clang, 12 we
   reject and clang accepts (the same), 2464 we accept and clang rejects
   (the same), all 0 refuted; declared types 27327 -> 27328, types
