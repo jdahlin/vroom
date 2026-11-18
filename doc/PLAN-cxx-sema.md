@@ -1262,6 +1262,71 @@ lines:
   2221, layout 13283 -> 14283, all 0 refuted; lowering 362 -> 363 files, 0
   refuted; `tree` problems 42 -> 34 (the remaining conditional of two class
   prvalues with destructors is old).  cxx-run 384/384 (96 programs).
+- Status (2026-11-18, step 3: explicit casts): one function,
+  `explicit_conversion` (`expr/expr.cast.cpp`), has the rules of
+  [expr.static.cast], [expr.const.cast] and [expr.reinterpret.cast];
+  `cast_kinds` says which casts it may use: one for `static_cast`,
+  `const_cast` and `reinterpret_cast` (`named_cast`, `expr/expr.post.cpp`),
+  all of them in [expr.cast]/4's order for the cast notation and
+  [expr.type.conv]'s `T(x)`.  To a class it is [expr.static.cast]/4's
+  direct-initialization (`class_direct_initialization`, shared with
+  `T(x)`; `(B)3`, `static_cast<B>(3)`, a typedef-name's `T(x)`); from a
+  class to another type a conversion function (`conversion_function_call`,
+  explicit ones too: `static_cast<bool>(f)`, `int(a)`, `(int)a`).  Between
+  pointers to classes one derived from the other (`class_pointer_cast`):
+  to a base by `pointer_to_base`, to a derived class by the new
+  `pointer_to_derived` ([expr.static.cast]/11; conversion
+  `base_to_derived`, lowered as the base's offset
+  subtracted after a null check, the code `derived_to_base` shares in
+  `null_checked_offset`); the cast notation through public non-virtual
+  bases only.  To a reference (`reference_cast`): the same glvalue, or the
+  lvalue's address converted as a pointer and the object it points to
+  ([expr.static.cast]/2, [expr.const.cast]/4, [expr.reinterpret.cast]/11).
+  Casting away constness ([expr.const.cast]/7) is checked for pointers to
+  what is no pointer, arrays by their elements' cv-qualifiers.  Tests:
+  `src/test/cxx/run/explicit-casts.cpp`.  Not analysed: `dynamic_cast`
+  ([expr.dynamic.cast], needs RTTI), a reference cast that may bind a
+  temporary ([expr.static.cast]/4: to const or an rvalue reference of
+  another type), a prvalue or xvalue operand of a reference cast of
+  another type, references to functions, casting away constness below the
+  first level of a multi-level pointer without a const_cast, the cast
+  notation through a private or virtual base ([expr.cast]/4's
+  inaccessible bases) or to an incomplete class ([expr.cast]/5),
+  `reinterpret_cast` of std::nullptr_t and of a bit-field to its own type,
+  a class with no constructors from another class, Microsoft's extra
+  casts (unsupported in its mode).  `bench/cxx-sema.py`: declarations
+  53608 -> 54051 as clang, 12 we reject and clang accepts (the same 12),
+  2392 -> 2396 we accept and clang rejects, unsupported 69209 -> 68762;
+  declared types 26974 -> 26976, types 65885 -> 67244, constants 27345 ->
+  27370, lookup 19680 -> 20039, symbols 2276 -> 2346, layout 14735 ->
+  14767, all 0 refuted; lowering 371 -> 401 files, 0 refuted; `tree`
+  problems 34 -> 26 (the casts to a reference now have their own nodes).
+  cxx-run 420/420 (105 programs); cxx-c-suites 0 wrong, no pass lost (the
+  four lost passes it reports, [cpp.pragma] and pr109318, fail at the
+  starting commit too).
+  After review (2026-11-18): the pointer conversions between a class and
+  its base on one non-virtual path are one routine, `pointer_along_path`
+  (`class/class.derived.cpp`), for both directions and for the cast
+  notation (which skips the access checks, [expr.cast]/4); the steps come
+  from `nonvirtual_path`, which `single_nonvirtual_path` shares.  One
+  conversion per base at a nonzero offset, and `null_checked_offset` folds
+  a chain of them into one null check, so an upcast across two nonzero
+  offsets is no longer refused.  An ambiguous base of a downcast is
+  ill-formed ([expr.static.cast]/11), no longer unsupported.  Now
+  analysed: the cast notation through a private or protected base and to
+  an incomplete class (the reinterpret_cast, as clang),
+  `reinterpret_cast<long>(nullptr)` ([expr.reinterpret.cast]/4),
+  `static_cast<bool>(nullptr)` ([conv.bool]), a cast to a base class
+  slicing a derived glvalue (`static_cast<B>(d)`, a class with no
+  constructors), and a reference to const or rvalue reference to a
+  non-class type bound to a temporary (`static_cast<const int &>(3)`,
+  `static_cast<int &&>(4)`, `(const unsigned char &)i`: `reference_binding`,
+  the temporary's address).  Still not analysed: such a temporary in a
+  constant expression (unsupported by the evaluator) or of a class type,
+  the cast notation through a virtual or ambiguous base, slicing a
+  prvalue through a virtual base.  `bench/cxx-sema.py`: declarations
+  54051 -> 54065 as clang, 12 we reject and clang accepts, 2396 we accept
+  and clang rejects, 0 refuted; cxx-run 420/420 (105 programs).
 
 ### S6. Constant evaluation and templates
 

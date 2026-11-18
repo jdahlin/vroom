@@ -266,6 +266,10 @@ class c_lowering
     mutable bool vcall_unknown = false;
     /* &((char *)p)[offset] as a pointer of type t */
     uint32_t offset_pointer(uint32_t p, int64_t offset, ast_qualified_type t);
+    /* the pointer conversion n's operand plus offset bytes, a null pointer
+       kept null */
+    uint32_t null_checked_offset(const semantic_node &n, int64_t offset,
+                                 ast_qualified_type t);
     uint32_t virtual_function(entity_index f, uint32_t object, token_index at,
                               uint32_t next = 0);
     bool side_effect_free(uint32_t lowered) const;
@@ -2007,47 +2011,16 @@ uint32_t c_lowering::conversion(const semantic_node &n)
         }
         /* [conv.ptr]/3: a base at offset 0 (which analysis makes sure
            of): the same address, a null pointer one too */
-        if (analysis.entity_table[n.b].offset) {
-            /* an object's address (never null), to an empty base the
-               layout moved ([abi:class-types] II): &((char *)p)[offset] */
-            int64_t offset =
-                static_cast<int64_t>(analysis.entity_table[n.b].offset);
-            uint32_t p = expression(n.a);
-            if (!p)
-                return 0;
-            if (node(n.a).kind == semantic_kind::address)
-                return offset_pointer(p, offset, t);
-            /* [conv.ptr]/3: "The null pointer value is converted to the
-               null pointer value of the destination type": p ? p + offset
-               : 0, p read twice */
-            uint32_t again = 0;
-            if (side_effect_free(p)) {
-                again = expression(n.a);
-            } else {
-                /* (e.g. a pointer to the virtual base it is in, read
-                   from the virtual table): a temporary holds it */
-                if (!collecting)
-                    return fail("a pointer to a base at a nonzero offset",
-                                n.at);
-                ast_qualified_type pt = type_of(p);
-                uint32_t temporary = full_expression_temporary(pt);
-                uint32_t assigned = make(AST_NODE_ASSIGN, pt,
-                                         make(AST_NODE_VARIABLE, pt, temporary,
-                                              0, 0, 0, AST_NODE_FLAG_LVALUE),
-                                         p, 0, 0, 0);
-                p = make(AST_NODE_COMMA, pt, assigned,
-                         make(AST_NODE_VARIABLE, pt, temporary, 0, 0, 0,
-                              AST_NODE_FLAG_LVALUE),
-                         0, 0, 0);
-                again = make(AST_NODE_VARIABLE, pt, temporary, 0, 0, 0,
-                             AST_NODE_FLAG_LVALUE);
-            }
-            uint32_t null = cast(
-                ast_builder_integer(c, ast_builder_type_basic(AST_TYPE_INT), 0),
-                t, AST_CAST_NULL_POINTER);
-            return make(AST_NODE_CONDITIONAL, AST_QUALIFIED_TYPE_UNQUALIFIED(t),
-                        truth(p), offset_pointer(again, offset, t), null, 0, 0);
-        }
+        if (analysis.entity_table[n.b].offset)
+            return null_checked_offset(
+                n, static_cast<int64_t>(analysis.entity_table[n.b].offset), t);
+        return cast(expression(n.a), t, AST_CAST_POINTER_TO_POINTER);
+    case conversion_kind::base_to_derived:
+        /* [expr.static.cast]/11: "the resulting pointer points to the
+           enclosing object of type D": the base's offset subtracted */
+        if (analysis.entity_table[n.b].offset)
+            return null_checked_offset(
+                n, -static_cast<int64_t>(analysis.entity_table[n.b].offset), t);
         return cast(expression(n.a), t, AST_CAST_POINTER_TO_POINTER);
     case conversion_kind::pointer_to_integral:
         return cast(expression(n.a), t, AST_CAST_POINTER_TO_INTEGER);
@@ -4410,6 +4383,63 @@ uint32_t c_lowering::vtable_pointer_stores(const semantic_node &n)
         stores = store;
     }
     return stores;
+}
+
+/* [conv.ptr]/3, [expr.static.cast]/11: "The null pointer value is
+   converted to the null pointer value of the destination type": p ? p +
+   offset : 0, p read twice; an object's address (never null, e.g. to an
+   empty base the layout moved, [abi:class-types] II) without the check.
+   The non-virtual base conversions n's operand is made of add their
+   offsets to the one check */
+uint32_t c_lowering::null_checked_offset(const semantic_node &n, int64_t offset,
+                                         ast_qualified_type t)
+{
+    uint32_t operand = n.a;
+    for (;;) {
+        const semantic_node &x = node(operand);
+        if (x.kind != semantic_kind::conversion)
+            break;
+        conversion_kind k = static_cast<conversion_kind>(x.op);
+        int64_t by = static_cast<int64_t>(analysis.entity_table[x.b].offset);
+        if (k == conversion_kind::base_to_derived)
+            by = -by;
+        else if (k != conversion_kind::derived_to_base ||
+                 analysis.entity_table[x.b].virtual_base)
+            break;
+        offset += by;
+        operand = x.a;
+    }
+    uint32_t p = expression(operand);
+    if (!p)
+        return 0;
+    if (node(operand).kind == semantic_kind::address)
+        return offset_pointer(p, offset, t);
+    uint32_t again = 0;
+    if (side_effect_free(p)) {
+        again = expression(operand);
+    } else {
+        /* (e.g. a pointer to the virtual base it is in, read from the
+           virtual table): a temporary holds it */
+        if (!collecting)
+            return fail("a pointer to a base at a nonzero offset", n.at);
+        ast_qualified_type pt = type_of(p);
+        uint32_t temporary = full_expression_temporary(pt);
+        uint32_t assigned = make(AST_NODE_ASSIGN, pt,
+                                 make(AST_NODE_VARIABLE, pt, temporary, 0, 0, 0,
+                                      AST_NODE_FLAG_LVALUE),
+                                 p, 0, 0, 0);
+        p = make(AST_NODE_COMMA, pt, assigned,
+                 make(AST_NODE_VARIABLE, pt, temporary, 0, 0, 0,
+                      AST_NODE_FLAG_LVALUE),
+                 0, 0, 0);
+        again = make(AST_NODE_VARIABLE, pt, temporary, 0, 0, 0,
+                     AST_NODE_FLAG_LVALUE);
+    }
+    uint32_t null =
+        cast(ast_builder_integer(c, ast_builder_type_basic(AST_TYPE_INT), 0), t,
+             AST_CAST_NULL_POINTER);
+    return make(AST_NODE_CONDITIONAL, AST_QUALIFIED_TYPE_UNQUALIFIED(t),
+                truth(p), offset_pointer(again, offset, t), null, 0, 0);
 }
 
 uint32_t c_lowering::offset_pointer(uint32_t p, int64_t offset,

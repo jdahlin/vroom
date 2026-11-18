@@ -247,51 +247,35 @@ bool parser::parenthesized_expression_list(const char *what,
  * ([expr.call]) needs overload resolution and is not analysed yet.
  */
 /*
- * [expr.static.cast]/1: "The result of the expression static_cast<T>(v)
- * is the result of converting the expression v to type T."  What analysis
- * has rules for: T cv void (/6) and the conversions between arithmetic and
- * enumeration types (/4 the implicit ones, /9, /10, [conv.fpint],
- * [conv.integral]); the rest (references, pointers, classes) not yet.
+ * The named casts: [expr.static.cast]/1: "The result of the expression
+ * static_cast<T>(v) is the result of converting the expression v to type
+ * T."; [expr.const.cast]/1: "The result of the expression const_cast<T>(v)
+ * is of type T."; [expr.reinterpret.cast]/1: "The result of the expression
+ * reinterpret_cast<T>(v) is the result of converting the expression v to
+ * type T."  Each the conversions of its own subclause, explicit_conversion
+ * (expr.cast.cpp) with that cast alone.  dynamic_cast needs the run-time
+ * type information, not analysed.
  */
-analysis_result semantic_analysis::static_cast_expression(node_index n,
-                                                          expression_meaning &m)
+analysis_result semantic_analysis::named_cast(node_index n,
+                                              standard_keyword keyword,
+                                              expression_meaning &m)
 {
+    uint8_t kinds = cast_static;
+    if (keyword == standard_keyword::const_cast_)
+        kinds = cast_const;
+    else if (keyword == standard_keyword::reinterpret_cast_)
+        kinds = cast_reinterpret;
+    else if (keyword != standard_keyword::static_cast_)
+        return not_supported(n, "expr.dynamic.cast");
     const syntax_child *children = tree.children(n);
     qualified_type to;
     analysis_result r = type_id(children[2].index(), to);
+    /* [over.over]/1: "an explicit type conversion" */
     if (r == analysis_result::well_formed)
-        r = expression(children[5], m);
+        r = target_expression(children[5], to, m);
     if (r != analysis_result::well_formed)
         return r;
-    const struct type target = type_table[to.unqualified()];
-    bool to_void = target.kind == type_kind::fundamental &&
-                   target.fundamental == fundamental_type::void_;
-    bool to_value = is_arithmetic(to) || enumeration_of(to);
-    bool from_value = is_arithmetic(m.type) || enumeration_of(m.type);
-    if (to_void || (to_value && from_value))
-        return explicit_conversion(n, to, m);
-    if ((target.kind == type_kind::rvalue_reference ||
-         target.kind == type_kind::lvalue_reference) &&
-        m.category != value_category::prvalue &&
-        target.operand.unqualified() == m.type.unqualified() &&
-        (m.type.cv() & ~target.operand.cv()) == 0) {
-        /* [expr.static.cast]/3: "A glvalue of type cv1 T1 can be cast to
-           type rvalue reference to cv2 T2 if cv2 T2 is reference-compatible
-           with cv1 T1 ([dcl.init.ref]).  If the value is not a bit-field,
-           the result refers to the object or the specified base class
-           subobject thereof"; /1: "If T is an lvalue reference type ... the
-           result is an lvalue; if T is an rvalue reference to object type,
-           the result is an xvalue".  The same type only, not a bit-field
-           (a base class is not analysed) */
-        if (m.bit_field_width)
-            return not_supported(n, "expr.static.cast");
-        m.type = target.operand;
-        m.category = value_category::xvalue;
-        if (target.kind == type_kind::lvalue_reference)
-            m.category = value_category::lvalue;
-        return analysis_result::well_formed;
-    }
-    return not_supported(n, "expr.static.cast");
+    return explicit_conversion(n, to, m, kinds);
 }
 
 analysis_result semantic_analysis::postfix(node_index n, expression_meaning &m)
@@ -311,10 +295,14 @@ analysis_result semantic_analysis::postfix(node_index n, expression_meaning &m)
     if (node.child_count < 2)
         return not_supported(n, "expr.post");
     if (node.child_count == 7 && children[0].is_token() &&
-        p.keyword_of(tokens[children[0].index()]) ==
-            standard_keyword::static_cast_ &&
-        syntax_is(tree, children[2], syntax_kind::type_id))
-        return static_cast_expression(n, m);
+        syntax_is(tree, children[2], syntax_kind::type_id)) {
+        standard_keyword k = p.keyword_of(tokens[children[0].index()]);
+        if (k == standard_keyword::static_cast_ ||
+            k == standard_keyword::const_cast_ ||
+            k == standard_keyword::reinterpret_cast_ ||
+            k == standard_keyword::dynamic_cast_)
+            return named_cast(n, k, m);
+    }
     if (node.child_count == 3 &&
         (syntax_is_punctuator(tokens, children[1],
                               preprocessing_op_or_punc::DOT) ||
@@ -429,6 +417,10 @@ analysis_result semantic_analysis::postfix(node_index n, expression_meaning &m)
     if (named) {
         qualified_type to = qualified_type::make(named, cv_none);
         const struct type record = type_table[named];
+        if (record.kind == type_kind::class_type &&
+            entity_table[record.entity].kind == entity_kind::class_type)
+            /* a typedef-name of a class */
+            return class_conversion(n, record.entity, m);
         if (record.kind != type_kind::fundamental &&
             record.kind != type_kind::pointer)
             return not_supported(n, "expr.type.conv");

@@ -1040,6 +1040,20 @@ enum class conversion_kind : uint8_t {
        class subobject: b: the base subobject (entity::base_subobject); a
        null pointer stays one */
     derived_to_base,
+    /* [expr.static.cast]/11: a pointer to a base class subobject to a
+       pointer to the derived class containing it: b: the base subobject;
+       a null pointer stays one */
+    base_to_derived,
+};
+
+/* [expr.cast]/4: the casts that may perform an explicit conversion */
+enum cast_kinds : uint8_t {
+    cast_const = 1,       /* [expr.const.cast] */
+    cast_static = 2,      /* [expr.static.cast] */
+    cast_reinterpret = 4, /* [expr.reinterpret.cast] */
+    /* the cast notation: each, and static_cast or reinterpret_cast
+       followed by a const_cast */
+    cast_notation = 7,
 };
 
 enum class increment_kind : uint8_t {
@@ -1955,11 +1969,23 @@ class semantic_analysis
     analysis_result member_reference(node_index n, expression_meaning &m);
     /* [expr.cast], [expr.type.conv] */
     analysis_result cast(node_index n, expression_meaning &m);
+    /* the conversion of m to to by the casts in kinds (cast_kinds: the
+       cast notation's, [expr.cast]/4, or one named cast's) */
+    analysis_result explicit_conversion(node_index at, qualified_type to,
+                                        expression_meaning &m,
+                                        uint8_t kinds = cast_notation);
+    /* ill-formed: no cast in kinds performs the conversion */
+    analysis_result no_cast(node_index at, uint8_t kinds);
     /* explicit_conversion's pointer to pointer conversions */
     analysis_result pointer_conversion(node_index at, qualified_type to,
-                                       expression_meaning &m);
-    analysis_result explicit_conversion(node_index at, qualified_type to,
-                                        expression_meaning &m);
+                                       expression_meaning &m, uint8_t kinds);
+    /* ... to a reference: the glvalue m through a pointer to it */
+    analysis_result reference_cast(node_index at, qualified_type to,
+                                   expression_meaning &m, uint8_t kinds);
+    /* ... between pointers to classes related by derivation */
+    analysis_result class_pointer_cast(node_index at, qualified_type to,
+                                       expression_meaning &m, uint8_t kinds,
+                                       bool &handled);
     /* [expr.mul] to [expr.log.or] */
     analysis_result binary(node_index n, expression_meaning &m);
     analysis_result builtin_binary(node_index n, token_index at,
@@ -1994,8 +2020,9 @@ class semantic_analysis
                                      expression_meaning &left,
                                      expression_meaning &right,
                                      expression_meaning &m);
-    /* [expr.static.cast] */
-    analysis_result static_cast_expression(node_index n, expression_meaning &m);
+    /* [expr.static.cast], [expr.const.cast], [expr.reinterpret.cast] */
+    analysis_result named_cast(node_index n, standard_keyword keyword,
+                               expression_meaning &m);
     /* [expr.comma] */
     analysis_result comma(node_index n, expression_meaning &m);
     /* a type-id ([dcl.name]) */
@@ -2362,6 +2389,26 @@ class semantic_analysis
     analysis_result pointer_to_base(token_index at, entity_index from,
                                     entity_index to, qualified_type type,
                                     expression_meaning &m);
+    /* [conv.ptr]/3: whether the base step of class c is accessible */
+    analysis_result base_pointer_access(token_index at, entity_index c,
+                                        entity_index step);
+    /* [expr.static.cast]/11: the pointer m to class from as a pointer to
+       its derived class to, of type type */
+    analysis_result pointer_to_derived(token_index at, entity_index from,
+                                       entity_index to, qualified_type type,
+                                       expression_meaning &m);
+    /* the non-virtual bases from class c to its base, outermost first */
+    bool nonvirtual_path(entity_index c, entity_index base,
+                         owned_array<entity_index> &steps) const;
+    /* [expr.cast]/4: whether class c has one base subobject base, on a
+       non-virtual path */
+    bool single_nonvirtual_path(entity_index c, entity_index base) const;
+    /* the pointer m between class derived and its base on a non-virtual
+       path, to type, to the base or to the derived class */
+    analysis_result pointer_along_path(token_index at, entity_index derived,
+                                       entity_index base, qualified_type type,
+                                       bool to_derived, bool access,
+                                       expression_meaning &m);
     analysis_result defaulted_or_deleted_special_member(
         entity_index c, node_index n, syntax_child d, syntax_child body,
         uint8_t access, bool constexpr_specified, bool virtual_specified);
@@ -2457,6 +2504,11 @@ class semantic_analysis
     /* [expr.type.conv]: C(expression-list) or C{} of the class c */
     analysis_result class_conversion(node_index n, entity_index c,
                                      expression_meaning &m);
+    /* ... the prvalue of class c direct-initialized by the arguments */
+    analysis_result
+    class_direct_initialization(node_index n, entity_index c,
+                                owned_array<expression_meaning> &arguments,
+                                expression_meaning &m);
     /* the expressions of an expression-list, analysed */
     analysis_result
     expression_list_meanings(syntax_child list,

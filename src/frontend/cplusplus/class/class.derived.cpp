@@ -637,8 +637,7 @@ analysis_result semantic_analysis::to_base(token_index at, entity_index base,
  * The result of the conversion is a pointer to the base class subobject
  * of the derived class object.  The null pointer value is converted to the
  * null pointer value of the destination type."  m, a pointer to class
- * `from`, to a pointer to its base `to` (to's cv-qualified type in type):
- * a base at offset 0 only, whose address is the object's.
+ * `from`, to a pointer to its base `to` (to's cv-qualified type in type).
  */
 analysis_result semantic_analysis::pointer_to_base(token_index at,
                                                    entity_index from,
@@ -646,8 +645,6 @@ analysis_result semantic_analysis::pointer_to_base(token_index at,
                                                    qualified_type type,
                                                    expression_meaning &m)
 {
-    entity_index first = 0;
-    bool shifted = false;
     bool ambiguous = false;
     if (!base_step(from, to, ambiguous))
         return not_supported(current_declaration, "class.derived");
@@ -688,40 +685,162 @@ analysis_result semantic_analysis::pointer_to_base(token_index at,
             semantics[m.node].b = virtual_base_of(from, v);
         return pointer_to_base(at, v, to, type, m);
     }
-    for (entity_index c = from; c != to;) {
-        entity_index step = nonvirtual_step(c, to);
-        if (entity_table[step].access && current_class() != c &&
-            !in_friend_of(c)) {
-            if (current_class())
-                return not_supported(current_declaration, "class.access.base");
-            return ill_formed_at_token(at,
-                                       "if B is an inaccessible base class of "
-                                       "D, a program that necessitates this "
-                                       "conversion is ill-formed",
-                                       "conv.ptr");
-        }
-        /* the conversion names the one step at a nonzero offset, whose
-           offset the lowering adds (else the first step) */
-        if (entity_table[step].offset) {
-            if (shifted)
-                return not_supported(current_declaration, "conv.ptr");
-            shifted = true;
-            first = step;
-        }
-        if (!first)
-            first = step;
-        c = type_table[entity_table[step].type.unqualified()].entity;
-    }
     /* [conv.ptr]/3: "The result of the conversion is a pointer to the base
        class subobject of the derived class object.  The null pointer value
-       is converted to the null pointer value of the destination type": a
-       base at a nonzero offset is the address plus its offset, after a
-       null check (the lowering's) */
-    m.type = type;
-    converted(m, conversion_kind::derived_to_base);
-    if (m.node)
-        semantics[m.node].b = first;
+       is converted to the null pointer value of the destination type" */
+    return pointer_along_path(at, from, to, type, false, true, m);
+}
+
+/* [conv.ptr]/3: "If B is an inaccessible or ambiguous base class of D, a
+   program that necessitates this conversion is ill-formed": the direct
+   non-virtual base step of class c */
+analysis_result semantic_analysis::base_pointer_access(token_index at,
+                                                       entity_index c,
+                                                       entity_index step)
+{
+    if (!entity_table[step].access || current_class() == c || in_friend_of(c))
+        return analysis_result::well_formed;
+    if (current_class())
+        return not_supported(current_declaration, "class.access.base");
+    return ill_formed_at_token(at,
+                               "if B is an inaccessible base class of D, a "
+                               "program that necessitates this conversion is "
+                               "ill-formed",
+                               "conv.ptr");
+}
+
+/*
+ * [expr.static.cast]/11: "A prvalue of type "pointer to cv1 B", where B is
+ * a class type, can be converted to a prvalue of type "pointer to cv2 D",
+ * where D is a complete class derived from B, if cv2 is the same
+ * cv-qualification as, or greater cv-qualification than, cv1.  If B is a
+ * virtual base class of D or a base class of a virtual base class of D, or
+ * if no valid standard conversion from "pointer to D" to "pointer to B"
+ * exists, the program is ill-formed.  The null pointer value is converted
+ * to the null pointer value of the destination type."  m, a pointer to
+ * class from (B), to a pointer to its derived class to (D), of type type
+ * (the caller checks the cv-qualifiers).
+ */
+analysis_result semantic_analysis::pointer_to_derived(token_index at,
+                                                      entity_index from,
+                                                      entity_index to,
+                                                      qualified_type type,
+                                                      expression_meaning &m)
+{
+    /* "or if no valid standard conversion from "pointer to D" to "pointer
+       to B" exists" ([conv.ptr]/3: "If B is an inaccessible or ambiguous
+       base class of D, a program that necessitates this conversion is
+       ill-formed") */
+    if (base_subobjects(to, from) != 1)
+        return ill_formed_at_token(at,
+                                   "if no valid standard conversion from "
+                                   "\"pointer to D\" to \"pointer to B\" "
+                                   "exists, the program is ill-formed",
+                                   "expr.static.cast");
+    if (!nonvirtual_subobjects(to, from))
+        return ill_formed_at_token(at,
+                                   "if B is a virtual base class of D or a "
+                                   "base class of a virtual base class of D, "
+                                   "the program is ill-formed",
+                                   "expr.static.cast");
+    return pointer_along_path(at, to, from, type, true, true, m);
+}
+
+/*
+ * The pointer m between class derived and its base on their one
+ * non-virtual path, to a pointer of type type: to the base
+ * ([conv.ptr]/3), or to the derived class if to_derived
+ * ([expr.static.cast]/11), each base on the way accessible if access
+ * ([expr.cast]/4: "the conversion is valid even if the base class is
+ * inaccessible").  One conversion per base at a nonzero offset, the
+ * lowering's addition or subtraction of that offset after a null check;
+ * the bases at offset 0 on either side of it (the object's address) are
+ * in the same conversion, and with none at a nonzero offset, one
+ * conversion names the first base.
+ */
+analysis_result semantic_analysis::pointer_along_path(
+    token_index at, entity_index derived, entity_index base,
+    qualified_type type, bool to_derived, bool access, expression_meaning &m)
+{
+    owned_array<entity_index> steps;
+    if (!nonvirtual_path(derived, base, steps))
+        return not_supported(current_declaration, "conv.ptr");
+    for (size_t i = 0; access && i < steps.size(); i++) {
+        analysis_result r =
+            base_pointer_access(at, entity_table[steps[i]].enclosing, steps[i]);
+        if (r != analysis_result::well_formed)
+            return r;
+    }
+    /* the steps at a nonzero offset in the order the pointer passes
+       them */
+    owned_array<size_t> shifts;
+    for (size_t k = 0; k < steps.size(); k++) {
+        size_t i = k;
+        if (to_derived)
+            i = steps.size() - 1 - k;
+        if (entity_table[steps[i]].offset)
+            shifts.append(i);
+    }
+    conversion_kind kind = conversion_kind::derived_to_base;
+    if (to_derived)
+        kind = conversion_kind::base_to_derived;
+    uint32_t cv = type_table[type.unqualified()].operand.cv();
+    if (shifts.empty()) {
+        m.type = type;
+        if (to_derived && m.evaluation == constness::constant)
+            m.evaluation = constness::unknown;
+        converted(m, kind);
+        if (m.node)
+            semantics[m.node].b = steps[0];
+        return analysis_result::well_formed;
+    }
+    for (size_t k = 0; k < shifts.size(); k++) {
+        m.type = type;
+        if (k + 1 < shifts.size()) {
+            /* the class the pointer reaches before the next such step:
+               that step's derived class going up, its base going down */
+            entity_index next = steps[shifts[k + 1]];
+            entity_index reached = entity_table[next].enclosing;
+            if (to_derived)
+                reached =
+                    type_table[entity_table[next].type.unqualified()].entity;
+            m.type = qualified_type::make(
+                type_table.pointer_to(qualified_type::make(
+                    entity_table[reached].type.unqualified(), cv)),
+                cv_none);
+        }
+        if (to_derived && m.evaluation == constness::constant)
+            m.evaluation = constness::unknown;
+        converted(m, kind);
+        if (m.node)
+            semantics[m.node].b = steps[shifts[k]];
+    }
     return analysis_result::well_formed;
+}
+
+/* the direct non-virtual bases on the way from class c to its base, each
+   the base of the class before it, outermost first; false if base is not
+   a non-virtual base of c */
+bool semantic_analysis::nonvirtual_path(entity_index c, entity_index base,
+                                        owned_array<entity_index> &steps) const
+{
+    while (c != base) {
+        entity_index step = nonvirtual_step(c, base);
+        if (!step)
+            return false;
+        steps.append(step);
+        c = type_table[entity_table[step].type.unqualified()].entity;
+    }
+    return true;
+}
+
+/* [expr.cast]/4: one path from class c to its base, every base on it
+   non-virtual */
+bool semantic_analysis::single_nonvirtual_path(entity_index c,
+                                               entity_index base) const
+{
+    owned_array<entity_index> steps;
+    return base_subobjects(c, base) == 1 && nonvirtual_path(c, base, steps);
 }
 
 /* the direct non-virtual base of c through which a non-virtual path leads

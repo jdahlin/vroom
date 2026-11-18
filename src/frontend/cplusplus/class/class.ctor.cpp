@@ -1729,6 +1729,20 @@ analysis_result semantic_analysis::special_member_definition(node_index n,
     return special_member_body(n, children[at + 1]);
 }
 
+/* the prvalue of class type type whose result object the node
+   initializes */
+static void class_prvalue(qualified_type type, constness evaluation,
+                          uint32_t node, expression_meaning &m)
+{
+    m = expression_meaning();
+    m.type = qualified_type::make(type.unqualified(), cv_none);
+    m.category = value_category::prvalue;
+    m.evaluation = evaluation;
+    if (m.evaluation == constness::constant)
+        m.evaluation = constness::not_constant;
+    m.node = node;
+}
+
 /*
  * [expr.type.conv]/2: "Otherwise, the expression is a prvalue of the
  * specified type whose result object is direct-initialized with the
@@ -1759,59 +1773,78 @@ analysis_result semantic_analysis::class_conversion(node_index n,
         } else if (node.child_count != 3) {
             return not_supported(n, "expr.type.conv");
         }
-        if (!entity_table[c].first_constructor && arguments.empty()) {
-            /* [dcl.init]/8.2: value-initialization of a class without a
-               user-provided default constructor zero-initializes it (the
-               implicit one is trivial: no constructor entity); the empty
-               list's elements are the same zeros ([dcl.init.aggr]/5.2),
-               and the same errors (a reference member, a deleted default
-               constructor) */
-            if (default_constructor_deleted(c)) {
-                /* (8.2): "if T has a non-trivial default constructor [or
-                   one defined as deleted], the object is
-                   default-initialized": the deleted function called.
-                   C++03 reports it at the class */
-                if (!tokens.files.behavior.has(
-                        language_feature::rvalue_references))
-                    return not_supported(n, "dcl.init");
-                return ill_formed(n,
-                                  "value-initialization calls the default "
-                                  "constructor, which is defined as deleted",
-                                  "dcl.init");
-            }
-            owned_array<syntax_child> none;
-            r = list_initialization_of(n, none, type, true, value);
-        } else if (!entity_table[c].first_constructor) {
-            /* T(x): "the type conversion expression is equivalent to the
-               corresponding cast expression" ([expr.type.conv]/2): of the
-               class's own type, a copy; C++20's parenthesized aggregate
-               initialization is not analysed */
-            if (arguments.size() != 1 ||
-                arguments[0].type.unqualified() != type.unqualified())
-                return not_supported(n, "expr.type.conv");
-            r = initialize_with(n, arguments[0], type, true, false, value);
-        } else if (is_aggregate(c) &&
-                   (arguments.size() != 1 ||
-                    arguments[0].type.unqualified() != type.unqualified())) {
-            /* an aggregate's implicit constructors (a default member
-               initializer makes its default constructor non-trivial) do
-               not take these arguments: C++20's parenthesized aggregate
-               initialization ([dcl.init]/17) is not analysed */
-            return not_supported(n, "expr.type.conv");
-        } else {
-            r = construct(n, type, arguments, 0, value);
-        }
+        return class_direct_initialization(n, c, arguments, m);
     }
-    if (r != analysis_result::well_formed)
-        return r;
-    m = expression_meaning();
-    m.type = qualified_type::make(type.unqualified(), cv_none);
-    m.category = value_category::prvalue;
-    m.evaluation = value.evaluation;
-    if (m.evaluation == constness::constant)
-        m.evaluation = constness::not_constant;
-    m.node = value.node;
-    return analysis_result::well_formed;
+    if (r == analysis_result::well_formed)
+        class_prvalue(type, value.evaluation, value.node, m);
+    return r;
+}
+
+/*
+ * [expr.type.conv]/2: "the expression is a prvalue of the specified type
+ * whose result object is direct-initialized with the initializer", the
+ * initializer ( expression-list_opt ); also [expr.static.cast]/4's "T t(E);"
+ * for a class T.
+ */
+analysis_result semantic_analysis::class_direct_initialization(
+    node_index n, entity_index c, owned_array<expression_meaning> &arguments,
+    expression_meaning &m)
+{
+    qualified_type type = entity_table[c].type;
+    if (!entity_table[c].size)
+        return not_supported(n, "expr.type.conv");
+    initialized_value value;
+    analysis_result r = analysis_result::well_formed;
+    if (!entity_table[c].first_constructor && arguments.empty()) {
+        /* [dcl.init]/8.2: value-initialization of a class without a
+           user-provided default constructor zero-initializes it (the
+           implicit one is trivial: no constructor entity); the empty
+           list's elements are the same zeros ([dcl.init.aggr]/5.2),
+           and the same errors (a reference member, a deleted default
+           constructor) */
+        if (default_constructor_deleted(c)) {
+            /* (8.2): "if T has a non-trivial default constructor [or
+               one defined as deleted], the object is
+               default-initialized": the deleted function called.
+               C++03 reports it at the class */
+            if (!tokens.files.behavior.has(language_feature::rvalue_references))
+                return not_supported(n, "dcl.init");
+            return ill_formed(n,
+                              "value-initialization calls the default "
+                              "constructor, which is defined as deleted",
+                              "dcl.init");
+        }
+        owned_array<syntax_child> none;
+        r = list_initialization_of(n, none, type, true, value);
+    } else if (!entity_table[c].first_constructor) {
+        /* T(x): "the type conversion expression is equivalent to the
+           corresponding cast expression" ([expr.type.conv]/2): of the
+           class's own type or of a class derived from it, a copy (of the
+           base class subobject, as the declaration T t(x) is); C++20's
+           parenthesized aggregate initialization is not analysed */
+        bool ambiguous = false;
+        if (arguments.size() != 1 ||
+            (arguments[0].type.unqualified() != type.unqualified() &&
+             (type_table[arguments[0].type.unqualified()].kind !=
+                  type_kind::class_type ||
+              !base_step(type_table[arguments[0].type.unqualified()].entity, c,
+                         ambiguous))))
+            return not_supported(n, "expr.type.conv");
+        r = initialize_with(n, arguments[0], type, true, false, value);
+    } else if (is_aggregate(c) &&
+               (arguments.size() != 1 ||
+                arguments[0].type.unqualified() != type.unqualified())) {
+        /* an aggregate's implicit constructors (a default member
+           initializer makes its default constructor non-trivial) do
+           not take these arguments: C++20's parenthesized aggregate
+           initialization ([dcl.init]/17) is not analysed */
+        return not_supported(n, "expr.type.conv");
+    } else {
+        r = construct(n, type, arguments, 0, value);
+    }
+    if (r == analysis_result::well_formed)
+        class_prvalue(type, value.evaluation, value.node, m);
+    return r;
 }
 
 } // namespace cplusplus
