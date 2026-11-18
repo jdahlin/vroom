@@ -164,6 +164,12 @@ name_class classify(parser &p, unsigned ahead, unsigned *length,
         }
         if (template_ids && p.at(preprocessing_op_or_punc::LESS, after))
             return name_class::unknown;
+        /* nested-name-specifier template identifier with no
+           template-argument-list names a template, not a type: a template
+           template argument's id-expression ([temp.arg.template]/1,
+           [temp.names]/5) */
+        if (template_keyword)
+            return name_class::not_a_type;
         switch (kind) {
         case name_kind::type_name:
         /* a class template's name alone: its injected-class-name in its
