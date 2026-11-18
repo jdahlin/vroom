@@ -1357,6 +1357,10 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
         if (s.constexpr_ && !s.static_ &&
             tokens.files.behavior.edition < standard_edition::cplusplus_14)
             return not_supported(declaration, "dcl.constexpr");
+        /* [dcl.constexpr]/3 (and clang before C++20 for any non-static
+           member function): not in a class with virtual bases */
+        if (s.constexpr_ && !s.static_ && entity_table[c].virtual_base_count)
+            return not_supported(declaration, "dcl.constexpr");
         entity_table[e].inline_ = definition || s.inline_ || s.constexpr_;
         /* [dcl.constexpr]/1: constexpr makes it inline; its body's rules
            and its invocations in constant expressions are the evaluator's

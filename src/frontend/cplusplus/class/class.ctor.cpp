@@ -309,6 +309,10 @@ analysis_result semantic_analysis::special_member_declarator(
                                            "twice in the member-specification",
                                            "class.mem");
     }
+    /* [dcl.constexpr]/3: "if the function is a constructor or destructor,
+       its class shall not have any virtual base classes" */
+    if (constexpr_specified && entity_table[c].virtual_base_count)
+        return not_supported(declaration, "dcl.constexpr");
     entity_index e =
         entity_table.make(entity_kind::function, entity_table[c].name, c);
     entity &x = entity_table[e];
@@ -689,14 +693,11 @@ analysis_result semantic_analysis::ctor_initializer(syntax_child list,
        initialized in the order they were declared": the subobjects in that
        order */
     owned_array<entity_index> subobjects;
-    {
-        const entity &x = entity_table[c];
-        for (uint32_t i = 0; i < x.base_count; i++)
-            subobjects.append(class_bases[x.first_base + i]);
-        for (uint32_t i = 0; i < x.member_count; i++)
-            if (!entity_table[class_members[x.first_member + i]].base_subobject)
-                subobjects.append(class_members[x.first_member + i]);
-    }
+    construction_order(c, subobjects);
+    uint32_t base_count = 0;
+    for (entity_index e : subobjects)
+        if (entity_table[e].base_subobject)
+            base_count++;
     owned_array<uint32_t> initialized;
     initialized.resize(subobjects.size());
     for (uint32_t &i : initialized)
@@ -745,6 +746,10 @@ analysis_result semantic_analysis::ctor_initializer(syntax_child list,
                     entity_table[base].type.unqualified())
                     e = b;
             }
+            /* [class.base.init]/2: "a direct or virtual base" */
+            if (!e && base &&
+                entity_table[base].kind == entity_kind::class_type)
+                e = virtual_base_of(c, base);
             if (!e && base &&
                 entity_table[base].kind == entity_kind::class_type) {
                 bool ambiguous = false;
@@ -820,6 +825,8 @@ analysis_result semantic_analysis::ctor_initializer(syntax_child list,
                 return not_supported(n, "class.copy.ctor");
             initialized[slot] = statement_node(
                 semantic_kind::expression_statement, id, value.node);
+            if (entity_table[e].virtual_base)
+                initialized[slot] = complete_object(initialized[slot]);
             continue;
         }
         initialized_value value;
@@ -868,6 +875,13 @@ analysis_result semantic_analysis::ctor_initializer(syntax_child list,
        constructor */
     for (size_t i = 0; i < subobjects.size(); i++) {
         if (initialized[i])
+            continue;
+        const dynamic_class *dynamic = dynamic_of(c);
+        if (entity_table[subobjects[i]].virtual_base && dynamic &&
+            dynamic->abstract)
+            /* [class.base.init]/9 (Note): "An abstract class is never a
+               most derived class, thus its constructors never initialize
+               virtual base classes" */
             continue;
         if (entity_table[subobjects[i]].default_initializer) {
             /* (9.1) "if the entity is a non-static data member that has a
@@ -919,12 +933,13 @@ analysis_result semantic_analysis::ctor_initializer(syntax_child list,
             return r;
         initialized[i] =
             statement_node(semantic_kind::expression_statement, at, value.node);
+        if (entity_table[subobjects[i]].virtual_base)
+            initialized[i] = complete_object(initialized[i]);
     }
     /* [class.cdtor]/4: from the members' initialization on, a virtual
        call finds this class's final overriders: its virtual table pointer
        stored after the bases ([abi:vtable-ctor]) */
     owned_array<uint32_t> statements;
-    uint32_t base_count = entity_table[c].base_count;
     for (uint32_t i = 0; i < initialized.size(); i++) {
         if (i == base_count)
             if (uint32_t store = vtable_pointer_store(c, at))
@@ -972,8 +987,13 @@ void semantic_analysis::construction_order(
     entity_index c, owned_array<entity_index> &order) const
 {
     const entity &x = entity_table[c];
+    /* [class.base.init]/13.1: "First, and only for the constructor of the
+       most derived class, virtual base classes are initialized" */
+    for (uint32_t i = 0; i < x.virtual_base_count; i++)
+        order.append(class_virtual_bases[x.first_virtual_base + i]);
     for (uint32_t i = 0; i < x.base_count; i++)
-        order.append(class_bases[x.first_base + i]);
+        if (!entity_table[class_bases[x.first_base + i]].virtual_base)
+            order.append(class_bases[x.first_base + i]);
     for (uint32_t i = 0; i < x.member_count; i++)
         if (!entity_table[class_members[x.first_member + i]].base_subobject)
             order.append(class_members[x.first_member + i]);
@@ -991,6 +1011,15 @@ uint32_t semantic_analysis::subobject_store(const expression_meaning &object,
         semantic_kind::assignment, stored, at, object.node, value,
         static_cast<uint8_t>(preprocessing_op_or_punc::EQUAL));
     return statement_node(semantic_kind::expression_statement, at, assigned);
+}
+
+/* statement, run by the complete object constructor or destructor only
+   ([abi:mangling-special-ctor-dtor] C1, D1): a virtual base's
+   ([class.base.init]/13.1, [class.dtor]/13) */
+uint32_t semantic_analysis::complete_object(uint32_t statement)
+{
+    semantics[statement].d = complete_object_only;
+    return statement;
 }
 
 uint32_t
@@ -1012,10 +1041,17 @@ void semantic_analysis::subobject_classes(entity_index c,
                                           owned_array<entity_index> &out) const
 {
     const entity &x = entity_table[c];
+    for (uint32_t i = 0; i < x.virtual_base_count; i++)
+        out.append(
+            type_table
+                [entity_table[class_virtual_bases[x.first_virtual_base + i]]
+                     .type.unqualified()]
+                    .entity);
     for (uint32_t i = 0; i < x.base_count; i++)
-        out.append(type_table[entity_table[class_bases[x.first_base + i]]
-                                  .type.unqualified()]
-                       .entity);
+        if (!entity_table[class_bases[x.first_base + i]].virtual_base)
+            out.append(type_table[entity_table[class_bases[x.first_base + i]]
+                                      .type.unqualified()]
+                           .entity);
     for (uint32_t i = 0; i < x.member_count; i++) {
         const entity &m = entity_table[class_members[x.first_member + i]];
         if (m.base_subobject)
@@ -1463,19 +1499,25 @@ analysis_result semantic_analysis::implicit_copy(entity_index c, node_index n,
                 return r;
             statements.append(statement_node(
                 semantic_kind::expression_statement, at, value.node));
+            if (entity_table[e].virtual_base)
+                statements.back() = complete_object(statements.back());
             continue;
         }
         if (record.kind == type_kind::lvalue_reference ||
             record.kind == type_kind::rvalue_reference)
             return not_supported(n, "class.copy.ctor");
         if (record.kind == type_kind::class_type &&
-            entity_table[e].field == UINT32_MAX)
+            entity_table[e].field == UINT32_MAX &&
+            (!entity_table[e].virtual_base ||
+             !entity_table[record.entity].member_count))
             /* an empty base: no bytes */
             continue;
         r = operand_value(n, from);
         if (r != analysis_result::well_formed)
             return r;
         statements.append(subobject_store(object, type, at, from.node));
+        if (entity_table[e].virtual_base)
+            statements.back() = complete_object(statements.back());
     }
     /* [class.cdtor]/4: the copy's virtual table pointer is its class's,
        not the source's */
@@ -1520,6 +1562,8 @@ uint32_t semantic_analysis::subobject_destructions(entity_index c,
                                              object.node, destructor);
         statements.append(
             statement_node(semantic_kind::expression_statement, at, destroyed));
+        if (entity_table[order[i]].virtual_base)
+            statements.back() = complete_object(statements.back());
     }
     if (statements.empty())
         return 0;

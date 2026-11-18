@@ -450,6 +450,23 @@ struct entity {
        class: its record in semantic_analysis::dynamic_classes plus one, 0
        if it is none */
     uint32_t dynamic = 0;
+    /* a base class subobject that is a virtual base ([class.mi]/4): a
+       direct one (its base-specifier has virtual) in class_bases, or one
+       of a class's virtual bases, direct or indirect
+       (semantic_analysis::class_virtual_bases), whose offset is its
+       offset in a complete object of the class; neither is a member */
+    bool virtual_base = false;
+    /* a class: its virtual bases, direct and indirect, are
+       semantic_analysis::class_virtual_bases[first_virtual_base ..
+       first_virtual_base + virtual_base_count), in the order of their
+       construction ([class.base.init]/13.1: depth-first left-to-right, a
+       base's virtual bases before it) */
+    uint32_t first_virtual_base = 0, virtual_base_count = 0;
+    /* a class: [abi:general] nvsize and nvalign, its size and alignment
+       without its virtual bases (a base subobject's); for a class
+       without virtual bases nvsize is its data size */
+    uint64_t nv_size = 0;
+    uint32_t nv_alignment = 0;
 };
 
 /* [class.virtual], [abi:vtable-components]: what a dynamic class adds to
@@ -476,6 +493,12 @@ struct dynamic_class {
        of a virtual destructor calls, and whether it takes the size */
     entity_index deallocation = 0;
     bool deallocation_sized = false;
+    /* [abi:vtable-components]: the virtual bases whose offsets the primary
+       virtual table has, nearest the address point first
+       (semantic_analysis::vbase_entries[first_vbase_entry ..
+       first_vbase_entry + vbase_entry_count), classes): the primary
+       base's, then the class's others in inheritance graph order */
+    uint32_t first_vbase_entry = 0, vbase_entry_count = 0;
 };
 
 /* one virtual table of a group ([abi:vtable-general]): the offset of the
@@ -487,6 +510,14 @@ struct dynamic_class {
 struct vtable_group {
     uint64_t offset = 0;
     uint32_t first_slot = 0, slot_count = 0;
+    /* the class whose primary virtual table this is (its vbase offsets
+       are the table's, [abi:vtable-components]); when the subobject is
+       in a virtual base, that base's class and the subobject's offset in
+       it (offset is then in the complete object); whether the table is
+       the virtual base's own primary one, which has vcall offsets */
+    entity_index subobject_class = 0, in_virtual_base = 0;
+    uint64_t offset_in_virtual = 0;
+    bool virtual_primary = false;
 };
 
 /* one declaration of an entity: the syntax node that declares it */
@@ -981,6 +1012,24 @@ class semantic_analysis
     owned_array<entity_index> class_members;
     /* the direct base class subobjects of the classes (entity::first_base) */
     owned_array<entity_index> class_bases;
+    /* the virtual base subobjects of the classes
+       (entity::first_virtual_base) */
+    owned_array<entity_index> class_virtual_bases;
+    /* the classes of the vbase offsets of the virtual tables
+       (dynamic_class::first_vbase_entry) */
+    owned_array<entity_index> vbase_entries;
+    /* the virtual base subobject of class c whose class is v, 0 if v is
+       no virtual base of c */
+    entity_index virtual_base_of(entity_index c, entity_index v) const;
+    /* the virtual bases of class c in inheritance graph order (preorder,
+       [abi:class-types] III), classes */
+    void virtual_bases_in_graph_order(entity_index c,
+                                      owned_array<entity_index> &out) const;
+    /* the base class subobjects of class base in an object of class c:
+       through non-virtual bases only, and in all ([class.mi]/4: a virtual
+       base is one subobject however many paths lead to it) */
+    uint32_t nonvirtual_subobjects(entity_index c, entity_index base) const;
+    uint32_t base_subobjects(entity_index c, entity_index base) const;
     /* the dynamic classes (entity::dynamic) and their virtual tables'
        functions (dynamic_class::first_slot) */
     owned_array<dynamic_class> dynamic_classes;
@@ -993,6 +1042,7 @@ class semantic_analysis
     owned_array<bool> vtable_own;
     struct group_source {
         entity_index base = 0;
+        entity_index virtual_class = 0;
         uint64_t offset = 0;
     };
     owned_array<group_source> vtable_group_sources;
@@ -1755,6 +1805,12 @@ class semantic_analysis
        when more than one path leads to it ([class.member.lookup]) */
     entity_index base_step(entity_index c, entity_index base,
                            bool &ambiguous) const;
+    entity_index nonvirtual_step(entity_index c, entity_index base) const;
+    entity_index virtual_route(entity_index c, entity_index base) const;
+    bool virtual_base_accessible(entity_index c, entity_index v) const;
+    bool public_path_to(entity_index c, entity_index v) const;
+    analysis_result to_virtual_base(token_index at, entity_index c,
+                                    entity_index v, expression_meaning &m);
     /* [class.member.lookup]: name looked up in class c and its bases;
        ambiguous when found in more than one base */
     entity_index class_member_lookup(entity_index c, uint32_t name,
@@ -1792,6 +1848,10 @@ class semantic_analysis
                              qualified_type type, token_index at,
                              uint32_t value);
     /* a block of the statements */
+    /* an expression_statement's d: run only by the complete object
+       constructor or destructor */
+    static constexpr uint32_t complete_object_only = 1;
+    uint32_t complete_object(uint32_t statement);
     uint32_t block_statement(token_index at,
                              const owned_array<uint32_t> &statements);
     /* the classes of the bases and members (arrays' elements) of c */

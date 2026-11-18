@@ -568,6 +568,8 @@ static void dump_layout_claims(const semantic_analysis &analysis,
         for (uint32_t i = 0; i < x.base_count; i++) {
             const entity &b =
                 analysis.entity_table[analysis.class_bases[x.first_base + i]];
+            if (b.virtual_base)
+                continue;
             name.clear();
             if (!layout_class_name(
                     analysis, tokens,
@@ -600,6 +602,23 @@ static void dump_layout_claims(const semantic_analysis &analysis,
                     tokens.pp.identifier_spelling(m.name - 1, &length);
                 vbuffer_append(lines.get(), spelled, length);
             }
+            vbuffer_string_append(lines.get(), "\n");
+        }
+        /* [abi:class-types] III: the virtual bases, after the members, in
+           the order of clang's dump (the order of their construction) */
+        for (uint32_t i = 0; i < x.virtual_base_count; i++) {
+            const entity &b =
+                analysis.entity_table
+                    [analysis.class_virtual_bases[x.first_virtual_base + i]];
+            name.clear();
+            if (!layout_class_name(
+                    analysis, tokens,
+                    analysis.type_table[b.type.unqualified()].entity, false,
+                    name.get()))
+                nameable = false;
+            vbuffer_format_append(lines.get(), "base\t%llu\t",
+                                  static_cast<unsigned long long>(b.offset));
+            vbuffer_append(lines.get(), name.data(), name.size());
             vbuffer_string_append(lines.get(), "\n");
         }
         if (nameable)

@@ -173,8 +173,14 @@ node_index parser::class_or_decltype(scope_index *region)
  *
  * Each base class subobject gets its offset with the class's layout, at
  * the closing } ([abi:class-types], abi/itanium/layout.cpp); one that is
- * not empty is also a field of the class.  Virtual bases ([class.mi]/4)
- * are not analysed.
+ * not empty is also a field of the class.  [class.mi]/4: "A base class
+ * specifier that contains the keyword virtual specifies a virtual base
+ * class.  For each distinct base class that is specified virtual, the
+ * most derived object shall contain a single base class subobject of that
+ * type": a virtual base is no field, and the class's virtual bases, direct
+ * and indirect, are listed with it (entity::first_virtual_base) in the
+ * order of their construction ([class.base.init]/13.1), each a subobject
+ * entity whose offset the layout gives (abi/itanium/layout.cpp).
  */
 analysis_result semantic_analysis::base_clause(entity_index c, node_index n,
                                                standard_keyword key)
@@ -197,6 +203,7 @@ analysis_result semantic_analysis::base_clause(entity_index c, node_index n,
     entity_table[c].base_count = 0;
     for (syntax_child specifier : specifiers) {
         uint8_t access = 0;
+        bool is_virtual = false;
         if (key == standard_keyword::class_)
             access = 2;
         syntax_child name = specifier;
@@ -219,7 +226,8 @@ analysis_result semantic_analysis::base_clause(entity_index c, node_index n,
                     access = 2;
                     break;
                 case standard_keyword::virtual_:
-                    return not_supported(specifier.index(), "class.mi");
+                    is_virtual = true;
+                    break;
                 default:
                     return not_supported(specifier.index(), "class.derived");
                 }
@@ -268,8 +276,13 @@ analysis_result semantic_analysis::base_clause(entity_index c, node_index n,
         entity_table[e].base_subobject = true;
         entity_table[e].defined = true;
         entity_table[e].access = access;
+        entity_table[e].virtual_base = is_virtual;
         entity_table.add_declaration(e, current_declaration);
-        if (!entity_table[base].member_count) {
+        if (is_virtual) {
+            /* [class.mi]/4: no member of the class; its offset is in the
+               complete object's layout */
+            entity_table[e].field = UINT32_MAX;
+        } else if (!entity_table[base].member_count) {
             /* [class.derived]/4 (Note): "A base class subobject may be of
                zero size" */
             entity_table[e].field = UINT32_MAX;
@@ -281,7 +294,128 @@ analysis_result semantic_analysis::base_clause(entity_index c, node_index n,
         class_bases.append(e);
         entity_table[c].base_count++;
     }
+    /* [class.base.init]/13.1: the virtual base classes "in the order they
+       appear on a depth-first left-to-right traversal of the directed
+       acyclic graph of base classes": each base's own virtual bases, then
+       the base if it is virtual, each class once */
+    owned_array<entity_index> order;
+    owned_array<entity_index> direct;
+    const entity &x = entity_table[c];
+    for (uint32_t i = 0; i < x.base_count; i++) {
+        entity_index b = class_bases[x.first_base + i];
+        entity_index of = type_table[entity_table[b].type.unqualified()].entity;
+        const entity &bx = entity_table[of];
+        for (uint32_t k = 0; k < bx.virtual_base_count; k++) {
+            entity_index v = class_virtual_bases[bx.first_virtual_base + k];
+            entity_index vc =
+                type_table[entity_table[v].type.unqualified()].entity;
+            bool seen = false;
+            for (entity_index o : order)
+                seen = seen || o == vc;
+            if (!seen) {
+                order.append(vc);
+                direct.append(0);
+            }
+        }
+        if (!entity_table[b].virtual_base)
+            continue;
+        bool seen = false;
+        for (size_t k = 0; k < order.size(); k++)
+            if (order[k] == of) {
+                seen = true;
+                direct[k] = b;
+            }
+        if (!seen) {
+            order.append(of);
+            direct.append(b);
+        }
+    }
+    uint32_t first = static_cast<uint32_t>(class_virtual_bases.size());
+    for (size_t k = 0; k < order.size(); k++) {
+        entity_index v = direct[k];
+        if (!v) {
+            /* an indirect virtual base: a subobject entity of its own */
+            v = entity_table.make(entity_kind::variable, 0, c);
+            entity_table[v].type = entity_table[order[k]].type;
+            entity_table[v].nonstatic_member = true;
+            entity_table[v].base_subobject = true;
+            entity_table[v].virtual_base = true;
+            entity_table[v].defined = true;
+            entity_table[v].field = UINT32_MAX;
+        }
+        class_virtual_bases.append(v);
+    }
+    entity_table[c].first_virtual_base = first;
+    entity_table[c].virtual_base_count = static_cast<uint32_t>(order.size());
     return analysis_result::well_formed;
+}
+
+entity_index semantic_analysis::virtual_base_of(entity_index c,
+                                                entity_index v) const
+{
+    const entity &x = entity_table[c];
+    for (uint32_t i = 0; i < x.virtual_base_count; i++) {
+        entity_index b = class_virtual_bases[x.first_virtual_base + i];
+        if (type_table[entity_table[b].type.unqualified()].entity == v)
+            return b;
+    }
+    return 0;
+}
+
+/* [abi:class-types] III "in inheritance graph order": each direct base in
+   declaration order, a virtual one before its own virtual bases */
+void semantic_analysis::virtual_bases_in_graph_order(
+    entity_index c, owned_array<entity_index> &out) const
+{
+    const entity &x = entity_table[c];
+    for (uint32_t i = 0; i < x.base_count; i++) {
+        entity_index b = class_bases[x.first_base + i];
+        entity_index of = type_table[entity_table[b].type.unqualified()].entity;
+        if (entity_table[b].virtual_base) {
+            bool seen = false;
+            for (entity_index o : out)
+                seen = seen || o == of;
+            if (!seen)
+                out.append(of);
+        }
+        if (entity_table[of].virtual_base_count)
+            virtual_bases_in_graph_order(of, out);
+    }
+}
+
+uint32_t semantic_analysis::nonvirtual_subobjects(entity_index c,
+                                                  entity_index base) const
+{
+    const entity &x = entity_table[c];
+    uint32_t count = 0;
+    for (uint32_t i = 0; i < x.base_count; i++) {
+        entity_index b = class_bases[x.first_base + i];
+        if (entity_table[b].virtual_base)
+            continue;
+        entity_index of = type_table[entity_table[b].type.unqualified()].entity;
+        if (of == base)
+            count++;
+        count += nonvirtual_subobjects(of, base);
+    }
+    return count;
+}
+
+uint32_t semantic_analysis::base_subobjects(entity_index c,
+                                            entity_index base) const
+{
+    uint32_t count = nonvirtual_subobjects(c, base);
+    const entity &x = entity_table[c];
+    for (uint32_t i = 0; i < x.virtual_base_count; i++) {
+        entity_index v =
+            type_table
+                [entity_table[class_virtual_bases[x.first_virtual_base + i]]
+                     .type.unqualified()]
+                    .entity;
+        if (v == base)
+            count++;
+        count += nonvirtual_subobjects(v, base);
+    }
+    return count;
 }
 
 /*
@@ -296,16 +430,14 @@ entity_index semantic_analysis::base_step(entity_index c, entity_index base,
 {
     const entity &x = entity_table[c];
     entity_index found = 0;
-    for (uint32_t i = 0; i < x.base_count; i++) {
+    for (uint32_t i = 0; i < x.base_count && !found; i++) {
         entity_index b = class_bases[x.first_base + i];
         entity_index of = type_table[entity_table[b].type.unqualified()].entity;
-        bool inner = false;
-        if (of == base || base_step(of, base, inner)) {
-            if (found || inner)
-                ambiguous = true;
+        if (of == base || base_subobjects(of, base))
             found = b;
-        }
     }
+    if (found && base_subobjects(c, base) > 1)
+        ambiguous = true;
     return found;
 }
 
@@ -364,6 +496,18 @@ analysis_result semantic_analysis::to_base(token_index at, entity_index base,
             return not_supported(current_declaration, "class.derived");
         if (ambiguous)
             return not_supported(current_declaration, "class.member.lookup");
+        if (!nonvirtual_subobjects(c, base)) {
+            /* through a virtual base: the virtual base base is, or the one
+               with base among its non-virtual bases */
+            entity_index v = virtual_route(c, base);
+            if (!v)
+                return not_supported(current_declaration, "class.mi");
+            analysis_result r = to_virtual_base(at, c, v, m);
+            if (r != analysis_result::well_formed)
+                return r;
+            continue;
+        }
+        step = nonvirtual_step(c, base);
         if (entity_table[step].access && current_class() != c &&
             !in_friend_of(c)) {
             if (current_class())
@@ -428,11 +572,35 @@ analysis_result semantic_analysis::pointer_to_base(token_index at,
 {
     entity_index first = 0;
     bool shifted = false;
+    bool ambiguous = false;
+    if (!base_step(from, to, ambiguous))
+        return not_supported(current_declaration, "class.derived");
+    if (ambiguous)
+        return not_supported(current_declaration, "class.member.lookup");
+    if (!nonvirtual_subobjects(from, to)) {
+        /* [conv.ptr]/3 through a virtual base: its offset is the object's
+           ([abi:vtable-components] vbase offset), the rest of the way
+           constant offsets */
+        entity_index v = virtual_route(from, to);
+        if (!v || v != to)
+            return not_supported(current_declaration, "conv.ptr");
+        if (!virtual_base_accessible(from, v)) {
+            if (current_class())
+                return not_supported(current_declaration, "class.access.base");
+            return ill_formed_at_token(at,
+                                       "if B is an inaccessible base class of "
+                                       "D, a program that necessitates this "
+                                       "conversion is ill-formed",
+                                       "conv.ptr");
+        }
+        m.type = type;
+        converted(m, conversion_kind::derived_to_base);
+        if (m.node)
+            semantics[m.node].b = virtual_base_of(from, v);
+        return analysis_result::well_formed;
+    }
     for (entity_index c = from; c != to;) {
-        bool ambiguous = false;
-        entity_index step = base_step(c, to, ambiguous);
-        if (ambiguous)
-            return not_supported(current_declaration, "class.member.lookup");
+        entity_index step = nonvirtual_step(c, to);
         if (entity_table[step].access && current_class() != c &&
             !in_friend_of(c)) {
             if (current_class())
@@ -464,6 +632,121 @@ analysis_result semantic_analysis::pointer_to_base(token_index at,
     converted(m, conversion_kind::derived_to_base);
     if (m.node)
         semantics[m.node].b = first;
+    return analysis_result::well_formed;
+}
+
+/* the direct non-virtual base of c through which a non-virtual path leads
+   to base */
+entity_index semantic_analysis::nonvirtual_step(entity_index c,
+                                                entity_index base) const
+{
+    const entity &x = entity_table[c];
+    for (uint32_t i = 0; i < x.base_count; i++) {
+        entity_index b = class_bases[x.first_base + i];
+        if (entity_table[b].virtual_base)
+            continue;
+        entity_index of = type_table[entity_table[b].type.unqualified()].entity;
+        if (of == base || nonvirtual_subobjects(of, base))
+            return b;
+    }
+    return 0;
+}
+
+/* the virtual base of c that is base or has base among its non-virtual
+   bases (base reached through no non-virtual path), 0 if none */
+entity_index semantic_analysis::virtual_route(entity_index c,
+                                              entity_index base) const
+{
+    const entity &x = entity_table[c];
+    for (uint32_t i = 0; i < x.virtual_base_count; i++) {
+        entity_index v =
+            type_table
+                [entity_table[class_virtual_bases[x.first_virtual_base + i]]
+                     .type.unqualified()]
+                    .entity;
+        if (v == base || nonvirtual_subobjects(v, base))
+            return v;
+    }
+    return 0;
+}
+
+/* [class.access.base]/4 for virtual base v of c: some path to it public
+   at each step (the first step any where c's members or friends name
+   it) */
+bool semantic_analysis::virtual_base_accessible(entity_index c,
+                                                entity_index v) const
+{
+    bool inside = current_class() == c || in_friend_of(c);
+    const entity &x = entity_table[c];
+    for (uint32_t i = 0; i < x.base_count; i++) {
+        entity_index b = class_bases[x.first_base + i];
+        if (entity_table[b].access && !inside)
+            continue;
+        entity_index of = type_table[entity_table[b].type.unqualified()].entity;
+        if (of == v && entity_table[b].virtual_base)
+            return true;
+        if (of != v && virtual_base_of(of, v) && public_path_to(of, v))
+            return true;
+    }
+    return false;
+}
+
+/* whether a path of public bases leads from c to its virtual base v */
+bool semantic_analysis::public_path_to(entity_index c, entity_index v) const
+{
+    const entity &x = entity_table[c];
+    for (uint32_t i = 0; i < x.base_count; i++) {
+        entity_index b = class_bases[x.first_base + i];
+        if (entity_table[b].access)
+            continue;
+        entity_index of = type_table[entity_table[b].type.unqualified()].entity;
+        if (of == v && entity_table[b].virtual_base)
+            return true;
+        if (of != v && virtual_base_of(of, v) && public_path_to(of, v))
+            return true;
+    }
+    return false;
+}
+
+/*
+ * The glvalue m of class c as its virtual base class subobject of class v
+ * ([class.mi]/4): *(V *)((char *)&m + vbase offset), the offset read from
+ * the object's virtual table ([abi:vtable-components]: "Virtual Base
+ * (vbase) offsets are used to access the virtual bases of an object"),
+ * the lowering's.
+ */
+analysis_result semantic_analysis::to_virtual_base(token_index at,
+                                                   entity_index c,
+                                                   entity_index v,
+                                                   expression_meaning &m)
+{
+    if (m.category != value_category::lvalue)
+        return not_supported(current_declaration, "class.temporary");
+    if (!virtual_base_accessible(c, v)) {
+        if (current_class())
+            return not_supported(current_declaration, "class.access.base");
+        return ill_formed_at_token(at,
+                                   "a base class is accessible only if an "
+                                   "invented public member of it is",
+                                   "class.access.base");
+    }
+    expression_meaning result;
+    result.type =
+        qualified_type::make(entity_table[v].type.unqualified(), m.type.cv());
+    result.category = value_category::lvalue;
+    result.evaluation = constness::not_constant;
+    expression_meaning address;
+    address.type = qualified_type::make(type_table.pointer_to(m.type), cv_none);
+    address.category = value_category::prvalue;
+    address.evaluation = constness::not_constant;
+    address.node = expression_node(semantic_kind::address, address, at, m.node);
+    address.type =
+        qualified_type::make(type_table.pointer_to(result.type), cv_none);
+    converted(address, conversion_kind::derived_to_base);
+    semantics[address.node].b = virtual_base_of(c, v);
+    result.node =
+        expression_node(semantic_kind::indirection, result, at, address.node);
+    m = result;
     return analysis_result::well_formed;
 }
 

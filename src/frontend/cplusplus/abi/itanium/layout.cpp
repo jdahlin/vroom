@@ -17,11 +17,11 @@
  *     III  Virtual base allocation
  *     IV   Finalization: the size rounded up to the alignment
  *
- * A class reaches this file only with rules analysis has: no virtual
- * bases yet, so III has no base to place ([class.mi], R7).  A virtual
- * function declared after the data members moves every one of them (I's
- * virtual table pointer), which is why the layout is not made member by
- * member.
+ * A class reaches this file only with rules analysis has: no primary
+ * base that is virtual (a nearly empty virtual base, [class.mi]).  A
+ * virtual function declared after the data members moves every one of
+ * them (I's virtual table pointer), which is why the layout is not made
+ * member by member.
  *
  * The ABI's prose is cited by section and said in our own words
  * (bench/cxx-spec-refs.py); -fcxx-dump=layout-claims writes what this
@@ -180,7 +180,7 @@ class class_layout
     /* f(class, offset) for every subobject of class `of` at `at`, itself
        included, while it returns true */
     template <typename F>
-    bool each_subobject(entity_index of, uint64_t at, F &&f);
+    bool each_subobject(entity_index of, uint64_t at, bool complete, F &&f);
     /* the objects of class `of` a member of that class type (or an array
        of them) is, at most most_recorded_elements (too_many past it) */
     uint64_t elements(const entity &m, entity_index of)
@@ -195,17 +195,17 @@ class class_layout
         }
         return count;
     }
-    bool conflicts(entity_index of, uint64_t at);
-    void record(entity_index of, uint64_t at);
+    bool conflicts(entity_index of, uint64_t at, bool complete);
+    void record(entity_index of, uint64_t at, bool complete);
     bool elements_conflict(entity_index of, uint64_t at, uint64_t element,
                            uint64_t count)
     {
         for (uint64_t k = 0; k < count; k++)
-            if (conflicts(of, at + k * element))
+            if (conflicts(of, at + k * element, true))
                 return true;
         return false;
     }
-    const char *base(uint32_t number);
+    const char *base(entity &b);
     void bit_field(entity &m);
     const char *data_member(entity &m);
 };
@@ -213,17 +213,32 @@ class class_layout
 /*
  * Every subobject of a component of class type `of` placed at `at`: the
  * component, its bases and its members of class type (each element of an
- * array of them), at their offsets in it.  Returns false when f does.
+ * array of them), at their offsets in it, and when the component is a
+ * complete object (a member, not a base) its virtual bases.  Returns false
+ * when f does.
  */
 template <typename F>
-bool class_layout::each_subobject(entity_index of, uint64_t at, F &&f)
+bool class_layout::each_subobject(entity_index of, uint64_t at, bool complete,
+                                  F &&f)
 {
     if (!f(of, at))
         return false;
     const entity &x = table[of];
     for (uint32_t i = 0; i < x.base_count; i++) {
         const entity &b = table[analysis.class_bases[x.first_base + i]];
-        if (!each_subobject(class_of_component(analysis, b), at + b.offset, f))
+        /* a virtual base is placed by the most derived class (III) */
+        if (b.virtual_base)
+            continue;
+        if (!each_subobject(class_of_component(analysis, b), at + b.offset,
+                            false, f))
+            return false;
+    }
+    /* a complete object (a member's) has its virtual bases too */
+    for (uint32_t i = 0; complete && i < x.virtual_base_count; i++) {
+        const entity &b =
+            table[analysis.class_virtual_bases[x.first_virtual_base + i]];
+        if (!each_subobject(class_of_component(analysis, b), at + b.offset,
+                            false, f))
             return false;
     }
     for (uint32_t i = 0; i < x.member_count; i++) {
@@ -234,7 +249,7 @@ bool class_layout::each_subobject(entity_index of, uint64_t at, F &&f)
         uint64_t element = table[inner].size;
         uint64_t count = elements(m, inner);
         for (uint64_t k = 0; k < count; k++)
-            if (!each_subobject(inner, at + m.offset + k * element, f))
+            if (!each_subobject(inner, at + m.offset + k * element, true, f))
                 return false;
     }
     return true;
@@ -247,10 +262,10 @@ bool class_layout::each_subobject(entity_index of, uint64_t at, F &&f)
  * same type have distinct addresses.  A subobject that is not empty
  * occupies bytes no other component of the class shares.
  */
-bool class_layout::conflicts(entity_index of, uint64_t at)
+bool class_layout::conflicts(entity_index of, uint64_t at, bool complete)
 {
     bool found = false;
-    each_subobject(of, at, [&](entity_index d, uint64_t offset) {
+    each_subobject(of, at, complete, [&](entity_index d, uint64_t offset) {
         if (!empty_class(analysis, d))
             return true;
         for (size_t i = 0; i < empty_subobjects.size(); i++)
@@ -265,9 +280,9 @@ bool class_layout::conflicts(entity_index of, uint64_t at)
 }
 
 /* the empty subobjects of a component placed at `at` */
-void class_layout::record(entity_index of, uint64_t at)
+void class_layout::record(entity_index of, uint64_t at, bool complete)
 {
-    each_subobject(of, at, [&](entity_index d, uint64_t offset) {
+    each_subobject(of, at, complete, [&](entity_index d, uint64_t offset) {
         if (empty_class(analysis, d))
             empty_subobjects.append(empty_subobject{d, offset});
         return true;
@@ -304,31 +319,36 @@ const char *class_layout::initialization()
  * size for a POD for the purpose of layout, [abi:pod]).  When D conflicts
  * there (conflicts above), the offset moves by nvalign(D), an empty base's
  * starting again from dsize(C) rounded up; an empty base raises sizeof(C)
- * to cover it and leaves dsize(C) where it was.
+ * to cover it and leaves dsize(C) where it was.  A base with virtual
+ * bases takes its nvsize and nvalign, its virtual bases being the most
+ * derived class's (III).
  */
-const char *class_layout::base(uint32_t number)
+const char *class_layout::base(entity &b)
 {
-    const entity &x = table[c];
-    entity &b = table[analysis.class_bases[x.first_base + number]];
     entity_index of = class_of_component(analysis, b);
     const entity &d = table[of];
-    raise_alignment(d.alignment);
+    uint64_t base_alignment = d.alignment, base_data = d.data_size;
+    if (d.virtual_base_count) {
+        base_alignment = d.nv_alignment;
+        base_data = d.nv_size;
+    }
+    raise_alignment(base_alignment);
     bool empty = empty_class(analysis, of);
     uint64_t at = 0;
     if (!empty)
-        at = align_up(data_size(), d.alignment);
-    if (conflicts(of, at)) {
+        at = align_up(data_size(), base_alignment);
+    if (conflicts(of, at, false)) {
         if (empty)
-            at = align_up(data_size(), d.alignment);
-        while (conflicts(of, at))
-            at += d.alignment;
+            at = align_up(data_size(), base_alignment);
+        while (conflicts(of, at, false))
+            at += base_alignment;
     }
     b.offset = at;
-    record(of, at);
+    record(of, at, false);
     if (empty) {
         raise_size(at + d.size);
     } else {
-        data_bits = (at + d.data_size) * 8;
+        data_bits = (at + base_data) * 8;
         raise_size(data_size());
     }
     if (too_many)
@@ -422,7 +442,7 @@ const char *class_layout::data_member(entity &m)
         while (elements_conflict(of, m.offset, element, count))
             m.offset += member_alignment;
         for (uint64_t k = 0; k < count; k++)
-            record(of, m.offset + k * element);
+            record(of, m.offset + k * element, true);
         data_bits = (m.offset + member_size) * 8;
     }
     raise_size(data_size());
@@ -443,7 +463,10 @@ const char *class_layout::allocation_of_members()
 {
     const entity &x = table[c];
     for (uint32_t i = 0; i < x.base_count; i++) {
-        const char *rule = base(i);
+        entity &b = table[analysis.class_bases[x.first_base + i]];
+        if (b.virtual_base)
+            continue;
+        const char *rule = base(b);
         if (rule)
             return rule;
     }
@@ -462,10 +485,29 @@ const char *class_layout::allocation_of_members()
     return nullptr;
 }
 
-/* [abi:class-types] III: the virtual bases, after everything else.  No
-   class with a virtual base is analysed yet ([class.mi]). */
+/*
+ * [abi:class-types] III: the non-virtual part's size and alignment are
+ * nvsize(C) and nvalign(C); then each virtual base, direct or indirect,
+ * in inheritance graph order, is allocated as a non-virtual base is (II),
+ * its offset that of the subobject in a complete object.  No virtual base
+ * is a primary base here (dynamic_class_record), so none is an indirect
+ * primary base left out.
+ */
 const char *class_layout::virtual_base_allocation()
 {
+    entity &x = table[c];
+    x.nv_size = size;
+    x.nv_alignment = alignment;
+    if (!x.virtual_base_count)
+        return nullptr;
+    owned_array<entity_index> order;
+    analysis.virtual_bases_in_graph_order(c, order);
+    for (entity_index v : order) {
+        entity &b = table[analysis.virtual_base_of(c, v)];
+        const char *rule = base(b);
+        if (rule)
+            return rule;
+    }
     return nullptr;
 }
 
@@ -488,6 +530,10 @@ const char *class_layout::finalization()
     x.data_size = data_size();
     if (pod_for_layout(analysis, c))
         x.data_size = x.size;
+    if (!x.virtual_base_count) {
+        x.nv_size = x.data_size;
+        x.nv_alignment = x.alignment;
+    }
     return nullptr;
 }
 

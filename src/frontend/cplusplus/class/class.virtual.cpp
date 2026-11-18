@@ -177,20 +177,38 @@ analysis_result semantic_analysis::dynamic_class_record(entity_index c,
        entity_table's (its bases, members and type, read here, stay) */
     const entity x = entity_table[c];
     entity_index primary = 0;
+    bool nonvirtual_before = false;
     for (uint32_t i = 0; i < x.base_count; i++) {
-        entity_index b = type_table[entity_table[class_bases[x.first_base + i]]
-                                        .type.unqualified()]
-                             .entity;
-        if (!entity_table[b].dynamic)
+        entity_index specifier = class_bases[x.first_base + i];
+        if (entity_table[specifier].virtual_base)
             continue;
-        if (i && !primary)
+        entity_index b =
+            type_table[entity_table[specifier].type.unqualified()].entity;
+        if (!entity_table[b].dynamic) {
+            nonvirtual_before = true;
+            continue;
+        }
+        if (nonvirtual_before && !primary)
             /* a primary base that is not the first base: allocated first
                ([abi:class-types] II), out of declaration order */
             return not_supported(n, "class.virtual");
         if (!primary)
-            primary = class_bases[x.first_base + i];
+            primary = specifier;
     }
-    bool any = primary != 0;
+    /* [abi:class-types] I: without a non-virtual dynamic base, "a nearly
+       empty virtual base class" would be the primary base, sharing the
+       virtual table pointer: not analysed */
+    owned_array<entity_index> virtual_order;
+    virtual_bases_in_graph_order(c, virtual_order);
+    if (!primary)
+        for (entity_index v : virtual_order)
+            if (entity_table[v].dynamic &&
+                entity_table[v].nv_size == pointer_size())
+                return not_supported(n, "class.mi");
+    /* [abi:definitions]: a dynamic class "requires a virtual table pointer
+       (because it or its bases have one or more virtual member functions
+       or virtual base classes)" */
+    bool any = primary != 0 || x.virtual_base_count;
     for (const declared_virtual &v : declared_virtuals)
         if (v.c == c)
             any = true;
@@ -297,19 +315,49 @@ analysis_result semantic_analysis::dynamic_class_record(entity_index c,
     vtable_group primary_group;
     primary_group.first_slot = d.first_slot;
     primary_group.slot_count = d.slot_count;
+    primary_group.subobject_class = c;
     vtable_groups.append(primary_group);
     vtable_group_sources.append(group_source{});
+    /* [abi:vtable-components]: the primary virtual table's vbase offsets,
+       the primary base's first ("in classes sharing a virtual table with
+       a primary base class, the vcall and vbase offsets added by the
+       derived class all come before the vcall and vbase offsets required
+       by the base class"), then the class's other virtual bases in
+       inheritance graph order */
+    d.first_vbase_entry = static_cast<uint32_t>(vbase_entries.size());
+    if (pd)
+        for (uint32_t k = 0; k < pd->vbase_entry_count; k++)
+            vbase_entries.append(vbase_entries[pd->first_vbase_entry + k]);
+    for (entity_index v : virtual_order) {
+        bool seen = false;
+        for (uint32_t k = d.first_vbase_entry; k < vbase_entries.size(); k++)
+            seen = seen || vbase_entries[k] == v;
+        if (!seen)
+            vbase_entries.append(v);
+    }
+    d.vbase_entry_count =
+        static_cast<uint32_t>(vbase_entries.size()) - d.first_vbase_entry;
     /* then the secondary virtual tables: the primary base's own secondary
        ones, then each other dynamic base's group, each slot the class
        overrides replaced (called through a this-adjusting thunk) */
-    bool secondary_destructor = false;
-    auto secondary = [&](entity_index base, const dynamic_class *bd,
-                         uint32_t from) {
+    bool secondary_destructor = false, across_virtual = false;
+    /* the groups of a base's virtual table group that are not in one of
+       its virtual bases (each virtual base's are the class's own, after
+       the others) */
+    auto secondary = [&](entity_index base, entity_index virtual_class,
+                         const dynamic_class *bd, uint32_t from) {
         for (uint32_t g = from; g < bd->group_count; g++) {
-            const vtable_group &bg = vtable_groups[bd->first_group + g];
+            /* a copy: vtable_groups grows below */
+            const vtable_group bg = vtable_groups[bd->first_group + g];
+            if (bg.in_virtual_base)
+                continue;
             vtable_group group;
             group.first_slot = static_cast<uint32_t>(vtable_slots.size());
             group.slot_count = bg.slot_count;
+            group.subobject_class = bg.subobject_class;
+            group.in_virtual_base = virtual_class;
+            group.offset_in_virtual = bg.offset;
+            group.virtual_primary = virtual_class && g == 0;
             for (uint32_t k = 0; k < bg.slot_count; k++) {
                 copy(bg.first_slot + k);
                 if (entity_table[vtable_slots.back()].special ==
@@ -322,29 +370,42 @@ analysis_result semantic_analysis::dynamic_class_record(entity_index c,
                         overrides_function(v.f, vtable_slots.back())) {
                         vtable_slots.back() = v.f;
                         vtable_own.back() = true;
+                        /* [abi:thunks]: overriding a function of a virtual
+                           base needs a virtual thunk (its vcall offset):
+                           not made */
+                        if (virtual_class)
+                            across_virtual = true;
                     }
             }
-            /* bg is an element of vtable_groups: read before the append,
-               which may move it */
             group_source source;
             source.base = base;
+            source.virtual_class = virtual_class;
             source.offset = bg.offset;
             vtable_groups.append(group);
             vtable_group_sources.append(source);
         }
     };
     if (pd)
-        secondary(primary, pd, 1);
+        secondary(primary, 0, pd, 1);
     for (uint32_t i = 0; i < x.base_count; i++) {
         entity_index base = class_bases[x.first_base + i];
-        if (base == primary)
+        if (base == primary || entity_table[base].virtual_base)
             continue;
         const dynamic_class *bd = dynamic_of(
             type_table[entity_table[base].type.unqualified()].entity);
         if (bd)
-            secondary(base, bd, 0);
+            secondary(base, 0, bd, 0);
+    }
+    /* [abi:vtable-construction] category 3: then a virtual table for each
+       dynamic virtual base, in inheritance graph order */
+    for (entity_index v : virtual_order) {
+        const dynamic_class *vd = dynamic_of(v);
+        if (vd)
+            secondary(virtual_base_of(c, v), v, vd, 0);
     }
     d.group_count = static_cast<uint32_t>(vtable_groups.size()) - d.first_group;
+    if (across_virtual)
+        return not_supported(n, "class.mi");
     if (secondary_destructor)
         return not_supported(n, "class.dtor");
     if (destructor && entity_table[destructor].virtual_) {

@@ -520,6 +520,10 @@ ast_qualified_type c_lowering::class_type(entity_index e, token_index at)
         fail("a class whose definition was not analysed", at);
         return ast_builder_type_basic(AST_TYPE_INT);
     }
+    if (x.virtual_base_count) {
+        fail("a class with virtual bases", at);
+        return ast_builder_type_basic(AST_TYPE_INT);
+    }
     owned_buffer name;
     spelling(e, name);
     if (!x.name && x.linkage_name) {
