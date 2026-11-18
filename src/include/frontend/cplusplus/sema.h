@@ -2328,6 +2328,11 @@ class semantic_analysis
     /* the access of the member-declaration analysed (an enumeration's and
        its enumerators' in a class) */
     uint8_t declaration_access = 0;
+    /* [dcl.typedef] in a class: a member typedef-name */
+    analysis_result member_typedef(entity_index c, node_index declaration,
+                                   token_index id, qualified_type type,
+                                   const specified &s,
+                                   const declarator_meaning &m, uint8_t access);
     analysis_result member_bit_field(entity_index c, node_index declaration,
                                      syntax_child d, const specified &s,
                                      uint8_t access);
@@ -2666,6 +2671,10 @@ class semantic_analysis
     /* [temp.param]/6: a non-type template-parameter's type with rules
        here; one whose arguments are addresses */
     bool structural_parameter_type(qualified_type t) const;
+    /* [temp.param]/4: the position of the earlier type parameter of the
+       same template-parameter-list that is t, UINT32_MAX if none */
+    uint32_t own_type_parameter_position(qualified_type t, entity_index scope,
+                                         uint32_t first) const;
     bool address_parameter_type(qualified_type t) const;
     /* [temp.arg.nontype]/3: an argument for one of those */
     analysis_result address_argument(node_index at, qualified_type to,

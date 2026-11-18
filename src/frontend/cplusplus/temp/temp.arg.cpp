@@ -123,7 +123,6 @@ analysis_result semantic_analysis::template_argument_for(
     syntax_child written, const template_argument *before,
     template_argument &out)
 {
-    (void)before;
     const function_template ft = function_templates[template_index - 1];
     entity_index p = template_parameter_entities[ft.first_parameter + position];
     out = template_argument();
@@ -137,6 +136,19 @@ analysis_result semantic_analysis::template_argument_for(
     if (syntax_is(tree, written, syntax_kind::type_id))
         return not_supported(at, "temp.arg");
     qualified_type to = entity_table[p].type;
+    /* [temp.param]/4: a parameter whose type is an earlier type parameter
+       of the template (template <class T, T v>): that argument's type, the
+       cv-qualifiers ignored (/6) */
+    uint32_t typed_by = own_type_parameter_position(
+        to, entity_table[p].enclosing, ft.first_parameter);
+    if (typed_by != UINT32_MAX) {
+        if (!before || typed_by >= position ||
+            before[typed_by].kind != template_argument::kind_t::type)
+            return not_supported(at, "temp.arg.nontype");
+        to = qualified_type::make(before[typed_by].type.unqualified(), cv_none);
+        if (!structural_parameter_type(to))
+            return not_supported(at, "temp.arg.nontype");
+    }
     /* in a template's own declaration, a non-type template-parameter's
        name: a value dependent argument ([temp.dep.constexpr]/2), of a
        parameter of the same type */
