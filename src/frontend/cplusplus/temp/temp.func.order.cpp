@@ -94,8 +94,7 @@ bool more_cv(unsigned a, unsigned b)
  * value.
  */
 bool semantic_analysis::at_least_as_specialized(uint32_t f, uint32_t g,
-                                                size_t arguments,
-                                                bool &unknown) const
+                                                size_t arguments, bool &unknown)
 {
     const function_template ff = function_templates[f - 1];
     const function_template gg = function_templates[g - 1];
@@ -215,8 +214,7 @@ bool semantic_analysis::at_least_as_specialized(uint32_t f, uint32_t g,
 }
 
 int semantic_analysis::function_template_order(uint32_t f, uint32_t g,
-                                               size_t arguments,
-                                               bool &unknown) const
+                                               size_t arguments, bool &unknown)
 {
     unknown = false;
     const uint32_t both[2] = {f, g};
@@ -288,7 +286,7 @@ int semantic_analysis::function_template_order(uint32_t f, uint32_t g,
  * t's arguments from s's.
  */
 bool semantic_analysis::class_at_least_as_specialized(uint32_t s, uint32_t t,
-                                                      bool &unknown) const
+                                                      bool &unknown)
 {
     const function_template ss = function_templates[s - 1];
     const function_template tt = function_templates[t - 1];

@@ -468,6 +468,16 @@ struct entity {
     /* ... and, its underlying type not fixed, the type it promotes to
        ([conv.prom]/4) */
     fundamental_type promoted = fundamental_type::none;
+    /* a function template's specialization ([temp.spec]): its
+       instantiation record (semantic_analysis::instantiations) plus one;
+       a function template (template_entity) or one of its type
+       parameters: its function_template record plus one */
+    uint32_t instantiation = 0;
+    /* a function template's specialization, a member function of a class
+       template's specialization or such a class: the subject of an
+       explicit instantiation ([temp.explicit]/2) declaration (extern) or
+       definition */
+    instantiation_kind explicitly_instantiated = instantiation_kind::none;
     /* a non-static member function: [class.virtual]/2 a virtual function
        (declared virtual, or overriding one), pure ([class.abstract]/2),
        and its slot in the virtual table of its class (the index of its
@@ -547,16 +557,6 @@ struct vtable_group {
     entity_index subobject_class = 0, in_virtual_base = 0;
     uint64_t offset_in_virtual = 0;
     bool virtual_primary = false;
-    /* a function template's specialization ([temp.spec]): its
-       instantiation record (semantic_analysis::instantiations) plus one;
-       a function template (template_entity) or one of its type
-       parameters: its function_template record plus one */
-    uint32_t instantiation = 0;
-    /* a function template's specialization, a member function of a class
-       template's specialization or such a class: the subject of an
-       explicit instantiation ([temp.explicit]/2) declaration (extern) or
-       definition */
-    instantiation_kind explicitly_instantiated = instantiation_kind::none;
 };
 
 /* one declaration of an entity: the syntax node that declares it */
@@ -1199,7 +1199,6 @@ class semantic_analysis
     /* whether a class is trivially copyable and has a trivial destructor:
        its objects are copied as their bytes, passed in registers */
     bool trivial_class(entity_index c) const;
-    bool trivial_defaulted_default_constructor(entity_index c) const;
     /* the explicit instantiation a function is the subject of, its own or
        its class's ([temp.explicit]/10) */
     instantiation_kind explicitly_instantiated(entity_index f) const;
@@ -1207,9 +1206,13 @@ class semantic_analysis
        analysis cannot tell; basic/basic.types.cpp) */
     constness literal_type(qualified_type t) const;
     constness literal_class(entity_index c) const;
+    bool trivial_defaulted_default_constructor(entity_index c) const;
     bool copies_bytes(entity_index c) const;
     bool is_copy_constructor(entity_index c, entity_index k) const;
     bool declares_move_constructor(entity_index c) const;
+    /* a user-declared copy constructor whose parameter is an lvalue reference
+       ([class.copy.ctor]/1) */
+    bool declares_copy_constructor(entity_index c) const;
     bool copy_assignment_deleted(entity_index c) const;
     bool default_constructor_deleted(entity_index c) const;
     bool default_constructed(entity_index c, entity_index k) const;
@@ -2368,13 +2371,6 @@ class semantic_analysis
        initializer that has one is the evaluator's to decide
        ([basic.start.static]/2) */
     uint32_t constexpr_calls = 0;
-    /* [class.mem]/6: member function bodies of nested classes, analysed
-       at the closing } of the outermost class being defined */
-    struct deferred_body {
-        entity_index c;
-        node_index body;
-    };
-    owned_array<deferred_body> nested_bodies;
 
     /* ---- instantiation (sema/instantiation.cpp, doc/PLAN-cxx-sema.md
        3.5) ----
@@ -2728,7 +2724,10 @@ class semantic_analysis
        (set: deduced or given) */
     bool deduce_type(qualified_type p, qualified_type a,
                      owned_array<template_argument> &deduced,
-                     owned_array<bool> &set, bool exact = false) const;
+                     owned_array<bool> &set, bool exact = false);
+    /* t without the cv-qualifiers cv, an array's taken from its elements
+       ([basic.type.qualifier]/3) */
+    qualified_type remove_cv(qualified_type t, uint32_t cv);
     /* [temp.over]/1: the usable function templates (indices plus one) of
        a held name, in declaration order */
     void function_template_overloads(entity_index held,
@@ -2738,13 +2737,12 @@ class semantic_analysis
        -1 when g is more than f, 0 when neither; unknown set when analysis
        cannot tell */
     int function_template_order(uint32_t f, uint32_t g, size_t arguments,
-                                bool &unknown) const;
+                                bool &unknown);
     bool at_least_as_specialized(uint32_t f, uint32_t g, size_t arguments,
-                                 bool &unknown) const;
+                                 bool &unknown);
     /* [temp.class.order]: whether partial specialization s (index plus
        one) is at least as specialized as t */
-    bool class_at_least_as_specialized(uint32_t s, uint32_t t,
-                                       bool &unknown) const;
+    bool class_at_least_as_specialized(uint32_t s, uint32_t t, bool &unknown);
     owned_array<template_argument> template_arguments;
     /* [temp.variadic]: the elements of the packs among template arguments
        (template_argument::kind_t::pack) */
@@ -2798,6 +2796,13 @@ class semantic_analysis
                                      uint32_t count,
                                      owned_array<template_argument> &deduced,
                                      bool *failed = nullptr);
+    /* [class.mem]/6: member function bodies of nested classes, analysed
+       at the closing } of the outermost class being defined */
+    struct deferred_body {
+        entity_index c;
+        node_index body;
+    };
+    owned_array<deferred_body> nested_bodies;
     analysis_result function_body(node_index definition, syntax_child compound,
                                   syntax_child ctor_initializer = {});
     /* [class.base.init]: a constructor's member initializations, the

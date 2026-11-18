@@ -2444,6 +2444,19 @@ analysis_result semantic_analysis::template_type(node_index id,
     return analysis_result::well_formed;
 }
 
+qualified_type semantic_analysis::remove_cv(qualified_type t, uint32_t cv)
+{
+    const struct type record = type_table[t.unqualified()];
+    if (record.kind != type_kind::array)
+        return qualified_type::make(t.unqualified(), t.cv() & ~cv);
+    qualified_type element = remove_cv(record.operand, cv);
+    if (record.bound_known)
+        return qualified_type::make(type_table.array_of(element, record.bound),
+                                    t.cv() & ~cv);
+    return qualified_type::make(type_table.array_of_unknown_bound_of(element),
+                                t.cv() & ~cv);
+}
+
 /*
  * [temp.deduct.type]/1: "Template arguments can be deduced in several
  * different contexts, but in each case a type that is specified in terms
@@ -2456,19 +2469,20 @@ analysis_result semantic_analysis::template_type(node_index id,
  */
 bool semantic_analysis::deduce_type(qualified_type p, qualified_type a,
                                     owned_array<template_argument> &deduced,
-                                    owned_array<bool> &set, bool exact) const
+                                    owned_array<bool> &set, bool exact)
 {
     const struct type &pr = type_table[p.unqualified()];
     if (pr.kind == type_kind::template_parameter) {
         /* (P's cv-qualifiers beyond A's: [temp.deduct.call]/4.1's "more
            cv-qualified" deduced A, or 4.2's qualification conversion; the
-           call's conversions check the rest) */
-        if (exact && (p.cv() & ~a.cv()))
+           call's conversions check the rest.  An array's cv-qualifiers are
+           its elements', [basic.type.qualifier]/3) */
+        uint32_t acv = cv_of(type_table, a);
+        if (exact && (p.cv() & ~acv))
             return false;
-        qualified_type value =
-            qualified_type::make(a.unqualified(), a.cv() & ~p.cv());
-        uint64_t i = entity_table[pr.entity].value;
-        if (i >= deduced.size())
+        uint32_t i = static_cast<uint32_t>(entity_table[pr.entity].value);
+        qualified_type value = remove_cv(a, p.cv());
+        if (entity_table[pr.entity].value >= deduced.size())
             return false;
         if (set[i] && !(deduced[i].type == value))
             return false;

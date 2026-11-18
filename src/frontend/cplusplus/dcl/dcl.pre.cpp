@@ -1268,6 +1268,19 @@ analysis_result semantic_analysis::declare_with_initializer(
     if (r != analysis_result::well_formed)
         return r;
     entity_table[declared_entity].bound_unknown = false;
+    /* [expr.const]/5.16 allows the modification of an object "whose
+       lifetime began within the evaluation of E" (a temporary bound to a
+       member of the object being initialized), which the analysis takes
+       for one that is not a constant expression: the evaluator decides
+       for an object of class type */
+    if (s.constexpr_ && value.node &&
+        value.evaluation == constness::not_constant) {
+        qualified_type element = type;
+        while (type_table[element.unqualified()].kind == type_kind::array)
+            element = type_table[element.unqualified()].operand;
+        if (type_table[element.unqualified()].kind == type_kind::class_type)
+            value.evaluation = constness::unknown;
+    }
     /* [basic.start.static]/2: "Constant initialization is performed if a
        variable or temporary object with static or thread storage duration
        is constant-initialized": whether an initializer that invokes a
