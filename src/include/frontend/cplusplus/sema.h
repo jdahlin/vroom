@@ -1840,36 +1840,44 @@ class semantic_analysis
         uint32_t frame = 0, frames = 0;
         /* a break or continue statement being executed ([stmt.jump]) */
         uint8_t jump = 0;
+        /* for the claims (evaluate_analysed_expressions): a function whose
+           body begins after this token is not defined yet where the claim
+           is placed ([expr.const]/5.3); 0: every body counts */
+        token_index defined_before = 0;
     };
-    analysis_result evaluate_node(constant_evaluation &state, uint32_t node,
-                                  constant_value &v, bool &constant);
-    analysis_result evaluate_statement(constant_evaluation &state,
-                                       uint32_t node, bool &constant,
-                                       bool &returned, constant_value &result);
-    analysis_result evaluate_call(constant_evaluation &state, uint32_t node,
-                                  constant_value &v, bool &constant);
-    /* the evaluator's parts (expr/expr.const.evaluate.cpp): the object
-       a glvalue designates among state.objects; the value a glvalue's
-       lvalue-to-rvalue conversion reads; a condition; the arithmetic
-       type the evaluator computes in for t (none: one it has no rules
-       for); a conversion and a binary operator on values */
-    analysis_result evaluate_object(constant_evaluation &state, uint32_t node,
-                                    uint32_t &object, bool &constant);
-    analysis_result evaluate_read(constant_evaluation &state, uint32_t node,
-                                  constant_value &v, bool &constant);
-    analysis_result evaluate_condition(constant_evaluation &state,
-                                       uint32_t node, bool &value,
-                                       bool &constant);
+    /* The evaluator's parts (expr/expr.const.evaluate.cpp).  Each answers
+       constant (with the value), not_constant (not a core constant
+       expression), or unknown where the evaluator has no rules (analysis's
+       unsupported [expr.const]).  evaluate_object: the object a glvalue
+       designates among state.objects; evaluate_read: the value a glvalue's
+       lvalue-to-rvalue conversion reads; evaluate_statement: returned is set
+       by a return statement, with its value in result */
+    constness evaluate_node(constant_evaluation &state, uint32_t node,
+                            constant_value &v);
+    constness evaluate_statement(constant_evaluation &state, uint32_t node,
+                                 bool &returned, constant_value &result);
+    constness evaluate_call(constant_evaluation &state, uint32_t node,
+                            constant_value &v);
+    constness evaluate_object(constant_evaluation &state, uint32_t node,
+                              uint32_t &object);
+    constness evaluate_read(constant_evaluation &state, uint32_t node,
+                            constant_value &v);
+    constness evaluate_condition(constant_evaluation &state, uint32_t node,
+                                 bool &value);
+    /* the index in state.objects of the entity's object in the current
+       frame, or no_frame_object */
+    static constexpr uint32_t no_frame_object = UINT32_MAX;
+    uint32_t frame_object(const constant_evaluation &state,
+                          entity_index e) const;
+    /* the arithmetic type the evaluator computes in for t (none: one it has
+       no rules for); a conversion and a binary operator on values */
     fundamental_type evaluated_type(qualified_type t) const;
-    analysis_result evaluate_conversion(constant_value &v,
-                                        fundamental_type from,
-                                        fundamental_type to, bool &constant);
-    analysis_result evaluate_binary(uint8_t op, fundamental_type t,
-                                    fundamental_type right,
-                                    fundamental_type result,
-                                    const constant_value &x,
-                                    const constant_value &y,
-                                    constant_value &out, bool &constant);
+    constness evaluate_conversion(constant_value &v, fundamental_type from,
+                                  fundamental_type to);
+    constness evaluate_binary(uint8_t op, fundamental_type t,
+                              fundamental_type right, fundamental_type result,
+                              const constant_value &x, const constant_value &y,
+                              constant_value &out);
     /* a value of the arithmetic type t as expression_meaning keeps it, and
        back */
     uint64_t kept_of(fundamental_type t, const constant_value &v) const;

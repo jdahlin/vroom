@@ -1194,27 +1194,30 @@ analysis_result semantic_analysis::declare_with_initializer(
        initializer, which lowering emits as data */
     if ((s.constexpr_ || (!entity_table[declared_entity].automatic &&
                           constexpr_calls != calls_before)) &&
-        value.evaluation == constness::unknown && value.node) {
-        constant_value v;
-        bool constant = false;
-        r = evaluate_constant(declaration, value.node, v, constant);
-        if (r != analysis_result::well_formed)
-            return r;
-        if (constant) {
-            expression_meaning folded;
-            folded.type = semantics[value.node].type;
-            evaluated_meaning(folded, v);
-            semantic_node c;
-            c.kind = semantic_kind::constant;
-            c.type = folded.type;
-            c.evaluation = constness::constant;
-            c.value = folded.value;
-            c.at = semantics[value.node].at;
-            value.node = semantics.add(c);
-            value.evaluation = constness::constant;
-            value.value = folded.value;
-        } else if (s.constexpr_) {
-            value.evaluation = constness::not_constant;
+        value.evaluation == constness::unknown) {
+        /* an initializer with no tree (a list of a class's members, ...)
+           the evaluator cannot run */
+        if (!value.node) {
+            if (s.constexpr_)
+                return not_supported(declaration, "expr.const");
+        } else {
+            constant_value v;
+            bool constant = false;
+            r = evaluate_constant(declaration, value.node, v, constant);
+            if (r != analysis_result::well_formed)
+                return r;
+            if (constant) {
+                expression_meaning folded;
+                folded.type = semantics[value.node].type;
+                folded.category = value_category::prvalue;
+                evaluated_meaning(folded, v);
+                value.node = expression_node(semantic_kind::constant, folded,
+                                             semantics[value.node].at);
+                value.evaluation = constness::constant;
+                value.value = folded.value;
+            } else if (s.constexpr_) {
+                value.evaluation = constness::not_constant;
+            }
         }
     }
     const struct type record = type_table[type.unqualified()];
