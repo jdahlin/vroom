@@ -190,11 +190,29 @@ uint32_t semantic_analysis::operator_identifier(const char *rest, size_t length)
     return tokens.pp.identifier(spelling.data(), spelling.size()) + 1;
 }
 
+uint32_t semantic_analysis::allocation_function_name(allocation_function kind)
+{
+    const char *rest = " new";
+    switch (kind) {
+    case allocation_function::new_array:
+        rest = " new[]";
+        break;
+    case allocation_function::delete_:
+        rest = " delete";
+        break;
+    case allocation_function::delete_array:
+        rest = " delete[]";
+        break;
+    default:
+        break;
+    }
+    return operator_identifier(rest, strlen(rest));
+}
+
 /*
- * The operator-function-id of a declarator: operator @, operator () or
- * operator [].  The operators analysis has no expressions for (class
- * member access, the allocation functions and co_await) are not
- * analysed.
+ * The operator-function-id of a declarator: operator @, operator (),
+ * operator [], or an allocation or deallocation function's name
+ * ([basic.stc.dynamic]/1).  co_await is not analysed.
  */
 analysis_result semantic_analysis::operator_function_id(node_index id,
                                                         declarator_meaning &m)
@@ -202,10 +220,37 @@ analysis_result semantic_analysis::operator_function_id(node_index id,
     const syntax_node &node = tree[id];
     const syntax_child *children = tree.children(id);
     operators_held = true;
+    if ((node.child_count == 2 || node.child_count == 4) &&
+        children[1].is_token() &&
+        tokens[children[1].index()].kind == token_kind::keyword &&
+        (p.keyword_of(tokens[children[1].index()]) == standard_keyword::new_ ||
+         p.keyword_of(tokens[children[1].index()]) ==
+             standard_keyword::delete_)) {
+        bool is_new =
+            p.keyword_of(tokens[children[1].index()]) == standard_keyword::new_;
+        bool array = node.child_count == 4;
+        allocation_function kind = allocation_function::delete_;
+        if (is_new && array)
+            kind = allocation_function::new_array;
+        else if (is_new)
+            kind = allocation_function::new_;
+        else if (array)
+            kind = allocation_function::delete_array;
+        /* a declaration of a global one redeclares the implicit
+           declaration ([basic.stc.dynamic]/2) */
+        implicit_allocation_functions();
+        operators_held = false;
+        m.has_id = true;
+        m.id = children[0].index();
+        m.operator_function = true;
+        m.allocation = kind;
+        tokens.name_token(m.id, allocation_function_name(kind));
+        return analysis_result::well_formed;
+    }
     if (node.child_count < 2 || node.child_count > 3 ||
         !children[0].is_token() || !children[1].is_token() ||
         tokens[children[1].index()].kind != token_kind::operator_or_punctuator)
-        /* new, delete, new[], delete[] and co_await */
+        /* co_await */
         return not_supported(id, "over.oper");
     preprocessing_op_or_punc op = preprocessing_op_or_punc_primary(
         tokens[children[1].index()].op_or_punc);
@@ -262,6 +307,8 @@ bool only_unary(preprocessing_op_or_punc op)
 analysis_result semantic_analysis::operator_function_declaration(node_index n,
                                                                  entity_index f)
 {
+    if (entity_table[f].allocation != allocation_function::none)
+        return allocation_function_declaration(n, f);
     const entity &x = entity_table[f];
     preprocessing_op_or_punc op = x.implemented;
     const struct type &function = type_table[x.type.unqualified()];

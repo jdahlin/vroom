@@ -1103,6 +1103,7 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
         if (m.operator_function) {
             entity_table[e].operator_function = true;
             entity_table[e].implemented = m.implemented;
+            entity_table[e].allocation = m.allocation;
             analysis_result checked =
                 operator_function_declaration(declaration, e);
             if (checked != analysis_result::well_formed)
@@ -1118,7 +1119,15 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
                 return checked;
         }
         if (has_defaults) {
+            if (entity_table[e].allocation != allocation_function::none)
+                /* [basic.stc.dynamic.allocation]/1: "The first parameter
+                   shall not have an associated default argument"; which
+                   parameter has one is known once the defaults are
+                   analysed, after the class */
+                return not_supported(declaration,
+                                     "basic.stc.dynamic.allocation");
             if (entity_table[e].operator_function &&
+                entity_table[e].allocation == allocation_function::none &&
                 entity_table[e].implemented !=
                     preprocessing_op_or_punc::LEFT_PARENTHESIS)
                 /* [over.oper]/10 */

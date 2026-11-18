@@ -1014,6 +1014,7 @@ analysis_result semantic_analysis::declare_with_initializer(
             kind == entity_kind::function) {
             entity_table[declared_entity].operator_function = true;
             entity_table[declared_entity].implemented = m.implemented;
+            entity_table[declared_entity].allocation = m.allocation;
             r = operator_function_declaration(declaration, declared_entity);
         }
         if (r == analysis_result::well_formed && m.literal_operator)

@@ -729,6 +729,26 @@ analysis_result semantic_analysis::call(node_index n, expression_meaning &m)
  * [expr.call]/7: "When a function is called, each parameter is initialized
  * with its corresponding argument."  The call of f, its function chosen.
  */
+analysis_result semantic_analysis::call_function(
+    node_index n, token_index at, entity_index f,
+    const owned_array<expression_meaning> &arguments, expression_meaning &m)
+{
+    analysis_result r = deleted_use(at, f);
+    if (r != analysis_result::well_formed)
+        return r;
+    const entity &x = entity_table[f];
+    expression_meaning callee;
+    callee.type = x.type;
+    callee.category = value_category::lvalue;
+    callee.evaluation = constness::constant;
+    callee.entity = f;
+    callee.node = expression_node(semantic_kind::entity, callee, at, f);
+    owned_array<syntax_child> syntax;
+    for (size_t i = 0; i < arguments.size(); i++)
+        syntax.append(syntax_child{});
+    return call_with(n, callee, x.type, 0, 0, syntax, arguments, m);
+}
+
 analysis_result semantic_analysis::call_with(
     node_index n, expression_meaning &f, qualified_type function_type,
     uint32_t object, entity_index member,

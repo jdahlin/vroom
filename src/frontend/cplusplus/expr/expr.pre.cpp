@@ -107,6 +107,10 @@ analysis_result semantic_analysis::expression_kind(syntax_child e,
         return assignment(n, m);
     case syntax_kind::expression:
         return comma(n, m);
+    case syntax_kind::new_expression:
+        return new_expression(n, m);
+    case syntax_kind::delete_expression:
+        return delete_expression(n, m);
     default:
         return not_supported(n);
     }

@@ -95,6 +95,8 @@ LANGUAGE_FEATURE(modular_left_shift, cplusplus_20, never,
                  "P1236R1: signed integers are two's complement; E1 << E2 is E1 x 2^E2 modulo 2^N")
 LANGUAGE_FEATURE(multidimensional_subscript, cplusplus_23, never,
                  "P2128R6: postfix-expression [ expression-list_opt ]")
+LANGUAGE_FEATURE(sized_deallocation, cplusplus_14, never,
+                 "N3778: operator delete(void*, std::size_t) ([basic.stc.dynamic]/2)")
 /* [cpp] */
 LANGUAGE_FEATURE(long_long, cplusplus_11, never, "N1811: long long, in #if too ([cpp.cond]/12)")
 LANGUAGE_FEATURE(variadic_macros, cplusplus_11, never,

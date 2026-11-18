@@ -217,6 +217,15 @@ enum class constness : uint8_t { constant, not_constant, unknown };
 
 /* [special]: a member function a class's objects are made and ended by */
 enum class special_member : uint8_t { none, constructor, destructor };
+/* [basic.stc.dynamic]/1: operator new, operator new[], operator delete
+   and operator delete[] */
+enum class allocation_function : uint8_t {
+    none,
+    new_,
+    new_array,
+    delete_,
+    delete_array
+};
 
 /* [ext:gnu_attributes] the GNU attributes analysis has rules for, as a
    function's or variable's flags */
@@ -364,6 +373,9 @@ struct entity {
        it implements (its name is operator_name's) */
     bool operator_function = false;
     preprocessing_op_or_punc implemented = {};
+    /* ... or one of the allocation and deallocation functions
+       ([basic.stc.dynamic]/1) */
+    allocation_function allocation = allocation_function::none;
     /* a class: it declares a copy assignment operator
        ([class.copy.assign]/1) */
     bool user_copy_assignment = false;
@@ -679,6 +691,25 @@ enum class semantic_kind : uint8_t {
     /* [class.dtor]/13: a destructor called: a: the object (a glvalue), b:
        the destructor */
     destroy,
+    /* [expr.new]: a: the allocation function's call (a void* prvalue), b:
+       the object's initialization (0: none), a construct node whose
+       object is the allocated node's, or the value stored in it; c: 1 when
+       the allocation function may return a null pointer, which the
+       initialization is skipped for ([expr.new]/20) */
+    new_object,
+    /* the pointer (a prvalue of type) the enclosing new_object's
+       allocation returned, or the enclosing delete_object's operand */
+    allocated,
+    /* [expr.new]/9, /15: an array's size in bytes, its count a times the
+       element's size value; the size no allocation can give (all ones)
+       when the product does not fit in std::size_t */
+    array_size,
+    /* [expr.delete]: a: the operand (a pointer prvalue), b: the
+       destructor's call on *allocated (0: none), c: the deallocation
+       function's call; nothing when the operand is a null pointer.
+       computation: the type of the allocated node, the operand's without
+       the pointee's cv-qualifiers ([expr.delete]/11) */
+    delete_object,
     /* ---- statements ---- */
     /* the statements in list[first .. first + count) */
     block,
@@ -981,6 +1012,7 @@ class semantic_analysis
         /* the declarator-id is an operator-function-id ([over.oper]/1) */
         bool operator_function = false;
         preprocessing_op_or_punc implemented = {};
+        allocation_function allocation = allocation_function::none;
         /* the declarator-id is a literal-operator-id ([over.literal]) */
         bool literal_operator = false;
     };
@@ -1827,6 +1859,13 @@ class semantic_analysis
                               const owned_array<syntax_child> &arguments,
                               const owned_array<expression_meaning> &early,
                               expression_meaning &m);
+    /* [expr.call]: the call of the function f, named at the token at
+       (but not by its name: a literal operator, an allocation function),
+       with the analysed arguments, each initialized as its parameter: m */
+    analysis_result
+    call_function(node_index n, token_index at, entity_index f,
+                  const owned_array<expression_meaning> &arguments,
+                  expression_meaning &m);
     /* [over.over]: the expression e analysed for the target type target:
        a name of an overload set (perhaps in parentheses, after &) as the
        function whose type the target's function type is; others as
@@ -1852,6 +1891,37 @@ class semantic_analysis
     /* [over.oper]/7-10: the rules of the declaration n of operator
        function f */
     analysis_result operator_function_declaration(node_index n, entity_index f);
+    /* [basic.stc.dynamic.allocation]/1, [basic.stc.dynamic.deallocation]/1-3,
+       [class.free]/1: the rules of the declaration n of the allocation or
+       deallocation function f */
+    analysis_result allocation_function_declaration(node_index n,
+                                                    entity_index f);
+    /* the name of an allocation or deallocation function */
+    uint32_t allocation_function_name(allocation_function kind);
+    /* [basic.stc.dynamic]/2: the global allocation and deallocation
+       functions implicitly declared, declared once */
+    void implicit_allocation_functions();
+    bool allocation_functions_declared = false;
+    /* the declarations of allocation and deallocation functions analysed;
+       when the translation unit spells operator new or operator delete
+       more often, a function lookup misses may be the one a call would
+       choose (allocation_names_spelled) */
+    uint32_t allocation_declarations_analysed = 0;
+    uint32_t allocation_names_spelled();
+    /* [expr.new]/11, [expr.delete]/9: the functions named kind found in
+       class c (0: none; in_class) or else in the global scope */
+    analysis_result allocation_functions(node_index n, allocation_function kind,
+                                         entity_index c,
+                                         owned_array<entity_index> &set,
+                                         bool &in_class);
+
+    /* [expr.new] and [expr.delete]: the expressions */
+    analysis_result new_expression(node_index n, expression_meaning &m);
+    analysis_result delete_expression(node_index n, expression_meaning &m);
+    /* the type of the new-type-id n ([expr.new]/1), the expression of the
+       first bound of its noptr-new-declarator if any (bound) */
+    analysis_result new_type_id(node_index n, qualified_type &type,
+                                syntax_child &bound);
     /* a declaration analysis did not follow may declare an operator
        function (hold_names): what an operator means is not known */
     bool operators_held = false;

@@ -311,23 +311,12 @@ analysis_result semantic_analysis::user_defined_literal(token_index t,
             return r;
         chosen = set[index];
     }
-    analysis_result r = deleted_use(t, chosen);
-    if (r != analysis_result::well_formed)
-        return r;
-    used(t, chosen);
-    const entity &x = entity_table[chosen];
-    expression_meaning callee;
-    callee.type = x.type;
-    callee.category = value_category::lvalue;
-    callee.evaluation = constness::constant;
-    callee.entity = chosen;
-    callee.node = expression_node(semantic_kind::entity, callee, t, chosen);
-    owned_array<syntax_child> syntax;
-    for (size_t i = 0; i < arguments.size(); i++)
-        syntax.append(syntax_child{});
     /* the call's node is the literal's own: its first token */
-    node_index at = current_declaration;
-    return call_with(at, callee, x.type, 0, 0, syntax, arguments, m);
+    analysis_result r =
+        call_function(current_declaration, t, chosen, arguments, m);
+    if (r == analysis_result::well_formed)
+        used(t, chosen);
+    return r;
 }
 
 } // namespace cplusplus

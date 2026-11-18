@@ -842,6 +842,34 @@ libstdc++ and json), since sema cannot analyse a declaration kept as tokens.
   reference (/9) parameters.  Test: `src/test/cxx/run/overload-braced.cpp`.
   `bench/cxx-sema.py` unchanged (27355 as clang, 0 wrong: clang's tests
   pass lists to classes).  cxx-run 164/164, cxx-c-suites 0 wrong.
+- Status (2026-11-18, new and delete): the allocation and deallocation
+  functions ([basic.stc.dynamic]): declarations of operator new, new[],
+  delete and delete[] with their rules (/allocation/1, /deallocation/1-3,
+  [class.free]/1: a member one is static), the implicit global ones of /2
+  (the sized operator delete from C++14, N3778; no std::align_val_t forms),
+  mangled nw, na, dl, da.  new-expressions (`expr/expr.new.cpp`):
+  new-type-id or ( type-id ), one array bound (its size checked for
+  overflow at run time as clang does, SIZE_MAX when it does not fit),
+  placement arguments, class-specific allocation functions found before the
+  global ones unless ::new (/11), default-, value- and direct-initialization
+  and braced-init-lists of one object; the initialization skipped for a null
+  pointer from an allocation function that is not an implicit one (/20).
+  delete-expressions (`expr/expr.delete.cpp`): the destructor, then the usual
+  deallocation function of [expr.delete]/10 (the sized global one for one
+  object, as clang), nothing for a null pointer.  Semantic nodes
+  new_object, allocated, array_size, delete_object, lowered as statement
+  expressions.  Not analysed: arrays of classes with constructors or
+  destructors (cookies), an array with a new-initializer, more than one
+  bound, a placeholder type, new-extended alignment, value-initialization
+  of a class, a destroying operator delete, an operand of class type, the
+  deallocation when the initialization throws (/25); a new-expression when
+  an operator new or delete spelled in the translation unit was not
+  analysed and lookup may miss it.  Test: `src/test/cxx/run/new-delete.cpp`
+  (it does not count calls of the replaceable functions: clang -O2 omits
+  them, /12).  `bench/cxx-sema.py`: 28046 declarations as clang, 0 wrong,
+  449 we accept that clang rejects, 0 refuted.  cxx-run 168/168,
+  cxx-c-suites 0 wrong (its `#pragma pack` programs are not yet, as at the
+  previous commit).
 
 ### S4. Classes and the object model (parallel with S3)
 

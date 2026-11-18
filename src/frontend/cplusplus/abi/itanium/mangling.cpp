@@ -439,7 +439,11 @@ bool itanium_mangler::source_name(uint32_t identifier)
 /*
  * [abi:mangling-operator]:
  *
- *     <operator-name> ::= ps        # + (unary)
+ *     <operator-name> ::= nw        # new
+ *                     ::= na        # new[]
+ *                     ::= dl        # delete
+ *                     ::= da        # delete[]
+ *                     ::= ps        # + (unary)
  *                     ::= ng        # - (unary)
  *                     ::= ad        # & (unary)
  *                     ::= de        # * (unary)
@@ -491,6 +495,22 @@ bool itanium_mangler::operator_name(const entity &x)
         operands++;
     bool unary = operands == 1;
     const char *code = nullptr;
+    switch (x.allocation) {
+    case allocation_function::new_:
+        text("nw");
+        return true;
+    case allocation_function::new_array:
+        text("na");
+        return true;
+    case allocation_function::delete_:
+        text("dl");
+        return true;
+    case allocation_function::delete_array:
+        text("da");
+        return true;
+    default:
+        break;
+    }
     switch (x.implemented) {
     case preprocessing_op_or_punc::PLUS:
         code = "pl";

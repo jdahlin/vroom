@@ -145,6 +145,15 @@ class c_lowering
     /* whether any object with a destructor is live */
     bool leaving_objects() const;
     uint32_t construct(const semantic_node &n);
+    /* [expr.new], [expr.delete]: the pointer the enclosing new_object or
+       delete_object holds (a variable of type allocated_type) */
+    uint32_t allocated_symbol = 0;
+    ast_qualified_type allocated_type = {};
+    uint32_t held_value(uint32_t value, ast_qualified_type t,
+                        owned_array<uint32_t> &items);
+    uint32_t new_object(const semantic_node &n);
+    uint32_t array_size(const semantic_node &n);
+    uint32_t delete_object(const semantic_node &n);
     bool passed_indirectly(qualified_type t) const;
     /* a parameter's C type: a class passed by address is a pointer */
     ast_qualified_type parameter_type(qualified_type t, token_index at);
@@ -809,6 +818,180 @@ uint32_t c_lowering::construct(const semantic_node &n)
                          0, 0, 0, 0)};
     return make(AST_NODE_STATEMENT_EXPRESSION, t, block(statements, 3), 0, 0, 0,
                 0);
+}
+
+/* ---- new and delete ------------------------------------------------ */
+
+/* the value of the semantic node value held in a variable of type t,
+   declared and assigned in items (a pointer converted to t): its symbol,
+   0 on failure */
+uint32_t c_lowering::held_value(uint32_t value, ast_qualified_type t,
+                                owned_array<uint32_t> &items)
+{
+    uint32_t lowered = expression(value);
+    if (!lowered)
+        return 0;
+    if (record(node(value).type).kind == type_kind::pointer)
+        lowered = cast(lowered, t, AST_CAST_POINTER_TO_POINTER);
+    ast_qualified_type v = ast_builder_type_basic(AST_TYPE_VOID);
+    uint32_t symbol = ast_builder_symbol(c, AST_SYMBOL_VARIABLE, "", 0, t,
+                                         AST_STORAGE_AUTO, 0, 1);
+    items.append(
+        ast_builder_node(c, AST_NODE_DECLARATION, v, symbol, 0, 0, 0, 0));
+    uint32_t variable =
+        make(AST_NODE_VARIABLE, t, symbol, 0, 0, 0, AST_NODE_FLAG_LVALUE);
+    items.append(ast_builder_node(
+        c, AST_NODE_EXPRESSION, v,
+        make(AST_NODE_ASSIGN, t, variable, lowered, 0, 0, 0), 0, 0, 0, 0));
+    return symbol;
+}
+
+/* [expr.new]: ({ T *p = (T *)allocation; initialization of *p; p; }), the
+   initialization skipped when p is null and the allocation function may
+   return null ([expr.new]/20) */
+uint32_t c_lowering::new_object(const semantic_node &n)
+{
+    if (!in_function)
+        return fail("a new-expression outside a function", n.at);
+    ast_qualified_type t = type(n.type, n.at);
+    ast_qualified_type v = ast_builder_type_basic(AST_TYPE_VOID);
+    owned_array<uint32_t> items;
+    uint32_t symbol = held_value(n.a, t, items);
+    if (!symbol)
+        return 0;
+    auto variable = [&] {
+        return make(AST_NODE_VARIABLE, t, symbol, 0, 0, 0,
+                    AST_NODE_FLAG_LVALUE);
+    };
+    if (n.b) {
+        uint32_t outer = allocated_symbol;
+        ast_qualified_type outer_type = allocated_type;
+        allocated_symbol = symbol;
+        allocated_type = t;
+        const semantic_node &init = node(n.b);
+        uint32_t done = 0;
+        if (init.kind == semantic_kind::construct) {
+            done = expression(n.b);
+        } else {
+            qualified_type object = record(n.type).operand;
+            ast_qualified_type u = AST_QUALIFIED_TYPE_UNQUALIFIED(type(
+                qualified_type::make(object.unqualified(), cv_none), n.at));
+            uint32_t value = 0;
+            if (init.kind == semantic_kind::initializer_list) {
+                value = compound_literal(n.b);
+            } else if (init.kind == semantic_kind::zero) {
+                /* [dcl.init]/6: "To zero-initialize an object ... of
+                   scalar type T means the object is initialized to the
+                   value obtained by converting the integer literal 0 to
+                   T" */
+                const struct type &r = record(object);
+                uint32_t zero = ast_builder_integer(
+                    c, ast_builder_type_basic(AST_TYPE_INT), 0);
+                if (r.kind == type_kind::pointer)
+                    value = cast(zero, u, AST_CAST_NULL_POINTER);
+                else if (r.kind == type_kind::fundamental &&
+                         fundamental_type_is_floating(r.fundamental))
+                    value = cast(zero, u, AST_CAST_INTEGER_TO_FLOAT);
+                else
+                    value = cast(zero, u, AST_CAST_INTEGER);
+            } else {
+                value = expression(n.b);
+            }
+            if (value) {
+                uint32_t target =
+                    make(AST_NODE_DEREFERENCE, type(object, n.at), variable(),
+                         0, 0, 0, AST_NODE_FLAG_LVALUE);
+                done = make(AST_NODE_ASSIGN, u, target, value, 0, 0, 0);
+            }
+        }
+        allocated_symbol = outer;
+        allocated_type = outer_type;
+        if (!done)
+            return 0;
+        uint32_t statement =
+            ast_builder_node(c, AST_NODE_EXPRESSION, v, done, 0, 0, 0, 0);
+        if (n.c)
+            statement = ast_builder_node(c, AST_NODE_IF, v, truth(variable()),
+                                         statement, 0, 0, 0);
+        items.append(statement);
+    }
+    items.append(
+        ast_builder_node(c, AST_NODE_EXPRESSION, t, variable(), 0, 0, 0, 0));
+    return make(AST_NODE_STATEMENT_EXPRESSION, t,
+                block(items.data(), static_cast<uint32_t>(items.size())), 0, 0,
+                0, 0);
+}
+
+/* [expr.new]/9: ({ size_t k = count; k > SIZE_MAX / size ? SIZE_MAX : k *
+   size; }): a size no allocation function can give when the product does
+   not fit, as clang passes */
+uint32_t c_lowering::array_size(const semantic_node &n)
+{
+    if (n.value == 1)
+        return expression(n.a);
+    ast_qualified_type t = AST_QUALIFIED_TYPE_UNQUALIFIED(type(n.type, n.at));
+    owned_array<uint32_t> items;
+    uint32_t symbol = held_value(n.a, t, items);
+    if (!symbol)
+        return 0;
+    auto variable = [&] {
+        return make(AST_NODE_VARIABLE, t, symbol, 0, 0, 0,
+                    AST_NODE_FLAG_LVALUE);
+    };
+    auto constant = [&](uint64_t value) {
+        return ast_builder_integer(c, t, static_cast<int64_t>(value));
+    };
+    uint32_t too_large =
+        make(AST_NODE_BINARY, ast_builder_type_basic(AST_TYPE_INT), variable(),
+             constant(UINT64_MAX / n.value), 0, LEX_TOKEN_GREATER, 0);
+    uint32_t product = make(AST_NODE_BINARY, t, variable(), constant(n.value),
+                            0, LEX_TOKEN_STAR, 0);
+    uint32_t chosen = make(AST_NODE_CONDITIONAL, t, too_large,
+                           constant(UINT64_MAX), product, 0, 0);
+    items.append(
+        ast_builder_node(c, AST_NODE_EXPRESSION, t, chosen, 0, 0, 0, 0));
+    return make(AST_NODE_STATEMENT_EXPRESSION, t,
+                block(items.data(), static_cast<uint32_t>(items.size())), 0, 0,
+                0, 0);
+}
+
+/* [expr.delete]: ({ T *p = operand; if (p) { p->~T(); deallocation; } }) */
+uint32_t c_lowering::delete_object(const semantic_node &n)
+{
+    if (!in_function)
+        return fail("a delete-expression outside a function", n.at);
+    ast_qualified_type t = type(n.computation, n.at);
+    ast_qualified_type v = ast_builder_type_basic(AST_TYPE_VOID);
+    owned_array<uint32_t> items;
+    uint32_t symbol = held_value(n.a, t, items);
+    if (!symbol)
+        return 0;
+    uint32_t outer = allocated_symbol;
+    ast_qualified_type outer_type = allocated_type;
+    allocated_symbol = symbol;
+    allocated_type = t;
+    uint32_t body[2];
+    uint32_t count = 0;
+    uint32_t destroyed = 0, deallocated = 0;
+    if (n.b)
+        destroyed = expression(n.b);
+    deallocated = expression(n.c);
+    allocated_symbol = outer;
+    allocated_type = outer_type;
+    if ((n.b && !destroyed) || !deallocated)
+        return 0;
+    if (destroyed)
+        body[count++] =
+            ast_builder_node(c, AST_NODE_EXPRESSION, v, destroyed, 0, 0, 0, 0);
+    body[count++] =
+        ast_builder_node(c, AST_NODE_EXPRESSION, v, deallocated, 0, 0, 0, 0);
+    uint32_t variable =
+        make(AST_NODE_VARIABLE, t, symbol, 0, 0, 0, AST_NODE_FLAG_LVALUE);
+    items.append(ast_builder_node(c, AST_NODE_IF, v, truth(variable),
+                                  block(body, count), 0, 0, 0));
+    return make(AST_NODE_STATEMENT_EXPRESSION, v,
+                block(items.data(), static_cast<uint32_t>(items.size())), 0, 0,
+                0, 0);
 }
 
 /* ---- expressions ---------------------------------------------------- */
@@ -1689,6 +1872,17 @@ uint32_t c_lowering::expression(uint32_t index)
         return bind_reference(n);
     case semantic_kind::construct:
         return construct(n);
+    case semantic_kind::new_object:
+        return new_object(n);
+    case semantic_kind::array_size:
+        return array_size(n);
+    case semantic_kind::delete_object:
+        return delete_object(n);
+    case semantic_kind::allocated:
+        if (!allocated_symbol)
+            return fail("an allocated pointer outside new or delete", n.at);
+        return make(AST_NODE_VARIABLE, allocated_type, allocated_symbol, 0, 0,
+                    0, AST_NODE_FLAG_LVALUE);
     case semantic_kind::destroy: {
         uint32_t object = expression(n.a);
         if (!object)
