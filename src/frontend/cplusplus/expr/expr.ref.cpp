@@ -226,6 +226,31 @@ analysis_result semantic_analysis::member_reference(node_index n,
     analysis_result r = expression(children[0], m);
     if (r != analysis_result::well_formed)
         return r;
+    /* [over.ref]/1: "An expression x->m is interpreted as
+       (x.operator->())->m for a class object x of type T if T::operator->()
+       exists and if the operator is selected as the best match function by
+       the overload resolution mechanism", again while the result is one */
+    for (unsigned depth = 0; arrow; depth++) {
+        if (type_table[m.type.unqualified()].kind != type_kind::class_type)
+            break;
+        if (depth == 16)
+            /* a chain of operator-> this long, or a cycle */
+            return not_supported(n, "over.ref");
+        owned_array<syntax_child> syntax;
+        owned_array<expression_meaning> operands;
+        syntax.append(children[0]);
+        operands.append(m);
+        bool handled = false;
+        expression_meaning result;
+        r = overloaded_operator(n, children[1].index(),
+                                preprocessing_op_or_punc::ARROW, false, syntax,
+                                operands, handled, result);
+        if (r != analysis_result::well_formed)
+            return r;
+        if (!handled)
+            break;
+        m = result;
+    }
     if (arrow) {
         r = operand_value(n, m);
         if (r != analysis_result::well_formed)

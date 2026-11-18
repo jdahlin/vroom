@@ -65,7 +65,8 @@ analysis_result semantic_analysis::overloaded_operator(
        have member candidates alone: a of class type */
     bool member_only = op == preprocessing_op_or_punc::EQUAL ||
                        op == preprocessing_op_or_punc::LEFT_BRACKET ||
-                       op == preprocessing_op_or_punc::LEFT_PARENTHESIS;
+                       op == preprocessing_op_or_punc::LEFT_PARENTHESIS ||
+                       op == preprocessing_op_or_punc::ARROW;
     if (member_only && type_table[operands[0].type.unqualified()].kind !=
                            type_kind::class_type)
         return analysis_result::well_formed;

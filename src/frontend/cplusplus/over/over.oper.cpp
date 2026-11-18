@@ -189,8 +189,8 @@ uint32_t semantic_analysis::operator_name(preprocessing_op_or_punc op)
 /*
  * The operator-function-id of a declarator: operator @, operator () or
  * operator [].  The operators analysis has no expressions for (class
- * member access, the allocation functions, co_await, ->*, comma and <=>)
- * are not analysed; neither is unary & (operator_function_declaration).
+ * member access, the allocation functions, co_await and <=>) are not
+ * analysed.
  */
 analysis_result semantic_analysis::operator_function_id(node_index id,
                                                         declarator_meaning &m)
@@ -210,10 +210,6 @@ analysis_result semantic_analysis::operator_function_id(node_index id,
         op != preprocessing_op_or_punc::LEFT_BRACKET)
         return not_supported(id, "over.oper");
     switch (op) {
-    case preprocessing_op_or_punc::ARROW:
-        return not_supported(id, "over.ref");
-    case preprocessing_op_or_punc::ARROW_STAR:
-    case preprocessing_op_or_punc::COMMA:
     case preprocessing_op_or_punc::SPACESHIP:
         return not_supported(id, "over.oper");
     default:
@@ -318,6 +314,19 @@ analysis_result semantic_analysis::operator_function_declaration(node_index n,
                           "over.oper");
     if (call)
         return analysis_result::well_formed;
+    if (op == preprocessing_op_or_punc::ARROW) {
+        /* [over.ref]/1: "A class member access operator function is a
+           function named operator-> that is a non-static member function
+           taking no parameters." */
+        if (!x.nonstatic_member || function.parameter_count ||
+            function.variadic)
+            return ill_formed(n,
+                              "a class member access operator function "
+                              "shall be a non-static member function taking "
+                              "no parameters",
+                              "over.ref");
+        return analysis_result::well_formed;
+    }
     if (subscript && (function.parameter_count != 1 || function.variadic)) {
         if (tokens.files.behavior.has(
                 language_feature::multidimensional_subscript))
@@ -364,12 +373,6 @@ analysis_result semantic_analysis::operator_function_declaration(node_index n,
                               "decrement operator function shall be of type "
                               "int",
                               "over.inc");
-    }
-    if (op == preprocessing_op_or_punc::AMPERSAND && operands == 1) {
-        /* [over.unary]: the address of an object of the class would be
-           the operator function's */
-        operators_held = true;
-        return not_supported(n, "over.unary");
     }
     return analysis_result::well_formed;
 }

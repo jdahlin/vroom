@@ -783,8 +783,17 @@ libstdc++ and json), since sema cannot analyse a declaration kept as tokens.
   Test: `src/test/cxx/run/operators-member.cpp`.  `bench/cxx-sema.py`:
   27208 declarations as clang, 0 we reject that clang accepts, 448 we
   accept that clang rejects, 0 refuted; lookup 10591, symbols 1496,
-  lowering 216.  cxx-run 140/140, cxx-c-suites 0 wrong.  Left: ->, ->*,
-  comma, unary &, <=>, the allocation functions.
+  lowering 216.  cxx-run 140/140, cxx-c-suites 0 wrong.
+- Status (2026-11-18, comma, ->*, unary & and ->): the comma, ->* and
+  unary & operator functions go through `overloaded_operator` like the
+  other binary and unary ones (the built-in ->* and .*, pointers to
+  members, are not analysed); [over.ref]'s x->m applies operator-> while
+  the result is of class type (`expr.ref.cpp`; a chain of 16, or a cycle,
+  is not analysed).  Mangled cm, pm, ad and pt.  Test:
+  `src/test/cxx/run/operators-rest.cpp`.  `bench/cxx-sema.py`: 27290
+  declarations as clang, 0 wrong, 448 we accept that clang rejects, 0
+  refuted; lookup 10786.  cxx-run 144/144, cxx-c-suites 0 wrong.  Left:
+  <=> and the allocation functions.
 
 ### S4. Classes and the object model (parallel with S3)
 

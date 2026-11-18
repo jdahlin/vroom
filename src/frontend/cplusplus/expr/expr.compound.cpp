@@ -710,10 +710,17 @@ analysis_result semantic_analysis::binary(node_index n, expression_meaning &m)
         syntax.append(children[2]);
         operands.append(right);
         bool handled = false;
-        r = overloaded_operator(n, at, op, false, syntax, operands, handled, m);
+        if (op != preprocessing_op_or_punc::DOT_STAR)
+            r = overloaded_operator(n, at, op, false, syntax, operands, handled,
+                                    m);
         if (r != analysis_result::well_formed || handled)
             return r;
     }
+    if (op == preprocessing_op_or_punc::DOT_STAR ||
+        op == preprocessing_op_or_punc::ARROW_STAR)
+        /* the built-in pointer-to-member operators: no pointers to
+           members are analysed */
+        return not_supported(n, "expr.mptr.oper");
     if (op == preprocessing_op_or_punc::AMPERSAND_AMPERSAND ||
         op == preprocessing_op_or_punc::BAR_BAR) {
         /* [expr.log.and]/1: "The operands are both contextually converted
@@ -998,13 +1005,30 @@ analysis_result semantic_analysis::comma(node_index n, expression_meaning &m)
         analysis_result r = expression(children[i], e);
         if (r != analysis_result::well_formed)
             return r;
-        /* [over.match.oper]/3.3: an operator, of a class or enumeration
-           operand may be an operator function's, which analysis has none
-           of (operator_function_id) */
-        type_kind k = type_table[e.type.unqualified()].kind;
-        if (operators_held &&
-            (k == type_kind::class_type || k == type_kind::enumeration))
-            return not_supported(n, "over.match.oper");
+        if (any) {
+            /* [over.match.oper]/2: an operand of class or enumeration type;
+               the left operand is the comma expression before ((a, b), c) */
+            owned_array<syntax_child> syntax;
+            owned_array<expression_meaning> operands;
+            syntax.append(syntax_child{});
+            if (i == 2)
+                syntax[0] = children[0];
+            operands.append(m);
+            syntax.append(children[i]);
+            operands.append(e);
+            bool handled = false;
+            expression_meaning result;
+            r = overloaded_operator(n, children[i - 1].index(),
+                                    preprocessing_op_or_punc::COMMA, false,
+                                    syntax, operands, handled, result);
+            if (r != analysis_result::well_formed)
+                return r;
+            if (handled) {
+                so_far = combined_constness(so_far, m.evaluation);
+                m = result;
+                continue;
+            }
+        }
         uint32_t previous = m.node;
         if (any)
             so_far = combined_constness(so_far, m.evaluation);
