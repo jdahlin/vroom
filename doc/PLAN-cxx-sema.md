@@ -272,7 +272,7 @@ produces it; clang's side is cached by content, options and version in
 | lookup | the declaration (file:line:col) each name refers to | `referencedDecl` in `-ast-dump=json` |
 | overload | the function each call, operator and conversion selected | the same |
 | constant | the value of every constant expression | `static_assert(E == V)` |
-| layout | size, alignment, field and base offsets of every class | `static_assert` with `sizeof`/`alignof`/`__builtin_offsetof`; `-fdump-record-layouts` for bases and vptrs |
+| layout | size, data size, alignment, field and base offsets of every class | `-fdump-record-layouts-complete`, the record of the class's name (bases, bit-fields and the data size are in it, private members too; nothing has to be nameable at the end of the TU) |
 | vtable | the entries of every vtable and VTT | `-fdump-vtable-layouts` |
 | symbols | each object's defined and undefined symbols, binding and COMDAT | `nm` of clang's `-O0` object: mangling, linkage and "what is emitted" at once |
 | instantiation | the set of specializations instantiated | the symbols claim, plus `-ast-dump` for those with no code |
@@ -1071,6 +1071,88 @@ libstdc++ and json), since sema cannot analyse a declaration kept as tokens.
   C5.1 2077 -> 2211, 0 wrong.
   Next: member functions of local and nested classes, in-class
   initializers of static members, unions, virtual functions.
+  Then (2026-11-18, while S3 and S6 run in other sessions) preparation
+  for the rest of the step, "S4: what remains" below.  The layout is no
+  longer made member by member in the class rules: `abi/itanium/layout.cpp`
+  (`itanium_class_layout`) runs the ABI's procedure ([abi:class-types]
+  I-IV) at the closing }, over the entities alone (so an instantiated
+  class is laid out by the same call), with I and III, the virtual table
+  pointer and the virtual bases, as the places [class.virtual] and
+  [class.mi] fill in; a virtual function declared after the data members
+  moves all of them, which the old way could not do.  `entity::data_size`
+  is the size for a POD for the purpose of layout.  The gate's layout
+  claim exists: `-fcxx-dump=layout-claims` (per complete class: size, data
+  size, alignment, each base's and member's offset, bit-fields by bit)
+  against clang's `-fdump-record-layouts-complete`, per record by name, in
+  `bench/cxx-sema.py` (and its `selftest`: hand-written claims, five of
+  them wrong).  First run: 8586 classes as clang's, 8 refuted, two bugs,
+  both fixed: an empty class is the ABI's ([abi:definitions]: a
+  zero-width bit-field does not make a base non-empty, so `struct D : C {
+  int : 0; }` with `C { int : 0; }` has data size 0), an unnamed bit-field
+  is no member for [abi:pod] (a private one left the class a POD), and a
+  class with nothing but a zero-width bit-field has its alignment as its
+  size (it was 1).  Now 8594 as clang's, 0 refuted, 470 not checkable (a
+  local class's name twice, a declaration clang rejects).  C5.3 has its
+  harness: `bench/vcc-abi.py` runs `src/test/cxx/abi/NAME/` (caller.cpp,
+  callee.cpp, clang/vcc x caller/callee, as CI's `abi` step): `classes`
+  passes (layouts, bit-fields, unions, empty bases, classes passed by
+  address and returned through x8, constructors and destructors of the
+  other object, static members, namespaces, dynamic initialization, a
+  callback); `tail_padding` and `virtual_calls` are `vcc-xfail` until
+  their items below land (an XPASS is an error).  `bench/itanium-abi.py`
+  dropped the text under a heading without an anchor, which was all of
+  2.4's procedure: `work/itanium-abi/class-types.txt` has it now (the
+  index and grammar are unchanged), and the script finds `work/` from a
+  worktree.  Unchanged by the move: cxx-sema's other numbers (0 refuted
+  anywhere; one more type claim, the size above), cxx-run 116/116, vpp -S
+  of every run test byte for byte, C5.1 2206 passing and 0 wrong as with
+  the binary before (bench/cxx-c-suites.passing is stale on main: 8
+  listed runs need [cpp.pragma] or lost `_ZL1m`, 15 new ones are not
+  listed), vcc-abi 35 pass, 2 xfail.
+
+#### S4: what remains
+
+In an order where each item's tests can pass when it lands.  "Needs"
+names what another track must have first; the counts are declarations of
+clang's CXX, SemaCXX and SemaTemplate unsupported for that subclause
+(2026-11-18), the size of what each item frees.
+
+| # | What | Subclauses (unsupported) | Files | Needs | Gate |
+|---|---|---|---|---|---|
+| R1 | Layout without virtuals, complete: a component that would share its address with one of its type moves ([abi:class-types] II-2, II-3: now `unsupported`); `aligned` and `packed` on a class, `#pragma pack`; enumeration and wide bit-fields, bit-fields in unions; anonymous unions and structs | [class.derived] 2603 (most are bases analysis cannot name: templates), [class.union.anon] 183, [class.bit] 159, [class.union] 170, [cpp.pragma] | `abi/itanium/layout.cpp`, `class/class.union*.cpp`, `class.bit.cpp` | - | layout claims 0 refuted |
+| R2 | A class whose layout is not C's, lowered: a base's tail padding reused, an empty base or member off its natural offset.  `ast_builder_type_record_complete` takes explicit offsets, or the base is lowered as its members | - (lowering refuses: "a class whose layout is not C's") | `lower/lower.cpp`, `frontend/c/ast-builder.h` | C's gates when `struct ast` changes (`vbench.py gate`, `vcc-same.py`) | `cxx/tail_padding` passes |
+| R3 | Member functions and static data members of nested and local classes (`<nested-name>`, `<local-name>` with discriminators), a nested class defined outside its class, in-class initializers of static members, default member initializers | [class.mem] 947, [class.nest] 190, [class.local] 127, [class.static.data] 29 | `class/class.nest.cpp`, `class.local.cpp`, `abi/itanium/mangling.cpp` | - | symbols claims; run tests |
+| R4 | Special member functions in full: `= default` and `= delete`, when an implicit one is deleted, move constructors, copy and move assignment (implicit and user-declared), reference and const members, arrays of class type (construction and destruction in order), class members of unions | [dcl.fct.def.general] 1085, [class.ctor] 1491, [class.copy.ctor] 278, [class.default.ctor] 111, [class.copy.assign] | `class/class.ctor.cpp`, `class.copy.*.cpp`, `class.dtor.cpp`, `dcl/dcl.fct.def.*.cpp` | S3: `operator=` and constructors chosen by [over.match] with reference binding and cv-qualifiers | CXX/special; symbols; run tests |
+| R5 | Initialization of classes in full: brace elision, aggregates with bases, list-initialization and its constructors, value- and zero-initialization, lifetime extension ([class.temporary]/6), temporaries in conditional operands, the rest of copy elision | [dcl.init.aggr] 215, [dcl.init.list] 86, [dcl.init] 32, [class.temporary] 11, [class.copy.elision] 49 | `dcl/dcl.init*.cpp`, `class/class.temporary.cpp` | S3: [over.match.list], [dcl.init.ref] (S3 owns its file) | CXX/dcl.init; type claims; run tests |
+| R6 | Virtual functions: `virtual`, `override`, `final`, pure, abstract classes; overriding and covariant returns; layout I (the virtual table pointer, the primary base); virtual tables ([abi:vtable-components]), their symbols and vague linkage with the key function ([abi:vague-vtable]), virtual calls, `this`-adjusting thunks, the pointer set during construction and destruction ([class.cdtor]), `__cxa_pure_virtual`, D0 | [dcl.fct.spec] 1127, [class.virtual], [class.abstract] | `class/class.virtual.cpp`, `class.abstract.cpp`, `abi/itanium/vtable.cpp`, `layout.cpp` | R8 for D0; RTTI slots are null until S7 (`-fno-rtti`) | vtable claims (`-fcxx-dump=vtable-claims` against `-fdump-vtable-layouts`, to write with the item); layout claims; `cxx/virtual_calls` passes |
+| R7 | Virtual bases: layout III, vbase and vcall offsets, VTT and construction virtual tables, virtual thunks, C1 and D1 no longer C2's and D2's | [class.mi] 597 | `class/class.mi.cpp`, `abi/itanium/layout.cpp`, `vtable.cpp` | R6 | vtable and layout claims; an ABI case with a diamond |
+| R8 | `new` and `delete`: allocation and deallocation functions looked up and called, placement, array cookies ([abi:array-cookies]), initializers; `operator new`/`delete` in the test run time (`src/test/rt`, on malloc) | [expr.new] 601, [expr.delete] 106 | `expr/expr.new.cpp`, `expr.delete.cpp`, `abi/itanium/calls.cpp` | S3: operator functions declared and overloaded | run tests; an ABI case allocating in one object and freeing in the other |
+| R9 | The rest of [basic.start]: destructors of static objects (`__cxa_atexit`, `__dso_handle`), local statics with dynamic initialization and their guards ([abi:guards]), inline variables | [basic.start.term], [stmt.dcl] | `basic/basic.start*.cpp`, `abi/itanium/guard.cpp`, `src/test/rt` | S6a decides which initializers are constant (a constexpr constructor is unsupported today, so no object is constant-initialized by one; clang emits such an object as data, with no start-up code) | symbols claims; run tests |
+| R10 | Access in full and friends: friend functions and classes, access of nested classes and through using-declarations, [class.protected] everywhere | [class.friend] 765, [class.access.base] 26 | `class/class.access*.cpp`, `class.friend.cpp` | S3 for friend operator functions | CXX/class.access: "we accept, clang rejects" down |
+| R11 | Classes in calls, checked across compilers for every shape: empty classes as arguments (clang's C++ and C differ), homogeneous aggregates with bases, classes with bit-fields and unions in registers, by-address classes on the stack | [abi:calls] | `abi/itanium/calls.cpp`, `lower/` | - | ABI cases generated per shape |
+
+Pointers to members ([dcl.mptr] 454, [expr.mptr.oper] 19) are S5's, with
+their ABI ([abi:member-pointers]) in `abi/itanium/`.
+
+Where the tracks meet, to keep the three sessions out of each other's
+lines:
+
+- `include/frontend/cplusplus/sema.h` is the one file all three edit.
+  `struct entity` carries every class's fields, and R6-R7 add a dozen
+  more (primary base, virtual table pointer, virtual functions, virtual
+  bases).  They go into a record of their own per class, in a table
+  beside `class_members` and `class_bases`, added by R6; the fields
+  `entity` has today stay where they are until S3 and S6 have merged.
+- `lower/lower.cpp` (2573 lines) is edited by every track.  New lowering
+  for S4 goes into files of its own in `lower/` (classes, virtual tables,
+  initialization at start-up).
+- [dcl.init.ref] and the copy constructor's selection are S3's; R4 and R5
+  call them and do not re-implement them.
+- A class template's instantiation (S6b) completes a class from entities,
+  not from syntax: `itanium_class_layout` and the implicit special
+  members already take the class entity alone, and R3-R7 keep to that.
+- Constant initialization (S6a) changes which variables R9 initializes at
+  start-up; the symbols claim is the check on both sides.
 
 ### S5. Conversions by user code, lambdas, the rest of [expr]
 
