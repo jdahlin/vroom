@@ -1048,10 +1048,12 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
         if (r != analysis_result::well_formed)
             return r;
         entity_index e = last_declared;
-        if (!e || entity_table[e].kind != entity_kind::variable ||
+        if (e && entity_table[e].kind == entity_kind::variable &&
             !entity_table[e].nonstatic_member)
-            /* a static data member's initializer, a pure-specifier */
-            return not_supported(d.index(), "class.static.data");
+            return static_member_initializer(d.index(), e, parts[1], s);
+        if (!e || entity_table[e].kind != entity_kind::variable)
+            /* a pure-specifier ([class.abstract]) */
+            return not_supported(d.index(), "class.abstract");
         if (entity_table[c].union_ || !entity_table[c].name)
             /* [class.union.anon]: at most one variant member's; an unnamed
                class's members are initialized by no constructor of its own */
@@ -1283,10 +1285,9 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
            be of an incomplete type other than cv void." */
         if (s.inline_)
             return not_supported(declaration, "class.static.data");
-        if (!is_namespace(entity_table[c].enclosing))
+        if (local_class_rule(c))
             /* [class.local]/4: "A local class cannot have static data
-               members"; a nested class's needs a <nested-name> of two
-               classes */
+               members" (a class nested in one neither) */
             return not_supported(declaration, "class.static.data");
         const struct type &record = type_table[type.unqualified()];
         if (record.kind == type_kind::lvalue_reference ||
@@ -1299,6 +1300,17 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
         entity_table[e].nonstatic_member = false;
         entity_table[e].defined = false;
         entity_table[e].alignment = static_cast<uint32_t>(m.aligned);
+        /* its first declaration, which a name found refers to (the
+           definition outside the class is a later one) */
+        declared_name first;
+        first.declaration = declaration;
+        first.outermost = current_declaration;
+        first.entity = e;
+        first.id = m.id;
+        first.kind = entity_kind::variable;
+        first.type = type;
+        first.claimable = declarations_claimable;
+        declared.append(first);
     } else {
         if (s.inline_)
             /* [dcl.inline]/5: "The inline specifier shall not appear on a
@@ -1614,6 +1626,52 @@ analysis_result semantic_analysis::member_redeclaration(
         entity_table[e].inline_ = true;
     entity_table.add_declaration(e, declaration);
     last_declared = e;
+    return analysis_result::well_formed;
+}
+
+/*
+ * [class.static.data]/4: "If a non-volatile non-inline const static data
+ * member is of integral or enumeration type, its declaration in the class
+ * definition can specify a brace-or-equal-initializer in which every
+ * initializer-clause that is an assignment-expression is a constant
+ * expression ([expr.const]).  The member shall still be defined in a
+ * namespace scope if it is odr-used in the program and the namespace scope
+ * definition shall not contain an initializer."  [expr.const]/3: such a
+ * member is usable in constant expressions.  An inline or constexpr one
+ * (an inline variable, R9) is not analysed.
+ */
+analysis_result
+semantic_analysis::static_member_initializer(node_index declarator,
+                                             entity_index e, syntax_child init,
+                                             const specified &s)
+{
+    qualified_type type = entity_table[e].type;
+    uint32_t cv = cv_of(type_table, type);
+    const struct type record = type_table[type.unqualified()];
+    if (s.inline_ || s.constexpr_)
+        return not_supported(declarator, "class.static.data");
+    if (!(cv & cv_const) || (cv & cv_volatile) ||
+        record.kind != type_kind::fundamental || !is_integral(type))
+        /* an enumeration's too, which analysis does not fold yet */
+        return not_supported(declarator, "class.static.data");
+    initialized_value value;
+    value.evaluation = constness::unknown;
+    value.value = 0;
+    analysis_result r = initializer(init, type, value);
+    if (r != analysis_result::well_formed)
+        return r;
+    if (value.evaluation == constness::not_constant)
+        return ill_formed(declarator,
+                          "every initializer-clause of a static data "
+                          "member's in-class initializer shall be a "
+                          "constant expression",
+                          "class.static.data");
+    if (value.evaluation != constness::constant)
+        return not_supported(declarator, "expr.const");
+    entity &x = entity_table[e];
+    x.usable = constness::constant;
+    x.value = value.value;
+    x.definition = value.node;
     return analysis_result::well_formed;
 }
 

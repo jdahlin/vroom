@@ -1558,6 +1558,9 @@ class semantic_analysis
                                     entity_index to, qualified_type type,
                                     expression_meaning &m);
     /* the subobject e (a base or a non-static data member) of *this */
+    analysis_result static_member_initializer(node_index declarator,
+                                              entity_index e, syntax_child init,
+                                              const specified &s);
     analysis_result default_member_initializer(token_index at, entity_index e,
                                                uint32_t &statement);
     analysis_result subobject(token_index at, entity_index e,

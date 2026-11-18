@@ -220,6 +220,9 @@ class c_lowering
     uint32_t discard(uint32_t n);
     uint32_t object(uint32_t n);
     uint32_t address_of(uint32_t lvalue, ast_qualified_type pointer);
+    /* a read of a variable usable in constant expressions, lowered to its
+       value */
+    bool folded_read(const semantic_node &x) const;
     uint32_t data_size_assignment(const semantic_node &n, uint32_t a,
                                   uint32_t b);
     uint32_t constant(const semantic_node &n);
@@ -1154,6 +1157,14 @@ uint32_t c_lowering::object(uint32_t n)
    object indicated by the glvalue is the prvalue result".  C reads an
    lvalue where it is used as a value; a comma's or conditional's glvalue
    is read in each operand, and an assignment's value is the one stored */
+bool c_lowering::folded_read(const semantic_node &x) const
+{
+    return x.kind == semantic_kind::entity &&
+           x.evaluation == constness::constant &&
+           analysis.entity_table[x.a].kind == entity_kind::variable &&
+           analysis.entity_table[x.a].usable == constness::constant;
+}
+
 uint32_t c_lowering::read(uint32_t n)
 {
     const semantic_node &x = node(n);
@@ -1164,6 +1175,15 @@ uint32_t c_lowering::read(uint32_t n)
     if (x.kind == semantic_kind::conditional)
         return make(AST_NODE_CONDITIONAL, AST_QUALIFIED_TYPE_UNQUALIFIED(t),
                     expression(x.a), read(x.b), read(x.c), 0, 0);
+    /* [basic.def.odr]/4: a variable usable in constant expressions whose
+       value is read is not odr-used; its value, which a static data member
+       initialized in its class ([class.static.data]/4) needs, having no
+       definition to read */
+    if (folded_read(x)) {
+        semantic_node value = x;
+        value.value = analysis.entity_table[x.a].value;
+        return constant(value);
+    }
     return expression(n);
 }
 
@@ -2335,9 +2355,11 @@ bool c_lowering::constant_initializer(uint32_t n) const
     case semantic_kind::conversion:
         if (address_constant(n))
             return true;
+        /* a read of a variable is code, unless read() folds it */
         return x.evaluation == constness::constant &&
-               static_cast<conversion_kind>(x.op) !=
-                   conversion_kind::lvalue_to_rvalue;
+               (static_cast<conversion_kind>(x.op) !=
+                    conversion_kind::lvalue_to_rvalue ||
+                folded_read(node(x.a)));
     case semantic_kind::bind_reference:
         /* a reference bound to an object of static storage duration */
         return static_lvalue(x.a);
