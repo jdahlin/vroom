@@ -38,6 +38,10 @@ struct Box {
 };
 auto boxed(int v) { return Box{v}; }
 
+// declared and never defined nor used: no code, no symbol
+auto never();
+decltype(auto) never_either(int);
+
 int main() {
     int failures = 0;
     failures += sum(2, 3) != 5 || ratio(3) != 1.5;
