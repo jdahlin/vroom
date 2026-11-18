@@ -1590,14 +1590,17 @@ class semantic_analysis
     analysis_result special_member_declarator(entity_index c,
                                               node_index declaration,
                                               syntax_child d, uint8_t access,
-                                              bool definition);
+                                              bool definition,
+                                              bool constexpr_specified = false);
+    bool function_specifiers_only(node_index seq,
+                                  bool &constexpr_specified) const;
     /* the function-body of a constructor or destructor definition
        (last_declared): ctor-initializer_opt compound-statement */
     analysis_result special_member_body(node_index definition,
                                         syntax_child body);
     /* [dcl.meaning]/1: Class::Class or Class::~Class defined outside the
        class: the function-definition n without a decl-specifier-seq */
-    analysis_result special_member_definition(node_index n);
+    analysis_result special_member_definition(node_index n, uint32_t at);
     /* whether the declarator d with no decl-specifier-seq declares a
        constructor or destructor of c */
     bool declares_special_member(entity_index c, syntax_child d) const;
@@ -1679,6 +1682,10 @@ class semantic_analysis
         /* the function whose body it is */
         entity_index function = 0;
     } function_state;
+    /* the invocations of constexpr functions analysed so far: an
+       initializer that has one is the evaluator's to decide
+       ([basic.start.static]/2) */
+    uint32_t constexpr_calls = 0;
     analysis_result function_body(node_index definition, syntax_child compound,
                                   syntax_child ctor_initializer = {});
     /* [class.base.init]: a constructor's member initializations, the

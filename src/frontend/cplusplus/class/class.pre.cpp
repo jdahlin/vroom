@@ -776,28 +776,40 @@ semantic_analysis::member_declaration(entity_index c, syntax_child member,
     const char *nested_rule = inner_class_rule(enclosing);
     if (nested_rule && node.kind == syntax_kind::function_definition)
         return not_supported(n, nested_rule);
-    if (!node.child_count ||
+    /* a constructor or destructor: no decl-specifier-seq, or one of
+       function-specifiers alone ([class.ctor]/1: "Each decl-specifier in
+       the decl-specifier-seq of a constructor declaration (if any) shall
+       be friend, inline, constexpr, or an explicit-specifier") */
+    uint32_t at = 0;
+    bool constexpr_specified = false;
+    if (node.child_count > 1 &&
+        syntax_is(tree, children[0], syntax_kind::decl_specifier_seq) &&
+        function_specifiers_only(children[0].index(), constexpr_specified) &&
+        declares_special_member(c, children[1]))
+        at = 1;
+    if (!node.child_count || at ||
         !syntax_is(tree, children[0], syntax_kind::decl_specifier_seq)) {
         /* [class.mem]/12: "The decl-specifier-seq may be omitted in
            constructor, destructor, and conversion function declarations
            only" */
-        if (!node.child_count || !declares_special_member(c, children[0]))
+        if (!node.child_count || !declares_special_member(c, children[at]))
             return not_supported(n, "class.ctor");
         if (nested_rule)
             return not_supported(n, nested_rule);
         if (node.kind == syntax_kind::member_declaration) {
-            if (node.child_count != 2 ||
-                !syntax_is_punctuator(tokens, children[1],
+            if (node.child_count != at + 2 ||
+                !syntax_is_punctuator(tokens, children[at + 1],
                                       preprocessing_op_or_punc::SEMICOLON))
                 /* = default, = delete, a pure-specifier */
                 return not_supported(n, "dcl.fct.def");
-            return special_member_declarator(c, n, children[0], access, false);
+            return special_member_declarator(c, n, children[at], access, false,
+                                             constexpr_specified);
         }
-        if (node.child_count != 2 ||
-            !syntax_is(tree, children[1], syntax_kind::function_body))
+        if (node.child_count != at + 2 ||
+            !syntax_is(tree, children[at + 1], syntax_kind::function_body))
             return not_supported(n, "dcl.fct.def.general");
-        analysis_result r =
-            special_member_declarator(c, n, children[0], access, true);
+        analysis_result r = special_member_declarator(
+            c, n, children[at], access, true, constexpr_specified);
         if (r == analysis_result::well_formed)
             bodies.append(n);
         return r;
@@ -941,7 +953,12 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
         return not_supported(declaration, "dcl.type");
     if (s.typedef_)
         return not_supported(declaration, "dcl.typedef");
-    if (s.constexpr_)
+    /* [dcl.constexpr]/1: "The constexpr specifier shall be applied only to
+       the definition of a variable or variable template or the declaration
+       of a function or function template": a static data member's is not
+       analysed yet */
+    if (s.constexpr_ &&
+        type_table[type.unqualified()].kind != type_kind::function)
         return not_supported(declaration, "dcl.constexpr");
     /* [class.mem]/11: "A member shall not be declared with the extern
        storage-class-specifier." */
@@ -1070,7 +1087,16 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
         /* [class.mfct]/1: "A member function may be defined in its class
            definition, in which case it is an inline member function
            ([dcl.inline])" */
-        entity_table[e].inline_ = definition || s.inline_;
+        /* C++11's [dcl.constexpr]/8 made a constexpr non-static member
+           function const, which C++14 dropped: not analysed */
+        if (s.constexpr_ && !s.static_ &&
+            tokens.files.behavior.edition < standard_edition::cplusplus_14)
+            return not_supported(declaration, "dcl.constexpr");
+        entity_table[e].inline_ = definition || s.inline_ || s.constexpr_;
+        /* [dcl.constexpr]/1: constexpr makes it inline; its body's rules
+           and its invocations in constant expressions are the evaluator's
+           (S6) */
+        entity_table[e].constexpr_ = s.constexpr_;
         entity_table[e].defined = definition;
         if (m.operator_function) {
             entity_table[e].operator_function = true;
@@ -1325,14 +1351,21 @@ analysis_result semantic_analysis::member_function_body(entity_index c,
 {
     const syntax_child *children = tree.children(definition);
     current_declaration = definition;
-    if (!syntax_is(tree, children[0], syntax_kind::decl_specifier_seq)) {
+    bool constexpr_specified = false;
+    uint32_t at = 0;
+    if (tree[definition].child_count > 2 &&
+        syntax_is(tree, children[0], syntax_kind::decl_specifier_seq) &&
+        function_specifiers_only(children[0].index(), constexpr_specified) &&
+        declares_special_member(c, children[1]))
+        at = 1;
+    if (at || !syntax_is(tree, children[0], syntax_kind::decl_specifier_seq)) {
         /* a constructor or destructor: the one this definition declared */
         qualified_type type = qualified_type::make(
             type_table.fundamental(fundamental_type::void_), cv_none);
         declarator_meaning m;
         function_cv = 0;
         in_member_declarator = true;
-        analysis_result r = declarator(definition, children[0], type, m);
+        analysis_result r = declarator(definition, children[at], type, m);
         in_member_declarator = false;
         if (r != analysis_result::well_formed)
             return r;
@@ -1347,7 +1380,7 @@ analysis_result semantic_analysis::member_function_body(entity_index c,
         }
         if (!last_declared)
             return not_supported(definition, "class.ctor");
-        return special_member_body(definition, children[1]);
+        return special_member_body(definition, children[at + 1]);
     }
     specified s;
     analysis_result r = decl_specifier_seq(children[0].index(), s, false);

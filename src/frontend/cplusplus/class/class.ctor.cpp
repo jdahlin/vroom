@@ -112,6 +112,33 @@ bool semantic_analysis::copies_bytes(entity_index c) const
 }
 
 /*
+ * Whether a decl-specifier-seq has only function-specifiers analysis has
+ * rules for on a constructor or destructor: constexpr and inline
+ * ([class.ctor]/1, [class.dtor]/1).  A constexpr destructor is C++20's
+ * and is not analysed.
+ */
+bool semantic_analysis::function_specifiers_only(
+    node_index seq, bool &constexpr_specified) const
+{
+    constexpr_specified = false;
+    for (uint32_t i = 0; i < tree[seq].child_count; i++) {
+        syntax_child c = tree.children(seq)[i];
+        if (!c.is_token())
+            return false;
+        switch (p.keyword_of(tokens[c.index()])) {
+        case standard_keyword::constexpr_:
+            if (constexpr_specified)
+                return false;
+            constexpr_specified = true;
+            break;
+        default:
+            return false;
+        }
+    }
+    return constexpr_specified;
+}
+
+/*
  * A constructor or destructor declared in the member-specification of c.
  * [class.ctor]/3: "A constructor shall not be a coroutine.  A constructor
  * shall not have an explicit object parameter."; /4 "A return type shall
@@ -122,7 +149,7 @@ bool semantic_analysis::copies_bytes(entity_index c) const
  */
 analysis_result semantic_analysis::special_member_declarator(
     entity_index c, node_index declaration, syntax_child d, uint8_t access,
-    bool definition)
+    bool definition, bool constexpr_specified)
 {
     qualified_type type = qualified_type::make(
         type_table.fundamental(fundamental_type::void_), cv_none);
@@ -161,6 +188,9 @@ analysis_result semantic_analysis::special_member_declarator(
     const qualified_type *parameters =
         type_table.parameters(type.unqualified());
     special_member kind = special_member::constructor;
+    if (m.destructor && constexpr_specified)
+        /* C++20's constexpr destructors ([dcl.constexpr]/3) */
+        return not_supported(declaration, "dcl.constexpr");
     if (m.destructor) {
         kind = special_member::destructor;
         if (f.parameter_count)
@@ -221,8 +251,12 @@ analysis_result semantic_analysis::special_member_declarator(
     x.type = type;
     x.nonstatic_member = true;
     x.special = kind;
-    /* [class.mfct]/1: defined in its class, an inline member function */
-    x.inline_ = definition;
+    /* [class.mfct]/1: defined in its class, an inline member function;
+       [dcl.constexpr]/1: "A function or static data member declared with
+       the constexpr or consteval specifier is implicitly an inline
+       function or variable" */
+    x.inline_ = definition || constexpr_specified;
+    x.constexpr_ = constexpr_specified;
     x.defined = definition;
     x.access = access;
     x.linkage_of_name = entity_table[c].linkage_of_name;
@@ -408,6 +442,13 @@ semantic_analysis::construct(node_index at, qualified_type type,
     made.category = value_category::prvalue;
     made.evaluation = constness::not_constant;
     result.evaluation = constness::not_constant;
+    /* [expr.const]/5.2: a constexpr constructor's invocation is the
+       evaluator's (S6) */
+    if (entity_table[chosen].constexpr_) {
+        made.evaluation = constness::unknown;
+        result.evaluation = constness::unknown;
+        constexpr_calls++;
+    }
     result.value = 0;
     result.node = expression_node(semantic_kind::construct, made,
                                   tree[at].first_token, object, chosen);
@@ -1140,12 +1181,16 @@ analysis_result semantic_analysis::special_member_body(node_index definition,
  * class definition."  [dcl.meaning]/1: the qualified declarator-id refers
  * to a constructor or the destructor declared in the class.
  */
-analysis_result semantic_analysis::special_member_definition(node_index n)
+analysis_result semantic_analysis::special_member_definition(node_index n,
+                                                             uint32_t at)
 {
     const syntax_node &node = tree[n];
     const syntax_child *children = tree.children(n);
-    if (node.child_count != 2 ||
-        !syntax_is(tree, children[1], syntax_kind::function_body) ||
+    /* a decl-specifier-seq before the declarator holds constexpr alone
+       (function_specifiers_only) */
+    bool constexpr_specified = at == 1;
+    if (node.child_count != at + 2 ||
+        !syntax_is(tree, children[at + 1], syntax_kind::function_body) ||
         at_block_scope() || function_state.active)
         return not_supported(n, "dcl.fct.def.general");
     qualified_type type = qualified_type::make(
@@ -1153,7 +1198,7 @@ analysis_result semantic_analysis::special_member_definition(node_index n)
     declarator_meaning m;
     function_cv = 0;
     function_parameters.clear();
-    analysis_result r = declarator(n, children[0], type, m);
+    analysis_result r = declarator(n, children[at], type, m);
     in_member_declarator = false;
     if (r != analysis_result::well_formed)
         return r;
@@ -1183,6 +1228,11 @@ analysis_result semantic_analysis::special_member_definition(node_index n)
                                    "declaration shall refer to a previously "
                                    "declared member of the class",
                                    "dcl.meaning");
+    /* [dcl.constexpr]/1: "If any declaration of a function or function
+       template has a constexpr specifier, then all its declarations shall
+       contain the constexpr specifier." */
+    if (entity_table[e].constexpr_ != constexpr_specified)
+        return not_supported(n, "dcl.constexpr");
     /* [basic.def.odr]/1 */
     if (entity_table[e].defined)
         return ill_formed_at_token(m.id,
@@ -1192,7 +1242,7 @@ analysis_result semantic_analysis::special_member_definition(node_index n)
     entity_table[e].defined = true;
     entity_table.add_declaration(e, n);
     last_declared = e;
-    return special_member_body(n, children[1]);
+    return special_member_body(n, children[at + 1]);
 }
 
 /*
@@ -1235,7 +1285,9 @@ analysis_result semantic_analysis::class_conversion(node_index n,
     m = expression_meaning();
     m.type = qualified_type::make(type.unqualified(), cv_none);
     m.category = value_category::prvalue;
-    m.evaluation = constness::not_constant;
+    m.evaluation = value.evaluation;
+    if (m.evaluation == constness::constant)
+        m.evaluation = constness::not_constant;
     m.node = value.node;
     return analysis_result::well_formed;
 }

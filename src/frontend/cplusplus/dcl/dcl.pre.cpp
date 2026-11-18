@@ -688,7 +688,14 @@ analysis_result semantic_analysis::function_definition(node_index n)
         !syntax_is(tree, tree.children(n)[k], syntax_kind::decl_specifier_seq))
         /* [class.mem]/12: a constructor or destructor (or a conversion
            function) defined outside its class */
-        return special_member_definition(n);
+        return special_member_definition(n, 0);
+    bool constexpr_specified = false;
+    if (!k && node.child_count == 3 &&
+        function_specifiers_only(tree.children(n)[0].index(),
+                                 constexpr_specified))
+        /* the same, constexpr ([class.ctor]/1): a decl-specifier-seq of
+           constexpr alone has no type, so names no other function */
+        return special_member_definition(n, 1);
     if (!node.child_count)
         return not_supported(n, "dcl.fct.def.general");
     analysis_result r = init_declarators(n, tree.children(n)[k].index(), true);
@@ -1128,9 +1135,17 @@ analysis_result semantic_analysis::declare_with_initializer(
         entity_table[declared_entity].bound_unknown =
             t.kind == type_kind::array && !t.bound_known;
     }
+    uint32_t calls_before = constexpr_calls;
     r = initializer(init, type, value);
     if (r != analysis_result::well_formed)
         return r;
+    /* [basic.start.static]/2: "Constant initialization is performed if a
+       variable or temporary object with static or thread storage duration
+       is constant-initialized": an initializer that invokes a constexpr
+       function or constructor may be one, which the evaluator (S6) decides */
+    if (!entity_table[declared_entity].automatic &&
+        constexpr_calls != calls_before)
+        return not_supported(declaration, "basic.start.static");
     entity_table[declared_entity].bound_unknown = false;
     const struct type record = type_table[type.unqualified()];
     /* [basic.def]/5: "In the definition of an object, the type of that

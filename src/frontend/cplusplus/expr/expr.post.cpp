@@ -889,6 +889,11 @@ analysis_result semantic_analysis::call_with(
     if (member ||
         (f.entity && entity_table[f.entity].kind == entity_kind::function))
         m.evaluation = constness::not_constant;
+    /* a constexpr member function's invocation is the evaluator's */
+    if (called && entity_table[called].constexpr_) {
+        m.evaluation = constness::unknown;
+        constexpr_calls++;
+    }
     uint32_t callee = f.node;
     if (member) {
         /* the member function, as an lvalue of its type; the object's
