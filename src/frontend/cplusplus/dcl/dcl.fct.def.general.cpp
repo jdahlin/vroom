@@ -294,6 +294,12 @@ analysis_result semantic_analysis::function_body(node_index definition,
     if (ctor_init.index() ||
         entity_table[f].special == special_member::constructor)
         result = worse(result, ctor_initializer(ctor_init, members));
+    else if (entity_table[f].special == special_member::destructor)
+        /* [class.cdtor]/4: in the destructor, a virtual call finds this
+           class's final overriders: its virtual table pointer stored on
+           entry ([abi:vtable-ctor]) */
+        members = vtable_pointer_store(entity_table[f].enclosing,
+                                       first_token(compound));
     open_scope(parameters, false);
     uint32_t block = 0;
     result = worse(result, block_items(compound.index(), block));

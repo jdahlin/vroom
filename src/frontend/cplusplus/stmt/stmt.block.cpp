@@ -93,12 +93,7 @@ analysis_result semantic_analysis::block_items(node_index n, uint32_t &built)
     }
     claim_place = place;
     claim_scope = place_scope;
-    built = statement_node(semantic_kind::block, tree[n].first_token);
-    if (!statements.empty()) {
-        semantics[built].first =
-            semantics.list(&statements[0], statements.size());
-        semantics[built].count = static_cast<uint32_t>(statements.size());
-    }
+    built = block_statement(tree[n].first_token, statements);
     return result;
 }
 

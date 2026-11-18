@@ -53,7 +53,7 @@ struct tree_checker {
                /* T(args), a prvalue of class type ([expr.type.conv]/2) */
                k == semantic_kind::construct ||
                (k >= semantic_kind::new_object &&
-                k <= semantic_kind::delete_object);
+                k <= semantic_kind::vtable_pointer_store);
     }
     static bool is_initializer(semantic_kind k)
     {
@@ -249,6 +249,12 @@ struct tree_checker {
                 problem(n, "no constructor");
             list(n, tree_sort::initializer, "argument");
             break;
+        case semantic_kind::vtable_pointer_store:
+            child(n, node.a, tree_sort::expression, false, "object address");
+            prvalue(n, node.a, "object address");
+            if (!node.b || !analysis.entity_table[node.b].dynamic)
+                problem(n, "no dynamic class");
+            break;
         case semantic_kind::destroy:
             child(n, node.a, tree_sort::expression, false, "object");
             if (!node.b || analysis.entity_table[node.b].special !=
@@ -258,9 +264,11 @@ struct tree_checker {
         case semantic_kind::new_object:
             child(n, node.a, tree_sort::expression, false, "allocation");
             child(n, node.b, tree_sort::initializer, true, "initialization");
+            child(n, node.d, tree_sort::expression, true, "count");
             prvalue(n, node.a, "allocation");
             break;
         case semantic_kind::allocated:
+        case semantic_kind::array_count:
             break;
         case semantic_kind::array_size:
             child(n, node.a, tree_sort::expression, false, "count");
@@ -277,7 +285,13 @@ struct tree_checker {
             list(n, tree_sort::statement, "statement");
             break;
         case semantic_kind::expression_statement:
-            child(n, node.a, tree_sort::expression, false, "expression");
+            /* a destructor's call of a subobject's destructor
+               ([class.dtor]/13) is a statement of its own */
+            if (node.a && node.a < analysis.semantics.size() &&
+                analysis.semantics[node.a].kind == semantic_kind::destroy)
+                child(n, node.a, tree_sort::initializer, false, "expression");
+            else
+                child(n, node.a, tree_sort::expression, false, "expression");
             break;
         case semantic_kind::declaration_statement:
             if (!node.a)

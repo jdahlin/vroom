@@ -1,4 +1,7 @@
-/* @FILE response files as GNU ld, lld and llvm-ar read them (common/response-files.h). */
+/*
+ * response-files.cpp: @FILE response files as GNU ld, lld and llvm-ar read
+ * them (common/response-files.h): FILE's words replace the argument.
+ */
 
 #include <ctype.h>
 #include <fcntl.h>

@@ -160,9 +160,9 @@ analysis_result semantic_analysis::iteration_statement(node_index n,
 {
     const syntax_node &node = tree[n];
     const syntax_child *children = tree.children(n);
-    if (!node.child_count || !children[0].is_token())
+    standard_keyword k = leading_keyword(n);
+    if (k == standard_keyword::none)
         return not_supported(n, "stmt.iter");
-    standard_keyword k = p.keyword_of(tokens[children[0].index()]);
     entity_index outer = current_scope, statement_scope = 0;
     analysis_result result = analysis_result::well_formed;
     expression_meaning m;

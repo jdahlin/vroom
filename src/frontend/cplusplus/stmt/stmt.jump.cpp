@@ -165,28 +165,29 @@ analysis_result semantic_analysis::return_statement(node_index n,
        C++11 to C++20; for a reference result that decides whether the
        initialization is well-formed, which analysis does not follow */
     type_kind result_kind = type_table[returns.unqualified()].kind;
-    if (result_kind == type_kind::lvalue_reference ||
-        result_kind == type_kind::rvalue_reference) {
-        syntax_child named = operand;
-        while (!named.is_token() &&
-               tree[named.index()].kind == syntax_kind::primary_expression &&
-               tree[named.index()].child_count == 3)
-            named = tree.children(named.index())[1];
-        if (named.is_token() &&
-            tokens[named.index()].kind == token_kind::identifier) {
-            entity_index e = lookup(tokens.identifier(named.index()));
-            /* an lvalue reference is not implicitly movable */
-            if (e && entity_table[e].automatic &&
-                type_table[entity_table[e].type.unqualified()].kind !=
-                    type_kind::lvalue_reference)
-                return not_supported(n, "class.copy.elision");
-        }
-    }
+    entity_index movable = implicitly_movable(operand);
+    if (movable && (result_kind == type_kind::lvalue_reference ||
+                    result_kind == type_kind::rvalue_reference))
+        return not_supported(n, "class.copy.elision");
     expression_meaning m;
     /* [over.over]/1: "the return value of a function" */
     analysis_result r = target_expression(operand, returns, m);
     if (r != analysis_result::well_formed)
         return r;
+    const struct type &object = type_table[m.type.unqualified()];
+    if (movable && m.category == value_category::lvalue &&
+        object.kind == type_kind::class_type &&
+        declares_move_constructor(object.entity)) {
+        /* the first overload resolution, as an rvalue, finds the move
+           constructor viable: it is chosen ([over.ics.rank]/3.2.3), deleted
+           or not.  For another class (a converting constructor), C++11 to
+           C++17 take the copy unless the chosen constructor's parameter is
+           an rvalue reference to the object's type, C++20 does not: not
+           analysed */
+        if (m.type.unqualified() != returns.unqualified())
+            return not_supported(n, "class.copy.elision");
+        m.category = value_category::xvalue;
+    }
     /* a void operand, or (an extension) one in a function returning void,
        is evaluated and discarded */
     operand_node = m.node;
@@ -207,6 +208,36 @@ analysis_result semantic_analysis::return_statement(node_index n,
     r = initialize_with(n, m, returns, false, false, result);
     operand_node = result.node;
     return r;
+}
+
+/*
+ * [class.copy.elision]/3: "An implicitly movable entity is a variable of
+ * automatic storage duration that is either a non-volatile object or an
+ * rvalue reference to a non-volatile object type."  The entity an operand
+ * names by an id-expression (in parentheses or not), or none.
+ */
+entity_index semantic_analysis::implicitly_movable(syntax_child operand)
+{
+    syntax_child named = operand;
+    while (!named.is_token() &&
+           tree[named.index()].kind == syntax_kind::primary_expression &&
+           tree[named.index()].child_count == 3)
+        named = tree.children(named.index())[1];
+    if (!named.is_token() ||
+        tokens[named.index()].kind != token_kind::identifier)
+        return 0;
+    entity_index e = lookup(tokens.identifier(named.index()));
+    if (!e || !entity_table[e].automatic)
+        return 0;
+    qualified_type t = entity_table[e].type;
+    const struct type &k = type_table[t.unqualified()];
+    if (k.kind == type_kind::lvalue_reference)
+        return 0;
+    if (k.kind == type_kind::rvalue_reference)
+        t = k.operand;
+    if (t.cv() & cv_volatile)
+        return 0;
+    return e;
 }
 
 } // namespace cplusplus

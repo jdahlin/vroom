@@ -182,6 +182,33 @@ void exit(int c)
 	_exit(c);
 }
 void abort(void) { _exit(134); }
+/* the C++ ABI's pure virtual function slot ([abi:pure-virtual] in
+   doc/PLAN-cxx-sema.md R6): a call of one terminates */
+void __cxa_pure_virtual(void) { abort(); }
+/* [abi:dso-dtor]: destructors of objects with static storage duration,
+   run by exit in the reverse order of their registration, interleaved
+   with atexit's functions ([basic.start.term]/3) */
+void *__dso_handle = &__dso_handle;
+static void (*cxa_f[64])(void *);
+static void *cxa_p[64];
+static int ncxa;
+static void cxa_run(void)
+{
+	int i = --ncxa;
+	cxa_f[i](cxa_p[i]);
+}
+int __cxa_atexit(void (*f)(void *), void *p, void *d)
+{
+	(void)d;
+	if (ncxa == 64 || atexit(cxa_run)) return -1;
+	cxa_f[ncxa] = f;
+	cxa_p[ncxa++] = p;
+	return 0;
+}
+/* [abi:guards], one thread: the first byte set once initialized */
+int __cxa_guard_acquire(unsigned long long *g) { return !*(unsigned char *)g; }
+void __cxa_guard_release(unsigned long long *g) { *(unsigned char *)g = 1; }
+void __cxa_guard_abort(unsigned long long *g) { (void)g; }
 void __rt_assert(const char *e, const char *f, int l, const char *fn);
 int fprintf(FILE *, const char *, ...);
 void __rt_assert(const char *e, const char *f, int l, const char *fn)

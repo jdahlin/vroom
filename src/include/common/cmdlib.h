@@ -1,3 +1,8 @@
+/*
+ * cmdlib.h: the command-line options of a small tool (vnm, vobjcopy, ...):
+ * a table of exact spellings matched against argv, an option's operand
+ * attached or in the next argument, and the --help text from the table.
+ */
 #ifndef VCC_COMMON_CMDLIB_H
 #define VCC_COMMON_CMDLIB_H
 

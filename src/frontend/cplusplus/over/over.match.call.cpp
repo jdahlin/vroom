@@ -78,10 +78,12 @@ semantic_analysis::resolve_call(node_index n,
 {
     /* the use of the name lookup resolved: it is claimed to find the
        function chosen (what clang's referencedDecl is), none until then */
-    semantic_node &callee = semantics[f.node];
+    /* f's node, fetched at each use: analysing the arguments and
+       choosing the function add nodes, which may move semantics' */
+    auto callee = [&]() -> semantic_node & { return semantics[f.node]; };
     size_t use = name_uses.size();
     for (size_t i = name_uses.size(); i-- > 0 && use == name_uses.size();)
-        if (name_uses[i].at == callee.at)
+        if (name_uses[i].at == callee().at)
             use = i;
     for (entity_index e : set)
         if (use < name_uses.size() && name_uses[use].entity == e)
@@ -170,7 +172,9 @@ semantic_analysis::resolve_call(node_index n,
     if (r != analysis_result::well_formed)
         return r;
     entity_index c = set[chosen];
-    const entity &x = entity_table[c];
+    /* a copy: deleted_use may define an implicit member, adding entities
+       that may move entity_table's */
+    const entity x = entity_table[c];
     entity_index object_class = 0;
     if (object)
         object_class = type_table[implied.type.unqualified()].entity;
@@ -187,7 +191,7 @@ semantic_analysis::resolve_call(node_index n,
     /* [dcl.fct.def.delete]/2: "If a function is overloaded, it is
        referenced only if the function is selected by overload
        resolution." */
-    r = deleted_use(callee.at, c);
+    r = deleted_use(callee().at, c);
     if (r != analysis_result::well_formed)
         return r;
     if (use < name_uses.size() && !name_uses[use].entity)
@@ -198,15 +202,15 @@ semantic_analysis::resolve_call(node_index n,
         if (expressions[i].meaning.node != f.node)
             continue;
         expressions[i].meaning.type = x.type;
-        if (callee.kind != semantic_kind::bound_member_function)
+        if (callee().kind != semantic_kind::bound_member_function)
             expressions[i].meaning.entity = c;
         break;
     }
-    callee.type = x.type;
-    if (callee.kind == semantic_kind::bound_member_function) {
-        callee.b = c;
+    callee().type = x.type;
+    if (callee().kind == semantic_kind::bound_member_function) {
+        callee().b = c;
     } else {
-        callee.a = c;
+        callee().a = c;
         f.entity = c;
     }
     f.type = x.type;

@@ -64,6 +64,16 @@ analysis_result semantic_analysis::member_access(token_index at, entity_index e,
                                                  expression_meaning &m)
 {
     entity_index object_class = type_table[m.type.unqualified()].entity;
+    entity_index through =
+        entity_table[entity_table[e].enclosing].anonymous_object;
+    if (entity_table[e].nonstatic_member && through) {
+        /* [class.union.anon]/1: a member of an anonymous union, of its
+           unnamed object */
+        analysis_result r = member_access(at, through, m);
+        if (r != analysis_result::well_formed)
+            return r;
+        object_class = type_table[m.type.unqualified()].entity;
+    }
     if (aggregate_prvalue(m))
         return not_supported(current_declaration, "class.temporary");
     if (!accessible(e, object_class))
@@ -96,6 +106,14 @@ analysis_result semantic_analysis::member_access(token_index at, entity_index e,
         result.category = value_category::xvalue;
         if (m.category == value_category::lvalue)
             result.category = value_category::lvalue;
+        const struct type &declared = type_table[x.type.unqualified()];
+        if (declared.kind == type_kind::lvalue_reference ||
+            declared.kind == type_kind::rvalue_reference) {
+            /* [expr.ref]/6.1: "If E2 is declared to have type "reference
+               to T", then E1.E2 is an lvalue of type T." */
+            result.type = declared.operand;
+            result.category = value_category::lvalue;
+        }
         result.evaluation = constness::unknown;
         if (m.evaluation == constness::not_constant)
             result.evaluation = constness::not_constant;
@@ -179,9 +197,15 @@ analysis_result semantic_analysis::implicit_member_access(token_index at,
                                                           expression_meaning &m)
 {
     bool ambiguous = false;
+    /* [class.union.anon]/1: a member of an anonymous union is one of the
+       class whose member its unnamed object is */
+    entity_index member_of = entity_table[e].enclosing;
+    while (entity_table[member_of].anonymous_object)
+        member_of =
+            entity_table[entity_table[member_of].anonymous_object].enclosing;
     if (!function_state.this_entity ||
-        (entity_table[e].enclosing != current_class() &&
-         !base_step(current_class(), entity_table[e].enclosing, ambiguous)))
+        (member_of != current_class() &&
+         !base_step(current_class(), member_of, ambiguous)))
         /* in a static member function, or unevaluated ([expr.prim.id]/2) */
         return not_supported(current_declaration, "expr.prim.id");
     expression_meaning object;

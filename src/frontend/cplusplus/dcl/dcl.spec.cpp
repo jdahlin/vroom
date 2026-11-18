@@ -991,7 +991,7 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
     simple_type_keywords k;
     uint32_t cv = cv_none;
     unsigned const_ = 0, volatile_ = 0, typedef_ = 0, static_ = 0, extern_ = 0,
-             inline_ = 0, constexpr_ = 0;
+             inline_ = 0, constexpr_ = 0, virtual_ = 0, friend_ = 0;
     type_index named = 0;
     bool declares_class = false, declares_enumeration = false;
     token_index named_at = 0, duplicate = 0;
@@ -1150,6 +1150,7 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
             kw != standard_keyword::static_ &&
             kw != standard_keyword::extern_ &&
             kw != standard_keyword::inline_ &&
+            kw != standard_keyword::virtual_ &&
             kw != standard_keyword::constexpr_)
             k.first = t;
         switch (kw) {
@@ -1224,6 +1225,20 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
             break;
         case standard_keyword::constexpr_:
             count(constexpr_, t, "constexpr");
+            break;
+        case standard_keyword::virtual_:
+            /* [dcl.fct.spec]/2: "The virtual specifier shall be used only
+               in the initial declaration of a non-static member
+               function": analysed on a member-declaration
+               (member_declarator) */
+            if (!virtual_allowed)
+                return not_supported(seq, specifier_subclause(kw));
+            count(virtual_, t, "virtual");
+            break;
+        case standard_keyword::friend_:
+            if (!friend_allowed)
+                return not_supported(seq, specifier_subclause(kw));
+            count(friend_, t, "friend");
             break;
         default:
             return not_supported(seq, specifier_subclause(kw));
@@ -1308,6 +1323,8 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
     s.static_ = static_;
     s.extern_ = extern_;
     s.inline_ = inline_;
+    s.virtual_ = virtual_ != 0;
+    s.friend_ = friend_ != 0;
     s.constexpr_ = constexpr_;
     if (type)
         s.type = add_cv(qualified_type::make(type, cv_none), cv);

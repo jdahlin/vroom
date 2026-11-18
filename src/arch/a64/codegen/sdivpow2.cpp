@@ -1,3 +1,7 @@
+/*
+ * sdivpow2.cpp: arm64's signed division and remainder by a power of two:
+ * the shared recipe (rounding toward zero) emitted as records.
+ */
 #include "../../../codegen/codegen-internal.h"
 
 /* The shared recipe specifies rounding; this adapter owns registers. */

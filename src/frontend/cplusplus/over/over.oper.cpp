@@ -443,6 +443,10 @@ bool semantic_analysis::copy_assignment_operator(entity_index f,
     const entity &x = entity_table[f];
     if (!x.nonstatic_member || x.enclosing != c)
         return false;
+    /* an operator+ or operator== of that parameter is none */
+    if (!x.operator_function ||
+        x.implemented != preprocessing_op_or_punc::EQUAL)
+        return false;
     const struct type &function = type_table[x.type.unqualified()];
     if (function.parameter_count != 1 || function.variadic)
         return false;
@@ -456,6 +460,11 @@ bool semantic_analysis::copy_assignment_operator(entity_index f,
 
 bool semantic_analysis::assigned_bitwise(entity_index c)
 {
+    /* [class.copy.assign]/9.1: a class with virtual functions: its
+       implicit copy assignment is not trivial (it keeps the virtual table
+       pointer): not analysed */
+    if (entity_table[c].dynamic)
+        return false;
     lookup_result found = lookup_qualified(
         c, operator_name(preprocessing_op_or_punc::EQUAL), lookup_filter::any);
     if (found.entity || found.unknown || found.ambiguous)
