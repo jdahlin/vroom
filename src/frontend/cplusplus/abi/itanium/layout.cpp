@@ -104,50 +104,17 @@ bool pod_for_layout(const semantic_analysis &a, entity_index c)
     return true;
 }
 
-/* whether class c has a subobject of class type `of` at offset 0: itself,
-   or one of its own at offset 0 ([abi:class-types] II's component type
-   conflicts) */
-bool at_offset_zero(const semantic_analysis &a, entity_index c, entity_index of)
-{
-    if (c == of)
-        return true;
-    const entity &x = a.entity_table[c];
-    for (uint32_t i = 0; i < x.base_count; i++) {
-        const entity &b = a.entity_table[a.class_bases[x.first_base + i]];
-        if (!b.offset && at_offset_zero(a, class_of_component(a, b), of))
-            return true;
-    }
-    for (uint32_t i = 0; i < x.member_count; i++) {
-        const entity &m = a.entity_table[a.class_members[x.first_member + i]];
-        entity_index inner = class_of_component(a, m);
-        if (!m.offset && inner && at_offset_zero(a, inner, of))
-            return true;
-    }
-    return false;
-}
+/* an empty subobject placed in the class being laid out: its class and
+   offset ([abi:class-types] II's component type conflicts) */
+struct empty_subobject {
+    entity_index of;
+    uint64_t offset;
+};
 
-/* whether a subobject at offset 0 of class c2 (c2 itself, or a base or
-   member it has there) has the type of one at offset 0 of class c1: the
-   two cannot both be placed at one address ([abi:class-types] II) */
-bool share_offset_zero(const semantic_analysis &a, entity_index c1,
-                       entity_index c2)
-{
-    if (at_offset_zero(a, c1, c2))
-        return true;
-    const entity &x = a.entity_table[c2];
-    for (uint32_t i = 0; i < x.base_count; i++) {
-        const entity &b = a.entity_table[a.class_bases[x.first_base + i]];
-        if (!b.offset && share_offset_zero(a, c1, class_of_component(a, b)))
-            return true;
-    }
-    for (uint32_t i = 0; i < x.member_count; i++) {
-        const entity &m = a.entity_table[a.class_members[x.first_member + i]];
-        entity_index inner = class_of_component(a, m);
-        if (!m.offset && inner && share_offset_zero(a, c1, inner))
-            return true;
-    }
-    return false;
-}
+/* the most elements of an array member whose empty subobjects are
+   recorded; a larger array of classes with empty subobjects has no layout
+   here */
+constexpr uint64_t most_recorded_elements = 4096;
 
 /* [abi:general]: the quantities of class C while its components are
    allocated */
@@ -189,10 +156,99 @@ class class_layout
         if (to > size)
             size = to;
     }
+    /* [abi:class-types] II: the empty subobjects allocated so far */
+    owned_array<empty_subobject> empty_subobjects;
+    /* set when a component has more empty subobjects than are recorded */
+    bool too_many = false;
+
+    /* f(class, offset) for every subobject of class `of` at `at`, itself
+       included, while it returns true */
+    template <typename F>
+    bool each_subobject(entity_index of, uint64_t at, F &&f);
+    bool conflicts(entity_index of, uint64_t at);
+    void record(entity_index of, uint64_t at);
+    bool elements_conflict(entity_index of, uint64_t at, uint64_t element,
+                           uint64_t count)
+    {
+        for (uint64_t k = 0; k < count; k++)
+            if (conflicts(of, at + k * element))
+                return true;
+        return false;
+    }
     const char *base(uint32_t number);
     void bit_field(entity &m);
-    void data_member(entity &m);
+    const char *data_member(entity &m);
 };
+
+/*
+ * Every subobject of a component of class type `of` placed at `at`: the
+ * component, its bases and its members of class type (each element of an
+ * array of them), at their offsets in it.  Returns false when f does.
+ */
+template <typename F>
+bool class_layout::each_subobject(entity_index of, uint64_t at, F &&f)
+{
+    if (!f(of, at))
+        return false;
+    const entity &x = table[of];
+    for (uint32_t i = 0; i < x.base_count; i++) {
+        const entity &b = table[analysis.class_bases[x.first_base + i]];
+        if (!each_subobject(class_of_component(analysis, b), at + b.offset, f))
+            return false;
+    }
+    for (uint32_t i = 0; i < x.member_count; i++) {
+        const entity &m = table[analysis.class_members[x.first_member + i]];
+        entity_index inner = class_of_component(analysis, m);
+        if (!inner || m.base_subobject)
+            continue;
+        uint64_t element = table[inner].size;
+        uint64_t count = 1;
+        if (element)
+            count = analysis.size_of_type(m.type) / element;
+        if (count > most_recorded_elements) {
+            too_many = true;
+            count = most_recorded_elements;
+        }
+        for (uint64_t k = 0; k < count; k++)
+            if (!each_subobject(inner, at + m.offset + k * element, f))
+                return false;
+    }
+    return true;
+}
+
+/*
+ * [abi:class-types] II: a component "conflicts" when one of its empty
+ * subobjects would be at the offset of an empty subobject of the same
+ * type already allocated: [intro.object]/9, two distinct objects of the
+ * same type have distinct addresses.  A subobject that is not empty
+ * occupies bytes no other component of the class shares.
+ */
+bool class_layout::conflicts(entity_index of, uint64_t at)
+{
+    bool found = false;
+    each_subobject(of, at, [&](entity_index d, uint64_t offset) {
+        if (!empty_class(analysis, d))
+            return true;
+        for (size_t i = 0; i < empty_subobjects.size(); i++)
+            if (empty_subobjects[i].of == d &&
+                empty_subobjects[i].offset == offset) {
+                found = true;
+                return false;
+            }
+        return true;
+    });
+    return found;
+}
+
+/* the empty subobjects of a component placed at `at` */
+void class_layout::record(entity_index of, uint64_t at)
+{
+    each_subobject(of, at, [&](entity_index d, uint64_t offset) {
+        if (empty_class(analysis, d))
+            empty_subobjects.append(empty_subobject{d, offset});
+        return true;
+    });
+}
 
 /*
  * [abi:class-types] I: sizeof(C) and dsize(C) start at zero, align(C) at
@@ -210,12 +266,12 @@ const char *class_layout::initialization()
 }
 
 /*
- * [abi:class-types] II, a base class: an empty one at offset 0, any other
- * at dsize(C) rounded up to its alignment, taking its data size (which is
- * its size for a POD for the purpose of layout, [abi:pod]).  A base that
- * would share its address with a subobject of its own type moves to a
- * later offset in the ABI; that rule is not written, and the class has no
- * layout.
+ * [abi:class-types] II, a base class D: an empty one at offset 0, any
+ * other at dsize(C) rounded up to nvalign(D), taking its data size (its
+ * size for a POD for the purpose of layout, [abi:pod]).  When D conflicts
+ * there (conflicts above), the offset moves by nvalign(D), an empty base's
+ * starting again from dsize(C) rounded up; an empty base raises sizeof(C)
+ * to cover it and leaves dsize(C) where it was.
  */
 const char *class_layout::base(uint32_t number)
 {
@@ -224,32 +280,26 @@ const char *class_layout::base(uint32_t number)
     entity_index of = class_of_component(analysis, b);
     const entity &d = table[of];
     raise_alignment(d.alignment);
-    if (empty_class(analysis, of)) {
-        /* [class.derived]/4 (Note): "A base class subobject may be of
-           zero size" */
-        for (uint32_t k = 0; k < number; k++)
-            if (share_offset_zero(
-                    analysis,
-                    class_of_component(
-                        analysis,
-                        table[analysis.class_bases[x.first_base + k]]),
-                    of))
-                return "class.derived";
-        b.offset = 0;
-        raise_size(d.size);
-        return nullptr;
+    bool empty = empty_class(analysis, of);
+    uint64_t at = 0;
+    if (!empty)
+        at = align_up(data_size(), d.alignment);
+    if (conflicts(of, at)) {
+        if (empty)
+            at = align_up(data_size(), d.alignment);
+        while (conflicts(of, at))
+            at += d.alignment;
     }
-    b.offset = align_up(data_size(), d.alignment);
-    /* at offset 0 with an empty base placed there before */
-    for (uint32_t k = 0; !b.offset && k < number; k++)
-        if (share_offset_zero(
-                analysis,
-                class_of_component(
-                    analysis, table[analysis.class_bases[x.first_base + k]]),
-                of))
-            return "class.derived";
-    data_bits = (b.offset + d.data_size) * 8;
-    raise_size(data_size());
+    b.offset = at;
+    record(of, at);
+    if (empty) {
+        raise_size(at + d.size);
+    } else {
+        data_bits = (at + d.data_size) * 8;
+        raise_size(data_size());
+    }
+    if (too_many)
+        return "class.derived";
     return nullptr;
 }
 
@@ -288,7 +338,7 @@ void class_layout::bit_field(entity &m)
  * raises a member's alignment; packed lowers it to one byte, which
  * aligned raises.
  */
-void class_layout::data_member(entity &m)
+const char *class_layout::data_member(entity &m)
 {
     uint64_t member_size = analysis.size_of_type(m.type);
     uint64_t member_alignment = analysis.alignment_of_type(m.type);
@@ -307,11 +357,32 @@ void class_layout::data_member(entity &m)
         else
             data_bits = data_size() * 8;
     } else {
+        /* [abi:class-types] II: a member of class type (each element of
+           an array of them) that conflicts moves by its alignment */
+        entity_index of = class_of_component(analysis, m);
+        uint64_t element = 0, count = 0;
+        if (of) {
+            element = table[of].size;
+            count = 1;
+            if (element)
+                count = member_size / element;
+            if (count > most_recorded_elements) {
+                too_many = true;
+                count = most_recorded_elements;
+            }
+        }
         m.offset = align_up(data_size(), member_alignment);
+        while (elements_conflict(of, m.offset, element, count))
+            m.offset += member_alignment;
+        for (uint64_t k = 0; k < count; k++)
+            record(of, m.offset + k * element);
         data_bits = (m.offset + member_size) * 8;
     }
     raise_size(data_size());
     raise_alignment(member_alignment);
+    if (too_many)
+        return "class.derived";
+    return nullptr;
 }
 
 /*
@@ -333,10 +404,13 @@ const char *class_layout::allocation_of_members()
         entity &m = table[analysis.class_members[x.first_member + i]];
         if (m.base_subobject)
             continue;
-        if (m.bit_field)
+        if (m.bit_field) {
             bit_field(m);
-        else
-            data_member(m);
+            continue;
+        }
+        const char *rule = data_member(m);
+        if (rule)
+            return rule;
     }
     return nullptr;
 }
@@ -365,22 +439,6 @@ const char *class_layout::finalization()
     if (!x.size)
         x.size = alignment;
     x.data_size = data_size();
-    /* a data member of class type placed at offset 0 where an empty base
-       of its type (or one it has at offset 0) is: the ABI moves the
-       member, a rule not written */
-    if (x.member_count) {
-        const entity &first = table[analysis.class_members[x.first_member]];
-        entity_index of = class_of_component(analysis, first);
-        for (uint32_t i = 0;
-             of && !first.base_subobject && !first.offset && i < x.base_count;
-             i++) {
-            const entity &b = table[analysis.class_bases[x.first_base + i]];
-            entity_index base_class = class_of_component(analysis, b);
-            if (empty_class(analysis, base_class) &&
-                share_offset_zero(analysis, base_class, of))
-                return "class.derived";
-        }
-    }
     if (pod_for_layout(analysis, c))
         x.data_size = x.size;
     return nullptr;
