@@ -612,6 +612,15 @@ static bool depends(const types &table, qualified_type t,
     case type_kind::template_parameter:
         return !parameters || (*parameters)[r.entity].value >= from;
     case type_kind::dependent:
+        /* typename Q::name depends on what Q does */
+        if (parameters &&
+            (*parameters)[r.entity].kind == entity_kind::dependent_member)
+            return depends(
+                table,
+                qualified_type::make(
+                    static_cast<type_index>((*parameters)[r.entity].value),
+                    cv_none),
+                parameters, from);
         return true;
     case type_kind::pointer:
     case type_kind::lvalue_reference:
@@ -1072,6 +1081,12 @@ bool semantic_analysis::deduce_type(qualified_type p, qualified_type a,
     }
     if (!depends(type_table, p))
         return p == a;
+    if (pr.kind == type_kind::dependent &&
+        entity_table[pr.entity].kind == entity_kind::dependent_member)
+        /* [temp.deduct.type]/5.1: "The nested-name-specifier of a type that
+           was specified using a qualified-id" is a non-deduced context;
+           the argument's conversion is checked on the specialization */
+        return true;
     if (pr.kind == type_kind::dependent) {
         /* [temp.deduct.type]/8's TT<T>: a class template's specialization,
            whose arguments are deduced from those of A's, a

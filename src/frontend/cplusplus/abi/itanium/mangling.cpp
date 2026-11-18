@@ -116,6 +116,8 @@ class itanium_mangler
     bool nested_name(entity_index e);
     bool prefix(entity_index scope);
     bool class_enum_type(qualified_type t);
+    bool dependent_member_name(entity_index e);
+    bool dependent_member_prefix(type_index q);
     void discriminator(uint64_t n);
     bool bare_function_type(qualified_type t);
     bool type(qualified_type t);
@@ -405,6 +407,50 @@ bool itanium_mangler::in_unnamed_namespace(entity_index e) const
  * A class or an enumeration of namespace or class scope: its name, as an
  * entity's.  One of a block scope (a <local-name>) has no rule yet.
  */
+/*
+ * [abi:mangle.name]:
+ *
+ *     <nested-name> ::= N [<CV-qualifiers>] [<ref-qualifier>] <prefix> <unqualified-name> E
+ *     <prefix> ::= <template-param>
+ *     <prefix> ::= <prefix> <unqualified-name>
+ *
+ * typename Q::name ([temp.res]/3) for a dependent Q: N, the template-param
+ * Q is made of and each name after it, E.  [abi:mangling-compression]:
+ * each prefix is a candidate, the same one as the type it names (Q::a in
+ * Q::a::b, as clang 23); the type as a whole is the one type() adds.
+ */
+bool itanium_mangler::dependent_member_name(entity_index e)
+{
+    text("N");
+    if (!dependent_member_prefix(
+            static_cast<type_index>(analysis.entity_table[e].value)))
+        return false;
+    if (!source_name(analysis.entity_table[e].name))
+        return false;
+    text("E");
+    return true;
+}
+
+bool itanium_mangler::dependent_member_prefix(type_index q)
+{
+    const struct type &r = record(qualified_type::make(q, cv_none));
+    if (r.kind == type_kind::template_parameter)
+        return type(qualified_type::make(q, cv_none));
+    if (r.kind != type_kind::dependent ||
+        analysis.entity_table[r.entity].kind != entity_kind::dependent_member)
+        return false;
+    qualified_type t = qualified_type::make(q, cv_none);
+    if (substitution(t))
+        return true;
+    const entity &x = analysis.entity_table[r.entity];
+    if (!dependent_member_prefix(static_cast<type_index>(x.value)))
+        return false;
+    if (!source_name(x.name))
+        return false;
+    add_candidate(t);
+    return true;
+}
+
 bool itanium_mangler::class_enum_type(qualified_type t)
 {
     entity_index c = record(t).entity;
@@ -1075,6 +1121,10 @@ bool itanium_mangler::type(qualified_type t)
         done = function_type(t);
     else if (r.kind == type_kind::array)
         done = array_type(t);
+    else if (r.kind == type_kind::dependent &&
+             analysis.entity_table[r.entity].kind ==
+                 entity_kind::dependent_member)
+        done = dependent_member_name(r.entity);
     else if (r.kind == type_kind::class_type ||
              r.kind == type_kind::enumeration || r.kind == type_kind::dependent)
         done = class_enum_type(t);

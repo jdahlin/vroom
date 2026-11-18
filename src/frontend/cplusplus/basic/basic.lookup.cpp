@@ -264,6 +264,17 @@ semantic_analysis::lookup_unqualified(uint32_t name, lookup_filter filter) const
                bases'; an ambiguous one finds nothing analysis uses */
             bool ambiguous = false;
             entity_index e = class_member_lookup(s, name, ambiguous);
+            bool unknown = false;
+            if ((e || ambiguous) && in_dependent_base_only(s, name, unknown)) {
+                e = 0;
+                ambiguous = false;
+                /* (clang's -fms-compatibility finds a name
+                   of a dependent base that nothing else declares) */
+                if (tokens.files.behavior.microsoft_compatibility)
+                    unknown = true;
+            }
+            if (unknown)
+                r.unknown = true;
             if (ambiguous)
                 r.unknown = true;
             else if (e) {
@@ -662,7 +673,8 @@ bool semantic_analysis::argument_dependent_lookup(
  * specialization; a decltype-specifier has no rules yet.
  */
 analysis_result semantic_analysis::nested_name_specifier(node_index n,
-                                                         nominated_scope &scope)
+                                                         nominated_scope &scope,
+                                                         bool dependent_allowed)
 {
     const syntax_node &node = tree[n];
     const syntax_child *parts = tree.children(n);
@@ -677,6 +689,21 @@ analysis_result semantic_analysis::nested_name_specifier(node_index n,
         i = 1;
     }
     for (; i < node.child_count; i += 2) {
+        if (scope.dependent) {
+            /* [temp.dep.type]/6: "A qualified-id in which the
+               nested-name-specifier names a dependent type that is not the
+               current instantiation" is a member of an unknown
+               specialization, a dependent type (/9): Q::name */
+            if (!parts[i].is_token() ||
+                tokens[parts[i].index()].kind != token_kind::identifier ||
+                i + 1 >= node.child_count ||
+                !syntax_is_punctuator(tokens, parts[i + 1],
+                                      preprocessing_op_or_punc::COLON_COLON))
+                return not_supported(n, "temp.res");
+            scope.dependent = dependent_member_type(
+                scope.dependent, tokens.identifier(parts[i].index()));
+            continue;
+        }
         if (!parts[i].is_token() &&
             syntax_is(tree, parts[i], syntax_kind::simple_template_id) &&
             i + 1 < node.child_count &&
@@ -691,6 +718,13 @@ analysis_result semantic_analysis::nested_name_specifier(node_index n,
             if (r != analysis_result::well_formed)
                 return r;
             const struct type &st = type_table[named];
+            if (st.kind == type_kind::dependent && dependent_allowed) {
+                scope.entity = 0;
+                scope.global = false;
+                scope.dependent = named;
+                qualified = true;
+                continue;
+            }
             if (st.kind != type_kind::class_type)
                 return not_supported(n, "temp.res");
             const entity &x = entity_table[st.entity];
@@ -738,8 +772,15 @@ analysis_result semantic_analysis::nested_name_specifier(node_index n,
             /* a template-parameter: a dependent type ([temp.dep.type]/9),
                whose members are looked up per specialization */
             if (named.kind == type_kind::template_parameter ||
-                named.kind == type_kind::dependent)
-                return not_supported(n, "temp.res");
+                named.kind == type_kind::dependent) {
+                if (!dependent_allowed)
+                    return not_supported(n, "temp.res");
+                scope.entity = 0;
+                scope.global = false;
+                scope.dependent = entity_table[e].type.unqualified();
+                qualified = true;
+                continue;
+            }
             if (named.kind != type_kind::class_type &&
                 named.kind != type_kind::enumeration)
                 return ill_formed_at_token(

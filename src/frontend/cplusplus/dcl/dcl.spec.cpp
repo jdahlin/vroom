@@ -1011,6 +1011,7 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
             syntax_is(tree, c, syntax_kind::enum_specifier) ||
             syntax_is(tree, c, syntax_kind::elaborated_enum_specifier) ||
             syntax_is(tree, c, syntax_kind::simple_type_specifier) ||
+            syntax_is(tree, c, syntax_kind::typename_specifier) ||
             syntax_is(tree, c, syntax_kind::simple_template_id))
             continue;
         /* an attribute specifier has rules unless a class-specifier is
@@ -1085,6 +1086,10 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
                 uint32_t named_cv = 0;
                 r = qualified_type_name(c.index(), class_type, named_cv);
                 cv |= named_cv;
+            } else if (syntax_is(tree, c, syntax_kind::typename_specifier)) {
+                uint32_t named_cv = 0;
+                r = typename_type(c.index(), class_type, named_cv);
+                cv |= named_cv;
             } else if (syntax_is(tree, c,
                                  syntax_kind::gnu_attribute_specifier)) {
                 /* [ext:gnu_attributes] a decl-specifier: it applies to
@@ -1103,7 +1108,8 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
                 k.alone++;
             named = class_type;
             named_at = tree[c.index()].first_token;
-            if (!syntax_is(tree, c, syntax_kind::simple_type_specifier))
+            if (!syntax_is(tree, c, syntax_kind::simple_type_specifier) &&
+                !syntax_is(tree, c, syntax_kind::typename_specifier))
                 declares_class = true;
             continue;
         }
@@ -1387,10 +1393,17 @@ analysis_result semantic_analysis::qualified_type_name(node_index n,
         return not_supported(n, "dcl.type.simple");
     }
     nominated_scope scope;
-    analysis_result r = nested_name_specifier(parts[0].index(), scope);
+    analysis_result r = nested_name_specifier(parts[0].index(), scope, true);
     if (r != analysis_result::well_formed)
         return r;
     token_index t = parts[1].index();
+    if (scope.dependent) {
+        /* [temp.res]/5: a qualified name in a context the parser assumes
+           names a type (C++20's implicit typename), with a dependent
+           nested-name-specifier: typename Q::name */
+        type = dependent_member_type(scope.dependent, tokens.identifier(t));
+        return analysis_result::well_formed;
+    }
     lookup_result found = lookup_qualified(scope.entity, tokens.identifier(t),
                                            lookup_filter::types);
     if (found.ambiguous)

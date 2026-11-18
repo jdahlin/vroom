@@ -206,6 +206,11 @@ enum class entity_kind : uint8_t {
     template_specialization,
     namespace_entity,
     pack,
+    /* not an entity: [temp.res]/3's typename-specifier with a dependent
+       nested-name-specifier, typename Q::name, a member of a type not
+       known until instantiation; its type is a type_kind::dependent of
+       it, value the qualifier Q (a type_index), name the identifier */
+    dependent_member,
     /* not an entity: a block scope or a function parameter scope
        ([basic.scope.block], [basic.scope.param]), the scope the names
        declared in it are bound in */
@@ -363,6 +368,10 @@ struct entity {
        is not empty is also among the class's non-static data members
        (field) */
     bool base_subobject = false;
+    /* a base subobject of a class template's specialization whose
+       base-specifier depends on a template-parameter: [temp.dep]/3, its
+       class's members are not found by unqualified lookup */
+    bool dependent_base = false;
     /* a class: its alignment; a non-static data member: the alignment
        its aligned attribute asks for, 0 if none ([ext:gnu_attributes]) */
     uint32_t alignment = 0;
@@ -1547,8 +1556,26 @@ class semantic_analysis
     struct nominated_scope {
         entity_index entity = 0;
         bool global = false;
+        /* [temp.dep.type]/9: the nested-name-specifier names a dependent
+           type (only when the caller allows one; entity is then 0) */
+        type_index dependent = 0;
     };
-    analysis_result nested_name_specifier(node_index n, nominated_scope &scope);
+    analysis_result nested_name_specifier(node_index n, nominated_scope &scope,
+                                          bool dependent_allowed = false);
+    /* whether class c's scope, for unqualified lookup of name, is to be
+       passed over: found only in a dependent base ([temp.dep]/3); unknown
+       when a dependent base and another one both may have it */
+    /* [temp.dep.type]/9: whether a base-specifier's class-or-decltype in
+       class template specialization c's class-specifier names one of the
+       template-parameters (bound in c) */
+    bool dependent_base_specifier(entity_index c, syntax_child name) const;
+    bool in_dependent_base_only(entity_index c, uint32_t name,
+                                bool &unknown) const;
+    /* [temp.res]/3: typename-specifier, as a type */
+    analysis_result typename_type(node_index n, type_index &type, uint32_t &cv);
+    /* the type typename Q::name for a dependent Q, one per Q and name */
+    type_index dependent_member_type(type_index qualifier, uint32_t name);
+    owned_array<entity_index> dependent_members;
     /* a block scope in the current one, made current */
     entity_index open_scope(entity_index conflicts, bool parameters);
     analysis_result pointer_operator(node_index op, qualified_type &type,

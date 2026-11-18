@@ -1608,6 +1608,38 @@ lines:
   symbols 1845, layouts 10190, lowering 284); [temp.class] unsupported
   6401 -> under 2196; cxx-run 212/212 (template-members-out-of-class.cpp);
   cxx-c-suites unchanged.
+  Then dependent names ([temp.res], [temp.dep]).  A typename-specifier
+  (`typename_type`, temp.res.cpp) and C++20's implicit typename in a
+  simple-type-specifier (`qualified_type_name`) with a dependent
+  nested-name-specifier (a template-parameter, a dependent specialization,
+  or such a name before it: `T::a::b`) are a dependent type of its own
+  (`entity_kind::dependent_member`, one per qualifier and name,
+  [temp.dep.type]/6 and /9), so a function template's declarator can use
+  `typename T::type`; a non-deduced context ([temp.deduct.type]/5.1), the
+  specialization's declarator analysed again with the arguments resolves
+  it.  `nested_name_specifier` reports such a qualifier only to a caller
+  that allows it.  Mangling: `N T_ <source-name>... E`, each prefix a
+  candidate (clang 23: `_Z2g4I1AENT_1a1bES2_S3_S1_`).  [temp.dep]/3: a
+  class template specialization's bases whose base-specifier names a
+  template-parameter are marked (`entity::dependent_base`), and unqualified
+  lookup passes over the class when the name is only in such a base
+  (`in_dependent_base_only`; unknown when another base or
+  -fms-compatibility could find it): `x` in a member of `D<T> : T` was
+  `T::x`, now the global `x` as clang's.  Bodies were already analysed per
+  specialization, so `T::value`, `T::f()`, `t.m` and dependent calls work
+  there.  Measured before going further: the lookup_horizon approximation
+  of two-phase lookup costs 8 declarations in cxx-sema, so binding
+  non-dependent names at the definition ([temp.nondep]) and ADL at the
+  point of instantiation ([temp.dep.candidate]) are not done; the
+  [basic.lookup.unqual] count (14.6k) is names whose declarations analysis
+  has no rules for, not templates'.  Not yet: `typename
+  T::template X<...>`, `struct T::X`, a dependent qualified name as an
+  expression in a template's own declarator (an array bound, a default
+  argument), member templates (S4).  cxx-sema: declarations as clang
+  40790, 0 we reject and clang accepts, 0 refuted (types 42663, lookup
+  14907, symbols 1845, layouts 10190); cxx-run 216/216
+  (template-dependent-names.cpp); cxx-c-suites unchanged (the #pragma pack
+  tests pr109318 and pr79737-1 not yet, [cpp.pragma]).
 
 ### S7. Exceptions and RTTI
 
