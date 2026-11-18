@@ -319,6 +319,18 @@ void class_layout::bit_field(entity &m)
     uint64_t unit = analysis.size_of_type(m.type) * 8;
     uint64_t type_alignment = analysis.alignment_of_type(m.type);
     uint64_t bit_alignment = type_alignment * 8;
+    if (table[c].union_) {
+        /* [class.union]/2: each member "as if it were the sole member of
+           a non-union class": at offset 0, its bytes the union's data */
+        m.offset = 0;
+        m.bit_offset = 0;
+        uint64_t bits = align_up(m.bit_width, 8);
+        if (bits > data_bits)
+            data_bits = bits;
+        raise_size(data_size());
+        raise_alignment(type_alignment);
+        return;
+    }
     uint64_t at = data_bits;
     if (!m.bit_width || (at % bit_alignment) + m.bit_width > unit)
         at = align_up(at, bit_alignment);

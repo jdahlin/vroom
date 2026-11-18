@@ -1251,8 +1251,8 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
  * when declaring an unnamed bit-field may the width be zero."
  *
  * The allocation is the layout's, at the closing } (abi/itanium/layout.cpp:
- * clang's for aarch64 Linux).  Bit-fields of enumeration type, with
- * padding bits, with an initializer, attributes, or in a union are not
+ * clang's for aarch64 Linux).  Bit-fields with
+ * padding bits, with an initializer or attributes are not
  * analysed yet.
  */
 analysis_result semantic_analysis::member_bit_field(entity_index c,
@@ -1277,14 +1277,16 @@ analysis_result semantic_analysis::member_bit_field(entity_index c,
     if (!s.has_type || s.typedef_ || s.static_ || s.extern_ || s.inline_ ||
         s.constexpr_ || s.aligned || s.gnu_flags)
         return not_supported(declaration, "class.bit");
-    if (entity_table[c].union_)
-        return not_supported(declaration, "class.bit");
     qualified_type type = s.type;
     const struct type record = type_table[type.unqualified()];
-    if (record.kind == type_kind::enumeration)
+    /* [class.bit]/1: "A bit-field shall have integral or enumeration
+       type"; an enumeration whose underlying type is not fixed yet (an
+       incomplete one) has no size */
+    bool enumeration = record.kind == type_kind::enumeration;
+    if (enumeration && !size_of_type(type))
         return not_supported(declaration, "class.bit");
-    if (record.kind != type_kind::fundamental ||
-        !fundamental_type_is_integral(record.fundamental))
+    if (!enumeration && (record.kind != type_kind::fundamental ||
+                         !fundamental_type_is_integral(record.fundamental)))
         return ill_formed(declaration,
                           "a bit-field shall have integral or enumeration "
                           "type",
