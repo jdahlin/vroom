@@ -339,7 +339,11 @@ analysis_result semantic_analysis::class_definition(node_index n,
             return not_supported(n, "temp.class");
         id = head_name;
         name = tokens.identifier(id);
-        c = entity_table.make(entity_kind::class_type, name, scope);
+        /* (one named before its template was defined is the incomplete
+           class made then) */
+        c = instantiations[specialization - 1].specialization;
+        if (!c)
+            c = entity_table.make(entity_kind::class_type, name, scope);
         entity_table[c].linkage_of_name = linkage::external;
         if (within_unnamed_namespace(scope))
             entity_table[c].linkage_of_name = linkage::internal;

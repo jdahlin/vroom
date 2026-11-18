@@ -82,7 +82,7 @@ semantic_analysis::instantiate(node_index at, entity_index template_entity,
         instantiations.append(record);
         /* the declaration: the declarator, where its types are the
            arguments' */
-        const syntax_child *d = tree.children(ft.definition);
+        const syntax_child *d = tree.children(ft.declarator);
         entity_index saved_scope = current_scope;
         uint32_t saved_cv = function_cv;
         owned_array<parameter_meaning> saved_parameters =
@@ -96,12 +96,12 @@ semantic_analysis::instantiate(node_index at, entity_index template_entity,
         qualified_type type = s.type;
         if (r == analysis_result::well_formed) {
             function_cv = 0;
-            r = declarator(ft.definition, d[1], type, m);
+            r = declarator(ft.declarator, d[1], type, m);
         }
         entity_index e = 0;
         if (r == analysis_result::well_formed) {
             instantiating = index + 1;
-            r = declare_specialization(ft.definition, m.id, type, s, e);
+            r = declare_specialization(ft.declarator, m.id, type, s, e);
             instantiating = 0;
         }
         current_scope = saved_scope;
@@ -121,7 +121,9 @@ semantic_analysis::instantiate(node_index at, entity_index template_entity,
     instantiation_record &x = instantiations[index];
     if (!needed || x.defined || x.pending || x.defining)
         return analysis_result::well_formed;
-    if (!t.constexpr_) {
+    /* (a template declared, not yet defined: its definition may come
+       later, [temp.point]/7) */
+    if (!t.constexpr_ || !ft.definition) {
         x.pending = true;
         pending_definitions.append(index);
         return analysis_result::well_formed;
@@ -249,6 +251,12 @@ semantic_analysis::instantiate_class(node_index at, uint32_t class_template,
         c = x.specialization;
         if (!c || entity_table[c].kind != entity_kind::class_type)
             return not_supported(at, "temp.inst");
+        /* a specialization named before its template was defined
+           ([temp.inst]/2's "declared specialization" is not one): defined
+           now that the template is */
+        if (!entity_table[c].defined && !x.defining && !x.pattern &&
+            ft.definition)
+            return define_class_instantiation(at, k, c);
         return analysis_result::well_formed;
     }
     if (instantiation_depth >= 64)
@@ -272,9 +280,6 @@ semantic_analysis::instantiate_class(node_index at, uint32_t class_template,
         at, class_template, arguments, count, pattern, deduced);
     if (matched != analysis_result::well_formed)
         return matched;
-    function_template definition = ft;
-    if (pattern)
-        definition = function_templates[pattern - 1];
     record.pattern = pattern;
     record.first_argument = static_cast<uint32_t>(template_arguments.size());
     record.argument_count = count;
@@ -285,6 +290,45 @@ semantic_analysis::instantiate_class(node_index at, uint32_t class_template,
         template_arguments.append(a);
     uint32_t index = static_cast<uint32_t>(instantiations.size());
     instantiations.append(record);
+    if (!pattern && !ft.definition) {
+        /* [temp.class]/1's template declared, not yet defined: the
+           specialization is an incomplete class ([basic.types]/5), which
+           a later use defines */
+        entity_index scope = entity_table[ft.entity].enclosing;
+        c = entity_table.make(entity_kind::class_type,
+                              entity_table[ft.entity].name, scope);
+        entity_table[c].linkage_of_name =
+            entity_table[ft.entity].linkage_of_name;
+        entity_table[c].type = qualified_type::make(
+            type_table.of_entity(type_kind::class_type, c), cv_none);
+        entity_table[c].instantiation = index + 1;
+        instantiations[index].specialization = c;
+        return analysis_result::well_formed;
+    }
+    return define_class_instantiation(at, index, c);
+}
+
+/*
+ * The class of instantiations[index], defined: its template's (or partial
+ * specialization's) class-specifier analysed again, then the member
+ * functions defined outside the class template ([temp.mem.func]/1) with
+ * the class's arguments.
+ */
+analysis_result semantic_analysis::define_class_instantiation(node_index at,
+                                                              uint32_t index,
+                                                              entity_index &c)
+{
+    c = 0;
+    if (instantiation_depth >= 64)
+        return not_supported(at, "temp.inst");
+    const instantiation_record record = instantiations[index];
+    const function_template ft =
+        function_templates[entity_table[record.template_entity].instantiation -
+                           1];
+    function_template definition = ft;
+    if (record.pattern)
+        definition = function_templates[record.pattern - 1];
+    instantiations[index].defining = true;
     entity_index saved_scope = current_scope;
     entity_index saved_class = defining_class;
     uint8_t saved_access = declaration_access;
@@ -339,6 +383,15 @@ semantic_analysis::instantiate_class(node_index at, uint32_t class_template,
         static_cast<owned_array<parameter_meaning> &&>(saved_parameters);
     expressions.resize(expressions_before);
     name_uses.resize(uses_before);
+    instantiations[index].defining = false;
+    c = instantiations[index].specialization;
+    if (r == analysis_result::well_formed && c &&
+        entity_table[c].kind == entity_kind::class_type)
+        for (uint32_t m = 0; m < template_member_definitions.size(); m++)
+            if (template_member_definitions[m].template_entity ==
+                    record.template_entity &&
+                template_member_definitions[m].pattern == record.pattern)
+                define_template_member(m, index, true);
     if (saved_class) {
         /* a class being defined named the specialization: its members so
            far again after the specialization's, one range of
@@ -351,7 +404,6 @@ semantic_analysis::instantiate_class(node_index at, uint32_t class_template,
             entity_table[saved_class].first_member = first;
         }
     }
-    c = instantiations[index].specialization;
     if (r == analysis_result::well_formed && c)
         return r;
     /* the class's rules broken, or not known: [temp.inst]/1 makes the
@@ -372,9 +424,15 @@ void semantic_analysis::instantiate_pending()
         if (!instantiations[index].pending)
             continue;
         entity_index t = instantiations[index].template_entity;
-        instantiate_definition(
-            function_templates[entity_table[t].instantiation - 1].declaration,
-            index);
+        const function_template ft =
+            function_templates[entity_table[t].instantiation - 1];
+        /* a template never defined: the specialization is not either
+           ([temp.inst]/5 needs a definition only to exist) */
+        if (!ft.definition) {
+            instantiations[index].pending = false;
+            continue;
+        }
+        instantiate_definition(ft.declaration, index);
     }
     pending_definitions.clear();
 }
@@ -427,7 +485,11 @@ analysis_result semantic_analysis::declare_specialization(
     d.declaration = declaration;
     d.outermost = current_declaration;
     d.entity = e;
+    /* (clang's specialization is declared where its template is defined,
+       which a template declared before is not yet: no name to claim) */
     d.id = id;
+    if (!ft.definition)
+        d.id = 0;
     d.kind = entity_kind::function;
     d.type = type;
     d.claimable = false;

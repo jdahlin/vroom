@@ -920,9 +920,26 @@ analysis_result semantic_analysis::template_call(
         expression_meaning e;
         if (syntax_is(tree, a, syntax_kind::braced_init_list))
             return not_supported(n, "temp.deduct.call");
+        /* [temp.deduct.call]/6: "When P is a function type, function
+           pointer type, or pointer-to-member-function type: If the argument
+           is an overload set containing one or more function templates, the
+           parameter is treated as a non-deduced context.  If the argument
+           is an overload set (not containing function templates), trial
+           argument deduction is attempted using each of the members of the
+           set": not analysed */
+        token_index set_at = 0;
+        if (named_overload_set(a, set_at))
+            return not_supported(n, "temp.deduct.call");
+        size_t uses_before = name_uses.size();
         analysis_result r = expression(a, e);
         if (r != analysis_result::well_formed)
             return r;
+        /* (a function's name whose other declarations analysis did not
+           follow may be such a set too) */
+        if (e.entity && entity_table[e.entity].kind == entity_kind::function) {
+            name_uses.resize(uses_before);
+            return not_supported(n, "temp.deduct.call");
+        }
         types.append(e.type);
         early.append(e);
     }

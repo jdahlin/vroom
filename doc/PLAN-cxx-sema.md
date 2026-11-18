@@ -1577,6 +1577,37 @@ lines:
   reject and clang accepts, 0 refuted (symbols 1791, layouts 10189,
   lowering 280); [temp.names] unsupported 8297 (from ~9.5k); cxx-run
   208/208; cxx-c-suites unchanged.
+  Then declarations before definitions and members defined outside the
+  class ([temp.class], [temp.fct], [temp.mem.func]).  `template<class T>
+  struct S;` declares the class template (`class_template_declaration`);
+  its definition completes the same record, taking the declaration's
+  default template-arguments when the parameters' names agree
+  ([temp.param]/10), and a specialization named before then is an
+  incomplete class that a use after the definition defines
+  (`define_class_instantiation`).  `template<class T> T f(T);` declares a
+  function template (`function_template::declarator`); a later declaration
+  or the definition with an equivalent head and function type
+  ([temp.over.link]/6, the same parameter names) is the same template, and
+  a specialization used before the definition is defined after the
+  translation unit's declarations, or never.  `template<class T> R
+  S<T>::f(...) {...}` and a partial specialization's member
+  ([temp.class.spec.mfunc]/1) are kept (`template_member_definitions`) and
+  analysed for each specialization of the class, made before or after
+  (`define_template_member`): the declarator's `S<T>::` names the
+  specialization, the member is defined inline (weak, emitted where used,
+  as clang's).  Its errors make it unsupported, not ill-formed (clang
+  instantiates only the members used, [temp.inst]/4).  A default
+  template-argument the arguments make ill-formed is unsupported at the
+  use (clang reports it at the default); a template call whose argument
+  names a function is unsupported ([temp.deduct.call]/6's overload sets).
+  Not yet: out-of-class constructors (the parser keeps them as tokens),
+  destructors, operators, member templates, static data members, renamed
+  parameters, defaults merged for function templates, a declaration with
+  default arguments.  cxx-sema: declarations as clang 38372 -> 40721, 0
+  we reject and clang accepts, 0 refuted (types 42619, lookup 14842,
+  symbols 1845, layouts 10190, lowering 284); [temp.class] unsupported
+  6401 -> under 2196; cxx-run 212/212 (template-members-out-of-class.cpp);
+  cxx-c-suites unchanged.
 
 ### S7. Exceptions and RTTI
 

@@ -44,6 +44,11 @@ analysis_result semantic_analysis::template_declaration(node_index n)
     /* [temp.fct]/1: "A function template defines an unbounded set of
        related functions." */
     case syntax_kind::function_definition:
+        /* [temp.mem.func]/1: "A member function of a class template may be
+           defined outside of the class template definition in which it is
+           declared." */
+        if (out_of_class_member(inner))
+            return member_definition_of_template(n, inner);
         return function_template_definition(n, inner);
     case syntax_kind::simple_declaration: {
         /* [temp.class]/1: "A class template defines the layout and
@@ -65,7 +70,23 @@ analysis_result semantic_analysis::template_declaration(node_index n)
                               syntax_kind::class_specifier))
                     return class_template_definition(
                         n, tree.children(seq)[0].index());
+                /* [temp.class]/1's declaration without a definition
+                   (template<class T> struct S;) */
+                if (tree[seq].child_count == 1 &&
+                    syntax_is(tree, tree.children(seq)[0],
+                              syntax_kind::elaborated_type_specifier))
+                    return class_template_declaration(
+                        n, tree.children(seq)[0].index());
             }
+            /* [temp.fct]/1: a function template's declaration
+               (template<class T> T f(T);), one declarator not in an
+               init-declarator-list */
+            if (d.child_count == 3 &&
+                (syntax_is(tree, tree.children(inner)[1],
+                           syntax_kind::noptr_declarator) ||
+                 syntax_is(tree, tree.children(inner)[1],
+                           syntax_kind::ptr_declarator)))
+                return function_template_definition(n, inner);
             return not_supported(n, "temp.class");
         }
         /* a function template's declaration or a variable template: which
@@ -201,12 +222,22 @@ semantic_analysis::function_template_definition(node_index n,
     if (head != analysis_result::well_formed)
         return head;
     const syntax_node &d = tree[definition];
+    /* a function-definition, or a simple-declaration of one declarator
+       without an initializer: the template declared, defined later */
+    bool defines = d.kind == syntax_kind::function_definition;
     if (leading_gnu_attributes(definition) || d.child_count != 3 ||
         !syntax_is(tree, tree.children(definition)[0],
                    syntax_kind::decl_specifier_seq) ||
         tree.children(definition)[1].is_token() ||
-        !syntax_is(tree, tree.children(definition)[2],
-                   syntax_kind::function_body))
+        (defines && !syntax_is(tree, tree.children(definition)[2],
+                               syntax_kind::function_body)) ||
+        (!defines &&
+         (!syntax_is_punctuator(tokens, tree.children(definition)[2],
+                                preprocessing_op_or_punc::SEMICOLON) ||
+          (!syntax_is(tree, tree.children(definition)[1],
+                      syntax_kind::noptr_declarator) &&
+           !syntax_is(tree, tree.children(definition)[1],
+                      syntax_kind::ptr_declarator)))))
         return not_supported(n, "temp.fct");
     uint32_t index = static_cast<uint32_t>(function_templates.size());
     /* the scope of the template-parameters ([basic.scope.temp]) */
@@ -248,10 +279,60 @@ semantic_analysis::function_template_definition(node_index n,
         if (p.default_argument.index())
             return not_supported(n, "dcl.fct.default");
     uint32_t name = tokens.identifier(m.id);
+    /* another declaration of a template declared before
+       ([temp.over.link]/6: equivalent template-heads and function types),
+       the first's record */
+    entity_index prior = entity_table.find(outer, name);
+    uint32_t earlier = function_template_of(prior);
+    if (prior && earlier) {
+        const function_template f = function_templates[earlier - 1];
+        const entity old = entity_table[f.entity];
+        if (f.definition && defines)
+            /* [basic.def.odr]/1: a second definition */
+            return not_supported(n, "basic.def.odr");
+        if (old.enclosing != outer || f.parameter_count != parameters.size() ||
+            !same_template_parameters(first, f.first_parameter,
+                                      f.parameter_count) ||
+            old.inline_ != s.inline_ || old.constexpr_ != s.constexpr_ ||
+            (s.static_ && old.linkage_of_name != linkage::internal))
+            return not_supported(n, "temp.over.link");
+        /* the same names: an instantiation made before the definition
+           binds the first declaration's (instantiate) */
+        for (uint32_t i = 0; i < f.parameter_count; i++)
+            if (entity_table[template_parameter_entities[first + i]].name !=
+                entity_table[template_parameter_entities[f.first_parameter + i]]
+                    .name)
+                return not_supported(n, "temp.over.link");
+        /* the function types the same once each parameter is the other's
+           (the old in terms of the new, exactly) */
+        owned_array<template_argument> values;
+        owned_array<bool> set;
+        for (uint32_t i = 0; i < f.parameter_count; i++) {
+            values.append(template_argument());
+            set.append(false);
+        }
+        if (!deduce_type(old.type, type, values, set, true))
+            return not_supported(n, "temp.over.link");
+        for (uint32_t i = 0; i < f.parameter_count; i++) {
+            entity_index pe = template_parameter_entities[first + i];
+            if (set[i] && (entity_table[pe].kind != entity_kind::typedef_name ||
+                           !(values[i].type == entity_table[pe].type)))
+                return not_supported(n, "temp.over.link");
+        }
+        entity_table.add_declaration(f.entity, n);
+        if (defines) {
+            function_template &record = function_templates[earlier - 1];
+            record.declaration = n;
+            record.definition = definition;
+            record.declarator = definition;
+            entity_table[f.entity].defined = true;
+        }
+        return analysis_result::well_formed;
+    }
     entity_index t =
         entity_table.make(entity_kind::template_entity, name, outer);
     entity_table[t].type = type;
-    entity_table[t].defined = true;
+    entity_table[t].defined = defines;
     entity_table[t].inline_ = s.inline_;
     entity_table[t].constexpr_ = s.constexpr_;
     entity_table[t].instantiation = index + 1;
@@ -268,7 +349,9 @@ semantic_analysis::function_template_definition(node_index n,
     function_template record;
     record.entity = t;
     record.declaration = n;
-    record.definition = definition;
+    if (defines)
+        record.definition = definition;
+    record.declarator = definition;
     record.first_parameter = first;
     record.parameter_count = static_cast<uint32_t>(parameters.size());
     /* the name: hold_names binds a fresh one; one it finds bound already
@@ -591,6 +674,56 @@ semantic_analysis::class_template_definition(node_index n, node_index specifier)
     r = declare_template_parameters(n, parameters, scope, index, name);
     if (r != analysis_result::well_formed)
         return r;
+    /* the definition of a class template declared before
+       (class_template_declaration): its record, defined now */
+    entity_index prior = entity_table.find(outer, name);
+    uint32_t declared = class_template_of(prior);
+    if (prior && declared && function_templates[declared - 1].name == prior &&
+        !function_templates[declared - 1].definition &&
+        !function_templates[declared - 1].primary) {
+        const function_template d = function_templates[declared - 1];
+        if (entity_table[d.entity].enclosing != outer ||
+            d.parameter_count != parameters.size() ||
+            !same_template_parameters(first, d.first_parameter,
+                                      d.parameter_count))
+            return not_supported(n, "temp.class");
+        /* [temp.param]/12: "A template-parameter shall not be given
+           default arguments by two different declarations in the same
+           scope"; /10: "The set of default template-arguments available
+           for use is obtained by merging the default arguments from all
+           prior declarations": the definition's parameters take the
+           declaration's defaults, if their names are the same (the
+           default's names are the definition's when analysed) */
+        for (uint32_t i = 0; i < d.parameter_count; i++) {
+            node_index before = template_parameter_nodes[d.first_parameter + i];
+            if (tree[before].child_count != 4)
+                continue;
+            if (tree[parameters[i]].child_count == 4 ||
+                entity_table[template_parameter_entities[first + i]].name !=
+                    entity_table[template_parameter_entities[d.first_parameter +
+                                                             i]]
+                        .name)
+                return not_supported(n, "temp.param");
+            template_parameter_nodes[first + i] = before;
+        }
+        /* [temp.param]/14 on the merged defaults (clang's error is the
+           definition's) */
+        for (uint32_t i = 1; i < d.parameter_count; i++)
+            if (tree[template_parameter_nodes[first + i - 1]].child_count ==
+                    4 &&
+                tree[template_parameter_nodes[first + i]].child_count != 4)
+                return not_supported(n, "temp.param");
+        for (uint32_t i = 0; i < d.parameter_count; i++)
+            entity_table[template_parameter_entities[first + i]].instantiation =
+                declared;
+        function_template &record = function_templates[declared - 1];
+        record.declaration = n;
+        record.definition = specifier;
+        record.first_parameter = first;
+        entity_table[d.entity].defined = true;
+        entity_table.add_declaration(d.entity, n);
+        return analysis_result::well_formed;
+    }
     /* [temp.param]/14: "If a template-parameter of a class template ...
        has a default template-argument, each subsequent template-parameter
        shall either have a default template-argument supplied or be a
@@ -700,41 +833,7 @@ analysis_result semantic_analysis::class_specialization_definition(
     size_t uses_before = name_uses.size();
     owned_array<template_argument> arguments;
     current_scope = scope;
-    for (uint32_t i = 2;
-         i + 1 < tree[id].child_count && r == analysis_result::well_formed;
-         i++) {
-        owned_array<syntax_child> written;
-        if (syntax_is(tree, parts[i], syntax_kind::template_argument_list)) {
-            for (uint32_t k = 0; k < tree[parts[i].index()].child_count; k++) {
-                syntax_child a = tree.children(parts[i].index())[k];
-                if (!syntax_is_punctuator(tokens, a,
-                                          preprocessing_op_or_punc::COMMA))
-                    written.append(a);
-            }
-        } else {
-            written.append(parts[i]);
-        }
-        for (syntax_child a : written) {
-            uint32_t position = static_cast<uint32_t>(arguments.size());
-            if (position >= primary.parameter_count) {
-                r = not_supported(id, "temp.arg");
-                break;
-            }
-            template_argument v;
-            r = template_argument_for(id, ct, position, a, arguments.data(), v);
-            if (r != analysis_result::well_formed)
-                break;
-            arguments.append(v);
-        }
-    }
-    if (r == analysis_result::well_formed) {
-        owned_array<bool> set;
-        for (uint32_t i = 0; i < primary.parameter_count; i++)
-            set.append(i < arguments.size());
-        while (arguments.size() < primary.parameter_count)
-            arguments.append(template_argument());
-        r = default_template_arguments(id, ct, arguments, set);
-    }
+    r = template_id_arguments(id, ct, arguments);
     current_scope = outer;
     expressions.resize(expressions_before);
     name_uses.resize(uses_before);
@@ -885,40 +984,7 @@ analysis_result semantic_analysis::template_type(node_index id,
     if (!ct)
         return not_supported(id, "temp.names");
     owned_array<template_argument> arguments;
-    for (uint32_t i = 2; i + 1 < t.child_count; i++) {
-        owned_array<syntax_child> written;
-        if (syntax_is(tree, parts[i], syntax_kind::template_argument_list)) {
-            for (uint32_t k = 0; k < tree[parts[i].index()].child_count; k++) {
-                syntax_child a = tree.children(parts[i].index())[k];
-                if (!syntax_is_punctuator(tokens, a,
-                                          preprocessing_op_or_punc::COMMA))
-                    written.append(a);
-            }
-        } else {
-            written.append(parts[i]);
-        }
-        for (syntax_child a : written) {
-            uint32_t position = static_cast<uint32_t>(arguments.size());
-            /* too many: clang's "too many template arguments" */
-            if (position >= function_templates[ct - 1].parameter_count)
-                return not_supported(id, "temp.arg");
-            template_argument v;
-            analysis_result r =
-                template_argument_for(id, ct, position, a, arguments.data(), v);
-            if (r != analysis_result::well_formed)
-                return r;
-            arguments.append(v);
-        }
-    }
-    /* [temp.arg]/4: the parameters after those given take their default
-       template-arguments; one without is clang's "too few template
-       arguments" */
-    owned_array<bool> set;
-    for (uint32_t i = 0; i < function_templates[ct - 1].parameter_count; i++)
-        set.append(i < arguments.size());
-    while (arguments.size() < function_templates[ct - 1].parameter_count)
-        arguments.append(template_argument());
-    analysis_result filled = default_template_arguments(id, ct, arguments, set);
+    analysis_result filled = template_id_arguments(id, ct, arguments);
     if (filled != analysis_result::well_formed)
         return filled;
     bool dependent = false;
@@ -1186,6 +1252,439 @@ semantic_analysis::deduce_from_call(node_index at, uint32_t function_template,
     for (const template_argument &x : values)
         deduced.append(x);
     return analysis_result::well_formed;
+}
+
+/*
+ * [temp.names]/1: a simple-template-id's template-arguments for the class
+ * template function_templates[ct - 1], in order, then [temp.arg]/4's
+ * defaults for those not given.
+ */
+analysis_result semantic_analysis::template_id_arguments(
+    node_index id, uint32_t ct, owned_array<template_argument> &arguments)
+{
+    const syntax_child *parts = tree.children(id);
+    uint32_t count = function_templates[ct - 1].parameter_count;
+    for (uint32_t i = 2; i + 1 < tree[id].child_count; i++) {
+        owned_array<syntax_child> written;
+        if (syntax_is(tree, parts[i], syntax_kind::template_argument_list)) {
+            for (uint32_t k = 0; k < tree[parts[i].index()].child_count; k++) {
+                syntax_child a = tree.children(parts[i].index())[k];
+                if (!syntax_is_punctuator(tokens, a,
+                                          preprocessing_op_or_punc::COMMA))
+                    written.append(a);
+            }
+        } else {
+            written.append(parts[i]);
+        }
+        for (syntax_child a : written) {
+            uint32_t position = static_cast<uint32_t>(arguments.size());
+            /* too many: clang's "too many template arguments" */
+            if (position >= count)
+                return not_supported(id, "temp.arg");
+            template_argument v;
+            analysis_result r =
+                template_argument_for(id, ct, position, a, arguments.data(), v);
+            if (r != analysis_result::well_formed)
+                return r;
+            arguments.append(v);
+        }
+    }
+    /* [temp.arg]/4: the parameters after those given take their default
+       template-arguments; one without is clang's "too few template
+       arguments" */
+    owned_array<bool> set;
+    for (uint32_t i = 0; i < count; i++)
+        set.append(i < arguments.size());
+    while (arguments.size() < count)
+        arguments.append(template_argument());
+    /* a default the arguments make ill-formed: clang reports it at the
+       default, "in instantiation of default argument" the use; neither
+       declaration is judged */
+    analysis_result r = default_template_arguments(id, ct, arguments, set);
+    if (r == analysis_result::ill_formed)
+        return not_supported(id, "temp.arg");
+    return r;
+}
+
+bool semantic_analysis::same_template_parameters(uint32_t first,
+                                                 uint32_t other_first,
+                                                 uint32_t count) const
+{
+    for (uint32_t i = 0; i < count; i++) {
+        const entity &a = entity_table[template_parameter_entities[first + i]];
+        const entity &b =
+            entity_table[template_parameter_entities[other_first + i]];
+        if (a.kind != b.kind)
+            return false;
+        if (a.kind == entity_kind::none && !(a.type == b.type))
+            return false;
+    }
+    return true;
+}
+
+/*
+ * [temp.class]/1 with [dcl.type.elab]/2: template<class T> struct S; (a
+ * class-key and an identifier).  The first declares the template, whose
+ * definition comes later (class_template_definition completes its
+ * record); a specialization named before then is an incomplete class
+ * (instantiate_class).  Another declaration of the same template-head
+ * declares it again ([temp.over.link]/6's equivalent heads; default
+ * template-arguments merged across declarations are only the
+ * definition's, [temp.param]/10).
+ */
+analysis_result
+semantic_analysis::class_template_declaration(node_index n,
+                                              node_index elaborated)
+{
+    entity_index outer = current_scope;
+    const syntax_node &e = tree[elaborated];
+    const syntax_child *parts = tree.children(elaborated);
+    if (e.child_count != 2 || !parts[0].is_token() || !parts[1].is_token() ||
+        tokens[parts[1].index()].kind != token_kind::identifier)
+        return not_supported(n, "temp.class");
+    standard_keyword key = p.keyword_of(tokens[parts[0].index()]);
+    if (key != standard_keyword::class_ && key != standard_keyword::struct_)
+        return not_supported(n, "temp.class");
+    owned_array<node_index> parameters;
+    analysis_result r = template_head_parameters(n, parameters);
+    if (r != analysis_result::well_formed)
+        return r;
+    uint32_t name = tokens.identifier(parts[1].index());
+    uint32_t index = static_cast<uint32_t>(function_templates.size());
+    entity_index scope = entity_table.make(entity_kind::block_scope, 0, outer);
+    uint32_t first = static_cast<uint32_t>(template_parameter_entities.size());
+    r = declare_template_parameters(n, parameters, scope, index, name);
+    if (r != analysis_result::well_formed)
+        return r;
+    entity_index held = entity_table.find(outer, name);
+    if (held) {
+        /* a redeclaration of the template, with no default
+           template-argument (/12 forbids one given twice; merging is
+           not analysed) */
+        uint32_t ct = class_template_of(held);
+        if (!ct || function_templates[ct - 1].name != held ||
+            function_templates[ct - 1].primary)
+            return not_supported(n, "temp.class");
+        const function_template d = function_templates[ct - 1];
+        if (entity_table[d.entity].enclosing != outer ||
+            d.parameter_count != parameters.size() ||
+            !same_template_parameters(first, d.first_parameter,
+                                      d.parameter_count))
+            return not_supported(n, "temp.class");
+        for (node_index x : parameters)
+            if (tree[x].child_count == 4)
+                return not_supported(n, "temp.param");
+        entity_table.add_declaration(d.entity, n);
+        return analysis_result::well_formed;
+    }
+    /* [temp.param]/14 (a later declaration may not supply the defaults
+       before) */
+    for (size_t i = 1; i < parameters.size(); i++)
+        if (tree[parameters[i - 1]].child_count == 4 &&
+            tree[parameters[i]].child_count != 4)
+            return not_supported(n, "temp.param");
+    entity_index t =
+        entity_table.make(entity_kind::template_entity, name, outer);
+    entity_table[t].instantiation = index + 1;
+    entity_table[t].linkage_of_name = linkage::external;
+    if (within_unnamed_namespace(outer))
+        entity_table[t].linkage_of_name = linkage::internal;
+    entity_table.add_declaration(t, n);
+    function_template record;
+    record.entity = t;
+    record.declaration = n;
+    record.first_parameter = first;
+    record.parameter_count = static_cast<uint32_t>(parameters.size());
+    record.is_class = true;
+    held = entity_table.make(entity_kind::none, name, outer);
+    entity_table[held].held_by_template = true;
+    entity_table.bind(outer, name, held);
+    record.name = held;
+    function_templates.append(record);
+    return analysis_result::well_formed;
+}
+
+/* a function-definition's declarator-id S<A...>::f (behind ptr-operators):
+   the simple-template-id, else 0 */
+node_index semantic_analysis::out_of_class_member(node_index definition,
+                                                  token_index *name) const
+{
+    const syntax_node &d = tree[definition];
+    if (d.child_count != 3 || tree.children(definition)[1].is_token())
+        return 0;
+    node_index x = tree.children(definition)[1].index();
+    while (tree[x].kind == syntax_kind::ptr_declarator) {
+        const syntax_node &pd = tree[x];
+        if (pd.child_count != 2 || tree.children(x)[1].is_token())
+            return 0;
+        x = tree.children(x)[1].index();
+    }
+    if (tree[x].kind != syntax_kind::noptr_declarator || !tree[x].child_count ||
+        !syntax_is(tree, tree.children(x)[0], syntax_kind::qualified_id))
+        return 0;
+    node_index q = tree.children(x)[0].index();
+    if (tree[q].child_count != 2 ||
+        !syntax_is(tree, tree.children(q)[0],
+                   syntax_kind::nested_name_specifier) ||
+        !tree.children(q)[1].is_token() ||
+        tokens[tree.children(q)[1].index()].kind != token_kind::identifier)
+        return 0;
+    node_index nested = tree.children(q)[0].index();
+    if (name)
+        *name = tree.children(q)[1].index();
+    if (tree[nested].child_count != 2 ||
+        !syntax_is(tree, tree.children(nested)[0],
+                   syntax_kind::simple_template_id))
+        return 0;
+    return tree.children(nested)[0].index();
+}
+
+/*
+ * [temp.mem.func]/1: "A member function of a class template may be
+ * defined outside of the class template definition in which it is
+ * declared."  /1's "the template-arguments are the same as the
+ * template-parameters" of its class: template<class T> R S<T>::f(P...)
+ * {...}, or of a partial specialization's ([temp.class.spec.mfunc]/1:
+ * "The template parameter list of a member of a class template partial
+ * specialization shall match the template parameter list of the class
+ * template partial specialization.  The template argument list of a member
+ * of a class template partial specialization shall match the template
+ * argument list of the class template partial specialization."), with the
+ * class's parameter names (its body finds them in the class).  Analysed
+ * for each specialization of the class there is or will be
+ * (define_template_member).
+ */
+analysis_result
+semantic_analysis::member_definition_of_template(node_index n,
+                                                 node_index definition)
+{
+    entity_index outer = current_scope;
+    owned_array<node_index> parameters;
+    analysis_result r = template_head_parameters(n, parameters);
+    if (r != analysis_result::well_formed)
+        return r;
+    if (leading_gnu_attributes(definition) ||
+        !syntax_is(tree, tree.children(definition)[0],
+                   syntax_kind::decl_specifier_seq) ||
+        !syntax_is(tree, tree.children(definition)[2],
+                   syntax_kind::function_body))
+        return not_supported(n, "temp.mem.func");
+    /* [temp.param]/12: "A default template-argument shall not be specified
+       in the template-parameter-lists of the definition of a member of a
+       class template that appears outside of the member's class." */
+    for (node_index x : parameters)
+        if (tree[x].child_count == 4)
+            return not_supported(x, "temp.param");
+    node_index id = out_of_class_member(definition);
+    const syntax_child *parts = tree.children(id);
+    if (tree[id].child_count < 3 || !parts[0].is_token() ||
+        tokens[parts[0].index()].kind != token_kind::identifier)
+        return not_supported(n, "temp.mem.func");
+    lookup_result x = lookup_unqualified(tokens.identifier(parts[0].index()),
+                                         lookup_filter::any);
+    entity_index named = x.entity;
+    if (!named)
+        named = x.unknown_entity;
+    uint32_t ct = class_template_of(named);
+    if (!ct || function_templates[ct - 1].name != named ||
+        function_templates[ct - 1].primary ||
+        !function_templates[ct - 1].definition ||
+        entity_table[function_templates[ct - 1].entity].enclosing != outer)
+        return not_supported(n, "temp.mem.func");
+    uint32_t index = static_cast<uint32_t>(function_templates.size());
+    entity_index scope = entity_table.make(entity_kind::block_scope, 0, outer);
+    uint32_t first = static_cast<uint32_t>(template_parameter_entities.size());
+    r = declare_template_parameters(n, parameters, scope, index, 0);
+    if (r != analysis_result::well_formed)
+        return r;
+    /* the template-id's arguments in terms of the parameters; what they
+       record for claims is the template's */
+    size_t expressions_before = expressions.size();
+    size_t uses_before = name_uses.size();
+    owned_array<template_argument> arguments;
+    current_scope = scope;
+    r = template_id_arguments(id, ct, arguments);
+    current_scope = outer;
+    expressions.resize(expressions_before);
+    name_uses.resize(uses_before);
+    if (r != analysis_result::well_formed)
+        return r;
+    uint32_t pattern = 0;
+    owned_array<template_argument> deduced;
+    r = matching_specialization(id, ct, arguments.data(),
+                                static_cast<uint32_t>(arguments.size()),
+                                pattern, deduced);
+    if (r != analysis_result::well_formed)
+        return r;
+    const template_argument *mine = arguments.data();
+    uint32_t mine_count = static_cast<uint32_t>(arguments.size());
+    function_template of = function_templates[ct - 1];
+    if (pattern) {
+        of = function_templates[pattern - 1];
+        mine = deduced.data();
+        mine_count = static_cast<uint32_t>(deduced.size());
+    }
+    /* each argument the parameter of the same position, with the
+       class's parameter's name */
+    if (!of.parameter_count || mine_count != parameters.size() ||
+        of.parameter_count != parameters.size() ||
+        !same_template_parameters(first, of.first_parameter,
+                                  of.parameter_count))
+        return not_supported(n, "temp.mem.func");
+    for (uint32_t i = 0; i < mine_count; i++) {
+        entity_index pe = template_parameter_entities[first + i];
+        const template_argument &a = mine[i];
+        bool same = a.template_entity == pe ||
+                    (a.kind == template_argument::kind_t::type &&
+                     !a.template_entity && a.type == entity_table[pe].type);
+        if (!same ||
+            entity_table[pe].name !=
+                entity_table[template_parameter_entities[of.first_parameter +
+                                                         i]]
+                    .name)
+            return not_supported(n, "temp.mem.func");
+    }
+    template_member_definition record;
+    record.declaration = n;
+    record.definition = definition;
+    record.template_entity = function_templates[ct - 1].entity;
+    record.pattern = pattern;
+    uint32_t member = static_cast<uint32_t>(template_member_definitions.size());
+    template_member_definitions.append(record);
+    /* the specializations of the class defined before this */
+    analysis_result result = analysis_result::well_formed;
+    for (uint32_t k = 0; k < instantiations.size(); k++) {
+        const instantiation_record &y = instantiations[k];
+        if (y.template_entity != record.template_entity ||
+            y.pattern != pattern || !y.specialization || y.defining ||
+            entity_table[y.specialization].kind != entity_kind::class_type ||
+            !entity_table[y.specialization].defined)
+            continue;
+        analysis_result one = define_template_member(member, k, false);
+        if (one != analysis_result::well_formed &&
+            result == analysis_result::well_formed)
+            result = one;
+    }
+    return result;
+}
+
+/*
+ * [temp.inst]/4: "the implicit instantiation of a class template
+ * specialization causes ... the implicit instantiation of the definitions
+ * of ... member functions ... when used"; here with the class (as its
+ * members defined in it).  The function-definition analysed again where
+ * the class's template-parameters' names are its arguments: its
+ * nested-name-specifier names the specialization, whose member it defines
+ * ([class.mfct]/1), inline as the class's own member functions are
+ * ([basic.def.odr]/13: emitted where used, weak).  Errors are the
+ * instantiation's, not judged here ([temp.inst]/1; clang reports them at
+ * the definition "in instantiation of" the use): unsupported.
+ */
+analysis_result semantic_analysis::define_template_member(uint32_t member,
+                                                          uint32_t index,
+                                                          bool recorded)
+{
+    const template_member_definition o = template_member_definitions[member];
+    const instantiation_record x = instantiations[index];
+    if (instantiation_depth >= 64)
+        return not_supported(o.declaration, "temp.inst");
+    function_template of =
+        function_templates[entity_table[x.template_entity].instantiation - 1];
+    uint32_t first = x.first_argument;
+    if (x.pattern) {
+        of = function_templates[x.pattern - 1];
+        first = x.first_deduced;
+    }
+    entity_index scope = entity_table.make(
+        entity_kind::block_scope, 0, entity_table[x.template_entity].enclosing);
+    for (uint32_t i = 0; i < of.parameter_count; i++)
+        bind_template_argument(
+            scope, template_parameter_entities[of.first_parameter + i],
+            template_arguments[first + i]);
+    entity_index saved_scope = current_scope;
+    entity_index saved_class = defining_class;
+    uint8_t saved_access = declaration_access;
+    entity_index saved_last = last_declared;
+    node_index saved_declaration = current_declaration;
+    uint32_t saved_cv = function_cv;
+    bool saved_condition = in_condition;
+    token_index saved_callee = overloaded_callee;
+    bool saved_claimable = declarations_claimable;
+    uint32_t saved_instantiating = instantiating;
+    uint32_t saved_class_instantiating = class_instantiating;
+    token_index saved_horizon = lookup_horizon;
+    unsigned saved_unevaluated = unevaluated;
+    function_context saved_function =
+        static_cast<function_context &&>(function_state);
+    function_state = function_context();
+    owned_array<parameter_meaning> saved_parameters =
+        static_cast<owned_array<parameter_meaning> &&>(function_parameters);
+    size_t expressions_before = expressions.size();
+    size_t uses_before = name_uses.size();
+    entity_index saved_member_scope = template_member_scope;
+    template_member_scope = scope;
+    current_scope = scope;
+    current_declaration = o.declaration;
+    defining_class = 0;
+    declaration_access = 0;
+    in_condition = false;
+    overloaded_callee = 0;
+    declarations_claimable = false;
+    unevaluated = 0;
+    instantiating = 0;
+    class_instantiating = 0;
+    lookup_horizon = tree[o.declaration].first_token;
+    instantiation_depth++;
+    analysis_result r = function_definition(o.definition);
+    instantiation_depth--;
+    template_member_scope = saved_member_scope;
+    class_instantiating = saved_class_instantiating;
+    unevaluated = saved_unevaluated;
+    lookup_horizon = saved_horizon;
+    instantiating = saved_instantiating;
+    declarations_claimable = saved_claimable;
+    overloaded_callee = saved_callee;
+    in_condition = saved_condition;
+    function_cv = saved_cv;
+    last_declared = saved_last;
+    current_declaration = saved_declaration;
+    declaration_access = saved_access;
+    defining_class = saved_class;
+    current_scope = saved_scope;
+    function_state = static_cast<function_context &&>(saved_function);
+    function_parameters =
+        static_cast<owned_array<parameter_meaning> &&>(saved_parameters);
+    expressions.resize(expressions_before);
+    name_uses.resize(uses_before);
+    /* the member defined: the class's function this definition declares
+       (last_declared may be a name its body declared) */
+    entity_index defined = 0;
+    if (r == analysis_result::well_formed) {
+        token_index name = 0;
+        out_of_class_member(o.definition, &name);
+        entity_index f =
+            entity_table.find(x.specialization, tokens.identifier(name));
+        if (f && entity_table[f].kind == entity_kind::function &&
+            (declared_by(f, o.definition) || declared_by(f, o.declaration)))
+            defined = f;
+        if (!defined)
+            r = analysis_result::unsupported;
+    }
+    if (r == analysis_result::well_formed) {
+        entity_table[defined].inline_ = true;
+        return r;
+    }
+    size_t unsupported_before = unsupported.size();
+    not_supported(o.declaration, "temp.inst");
+    if (!recorded)
+        return analysis_result::unsupported;
+    for (analysed_declaration &d : declarations) {
+        if (d.node != o.declaration || d.result != analysis_result::well_formed)
+            continue;
+        d.result = analysis_result::unsupported;
+        d.first_unsupported = static_cast<uint32_t>(unsupported_before);
+    }
+    return analysis_result::unsupported;
 }
 
 } // namespace cplusplus

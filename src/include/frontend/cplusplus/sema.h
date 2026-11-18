@@ -1430,8 +1430,12 @@ class semantic_analysis
        parameters) */
     bool at_block_scope() const
     {
-        return !is_namespace(current_scope);
+        return !is_namespace(current_scope) &&
+               current_scope != template_member_scope;
     }
+    /* define_template_member's scope of the template-parameters' names,
+       which stands for the class template's namespace */
+    entity_index template_member_scope = 0;
     /* whether namespace inner is n or is enclosed by it */
     bool namespace_encloses(entity_index n, entity_index inner) const;
     /* [namespace.udir]/2: "the nearest enclosing namespace which contains
@@ -2348,6 +2352,10 @@ class semantic_analysis
     struct function_template {
         entity_index entity = 0, name = 0;
         node_index declaration = 0, definition = 0;
+        /* a function template's function-definition or (declared, not
+           yet defined: definition 0) simple-declaration, whose first two
+           children are its decl-specifier-seq and declarator */
+        node_index declarator = 0;
         uint32_t first_parameter = 0, parameter_count = 0;
         bool unusable = false;
         /* a class template ([temp.class]): definition is its
@@ -2437,6 +2445,46 @@ class semantic_analysis
     /* [temp.class]: a class template defined at namespace scope */
     analysis_result class_template_definition(node_index n,
                                               node_index specifier);
+    /* [temp.names]/1: a simple-template-id's arguments for the class
+       template function_templates[ct - 1], defaults included */
+    analysis_result
+    template_id_arguments(node_index id, uint32_t ct,
+                          owned_array<template_argument> &arguments);
+    /* [temp.class]: a class template declared without a definition
+       (template<class T> struct S;) */
+    analysis_result class_template_declaration(node_index n,
+                                               node_index elaborated);
+    /* whether the template's parameters (template_parameter_entities from
+       first) are another's (from other_first) of the same kinds and
+       types, count of each */
+    bool same_template_parameters(uint32_t first, uint32_t other_first,
+                                  uint32_t count) const;
+    /* [temp.mem.func]/1: a member function of a class template (or of a
+       partial specialization, [temp.class.spec.mfunc]/1) defined outside
+       it: the definition, analysed per specialization of the class
+       (define_template_member) */
+    struct template_member_definition {
+        node_index declaration = 0, definition = 0;
+        /* the class template, and the partial specialization whose member
+           it is (function_templates' index plus one; 0 the primary) */
+        entity_index template_entity = 0;
+        uint32_t pattern = 0;
+    };
+    owned_array<template_member_definition> template_member_definitions;
+    /* the simple-template-id before the declarator-id's :: of a
+       function-definition (box<T>::f), or 0; and the member's name */
+    node_index out_of_class_member(node_index definition,
+                                   token_index *name = nullptr) const;
+    analysis_result member_definition_of_template(node_index n,
+                                                  node_index definition);
+    /* template_member_definitions[member] for the class of
+       instantiations[index]; after the template-declaration was analysed
+       (declarations has it), a failure makes that unsupported */
+    analysis_result define_template_member(uint32_t member, uint32_t index,
+                                           bool recorded);
+    /* instantiate_class's definition of instantiations[index]'s class */
+    analysis_result define_class_instantiation(node_index at, uint32_t index,
+                                               entity_index &c);
     /* [temp.names]/1: a simple-template-id that names a class template's
        specialization, as a type; in the scope given (0: unqualified) */
     analysis_result template_type(node_index id, entity_index scope,
