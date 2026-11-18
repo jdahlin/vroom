@@ -1512,8 +1512,17 @@ analysis_result semantic_analysis::class_specialization_definition(
     if (!is_namespace(outer) || defining_class)
         return not_supported(n, rule);
     const syntax_node &spec = tree[specifier];
-    node_index head = tree.children(specifier)[0].index();
-    node_index id = class_head_name(head).index();
+    /* [temp.expl.spec]/1 also declares a specialization without defining
+       it: class-key simple-template-id ; (an elaborated-type-specifier),
+       whose definition may follow */
+    bool defines = spec.kind == syntax_kind::class_specifier;
+    node_index id = 0;
+    if (defines) {
+        node_index head = tree.children(specifier)[0].index();
+        id = class_head_name(head).index();
+    } else {
+        id = tree.children(specifier)[1].index();
+    }
     lookup_result x;
     entity_index named = 0;
     if (!template_id_name(id, x, named))
@@ -1531,10 +1540,13 @@ analysis_result semantic_analysis::class_specialization_definition(
     /* [temp.expl.spec]/7, [temp.class.spec]/1: one declared after a
        specialization it would be used for was instantiated makes the
        program ill-formed (no diagnostic required); any instantiation
-       before it is not analysed */
+       before it is not analysed.  One of an explicit specialization is
+       that specialization's own (declared, it is defined at its next
+       use), never another's */
     for (const instantiation_record &r : instantiations)
         if (r.template_entity == primary.entity && r.specialization &&
-            entity_table[r.specialization].kind == entity_kind::class_type)
+            entity_table[r.specialization].kind == entity_kind::class_type &&
+            !(r.pattern && !function_templates[r.pattern - 1].parameter_count))
             return not_supported(n, rule);
     uint32_t index = 0, first = 0;
     entity_index scope = 0;
@@ -1586,7 +1598,9 @@ analysis_result semantic_analysis::class_specialization_definition(
     function_template record;
     record.entity = primary.entity;
     record.declaration = n;
-    record.definition = specifier;
+    record.definition = 0;
+    if (defines)
+        record.definition = specifier;
     record.first_parameter = first;
     record.parameter_count = static_cast<uint32_t>(parameters.size());
     record.is_class = true;
@@ -1595,14 +1609,24 @@ analysis_result semantic_analysis::class_specialization_definition(
     record.pattern_count = static_cast<uint32_t>(arguments.size());
     /* a second explicit specialization of the same arguments: a
        redefinition ([basic.def.odr]/1) */
-    for (const function_template &o : function_templates) {
+    for (function_template &o : function_templates) {
         if (o.primary != ct || o.parameter_count || !parameters.empty())
             continue;
         bool same = true;
         for (uint32_t i = 0; i < o.pattern_count && same; i++)
             same = template_arguments[o.first_pattern + i] == arguments[i];
-        if (same)
+        if (!same)
+            continue;
+        /* [basic.def]/1: declared again, or defined after its
+           declaration (the instantiations that named it define it at
+           their next use, instantiate_class) */
+        if (!defines)
+            return analysis_result::well_formed;
+        if (o.definition)
             return not_supported(n, rule);
+        o.declaration = n;
+        o.definition = specifier;
+        return analysis_result::well_formed;
     }
     for (const template_argument &a : arguments)
         template_arguments.append(a);

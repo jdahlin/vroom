@@ -24,6 +24,25 @@ analysis_result semantic_analysis::explicit_specialization(node_index n)
             owned_array<node_index> none;
             return class_specialization_definition(n, only, none);
         }
+        /* template<> class-key simple-template-id ; declared only */
+        node_index d = tree.children(n)[3].index();
+        const syntax_child *dc = tree.children(d);
+        if (only && tree[only].kind == syntax_kind::elaborated_type_specifier &&
+            tree[d].child_count == 2 && tree[only].child_count == 2 &&
+            tree.children(only)[0].is_token() &&
+            syntax_is(tree, tree.children(only)[1],
+                      syntax_kind::simple_template_id) &&
+            syntax_is_punctuator(tokens, dc[1],
+                                 preprocessing_op_or_punc::SEMICOLON) &&
+            !leading_gnu_attributes(d)) {
+            standard_keyword key =
+                p.keyword_of(tokens[tree.children(only)[0].index()]);
+            if (key == standard_keyword::struct_ ||
+                key == standard_keyword::class_) {
+                owned_array<node_index> none;
+                return class_specialization_definition(n, only, none);
+            }
+        }
     }
     /* ... or a function template's specialization, declared or defined */
     if (x.child_count != 4 || tree.children(n)[3].is_token())
