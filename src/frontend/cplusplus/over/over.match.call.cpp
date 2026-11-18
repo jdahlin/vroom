@@ -86,21 +86,61 @@ semantic_analysis::resolve_call(node_index n,
     for (entity_index e : set)
         if (use < name_uses.size() && name_uses[use].entity == e)
             name_uses[use].entity = 0;
-    for (size_t i = 0; i < arguments.size(); i++)
-        if (syntax_is(tree, arguments[i], syntax_kind::braced_init_list))
-            /* [over.ics.list]: list-initialization sequences */
+    /* [over.ics.list]/10: "Otherwise, if the parameter type is not a class:
+       if the initializer list has one element that is not itself an
+       initializer list, the implicit conversion sequence is the one
+       required to convert the element to the parameter type": the
+       element stands for the list (the call list-initializes the
+       parameter); other lists, and lists for a parameter of class,
+       reference or array type, are not analysed */
+    owned_array<syntax_child> lists;
+    for (size_t i = 0; i < arguments.size(); i++) {
+        if (!syntax_is(tree, arguments[i], syntax_kind::braced_init_list))
+            continue;
+        owned_array<syntax_child> clauses;
+        analysis_result r = list_clauses(arguments[i].index(), clauses);
+        if (r != analysis_result::well_formed)
+            return r;
+        if (clauses.size() != 1 ||
+            syntax_is(tree, clauses[0], syntax_kind::braced_init_list))
             return not_supported(n, "over.ics.list");
-    for (const expression_meaning &e : early)
-        if (!e.node)
+        for (entity_index e : set) {
+            const struct type &ft =
+                type_table[entity_table[e].type.unqualified()];
+            if (i >= ft.parameter_count)
+                continue;
+            qualified_type p =
+                type_table.parameters(entity_table[e].type.unqualified())[i];
+            type_kind k = type_table[p.unqualified()].kind;
+            if (k != type_kind::pointer && k != type_kind::enumeration &&
+                (k != type_kind::fundamental ||
+                 fundamental_of(p) == fundamental_type::void_))
+                return not_supported(n, "over.ics.list");
+        }
+        lists.append(clauses[0]);
+    }
+    for (size_t i = 0; i < early.size(); i++)
+        if (!early[i].node &&
+            !syntax_is(tree, arguments[i], syntax_kind::braced_init_list))
             /* an overload set's name as an argument: the conversion
                sequences of [over.ics.ref] and [over.over] together */
             return not_supported(n, "over.over");
     for (size_t i = early.size(); i < arguments.size(); i++) {
         expression_meaning e;
-        analysis_result r = expression(arguments[i], e);
+        if (!syntax_is(tree, arguments[i], syntax_kind::braced_init_list)) {
+            analysis_result r = expression(arguments[i], e);
+            if (r != analysis_result::well_formed)
+                return r;
+        }
+        early.append(e);
+    }
+    size_t list = 0;
+    for (size_t i = 0; i < arguments.size(); i++) {
+        if (!syntax_is(tree, arguments[i], syntax_kind::braced_init_list))
+            continue;
+        analysis_result r = expression(lists[list++], early[i]);
         if (r != analysis_result::well_formed)
             return r;
-        early.append(e);
     }
     expression_meaning implied;
     if (object) {

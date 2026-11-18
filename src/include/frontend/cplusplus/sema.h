@@ -1410,6 +1410,12 @@ class semantic_analysis
                                     bool list, initialized_value &result);
     analysis_result list_initialization(node_index list, qualified_type &type,
                                         bool direct, initialized_value &result);
+    /* the initializer-clauses of the braced-init-list list */
+    analysis_result list_clauses(node_index list,
+                                 owned_array<syntax_child> &clauses);
+    analysis_result list_initialization_of(
+        node_index list, const owned_array<syntax_child> &clauses,
+        qualified_type &type, bool direct, initialized_value &result);
     /* [dcl.init.list]/3 for a class: an aggregate's elements, each from
        its clause or from an empty list */
     analysis_result

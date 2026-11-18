@@ -833,6 +833,15 @@ libstdc++ and json), since sema cannot analyse a declaration kept as tokens.
   `src/test/cxx/run/constructor-default-arguments.cpp`.
   `bench/cxx-sema.py`: 27355 declarations as clang, 0 wrong, 448 we accept
   that clang rejects, 0 refuted.  cxx-run 160/160, cxx-c-suites 0 wrong.
+- Status (2026-11-18, [over.ics.list]): a braced-init-list argument of an
+  overloaded call with one element that is no list, for parameters of
+  scalar type, has the element's conversion sequence (/10.1); the call
+  then list-initializes the parameter (`resolve_call`, `list_clauses`
+  shared with `list_initialization`).  Not analysed: other lists (/10.2
+  {}), and class (/7, /8), std::initializer_list (/5), array (/6) and
+  reference (/9) parameters.  Test: `src/test/cxx/run/overload-braced.cpp`.
+  `bench/cxx-sema.py` unchanged (27355 as clang, 0 wrong: clang's tests
+  pass lists to classes).  cxx-run 164/164, cxx-c-suites 0 wrong.
 
 ### S4. Classes and the object model (parallel with S3)
 
