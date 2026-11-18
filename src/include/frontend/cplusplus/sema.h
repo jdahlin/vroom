@@ -261,6 +261,11 @@ enum gnu_attribute_flag : uint32_t {
     gnu_packed = 128,
     /* nothrow: no code changes, but clang's function type is noexcept */
     gnu_nothrow = 256,
+    /* visibility("default"), type_visibility("default"): what vcc's
+       symbols have already; never set in a declaration's flags */
+    gnu_default_visibility = 512,
+    /* clang's using_if_exists, on a using-declarator */
+    gnu_using_if_exists = 1024,
 };
 
 struct entity {
@@ -1604,7 +1609,7 @@ class semantic_analysis
     analysis_result using_directive(node_index n);
     analysis_result namespace_alias_definition(node_index n);
     analysis_result using_declaration(node_index n);
-    analysis_result using_declarator(node_index n);
+    analysis_result using_declarator(node_index n, bool if_exists = false);
     /* [basic.lookup.udir]: the namespace a namespace-name, after a
        nested-name-specifier (0: none), names */
     analysis_result named_namespace(node_index at, node_index qualifier,

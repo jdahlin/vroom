@@ -596,6 +596,18 @@ analysis_result semantic_analysis::enum_specifier(node_index n,
         previous_type = fixed;
     bool any = false;
     unsigned positive_bits = 0, negative_bits = 0;
+    /* [basic.scope.enum]/1: a scoped enumeration's enumerator-list is its
+       own scope, so a later initializer names an earlier enumerator
+       unqualified; the enclosing scope again after the list */
+    struct scope_restore {
+        entity_index &current, saved;
+        ~scope_restore()
+        {
+            current = saved;
+        }
+    } restore_scope = {current_scope, current_scope};
+    if (scoped)
+        current_scope = e;
     for (syntax_child c : enumerators) {
         syntax_child id = c;
         syntax_child init;

@@ -27,9 +27,13 @@ node_index parser::using_declaration()
     if (!comma_list(
             syntax_kind::using_declarator_list, [this] { using_declarator(); },
             [this] {
+                /* GNU attributes after a using-declarator (clang's
+                   extension; libc++'s using_if_exists) */
+                if (at_gnu_attribute())
+                    gnu_attributes_opt();
                 /* an attribute-specifier-seq after a
                    using-declarator: clang's extension, P9's */
-                if (at_attribute_specifier())
+                else if (at_attribute_specifier())
                     beyond_this_step();
             }))
         return 0;
@@ -115,28 +119,48 @@ node_index parser::using_declarator()
  */
 analysis_result semantic_analysis::using_declaration(node_index n)
 {
+    /* the using-declarators, the GNU attributes after each (clang's
+       extension) and the commas: of the using-declaration, or of its
+       using-declarator-list */
     const syntax_node &node = tree[n];
-    analysis_result result = analysis_result::well_formed;
-    bool any = false;
+    owned_array<syntax_child> items;
     for (uint32_t i = 0; i < node.child_count; i++) {
         syntax_child c = tree.children(n)[i];
-        if (syntax_is(tree, c, syntax_kind::using_declarator)) {
-            result = worse(result, using_declarator(c.index()));
-            any = true;
-        } else if (syntax_is(tree, c, syntax_kind::using_declarator_list)) {
-            for (uint32_t k = 0; k < tree[c.index()].child_count; k++) {
-                syntax_child d = tree.children(c.index())[k];
-                if (syntax_is(tree, d, syntax_kind::using_declarator)) {
-                    result = worse(result, using_declarator(d.index()));
-                    any = true;
-                } else if (!syntax_is_punctuator(
-                               tokens, d, preprocessing_op_or_punc::COMMA)) {
-                    /* a pack expansion */
-                    result = worse(result, not_supported(n, "temp.variadic"));
-                }
-            }
+        if (syntax_is(tree, c, syntax_kind::using_declarator_list)) {
+            for (uint32_t k = 0; k < tree[c.index()].child_count; k++)
+                items.append(tree.children(c.index())[k]);
         } else if (!c.is_token()) {
-            result = worse(result, not_supported(n, "namespace.udecl"));
+            items.append(c);
+        }
+    }
+    analysis_result result = analysis_result::well_formed;
+    bool any = false;
+    for (size_t i = 0; i < items.size(); i++) {
+        syntax_child d = items[i];
+        if (syntax_is(tree, d, syntax_kind::using_declarator)) {
+            gnu_attributes g;
+            for (size_t k = i + 1;
+                 k < items.size() &&
+                 syntax_is(tree, items[k],
+                           syntax_kind::gnu_attribute_specifier);
+                 k++) {
+                analysis_result r =
+                    gnu_attribute_specifier(items[k].index(), g);
+                if (r != analysis_result::well_formed)
+                    return worse(result, r);
+            }
+            if ((g.flags & ~gnu_using_if_exists) || g.aligned || g.section)
+                return worse(result, not_supported(n, "namespace.udecl"));
+            result =
+                worse(result, using_declarator(d.index(),
+                                               g.flags & gnu_using_if_exists));
+            any = true;
+        } else if (syntax_is(tree, d, syntax_kind::gnu_attribute_specifier)) {
+            continue; /* the using-declarator's before it */
+        } else if (!syntax_is_punctuator(tokens, d,
+                                         preprocessing_op_or_punc::COMMA)) {
+            /* a pack expansion */
+            result = worse(result, not_supported(n, "temp.variadic"));
         }
     }
     if (!any)
@@ -156,7 +180,8 @@ analysis_result semantic_analysis::using_declaration(node_index n)
  * functions, or a class and what hides it found in two namespaces) has no
  * rules yet.
  */
-analysis_result semantic_analysis::using_declarator(node_index n)
+analysis_result semantic_analysis::using_declarator(node_index n,
+                                                    bool if_exists)
 {
     const syntax_node &node = tree[n];
     const syntax_child *children = tree.children(n);
@@ -176,6 +201,11 @@ analysis_result semantic_analysis::using_declarator(node_index n)
     lookup_result found = lookup_qualified(q.entity, name, lookup_filter::any);
     if (found.unknown)
         return not_supported(n, "over");
+    /* clang's using_if_exists: "the using-declaration is ignored if the
+       name is not found" (a name an unsupported declaration declares
+       is not found either, so this trusts the library's headers) */
+    if (if_exists && !found.ambiguous && !found.entity)
+        return analysis_result::well_formed;
     /* the declarations found in more than one namespace, or none (which
        may be ones analysis has no rules for) */
     if (found.ambiguous || !found.entity)

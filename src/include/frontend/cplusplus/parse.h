@@ -1169,6 +1169,8 @@ class parser
        is at tokens[ahead], brackets balanced; 0 when none ends before a
        ';', '{' or '}' */
     unsigned angle_group_end(unsigned ahead);
+    /* angle_group_end of the current token, then a ( or a :: */
+    bool angle_group_follows_call();
     bool named_pack_follows();
     bool binary_operator_follows();
     /* in the declaration of an explicit-instantiation or

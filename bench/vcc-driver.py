@@ -324,11 +324,27 @@ def codegen_rows(verbose):
                     print(f'{"ok  " if ok else "FAIL"} codegen {os.path.basename(cc)} {flags}: -S unchanged')
     return bad, n
 
+def darwin_cxx_rows(d):
+    """C++ on a Darwin host: <cstdarg> is the SDK's libc++ (usr/include/c++/v1), as Apple's clang++'s
+    (the SDKs may differ: compared from the .sdk on)"""
+    if sys.platform != 'darwin':
+        return []
+    src = os.path.join(d, 'libcxx.cpp')
+    open(src, 'w').write('#include <cstdarg>\n')
+    def header(cc):
+        r = subprocess.run([cc, '-x', 'c++', '-M', src], capture_output=True, text=True)
+        for w in r.stdout.split():
+            if w.endswith('/cstdarg'):
+                return w[w.find('.sdk/'):]
+        return 'not found: ' + r.stderr.strip()
+    return [('darwin c++: <cstdarg> from the SDK\'s libc++',
+             lambda: header('/usr/bin/clang++') == header(vd.VPP) == '.sdk/usr/include/c++/v1/cstdarg')]
+
 def main():
     verbose = '-v' in sys.argv
     bad = 0
     with tempfile.TemporaryDirectory() as d:
-        drows = diag_rows(d) + return_rows(d)
+        drows = diag_rows(d) + return_rows(d) + darwin_cxx_rows(d)
         for name, fn in drows:
             ok = fn()
             bad += not ok
