@@ -100,6 +100,9 @@ void ast_builder_symbol_flags_add(cc *c, uint32_t s, uint32_t flags);
    placed in */
 void ast_builder_symbol_section(cc *c, uint32_t s, const char *name,
                                 size_t length);
+/* GNU C's __attribute__((visibility(name))): "hidden", "protected" */
+void ast_builder_symbol_visibility(cc *c, uint32_t s, const char *name,
+                                   size_t length);
 /* GNU C's __attribute__((aligned(alignment))) on a variable: its least
    alignment in bytes */
 void ast_builder_symbol_align(cc *c, uint32_t s, uint32_t alignment);

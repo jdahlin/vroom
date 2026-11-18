@@ -108,6 +108,7 @@ class itanium_mangler
     bool name(entity_index e);
     bool unscoped_name(entity_index e);
     bool unqualified_name(entity_index e);
+    bool unqualified_name_untagged(entity_index e);
     bool source_name(uint32_t identifier);
     bool operator_name(const entity &x);
     bool ctor_dtor_name(special_member which);
@@ -732,7 +733,24 @@ bool itanium_mangler::unscoped_name(entity_index e)
  * unnamed namespace, whose name already keeps the symbol apart: both name
  * an unnamed namespace _GLOBAL__N_1 (_ZN12_GLOBAL__N_11fEv).
  */
+/* [abi:mangle.abi-tag] "<abi-tag> ::= B <source-name>" after the
+   name, from GNU's __attribute__((abi_tag("tag"))) (one tag) */
 bool itanium_mangler::unqualified_name(entity_index e)
+{
+    if (!unqualified_name_untagged(e))
+        return false;
+    token_index tag = analysis.entity_table[e].abi_tag;
+    if (!tag)
+        return true;
+    owned_buffer written;
+    analysis.token_spelling(tag, written.get());
+    text("B");
+    number(written.size() - 2);
+    vbuffer_append(out, written.data() + 1, written.size() - 2);
+    return true;
+}
+
+bool itanium_mangler::unqualified_name_untagged(entity_index e)
 {
     const entities &table = analysis.entity_table;
     const entity &x = table[e];

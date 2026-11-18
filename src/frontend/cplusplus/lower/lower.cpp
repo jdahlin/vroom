@@ -1078,6 +1078,8 @@ void c_lowering::gnu_attributes(entity_index e, uint32_t s)
         ast_builder_symbol_flags_add(c, s, flags);
     if (x.gnu_flags & gnu_used)
         ast_builder_symbol_keep(c, s);
+    if (x.gnu_flags & gnu_hidden_visibility)
+        ast_builder_symbol_visibility(c, s, "hidden", 6);
     if (x.section) {
         /* the string-literal's characters between its quotes (sema took
            one with no escape sequence) */

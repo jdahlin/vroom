@@ -55,7 +55,8 @@ semantic_analysis::instantiate(node_index at, entity_index template_entity,
         index = record_instantiation(ft, arguments, count);
         /* the declaration: the declarator, where its types are the
            arguments' */
-        const syntax_child *d = tree.children(ft.declarator);
+        const syntax_child *d = tree.children(ft.declarator) +
+                                leading_gnu_attributes(ft.declarator);
         entity_index saved_scope = current_scope;
         uint32_t saved_cv = function_cv;
         owned_array<parameter_meaning> saved_parameters =
@@ -409,6 +410,8 @@ analysis_result semantic_analysis::declare_specialization(
     entity_table[e].instantiation = index + 1;
     entity_table.add_declaration(e, declaration);
     const function_template ft = function_templates[t.instantiation - 1];
+    entity_table[e].gnu_flags = ft.gnu_flags;
+    entity_table[e].abi_tag = ft.abi_tag;
     for (uint32_t i = 0; i < ft.parameter_count; i++) {
         uint32_t name =
             entity_table[template_parameter_entities[ft.first_parameter + i]]

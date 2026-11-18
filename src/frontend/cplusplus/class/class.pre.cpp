@@ -1037,17 +1037,20 @@ semantic_analysis::member_declaration(entity_index c, syntax_child member,
        function-specifiers alone ([class.ctor]/1: "Each decl-specifier in
        the decl-specifier-seq of a constructor declaration (if any) shall
        be friend, inline, constexpr, or an explicit-specifier") */
-    uint32_t at = 0;
+    /* [ext:gnu_attributes] before it all (special_member_declarator takes
+       them) */
+    uint32_t lead = leading_gnu_attributes(n);
+    uint32_t at = lead;
     bool constexpr_specified = false, virtual_specified = false,
          explicit_specified = false;
-    if (node.child_count > 1 &&
-        syntax_is(tree, children[0], syntax_kind::decl_specifier_seq) &&
-        function_specifiers_only(children[0].index(), constexpr_specified,
+    if (node.child_count > lead + 1 &&
+        syntax_is(tree, children[lead], syntax_kind::decl_specifier_seq) &&
+        function_specifiers_only(children[lead].index(), constexpr_specified,
                                  &virtual_specified, &explicit_specified) &&
-        declares_special_member(c, children[1]))
-        at = 1;
-    if (!node.child_count || at ||
-        !syntax_is(tree, children[0], syntax_kind::decl_specifier_seq)) {
+        declares_special_member(c, children[lead + 1]))
+        at = lead + 1;
+    if (lead == node.child_count || at > lead ||
+        !syntax_is(tree, children[lead], syntax_kind::decl_specifier_seq)) {
         /* [class.mem]/12: "The decl-specifier-seq may be omitted in
            constructor, destructor, and conversion function declarations
            only" */
@@ -1106,12 +1109,16 @@ semantic_analysis::member_declaration(entity_index c, syntax_child member,
             bodies.append(n);
         return r;
     }
+    /* [ext:gnu_attributes] before the decl-specifier-seq: what follows
+       them is the declaration */
+    children += lead;
+    uint32_t count = node.child_count - lead;
     specified s;
     declaration_access = access;
     /* [basic.scope.pdecl]/7.1: class-key identifier ; declares a nested
        class */
     sole_elaborated = 0;
-    if (node.kind == syntax_kind::member_declaration && node.child_count == 2 &&
+    if (node.kind == syntax_kind::member_declaration && count == 2 &&
         syntax_is_punctuator(tokens, children[1],
                              preprocessing_op_or_punc::SEMICOLON) &&
         tree[children[0].index()].child_count == 1 &&
@@ -1124,9 +1131,11 @@ semantic_analysis::member_declaration(entity_index c, syntax_child member,
     virtual_allowed = outer_virtual_allowed;
     sole_elaborated = 0;
     declaration_access = 0;
+    for (uint32_t i = 0; i < lead && r == analysis_result::well_formed; i++)
+        r = gnu_attribute_specifier(tree.children(n)[i].index(), s);
     if (r != analysis_result::well_formed)
         return r;
-    return member_declarators(c, n, s, access, 1, bodies);
+    return member_declarators(c, n, s, access, lead + 1, bodies);
 }
 
 /*
@@ -1191,15 +1200,15 @@ analysis_result semantic_analysis::member_declarators(
                      !s.constexpr_ && !s.type.cv();
         if (s.declares_enumeration && plain)
             return analysis_result::well_formed;
-        if (declares_unnamed_class(children[0].index()))
+        if (declares_unnamed_class(children[first - 1].index()))
             return anonymous_union_member(c, n, s, access);
         /* [class.nest]/1: a nested class's definition, or its declaration
            ([class.nest]/3) */
-        const syntax_node &seq = tree[children[0].index()];
+        const syntax_node &seq = tree[children[first - 1].index()];
         if (plain && seq.child_count == 1 &&
-            (syntax_is(tree, tree.children(children[0].index())[0],
+            (syntax_is(tree, tree.children(children[first - 1].index())[0],
                        syntax_kind::class_specifier) ||
-             syntax_is(tree, tree.children(children[0].index())[0],
+             syntax_is(tree, tree.children(children[first - 1].index())[0],
                        syntax_kind::elaborated_type_specifier)))
             return analysis_result::well_formed;
         /* a nested class, an anonymous union */
@@ -1318,6 +1327,8 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
     m.gnu_flags |= s.gnu_flags;
     if (!m.section)
         m.section = s.section;
+    if (!m.abi_tag)
+        m.abi_tag = s.abi_tag;
     if (!s.has_type)
         return not_supported(declaration, "dcl.type");
     if (s.typedef_)
@@ -1355,6 +1366,9 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
        are GCC's error */
     if (m.gnu_flags & (gnu_noinline | gnu_always_inline | gnu_noreturn |
                        gnu_weak | gnu_used | gnu_section))
+        return not_supported(declaration, "ext.gnu");
+    if (!is_function && (m.gnu_flags & gnu_function_symbol_flags))
+        /* a data member's */
         return not_supported(declaration, "ext.gnu");
     /* [class.mem]/20: "If T is the name of a class, then each of the
        following shall have a name different from T: every static data
@@ -1480,6 +1494,9 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
            (S6) */
         entity_table[e].constexpr_ = s.constexpr_;
         entity_table[e].defined = definition;
+        /* [ext:gnu_attributes] its symbol's */
+        entity_table[e].gnu_flags |= m.gnu_flags & gnu_function_symbol_flags;
+        entity_table[e].abi_tag = m.abi_tag;
         if (m.operator_function) {
             entity_table[e].operator_function = true;
             entity_table[e].implemented = m.implemented;
@@ -1709,11 +1726,14 @@ analysis_result semantic_analysis::member_function_body(entity_index c,
 analysis_result semantic_analysis::member_function_definition(
     entity_index c, node_index definition, const syntax_child *children)
 {
+    /* [ext:gnu_attributes] before it all: member_declaration took them */
+    uint32_t lead = leading_gnu_attributes(definition);
+    children += lead;
     /* a conversion function ([class.conv.fct]): no parameters for the
        declarator to bind, its body the function-body */
     if (entity_index f = conversion_function_declared_by(c, definition)) {
         last_declared = f;
-        syntax_child body = children[tree[definition].child_count - 1];
+        syntax_child body = children[tree[definition].child_count - lead - 1];
         if (deleted_body(body))
             return deleted_definition(definition, f);
         entity_index saved_class = defining_class;
@@ -1726,7 +1746,7 @@ analysis_result semantic_analysis::member_function_definition(
     bool constexpr_specified = false, body_virtual = false,
          body_explicit = false;
     uint32_t at = 0;
-    if (tree[definition].child_count > 2 &&
+    if (tree[definition].child_count > lead + 2 &&
         syntax_is(tree, children[0], syntax_kind::decl_specifier_seq) &&
         function_specifiers_only(children[0].index(), constexpr_specified,
                                  &body_virtual, &body_explicit) &&
@@ -1790,7 +1810,7 @@ analysis_result semantic_analysis::member_function_definition(
     if (!last_declared)
         return not_supported(definition, "class.mfct");
     /* the function-body after any virt-specifier-seq */
-    syntax_child body = children[tree[definition].child_count - 1];
+    syntax_child body = children[tree[definition].child_count - lead - 1];
     if (deleted_body(body))
         return deleted_definition(definition, last_declared);
     return function_body(definition, tree.children(body.index())[0]);

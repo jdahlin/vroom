@@ -271,7 +271,20 @@ enum gnu_attribute_flag : uint32_t {
     gnu_default_visibility = 512,
     /* clang's using_if_exists, on a using-declarator */
     gnu_using_if_exists = 1024,
+    /* visibility("hidden"): the symbol is hidden (STV_HIDDEN) */
+    gnu_hidden_visibility = 2048,
+    /* abi_tag("tag"): the tag is part of the mangled name ([abi:mangling]
+       <abi-tag>); the string-literal is the entity's abi_tag */
+    gnu_abi_tag = 4096,
+    /* clang's exclude_from_explicit_instantiation: an explicit
+       instantiation of the class leaves the member out */
+    gnu_exclude_from_explicit_instantiation = 8192,
 };
+/* the GNU attributes of a function's own symbol that analysis carries to
+   member functions and function templates */
+const uint32_t gnu_function_symbol_flags =
+    gnu_hidden_visibility | gnu_abi_tag |
+    gnu_exclude_from_explicit_instantiation;
 
 struct entity {
     entity_kind kind = entity_kind::none;
@@ -462,6 +475,8 @@ struct entity {
        alignment is alignment */
     uint32_t gnu_flags = 0;
     token_index section = 0;
+    /* ... and an abi_tag attribute's string-literal, 0 if none */
+    token_index abi_tag = 0;
     /* [dcl.link]/1: a function or variable with C language linkage,
        whose name is its symbol */
     bool c_language_linkage = false;
@@ -1309,6 +1324,11 @@ class semantic_analysis
     {
         return tree;
     }
+    /* a token's spelling, as written (an entity's abi_tag, its section) */
+    size_t token_spelling(token_index i, vbuffer *out) const
+    {
+        return tokens.spelling(i, out);
+    }
 
   private:
     /* the node needs rules that are not written: those of the subclause
@@ -1397,7 +1417,7 @@ class semantic_analysis
         /* [ext:gnu_attributes] the GNU attributes among the
            decl-specifiers and before them */
         uint32_t gnu_flags = 0;
-        token_index section = 0;
+        token_index section = 0, abi_tag = 0;
         uint64_t aligned = 0;
     };
     analysis_result decl_specifier_seq(node_index seq, specified &s,
@@ -1440,7 +1460,7 @@ class semantic_analysis
            string-literal */
         uint64_t aligned = 0;
         uint32_t gnu_flags = 0;
-        token_index section = 0;
+        token_index section = 0, abi_tag = 0;
         /* the declarator-id is ~ class-name: a destructor ([class.dtor]/1) */
         bool destructor = false;
         /* the declarator-id is an operator-function-id ([over.oper]/1) */
@@ -1738,7 +1758,7 @@ class semantic_analysis
     struct gnu_attributes {
         uint64_t aligned = 0;
         uint32_t flags = 0;
-        token_index section = 0;
+        token_index section = 0, abi_tag = 0;
     };
     analysis_result gnu_attribute_specifier(node_index n, gnu_attributes &g);
     analysis_result gnu_attribute_specifier(node_index n,
@@ -2704,6 +2724,10 @@ class semantic_analysis
         node_index declarator = 0;
         uint32_t first_parameter = 0, parameter_count = 0;
         bool unusable = false;
+        /* a function template: the GNU attributes of its specializations'
+           symbols (gnu_function_symbol_flags) and abi_tag */
+        uint32_t gnu_flags = 0;
+        token_index abi_tag = 0;
         /* a class template ([temp.class]): definition is its
            class-specifier */
         bool is_class = false;

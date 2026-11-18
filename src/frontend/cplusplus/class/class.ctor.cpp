@@ -252,6 +252,13 @@ analysis_result semantic_analysis::special_member_declarator(
     in_member_declarator = false;
     if (r != analysis_result::well_formed)
         return r;
+    /* [ext:gnu_attributes] before the declaration (libc++'s
+       _LIBCPP_HIDE_FROM_ABI) */
+    for (uint32_t i = 0; i < leading_gnu_attributes(declaration); i++) {
+        r = gnu_attribute_specifier(tree.children(declaration)[i].index(), m);
+        if (r != analysis_result::well_formed)
+            return r;
+    }
     /* [dcl.fct.default]: a member function's default arguments are a
        complete-class context ([class.mem]/6): analysed with the class
        complete (member_default_arguments) */
@@ -361,6 +368,9 @@ analysis_result semantic_analysis::special_member_declarator(
     x.type = type;
     x.nonstatic_member = true;
     x.special = kind;
+    /* [ext:gnu_attributes] its symbol's */
+    x.gnu_flags = m.gnu_flags & gnu_function_symbol_flags;
+    x.abi_tag = m.abi_tag;
     x.explicit_ = explicit_specified;
     /* [class.mfct]/1: defined in its class, an inline member function;
        [dcl.constexpr]/1: "A function or static data member declared with

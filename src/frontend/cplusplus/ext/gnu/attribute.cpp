@@ -207,6 +207,16 @@ static const gnu_attribute_rule gnu_attribute_rules[] = {
        vague linkage (libc++'s namespace std) */
     {"visibility", gnu_default_visibility},
     {"type_visibility", gnu_default_visibility},
+    /* clang: "abi_tag ("tag", ...): The abi_tag attribute can be applied to
+       a function, variable, class or inline namespace declaration to
+       modify the mangled name of the entity" (one tag, on a function or
+       variable, here) */
+    {"abi_tag", gnu_abi_tag},
+    /* clang: "exclude_from_explicit_instantiation: ... a member of a class
+       template is not part of an explicit instantiation of that class
+       template" */
+    {"exclude_from_explicit_instantiation",
+     gnu_exclude_from_explicit_instantiation},
     /* clang's using_if_exists: a using-declarator whose name is not
        found declares nothing */
     {"using_if_exists", gnu_using_if_exists},
@@ -283,7 +293,7 @@ analysis_result semantic_analysis::gnu_attribute_specifier(node_index n,
         work.resize(work.size() - 1);
         for (uint32_t i = 0; i < tree[next].child_count; i++) {
             syntax_child c = tree.children(next)[i];
-            if (next == n && i == 0)
+            if (next == n && i == 0 && c.is_token())
                 continue; /* __attribute__ */
             if (syntax_is(tree, c, syntax_kind::gnu_attribute))
                 attributes.append(c);
@@ -372,8 +382,44 @@ analysis_result semantic_analysis::gnu_attribute_specifier(node_index n,
             owned_buffer value;
             if (count == 4 && children[2].is_token())
                 tokens.spelling(children[2].index(), value.get());
-            if (value.size() != 9 || memcmp(value.data(), "\"default\"", 9))
+            if (value.size() == 9 && !memcmp(value.data(), "\"default\"", 9))
+                continue;
+            /* visibility("hidden") on a function or variable (the
+               declaration's kind decides where it is allowed);
+               type_visibility's is a class's */
+            bool type_visibility = !strcmp(rule->name, "type_visibility");
+            if (type_visibility || value.size() != 8 ||
+                memcmp(value.data(), "\"hidden\"", 8))
                 return not_supported(at, "ext.gnu");
+            g.flags |= gnu_hidden_visibility;
+            continue;
+        }
+        if (rule->flag == gnu_abi_tag) {
+            /* one ordinary string-literal of identifier characters */
+            if (count != 4 || !children[2].is_token() ||
+                tokens[children[2].index()].literal !=
+                    literal_kind::string_literal)
+                return not_supported(at, "ext.gnu");
+            owned_buffer tag;
+            tokens.spelling(children[2].index(), tag.get());
+            if (tag.size() < 3 || tag.data()[0] != '"')
+                return not_supported(at, "ext.gnu");
+            for (size_t i = 1; i + 1 < tag.size(); i++) {
+                unsigned char ch = tag.data()[i];
+                if (!(ch == '_' || (ch >= '0' && ch <= '9') ||
+                      ((ch | 32) >= 'a' && (ch | 32) <= 'z')))
+                    return not_supported(at, "ext.gnu");
+            }
+            if (g.abi_tag) {
+                /* two tags: their order in the name is sorted */
+                owned_buffer before;
+                tokens.spelling(g.abi_tag, before.get());
+                if (before.size() != tag.size() ||
+                    memcmp(before.data(), tag.data(), tag.size()))
+                    return not_supported(at, "ext.gnu");
+            }
+            g.abi_tag = children[2].index();
+            g.flags |= gnu_abi_tag;
             continue;
         }
         /* the others take no arguments analysis has rules for (format's
@@ -393,10 +439,12 @@ semantic_analysis::gnu_attribute_specifier(node_index n, declarator_meaning &m)
     g.aligned = m.aligned;
     g.flags = m.gnu_flags;
     g.section = m.section;
+    g.abi_tag = m.abi_tag;
     analysis_result r = gnu_attribute_specifier(n, g);
     m.aligned = g.aligned;
     m.gnu_flags = g.flags;
     m.section = g.section;
+    m.abi_tag = g.abi_tag;
     return r;
 }
 
@@ -407,10 +455,12 @@ analysis_result semantic_analysis::gnu_attribute_specifier(node_index n,
     g.aligned = s.aligned;
     g.flags = s.gnu_flags;
     g.section = s.section;
+    g.abi_tag = s.abi_tag;
     analysis_result r = gnu_attribute_specifier(n, g);
     s.aligned = g.aligned;
     s.gnu_flags = g.flags;
     s.section = g.section;
+    s.abi_tag = g.abi_tag;
     return r;
 }
 

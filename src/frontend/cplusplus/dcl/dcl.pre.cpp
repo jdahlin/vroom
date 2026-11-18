@@ -1050,6 +1050,9 @@ analysis_result semantic_analysis::declare_with_initializer(
     token_index section = m.section;
     if (!section)
         section = s.section;
+    token_index abi_tag = m.abi_tag;
+    if (!abi_tag)
+        abi_tag = s.abi_tag;
     bool is_function_type =
         type_table[type.unqualified()].kind == type_kind::function;
     if ((aligned && (s.typedef_ || is_function_type)) ||
@@ -1198,9 +1201,15 @@ analysis_result semantic_analysis::declare_with_initializer(
            applies to functions, global variables ...") */
         if ((gnu_flags & gnu_section) && x.automatic)
             return not_supported(declaration, "ext.gnu");
+        if ((gnu_flags & (gnu_abi_tag | gnu_hidden_visibility)) &&
+            (x.automatic || (x.abi_tag && abi_tag && x.abi_tag != abi_tag)))
+            /* a local's, or a second tag */
+            return not_supported(declaration, "ext.gnu");
         x.gnu_flags |= gnu_flags;
         if (section)
             x.section = section;
+        if (abi_tag)
+            x.abi_tag = abi_tag;
         if (aligned > x.alignment)
             x.alignment = static_cast<uint32_t>(aligned);
     }
