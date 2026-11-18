@@ -118,6 +118,18 @@ analysis_result semantic_analysis::typename_type(node_index n, type_index &type,
                                    "namespaces",
                                    "namespace.qual");
     entity_index e = found.entity;
+    if (!e && !found.unknown && substituting && scope.entity &&
+        entity_table[scope.entity].kind == entity_kind::class_type &&
+        entity_table[scope.entity].defined &&
+        !entity_table[scope.entity].unknown_names)
+        /* [temp.deduct]/11: "Attempting to use a type in a
+           nested-name-specifier of a qualified-id when that type does not
+           contain the specified member" (a deduction failure) */
+        return ill_formed_at_token(t,
+                                   "the name shall represent one or more "
+                                   "members of that class or of one of its "
+                                   "base classes",
+                                   "class.qual");
     if (!e || (entity_table[e].kind != entity_kind::class_type &&
                entity_table[e].kind != entity_kind::enumeration &&
                entity_table[e].kind != entity_kind::typedef_name))

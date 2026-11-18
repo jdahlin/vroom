@@ -437,6 +437,22 @@ bool itanium_mangler::dependent_member_prefix(type_index q)
     const struct type &r = record(qualified_type::make(q, cv_none));
     if (r.kind == type_kind::template_parameter)
         return type(qualified_type::make(q, cv_none));
+    if (r.kind == type_kind::dependent &&
+        analysis.entity_table[r.entity].kind ==
+            entity_kind::template_specialization) {
+        /* a class template's specialization at namespace scope as the
+           prefix, its template-prefix and template-args
+           (only_int<T>::type: N8only_intIT_E4typeE, as clang 23), itself
+           a candidate */
+        qualified_type t = qualified_type::make(q, cv_none);
+        if (substitution(t))
+            return true;
+        if (analysis.entity_table[r.entity].enclosing != 0 ||
+            !class_enum_type(t))
+            return false;
+        add_candidate(t);
+        return true;
+    }
     if (r.kind != type_kind::dependent ||
         analysis.entity_table[r.entity].kind != entity_kind::dependent_member)
         return false;

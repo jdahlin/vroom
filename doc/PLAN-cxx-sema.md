@@ -1750,6 +1750,36 @@ lines:
   42029 -> 42350, 0 we reject and clang accepts, 0 refuted (types 43630,
   lookup 15236, symbols 1910, layouts 10271, lowering 295 -> 298); cxx-run
   228/228 (template-overloads.cpp); cxx-c-suites 2214 pass, 0 wrong.
+  Then substitution failure ([temp.deduct]/8).  Each candidate of an
+  overloaded name (`template_call`) is deduced and its declaration
+  instantiated with `substituting` set: an ill-formed result there (the
+  declarator's types, a default template-argument) is no candidate, the
+  diagnostics, expressions and name uses it made taken back, the
+  instantiation record marked `substitution_failed`; a class defined
+  meanwhile is outside the immediate context (`define_class_outside`
+  counts its failures, which stay errors).  The one invalid form
+  analysis tells yet is /11's member a class does not contain:
+  `typename T::type`, `typename only_int<T>::type` (an explicit or partial
+  specialization giving the member for some arguments), in the return
+  type, a parameter or a default template-argument, the class defined
+  and its names all known (else unsupported).  Also: two templates whose
+  types differ only in `typename Q::name` are different templates
+  ([temp.over.link]/7: deduce_type compares the names and qualifiers);
+  an argument of class type for a P that is not a class template-id, or
+  a pointer to class for a non-pointer P, is a deduction failure, not
+  unsupported; a typename-specifier's template-id no longer holds the
+  class template's name in a declaration analysis keeps as names
+  (hold_names); `N8only_intIT_E4typeE` as a dependent prefix.  Not yet:
+  SFINAE with a single template and no other candidate (an error, as
+  clang's "no matching function": unsupported), `enable_if` on a
+  constant (static data members, `sizeof` of a dependent type and
+  member typedefs are S4's or not analysed), `decltype` in the return
+  type, a non-type argument that does not convert, [temp.deduct.call]/4's
+  derived-to-base and qualification conversions, [temp.deduct.funcaddr]
+  and [temp.deduct.conv].  cxx-sema: declarations as clang 42350 ->
+  42357, 0 we reject and clang accepts, 0 refuted (types 43630 -> 43689,
+  lookup 15236, symbols 1910 -> 1911, layouts 10271, lowering 298);
+  cxx-run 232/232 (template-sfinae.cpp); cxx-c-suites 2214 pass, 0 wrong.
 
 ### S7. Exceptions and RTTI
 

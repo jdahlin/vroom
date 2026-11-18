@@ -2437,6 +2437,9 @@ class semantic_analysis
         /* a function template's specialization declared by an explicit
            specialization ([temp.expl.spec]/1): never instantiated */
         bool explicit_specialization = false;
+        /* a function template's declaration whose substitution failed
+           while a candidate was considered ([temp.deduct]/8) */
+        bool substitution_failed = false;
     };
     /* [temp.fct]/1: a function template: its entity (template_entity,
        whose type is the function type with the type parameters' types,
@@ -2491,6 +2494,13 @@ class semantic_analysis
        analysed: a specialization named there needs no definition
        ([temp.inst]/5) */
     unsigned unevaluated = 0;
+    /* a candidate's declaration is instantiated ([temp.over]/1): an
+       invalid type or expression in it is a deduction failure
+       ([temp.deduct]/8), not an error (its diagnostics are taken back);
+       definitions instantiated meanwhile are outside the immediate
+       context, their failures counted */
+    unsigned substituting = 0;
+    uint32_t definition_failures = 0;
     /* the specializations whose definitions wait for the end of the
        translation unit ([temp.point]/7) */
     owned_array<uint32_t> pending_definitions;
@@ -2591,6 +2601,10 @@ class semantic_analysis
     analysis_result define_template_member(uint32_t member, uint32_t index,
                                            bool recorded);
     /* instantiate_class's definition of instantiations[index]'s class */
+    /* define_class_instantiation outside a substitution's immediate
+       context (substituting) */
+    analysis_result define_class_outside(node_index at, uint32_t index,
+                                         entity_index &c);
     analysis_result define_class_instantiation(node_index at, uint32_t index,
                                                entity_index &c);
     /* [temp.names]/1: a simple-template-id that names a class template's

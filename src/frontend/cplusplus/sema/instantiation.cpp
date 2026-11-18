@@ -115,10 +115,22 @@ semantic_analysis::instantiate(node_index at, entity_index template_entity,
             static_cast<owned_array<parameter_meaning> &&>(saved_parameters);
         expressions.resize(expressions_before);
         name_uses.resize(uses_before);
+        if (r == analysis_result::ill_formed && substituting) {
+            /* [temp.deduct]/8: "If a substitution results in an invalid
+               type or expression, type deduction fails." (the caller
+               takes the diagnostics back) */
+            instantiations[index].substitution_failed = true;
+            return r;
+        }
         if (r != analysis_result::well_formed)
             /* (an argument that makes the declaration ill-formed is a
                deduction failure, [temp.deduct]/8: no candidate) */
             return not_supported(at, "temp.deduct");
+    }
+    if (instantiations[index].substitution_failed) {
+        if (substituting)
+            return analysis_result::ill_formed;
+        return not_supported(at, "temp.deduct");
     }
     specialization = instantiations[index].specialization;
     if (!specialization)
@@ -264,7 +276,7 @@ semantic_analysis::instantiate_class(node_index at, uint32_t class_template,
            now that the template is */
         if (!entity_table[c].defined && !x.defining && !x.pattern &&
             ft.definition)
-            return define_class_instantiation(at, k, c);
+            return define_class_outside(at, k, c);
         return analysis_result::well_formed;
     }
     if (instantiation_depth >= 64)
@@ -320,7 +332,24 @@ semantic_analysis::instantiate_class(node_index at, uint32_t class_template,
         instantiations[index].specialization = c;
         return analysis_result::well_formed;
     }
-    return define_class_instantiation(at, index, c);
+    return define_class_outside(at, index, c);
+}
+
+/* [temp.deduct]/8: "Only invalid types and expressions in the immediate
+   context of the function type, its template parameter types, and its
+   explicit-specifier can result in a deduction failure": a class
+   instantiated while a candidate's declaration is is not in it */
+analysis_result semantic_analysis::define_class_outside(node_index at,
+                                                        uint32_t index,
+                                                        entity_index &c)
+{
+    unsigned saved = substituting;
+    substituting = 0;
+    analysis_result r = define_class_instantiation(at, index, c);
+    substituting = saved;
+    if (saved && r != analysis_result::well_formed)
+        definition_failures++;
+    return r;
 }
 
 /*

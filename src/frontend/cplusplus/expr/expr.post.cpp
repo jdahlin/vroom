@@ -1078,21 +1078,44 @@ analysis_result semantic_analysis::template_call(
         for (uint32_t g : group) {
             owned_array<template_argument> d;
             bool failed = false;
+            /* [temp.deduct]/8: an invalid type or expression in the
+               immediate context of the declaration (or of a default
+               template-argument) substituted is no candidate, and no
+               diagnostic: what substitution issued is taken back */
+            size_t messages = diagnostics.messages.size();
+            size_t errors = diagnostics.error_count;
+            size_t warnings = diagnostics.warning_count;
+            size_t fatals = diagnostics.fatal_count;
+            size_t expressions_before = expressions.size();
+            size_t uses_before = name_uses.size();
+            uint32_t failures = definition_failures;
+            substituting++;
             analysis_result r = deduce_from_call(
                 n, g, meanings, static_cast<uint32_t>(early.size()), d,
                 &failed);
+            entity_index e = 0;
+            const struct function_template ft = function_templates[g - 1];
+            if (r == analysis_result::well_formed && !failed) {
+                unevaluated++;
+                r = instantiate(n, ft.entity, d.data(),
+                                static_cast<uint32_t>(d.size()), e);
+                unevaluated--;
+            }
+            substituting--;
+            if (r == analysis_result::ill_formed &&
+                failures == definition_failures &&
+                diagnostics.fatal_count == fatals) {
+                diagnostics.messages.resize(messages);
+                diagnostics.error_count = errors;
+                diagnostics.warning_count = warnings;
+                expressions.resize(expressions_before);
+                name_uses.resize(uses_before);
+                continue;
+            }
             if (r != analysis_result::well_formed)
                 return r;
             if (failed)
                 continue;
-            entity_index e = 0;
-            unevaluated++;
-            const struct function_template ft = function_templates[g - 1];
-            r = instantiate(n, ft.entity, d.data(),
-                            static_cast<uint32_t>(d.size()), e);
-            unevaluated--;
-            if (r != analysis_result::well_formed)
-                return r;
             overload_candidate c;
             c.function = e;
             c.type = entity_table[e].type;

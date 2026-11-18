@@ -384,6 +384,12 @@ void semantic_analysis::hold_names(node_index declaration)
            brackets and braces, which holds more names than the declaration
            declares and so only makes more declarations unsupported */
         int depth = 0;
+        auto is_punctuator_at = [&](token_index at,
+                                    preprocessing_op_or_punc op) {
+            const token &x = tokens[at];
+            return x.kind == token_kind::operator_or_punctuator &&
+                   preprocessing_op_or_punc_primary(x.op_or_punc) == op;
+        };
         auto is_scope_operator = [&](token_index at) {
             const token &x = tokens[at];
             return x.kind == token_kind::operator_or_punctuator &&
@@ -398,6 +404,49 @@ void semantic_analysis::hold_names(node_index declaration)
             bool qualified =
                 (t + 1 < node.end_token && is_scope_operator(t + 1)) ||
                 (t > node.first_token && is_scope_operator(t - 1));
+            /* a typename-specifier's simple-template-id before ::
+               (typename only_int<T>::type) names a type, never what the
+               declaration declares; its template-arguments neither */
+            if (tok.kind == token_kind::identifier && !depth && !qualified &&
+                t > node.first_token &&
+                p.keyword_of(tokens[t - 1]) == standard_keyword::typename_ &&
+                t + 1 < node.end_token &&
+                is_punctuator_at(t + 1, preprocessing_op_or_punc::LESS)) {
+                token_index close = 0;
+                int angles = 0, nested = 0;
+                for (token_index k = t + 1; k < node.end_token && !close; k++) {
+                    if (is_punctuator_at(
+                            k, preprocessing_op_or_punc::LEFT_PARENTHESIS) ||
+                        is_punctuator_at(
+                            k, preprocessing_op_or_punc::LEFT_BRACKET) ||
+                        is_punctuator_at(k,
+                                         preprocessing_op_or_punc::LEFT_BRACE))
+                        nested++;
+                    else if (is_punctuator_at(
+                                 k,
+                                 preprocessing_op_or_punc::RIGHT_PARENTHESIS) ||
+                             is_punctuator_at(
+                                 k, preprocessing_op_or_punc::RIGHT_BRACKET) ||
+                             is_punctuator_at(
+                                 k, preprocessing_op_or_punc::RIGHT_BRACE))
+                        nested--;
+                    else if (!nested && is_punctuator_at(
+                                            k, preprocessing_op_or_punc::LESS))
+                        angles++;
+                    else if (!nested &&
+                             is_punctuator_at(
+                                 k, preprocessing_op_or_punc::GREATER) &&
+                             --angles == 0)
+                        close = k;
+                    if (nested < 0)
+                        break;
+                }
+                if (close && close + 1 < node.end_token &&
+                    is_scope_operator(close + 1)) {
+                    t = close;
+                    continue;
+                }
+            }
             if (tok.kind == token_kind::identifier && !depth && !qualified)
                 ids.append(t);
             if (tok.kind != token_kind::operator_or_punctuator)

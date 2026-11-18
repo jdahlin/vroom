@@ -1791,11 +1791,28 @@ bool semantic_analysis::deduce_type(qualified_type p, qualified_type a,
     if (!depends(type_table, p))
         return p == a;
     if (pr.kind == type_kind::dependent &&
-        entity_table[pr.entity].kind == entity_kind::dependent_member)
+        entity_table[pr.entity].kind == entity_kind::dependent_member) {
         /* [temp.deduct.type]/5.1: "The nested-name-specifier of a type that
            was specified using a qualified-id" is a non-deduced context;
-           the argument's conversion is checked on the specialization */
-        return true;
+           the argument's conversion is checked on the specialization.
+           Comparing two declarations ([temp.over.link]/7), the same name
+           of an equivalent qualifier */
+        if (!exact)
+            return true;
+        const struct type &ar = type_table[a.unqualified()];
+        if (ar.kind != type_kind::dependent || p.cv() != a.cv() ||
+            entity_table[ar.entity].kind != entity_kind::dependent_member ||
+            entity_table[ar.entity].name != entity_table[pr.entity].name)
+            return false;
+        return deduce_type(
+            qualified_type::make(
+                static_cast<type_index>(entity_table[pr.entity].value),
+                cv_none),
+            qualified_type::make(
+                static_cast<type_index>(entity_table[ar.entity].value),
+                cv_none),
+            deduced, set, exact);
+    }
     if (pr.kind == type_kind::dependent) {
         /* [temp.deduct.type]/8's TT<T>: a class template's specialization,
            whose arguments are deduced from those of A's, a
@@ -1883,15 +1900,20 @@ static bool deduction_may_succeed(const types &table, qualified_type p,
                                   qualified_type a)
 {
     const struct type &ar = table[a.unqualified()];
-    if (ar.kind == type_kind::class_type || ar.kind == type_kind::dependent)
+    const struct type &pr = table[p.unqualified()];
+    /* (/4.3 needs P a class, a simple-template-id, or a pointer to one;
+       /4.2 a pointer P for a pointer A) */
+    if (ar.kind == type_kind::class_type)
+        return pr.kind == type_kind::dependent;
+    if (ar.kind == type_kind::dependent)
         return true;
     if (ar.kind == type_kind::pointer) {
         type_kind k = table[ar.operand.unqualified()].kind;
         if (k == type_kind::class_type || k == type_kind::function ||
             k == type_kind::dependent)
-            return true;
+            return pr.kind == type_kind::pointer ||
+                   pr.kind == type_kind::dependent;
     }
-    const struct type &pr = table[p.unqualified()];
     switch (pr.kind) {
     case type_kind::template_parameter:
     case type_kind::fundamental:
