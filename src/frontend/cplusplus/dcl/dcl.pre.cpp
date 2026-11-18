@@ -682,11 +682,15 @@ analysis_result semantic_analysis::alias_type(node_index n,
 {
     const syntax_node &node = tree[n];
     const syntax_child *c = tree.children(n);
-    /* using identifier = defining-type-id ; */
-    if (node.child_count != 5 ||
-        !syntax_is(tree, c[3], syntax_kind::defining_type_id))
+    /* using identifier attribute-specifier-seq_opt = defining-type-id ;
+       the attributes only those that change nothing vcc generates */
+    uint32_t type_at = 3;
+    if (node.child_count == 6 && attributes_without_effect(c[2]))
+        type_at = 4;
+    if (node.child_count != type_at + 2 ||
+        !syntax_is(tree, c[type_at], syntax_kind::defining_type_id))
         return not_supported(n, "dcl.attr");
-    node_index id = c[3].index();
+    node_index id = c[type_at].index();
     const syntax_node &d = tree[id];
     const syntax_child *dc = tree.children(id);
     if (!d.child_count || d.child_count > 2 || dc[0].is_token())

@@ -1666,6 +1666,9 @@ class semantic_analysis
                                             declarator_meaning &m);
     analysis_result gnu_attribute_specifier(node_index n, specified &s);
     uint32_t leading_gnu_attributes(node_index n) const;
+    /* [dcl.attr.grammar]: every attribute at n (an attribute-specifier,
+       -seq or -list) changes nothing vcc generates */
+    bool attributes_without_effect(syntax_child n) const;
     bool declares_unnamed_class(node_index seq) const;
     /* [ext:gnu_library_builtins] the function __builtin_NAME (an
        identifier) declares at its first use, 0 if it is not one */
