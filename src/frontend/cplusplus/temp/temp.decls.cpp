@@ -72,12 +72,21 @@ analysis_result semantic_analysis::template_declaration(node_index n)
                 tree[only].kind == syntax_kind::elaborated_type_specifier)
                 return class_template_declaration(n, only);
             /* [temp.pre]/1: a variable template, its one init-declarator
-               with an initializer */
-            if (d.child_count == 3 &&
-                syntax_is(tree, tree.children(inner)[0],
+               with an initializer, after attributes without effect
+               (libc++'s deprecated is_pod_v) */
+            uint32_t lead = attributes_without_effect_before(inner);
+            if (d.child_count == 3 + lead &&
+                syntax_is(tree, tree.children(inner)[lead],
                           syntax_kind::decl_specifier_seq) &&
-                syntax_is(tree, tree.children(inner)[1],
+                syntax_is(tree, tree.children(inner)[lead + 1],
                           syntax_kind::init_declarator)) {
+                /* (a specialization's template-id after attributes: no
+                   rules yet) */
+                node_index item = tree.children(inner)[lead + 1].index();
+                if (lead && tree[item].child_count &&
+                    syntax_is(tree, tree.children(item)[0],
+                              syntax_kind::simple_template_id))
+                    return not_supported(n, "temp.pre");
                 if (node_index id = variable_specialization_id(inner))
                     return variable_partial_specialization(n, inner, id);
                 return variable_template_definition(n, inner);
@@ -879,7 +888,8 @@ semantic_analysis::variable_template_definition(node_index n,
     analysis_result r = template_head_parameters(n, parameters, true);
     if (r != analysis_result::well_formed)
         return r;
-    const syntax_child *parts = tree.children(declaration);
+    const syntax_child *parts = tree.children(declaration) +
+                                attributes_without_effect_before(declaration);
     node_index item = parts[1].index();
     if (tree[item].child_count != 2 ||
         syntax_is(tree, tree.children(item)[1], syntax_kind::requires_clause))
@@ -2358,6 +2368,19 @@ void semantic_analysis::hold_template_name(function_template &record,
     entity_table.bind(outer, name, held);
     record.name = held;
     function_templates.append(record);
+}
+
+/* the number of a simple-declaration's leading attribute-specifier-seqs
+   and gnu-attribute-specifiers whose attributes change nothing vcc
+   generates */
+uint32_t semantic_analysis::attributes_without_effect_before(
+    node_index declaration) const
+{
+    uint32_t k = 0;
+    while (k < tree[declaration].child_count &&
+           class_head_attributes_without_effect(tree.children(declaration)[k]))
+        k++;
+    return k;
 }
 
 } // namespace cplusplus

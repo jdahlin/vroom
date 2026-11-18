@@ -1830,6 +1830,7 @@ class semantic_analysis
     bool attributes_without_effect(syntax_child n) const;
     bool gnu_attributes_without_effect(syntax_child n) const;
     bool class_head_attributes_without_effect(syntax_child c) const;
+    uint32_t attributes_without_effect_before(node_index declaration) const;
     bool declares_unnamed_class(node_index seq) const;
     /* [ext:gnu_library_builtins] the function __builtin_NAME (an
        identifier) declares at its first use, 0 if it is not one */
