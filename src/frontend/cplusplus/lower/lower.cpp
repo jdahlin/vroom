@@ -2126,9 +2126,17 @@ entity_index c_lowering::returned_variable(uint32_t operand) const
     if (!operand)
         return 0;
     const semantic_node &n = node(operand);
-    if (n.kind != semantic_kind::construct || n.a || n.count != 1)
+    uint32_t argument = 0;
+    if (n.kind == semantic_kind::conversion &&
+        static_cast<conversion_kind>(n.op) == conversion_kind::lvalue_to_rvalue)
+        /* a class trivially copyable but non-trivial for the purposes of
+           calls (a non-trivial destructor): its copy is the bytes, still
+           elided as clang does */
+        argument = n.a;
+    else if (n.kind != semantic_kind::construct || n.a || n.count != 1)
         return 0;
-    uint32_t argument = analysis.semantics.items(n.first)[0];
+    else
+        argument = analysis.semantics.items(n.first)[0];
     if (node(argument).kind == semantic_kind::bind_reference)
         argument = node(argument).a;
     const semantic_node &named = node(argument);
