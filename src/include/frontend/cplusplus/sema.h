@@ -530,6 +530,11 @@ struct vtable_group {
     entity_index subobject_class = 0, in_virtual_base = 0;
     uint64_t offset_in_virtual = 0;
     bool virtual_primary = false;
+    /* a function template's specialization ([temp.spec]): its
+       instantiation record (semantic_analysis::instantiations) plus one;
+       a function template (template_entity) or one of its type
+       parameters: its function_template record plus one */
+    uint32_t instantiation = 0;
 };
 
 /* one declaration of an entity: the syntax node that declares it */
@@ -1244,6 +1249,9 @@ class semantic_analysis
        (temp/): the declarations of templates and of their
        specializations; no rules yet, each answers its subclause */
     analysis_result template_declaration(node_index n);
+    /* [temp.fct]: a function template defined at namespace scope */
+    analysis_result function_template_definition(node_index n,
+                                                 node_index definition);
     analysis_result explicit_specialization(node_index n);
     analysis_result explicit_instantiation(node_index n);
     analysis_result deduction_guide(node_index n);
@@ -1407,7 +1415,8 @@ class semantic_analysis
        name that analysis did not follow */
     bool argument_dependent_lookup(uint32_t name,
                                    const owned_array<qualified_type> &arguments,
-                                   owned_array<entity_index> &found) const;
+                                   owned_array<entity_index> &found,
+                                   entity_index known = 0) const;
     /* [basic.lookup.argdep]/2: the associated entities (classes) and
        namespaces of the type t, added to the sets; false if a class of it
        is one analysis did not follow */
@@ -2310,6 +2319,48 @@ class semantic_analysis
         /* inputs[first_input .. + input_count) */
         uint32_t first_input = 0, input_count = 0;
     };
+    /* [temp.fct]/1: a function template: its entity (template_entity,
+       whose type is the function type with the type parameters' types,
+       type_kind::template_parameter), the name hold_names bound for it,
+       its template-declaration and function-definition, and its type
+       parameters (typedef-names of those types, whose value is their
+       position) template_parameter_entities[first_parameter ..
+       + parameter_count); unusable when its name declares more than this
+       template */
+    struct function_template {
+        entity_index entity = 0, name = 0;
+        node_index declaration = 0, definition = 0;
+        uint32_t first_parameter = 0, parameter_count = 0;
+        bool unusable = false;
+    };
+    owned_array<function_template> function_templates;
+    owned_array<entity_index> template_parameter_entities;
+    /* the instantiation whose specialization the declaration analysed
+       now declares (its record's index plus one), and how deep
+       instantiations nest ([temp.inst]/16) */
+    uint32_t instantiating = 0;
+    unsigned instantiation_depth = 0;
+    /* in an instantiation, the template's first token: a namespace's
+       name declared after it is not the template's to find
+       (lookup_unqualified) */
+    token_index lookup_horizon = 0;
+    /* the function template whose name the held entity is, plus one */
+    uint32_t function_template_of(entity_index held) const;
+    /* a call whose name is a function template's (expr.post.cpp) */
+    analysis_result template_call(node_index n, token_index name,
+                                  uint32_t function_template,
+                                  const owned_array<syntax_child> &arguments,
+                                  owned_array<expression_meaning> &early,
+                                  expression_meaning &f);
+    /* declare()'s part for a specialization an instantiation makes */
+    analysis_result declare_specialization(node_index declaration,
+                                           token_index id, qualified_type type,
+                                           const specified &s,
+                                           entity_index &declared_entity);
+    /* [temp.deduct.call]: P against A, the deduced arguments by position
+       (an empty type: none yet) */
+    bool deduce_type(qualified_type p, qualified_type a,
+                     owned_array<qualified_type> &deduced) const;
     owned_array<template_argument> template_arguments;
     owned_array<constant_value> instantiation_values;
     owned_array<instantiation_input> instantiation_inputs;
@@ -2322,8 +2373,7 @@ class semantic_analysis
     /* [temp.deduct]/1: "When a function template specialization is
        referenced, all of the template arguments shall have values"; the
        arguments deduced from a call's ([temp.deduct.call]) */
-    analysis_result deduce_from_call(node_index at,
-                                     entity_index function_template,
+    analysis_result deduce_from_call(node_index at, uint32_t function_template,
                                      const expression_meaning *arguments,
                                      uint32_t count,
                                      owned_array<template_argument> &deduced);
@@ -2373,6 +2423,23 @@ class semantic_analysis
 
     /* ---- overloading ([over]) ---- */
   public:
+    /* a function template's specialization (entity::instantiation): its
+       template and its arguments, for its name ([abi:mangle.name]) */
+    entity_index specialized_template(entity_index e) const
+    {
+        return instantiations[entity_table[e].instantiation - 1]
+            .template_entity;
+    }
+    uint32_t specialization_argument_count(entity_index e) const
+    {
+        return instantiations[entity_table[e].instantiation - 1].argument_count;
+    }
+    qualified_type specialization_argument(entity_index e, uint32_t i) const
+    {
+        const instantiation_record &x =
+            instantiations[entity_table[e].instantiation - 1];
+        return template_arguments[x.first_argument + i].type;
+    }
     /* [over.best.ics]/1: "An implicit conversion sequence is a sequence of
        conversions used to convert an argument in a function call to the
        type of the corresponding parameter of the function being called":

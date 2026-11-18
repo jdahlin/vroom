@@ -286,6 +286,23 @@ semantic_analysis::lookup_unqualified(uint32_t name, lookup_filter filter) const
         if (r.entity || r.unknown || r.ambiguous || !s)
             break;
     }
+    /* [temp.res]/10: "If a name does not depend on a template-parameter
+       (as defined in [temp.dep]), a declaration (or set of declarations)
+       for that name shall be in scope at the point where the name appears
+       in the template definition".  An instantiation analyses the
+       definition again later: a namespace's declaration after the
+       template, which the template's lookup would not find, makes what
+       the name denotes not known (a dependent call's lookup at the point
+       of instantiation, [temp.dep.candidate], is not told apart) */
+    if (lookup_horizon && r.entity && is_namespace(r.found_in))
+        for (entity_index o = r.entity; o; o = entity_table[o].next_overload) {
+            uint32_t d = entity_table[o].first_declaration;
+            if (d && tree[entity_table.declaration(d).node].first_token >
+                         lookup_horizon)
+                r.unknown = true;
+            if (entity_table[o].kind != entity_kind::function)
+                break;
+        }
     if (r.unknown || r.ambiguous)
         r.entity = 0;
     return r;
@@ -548,7 +565,7 @@ bool semantic_analysis::associated_with(
  */
 bool semantic_analysis::argument_dependent_lookup(
     uint32_t name, const owned_array<qualified_type> &arguments,
-    owned_array<entity_index> &found) const
+    owned_array<entity_index> &found, entity_index known) const
 {
     owned_array<entity_index> classes, namespaces;
     for (qualified_type t : arguments)
@@ -577,7 +594,9 @@ bool semantic_analysis::argument_dependent_lookup(
         entity_index e = entity_table.find(n, name);
         if (!e && entity_table[n].unknown_names)
             return false;
-        if (!e)
+        /* (a name analysis holds: the one the caller found already, a
+           function template's, is no other) */
+        if (!e || e == known)
             continue;
         if (entity_table[e].kind == entity_kind::none)
             return false;
@@ -693,6 +712,11 @@ analysis_result semantic_analysis::nested_name_specifier(node_index n,
                type" */
             const struct type &named =
                 type_table[entity_table[e].type.unqualified()];
+            /* a template-parameter: a dependent type ([temp.dep.type]/9),
+               whose members are looked up per specialization */
+            if (named.kind == type_kind::template_parameter ||
+                named.kind == type_kind::dependent)
+                return not_supported(n, "temp.res");
             if (named.kind != type_kind::class_type &&
                 named.kind != type_kind::enumeration)
                 return ill_formed_at_token(

@@ -494,6 +494,12 @@ void semantic_analysis::hold_names(node_index declaration)
                 entity_table[found].kind = entity_kind::none;
                 if (by_template)
                     entity_table[found].held_by_template = true;
+                /* a function template's name declared again (an explicit
+                   specialization, an overload): its calls need more than
+                   the template */
+                for (function_template &t : function_templates)
+                    if (t.name == found)
+                        t.unusable = true;
             }
             continue;
         }

@@ -391,8 +391,30 @@ analysis_result semantic_analysis::function_body(node_index definition,
     /* a body analysed in part has a tree the evaluator cannot run */
     if (result != analysis_result::well_formed)
         semantics[body].evaluation = constness::not_constant;
+    /* [dcl.constexpr]/7: "If the instantiated template specialization of
+       a constexpr function template ... would fail to satisfy the
+       requirements for a constexpr function, that specialization is still
+       a constexpr function, even though a call to such a function cannot
+       appear in a constant expression." */
+    bool specialization = entity_table[f].instantiation != 0;
     if (result == analysis_result::well_formed && entity_table[f].constexpr_ &&
-        entity_table[f].special == special_member::none) {
+        specialization) {
+        const implementation_defined_behavior &b = tokens.files.behavior;
+        bool literal = true;
+        if (!b.has(language_feature::constexpr_without_constant_result)) {
+            if (literal_type(returns) == constness::not_constant)
+                literal = false;
+            type_index ft = entity_table[f].type.unqualified();
+            const qualified_type *parameters = type_table.parameters(ft);
+            for (uint32_t i = 0; i < type_table[ft].parameter_count; i++)
+                if (literal_type(parameters[i]) == constness::not_constant)
+                    literal = false;
+        }
+        if (!literal)
+            semantics[body].evaluation = constness::not_constant;
+    }
+    if (result == analysis_result::well_formed && entity_table[f].constexpr_ &&
+        !specialization && entity_table[f].special == special_member::none) {
         const implementation_defined_behavior &b = tokens.files.behavior;
         constexpr_body found;
         walk_constexpr_body(semantics, block, found);

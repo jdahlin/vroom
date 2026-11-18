@@ -176,6 +176,9 @@ analysis_result semantic_analysis::declare(node_index declaration,
                                            entity_index &declared_entity)
 {
     declared_entity = 0;
+    if (instantiating && kind == entity_kind::function)
+        return declare_specialization(declaration, id, type, s,
+                                      declared_entity);
     uint32_t name = tokens.identifier(id);
     entity_index scope = current_scope;
     entity_index prior = 0;

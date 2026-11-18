@@ -1445,6 +1445,44 @@ lines:
   clang 30185, 0 we reject and clang accepts, 0 refuted (types 39465,
   constants 15796); cxx-run 188/188 (constexpr-classes.cpp);
   cxx-c-suites 2214 pass, 0 wrong.
+  S6b's first rules: function templates.  A namespace-scope
+  function-definition after `template<class T, typename U>` (type
+  parameters, no defaults, packs or constraints) is a `template_entity`
+  whose type is its function type over `type_kind::template_parameter`
+  types (its declarator analysed with each parameter's name a typedef of
+  one), recorded in `function_templates`; its name stays the one
+  hold_names binds.  A call by that name (`template_call`, expr.post.cpp)
+  analyses the arguments, deduces ([temp.deduct.call]/2-3, forwarding
+  references; `deduce_type` for T, cv T, pointers, references, arrays and
+  function types) and instantiates (sema/instantiation.cpp): the
+  function-definition analysed again in a scope where each parameter
+  names its argument, the caller's state kept aside, declare() making a
+  function of the template's namespace that no name binds
+  (`declare_specialization`), inline (emitted where used, weak), with the
+  parameters' names bound in it for its body.  One record per template
+  and argument list (3.5's `instantiations`), so recursion finds its own
+  specialization.  Itanium names: `<template-args>`, the template's
+  return and parameter types with `T_`, the template name as a
+  substitution candidate (symbols as clang's: `_Z1hIidET_PS0_RKT0_S0_`).
+  Errors in a specialization's body make the template's declaration
+  ill-formed, as clang reports them; a constexpr specialization that
+  breaks /3's rules is still constexpr but not constant
+  ([dcl.constexpr]/7); a name the body finds among a namespace's
+  declarations after the template makes the lookup unknown ([temp.res]/10,
+  no two-phase lookup yet); `T::x` is unsupported [temp.res].  Unusable
+  (unsupported as before) when the name is declared again (an overload,
+  an explicit specialization) or argument-dependent lookup finds other
+  functions.  Not yet: explicit template arguments, qualified calls
+  (`N::f(x)`), declarations without a body, member templates, class
+  templates.  cxx-sema: declarations as clang 30185 -> 31651, 0 we reject
+  and clang accepts, 0 refuted (lookup 14031, symbols 1675); we accept and
+  clang rejects 482 -> 1081 (templates clang rejects at their definition,
+  whose rules on non-dependent constructs are not checked before an
+  instantiation); cxx-run 192/192 (function-templates.cpp); cxx-c-suites
+  2214 pass, 0 wrong.  ASan over SemaTemplate and temp.deduct.call: clean
+  but for a use-after-free in the parser's recovery
+  (`parser::unparsed_declaration`, SemaTemplate/explicit-instantiation.cpp),
+  which is older than this.
 
 ### S7. Exceptions and RTTI
 

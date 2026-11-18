@@ -603,6 +603,16 @@ analysis_result semantic_analysis::call(node_index n, expression_meaning &m)
         token_index t = children[0].index();
         uint32_t name = tokens.identifier(t);
         lookup_result x = lookup_unqualified(name, lookup_filter::any);
+        if (uint32_t ft = function_template_of(x.unknown_entity)) {
+            /* [over.match.funcs]/8: "In each case where a candidate is a
+               function template, candidate function template
+               specializations are generated using template argument
+               deduction"; the name is a function template's alone */
+            r = template_call(n, t, ft, arguments, early, f);
+            if (r != analysis_result::well_formed)
+                return r;
+            looked_up = true;
+        }
         bool dependent = !x.ambiguous && !x.unknown;
         if (x.entity) {
             const entity &fx = entity_table[x.entity];
@@ -744,6 +754,59 @@ analysis_result semantic_analysis::call(node_index n, expression_meaning &m)
             member = semantics[f.node].b;
     }
     return call_with(n, f, function_type, object, member, arguments, early, m);
+}
+
+/*
+ * A call whose name is a function template's ([temp.fct]): the arguments
+ * analysed, the template arguments deduced from them
+ * ([temp.deduct.call]), the specialization instantiated ([temp.inst]) and
+ * named.  [basic.lookup.argdep]/3's lookup set Y may add functions of the
+ * arguments' associated namespaces, which overload resolution would weigh
+ * against the specialization: not analysed.
+ */
+analysis_result semantic_analysis::template_call(
+    node_index n, token_index name, uint32_t function_template,
+    const owned_array<syntax_child> &arguments,
+    owned_array<expression_meaning> &early, expression_meaning &f)
+{
+    owned_array<qualified_type> types;
+    for (syntax_child a : arguments) {
+        expression_meaning e;
+        if (syntax_is(tree, a, syntax_kind::braced_init_list))
+            return not_supported(n, "temp.deduct.call");
+        analysis_result r = expression(a, e);
+        if (r != analysis_result::well_formed)
+            return r;
+        types.append(e.type);
+        early.append(e);
+    }
+    owned_array<entity_index> others;
+    if (!argument_dependent_lookup(
+            tokens.identifier(name), types, others,
+            function_templates[function_template - 1].name) ||
+        !others.empty())
+        return not_supported(n, "basic.lookup.argdep");
+    owned_array<template_argument> deduced;
+    const expression_meaning *meanings = nullptr;
+    if (!early.empty())
+        meanings = &early[0];
+    analysis_result r =
+        deduce_from_call(n, function_template, meanings,
+                         static_cast<uint32_t>(early.size()), deduced);
+    if (r != analysis_result::well_formed)
+        return r;
+    entity_index specialization = 0;
+    r = instantiate(n, function_templates[function_template - 1].entity,
+                    &deduced[0], static_cast<uint32_t>(deduced.size()),
+                    specialization);
+    if (r != analysis_result::well_formed)
+        return r;
+    /* no claim is made about the name, whose declaration clang finds is
+       the template's */
+    overloaded_callee = name;
+    r = named_entity(name, specialization, f);
+    overloaded_callee = 0;
+    return r;
 }
 
 /*
