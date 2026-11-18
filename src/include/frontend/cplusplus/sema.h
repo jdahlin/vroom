@@ -2962,6 +2962,8 @@ class semantic_analysis
                                         const qualified_type *types,
                                         uint32_t count, type_index &type);
     qualified_type decayed(qualified_type t);
+    analysis_result changed_signedness(node_index n, qualified_type t,
+                                       bool to_signed, qualified_type &type);
     analysis_result alias_template_specialization(
         node_index id, uint32_t at,
         const owned_array<template_argument> &arguments, type_index &type);

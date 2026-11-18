@@ -1427,8 +1427,28 @@ bool itanium_mangler::type(qualified_type t)
              analysis.entity_table[r.entity].kind ==
                  entity_kind::dependent_member)
         done = dependent_member_name(r.entity);
-    else if (r.kind == type_kind::class_type ||
-             r.kind == type_kind::enumeration || r.kind == type_kind::dependent)
+    else if (r.kind == type_kind::dependent &&
+             analysis.entity_table[r.entity].kind ==
+                 entity_kind::type_transformation) {
+        /* [abi:mangle.vendor-qualifier]'s vendor extended type, as clang
+           mangles a type transformation of a dependent operand:
+
+               <type> ::= u <source-name> [<template-args>]
+
+           the keyword's name, its operand the one template-arg */
+        uint64_t operand = analysis.entity_table[r.entity].value;
+        text("u");
+        done = source_name(analysis.entity_table[r.entity].name);
+        if (done) {
+            text("I");
+            done = type(qualified_type::make(
+                static_cast<type_index>(operand & 0xffffffffu),
+                static_cast<uint32_t>(operand >> 32)));
+            text("E");
+        }
+    } else if (r.kind == type_kind::class_type ||
+               r.kind == type_kind::enumeration ||
+               r.kind == type_kind::dependent)
         done = class_enum_type(t);
     else if (r.kind == type_kind::template_parameter) {
         /* [abi:mangle.template-param]:

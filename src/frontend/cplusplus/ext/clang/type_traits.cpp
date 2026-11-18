@@ -107,6 +107,8 @@ enum class transformation : uint8_t {
     add_lvalue_reference,
     add_rvalue_reference,
     decay,
+    make_signed,
+    make_unsigned,
 };
 
 static transformation transformation_named(const char *s, size_t n)
@@ -127,6 +129,8 @@ static transformation transformation_named(const char *s, size_t n)
         {"__add_lvalue_reference", transformation::add_lvalue_reference},
         {"__add_rvalue_reference", transformation::add_rvalue_reference},
         {"__decay", transformation::decay},
+        {"__make_signed", transformation::make_signed},
+        {"__make_unsigned", transformation::make_unsigned},
     };
     for (const auto &k : names)
         if (strlen(k.name) == n && !memcmp(k.name, s, n))
@@ -154,7 +158,12 @@ semantic_analysis::clang_type_transformation(node_index n, qualified_type &type)
     if (r != analysis_result::well_formed)
         return r;
     if (depends_on_template_parameter(t)) {
-        uint32_t name = tokens.identifier(keyword);
+        /* (the keyword's name as an identifier: a keyword token has
+           none of its own) */
+        uint32_t name =
+            tokens.pp.identifier(reinterpret_cast<const char *>(written.data()),
+                                 written.size()) +
+            1;
         /* the operand: its type and cv-qualifiers */
         uint64_t operand = (uint64_t(t.cv()) << 32) | t.unqualified();
         type = qualified_type::make(
@@ -227,6 +236,10 @@ semantic_analysis::clang_type_transformation(node_index n, qualified_type &type)
     case transformation::decay:
         type = decayed(t);
         break;
+    case transformation::make_signed:
+    case transformation::make_unsigned:
+        return changed_signedness(n, t, which == transformation::make_signed,
+                                  type);
     case transformation::none:
         break;
     }
@@ -603,6 +616,80 @@ semantic_analysis::template_with_types(node_index id, entity_index named,
         return r;
     type = entity_table[c].type.unqualified();
     return analysis_result::well_formed;
+}
+
+/*
+ * [meta.trans.sign] make_signed / make_unsigned, as clang's __make_signed
+ * and __make_unsigned: "If T names a (possibly cv-qualified) signed
+ * [unsigned] integer type then the member typedef type names the type T;
+ * otherwise, if T names a (possibly cv-qualified) unsigned [signed]
+ * integer type then type names the corresponding signed [unsigned]
+ * integer type, with the same cv-qualifiers as T; otherwise, type names
+ * the signed [unsigned] integer type with smallest rank for which sizeof(T)
+ * == sizeof(type), with the same cv-qualifiers as T."  "Mandates: T is an
+ * integral or enumeration type other than cv bool."  (char's
+ * corresponding types are signed char and unsigned char; the character
+ * types and enumerations take the third rule.)
+ */
+analysis_result semantic_analysis::changed_signedness(node_index n,
+                                                      qualified_type t,
+                                                      bool to_signed,
+                                                      qualified_type &type)
+{
+    static const fundamental_type pairs[][2] = {
+        {fundamental_type::signed_char, fundamental_type::unsigned_char},
+        {fundamental_type::short_int, fundamental_type::unsigned_short_int},
+        {fundamental_type::int_, fundamental_type::unsigned_int},
+        {fundamental_type::long_int, fundamental_type::unsigned_long_int},
+        {fundamental_type::long_long_int,
+         fundamental_type::unsigned_long_long_int},
+        {fundamental_type::int128, fundamental_type::unsigned_int128},
+    };
+    unsigned side = 1;
+    if (to_signed)
+        side = 0;
+    const struct type &k = type_table[t.unqualified()];
+    fundamental_type f = fundamental_type::none;
+    if (k.kind == type_kind::fundamental)
+        f = k.fundamental;
+    if (f == fundamental_type::char_) {
+        type = qualified_type::make(type_table.fundamental(pairs[0][side]),
+                                    t.cv());
+        return analysis_result::well_formed;
+    }
+    for (const auto &p : pairs)
+        if (f == p[0] || f == p[1]) {
+            type =
+                qualified_type::make(type_table.fundamental(p[side]), t.cv());
+            return analysis_result::well_formed;
+        }
+    bool by_size =
+        k.kind == type_kind::enumeration || f == fundamental_type::wchar_t_ ||
+        f == fundamental_type::char8_t_ || f == fundamental_type::char16_t_ ||
+        f == fundamental_type::char32_t_;
+    if (!by_size) {
+        /* (_BitInt(N): no rule here) */
+        if (f == fundamental_type::bit_precise_int ||
+            f == fundamental_type::unsigned_bit_precise_int)
+            return not_supported(n, "ext.clang");
+        return ill_formed(n,
+                          "the operand of __make_signed and __make_unsigned "
+                          "is an integral or enumeration type other than "
+                          "bool",
+                          "meta.trans.sign");
+    }
+    uint64_t size =
+        size_of_type(qualified_type::make(t.unqualified(), cv_none));
+    if (!size)
+        return not_supported(n, "ext.clang");
+    for (const auto &p : pairs)
+        if (size_of_type(qualified_type::make(type_table.fundamental(p[side]),
+                                              cv_none)) == size) {
+            type =
+                qualified_type::make(type_table.fundamental(p[side]), t.cv());
+            return analysis_result::well_formed;
+        }
+    return not_supported(n, "ext.clang");
 }
 
 } // namespace cplusplus
