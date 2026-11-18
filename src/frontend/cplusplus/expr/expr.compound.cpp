@@ -712,7 +712,12 @@ analysis_result semantic_analysis::conditional(node_index n,
     if (e2.category != value_category::prvalue && e2.category == e3.category &&
         e2.type.unqualified() == e3.type.unqualified()) {
         uint32_t cv2 = e2.type.cv(), cv3 = e3.type.cv();
-        if (!(cv2 & ~cv3) || !(cv3 & ~cv2)) {
+        /* a bit-field converted to the other's more cv-qualified type does
+           not bind directly ([dcl.init.ref]/5.2's temporary) */
+        bool bit_field_converted =
+            (cv2 != cv3 && (cv2 & ~cv3) == 0 && e2.bit_field_width) ||
+            (cv2 != cv3 && (cv3 & ~cv2) == 0 && e3.bit_field_width);
+        if (!bit_field_converted && (!(cv2 & ~cv3) || !(cv3 & ~cv2))) {
             /* [expr.cond]/5: "If the second and third operands are
                glvalues of the same value category and have the same type,
                the result is of that type and value category" */

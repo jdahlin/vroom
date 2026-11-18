@@ -51,6 +51,8 @@ LANGUAGE_FEATURE(deleted_function_message, cplusplus_26, never,
 /* [dcl.spec] */
 LANGUAGE_FEATURE(auto_type_specifier, cplusplus_11, never,
                  "[diff.cpp03.dcl.dcl]/1: Remove auto as a storage class specifier")
+LANGUAGE_FEATURE(return_type_deduction, cplusplus_14, never,
+                 "N3638: a function's return type deduced; decltype(auto)")
 /* [dcl.decl] */
 LANGUAGE_FEATURE(rvalue_references, cplusplus_11, never, "N2118: the ptr-operator &&")
 /* [dcl.init] */

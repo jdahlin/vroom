@@ -135,6 +135,21 @@ analysis_result semantic_analysis::return_statement(node_index n,
     const syntax_child *children = tree.children(n);
     qualified_type returns = function_state.returns;
     bool returns_void = fundamental_of(returns) == fundamental_type::void_;
+    if (function_state.deducing && node.child_count == 2) {
+        /* [dcl.type.auto.deduct]/2: "If the return statement has no
+           operand, then E is void()" */
+        analysis_result r = deduce_return(n, nullptr, false);
+        if (r != analysis_result::well_formed)
+            return r;
+        returns_void = true;
+    }
+    if (function_state.deducing && node.child_count == 3 &&
+        syntax_is(tree, children[1], syntax_kind::braced_init_list))
+        /* [dcl.type.auto.deduct]/3 */
+        return ill_formed(n,
+                          "if the deduction is for a return statement and E "
+                          "is a braced-init-list, the program is ill-formed",
+                          "dcl.type.auto.deduct");
     if (node.child_count == 2) {
         if (returns_void)
             return analysis_result::well_formed;
@@ -164,14 +179,32 @@ analysis_result semantic_analysis::return_statement(node_index n,
        name it is an xvalue in C++23 and is first tried as an rvalue in
        C++11 to C++20; for a reference result that decides whether the
        initialization is well-formed, which analysis does not follow */
+    expression_meaning m;
+    bool decltype_auto = false;
+    if (function_state.deducing &&
+        contains_placeholder(function_state.declared_returns, &decltype_auto) &&
+        decltype_auto && implicitly_movable(operand))
+        /* decltype(auto) of an implicitly movable entity: an xvalue in
+           C++23 (P2266R3) */
+        return not_supported(n, "class.copy.elision");
+    if (function_state.deducing) {
+        analysis_result r = expression(operand, m);
+        if (r == analysis_result::well_formed)
+            r = deduce_return(n, &m, names_entity(operand));
+        if (r != analysis_result::well_formed)
+            return r;
+        returns = function_state.returns;
+        returns_void = fundamental_of(returns) == fundamental_type::void_;
+    }
     type_kind result_kind = type_table[returns.unqualified()].kind;
     entity_index movable = implicitly_movable(operand);
     if (movable && (result_kind == type_kind::lvalue_reference ||
                     result_kind == type_kind::rvalue_reference))
         return not_supported(n, "class.copy.elision");
-    expression_meaning m;
     /* [over.over]/1: "the return value of a function" */
-    analysis_result r = target_expression(operand, returns, m);
+    analysis_result r = analysis_result::well_formed;
+    if (!function_state.deducing)
+        r = target_expression(operand, returns, m);
     if (r != analysis_result::well_formed)
         return r;
     const struct type &object = type_table[m.type.unqualified()];

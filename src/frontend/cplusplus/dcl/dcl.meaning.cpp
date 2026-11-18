@@ -340,6 +340,15 @@ void semantic_analysis::hold_names(node_index declaration)
                 const syntax_node &list = tree[c.index()];
                 for (uint32_t k = 0; k < list.child_count; k++)
                     ids.append(declarator_id(tree.children(c.index())[k]));
+            } else if (syntax_is(tree, c, syntax_kind::identifier_list)) {
+                /* [dcl.struct.bind]/1: a structured binding declaration's
+                   identifiers */
+                const syntax_node &list = tree[c.index()];
+                for (uint32_t k = 0; k < list.child_count; k++)
+                    if (tree.children(c.index())[k].is_token() &&
+                        tokens[tree.children(c.index())[k].index()].kind ==
+                            token_kind::identifier)
+                        ids.append(tree.children(c.index())[k].index());
             } else {
                 ids.append(declarator_id(c));
             }
@@ -662,8 +671,7 @@ analysis_result semantic_analysis::declarator(node_index declaration,
         return analysis_result::well_formed;
     }
     case syntax_kind::declarator:
-        /* a trailing-return-type */
-        return not_supported(n, "dcl.fct");
+        return trailing_return(declaration, n, type, m);
     case syntax_kind::operator_function_id:
         return operator_function_id(n, m);
     case syntax_kind::literal_operator_id:
