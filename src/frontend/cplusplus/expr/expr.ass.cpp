@@ -227,11 +227,12 @@ analysis_result semantic_analysis::assignment(node_index n,
  * operator, the implicitly declared copy assignment operator is defined as
  * deleted"; /7 "a non-static data member of reference type", or a
  * subobject whose copy assignment is deleted (/7.4: overload resolution
- * finds a deleted function).
+ * finds a deleted function); a closure type's ([expr.prim.lambda.closure]/13).
  */
 bool semantic_analysis::copy_assignment_deleted(entity_index c) const
 {
-    if (declares_move_constructor(c))
+    if (declares_move_constructor(c) ||
+        entity_table[c].closure_assignment_deleted)
         return true;
     const entity &x = entity_table[c];
     for (uint32_t i = 0; i < x.member_count; i++) {

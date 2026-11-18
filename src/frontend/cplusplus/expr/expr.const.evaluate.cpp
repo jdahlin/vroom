@@ -1170,10 +1170,7 @@ uint32_t semantic_analysis::value_tree(const constant_evaluation &state,
         elements.append(e);
     }
     uint32_t node = expression_node(semantic_kind::initializer_list, m, at);
-    if (!elements.empty())
-        semantics[node].first =
-            semantics.list(elements.data(), elements.size());
-    semantics[node].count = static_cast<uint32_t>(elements.size());
+    semantics.set_list(node, elements.data(), elements.size());
     return node;
 }
 
