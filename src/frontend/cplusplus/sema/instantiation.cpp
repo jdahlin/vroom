@@ -264,10 +264,25 @@ semantic_analysis::instantiate_class(node_index at, uint32_t class_template,
             return not_supported(at, "temp.spec");
     instantiation_record record;
     record.template_entity = ft.entity;
+    /* [temp.class.spec.match]: the definition instantiated, the
+       primary's or a specialization's */
+    uint32_t pattern = 0;
+    owned_array<template_argument> deduced;
+    analysis_result matched = matching_specialization(
+        at, class_template, arguments, count, pattern, deduced);
+    if (matched != analysis_result::well_formed)
+        return matched;
+    function_template definition = ft;
+    if (pattern)
+        definition = function_templates[pattern - 1];
+    record.pattern = pattern;
     record.first_argument = static_cast<uint32_t>(template_arguments.size());
     record.argument_count = count;
     for (uint32_t i = 0; i < count; i++)
         template_arguments.append(arguments[i]);
+    record.first_deduced = static_cast<uint32_t>(template_arguments.size());
+    for (const template_argument &a : deduced)
+        template_arguments.append(a);
     uint32_t index = static_cast<uint32_t>(instantiations.size());
     instantiations.append(record);
     entity_index saved_scope = current_scope;
@@ -292,7 +307,7 @@ semantic_analysis::instantiate_class(node_index at, uint32_t class_template,
     size_t uses_before = name_uses.size();
     size_t unsupported_before = unsupported.size();
     current_scope = entity_table[ft.entity].enclosing;
-    current_declaration = ft.declaration;
+    current_declaration = definition.declaration;
     defining_class = 0;
     declaration_access = 0;
     in_condition = false;
@@ -301,10 +316,10 @@ semantic_analysis::instantiate_class(node_index at, uint32_t class_template,
     unevaluated = 0;
     instantiating = 0;
     class_instantiating = index + 1;
-    lookup_horizon = tree[ft.declaration].first_token;
+    lookup_horizon = tree[definition.declaration].first_token;
     instantiation_depth++;
     type_index type = 0;
-    analysis_result r = class_specifier(ft.definition, type);
+    analysis_result r = class_specifier(definition.definition, type);
     instantiation_depth--;
     class_instantiating = saved_class_instantiating;
     unevaluated = saved_unevaluated;

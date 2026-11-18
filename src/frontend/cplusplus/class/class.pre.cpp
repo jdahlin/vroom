@@ -208,6 +208,12 @@ analysis_result semantic_analysis::class_definition(node_index n,
     if (!unnamed && head_children[1].is_token() &&
         tokens[head_children[1].index()].kind == token_kind::identifier) {
         head_name = head_children[1].index();
+    } else if (!unnamed && class_instantiating &&
+               syntax_is(tree, head_children[1],
+                         syntax_kind::simple_template_id)) {
+        /* a partial or explicit specialization's definition, instantiated
+           (instantiate_class): the template's name */
+        head_name = tree.children(head_children[1].index())[0].index();
     } else if (!unnamed && syntax_is(tree, head_children[1],
                                      syntax_kind::class_head_name)) {
         node_index hn = head_children[1].index();
@@ -349,10 +355,21 @@ analysis_result semantic_analysis::class_definition(node_index n,
         entity_table.bind(c, name, c);
         const function_template &ft = function_templates
             [entity_table[record.template_entity].instantiation - 1];
-        for (uint32_t i = 0; i < ft.parameter_count; i++)
-            bind_template_argument(
-                c, template_parameter_entities[ft.first_parameter + i],
-                template_arguments[record.first_argument + i]);
+        if (record.pattern) {
+            /* a partial specialization's parameters, each the argument
+               matching deduced */
+            const function_template &ps =
+                function_templates[record.pattern - 1];
+            for (uint32_t i = 0; i < ps.parameter_count; i++)
+                bind_template_argument(
+                    c, template_parameter_entities[ps.first_parameter + i],
+                    template_arguments[record.first_deduced + i]);
+        } else {
+            for (uint32_t i = 0; i < ft.parameter_count; i++)
+                bind_template_argument(
+                    c, template_parameter_entities[ft.first_parameter + i],
+                    template_arguments[record.first_argument + i]);
+        }
     } else if (!unnamed) {
         id = head_name;
         name = tokens.identifier(id);

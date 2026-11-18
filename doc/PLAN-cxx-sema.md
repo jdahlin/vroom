@@ -1543,6 +1543,21 @@ lines:
   37781, 0 we reject and clang accepts, 0 refuted (types 41644, lookup
   14684, symbols 1772, layouts 10166); cxx-run 200/200; cxx-c-suites
   unchanged.
+  Then partial and explicit specializations of class templates
+  (`class_specialization_definition`, `matching_specialization`,
+  temp.decls.cpp): each a record of its own (`function_template::primary`)
+  with its template-id's arguments in terms of its parameters; an
+  instantiation deduces them from its arguments exactly
+  ([temp.class.spec.match]/2), an explicit specialization of the arguments
+  first, and analyses that class-specifier with the specialization's
+  parameters bound (`instantiation_record::pattern`).  Not yet: partial
+  ordering when two match ([temp.class.order]), one declared after an
+  instantiation of its template, members defined out of the class.  Layout:
+  a derived class continues after a base's NonVirtualSize, as clang (an
+  empty base moved past the base's data counts), which the specializations
+  exposed (SemaCXX/empty-class-layout.cpp).  cxx-sema: declarations as
+  clang 38285, 0 we reject and clang accepts, 0 refuted (symbols 1778,
+  layouts 10178); cxx-run 204/204; cxx-c-suites unchanged.
 
 ### S7. Exceptions and RTTI
 

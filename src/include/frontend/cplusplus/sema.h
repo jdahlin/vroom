@@ -2331,6 +2331,11 @@ class semantic_analysis
            analysed */
         entity_index scope = 0;
         bool defined = false, pending = false, defining = false;
+        /* a class's: the partial or explicit specialization whose
+           class-specifier defines it (function_templates' index plus one;
+           0 the primary template's) and its parameters' arguments
+           (template_arguments[first_deduced ..]) */
+        uint32_t pattern = 0, first_deduced = 0;
     };
     /* [temp.fct]/1: a function template: its entity (template_entity,
        whose type is the function type with the type parameters' types,
@@ -2348,6 +2353,13 @@ class semantic_analysis
         /* a class template ([temp.class]): definition is its
            class-specifier */
         bool is_class = false;
+        /* a class template's partial ([temp.class.spec]) or explicit
+           ([temp.expl.spec]) specialization: its primary template
+           (function_templates' index plus one; no name of its own), the
+           arguments its template-id gives
+           (template_arguments[first_pattern .. + pattern_count), in terms
+           of its own parameters) */
+        uint32_t primary = 0, first_pattern = 0, pattern_count = 0;
     };
     owned_array<function_template> function_templates;
     /* per template-parameter: a type parameter's typedef-name of its
@@ -2409,6 +2421,19 @@ class semantic_analysis
        typedef-name of the type, or a constant of the value */
     void bind_template_argument(entity_index scope, entity_index parameter,
                                 const template_argument &a);
+    /* [temp.class.spec], [temp.expl.spec]: a class template's partial
+       (parameters) or explicit specialization's definition */
+    analysis_result
+    class_specialization_definition(node_index n, node_index specifier,
+                                    const owned_array<node_index> &parameters);
+    /* the specialization of function_templates[class_template - 1] whose
+       pattern the arguments match (0: the primary), with its parameters'
+       arguments */
+    analysis_result
+    matching_specialization(node_index at, uint32_t class_template,
+                            const template_argument *arguments, uint32_t count,
+                            uint32_t &pattern,
+                            owned_array<template_argument> &deduced);
     /* [temp.class]: a class template defined at namespace scope */
     analysis_result class_template_definition(node_index n,
                                               node_index specifier);
@@ -2450,7 +2475,7 @@ class semantic_analysis
        (set: deduced or given) */
     bool deduce_type(qualified_type p, qualified_type a,
                      owned_array<template_argument> &deduced,
-                     owned_array<bool> &set) const;
+                     owned_array<bool> &set, bool exact = false) const;
     owned_array<template_argument> template_arguments;
     owned_array<constant_value> instantiation_values;
     owned_array<instantiation_input> instantiation_inputs;
