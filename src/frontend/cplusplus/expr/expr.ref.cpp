@@ -8,9 +8,9 @@
  *         postfix-expression -> template_opt id-expression
  *
  * The grammar is expr.post.cpp's.  An id-expression that is an identifier,
- * naming a non-static data member or member function of the class or of
- * one of its bases (there are no static data members or overload sets
- * yet).
+ * naming a non-static data member or member function (or an overload set
+ * of them, [over.call.func]/2) of the class or of one of its bases (there
+ * are no static data members yet).
  */
 #include "../cplusplus-internal.h"
 #include "frontend/cplusplus/sema.h"
@@ -126,7 +126,18 @@ analysis_result semantic_analysis::member_access(token_index at, entity_index e,
            cv-qualifier-seq cv1 can be called on an object expression of
            type cv2 T only if cv1 is the same as or more cv-qualified than
            cv2." */
-        if (m.type.cv() & ~x.member_cv)
+        /* [over.over]/1 (named_entity); with more than one function the
+           cv-qualifiers are the implicit object parameter's, of
+           overload resolution ([over.match.funcs]/4) */
+        if (x.next_overload && at != overloaded_callee)
+            return not_supported(current_declaration, "over.over");
+        if (!x.next_overload) {
+            /* [dcl.fct.def.delete]/2 */
+            analysis_result r = deleted_use(at, e);
+            if (r != analysis_result::well_formed)
+                return r;
+        }
+        if ((m.type.cv() & ~x.member_cv) && !x.next_overload)
             return ill_formed_at_token(at,
                                        "a member function can be called on "
                                        "an object expression only if its "

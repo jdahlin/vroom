@@ -702,8 +702,10 @@ analysis_result semantic_analysis::function_definition(node_index n)
     if (!f || entity_table[f].kind != entity_kind::function ||
         body.is_token() || !body.index())
         return not_supported(n, "dcl.fct.def.general");
-    /* function-body: compound-statement; a ctor-initializer, a
-       function-try-block, = default and = delete are not analysed yet */
+    /* function-body: compound-statement, = delete ; a ctor-initializer, a
+       function-try-block and = default are not analysed yet */
+    if (deleted_body(body))
+        return deleted_definition(n, f);
     const syntax_node &b = tree[body.index()];
     if (b.child_count != 1 || !syntax_is(tree, tree.children(body.index())[0],
                                          syntax_kind::compound_statement))
@@ -853,11 +855,22 @@ analysis_result semantic_analysis::declare_with_initializer(
     qualified_type type = s.type;
     declarator_meaning m;
     function_cv = 0;
+    /* the parameters of this declarator's function declarator, if it has
+       one (function sets them) */
+    function_parameters.clear();
     analysis_result r = declarator(declaration, d, type, m);
     if (r != analysis_result::well_formed)
         return r;
     if (!m.has_id)
         return not_supported(declaration, "dcl.meaning");
+    bool has_default_arguments = false;
+    for (const parameter_meaning &p : function_parameters)
+        if (p.default_argument.index())
+            has_default_arguments = true;
+    if (m.qualifier && has_default_arguments)
+        /* [dcl.fct.default]/6: a member function's, added to its class's
+           declaration's */
+        return not_supported(declaration, "dcl.fct.default");
     if (tokens.files.behavior.microsoft_extensions && s.declares_class) {
         /* Microsoft's class-virt-specifiers, struct X sealed { }: the
            parser takes the word for a declarator-id */
@@ -981,6 +994,12 @@ analysis_result semantic_analysis::declare_with_initializer(
         qualified_declarator = false;
         if (r == analysis_result::well_formed && m.qualified_namespace)
             current_scope = entity_table[declared_entity].enclosing;
+        if (r == analysis_result::well_formed) {
+            r = default_arguments(declaration, declared_entity, kind);
+            if (r != analysis_result::well_formed &&
+                kind == entity_kind::function && declared_entity)
+                entity_table[declared_entity].unknown_defaults = true;
+        }
     }
     last_declared = declared_entity;
     if (r == analysis_result::well_formed && !s.typedef_ &&

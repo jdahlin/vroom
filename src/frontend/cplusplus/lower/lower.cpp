@@ -206,6 +206,7 @@ class c_lowering
     uint32_t call(const semantic_node &n);
     uint32_t bind_reference(const semantic_node &n);
     uint32_t initializer_list(const semantic_node &n);
+    uint32_t compound_literal(uint32_t n);
     void address_taken(uint32_t lvalue);
 
     /* statements */
@@ -1202,6 +1203,10 @@ uint32_t c_lowering::call(const semantic_node &n)
         uint32_t a = 0;
         if (i < ft.parameter_count && passed_indirectly(parameters[i]))
             a = indirect_argument(items[i], parameters[i], n.at);
+        else if (node(items[i]).kind == semantic_kind::initializer_list)
+            /* a class's object initialized by a braced-init-list
+               ([dcl.init.list]/3.4): its value */
+            a = compound_literal(items[i]);
         else
             a = expression(items[i]);
         if (!a)
@@ -1449,17 +1454,29 @@ uint32_t c_lowering::bind_reference(const semantic_node &n)
     }
     if (!in_function)
         return fail("a temporary bound to a reference of static storage", n.at);
-    uint32_t value = expression(n.a);
+    uint32_t literal = compound_literal(n.a);
+    if (!literal)
+        return 0;
+    return make(AST_NODE_ADDRESS, pointer, literal, 0, 0, 0, 0);
+}
+
+/* the prvalue n held in a temporary of the enclosing block, as C's
+   compound literal is: an initializer list as an operand */
+uint32_t c_lowering::compound_literal(uint32_t n)
+{
+    const semantic_node &held = node(n);
+    if (!in_function)
+        return fail("a temporary of static storage", held.at);
+    uint32_t value = expression(n);
     if (!value)
         return 0;
-    ast_qualified_type t = type(bound.type, bound.at);
+    ast_qualified_type t = type(held.type, held.at);
     uint32_t temporary =
         ast_builder_symbol(c, AST_SYMBOL_VARIABLE, "", 0, t, AST_STORAGE_AUTO,
                            AST_SYMBOL_FLAG_ADDRESS_TAKEN, 1);
     ast_builder_symbol_body(c, temporary, value);
-    uint32_t literal = make(AST_NODE_COMPOUND_LITERAL, t, value, temporary, 0,
-                            0, AST_NODE_FLAG_LVALUE);
-    return make(AST_NODE_ADDRESS, pointer, literal, 0, 0, 0, 0);
+    return make(AST_NODE_COMPOUND_LITERAL, t, value, temporary, 0, 0,
+                AST_NODE_FLAG_LVALUE);
 }
 
 /* [dcl.init.aggr]: an array's elements in order, the rest zero */
@@ -2262,13 +2279,17 @@ bool c_lowering::function_definition(entity_index e)
     const qualified_type *types =
         analysis.type_table.parameters(x.type.unqualified());
     const uint32_t *items = analysis.semantics.items(body.first);
+    /* a member function's this comes first */
+    uint32_t implicit = 0;
+    if (body.count > f.parameter_count)
+        implicit = body.count - f.parameter_count;
     for (uint32_t i = 0; i < body.count; i++) {
         uint32_t p = 0;
         if (items[i])
             p = symbol(items[i], body.at);
-        else if (i < f.parameter_count)
+        else if (i >= implicit)
             p = ast_builder_symbol(c, AST_SYMBOL_VARIABLE, "", 0,
-                                   parameter_type(types[i], body.at),
+                                   parameter_type(types[i - implicit], body.at),
                                    AST_STORAGE_AUTO, 0, 1);
         if (!p)
             return fail("a parameter", body.at);
@@ -2527,7 +2548,9 @@ bool c_lowering::translation_unit()
         if (!d.entity)
             continue;
         const entity &x = analysis.entity_table[d.entity];
-        if (!x.defined || x.automatic || enclosing_function(d.entity))
+        /* a deleted function has no code ([dcl.fct.def.delete]) */
+        if (!x.defined || x.automatic || enclosing_function(d.entity) ||
+            x.deleted)
             continue;
         bool again = false;
         for (entity_index s : done)

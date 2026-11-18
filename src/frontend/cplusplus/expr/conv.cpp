@@ -231,11 +231,27 @@ fundamental_type promoted_type(const implementation_defined_behavior &b,
 
 } // namespace
 
+fundamental_type semantic_analysis::promotion_of(fundamental_type t) const
+{
+    return promoted_type(tokens.files.behavior, t);
+}
+
 void semantic_analysis::promote(expression_meaning &m)
 {
     fundamental_type t = fundamental_of(m.type);
     if (!fundamental_type_is_integral(t))
         return;
+    fundamental_type to = integral_promotion(m);
+    if (to != t)
+        convert_arithmetic(m, to);
+}
+
+fundamental_type
+semantic_analysis::integral_promotion(const expression_meaning &m) const
+{
+    fundamental_type t = fundamental_of(m.type);
+    if (!fundamental_type_is_integral(t))
+        return t;
     fundamental_type to = promoted_type(tokens.files.behavior, t);
     if (m.bit_field_width && t != fundamental_type::bool_) {
         /* [conv.prom]/5: "A prvalue for an integral bit-field can be
@@ -255,8 +271,7 @@ void semantic_analysis::promote(expression_meaning &m)
         else
             to = t;
     }
-    if (to != t)
-        convert_arithmetic(m, to);
+    return to;
 }
 
 entity_index semantic_analysis::enumeration_of(qualified_type t) const

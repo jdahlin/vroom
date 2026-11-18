@@ -685,6 +685,32 @@ libstdc++ and json), since sema cannot analyse a declaration kept as tokens.
   [over.built], [over.literal]; function-to-pointer and the reference
   bindings of [dcl.init.ref].
 - Gate: overload claims 0 wrong; CXX/over.
+- Status (2026-11-18, overload resolution, default arguments, deleted
+  functions; operators not started): overload sets are a chain of
+  functions (`entity::next_overload`, declared by `basic.link.cpp` and
+  `class.pre.cpp` with [over.load]'s checks); `over/` has one file per
+  subclause: implicit conversion sequences (`over.best.ics.cpp`, a class
+  conversion exactly as the analysed classes have no conversion functions
+  or explicit constructors), their ranking (`over.ics.rank.cpp`, with
+  clang's reading of CWG2352 in /3.2.1 and /3.2.5), viability and the best
+  viable function (`over.match.cpp`; constructors use it too) and calls by
+  name, member access included (`over.match.call.cpp`): the callee node,
+  its claim and access are of the function chosen.  Default arguments
+  (`dcl/dcl.fct.default.cpp`) of namespace-scope functions, merged per /4;
+  a function whose defaults are not analysed or are another scope's is
+  `unknown_defaults` and a call that needs them is unsupported.
+  `= delete` (`dcl/dcl.fct.def.delete.cpp`).  An aggregate argument is
+  lowered as a compound literal.  Tests: `src/test/cxx/run/overloading.cpp`,
+  `default-arguments.cpp`.  `bench/cxx-sema.py`: 26169 declarations as
+  clang (S2: 24590), 0 we reject that clang accepts, 447 we accept that
+  clang rejects (S2: 413), 0 refuted; lookup 10063 verified (S2: 9388),
+  symbols 1458 (S2: 1400), lowering 211 files (S2: 206); CXX/over 1101 as
+  clang, 0 wrong.  cxx-run 124/124; cxx-c-suites 0 wrong (its eight
+  `#pragma pack` entries in the passing list fail on main too).  Left, as
+  `not_supported`: [over.oper], [over.match.oper] and [over.built]
+  (operator functions), [over.over] (an overload set's address),
+  [over.literal], [over.ics.list] and [over.match.list], member functions'
+  default arguments, and static and non-static members in one set.
 
 ### S4. Classes and the object model (parallel with S3)
 

@@ -552,9 +552,12 @@ analysis_result semantic_analysis::call(node_index n, expression_meaning &m)
     expression_meaning f;
     analysis_result r = analysis_result::well_formed;
     /* the arguments analysed before the function is known, for
-       argument-dependent lookup: each one's meaning, or none for a
-       braced-init-list (which has no type) */
+       argument-dependent lookup or overload resolution: each one's
+       meaning, or none for a braced-init-list (which has no type) */
     owned_array<expression_meaning> early;
+    /* the functions argument-dependent lookup found, with unqualified
+       lookup's */
+    owned_array<entity_index> found_by_adl;
     bool looked_up = false;
     if (children[0].is_token() &&
         tokens[children[0].index()].kind == token_kind::identifier) {
@@ -596,21 +599,27 @@ analysis_result semantic_analysis::call(node_index n, expression_meaning &m)
                 set.append(x.entity);
             if (!argument_dependent_lookup(name, types, set))
                 return not_supported(n, "basic.lookup.argdep");
-            /* more than one function: an overload set ([over.match]) */
-            if (set.size() > 1)
-                return not_supported(n, "over");
-            if (set.size() == 1 && set[0] != x.entity) {
+            /* the functions of the sets found: [over.call.func]/3's
+               candidate functions */
+            for (entity_index e : set)
+                overload_set(e, found_by_adl);
+            if (!x.entity && !set.empty()) {
                 /* found by argument-dependent lookup alone: no claim is
                    made about the name, which names nothing elsewhere */
+                overloaded_callee = t;
                 r = named_entity(t, set[0], f);
+                overloaded_callee = 0;
                 if (r != analysis_result::well_formed)
                     return r;
                 looked_up = true;
             }
         }
     }
-    if (!looked_up)
+    if (!looked_up) {
+        overloaded_callee = callee_name(children[0]);
         r = expression(children[0], f);
+        overloaded_callee = 0;
+    }
     if (r != analysis_result::well_formed)
         return r;
     qualified_type function_type = f.type;
@@ -645,6 +654,25 @@ analysis_result semantic_analysis::call(node_index n, expression_meaning &m)
                               "expr.call");
         }
     }
+    /* [over.call.func]/3: the candidate functions of the name's overload
+       set, one or more */
+    entity_index named = member;
+    if (!named && f.node && semantics[f.node].kind == semantic_kind::entity &&
+        f.entity && entity_table[f.entity].kind == entity_kind::function)
+        named = f.entity;
+    owned_array<entity_index> set;
+    if (named)
+        overload_set(named, set);
+    for (entity_index e : found_by_adl)
+        overload_set(e, set);
+    if (set.size() > 1) {
+        r = resolve_call(n, arguments, early, set, object, f);
+        if (r != analysis_result::well_formed)
+            return r;
+        function_type = f.type;
+        if (member)
+            member = semantics[f.node].b;
+    }
     const struct type function = type_table[function_type.unqualified()];
     size_t count = function.parameter_count;
     owned_array<uint32_t> argument_nodes;
@@ -654,7 +682,17 @@ analysis_result semantic_analysis::call(node_index n, expression_meaning &m)
        function exists and is unique, overload resolution succeeds ...
        Otherwise overload resolution fails and the invocation is
        ill-formed." */
-    if (arguments.size() < count ||
+    entity_index called = member;
+    if (!called && f.entity &&
+        entity_table[f.entity].kind == entity_kind::function)
+        called = f.entity;
+    size_t defaults = 0;
+    if (called)
+        defaults = entity_table[called].default_arguments;
+    if (called && entity_table[called].unknown_defaults &&
+        arguments.size() < count)
+        return not_supported(n, "dcl.fct.default");
+    if (arguments.size() + defaults < count ||
         (arguments.size() > count && !function.variadic))
         return ill_formed(n,
                           "to be a viable function, a candidate function "
@@ -735,6 +773,12 @@ analysis_result semantic_analysis::call(node_index n, expression_meaning &m)
         }
         argument_nodes.append(e.node);
     }
+    /* [expr.call]/7: "If there is no corresponding argument, the default
+       argument for the parameter is used." ([dcl.fct.default]/9: evaluated
+       at each call) */
+    for (size_t i = arguments.size(); i < count; i++)
+        argument_nodes.append(
+            default_argument_nodes[entity_table[called].first_default + i]);
     /* [expr.call]/14: "A function call is an lvalue if the result type is
        an lvalue reference type or an rvalue reference to function type, an
        xvalue if the result type is an rvalue reference to object type, and

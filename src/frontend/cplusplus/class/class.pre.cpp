@@ -940,10 +940,16 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
     declarator_meaning m;
     function_cv = 0;
     in_member_declarator = true;
+    function_parameters.clear();
     analysis_result r = declarator(declaration, d, type, m);
     in_member_declarator = false;
     if (r != analysis_result::well_formed)
         return r;
+    /* [dcl.fct.default]: a member function's default arguments are a
+       complete-class context ([class.mem]/6), not analysed */
+    for (const parameter_meaning &p : function_parameters)
+        if (p.default_argument.index())
+            return not_supported(declaration, "dcl.fct.default");
     if (!m.has_id || m.qualifier)
         return not_supported(declaration, "class.mem");
     /* [ext:gnu_attributes] the declaration's and the declarator's */
@@ -1005,12 +1011,50 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
         /* a name a using-declaration or a member enumeration's enumerator
            brought into the class */
         return not_supported(declaration, "class.mem");
-    if (prior) {
-        if (is_function && entity_table[prior].kind == entity_kind::function) {
-            /* an overload set of member functions */
-            entity_table[prior].kind = entity_kind::none;
-            return not_supported(declaration, "over");
+    entity_index overloads = 0;
+    if (prior && is_function &&
+        entity_table[prior].kind == entity_kind::function &&
+        entity_table[prior].special == special_member::none) {
+        /* [over.load]/2: "Certain function declarations cannot be
+           overloaded: Function declarations that differ only in the return
+           type ... Member function declarations with the same name, the
+           same parameter-type-list, and the same trailing
+           requires-clause cannot be overloaded if any of them is a static
+           member function declaration."  The cv-qualifier-seq of a member
+           function is part of its type ([dcl.fct]/1), so one that differs
+           in it is another function */
+        for (entity_index o = prior; o; o = entity_table[o].next_overload) {
+            const entity &x = entity_table[o];
+            if (!same_parameters(type_table, x.type.unqualified(),
+                                 type.unqualified()))
+                continue;
+            if (x.member_cv == function_cv &&
+                x.nonstatic_member == !s.static_ && x.type == type)
+                /* [class.mem]/5 */
+                return ill_formed_at_token(m.id,
+                                           "a member shall not be declared "
+                                           "twice in the member-specification",
+                                           "class.mem");
+            if (x.member_cv == function_cv && x.nonstatic_member == !s.static_)
+                return ill_formed_at_token(m.id,
+                                           "function declarations that differ "
+                                           "only in the return type cannot be "
+                                           "overloaded",
+                                           "over.load");
+            if (x.nonstatic_member != !s.static_)
+                return ill_formed_at_token(m.id,
+                                           "member function declarations "
+                                           "with the same name and the same "
+                                           "parameter-type-list cannot be "
+                                           "overloaded if any of them is a "
+                                           "static member function "
+                                           "declaration",
+                                           "over.load");
         }
+        overloads = prior;
+        prior = 0;
+    }
+    if (prior) {
         if (entity_table[prior].kind == entity_kind::none)
             return not_supported(declaration, "over");
         owned_buffer spelling;
@@ -1152,7 +1196,16 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
     entity_table[e].access = access;
     entity_table.add_declaration(e, declaration);
     entity_table[e].hidden_type = hides;
-    entity_table.bind(c, name, e);
+    if (overloads) {
+        /* another member function of the set, last in its chain */
+        entity_index last = overloads;
+        while (entity_table[last].next_overload)
+            last = entity_table[last].next_overload;
+        entity_table[last].next_overload = e;
+        entity_table[e].hidden_type = entity_table[overloads].hidden_type;
+    } else {
+        entity_table.bind(c, name, e);
+    }
     last_declared = e;
     return analysis_result::well_formed;
 }
@@ -1327,9 +1380,17 @@ analysis_result semantic_analysis::member_function_body(entity_index c,
     in_member_declarator = false;
     if (r != analysis_result::well_formed)
         return r;
-    last_declared = entity_table.find(c, tokens.identifier(m.id));
+    /* the function of the name this definition declared (one of an
+       overload set) */
+    last_declared = 0;
+    for (entity_index o = entity_table.find(c, tokens.identifier(m.id)); o;
+         o = entity_table[o].next_overload)
+        if (declared_by(o, definition))
+            last_declared = o;
     if (!last_declared)
         return not_supported(definition, "class.mfct");
+    if (deleted_body(children[2]))
+        return deleted_definition(definition, last_declared);
     return function_body(definition, tree.children(children[2].index())[0]);
 }
 
@@ -1359,6 +1420,14 @@ analysis_result semantic_analysis::member_redeclaration(
     entity_index e = entity_table.find(qualifier, tokens.identifier(id));
     if (e && entity_table[e].kind == entity_kind::none)
         return not_supported(declaration, "over");
+    /* [dcl.meaning]/1: the member function of the set it declares again */
+    for (entity_index o = e; o && entity_table[o].kind == entity_kind::function;
+         o = entity_table[o].next_overload)
+        if (entity_table[o].type == type &&
+            entity_table[o].member_cv == function_cv) {
+            e = o;
+            break;
+        }
     if (!e || entity_table[e].kind != entity_kind::function ||
         !(entity_table[e].type == type) ||
         entity_table[e].member_cv != function_cv)

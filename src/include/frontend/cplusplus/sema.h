@@ -339,6 +339,27 @@ struct entity {
     special_member special = special_member::none;
     /* a constructor: the class's next one, 0 at the last */
     entity_index next_constructor = 0;
+    /* a function: [over.pre]/1 "When two or more different declarations
+       are specified for a single name in the same scope, that name is said
+       to be overloaded": the scope's next function of the name, 0 at the
+       last.  The name is bound to the first; the others are reached
+       through it (overload_set) */
+    entity_index next_overload = 0;
+    /* a function: [dcl.fct.def.delete]/1 a deleted function */
+    bool deleted = false;
+    /* a function: [dcl.fct.default]/1 the number of its last parameters
+       that have a default argument (default_argument) */
+    uint32_t default_arguments = 0;
+    /* ... and where its parameters' are in
+       semantic_analysis::default_argument_nodes (0: none has one) */
+    uint32_t first_default = 0;
+    /* ... not known: a declaration's default arguments were not analysed,
+       or it is in another scope than the first ([dcl.fct.default]/4: "For
+       non-template functions, default arguments can be added in later
+       declarations of a function that appear within the same scope.
+       Declarations that appear in different scopes have completely distinct
+       sets of default arguments.") */
+    bool unknown_defaults = false;
     /* a class: its user-declared constructors (a chain through
        next_constructor) and destructor, 0 if none */
     entity_index first_constructor = 0, destructor = 0;
@@ -540,6 +561,9 @@ uint64_t floating_kept(double v);
 /* the cv-qualifiers of a type, an array's those of its elements
    ([basic.type.qualifier]/3) */
 uint32_t cv_of(const types &table, qualified_type t);
+/* whether the function types a and b have the same parameter-type-list
+   ([dcl.fct]/4) */
+bool same_parameters(const types &table, type_index a, type_index b);
 
 /* [basic.lval]/1: "Every expression belongs to exactly one of the
    fundamental classifications in this taxonomy: lvalue, xvalue, or
@@ -1157,7 +1181,19 @@ class semantic_analysis
     struct parameter_meaning {
         token_index id = 0;
         qualified_type type;
+        /* its parameter-declaration, and the initializer-clause of its
+           default argument ([dcl.fct.default]/1), none if it has none */
+        node_index declaration = 0;
+        syntax_child default_argument;
     };
+    /* [dcl.fct.default]: the default arguments of function_parameters,
+       which the declaration n of the function f gives it */
+    analysis_result default_arguments(node_index n, entity_index f,
+                                      entity_kind kind);
+    /* the default arguments' initializations: a function's are
+       [entity::first_default .. + its parameter count), 0 for a parameter
+       without one */
+    owned_array<uint32_t> default_argument_nodes;
     owned_array<parameter_meaning> function_parameters;
     /* the cv-qualifier-seq of the function declarator analysed last
        ([dcl.fct]/6: only a member function's) */
@@ -1166,7 +1202,8 @@ class semantic_analysis
        declarator, or one whose declarator-id is a qualified-id */
     bool in_member_declarator = false;
     analysis_result parameter_declaration(node_index n, qualified_type &type,
-                                          bool &unnamed, token_index &id);
+                                          bool &unnamed, token_index &id,
+                                          syntax_child &default_argument);
     /* cv-qualifiers added to a type: to an array's elements
        ([basic.type.qualifier]/3), none to a reference or a function type
        ([dcl.ref]/1, [dcl.fct]/7) */
@@ -1280,6 +1317,11 @@ class semantic_analysis
     analysis_result operand_value(node_index at, expression_meaning &m);
     /* [conv.prom] */
     void promote(expression_meaning &m);
+    /* the type the integral prvalue m promotes to (its own type when no
+       integral promotion applies, [conv.prom]/5 for a bit-field), and the
+       type an integral type promotes to */
+    fundamental_type integral_promotion(const expression_meaning &m) const;
+    fundamental_type promotion_of(fundamental_type t) const;
     /* the enumeration t, 0 if t is no complete enumeration */
     entity_index enumeration_of(qualified_type t) const;
     /* a prvalue of enumeration type as its underlying type
@@ -1421,8 +1463,6 @@ class semantic_analysis
     analysis_result base_clause(entity_index c, node_index n,
                                 standard_keyword key);
     analysis_result empty_base_conflict(entity_index c, node_index n);
-    bool derived_to_base_conversion(const expression_meaning &argument,
-                                    qualified_type parameter) const;
     /* [conv.ptr]/3: the pointer m to class from as a pointer to its base
        to, of type type */
     analysis_result pointer_to_base(token_index at, entity_index from,
@@ -1611,6 +1651,122 @@ class semantic_analysis
     bool in_scope(jump_point variable, jump_point at) const;
     /* [expr.call] */
     analysis_result call(node_index n, expression_meaning &m);
+
+    /* ---- overloading ([over]) ---- */
+  public:
+    /* [over.best.ics]/1: "An implicit conversion sequence is a sequence of
+       conversions used to convert an argument in a function call to the
+       type of the corresponding parameter of the function being called":
+       what [over.ics.rank] compares of one */
+    struct conversion_sequence {
+        enum class form : uint8_t {
+            /* no implicit conversion sequence: the candidate is not
+               viable ([over.match.viable]/3) */
+            bad,
+            standard,
+            user_defined,
+            ellipsis,
+            /* one analysis cannot tell (a class it did not follow) */
+            unknown,
+        };
+        form kind = form::bad;
+        /* [over.ics.scs]/3: the rank of the standard conversion sequence
+           (a user-defined one's second): 0 Exact Match, 1 Promotion, 2
+           Conversion */
+        uint8_t rank = 0;
+        /* the identity conversion: none but lvalue transformations
+           ([over.ics.rank]/3.2.1) */
+        bool identity = true;
+        /* [conv.bool] from a pointer ([over.ics.rank]/4.1) */
+        bool pointer_to_bool = false;
+        /* to cv void* ([over.ics.rank]/4.4.1) */
+        bool to_void_pointer = false;
+        /* [conv.prom]/4: an enumeration with a fixed underlying type to it
+           ([over.ics.rank]/4.2) */
+        bool to_underlying = false;
+        /* a reference binding ([over.ics.ref]): to an rvalue reference, to
+           an rvalue (a temporary too), to a function lvalue; of the
+           implicit object parameter ([over.match.funcs]/4) */
+        bool reference = false, rvalue_reference = false, binds_rvalue = false,
+             function_lvalue = false, implicit_object = false;
+        /* the implicit object parameter of a static member function, which
+           "is considered to match any object" ([over.match.funcs]/4) */
+        bool any_object = false;
+        /* [over.best.ics]/10: an ambiguous conversion sequence */
+        bool ambiguous = false;
+        /* the type converted to: the parameter's, or the type a
+           reference refers to */
+        qualified_type target;
+        /* a derived-to-base Conversion ([over.best.ics]/6, [conv.ptr]/3):
+           its classes */
+        entity_index base_from = 0, base_to = 0;
+        /* a user-defined conversion sequence: the converting constructor
+           ([over.ics.user]/1) */
+        entity_index function = 0;
+    };
+    /* [over.match.funcs]: a candidate function, or (function 0) the
+       implicitly-declared copy constructor of the class constructed,
+       whose type is type */
+    struct overload_candidate {
+        entity_index function = 0;
+        qualified_type type;
+    };
+
+  private:
+    /* [over.best.ics]: the argument a converted to the type of a parameter;
+       user-defined conversions considered unless [over.best.ics]/4 says
+       not */
+    conversion_sequence
+    implicit_conversion_sequence(const expression_meaning &a,
+                                 qualified_type parameter, bool user_defined);
+    conversion_sequence
+    standard_conversion_sequence(const expression_meaning &a,
+                                 qualified_type to);
+    conversion_sequence reference_sequence(const expression_meaning &a,
+                                           qualified_type reference,
+                                           bool user_defined);
+    conversion_sequence class_sequence(const expression_meaning &a,
+                                       qualified_type to, bool user_defined);
+    /* [over.match.funcs]/4-5: the object expression to the implicit object
+       parameter of the member function f */
+    conversion_sequence object_sequence(const expression_meaning &object,
+                                        entity_index f) const;
+    /* [over.ics.rank]: less than 0 when a is the better conversion
+       sequence, more than 0 when b is, 0 when neither is */
+    int compare_conversions(const conversion_sequence &a,
+                            const conversion_sequence &b) const;
+    int compare_standard_conversions(const conversion_sequence &a,
+                                     const conversion_sequence &b) const;
+    /* [over.match.viable], [over.match.best]: the best viable function of
+       the candidates for the arguments (and the object expression of a
+       member function call, or none): its index; ill-formed when there is
+       no unique one */
+    analysis_result best_viable_function(
+        node_index at, const owned_array<overload_candidate> &candidates,
+        const expression_meaning *object,
+        const owned_array<expression_meaning> &arguments, size_t &chosen);
+    /* the functions of the overload set whose first is e
+       (entity::next_overload), each once, added to out */
+    void overload_set(entity_index e, owned_array<entity_index> &out) const;
+    /* [over.call.func]: the token of the name a call's postfix-expression
+       is, and the call's callee f made the best viable function of the
+       set (its implied object argument's address object, 0 if none) */
+    token_index callee_name(syntax_child c) const;
+    /* [dcl.fct.def.delete]: whether a function-body is = delete ;, the
+       function f so defined by the definition n, and (ill-formed) a
+       reference to f if it is deleted */
+    bool deleted_body(syntax_child body) const;
+    analysis_result deleted_definition(node_index n, entity_index f);
+    analysis_result deleted_use(token_index at, entity_index f);
+    analysis_result resolve_call(node_index n,
+                                 const owned_array<syntax_child> &arguments,
+                                 owned_array<expression_meaning> &early,
+                                 const owned_array<entity_index> &set,
+                                 uint32_t object, expression_meaning &f);
+    /* the token of the name of a function being called whose overload set
+       overload resolution chooses from ([over.call.func]); 0 elsewhere,
+       where a name of an overload set is [over.over]'s */
+    token_index overloaded_callee = 0;
     /* the initialization of type from the analysed expression m */
     analysis_result initialize_with(node_index at, expression_meaning &m,
                                     qualified_type type, bool direct, bool list,
