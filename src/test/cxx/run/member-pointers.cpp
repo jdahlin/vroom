@@ -1,7 +1,8 @@
 /* [dcl.mptr], [expr.unary.op]/3, /4, [expr.mptr.oper], [conv.mem],
-   [expr.eq]/4, [conv.bool], [expr.static.cast]/12: pointers to data
-   members and to member functions, virtual ones too, through bases at
-   nonzero offsets, compared, tested, passed, returned and stored */
+   [expr.eq]/4, [conv.bool], [expr.static.cast]/12, [conv.qual]: pointers
+   to data members and to member functions, virtual ones too, through
+   bases at nonzero offsets, compared, tested, passed, returned and stored;
+   qualification conversions; .* on a prvalue ([basic.lval]/7) */
 struct Pad {
     long p;
     virtual int first() { return 1; }
@@ -40,6 +41,19 @@ int (B::*widen_function(int (A::*f)()))() { return f; }
 bool test(int A::*p) { return p; }
 bool test_function(int (A::*f)()) { return f; }
 bool same(int (A::*f)(), int (A::*g)()) { return f == g; }
+
+const int A::*global_const = &A::y;
+const int B::*global_const_converted = &A::x;
+int rank(const int A::*) { return 1; }
+int rank(const volatile int A::*) { return 2; }
+struct E {
+    int x;
+    int y;
+    E(int k) : x(k), y(k + 1) {}
+    int get() { return x; }
+    int sum(int k) { return x + y + k; }
+};
+E make(int x) { return E(x); }
 
 static void fail() { __builtin_abort(); }
 
@@ -124,6 +138,33 @@ int main()
         fail();
     get = &A::get;
     if (!get)
+        fail();
+    /* [conv.qual]: a pointer to member of a more qualified type, with
+       [conv.mem]/2 too */
+    int A::*ay = &A::y;
+    const int A::*cy = ay;
+    const volatile int A::*cvy = cy;
+    const int B::*cby = ay;
+    if (b.*cy != 3 || b.*cvy != 3 || b.*cby != 3 || a.*global_const != 3 ||
+        b.*global_const_converted != 7)
+        fail();
+    if (cy != ay || ay != cy || !(cby == ay) || cy == &A::x ||
+        static_cast<const int A::*>(ay) != cy || rank(ay) != 1)
+        fail();
+    const int B::*bcy = static_cast<const int B::*>(ay);
+    const int A::*acy = static_cast<const int A::*>(&B::y);
+    if (b.*bcy != 3 || a.*acy != 3 || (const int B::*)ay != bcy)
+        fail();
+    /* .* on a prvalue: its temporary, an xvalue */
+    int E::*ex = &E::x;
+    int E::*ey = &E::y;
+    int (E::*eget)() = &E::get;
+    int (E::*esum)(int) = &E::sum;
+    int &&r = make(40).*ex;
+    const int E::*cey = ey;
+    if (r != 40 || make(5).*ey != 6 || make(5).*cey != 6 ||
+        (make(6).*eget)() != 6 || (make(7).*esum)(1) != 16 ||
+        (E(8).*eget)() != 8)
         fail();
     return 0;
 }

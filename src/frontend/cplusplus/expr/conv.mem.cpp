@@ -29,9 +29,8 @@ bool semantic_analysis::is_member_function_pointer(qualified_type t) const
  * from a null pointer constant."  /2: "A prvalue of type "pointer to member
  * of B of type cv T", where B is a class type, can be converted to a
  * prvalue of type "pointer to member of D of type cv T", where D is a
- * complete class derived ([class.derived]) from B."  The member types are
- * the same here: a qualification conversion of the member's type
- * ([conv.qual]) is not analysed.
+ * complete class derived ([class.derived]) from B."  Then, or alone,
+ * [conv.qual]/3 (member_pointer_qualification).
  */
 analysis_result semantic_analysis::member_pointer_conversion(
     node_index at, expression_meaning &m, qualified_type to, bool &handled)
@@ -42,6 +41,10 @@ analysis_result semantic_analysis::member_pointer_conversion(
     if (target.kind != type_kind::pointer_to_member)
         return analysis_result::well_formed;
     handled = true;
+    const char *rule = "a standard conversion sequence converts the "
+                       "initializer expression to the cv-unqualified "
+                       "destination type, else the initialization is "
+                       "ill-formed";
     if (m.zero_literal ||
         fundamental_of(m.type) == fundamental_type::std_nullptr_t) {
         null_pointer_constant_to(m, to, conversion_kind::null_member_pointer);
@@ -51,12 +54,7 @@ analysis_result semantic_analysis::member_pointer_conversion(
     if (source.kind != type_kind::pointer_to_member) {
         if (source.kind == type_kind::fundamental &&
             !(is_integral(m.type) && m.evaluation != constness::not_constant))
-            return ill_formed(at,
-                              "a standard conversion sequence converts the "
-                              "initializer expression to the cv-unqualified "
-                              "destination type, else the initialization is "
-                              "ill-formed",
-                              "dcl.init");
+            return ill_formed(at, rule, "dcl.init");
         return not_supported(at, "conv.mem");
     }
     if (m.type.unqualified() == to.unqualified()) {
@@ -64,7 +62,19 @@ analysis_result semantic_analysis::member_pointer_conversion(
         return analysis_result::well_formed;
     }
     entity_index b = source.entity, d = target.entity;
-    if (!(source.operand == target.operand) ||
+    if (b == d) {
+        if (qualification_convertible(m.type, to)) {
+            member_pointer_qualification(m, to);
+            return analysis_result::well_formed;
+        }
+        if (similar(m.type, to))
+            return ill_formed(at, rule, "dcl.init");
+        return not_supported(at, "conv.mem");
+    }
+    qualified_type via = qualified_type::make(
+        type_table.pointer_to_member(d, source.operand), cv_none);
+    if ((via.unqualified() != to.unqualified() &&
+         !qualification_convertible(via, to)) ||
         entity_table[d].kind != entity_kind::class_type ||
         entity_table[b].kind != entity_kind::class_type ||
         !entity_table[d].size)
@@ -86,8 +96,28 @@ analysis_result semantic_analysis::member_pointer_conversion(
                           "program that necessitates this conversion is "
                           "ill-formed",
                           "conv.mem");
-    return member_pointer_along_path(tree[at].first_token, d, b, to, false,
-                                     true, m);
+    analysis_result r = member_pointer_along_path(tree[at].first_token, d, b,
+                                                  via, false, true, m);
+    if (r == analysis_result::well_formed)
+        member_pointer_qualification(m, to);
+    return r;
+}
+
+/*
+ * [conv.qual]/3: "A prvalue of type T1 can be converted to type T2 if the
+ * cv-combined type of T1 and T2 is T2"; /4: "A prvalue of type "pointer to
+ * member of X of type cv1 T" can be converted to a prvalue of type "pointer
+ * to member of X of type cv2 T" if "cv2 T" is more cv-qualified than "cv1
+ * T"": the same value.  The caller has checked the conversion.
+ */
+void semantic_analysis::member_pointer_qualification(expression_meaning &m,
+                                                     qualified_type to)
+{
+    to = qualified_type::make(to.unqualified(), cv_none);
+    if (m.type.unqualified() == to.unqualified())
+        return;
+    m.type = to;
+    converted(m, conversion_kind::member_pointer_qualification);
 }
 
 /*

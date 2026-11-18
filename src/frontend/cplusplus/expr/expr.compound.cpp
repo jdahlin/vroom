@@ -378,21 +378,31 @@ analysis_result semantic_analysis::composite_pointer_type(node_index at,
            type U, where C1 is reference-related to C2 or C2 is
            reference-related to C1, the cv-combined type of T2 and T1 or
            the cv-combined type of T1 and T2, respectively": the same U
-           here, the derived class's type */
+           here, of one level: the derived class's type, U with the union
+           of cv1 and cv2 */
         const struct type x = type_table[a.type.unqualified()];
         const struct type y = type_table[b.type.unqualified()];
+        type_kind u = type_table[x.operand.unqualified()].kind;
         if (a.type.unqualified() == b.type.unqualified())
             composite = a.type;
-        else if (!(x.operand == y.operand) ||
-                 type_table[x.operand.unqualified()].kind ==
-                     type_kind::function)
+        else if (x.operand.unqualified() != y.operand.unqualified() ||
+                 u == type_kind::function || u == type_kind::array)
             return not_supported(at, "expr.type");
-        else if (base_subobjects(x.entity, y.entity))
+        else if (base_subobjects(x.entity, y.entity) || x.entity == y.entity)
             composite = a.type;
         else if (base_subobjects(y.entity, x.entity))
             composite = b.type;
         else
             return not_supported(at, "expr.type");
+        if (a.type.unqualified() != b.type.unqualified()) {
+            const struct type c = type_table[composite.unqualified()];
+            composite = qualified_type::make(
+                type_table.pointer_to_member(
+                    c.entity,
+                    qualified_type::make(x.operand.unqualified(),
+                                         x.operand.cv() | y.operand.cv())),
+                cv_none);
+        }
     } else if (is_pointer(a.type) && is_pointer(b.type)) {
         qualified_type x = type_table[a.type.unqualified()].operand;
         qualified_type y = type_table[b.type.unqualified()].operand;

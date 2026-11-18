@@ -540,7 +540,7 @@ bool semantic_analysis::similar(qualified_type a, qualified_type b) const
         return true;
     const struct type x = type_table[a.unqualified()];
     const struct type y = type_table[b.unqualified()];
-    if (x.kind == type_kind::pointer && y.kind == type_kind::pointer)
+    if (same_pointer_level(x, y))
         return similar(x.operand, y.operand);
     if (x.kind == type_kind::array && y.kind == type_kind::array) {
         if (x.bound_known && y.bound_known && x.bound != y.bound)
@@ -548,6 +548,19 @@ bool semantic_analysis::similar(qualified_type a, qualified_type b) const
         return similar(x.operand, y.operand);
     }
     return false;
+}
+
+/*
+ * [conv.qual]/1: a P_i of a cv-decomposition is "pointer to" or "pointer
+ * to member of class C_i of type": the same P_i in both types
+ */
+bool semantic_analysis::same_pointer_level(const struct type &x,
+                                           const struct type &y) const
+{
+    if (x.kind == type_kind::pointer && y.kind == type_kind::pointer)
+        return true;
+    return x.kind == type_kind::pointer_to_member &&
+           y.kind == type_kind::pointer_to_member && x.entity == y.entity;
 }
 
 /*
@@ -608,7 +621,7 @@ bool semantic_analysis::qualification_convertible(qualified_type from,
 {
     const struct type f0 = type_table[from.unqualified()];
     const struct type t0 = type_table[to.unqualified()];
-    if (f0.kind != type_kind::pointer || t0.kind != type_kind::pointer)
+    if (!same_pointer_level(f0, t0))
         return false;
     qualified_type f = f0.operand, t = t0.operand;
     bool const_above = true;
@@ -629,7 +642,7 @@ bool semantic_analysis::qualification_convertible(qualified_type from,
         const struct type pf = type_table[f.unqualified()];
         const struct type pt = type_table[t.unqualified()];
         bool level_differs = cvf != cvt, leaf = false;
-        if (pf.kind == type_kind::pointer && pt.kind == type_kind::pointer) {
+        if (same_pointer_level(pf, pt)) {
         } else if (pf.kind == type_kind::array && pt.kind == type_kind::array) {
             if (pf.bound_known && pt.bound_known && pf.bound != pt.bound)
                 return false;

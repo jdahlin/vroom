@@ -168,6 +168,11 @@ semantic_analysis::standard_conversion_sequence(const expression_meaning &a,
                 return of_form(sequence::form::unknown);
             return of_form(sequence::form::bad);
         }
+        /* [conv.qual]/3: Qualification Adjustment, of Exact Match rank */
+        if (qualification_convertible(from, to)) {
+            s.rank = 0;
+            return s;
+        }
         if (f.operand.unqualified() != t.operand.unqualified())
             return of_form(sequence::form::bad);
         return of_form(sequence::form::unknown);

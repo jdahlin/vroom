@@ -73,13 +73,25 @@ analysis_result semantic_analysis::member_pointer_operator(
                               "unambiguous and accessible base class",
                               "expr.mptr.oper");
         }
-        /* a prvalue's temporary ([conv.rval]) is not analysed here */
-        if (object.category == value_category::prvalue)
-            return not_supported(n, "expr.mptr.oper");
+        /* [basic.lval]/7: "Whenever a prvalue appears as an operand of an
+           operator that expects a glvalue for that operand, the temporary
+           materialization conversion ([conv.rval]) is applied to convert
+           the expression to an xvalue": the address of a prvalue is its
+           temporary's (lowering's bind_reference).  One with a destructor
+           is destroyed at the end of the full-expression
+           ([class.temporary]/4), not analysed yet, nor an aggregate's
+           temporary (aggregate_prvalue) */
+        if (object.category == value_category::prvalue &&
+            (aggregate_prvalue(object) ||
+             entity_table[type_table[object.type.unqualified()].entity]
+                 .destructor))
+            return not_supported(n, "class.temporary");
         /* /6: "The result of a .* expression whose second operand is a
            pointer to a data member is an lvalue if the first operand is an
            lvalue and an xvalue otherwise." */
-        category = object.category;
+        category = value_category::xvalue;
+        if (object.category == value_category::lvalue)
+            category = value_category::lvalue;
         address_of_glvalue(at, object);
     }
     qualified_type pointee = type_table[object.type.unqualified()].operand;

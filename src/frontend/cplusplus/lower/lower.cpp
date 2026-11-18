@@ -2046,6 +2046,8 @@ uint32_t c_lowering::conversion(const semantic_node &n)
     case conversion_kind::member_pointer_to_derived:
     case conversion_kind::member_pointer_to_base:
         return member_pointer_conversion(n);
+    case conversion_kind::member_pointer_qualification:
+        return expression(n.a);
     case conversion_kind::null_pointer: {
         /* [conv.ptr]/1: "A null pointer constant can be converted to a
            pointer type; the result is the null pointer value of that
@@ -2198,6 +2200,8 @@ bool c_lowering::member_pointer_value(uint32_t n, entity_index &member,
         case conversion_kind::member_pointer_to_base:
             adjustment -= static_cast<int64_t>(x.value);
             break;
+        case conversion_kind::member_pointer_qualification:
+            break;
         default:
             return false;
         }
@@ -2326,6 +2330,7 @@ bool c_lowering::rereadable_member_pointer(uint32_t n) const
             return node(x.a).kind == semantic_kind::entity;
         case conversion_kind::member_pointer_to_derived:
         case conversion_kind::member_pointer_to_base:
+        case conversion_kind::member_pointer_qualification:
             n = x.a;
             break;
         default:

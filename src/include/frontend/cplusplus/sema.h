@@ -1098,6 +1098,8 @@ enum class conversion_kind : uint8_t {
     member_pointer_to_derived,
     /* [expr.static.cast]/12: the other way: value: the offset subtracted */
     member_pointer_to_base,
+    /* [conv.qual]/3 of a pointer to member: the same value */
+    member_pointer_qualification,
 };
 
 /* [expr.cast]/4: the casts that may perform an explicit conversion */
@@ -2173,6 +2175,8 @@ class semantic_analysis
     bool similar(qualified_type a, qualified_type b) const;
     /* [conv.qual]/3: whether a prvalue of type from converts to type to by
        a qualification conversion */
+    void member_pointer_qualification(expression_meaning &m, qualified_type to);
+    bool same_pointer_level(const struct type &x, const struct type &y) const;
     bool qualification_convertible(qualified_type from,
                                    qualified_type to) const;
     /* [conv.fctptr]/1: whether a prvalue of type from (pointer to noexcept
@@ -3504,6 +3508,7 @@ class semantic_analysis
     /* [expr.unary.op]/3.2: the glvalue m as the prvalue of its address */
     void address_of_glvalue(token_index at, expression_meaning &m);
     /* [expr.unary.op]/3.1: &C::m, of the non-static member e named at t */
+    analysis_result address_of_bit_field(token_index t);
     analysis_result member_pointer_constant(token_index t, entity_index e,
                                             expression_meaning &m);
     /* [expr.call]: the call of the function f (whose type is function_type;

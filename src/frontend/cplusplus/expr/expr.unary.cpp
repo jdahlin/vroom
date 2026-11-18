@@ -515,10 +515,8 @@ analysis_result semantic_analysis::unary(node_index n, expression_meaning &m)
                               "the operand of the unary & operator shall "
                               "be an lvalue",
                               "expr.unary.op");
-        /* [expr.unary.op]/5: "The operand of & shall not be a bit-field."
-           (clang's error) */
         if (m.bit_field_width)
-            return not_supported(n, "class.bit");
+            return address_of_bit_field(tree[n].first_token);
         address_of_glvalue(at, m);
         return analysis_result::well_formed;
     }
@@ -631,6 +629,16 @@ void semantic_analysis::address_of_glvalue(token_index at,
     m.node = expression_node(semantic_kind::address, m, at, m.node);
 }
 
+/* [class.bit]/3: "The address-of operator & shall not be applied to a
+   bit-field, so there are no pointers to bit-fields." */
+analysis_result semantic_analysis::address_of_bit_field(token_index t)
+{
+    return ill_formed_at_token(t,
+                               "the address-of operator & shall not be "
+                               "applied to a bit-field",
+                               "class.bit");
+}
+
 /*
  * [expr.unary.op]/3.1: "If the operand is a qualified-id naming a
  * non-static or variant member m of some class C with type T, the result
@@ -657,10 +665,8 @@ semantic_analysis::member_pointer_constant(token_index t, entity_index e,
                                    "be used only by members and friends of "
                                    "the class in which it is declared",
                                    "class.access");
-    /* [expr.unary.op]/5: "The operand of & shall not be a bit-field." */
     if (x.bit_field)
-        return ill_formed_at_token(
-            t, "the operand of & shall not be a bit-field", "expr.unary.op");
+        return address_of_bit_field(t);
     const struct type &member = type_table[x.type.unqualified()];
     if (member.kind == type_kind::lvalue_reference ||
         member.kind == type_kind::rvalue_reference)

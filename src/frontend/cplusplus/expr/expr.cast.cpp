@@ -391,17 +391,17 @@ analysis_result semantic_analysis::member_pointer_cast(node_index at,
     const struct type source = type_table[m.type.unqualified()];
     const struct type target = type_table[to.unqualified()];
     if (source.kind != type_kind::pointer_to_member ||
-        m.type.unqualified() == to.unqualified())
+        m.type.unqualified() == to.unqualified() ||
+        qualification_convertible(m.type, to))
         return implicit_conversion(at, m, to, true);
     entity_index d = source.entity, b = target.entity;
     if (source.operand.unqualified() != target.operand.unqualified() ||
-        (source.operand.cv() & ~target.operand.cv()) ||
+        (source.operand.cv() & ~target.operand.cv()) || d == b ||
         entity_table[d].kind != entity_kind::class_type ||
         entity_table[b].kind != entity_kind::class_type)
         return not_supported(at, "expr.static.cast");
-    if (source.operand == target.operand && entity_table[d].size &&
-        base_subobjects(d, b) == 0 && entity_table[b].size &&
-        base_subobjects(b, d)) {
+    if (entity_table[d].size && base_subobjects(d, b) == 0 &&
+        entity_table[b].size && base_subobjects(b, d)) {
         /* [conv.mem]/2; [expr.cast]/4: "a pointer to member of an
            unambiguous non-virtual base class type may be explicitly
            converted to ... a pointer to member of a derived class type"
@@ -415,8 +415,14 @@ analysis_result semantic_analysis::member_pointer_cast(node_index at,
                               "D, a program that necessitates this "
                               "conversion is ill-formed",
                               "conv.mem");
-        return member_pointer_along_path(tree[at].first_token, b, d, to, false,
-                                         false, m);
+        r = member_pointer_along_path(
+            tree[at].first_token, b, d,
+            qualified_type::make(
+                type_table.pointer_to_member(b, source.operand), cv_none),
+            false, false, m);
+        if (r == analysis_result::well_formed)
+            member_pointer_qualification(m, to);
+        return r;
     }
     if (!entity_table[d].size || !base_subobjects(d, b))
         return not_supported(at, "expr.static.cast");
