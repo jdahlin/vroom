@@ -310,7 +310,17 @@ analysis_result semantic_analysis::special_member_declarator(
                                            "class.mem");
     }
     /* [dcl.constexpr]/3: "if the function is a constructor or destructor,
-       its class shall not have any virtual base classes" */
+       its class shall not have any virtual base classes": a constructor
+       defined with a body (clang's "constexpr constructor not allowed in
+       struct with virtual base class"); one only declared, defaulted
+       (clang rejects it too, with another reason) or deleted (clang
+       accepts it) is not analysed */
+    if (constexpr_specified && entity_table[c].virtual_base_count &&
+        definition && !m.destructor)
+        return ill_formed_at_token(m.id,
+                                   "the class of a constexpr constructor "
+                                   "shall not have any virtual base classes",
+                                   "dcl.constexpr");
     if (constexpr_specified && entity_table[c].virtual_base_count)
         return not_supported(declaration, "dcl.constexpr");
     entity_index e =

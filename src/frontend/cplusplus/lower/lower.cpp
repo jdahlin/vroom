@@ -1976,9 +1976,28 @@ uint32_t c_lowering::conversion(const semantic_node &n)
             /* [conv.ptr]/3: "The null pointer value is converted to the
                null pointer value of the destination type": p ? p + offset
                : 0, p read twice */
-            if (!side_effect_free(p))
-                return fail("a pointer to a base at a nonzero offset", n.at);
-            uint32_t again = expression(n.a);
+            uint32_t again = 0;
+            if (side_effect_free(p)) {
+                again = expression(n.a);
+            } else {
+                /* (e.g. a pointer to the virtual base it is in, read
+                   from the virtual table): a temporary holds it */
+                if (!collecting)
+                    return fail("a pointer to a base at a nonzero offset",
+                                n.at);
+                ast_qualified_type pt = type_of(p);
+                uint32_t temporary = full_expression_temporary(pt);
+                uint32_t assigned = make(AST_NODE_ASSIGN, pt,
+                                         make(AST_NODE_VARIABLE, pt, temporary,
+                                              0, 0, 0, AST_NODE_FLAG_LVALUE),
+                                         p, 0, 0, 0);
+                p = make(AST_NODE_COMMA, pt, assigned,
+                         make(AST_NODE_VARIABLE, pt, temporary, 0, 0, 0,
+                              AST_NODE_FLAG_LVALUE),
+                         0, 0, 0);
+                again = make(AST_NODE_VARIABLE, pt, temporary, 0, 0, 0,
+                             AST_NODE_FLAG_LVALUE);
+            }
             uint32_t null = cast(
                 ast_builder_integer(c, ast_builder_type_basic(AST_TYPE_INT), 0),
                 t, AST_CAST_NULL_POINTER);

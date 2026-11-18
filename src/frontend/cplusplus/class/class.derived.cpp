@@ -582,7 +582,7 @@ analysis_result semantic_analysis::pointer_to_base(token_index at,
            ([abi:vtable-components] vbase offset), the rest of the way
            constant offsets */
         entity_index v = virtual_route(from, to);
-        if (!v || v != to)
+        if (!v)
             return not_supported(current_declaration, "conv.ptr");
         if (!virtual_base_accessible(from, v)) {
             if (current_class())
@@ -593,11 +593,24 @@ analysis_result semantic_analysis::pointer_to_base(token_index at,
                                        "conversion is ill-formed",
                                        "conv.ptr");
         }
-        m.type = type;
+        if (v == to) {
+            m.type = type;
+            converted(m, conversion_kind::derived_to_base);
+            if (m.node)
+                semantics[m.node].b = virtual_base_of(from, v);
+            return analysis_result::well_formed;
+        }
+        /* a base inside the virtual base: to the virtual base first, then
+           the non-virtual path from it */
+        m.type = qualified_type::make(
+            type_table.pointer_to(qualified_type::make(
+                entity_table[v].type.unqualified(),
+                type_table[type.unqualified()].operand.cv())),
+            cv_none);
         converted(m, conversion_kind::derived_to_base);
         if (m.node)
             semantics[m.node].b = virtual_base_of(from, v);
-        return analysis_result::well_formed;
+        return pointer_to_base(at, v, to, type, m);
     }
     for (entity_index c = from; c != to;) {
         entity_index step = nonvirtual_step(c, to);
