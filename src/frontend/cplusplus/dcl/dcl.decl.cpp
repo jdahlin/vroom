@@ -526,6 +526,14 @@ node_index parser::ptr_operator(derivation *kind)
  *     cv-qualifier:
  *         __restrict
  *         __restrict__
+ *
+ * [ext:clang_nullability] (clang Language Extensions, Nullability):
+ *
+ *     cv-qualifier:
+ *         _Nonnull
+ *         _Nullable
+ *         _Nullable_result
+ *         _Null_unspecified
  */
 node_index parser::cv_qualifier_seq()
 {
@@ -533,7 +541,8 @@ node_index parser::cv_qualifier_seq()
     token_index first = position;
     while (accept(standard_keyword::const_) ||
            accept(standard_keyword::volatile_) ||
-           accept(extension_keyword::restrict))
+           accept(extension_keyword::restrict) ||
+           accept(extension_keyword::nullability))
         ;
     if (position == first)
         return 0;

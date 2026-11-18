@@ -80,6 +80,13 @@ parser::parser(token_stream &tokens, syntax_tree &tree, declared_names &names,
         declared_names::global_namespace,
         tokens.pp.identifier(va_list_name, sizeof va_list_name - 1) + 1,
         name_kind::type_name);
+    /* [impl.clang] clang's predeclared typedef-names of __int128 and
+       unsigned __int128 (<mach/arm/_structs.h> uses __uint128_t) */
+    static const char *const int128_names[] = {"__int128_t", "__uint128_t"};
+    for (const char *name : int128_names)
+        names.declare_in(declared_names::global_namespace,
+                         tokens.pp.identifier(name, strlen(name)) + 1,
+                         name_kind::type_name);
     /* [ext:clang_builtin_templates] clang's predeclared class template
        (libc++'s common_type derives from it) */
     static const char common_type_name[] = "__builtin_common_type";

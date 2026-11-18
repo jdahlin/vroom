@@ -36,6 +36,10 @@ EXTENSION_KEYWORD(restrict, "__restrict", gnu_restrict)
 EXTENSION_KEYWORD(restrict, "__restrict__", gnu_restrict)
 EXTENSION_KEYWORD(extension, "__extension__", gnu_extension_keyword)
 EXTENSION_KEYWORD(int128, "__int128", gnu_int128)
+EXTENSION_KEYWORD(nullability, "_Nonnull", clang_nullability)
+EXTENSION_KEYWORD(nullability, "_Nullable", clang_nullability)
+EXTENSION_KEYWORD(nullability, "_Nullable_result", clang_nullability)
+EXTENSION_KEYWORD(nullability, "_Null_unspecified", clang_nullability)
 
 /* [ext:clang_type_traits] (clang Language Extensions, Type Trait
  * Primitives): an expression trait ( type-id, ... ) and a type

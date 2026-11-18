@@ -201,6 +201,10 @@ analysis_result semantic_analysis::pointer_operator(node_index op,
                 if (!q.is_token())
                     return not_supported(op, "dcl.ptr");
                 standard_keyword kw = p.keyword_of(tokens[q.index()]);
+                /* [ext:clang_nullability]: no effect on the type */
+                if (p.extension_keyword_of(tokens[q.index()]) ==
+                    extension_keyword::nullability)
+                    continue;
                 if (kw == standard_keyword::const_)
                     type = add_cv(type, cv_const);
                 else if (kw == standard_keyword::volatile_)
@@ -210,6 +214,9 @@ analysis_result semantic_analysis::pointer_operator(node_index op,
             }
         } else if (c.is_token()) {
             standard_keyword kw = p.keyword_of(tokens[c.index()]);
+            if (p.extension_keyword_of(tokens[c.index()]) ==
+                extension_keyword::nullability)
+                continue;
             if (kw == standard_keyword::const_)
                 type = add_cv(type, cv_const);
             else if (kw == standard_keyword::volatile_)
