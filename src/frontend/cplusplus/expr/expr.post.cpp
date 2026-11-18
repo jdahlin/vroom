@@ -270,6 +270,27 @@ analysis_result semantic_analysis::static_cast_expression(node_index n,
     bool from_value = is_arithmetic(m.type) || enumeration_of(m.type);
     if (to_void || (to_value && from_value))
         return explicit_conversion(n, to, m);
+    if ((target.kind == type_kind::rvalue_reference ||
+         target.kind == type_kind::lvalue_reference) &&
+        m.category != value_category::prvalue &&
+        target.operand.unqualified() == m.type.unqualified() &&
+        (m.type.cv() & ~target.operand.cv()) == 0) {
+        /* [expr.static.cast]/3: "A glvalue of type cv1 T1 can be cast to
+           type rvalue reference to cv2 T2 if cv2 T2 is reference-compatible
+           with cv1 T1 ([dcl.init.ref]).  If the value is not a bit-field,
+           the result refers to the object or the specified base class
+           subobject thereof"; /1: "If T is an lvalue reference type ... the
+           result is an lvalue; if T is an rvalue reference to object type,
+           the result is an xvalue".  The same type only, not a bit-field
+           (a base class is not analysed) */
+        if (m.bit_field_width)
+            return not_supported(n, "expr.static.cast");
+        m.type = target.operand;
+        m.category = value_category::xvalue;
+        if (target.kind == type_kind::lvalue_reference)
+            m.category = value_category::lvalue;
+        return analysis_result::well_formed;
+    }
     return not_supported(n, "expr.static.cast");
 }
 

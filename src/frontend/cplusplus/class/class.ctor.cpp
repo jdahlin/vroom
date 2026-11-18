@@ -136,6 +136,22 @@ bool semantic_analysis::is_copy_constructor(entity_index c,
            p.operand.unqualified() == entity_table[c].type.unqualified();
 }
 
+/* whether class c declares a move constructor X(cv X&&)
+   ([class.copy.ctor]/3, without default arguments) */
+bool semantic_analysis::declares_move_constructor(entity_index c) const
+{
+    for (entity_index k = entity_table[c].first_constructor; k;
+         k = entity_table[k].next_constructor) {
+        if (!is_copy_constructor(c, k))
+            continue;
+        qualified_type p =
+            type_table.parameters(entity_table[k].type.unqualified())[0];
+        if (type_table[p.unqualified()].kind == type_kind::rvalue_reference)
+            return true;
+    }
+    return false;
+}
+
 bool semantic_analysis::copies_bytes(entity_index c) const
 {
     const entity &x = entity_table[c];
@@ -271,10 +287,6 @@ analysis_result semantic_analysis::special_member_declarator(
                                            "ill-formed if its only parameter "
                                            "is of type cv X",
                                            "class.copy.ctor");
-            const struct type &p = type_table[parameters[i].unqualified()];
-            if (p.kind == type_kind::rvalue_reference)
-                /* a move constructor: overload resolution with rvalues */
-                return not_supported(declaration, "class.copy.ctor");
         }
         for (entity_index k = entity_table[c].first_constructor; k;
              k = entity_table[k].next_constructor)
@@ -997,6 +1009,10 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
             declares_copy = true;
     for (entity_index k : classes) {
         const entity &sub = entity_table[k];
+        if (declares_move_constructor(k))
+            /* [class.copy.ctor]/8: the implicit move constructor, which
+               moves the subobject, is not declared yet */
+            return not_supported(n, "class.copy.ctor");
         bool default_ok = !sub.first_constructor, copy_ok = copies_bytes(k);
         for (entity_index q = sub.first_constructor; q;
              q = entity_table[q].next_constructor) {

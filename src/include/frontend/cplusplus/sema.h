@@ -913,6 +913,8 @@ class semantic_analysis
     bool trivial_defaulted_default_constructor(entity_index c) const;
     bool copies_bytes(entity_index c) const;
     bool is_copy_constructor(entity_index c, entity_index k) const;
+    bool declares_move_constructor(entity_index c) const;
+    entity_index implicitly_movable(syntax_child operand);
     /* whether destroying an object of class c runs code */
     bool destroys(entity_index c) const;
     /* the type's size and alignment in bytes ([expr.sizeof],
