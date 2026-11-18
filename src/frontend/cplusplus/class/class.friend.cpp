@@ -174,21 +174,44 @@ analysis_result semantic_analysis::friend_class(entity_index c, node_index n,
 
 /*
  * [class.friend]/6: "No storage-class-specifier shall appear in the
- * decl-specifier-seq of a friend declaration."  /7: a friend function
- * defined in the class is not analysed.  [namespace.memdef]/3: a function
- * first declared by the friend declaration is a member of the innermost
- * enclosing namespace, not found by ordinary lookup until declared there.
+ * decl-specifier-seq of a friend declaration."  [namespace.memdef]/3: a
+ * function first declared by the friend declaration is a member of the
+ * innermost enclosing namespace, not found by ordinary lookup until
+ * declared there (argument-dependent lookup finds it, [basic.lookup.argdep]
+ * /4.3).  /6: "A function can be defined in a friend declaration of a class
+ * if and only if the class is a non-local class and the function name is
+ * unqualified"; /7: "Such a function is implicitly an inline function.  A
+ * friend function defined in a class is in the (lexical) scope of the class
+ * in which it is defined": its body is analysed with the class's members
+ * (friend_function_body), after the class is complete as a member
+ * function's (bodies).
  */
-analysis_result semantic_analysis::friend_function(entity_index c, node_index n)
+analysis_result
+semantic_analysis::friend_function(entity_index c, node_index n,
+                                   owned_array<node_index> &bodies)
 {
     const syntax_node &node = tree[n];
     const syntax_child *children = tree.children(n);
-    if (node.kind != syntax_kind::member_declaration || node.child_count != 3 ||
-        !syntax_is_punctuator(tokens, children[2],
-                              preprocessing_op_or_punc::SEMICOLON) ||
-        syntax_is(tree, children[1], syntax_kind::member_declarator) ||
-        syntax_is(tree, children[1], syntax_kind::member_declarator_list))
+    bool defines = node.kind == syntax_kind::function_definition;
+    if (defines) {
+        if (node.child_count != 3 ||
+            !syntax_is(tree, children[0], syntax_kind::decl_specifier_seq) ||
+            !syntax_is(tree, children[2], syntax_kind::function_body))
+            return not_supported(n, "class.friend");
+        const syntax_node &b = tree[children[2].index()];
+        if (b.child_count != 1 ||
+            !syntax_is(tree, tree.children(children[2].index())[0],
+                       syntax_kind::compound_statement))
+            return not_supported(n, "dcl.fct.def.general");
+    } else if (node.kind != syntax_kind::member_declaration ||
+               node.child_count != 3 ||
+               !syntax_is_punctuator(tokens, children[2],
+                                     preprocessing_op_or_punc::SEMICOLON) ||
+               syntax_is(tree, children[1], syntax_kind::member_declarator) ||
+               syntax_is(tree, children[1],
+                         syntax_kind::member_declarator_list)) {
         return not_supported(n, "class.friend");
+    }
     specified s;
     bool outer = friend_allowed;
     friend_allowed = true;
@@ -196,9 +219,10 @@ analysis_result semantic_analysis::friend_function(entity_index c, node_index n)
     friend_allowed = outer;
     if (r != analysis_result::well_formed)
         return r;
-    if (!s.friend_ || s.typedef_ || s.static_ || s.extern_ || s.inline_ ||
-        s.constexpr_ || s.virtual_ || s.declares_class ||
-        s.declares_enumeration || !s.has_type)
+    /* (inline or constexpr only on a definition here) */
+    if (!s.friend_ || s.typedef_ || s.static_ || s.extern_ ||
+        ((s.inline_ || s.constexpr_) && !defines) || s.virtual_ ||
+        s.declares_class || s.declares_enumeration || !s.has_type)
         return not_supported(n, "class.friend");
     qualified_type type = s.type;
     declarator_meaning m;
@@ -207,9 +231,13 @@ analysis_result semantic_analysis::friend_function(entity_index c, node_index n)
     r = declarator(n, children[1], type, m);
     if (r != analysis_result::well_formed)
         return r;
+    /* an operator function only as a definition ([over.oper]: its
+       declaration's checks are operator_function_declaration's) */
     if (!m.has_id || m.qualifier || m.qualified_namespace ||
-        m.operator_function || m.literal_operator || m.destructor ||
-        m.aligned || m.gnu_flags || function_cv || c_language ||
+        (m.operator_function &&
+         (!defines || m.allocation != allocation_function::none)) ||
+        m.literal_operator || m.destructor || m.aligned || m.gnu_flags ||
+        function_cv || c_language ||
         type_table[type.unqualified()].kind != type_kind::function)
         return not_supported(n, "class.friend");
     for (const parameter_meaning &parameter : function_parameters)
@@ -245,11 +273,28 @@ analysis_result semantic_analysis::friend_function(entity_index c, node_index n)
         befriended = entity_table.make(entity_kind::function, name, space);
         entity &made = entity_table[befriended];
         made.type = type;
+        made.implemented = m.implemented;
+        made.operator_function = m.operator_function;
         made.linkage_of_name = linkage::external;
         /* [basic.link]/4: within an unnamed namespace, internal */
         if (within_unnamed_namespace(space))
             made.linkage_of_name = linkage::internal;
         block_declared.append(befriended);
+    }
+    if (defines) {
+        /* [basic.def.odr]/1: one definition */
+        if (entity_table[befriended].defined)
+            return not_supported(n, "basic.def.odr");
+        entity_table[befriended].inline_ = true;
+        if (s.constexpr_)
+            entity_table[befriended].constexpr_ = true;
+        if (m.operator_function) {
+            analysis_result o = operator_function_declaration(n, befriended);
+            if (o != analysis_result::well_formed)
+                return o;
+        }
+        bodies.append(n);
+        friend_definitions.append({n, befriended, c});
     }
     entity_table.add_declaration(befriended, n);
     friend_record f;
@@ -259,9 +304,67 @@ analysis_result semantic_analysis::friend_function(entity_index c, node_index n)
     return analysis_result::well_formed;
 }
 
+entity_index semantic_analysis::lexical_parent(entity_index s) const
+{
+    if (entity_table[s].kind == entity_kind::function &&
+        entity_table[s].inline_)
+        for (const friend_definition &d : friend_definitions)
+            if (d.function == s)
+                return d.granting;
+    return entity_table[s].enclosing;
+}
+
+bool semantic_analysis::defined_by_friend(entity_index f) const
+{
+    for (const friend_definition &d : friend_definitions)
+        if (d.function == f)
+            return true;
+    return false;
+}
+
+/* the function a friend definition n defines, 0 if n is not one */
+entity_index semantic_analysis::friend_defined_by(node_index n) const
+{
+    for (const friend_definition &d : friend_definitions)
+        if (d.definition == n)
+            return d.function;
+    return 0;
+}
+
+/* [class.friend]/7: the body of a friend defined in class c, in the
+   class's scope: its declarator again for the parameters, then the body */
+analysis_result semantic_analysis::friend_function_body(entity_index c,
+                                                        node_index n,
+                                                        entity_index f)
+{
+    const syntax_child *children = tree.children(n);
+    current_declaration = n;
+    entity_index scope = current_scope;
+    current_scope = c;
+    specified s;
+    bool outer = friend_allowed;
+    friend_allowed = true;
+    analysis_result r = decl_specifier_seq(children[0].index(), s, false);
+    friend_allowed = outer;
+    qualified_type type = s.type;
+    declarator_meaning m;
+    if (r == analysis_result::well_formed) {
+        function_cv = 0;
+        function_parameters.clear();
+        r = declarator(n, children[1], type, m);
+    }
+    if (r == analysis_result::well_formed) {
+        last_declared = f;
+        r = function_body(n, tree.children(children[2].index())[0]);
+    }
+    current_scope = scope;
+    return r;
+}
+
 /* a member-declaration whose decl-specifier-seq has friend */
-analysis_result semantic_analysis::friend_declaration(entity_index c,
-                                                      node_index n)
+analysis_result
+semantic_analysis::friend_declaration(entity_index c, node_index n,
+                                      owned_array<node_index> &bodies)
 {
     /* [class.friend]/11: a friend declaration in a local class */
     for (entity_index k = c; !is_namespace(k); k = entity_table[k].enclosing)
@@ -269,6 +372,8 @@ analysis_result semantic_analysis::friend_declaration(entity_index c,
             return not_supported(n, "class.friend");
     const syntax_node &node = tree[n];
     const syntax_child *children = tree.children(n);
+    if (node.kind == syntax_kind::function_definition)
+        return friend_function(c, n, bodies);
     if (node.kind != syntax_kind::member_declaration || node.child_count < 2)
         return not_supported(n, "class.friend");
     if (node.child_count == 2) {
@@ -289,7 +394,7 @@ analysis_result semantic_analysis::friend_declaration(entity_index c,
             return not_supported(n, "class.friend");
         return friend_class(c, n, type);
     }
-    return friend_function(c, n);
+    return friend_function(c, n, bodies);
 }
 
 } // namespace cplusplus

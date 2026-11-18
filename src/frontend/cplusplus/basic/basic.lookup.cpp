@@ -222,7 +222,7 @@ semantic_analysis::lookup_unqualified(uint32_t name, lookup_filter filter) const
     entity_index first = current_scope;
     if (is_namespace(first) && defining_class)
         first = defining_class;
-    for (entity_index s = first;; s = entity_table[s].enclosing) {
+    for (entity_index s = first;; s = lexical_parent(s)) {
         if (entity_table[s].has_using_directive) {
             entity_index from = enclosing_namespace(s);
             /* the directives of s, and of each namespace they nominate

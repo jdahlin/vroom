@@ -1105,7 +1105,7 @@ semantic_analysis::member_declaration(entity_index c, syntax_child member,
         for (uint32_t i = 0; i < tree[seq].child_count; i++) {
             syntax_child x = tree.children(seq)[i];
             if (is_keyword(x, standard_keyword::friend_))
-                return friend_declaration(c, n);
+                return friend_declaration(c, n, bodies);
         }
     }
 
@@ -1830,6 +1830,8 @@ analysis_result semantic_analysis::member_typedef(
 analysis_result semantic_analysis::member_function_body(entity_index c,
                                                         node_index definition)
 {
+    if (entity_index f = friend_defined_by(definition))
+        return friend_function_body(c, definition, f);
     const syntax_child *children = tree.children(definition);
     current_declaration = definition;
     /* [basic.scope.class]/1: the declaration is in the class's scope, its
