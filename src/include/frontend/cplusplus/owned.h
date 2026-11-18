@@ -73,10 +73,13 @@ template <typename T> class owned_array
         elements = p;
         capacity = grown;
     }
+    /* value may be one of this array's own elements, which reserve moves:
+       copied before (std::vector's push_back allows the same) */
     T &append(const T &value)
     {
+        T copy = value;
         reserve(count + 1);
-        elements[count] = value;
+        elements[count] = copy;
         return elements[count++];
     }
     /* n elements more, their bytes unset; returns the first */
