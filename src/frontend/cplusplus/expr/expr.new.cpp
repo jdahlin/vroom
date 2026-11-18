@@ -269,10 +269,9 @@ analysis_result semantic_analysis::allocation_functions(
  * Otherwise, the new-initializer is interpreted according to the
  * initialization rules of [dcl.init] for direct-initialization."
  *
- * Not analysed: a placeholder type (/2), an array of class type (its
- * constructors and destructors run per element, with a cookie, [expr.new]/15),
- * an array with a new-initializer, new-extended alignment (/18), the
- * deallocation when the initialization throws (/25).
+ * Not analysed: a placeholder type (/2), an array with a new-initializer,
+ * new-extended alignment (/18), the deallocation when the initialization
+ * throws (/25).
  */
 analysis_result semantic_analysis::new_expression(node_index n,
                                                   expression_meaning &m)
@@ -361,25 +360,24 @@ analysis_result semantic_analysis::new_expression(node_index n,
         type_table.fundamental(fundamental_type::unsigned_long_int), cv_none);
     expression_meaning requested;
     /* an array of a class with a constructor or destructor: each element
-       initialized ([expr.new]/22), and, with a non-trivial destructor, the
+       initialized ([expr.new]/22), and, with a cookie (array_cookie), the
        element count stored before the elements for delete[]
-       ([abi:array-cookies]: "The size of the array cookie is the maximum
-       of sizeof(std::size_t) and the alignment of the element type",
-       which "is stored immediately before the first element", the
-       allocation /15's "array allocation overhead") */
-    bool elements =
-        array && c && (entity_table[c].first_constructor || destroys(c));
+       ([abi:array-cookies]: it "is stored immediately before the first
+       element", the allocation /15's "array allocation overhead") */
     uint64_t cookie = 0;
     expression_meaning element_count;
     if (array) {
         if (init.bits)
             return not_supported(n, "expr.new");
-        if (elements && destroys(c)) {
-            cookie = 8;
-            if (alignment_of_type(type) > cookie)
-                cookie = alignment_of_type(type);
-        }
+        /* the class's operator delete[], as clang looks it up, ::new or
+           not */
+        r = array_cookie(n, c, type, false, cookie);
+        if (r != analysis_result::well_formed)
+            return r;
     }
+    bool elements =
+        array && c &&
+        (entity_table[c].first_constructor || destroys(c) || cookie);
     if (array && bound.bits) {
         /* [expr.new]/9: "If the expression in a noptr-new-declarator is
            present, it is implicitly converted to std::size_t." */

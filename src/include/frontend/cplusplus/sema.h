@@ -2156,6 +2156,12 @@ class semantic_analysis
                                        entity_index &function, bool &sized,
                                        bool class_complete = false,
                                        bool cookie = false);
+    /* [abi:array-cookies]: the size of the cookie before an array of
+       element (of class c, 0 if none) that a new[] or delete[] (::delete[]
+       when global) gives, 0 if none */
+    analysis_result array_cookie(node_index n, entity_index c,
+                                 qualified_type element, bool global,
+                                 uint64_t &cookie);
     /* the type of the new-type-id n ([expr.new]/1), the expression of the
        first bound of its noptr-new-declarator if any (bound) */
     analysis_result new_type_id(node_index n, qualified_type &type,

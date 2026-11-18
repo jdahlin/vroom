@@ -128,15 +128,15 @@ analysis_result semantic_analysis::delete_expression(node_index n,
     /* [abi:array-cookies]: an array of a class with a non-trivial
        destructor has its count before its elements */
     uint64_t cookie = 0;
+    if (array) {
+        r = array_cookie(n, c, object_type, global, cookie);
+        if (r != analysis_result::well_formed)
+            return r;
+    }
     if (c && destroys(c)) {
         entity_index destructor = entity_table[c].destructor;
         if (!destructor)
             return not_supported(n, "expr.delete");
-        if (array) {
-            cookie = 8;
-            if (alignment_of_type(object_type) > cookie)
-                cookie = alignment_of_type(object_type);
-        }
         r = deleted_use(at, destructor);
         if (r != analysis_result::well_formed)
             return r;
@@ -213,6 +213,56 @@ analysis_result semantic_analysis::delete_expression(node_index n,
         entity_table[entity_table[c].destructor].virtual_)
         semantics[m.node].value = 1;
     semantics[m.node].d = static_cast<uint32_t>(cookie);
+    return analysis_result::well_formed;
+}
+
+/*
+ * [abi:array-cookies]: "If the element type T has a trivial destructor
+ * ([class.dtor]) and the usual (array) deallocation function
+ * ([basic.stc.dynamic.deallocation]) function does not take two arguments,
+ * then no cookie is required" ... "The size of the array cookie is the
+ * maximum of sizeof(std::size_t) and the alignment of the element type".
+ * The usual deallocation function takes two arguments when class c's
+ * operator delete[] has only that form ([expr.delete]/10: of a class's
+ * two, the one without the size is selected; of the global ones, clang
+ * selects the unsized one for an array without a cookie).
+ */
+analysis_result semantic_analysis::array_cookie(node_index n, entity_index c,
+                                                qualified_type element,
+                                                bool global, uint64_t &cookie)
+{
+    cookie = 0;
+    if (!c)
+        return analysis_result::well_formed;
+    bool needed = destroys(c);
+    if (!needed && !global) {
+        owned_array<entity_index> set;
+        bool in_class = false;
+        analysis_result r = allocation_functions(
+            n, allocation_function::delete_array, c, set, in_class);
+        if (r != analysis_result::well_formed)
+            return r;
+        qualified_type size_type = qualified_type::make(
+            type_table.fundamental(fundamental_type::unsigned_long_int),
+            cv_none);
+        bool unsized = false, sized = false;
+        for (entity_index f : set) {
+            type_index ft = entity_table[f].type.unqualified();
+            if (type_table[ft].variadic)
+                continue;
+            if (type_table[ft].parameter_count == 1)
+                unsized = true;
+            else if (type_table[ft].parameter_count == 2 &&
+                     type_table.parameters(ft)[1] == size_type)
+                sized = true;
+        }
+        needed = in_class && sized && !unsized;
+    }
+    if (needed) {
+        cookie = 8;
+        if (alignment_of_type(element) > cookie)
+            cookie = alignment_of_type(element);
+    }
     return analysis_result::well_formed;
 }
 
