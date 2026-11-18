@@ -228,7 +228,10 @@ semantic_analysis::function_template_definition(node_index n,
 {
     entity_index outer = current_scope;
     owned_array<node_index> parameters;
-    analysis_result head = template_head_parameters(n, parameters, true, true);
+    /* [temp.param]/14: a function template's pack may be followed by
+       parameters that are deduced or have defaults */
+    analysis_result head =
+        template_head_parameters(n, parameters, true, true, true);
     if (head != analysis_result::well_formed)
         return head;
     const syntax_node &d = tree[definition];
@@ -301,10 +304,18 @@ semantic_analysis::function_template_definition(node_index n,
        outside one is ill-formed (/7), which the template's own declarator
        does not tell apart from a pattern analysis has no rules for: the
        last parameter's type the only pack expansion, a function parameter
-       pack of the template parameter pack (the last) */
+       pack of the template parameter pack (its only one) */
     {
         uint32_t last = static_cast<uint32_t>(parameters.size()) - 1;
-        bool pack = template_parameter_is_pack(first + last);
+        uint32_t packs = 0;
+        for (uint32_t i = 0; i < parameters.size(); i++)
+            if (template_parameter_is_pack(first + i)) {
+                last = i;
+                packs++;
+            }
+        if (packs > 1)
+            return not_supported(n, "temp.variadic");
+        bool pack = packs == 1;
         const struct type ft = type_table[type.unqualified()];
         const qualified_type *list = type_table.parameters(type.unqualified());
         /* the return type: the pack named only in pack expansions
@@ -791,7 +802,8 @@ analysis_result semantic_analysis::variable_partial_specialization(
     owned_array<node_index> parameters;
     /* [temp.param]/14: a partial specialization's packs are deduced,
        wherever they are */
-    analysis_result r = template_head_parameters(n, parameters, true, true);
+    analysis_result r =
+        template_head_parameters(n, parameters, true, false, true);
     if (r != analysis_result::well_formed)
         return r;
     lookup_result x;
