@@ -189,7 +189,7 @@ uint32_t semantic_analysis::operator_name(preprocessing_op_or_punc op)
 /*
  * The operator-function-id of a declarator: operator @, operator () or
  * operator [].  The operators analysis has no expressions for (class
- * member access, the allocation functions, co_await and <=>) are not
+ * member access, the allocation functions and co_await) are not
  * analysed.
  */
 analysis_result semantic_analysis::operator_function_id(node_index id,
@@ -211,7 +211,10 @@ analysis_result semantic_analysis::operator_function_id(node_index id,
         return not_supported(id, "over.oper");
     switch (op) {
     case preprocessing_op_or_punc::SPACESHIP:
-        return not_supported(id, "over.oper");
+        if (!tokens.files.behavior.has(
+                language_feature::three_way_comparison_operator))
+            return not_supported(id, "over.oper");
+        break;
     default:
         break;
     }

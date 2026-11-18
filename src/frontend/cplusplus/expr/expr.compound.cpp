@@ -716,6 +716,10 @@ analysis_result semantic_analysis::binary(node_index n, expression_meaning &m)
         if (r != analysis_result::well_formed || handled)
             return r;
     }
+    if (op == preprocessing_op_or_punc::SPACESHIP)
+        /* [expr.spaceship]: the built-in three-way comparison, whose
+           result is of a type of <compare> */
+        return not_supported(n, "expr.spaceship");
     if (op == preprocessing_op_or_punc::DOT_STAR ||
         op == preprocessing_op_or_punc::ARROW_STAR)
         /* the built-in pointer-to-member operators: no pointers to

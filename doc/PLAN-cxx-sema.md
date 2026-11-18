@@ -792,8 +792,19 @@ libstdc++ and json), since sema cannot analyse a declaration kept as tokens.
   is not analysed).  Mangled cm, pm, ad and pt.  Test:
   `src/test/cxx/run/operators-rest.cpp`.  `bench/cxx-sema.py`: 27290
   declarations as clang, 0 wrong, 448 we accept that clang rejects, 0
-  refuted; lookup 10786.  cxx-run 144/144, cxx-c-suites 0 wrong.  Left:
-  <=> and the allocation functions.
+  refuted; lookup 10786.  cxx-run 144/144, cxx-c-suites 0 wrong.
+- Status (2026-11-18, <=>): operator<=> is declared (C++20), mangled ss,
+  and called for x <=> y of class or enumeration operands; the relational
+  operators have its rewritten candidates, x <=> y and the synthesized
+  y <=> x ([over.match.oper]/3.4), interpreted as (x <=> y) @ 0 or
+  0 @ (y <=> x) (/8) when its result is of arithmetic type.  Not analysed:
+  the built-in <=> and the comparison category types of <compare> (so
+  neither a reversed x <=> y nor std::strong_ordering results), and an
+  enumeration's rewritten candidates.  Test:
+  `src/test/cxx/run/three-way.cpp`.  `bench/cxx-sema.py`: 27309
+  declarations as clang, 0 wrong, 448 we accept that clang rejects, 0
+  refuted.  cxx-run 148/148, cxx-c-suites 0 wrong.  Left: the allocation
+  functions.
 
 ### S4. Classes and the object model (parallel with S3)
 

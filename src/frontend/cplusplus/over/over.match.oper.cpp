@@ -15,8 +15,10 @@
  * candidate ([over.built]) is viable for an operand of class type; for an
  * operand of enumeration type one may be, and an operator function is
  * chosen only where it is better than every built-in candidate could be.
- * C++20's rewritten candidates (/3.4) are those of operator==; operator<=>
- * is not analysed (operator_function_id), so a relational operator has none.
+ * C++20's rewritten candidates (/3.4) are those of operator== and
+ * operator<=>; a rewritten x @ y is (x <=> y) @ 0 of a three-way
+ * comparison whose result is of arithmetic type (<compare>'s types are not
+ * analysed).
  */
 #include "../cplusplus-internal.h"
 #include "frontend/cplusplus/sema.h"
@@ -201,6 +203,24 @@ analysis_result semantic_analysis::overloaded_operator(
         r = collect(equality, true, false);
     if (r == analysis_result::well_formed && rewrites)
         r = collect(equality, true, true);
+    /* "For the relational ([expr.rel]) operators, the rewritten candidates
+       include all non-rewritten candidates for the expression x <=> y.  For
+       the relational ([expr.rel]) and three-way comparison ([expr.spaceship])
+       operators, the rewritten candidates also include a synthesized
+       candidate, with the order of the two parameters reversed, for each
+       non-rewritten candidate for the expression y <=> x." */
+    bool three_way =
+        tokens.files.behavior.has(
+            language_feature::three_way_comparison_operator) &&
+        (op == preprocessing_op_or_punc::SPACESHIP ||
+         (is_comparison(op) && op != preprocessing_op_or_punc::EQUAL_EQUAL &&
+          op != preprocessing_op_or_punc::EXCLAMATION_EQUAL));
+    uint32_t spaceship = operator_name(preprocessing_op_or_punc::SPACESHIP);
+    if (r == analysis_result::well_formed && three_way &&
+        op != preprocessing_op_or_punc::SPACESHIP)
+        r = collect(spaceship, true, false);
+    if (r == analysis_result::well_formed && three_way)
+        r = collect(spaceship, true, true);
     if (r != analysis_result::well_formed)
         return r;
     if (candidates.empty())
@@ -285,7 +305,14 @@ analysis_result semantic_analysis::overloaded_operator(
              stripped(parameters[1]) != operands[1].type.unqualified()))
             return not_supported(n, "over.built");
     }
-    if (c.rewritten) {
+    bool from_three_way =
+        c.rewritten && x.implemented == preprocessing_op_or_punc::SPACESHIP;
+    if (from_three_way &&
+        (!any_class || op == preprocessing_op_or_punc::SPACESHIP))
+        /* an enumeration's built-in candidates against a rewritten one;
+           0 <=> (y <=> x), whose built-in <=> is not analysed */
+        return not_supported(n, "over.match.oper");
+    if (c.rewritten && !from_three_way) {
         /* /9: "If a rewritten operator== candidate is selected by overload
            resolution for an operator @, its return type shall be cv bool" */
         qualified_type result =
@@ -360,6 +387,38 @@ analysis_result semantic_analysis::overloaded_operator(
                   call_arguments, m);
     if (r != analysis_result::well_formed)
         return r;
+    if (from_three_way) {
+        /* /8: "If a rewritten operator<=> candidate is selected by overload
+           resolution for an operator @, x @ y is interpreted as 0 @ (y <=>
+           x) if the selected candidate is a synthesized candidate with
+           reversed order of parameters, or (x <=> y) @ 0 otherwise, using
+           the selected rewritten operator<=> candidate." */
+        if (fundamental_of(m.type) == fundamental_type::none)
+            /* a comparison category type of <compare> */
+            return not_supported(n, "over.match.oper");
+        expression_meaning zero;
+        zero.type = qualified_type::make(
+            type_table.fundamental(fundamental_type::int_), cv_none);
+        zero.category = value_category::prvalue;
+        zero.evaluation = constness::constant;
+        zero.value = 0;
+        zero.zero_literal = true;
+        zero.node = expression_node(semantic_kind::constant, zero, at);
+        expression_meaning three = m;
+        expression_meaning *left = &three, *right = &zero;
+        if (c.reversed) {
+            left = &zero;
+            right = &three;
+        }
+        r = operand_value(n, *left);
+        if (r == analysis_result::well_formed)
+            r = operand_value(n, *right);
+        if (r == analysis_result::well_formed)
+            r = comparison(n, op, *left, *right, m);
+        r = binary_built(r, at, op, *left, *right, m);
+        if (r != analysis_result::well_formed)
+            return r;
+    }
     if (c.rewritten && op == preprocessing_op_or_punc::EXCLAMATION_EQUAL) {
         /* /9: x != y is "!(x == y)", or "!(y == x)" */
         expression_meaning negated;

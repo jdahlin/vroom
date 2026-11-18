@@ -89,6 +89,7 @@ analysis_result semantic_analysis::expression_kind(syntax_child e,
     case syntax_kind::cast_expression:
         return cast(n, m);
     case syntax_kind::pm_expression:
+    case syntax_kind::compare_expression:
     case syntax_kind::multiplicative_expression:
     case syntax_kind::additive_expression:
     case syntax_kind::shift_expression:

@@ -477,6 +477,7 @@ bool itanium_mangler::source_name(uint32_t identifier)
  *                     ::= cm        # ,
  *                     ::= pm        # ->*
  *                     ::= pt        # ->
+ *                     ::= ss        # <=>
  *
  * and rs (>>), rS (>>=), gt (>) and ge (>=), whose lines the grammar
  * index lost.  The unary forms of + - & * are the operator functions of one operand,
@@ -612,6 +613,9 @@ bool itanium_mangler::operator_name(const entity &x)
         break;
     case preprocessing_op_or_punc::ARROW:
         code = "pt";
+        break;
+    case preprocessing_op_or_punc::SPACESHIP:
+        code = "ss";
         break;
     default:
         return false;
