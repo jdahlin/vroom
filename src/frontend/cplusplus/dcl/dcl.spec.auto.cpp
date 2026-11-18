@@ -298,8 +298,19 @@ analysis_result semantic_analysis::deduced_initializer(syntax_child init,
     analysis_result r = expression(clause, m);
     if (r != analysis_result::well_formed)
         return r;
+    return deduced_initialization(n, m, names_entity(clause), direct, list, e,
+                                  type, value);
+}
+
+/* ... the initializer's expression analysed as m (named: names_entity of
+   it) */
+analysis_result semantic_analysis::deduced_initialization(
+    node_index n, expression_meaning &m, bool named, bool direct, bool list,
+    entity_index e, qualified_type &type, initialized_value &value)
+{
     qualified_type replacement;
-    r = deduce_placeholder(n, type, m, names_entity(clause), type, replacement);
+    analysis_result r =
+        deduce_placeholder(n, type, m, named, type, replacement);
     if (r != analysis_result::well_formed)
         return r;
     /* [dcl.spec.auto]/7: "if the type that replaces the placeholder type is

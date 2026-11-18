@@ -771,7 +771,7 @@ analysis_result semantic_analysis::alias_template_definition(node_index n,
 }
 
 /*
- * [temp.spec.partial]/1 (C++20 [temp.class.spec] with [temp.pre]/1's
+ * [temp.class.spec]/1 (with [temp.pre]/1's
  * variable templates): template<class T> const bool v<T, void_t<T&>> =
  * true;: a partial specialization of a variable template, recorded as a
  * class template's is (class_specialization_definition): its arguments in
@@ -848,7 +848,7 @@ analysis_result semantic_analysis::variable_partial_specialization(
 }
 
 /*
- * [temp.spec.partial.general]/1 (CWG 1980): a partial specialization
+ * [temp.class.spec]/1 (CWG 1980): a partial specialization
  * equivalent to another of the template (each at least as specialized as
  * the other: their arguments the same but for the names of their
  * parameters, void_t<typename T::a> and void_t<typename T::b> both void)

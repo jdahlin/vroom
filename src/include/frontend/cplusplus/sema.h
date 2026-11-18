@@ -2176,6 +2176,14 @@ class semantic_analysis
     analysis_result increment(node_index n, syntax_child operand,
                               bool decrement, bool postfix,
                               expression_meaning &m);
+    /* ... of the operand analysed as m (syntax operand, if it has one),
+       the operator at the token at */
+    analysis_result increment_of(node_index n, token_index at,
+                                 syntax_child operand, bool decrement,
+                                 bool postfix, expression_meaning &m);
+    /* [expr.unary.op]/1, [over.unary]: *m, as increment_of */
+    analysis_result indirection_of(node_index n, token_index at,
+                                   syntax_child operand, expression_meaning &m);
     /* [expr.post] */
     analysis_result postfix(node_index n, expression_meaning &m);
     /* [expr.ref]: E1.E2 and E1->E2 */
@@ -2204,6 +2212,15 @@ class semantic_analysis
                                        bool &handled);
     /* [expr.mul] to [expr.log.or] */
     analysis_result binary(node_index n, expression_meaning &m);
+    /* E1 op E2 of the operands analysed (their syntax, none for operands
+       [stmt.ranged]/1 makes): an operator function ([over.binary]) or the
+       built-in operator */
+    analysis_result binary_of(node_index n, token_index at,
+                              preprocessing_op_or_punc op,
+                              syntax_child left_syntax,
+                              expression_meaning &left,
+                              syntax_child right_syntax,
+                              expression_meaning &right, expression_meaning &m);
     analysis_result builtin_binary(node_index n, token_index at,
                                    preprocessing_op_or_punc op,
                                    expression_meaning &left,
@@ -2519,6 +2536,10 @@ class semantic_analysis
     analysis_result deduced_initializer(syntax_child init, entity_index e,
                                         qualified_type &type,
                                         initialized_value &value);
+    analysis_result deduced_initialization(node_index n, expression_meaning &m,
+                                           bool named, bool direct, bool list,
+                                           entity_index e, qualified_type &type,
+                                           initialized_value &value);
     /* the object or reference of type type (an array of unknown bound gets
        its bound) initialized by the initializer node (a
        brace-or-equal-initializer, initializer or braced-init-list) */
@@ -3516,6 +3537,21 @@ class semantic_analysis
     analysis_result expression_statement(node_index n, uint32_t &built);
     analysis_result selection_statement(node_index n, uint32_t &built);
     analysis_result iteration_statement(node_index n, uint32_t &built);
+    /* [stmt.ranged]: the range-based for statement n, whose
+       for-range-declaration is its child declaration */
+    analysis_result range_based_for(node_index n, uint32_t declaration,
+                                    uint32_t &built);
+    analysis_result exposition_variable(node_index n, token_index at,
+                                        expression_meaning &m,
+                                        qualified_type type, bool named,
+                                        uint32_t &declaration,
+                                        expression_meaning &variable);
+    analysis_result range_call(node_index n, token_index at,
+                               const expression_meaning &range, uint32_t name,
+                               bool member, expression_meaning &m);
+    analysis_result for_range_declaration(syntax_child d,
+                                          const expression_meaning &element,
+                                          uint32_t &built);
     analysis_result jump_statement(node_index n, uint32_t &built);
     analysis_result labeled_statement(node_index n, uint32_t &built);
     analysis_result case_label(node_index n, syntax_child value,
@@ -3981,12 +4017,13 @@ class semantic_analysis
                                     qualified_type type, bool direct, bool list,
                                     initialized_value &result);
     /* a declarator and its initializer (none if !initialized), as in an
-       init-declarator or a condition */
-    analysis_result declare_with_initializer(node_index declaration,
-                                             syntax_child d, syntax_child init,
-                                             bool initialized,
-                                             const specified &s,
-                                             bool definition);
+       init-declarator or a condition; supplied, if not null, is an
+       initializer analysed already ("= E", [stmt.ranged]/1; init none) */
+    analysis_result
+    declare_with_initializer(node_index declaration, syntax_child d,
+                             syntax_child init, bool initialized,
+                             const specified &s, bool definition,
+                             const expression_meaning *supplied = nullptr);
 
     const syntax_tree &tree;
     token_stream &tokens;

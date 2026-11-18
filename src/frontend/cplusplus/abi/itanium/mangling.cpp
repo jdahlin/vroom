@@ -296,9 +296,9 @@ bool itanium_mangler::specialization_encoding(entity_index e)
     candidates.append(c);
     if (!template_args(e, pattern_of))
         return false;
-    /* [abi:mangle.template-args]: <template-args> ::= I <template-arg>+
-       [Q <requires-clause expression>] E; the requires-clause of the
-       template-head */
+    /* [abi:mangle.template-arg]'s template-args, with [impl.clang]'s
+       requires-clause: I, the template-args, Q and the requires-clause's
+       expression, E; the requires-clause of the template-head */
     syntax_child constraint = analysis.template_constraint(pattern_of);
     if (constraint.bits) {
         out->n--;
@@ -317,12 +317,10 @@ bool itanium_mangler::specialization_encoding(entity_index e)
 }
 
 /*
- * [abi:mangle.expression] of a requires-clause, as far as it is written
+ * [abi:expressions] of a requires-clause, as far as it is written
  * with concept-ids of the template's parameters (each an
- * <unresolved-name> with its <template-args>), !, && and ||:
- *
- *     <expression> ::= <operator-name> <expression>          # nt
- *                  ::= <operator-name> <expression> <expression> # aa, oo
+ * <unresolved-name> with its <template-args>), !, && and ||: an
+ * operator's name (nt, aa, oo), then its one or two operands.
  *
  * Parentheses are not mangled.  Anything else: not mangled yet.
  */
@@ -607,8 +605,11 @@ bool itanium_mangler::class_enum_type(qualified_type t)
        prefix, is a <substitution> before the arguments */
     if (x.instantiation && x.enclosing && !is_std(x.enclosing) &&
         !local_function(c)) {
-        /* <nested-name> ::= N <template-prefix> <template-args> E, the
-           <template-prefix> a <substitution> */
+        /* [abi:mangle.name]:
+
+               <nested-name> ::= N [<CV-qualifiers>] [<ref-qualifier>] <template-prefix> <template-args> E
+
+           with the <template-prefix> a <substitution> */
         size_t before = out->n;
         text("N");
         if (substitution(analysis.specialized_template(c))) {
@@ -1560,10 +1561,10 @@ bool itanium_mangler::type(qualified_type t)
     else if (r.kind == type_kind::dependent &&
              analysis.entity_table[r.entity].kind ==
                  entity_kind::type_transformation) {
-        /* [abi:mangle.vendor-qualifier]'s vendor extended type, as clang
+        /* [abi:mangling-builtin]'s vendor extended type, as clang
            mangles a type transformation of a dependent operand:
 
-               <type> ::= u <source-name> [<template-args>]
+               <builtin-type> ::= u <source-name> [<template-args>]
 
            the keyword's name, its operand the one template-arg */
         uint64_t operand = analysis.entity_table[r.entity].value;

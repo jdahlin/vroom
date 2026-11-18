@@ -61,6 +61,8 @@ EXTENSION(gnu_compound_literals, gnu,
 EXTENSION(clang_feature_checks, clang,
           "clang Language Extensions, Feature Checking Macros: __has_feature, __has_builtin, ...")
 EXTENSION(clang_has_include_next, clang, "clang Language Extensions: __has_include_next")
+EXTENSION(clang_builtin_templates, clang,
+          "clang's BuiltinTemplates.td: __builtin_common_type, ...")
 EXTENSION(clang_file_name_macro, clang, "clang Language Extensions: __FILE_NAME__")
 EXTENSION(clang_flt_eval_method, clang,
           "__FLT_EVAL_METHOD__, as #pragma clang fp eval_method sets it (0 on this target)")

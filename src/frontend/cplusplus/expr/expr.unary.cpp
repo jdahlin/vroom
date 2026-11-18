@@ -379,6 +379,17 @@ analysis_result semantic_analysis::increment(node_index n, syntax_child operand,
     analysis_result r = expression(operand, m);
     if (r != analysis_result::well_formed)
         return r;
+    return increment_of(n, tree[n].first_token, operand, decrement, postfix, m);
+}
+
+/* ... of the operand analysed as m (its syntax operand, none for an
+   operand [stmt.ranged]/1 makes) */
+analysis_result semantic_analysis::increment_of(node_index n, token_index at,
+                                                syntax_child operand,
+                                                bool decrement, bool postfix,
+                                                expression_meaning &m)
+{
+    analysis_result r = analysis_result::well_formed;
     {
         /* [over.inc]: an operand of class or enumeration type
            ([over.match.oper]/2) */
@@ -386,8 +397,7 @@ analysis_result semantic_analysis::increment(node_index n, syntax_child operand,
         if (decrement)
             op = preprocessing_op_or_punc::MINUS_MINUS;
         bool handled = false;
-        r = unary_operator_function(n, tree[n].first_token, op, postfix,
-                                    operand, m, handled);
+        r = unary_operator_function(n, at, op, postfix, operand, m, handled);
         if (r != analysis_result::well_formed || handled)
             return r;
     }
@@ -445,8 +455,8 @@ analysis_result semantic_analysis::increment(node_index n, syntax_child operand,
         if (decrement)
             kind = increment_kind::post_decrement;
     }
-    m.node = expression_node(semantic_kind::increment, m, tree[n].first_token,
-                             m.node, 0, static_cast<uint8_t>(kind));
+    m.node = expression_node(semantic_kind::increment, m, at, m.node, 0,
+                             static_cast<uint8_t>(kind));
     return analysis_result::well_formed;
 }
 
@@ -493,6 +503,8 @@ analysis_result semantic_analysis::unary(node_index n, expression_meaning &m)
         return analysis_result::well_formed;
     const implementation_defined_behavior &b = tokens.files.behavior;
     token_index at = children[0].index();
+    if (o == preprocessing_op_or_punc::STAR)
+        return indirection_of(n, at, children[1], m);
     /* [over.unary]: an operand of class or enumeration type
        ([over.match.oper]/2) */
     bool handled = false;
@@ -518,34 +530,6 @@ analysis_result semantic_analysis::unary(node_index n, expression_meaning &m)
         if (m.bit_field_width)
             return address_of_bit_field(tree[n].first_token);
         address_of_glvalue(at, m);
-        return analysis_result::well_formed;
-    }
-    case preprocessing_op_or_punc::STAR: {
-        /* [expr.unary.op]/1: "the expression to which it is applied shall
-           be a pointer to an object type, or a pointer to a function type
-           and the result is an lvalue referring to the object or function
-           to which the expression points.  If the type of the expression
-           is "pointer to T", the type of the result is "T"." */
-        r = operand_value(n, m);
-        if (r != analysis_result::well_formed)
-            return r;
-        if (!is_pointer(m.type)) {
-            if (fundamental_of(m.type) == fundamental_type::none)
-                return not_supported(n, "expr.unary.op");
-            return ill_formed(n,
-                              "the operand of unary * shall be a pointer to an "
-                              "object type, or a pointer to a function type",
-                              "expr.unary.op");
-        }
-        qualified_type pointee = type_table[m.type.unqualified()].operand;
-        if (fundamental_of(pointee) == fundamental_type::void_)
-            /* clang's extension, a warning */
-            return not_supported(n, "expr.unary.op");
-        m.type = pointee;
-        m.category = value_category::lvalue;
-        if (m.evaluation != constness::not_constant)
-            m.evaluation = constness::unknown;
-        m.node = expression_node(semantic_kind::indirection, m, at, m.node);
         return analysis_result::well_formed;
     }
     case preprocessing_op_or_punc::PLUS:
@@ -611,6 +595,49 @@ analysis_result semantic_analysis::unary(node_index n, expression_meaning &m)
     }
     m.node = expression_node(semantic_kind::unary, m, at, m.node, 0,
                              static_cast<uint8_t>(o));
+    return analysis_result::well_formed;
+}
+
+/* [expr.unary.op]/1: *m of the operand analysed as m (its syntax operand,
+   none for an operand [stmt.ranged]/1 makes) */
+analysis_result semantic_analysis::indirection_of(node_index n, token_index at,
+                                                  syntax_child operand,
+                                                  expression_meaning &m)
+{
+    {
+        /* [over.unary]: an operand of class or enumeration type
+           ([over.match.oper]/2) */
+        bool handled = false;
+        analysis_result r = unary_operator_function(
+            n, at, preprocessing_op_or_punc::STAR, false, operand, m, handled);
+        if (r != analysis_result::well_formed || handled)
+            return r;
+    }
+    /* [expr.unary.op]/1: "the expression to which it is applied shall
+       be a pointer to an object type, or a pointer to a function type
+       and the result is an lvalue referring to the object or function
+       to which the expression points.  If the type of the expression
+       is "pointer to T", the type of the result is "T"." */
+    analysis_result r = operand_value(n, m);
+    if (r != analysis_result::well_formed)
+        return r;
+    if (!is_pointer(m.type)) {
+        if (fundamental_of(m.type) == fundamental_type::none)
+            return not_supported(n, "expr.unary.op");
+        return ill_formed(n,
+                          "the operand of unary * shall be a pointer to an "
+                          "object type, or a pointer to a function type",
+                          "expr.unary.op");
+    }
+    qualified_type pointee = type_table[m.type.unqualified()].operand;
+    if (fundamental_of(pointee) == fundamental_type::void_)
+        /* clang's extension, a warning */
+        return not_supported(n, "expr.unary.op");
+    m.type = pointee;
+    m.category = value_category::lvalue;
+    if (m.evaluation != constness::not_constant)
+        m.evaluation = constness::unknown;
+    m.node = expression_node(semantic_kind::indirection, m, at, m.node);
     return analysis_result::well_formed;
 }
 
