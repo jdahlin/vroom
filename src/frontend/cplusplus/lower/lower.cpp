@@ -1775,18 +1775,50 @@ uint32_t c_lowering::address_of(uint32_t lvalue, ast_qualified_type pointer)
     return make(AST_NODE_ADDRESS, pointer, lvalue, 0, 0, 0, 0);
 }
 
-/* a glvalue as a C lvalue, failing when C has none for it (an assignment
-   or increment used as an object) */
+/* a glvalue as a C lvalue.  [expr.ass]/1 and [expr.pre.incr]/1: an
+   assignment's or prefix increment's result is its left operand, an
+   lvalue, which C's is not: *({ T *p; p = &lhs; *p op= rhs; p; }), the
+   left operand evaluated once */
 uint32_t c_lowering::object(uint32_t n)
 {
     uint32_t made = expression(n);
     if (!made)
         return 0;
     const struct node &x = ast_builder_ast(c)->nodes[made];
-    if (!(x.flags & AST_NODE_FLAG_LVALUE) &&
-        record(node(n).type).kind != type_kind::function)
+    if ((x.flags & AST_NODE_FLAG_LVALUE) ||
+        record(node(n).type).kind == type_kind::function)
+        return made;
+    bool assigns = x.op == AST_NODE_ASSIGN || x.op == AST_NODE_PRE_INCREMENT ||
+                   x.op == AST_NODE_PRE_DECREMENT;
+    if (!assigns || !in_function)
         return fail("an assignment or increment used as an object", node(n).at);
-    return made;
+    uint32_t left = x.a;
+    ast_qualified_type t = type_of(left);
+    ast_qualified_type pointer = ast_builder_type_pointer(c, t);
+    ast_qualified_type v = ast_builder_type_basic(AST_TYPE_VOID);
+    uint32_t symbol = ast_builder_symbol(c, AST_SYMBOL_VARIABLE, "", 0, pointer,
+                                         AST_STORAGE_AUTO, 0, 1);
+    auto variable = [&] {
+        return make(AST_NODE_VARIABLE, pointer, symbol, 0, 0, 0,
+                    AST_NODE_FLAG_LVALUE);
+    };
+    uint32_t items[4];
+    items[0] = ast_builder_node(c, AST_NODE_DECLARATION, v, symbol, 0, 0, 0, 0);
+    items[1] = ast_builder_node(c, AST_NODE_EXPRESSION, v,
+                                make(AST_NODE_ASSIGN, pointer, variable(),
+                                     address_of(left, pointer), 0, 0, 0),
+                                0, 0, 0, 0);
+    /* the assignment, through p */
+    uint32_t through = make(AST_NODE_DEREFERENCE, t, variable(), 0, 0, 0,
+                            AST_NODE_FLAG_LVALUE);
+    ast_builder_ast(c)->nodes[made].a = through;
+    items[2] = ast_builder_node(c, AST_NODE_EXPRESSION, v, made, 0, 0, 0, 0);
+    items[3] = ast_builder_node(c, AST_NODE_EXPRESSION, pointer, variable(), 0,
+                                0, 0, 0);
+    uint32_t address = make(AST_NODE_STATEMENT_EXPRESSION, pointer,
+                            block(items, 4), 0, 0, 0, 0);
+    return make(AST_NODE_DEREFERENCE, t, address, 0, 0, 0,
+                AST_NODE_FLAG_LVALUE);
 }
 
 /* [conv.lval]/3.4: the value of a glvalue: "the value contained in the
