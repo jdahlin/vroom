@@ -90,7 +90,7 @@ qualified_type semantic_analysis::function_returning(qualified_type f,
         parameters.append(list[i]);
     return qualified_type::make(type_table.function(returns, parameters.data(),
                                                     parameters.size(),
-                                                    r.variadic),
+                                                    r.variadic, r.non_throwing),
                                 f.cv());
 }
 

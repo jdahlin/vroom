@@ -965,6 +965,76 @@ analysis_result semantic_analysis::template_callee_parts(
     return analysis_result::well_formed;
 }
 
+/*
+ * [temp.over]/1: "For each function template, if the argument deduction
+ * and checking succeeds, the template-arguments (deduced and/or explicit)
+ * are used to synthesize the declaration of a single function template
+ * specialization which is added to the candidate functions set to be used
+ * in overload resolution."  Each candidate's declaration is instantiated
+ * ([temp.inst]/5: not its definition, which only the one chosen needs);
+ * with first_arguments, where each one's arguments start in all.  A call
+ * of a template's name and an operator expression ([over.match.oper]/3)
+ * both form them here.
+ */
+analysis_result semantic_analysis::template_candidates(
+    node_index n, const owned_array<uint32_t> &group,
+    const expression_meaning *meanings, uint32_t count,
+    owned_array<overload_candidate> &candidates,
+    owned_array<uint32_t> *first_arguments, owned_array<template_argument> *all)
+{
+    for (uint32_t g : group) {
+        owned_array<template_argument> d;
+        bool failed = false;
+        /* [temp.deduct]/8: an invalid type or expression in the
+           immediate context of the declaration (or of a default
+           template-argument) substituted is no candidate, and no
+           diagnostic: what substitution issued is taken back */
+        size_t messages = diagnostics.messages.size();
+        size_t errors = diagnostics.error_count;
+        size_t warnings = diagnostics.warning_count;
+        size_t fatals = diagnostics.fatal_count;
+        size_t expressions_before = expressions.size();
+        size_t uses_before = name_uses.size();
+        uint32_t failures = definition_failures;
+        substituting++;
+        analysis_result r = deduce_from_call(n, g, meanings, count, d, &failed);
+        entity_index e = 0;
+        const struct function_template ft = function_templates[g - 1];
+        if (r == analysis_result::well_formed && !failed) {
+            unevaluated++;
+            r = instantiate(n, ft.entity, d.data(),
+                            static_cast<uint32_t>(d.size()), e);
+            unevaluated--;
+        }
+        substituting--;
+        if (r == analysis_result::ill_formed &&
+            failures == definition_failures &&
+            diagnostics.fatal_count == fatals) {
+            diagnostics.messages.resize(messages);
+            diagnostics.error_count = errors;
+            diagnostics.warning_count = warnings;
+            expressions.resize(expressions_before);
+            name_uses.resize(uses_before);
+            continue;
+        }
+        if (r != analysis_result::well_formed)
+            return r;
+        if (failed)
+            continue;
+        overload_candidate c;
+        c.function = e;
+        c.type = entity_table[e].type;
+        c.template_index = g;
+        candidates.append(c);
+        if (first_arguments) {
+            first_arguments->append(static_cast<uint32_t>(all->size()));
+            for (const template_argument &x : d)
+                all->append(x);
+        }
+    }
+    return analysis_result::well_formed;
+}
+
 analysis_result semantic_analysis::template_call(
     node_index n, token_index name, uint32_t function_template,
     owned_array<template_argument> &specified, bool qualified,
@@ -1036,14 +1106,7 @@ analysis_result semantic_analysis::template_call(
             functions.append(x.function);
     entity_index specialization = 0;
     if (group.size() > 1 || !functions.empty()) {
-        /* [temp.over]/1: "For each function template, if the argument
-           deduction and checking succeeds, the template-arguments
-           (deduced and/or explicit) are used to synthesize the
-           declaration of a single function template specialization which
-           is added to the candidate functions set to be used in overload
-           resolution."  Each candidate's declaration is instantiated
-           ([temp.inst]/5: not its definition, which only the one chosen
-           needs) */
+        /* [temp.over]/1: template_candidates */
         owned_array<overload_candidate> candidates;
         owned_array<uint32_t> first_arguments;
         owned_array<template_argument> all;
@@ -1054,56 +1117,11 @@ analysis_result semantic_analysis::template_call(
             candidates.append(c);
             first_arguments.append(0);
         }
-        for (uint32_t g : group) {
-            owned_array<template_argument> d;
-            bool failed = false;
-            /* [temp.deduct]/8: an invalid type or expression in the
-               immediate context of the declaration (or of a default
-               template-argument) substituted is no candidate, and no
-               diagnostic: what substitution issued is taken back */
-            size_t messages = diagnostics.messages.size();
-            size_t errors = diagnostics.error_count;
-            size_t warnings = diagnostics.warning_count;
-            size_t fatals = diagnostics.fatal_count;
-            size_t expressions_before = expressions.size();
-            size_t uses_before = name_uses.size();
-            uint32_t failures = definition_failures;
-            substituting++;
-            analysis_result r = deduce_from_call(
-                n, g, meanings, static_cast<uint32_t>(early.size()), d,
-                &failed);
-            entity_index e = 0;
-            const struct function_template ft = function_templates[g - 1];
-            if (r == analysis_result::well_formed && !failed) {
-                unevaluated++;
-                r = instantiate(n, ft.entity, d.data(),
-                                static_cast<uint32_t>(d.size()), e);
-                unevaluated--;
-            }
-            substituting--;
-            if (r == analysis_result::ill_formed &&
-                failures == definition_failures &&
-                diagnostics.fatal_count == fatals) {
-                diagnostics.messages.resize(messages);
-                diagnostics.error_count = errors;
-                diagnostics.warning_count = warnings;
-                expressions.resize(expressions_before);
-                name_uses.resize(uses_before);
-                continue;
-            }
-            if (r != analysis_result::well_formed)
-                return r;
-            if (failed)
-                continue;
-            overload_candidate c;
-            c.function = e;
-            c.type = entity_table[e].type;
-            c.template_index = g;
-            candidates.append(c);
-            first_arguments.append(static_cast<uint32_t>(all.size()));
-            for (const template_argument &x : d)
-                all.append(x);
-        }
+        analysis_result added = template_candidates(
+            n, group, meanings, static_cast<uint32_t>(early.size()), candidates,
+            &first_arguments, &all);
+        if (added != analysis_result::well_formed)
+            return added;
         if (candidates.empty())
             /* (deduction failed for each: no viable function, which
                clang reports with each template's reason) */

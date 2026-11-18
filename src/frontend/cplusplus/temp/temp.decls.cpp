@@ -193,21 +193,19 @@ semantic_analysis::function_template_definition(node_index n,
         return head;
     const syntax_node &d = tree[definition];
     /* a function-definition, or a simple-declaration of one declarator
-       without an initializer: the template declared, defined later */
+       without an initializer: the template declared, defined later;
+       [ext:gnu_attributes] before it, its specializations' */
     bool defines = d.kind == syntax_kind::function_definition;
-    if (leading_gnu_attributes(definition) || d.child_count != 3 ||
-        !syntax_is(tree, tree.children(definition)[0],
-                   syntax_kind::decl_specifier_seq) ||
-        tree.children(definition)[1].is_token() ||
-        (defines && !syntax_is(tree, tree.children(definition)[2],
-                               syntax_kind::function_body)) ||
-        (!defines &&
-         (!syntax_is_punctuator(tokens, tree.children(definition)[2],
-                                preprocessing_op_or_punc::SEMICOLON) ||
-          (!syntax_is(tree, tree.children(definition)[1],
-                      syntax_kind::noptr_declarator) &&
-           !syntax_is(tree, tree.children(definition)[1],
-                      syntax_kind::ptr_declarator)))))
+    uint32_t lead = leading_gnu_attributes(definition);
+    const syntax_child *dc = tree.children(definition) + lead;
+    if (d.child_count != lead + 3 ||
+        !syntax_is(tree, dc[0], syntax_kind::decl_specifier_seq) ||
+        dc[1].is_token() ||
+        (defines && !syntax_is(tree, dc[2], syntax_kind::function_body)) ||
+        (!defines && (!syntax_is_punctuator(
+                          tokens, dc[2], preprocessing_op_or_punc::SEMICOLON) ||
+                      (!syntax_is(tree, dc[1], syntax_kind::noptr_declarator) &&
+                       !syntax_is(tree, dc[1], syntax_kind::ptr_declarator)))))
         return not_supported(n, "temp.fct");
     uint32_t index = 0, first = 0;
     entity_index scope = 0;
@@ -223,26 +221,38 @@ semantic_analysis::function_template_definition(node_index n,
     specified s;
     declarator_meaning m;
     qualified_type type;
-    analysis_result r =
-        decl_specifier_seq(tree.children(definition)[0].index(), s, false);
+    analysis_result r = decl_specifier_seq(dc[0].index(), s, false);
+    for (uint32_t i = 0; i < lead && r == analysis_result::well_formed; i++)
+        r = gnu_attribute_specifier(tree.children(definition)[i].index(), s);
     if (r == analysis_result::well_formed) {
         type = s.type;
         function_cv = 0;
         function_parameters.clear();
-        r = declarator(definition, tree.children(definition)[1], type, m);
+        r = declarator(definition, dc[1], type, m);
     }
     current_scope = outer;
     expressions.resize(expressions_before);
     name_uses.resize(uses_before);
     if (r != analysis_result::well_formed)
         return r;
+    /* an operator function template (libc++'s byte& operator<<=(byte&,
+       _Integer)): its name is operator@ ([over.oper]); not new or delete */
     if (!m.has_id || m.qualifier || m.qualified_namespace ||
-        m.operator_function || m.literal_operator || function_cv ||
+        m.allocation != allocation_function::none || m.literal_operator ||
+        function_cv ||
         type_table[type.unqualified()].kind != type_kind::function)
         return not_supported(n, "temp.fct");
-    if (s.typedef_ || s.extern_ || c_language || s.gnu_flags || m.gnu_flags ||
-        s.aligned || m.aligned || s.section || m.section)
+    /* [ext:gnu_attributes] its specializations' symbols' (given them at
+       instantiation) */
+    uint32_t gnu_flags = s.gnu_flags | m.gnu_flags;
+    if (s.typedef_ || s.extern_ || c_language ||
+        (gnu_flags & ~gnu_function_symbol_flags) || s.aligned || m.aligned ||
+        s.section || m.section ||
+        (s.abi_tag && m.abi_tag && s.abi_tag != m.abi_tag))
         return not_supported(n, "temp.fct");
+    token_index abi_tag = m.abi_tag;
+    if (!abi_tag)
+        abi_tag = s.abi_tag;
     for (const parameter_meaning &p : function_parameters)
         if (p.default_argument.index())
             return not_supported(n, "dcl.fct.default");
@@ -359,11 +369,17 @@ semantic_analysis::function_template_definition(node_index n,
     }
     function_template record = new_template(
         name, outer, n, index, first, static_cast<uint32_t>(parameters.size()));
+    record.gnu_flags = gnu_flags;
+    record.abi_tag = abi_tag;
     entity_index t = record.entity;
     entity_table[t].type = type;
     entity_table[t].defined = defines;
     entity_table[t].inline_ = s.inline_;
     entity_table[t].constexpr_ = s.constexpr_;
+    /* [over.oper]: an operator function template's specializations are
+       operator functions (named by the operator: [abi:mangling-operator]) */
+    entity_table[t].operator_function = m.operator_function;
+    entity_table[t].implemented = m.implemented;
     /* [basic.link]/3.1: a function template declared static has internal
        linkage */
     if (s.static_)
@@ -397,8 +413,18 @@ semantic_analysis::function_template_definition(node_index n,
     size_t before = entity_table.size();
     /* (another function template of the name, group, keeps it: the
        name's templates are overloaded, [temp.over]) */
+    /* (an operator function template is followed: operator expressions
+       find it, over.match.oper) */
+    bool operators_were_held = operators_held;
     hold_names(n);
+    operators_held = operators_were_held;
     entity_index held = entity_table.find(outer, name);
+    if (!held && m.operator_function) {
+        /* (hold_names holds identifiers: an operator's name is held here) */
+        held = entity_table.make(entity_kind::none, name, outer);
+        entity_table[held].held_by_template = true;
+        entity_table.bind(outer, name, held);
+    }
     record.name = held;
     bool overload = (!group.empty() || !functions.empty()) && own &&
                     held == prior &&
@@ -505,15 +531,16 @@ analysis_result semantic_analysis::declare_template_parameters(
             current_scope = saved;
             if (r != analysis_result::well_formed)
                 return r;
-            /* [temp.param]/4 with a type that is one of this template's
-               type parameters declared before it (template <class T, T v>,
-               libc++'s integral_constant): an argument gives its type
-               (template_argument_for); any other dependent type has no
-               rules yet */
+            /* [temp.param]/4 with a type that depends on this template's
+               parameters declared before it: template <class T, T v>
+               (libc++'s integral_constant), whose argument gives its
+               type, or typename enable_if<B, int>::type = 0 (libc++'s
+               SFINAE), analysed again with the arguments
+               (template_argument_for) */
             bool own_parameter_type =
                 own_type_parameter_position(type, scope, first) != UINT32_MAX;
-            if ((!own_parameter_type && (!structural_parameter_type(type) ||
-                                         depends(type_table, type))) ||
+            if ((!own_parameter_type && !depends(type_table, type) &&
+                 !structural_parameter_type(type)) ||
                 sp.typedef_ || sp.static_ || sp.extern_ || sp.constexpr_ ||
                 sp.inline_ || sp.gnu_flags)
                 return not_supported(node, "temp.param");

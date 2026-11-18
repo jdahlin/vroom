@@ -1,2 +1,2 @@
-member-conversion-function.cpp:4:5: error: the rules of [class.conv.fct] are not implemented yet
-member-conversion-function.cpp:4:5: note: refused by vcc's frontend/cplusplus/class/class.pre.cpp:N (member_declaration)
+member-conversion-function.cpp:6:7: error: the rules of [class.temporary] are not implemented yet
+member-conversion-function.cpp:6:7: note: refused by vcc's frontend/cplusplus/class/class.conv.fct.cpp:N (conversion_function_call)

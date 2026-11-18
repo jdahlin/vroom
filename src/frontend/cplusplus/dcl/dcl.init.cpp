@@ -474,8 +474,10 @@ analysis_result semantic_analysis::reference_binding(node_index at,
             return not_supported(at, "dcl.init.ref");
         return reference_binding(at, m, reference);
     }
-    if (x.kind == type_kind::class_type || x.kind == type_kind::enumeration ||
-        y.kind == type_kind::class_type || y.kind == type_kind::enumeration ||
+    /* an enumeration has no conversion functions: its rules are a
+       fundamental type's (libc++'s byte& operator|=(byte&, byte) returns
+       the assignment's lvalue) */
+    if (x.kind == type_kind::class_type || y.kind == type_kind::class_type ||
         x.kind == type_kind::none || y.kind == type_kind::none)
         return not_supported(at, "dcl.init.ref");
     qualified_type p1 =
@@ -483,7 +485,8 @@ analysis_result semantic_analysis::reference_binding(node_index at,
     qualified_type p2 =
         qualified_type::make(type_table.pointer_to(t2), cv_none);
     bool compatible = p1.unqualified() == p2.unqualified() ||
-                      qualification_convertible(p2, p1);
+                      qualification_convertible(p2, p1) ||
+                      function_pointer_convertible(p2, p1);
     bool related = similar(qualified_type::make(t1.unqualified(), cv_none),
                            qualified_type::make(t2.unqualified(), cv_none));
     bool function_lvalue =
@@ -532,6 +535,9 @@ analysis_result semantic_analysis::reference_binding(node_index at,
                               "initializer expression shall not be an lvalue",
                               "dcl.init.ref");
     }
+    /* (a temporary of or from an enumeration: not yet) */
+    if (x.kind == type_kind::enumeration || y.kind == type_kind::enumeration)
+        return not_supported(at, "dcl.init.ref");
     analysis_result result = operand_value(at, m);
     if (result != analysis_result::well_formed)
         return result;

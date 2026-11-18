@@ -327,6 +327,8 @@ analysis_result semantic_analysis::function(node_index parameters,
     owned_array<syntax_child> work;
     uint32_t cv = cv_none;
     bool may_qualify = in_member_declarator;
+    /* [except.spec]/1: the noexcept-specifier */
+    bool specified_exceptions = false, non_throwing = false;
     for (uint32_t i = node.child_count; i-- > 0;) {
         syntax_child c = tree.children(parameters)[i];
         if (syntax_is_punctuator(tokens, c,
@@ -352,12 +354,15 @@ analysis_result semantic_analysis::function(node_index parameters,
                 cv |= cv_volatile;
                 continue;
             }
-            /* [except.spec]/2: "In a noexcept-specifier, the
-               constant-expression, if supplied, shall be a contextually
-               converted constant expression of type bool": the exception
-               specification is not in the function type analysis keeps */
-            if (syntax_is(tree, c, syntax_kind::noexcept_specifier))
-                return not_supported(parameters, "except.spec");
+            if (syntax_is(tree, c, syntax_kind::noexcept_specifier) &&
+                !specified_exceptions) {
+                specified_exceptions = true;
+                analysis_result r =
+                    noexcept_specifier(c.index(), may_qualify, non_throwing);
+                if (r != analysis_result::well_formed)
+                    return r;
+                continue;
+            }
             /* a ref-qualifier, attributes, a cv-qualifier-seq of a type
                that is not a member function's */
             return not_supported(parameters, "dcl.fct");
@@ -515,11 +520,19 @@ analysis_result semantic_analysis::function(node_index parameters,
         function_parameters.append(parameter);
     function_empty_pack = empty_pack;
     function_cv = cv;
+    function_exceptions_specified = specified_exceptions;
     if (abstract_class(type))
         /* a return type of abstract class type: as a parameter's */
         return not_supported(parameters, "class.abstract");
-    type = qualified_type::make(
-        type_table.function(type, list.data(), list.size(), variadic), cv_none);
+    /* [except.spec]/2: part of the type since C++17 (P0012R1); before it
+       a function's own, which nothing analysed asks about */
+    if (!tokens.files.behavior.has(
+            language_feature::exception_specification_in_type))
+        non_throwing = false;
+    type =
+        qualified_type::make(type_table.function(type, list.data(), list.size(),
+                                                 variadic, non_throwing),
+                             cv_none);
     return analysis_result::well_formed;
 }
 

@@ -134,6 +134,12 @@ bool semantic_analysis::deduce_type(qualified_type p, qualified_type a,
                     return false;
                 continue;
             }
+            /* /5.3: "A non-type template argument ... in which a
+               subexpression references a template parameter" is a
+               non-deduced context */
+            if (entity_table[x.template_entity].kind ==
+                entity_kind::dependent_value)
+                continue;
             /* /8's TT<i>: a non-type parameter's value from A's (of the
                parameter's type: the template's parameter is the same) */
             uint64_t k = x.value;
@@ -160,7 +166,7 @@ bool semantic_analysis::deduce_type(qualified_type p, qualified_type a,
             return false;
         return deduce_type(pr.operand, ar.operand, deduced, set, exact);
     case type_kind::function: {
-        if (pr.variadic != ar.variadic ||
+        if (pr.variadic != ar.variadic || pr.non_throwing != ar.non_throwing ||
             pr.parameter_count != ar.parameter_count)
             return false;
         if (!deduce_type(pr.operand, ar.operand, deduced, set, exact))

@@ -112,6 +112,94 @@ void semantic_analysis::bind_template_argument(entity_index scope,
     entity_table.bind(scope, name, e);
 }
 
+/* what [abi:mangle.template-arg] spells of a value-dependent argument
+   (entity_kind::dependent_value): [!] Q<args>::name, Q unqualified as
+   written (clang mangles the qualifier as written) */
+entity_index semantic_analysis::dependent_value_entity(syntax_child written)
+{
+    entity_index e = entity_table.make(entity_kind::dependent_value, 0, 0);
+    bool negated = false;
+    if (syntax_is(tree, written, syntax_kind::unary_expression) &&
+        tree[written.index()].child_count == 2 &&
+        syntax_is_punctuator(tokens, tree.children(written.index())[0],
+                             preprocessing_op_or_punc::EXCLAMATION)) {
+        negated = true;
+        written = tree.children(written.index())[1];
+    }
+    if (!syntax_is(tree, written, syntax_kind::qualified_id) ||
+        tree[written.index()].child_count != 2)
+        return e;
+    syntax_child qualifier = tree.children(written.index())[0];
+    syntax_child member = tree.children(written.index())[1];
+    if (!member.is_token() ||
+        tokens[member.index()].kind != token_kind::identifier ||
+        !syntax_is(tree, qualifier, syntax_kind::nested_name_specifier) ||
+        tree[qualifier.index()].child_count != 2 ||
+        !syntax_is(tree, tree.children(qualifier.index())[0],
+                   syntax_kind::simple_template_id))
+        return e;
+    /* (its own unsupported records: the argument stays value-dependent) */
+    size_t unsupported_before = unsupported.size();
+    type_index q = 0;
+    analysis_result r =
+        template_type(tree.children(qualifier.index())[0].index(), 0, false, q);
+    unsupported.resize(unsupported_before);
+    if (r != analysis_result::well_formed ||
+        type_table[q].kind != type_kind::dependent ||
+        entity_table[type_table[q].entity].kind !=
+            entity_kind::template_specialization)
+        return e;
+    qualified_type type = qualified_type::make(q, cv_none);
+    uint32_t name = tokens.identifier(member.index());
+    uint64_t value = 1;
+    if (negated)
+        value = 3;
+    for (entity_index d : dependent_values)
+        if (entity_table[d].type == type && entity_table[d].name == name &&
+            entity_table[d].value == value)
+            return d;
+    entity_table[e].type = type;
+    entity_table[e].name = name;
+    entity_table[e].value = value;
+    dependent_values.append(e);
+    return e;
+}
+
+analysis_result semantic_analysis::substituted_parameter_type(
+    uint32_t template_index, uint32_t position, const template_argument *before,
+    qualified_type &type)
+{
+    const function_template ft = function_templates[template_index - 1];
+    node_index node = template_parameter_nodes[ft.first_parameter + position];
+    template_parameter_parts form;
+    if (!template_parameter_form(node, form))
+        return not_supported(node, "temp.param");
+    entity_index scope = entity_table.make(entity_kind::block_scope, 0,
+                                           entity_table[ft.entity].enclosing);
+    for (uint32_t k = 0; k < position; k++)
+        bind_template_argument(
+            scope, template_parameter_entities[ft.first_parameter + k],
+            before[k]);
+    entity_index saved = current_scope;
+    token_index saved_horizon = lookup_horizon;
+    current_scope = scope;
+    lookup_horizon = tree[ft.declaration].first_token;
+    specified sp;
+    analysis_result r =
+        decl_specifier_seq(tree.children(node)[0].index(), sp, false);
+    qualified_type t = sp.type;
+    if (r == analysis_result::well_formed && form.has_declarator) {
+        declarator_meaning dm;
+        r = declarator(node, form.declarator, t, dm);
+    }
+    current_scope = saved;
+    lookup_horizon = saved_horizon;
+    if (r != analysis_result::well_formed)
+        return r;
+    type = qualified_type::make(t.unqualified(), cv_none);
+    return analysis_result::well_formed;
+}
+
 /*
  * [temp.arg.type]/1: "A template-argument for a template-parameter which
  * is a type shall be a type-id."  [temp.arg.nontype]/2: "A template-argument
@@ -148,6 +236,17 @@ analysis_result semantic_analysis::template_argument_for(
         to = qualified_type::make(before[typed_by].type.unqualified(), cv_none);
         if (!structural_parameter_type(to))
             return not_supported(at, "temp.arg.nontype");
+    } else if (depends_on_template_parameter(to)) {
+        /* another dependent type: the parameter's type with the arguments
+           before it, which may fail to be one ([temp.deduct]/8) */
+        if (!before)
+            return not_supported(at, "temp.arg.nontype");
+        analysis_result r =
+            substituted_parameter_type(template_index, position, before, to);
+        if (r != analysis_result::well_formed)
+            return r;
+        if (depends_on_template_parameter(to) || !structural_parameter_type(to))
+            return not_supported(at, "temp.arg.nontype");
     }
     /* in a template's own declaration, a non-type template-parameter's
        name: a value dependent argument ([temp.dep.constexpr]/2), of a
@@ -175,6 +274,16 @@ analysis_result semantic_analysis::template_argument_for(
             out.value = entity_table[named].value;
             return analysis_result::well_formed;
         }
+        /* an alias template's parameter bound to a value-dependent
+           argument (enable_if_t<is_integral<T>::value, int>): that
+           argument */
+        if (named && entity_table[named].kind == entity_kind::dependent_value) {
+            out.kind = template_argument::kind_t::value;
+            out.type = to;
+            out.template_entity = named;
+            out.value = UINT32_MAX;
+            return analysis_result::well_formed;
+        }
         /* in an instantiation, a pointer, reference or std::nullptr_t
            parameter's name (bind_template_argument): its argument */
         if (named && entity_table[named].kind == entity_kind::none &&
@@ -185,6 +294,34 @@ analysis_result semantic_analysis::template_argument_for(
             out.value = entity_table[named].value;
             return analysis_result::well_formed;
         }
+    }
+    /* [temp.dep.constexpr]/2: another expression naming a template
+       parameter (is_integral<T>::value): value-dependent, not analysed
+       until an instantiation gives the parameters values */
+    for (token_index t = first; t < end; t++) {
+        if (tokens[t].kind != token_kind::identifier)
+            continue;
+        lookup_result x =
+            lookup_unqualified(tokens.identifier(t), lookup_filter::any);
+        entity_index e = x.entity;
+        if (!e)
+            continue;
+        const entity &named = entity_table[e];
+        /* (or an alias template's parameter bound to such an argument) */
+        bool parameter = (named.kind == entity_kind::none &&
+                          named.instantiation && !named.held_by_template) ||
+                         named.kind == entity_kind::dependent_value;
+        if (!parameter && (named.kind == entity_kind::none ||
+                           !depends_on_template_parameter(named.type)))
+            continue;
+        if (!is_integral(to) &&
+            type_table[to.unqualified()].kind != type_kind::enumeration)
+            return not_supported(at, "temp.dep.constexpr");
+        out.kind = template_argument::kind_t::value;
+        out.type = to;
+        out.template_entity = dependent_value_entity(written);
+        out.value = UINT32_MAX;
+        return analysis_result::well_formed;
     }
     if (address_parameter_type(to))
         return address_argument(at, to, written, out);

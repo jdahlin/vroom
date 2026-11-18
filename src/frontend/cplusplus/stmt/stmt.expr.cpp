@@ -43,6 +43,8 @@ analysis_result semantic_analysis::expression_statement(node_index n,
         return not_supported(n, "stmt.expr");
     expression_meaning m;
     analysis_result r = expression(tree.children(n)[0], m);
+    if (r == analysis_result::well_formed && destroyed_temporary(m))
+        return not_supported(n, "class.temporary");
     built = statement_node(semantic_kind::expression_statement,
                            node.first_token, m.node);
     return r;

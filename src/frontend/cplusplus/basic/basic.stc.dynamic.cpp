@@ -72,8 +72,15 @@ void semantic_analysis::implicit_allocation_functions()
         uint32_t name = allocation_function_name(f.kind);
         entity_index e = entity_table.make(entity_kind::function, name, 0);
         entity &x = entity_table[e];
+        /* [basic.stc.dynamic]/2: the deallocation functions are declared
+           noexcept, part of their type since C++17 */
+        bool non_throwing =
+            !allocation &&
+            tokens.files.behavior.has(
+                language_feature::exception_specification_in_type);
         x.type = qualified_type::make(
-            type_table.function(result, parameters, count, false), cv_none);
+            type_table.function(result, parameters, count, false, non_throwing),
+            cv_none);
         x.linkage_of_name = linkage::external;
         x.operator_function = true;
         x.allocation = f.kind;
@@ -150,7 +157,11 @@ semantic_analysis::allocation_function_declaration(node_index n, entity_index f)
                           "an allocation or deallocation function shall be a "
                           "class member function or a global function",
                           subclause);
-    } else if (x.linkage_of_name == linkage::internal) {
+    } else if (x.linkage_of_name == linkage::internal &&
+               !x.unnamed_type_linkage) {
+        /* (internal linkage by the static specifier: one by a parameter
+           of a type of an unnamed namespace is [impl.clang]'s, no
+           declaration static) */
         return ill_formed(n,
                           "an allocation or deallocation function shall not "
                           "be declared static in global scope",

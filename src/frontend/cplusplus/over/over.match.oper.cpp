@@ -152,7 +152,12 @@ analysis_result semantic_analysis::overloaded_operator(
             return analysis_result::well_formed;
         }
         lookup_result found = lookup_unqualified(name, lookup_filter::any);
-        if (found.unknown || found.ambiguous)
+        /* [temp.over]/1: operator function templates by that name, whose
+           specializations deduced from the operands are candidates too */
+        uint32_t function_template = 0;
+        if (found.unknown && !found.ambiguous)
+            function_template = function_template_of(found.unknown_entity);
+        if ((found.unknown && !function_template) || found.ambiguous)
             return not_supported(n, "over.match.oper");
         owned_array<entity_index> set;
         if (found.entity) {
@@ -165,8 +170,31 @@ analysis_result semantic_analysis::overloaded_operator(
         owned_array<qualified_type> types;
         for (const expression_meaning &e : operands)
             types.append(e.type);
-        if (!argument_dependent_lookup(name, types, set))
+        uint32_t held = 0;
+        if (function_template)
+            held = function_templates[function_template - 1].name;
+        if (!argument_dependent_lookup(name, types, set, held))
             return not_supported(n, "basic.lookup.argdep");
+        if (function_template) {
+            owned_array<uint32_t> group;
+            function_template_overloads(held, group);
+            for (const template_name_function &x : template_name_functions)
+                if (x.name == held)
+                    set.append(x.function);
+            owned_array<expression_meaning> in_order;
+            for (size_t i = 0; i < count; i++)
+                in_order.append(operand(i));
+            size_t first = candidates.size();
+            analysis_result r =
+                template_candidates(n, group, in_order.data(),
+                                    static_cast<uint32_t>(count), candidates);
+            if (r != analysis_result::well_formed)
+                return r;
+            for (size_t i = first; i < candidates.size(); i++) {
+                candidates[i].rewritten = rewritten;
+                candidates[i].reversed = reversed;
+            }
+        }
         for (entity_index e : set)
             overload_set(e, others);
         for (entity_index e : members) {
@@ -289,6 +317,27 @@ analysis_result semantic_analysis::overloaded_operator(
         return r;
     const overload_candidate &c = candidates[chosen];
     entity_index f = c.function;
+    if (c.template_index) {
+        /* [temp.inst]/4: the specialization chosen is referenced: its
+           definition is instantiated (a candidate's declaration only was,
+           in an unevaluated context) */
+        owned_array<template_argument> deduced;
+        owned_array<expression_meaning> in_order;
+        for (size_t i = 0; i < arguments.size(); i++) {
+            if (c.reversed)
+                in_order.append(arguments[arguments.size() - 1 - i]);
+            else
+                in_order.append(arguments[i]);
+        }
+        r = deduce_from_call(n, c.template_index, in_order.data(),
+                             static_cast<uint32_t>(in_order.size()), deduced);
+        if (r == analysis_result::well_formed)
+            r = instantiate(n, function_templates[c.template_index - 1].entity,
+                            deduced.data(),
+                            static_cast<uint32_t>(deduced.size()), f);
+        if (r != analysis_result::well_formed)
+            return r;
+    }
     const entity &x = entity_table[f];
     const struct type &type = type_table[x.type.unqualified()];
     const qualified_type *parameters =

@@ -119,6 +119,10 @@ struct type {
     /* function: [dcl.fct]/2 "the parameter-declaration-clause terminates
        with an ellipsis" */
     bool variadic = false;
+    /* function: [dcl.fct]/1 "noexcept_opt function of ...": a non-throwing
+       exception specification is part of the type since C++17
+       ([except.spec]/2, [diff.cpp14.except]/1) */
+    bool non_throwing = false;
     /* array: [dcl.array]/1 whether the constant-expression is present (if
        not, an "array of unknown bound of T") */
     bool bound_known = false;
@@ -154,7 +158,8 @@ class types
     type_index array_of(qualified_type element, uint64_t bound);
     type_index array_of_unknown_bound_of(qualified_type element);
     type_index function(qualified_type result, const qualified_type *parameters,
-                        size_t parameter_count, bool variadic);
+                        size_t parameter_count, bool variadic,
+                        bool non_throwing = false);
     type_index of_entity(type_kind kind, uint32_t entity);
     type_index pointer_to_member(uint32_t class_entity, qualified_type member);
     type_index pack_expansion_of(qualified_type pattern);
@@ -216,6 +221,21 @@ enum class entity_kind : uint8_t {
        known until instantiation; its type is a type_kind::dependent of
        it, value the qualifier Q (a type_index), name the identifier */
     dependent_member,
+    /* not an entity: [ext:clang_type_traits] a clang-type-transformation
+       of a dependent type, __remove_cv(T); its type is a
+       type_kind::dependent of it, value the operand (cv << 32 | its
+       type_index), name the keyword's identifier */
+    type_transformation,
+    /* not an entity: [temp.dep.constexpr] a value-dependent template
+       argument other than a parameter's name (is_integral<T>::value), in
+       a template's own declaration; the template_argument's
+       template_entity, its value no parameter's position (UINT32_MAX).
+       An instantiation analyses the argument again with its arguments.
+       What mangling knows of it: for [!] Q<args>::name written so, type
+       the dependent Q<args>, name the member's identifier, value 1 (3 if
+       negated), one entity for the same three ([temp.over.link]); else
+       value 0, an entity of its own */
+    dependent_value,
     /* not an entity: a block scope or a function parameter scope
        ([basic.scope.block], [basic.scope.param]), the scope the names
        declared in it are bound in */
@@ -266,7 +286,20 @@ enum gnu_attribute_flag : uint32_t {
     gnu_default_visibility = 512,
     /* clang's using_if_exists, on a using-declarator */
     gnu_using_if_exists = 1024,
+    /* visibility("hidden"): the symbol is hidden (STV_HIDDEN) */
+    gnu_hidden_visibility = 2048,
+    /* abi_tag("tag"): the tag is part of the mangled name ([abi:mangling]
+       <abi-tag>); the string-literal is the entity's abi_tag */
+    gnu_abi_tag = 4096,
+    /* clang's exclude_from_explicit_instantiation: an explicit
+       instantiation of the class leaves the member out */
+    gnu_exclude_from_explicit_instantiation = 8192,
 };
+/* the GNU attributes of a function's own symbol that analysis carries to
+   member functions and function templates */
+const uint32_t gnu_function_symbol_flags =
+    gnu_hidden_visibility | gnu_abi_tag |
+    gnu_exclude_from_explicit_instantiation;
 
 struct entity {
     entity_kind kind = entity_kind::none;
@@ -457,6 +490,8 @@ struct entity {
        alignment is alignment */
     uint32_t gnu_flags = 0;
     token_index section = 0;
+    /* ... and an abi_tag attribute's string-literal, 0 if none */
+    token_index abi_tag = 0;
     /* [dcl.link]/1: a function or variable with C language linkage,
        whose name is its symbol */
     bool c_language_linkage = false;
@@ -1304,6 +1339,11 @@ class semantic_analysis
     {
         return tree;
     }
+    /* a token's spelling, as written (an entity's abi_tag, its section) */
+    size_t token_spelling(token_index i, vbuffer *out) const
+    {
+        return tokens.spelling(i, out);
+    }
 
   private:
     /* the node needs rules that are not written: those of the subclause
@@ -1392,7 +1432,7 @@ class semantic_analysis
         /* [ext:gnu_attributes] the GNU attributes among the
            decl-specifiers and before them */
         uint32_t gnu_flags = 0;
-        token_index section = 0;
+        token_index section = 0, abi_tag = 0;
         uint64_t aligned = 0;
     };
     analysis_result decl_specifier_seq(node_index seq, specified &s,
@@ -1435,7 +1475,7 @@ class semantic_analysis
            string-literal */
         uint64_t aligned = 0;
         uint32_t gnu_flags = 0;
-        token_index section = 0;
+        token_index section = 0, abi_tag = 0;
         /* the declarator-id is ~ class-name: a destructor ([class.dtor]/1) */
         bool destructor = false;
         /* the declarator-id is an operator-function-id ([over.oper]/1) */
@@ -1475,6 +1515,10 @@ class semantic_analysis
     /* the ellipsis of the last parameter-declaration's declarator, if it
        declares a function parameter pack, else 0 */
     token_index declared_pack = 0;
+    /* [except.spec]/8, /12: a destructor's or deallocation function's type
+       non-throwing without a noexcept-specifier */
+    void implicitly_non_throwing(const declarator_meaning &m,
+                                 qualified_type &type);
     analysis_result declarator(node_index declaration, syntax_child d,
                                qualified_type &type, declarator_meaning &m);
     token_index declarator_id(syntax_child d) const;
@@ -1708,6 +1752,9 @@ class semantic_analysis
                                 bool &unknown) const;
     /* [temp.res]/3: typename-specifier, as a type */
     analysis_result typename_type(node_index n, type_index &type, uint32_t &cv);
+    /* a dependent type of kind, one per name and value in list */
+    type_index dependent_type(owned_array<entity_index> &list, entity_kind kind,
+                              uint32_t name, uint64_t value);
     /* the type typename Q::name for a dependent Q, one per Q and name */
     type_index dependent_member_type(type_index qualifier, uint32_t name);
     owned_array<entity_index> dependent_members;
@@ -1733,7 +1780,7 @@ class semantic_analysis
     struct gnu_attributes {
         uint64_t aligned = 0;
         uint32_t flags = 0;
-        token_index section = 0;
+        token_index section = 0, abi_tag = 0;
     };
     analysis_result gnu_attribute_specifier(node_index n, gnu_attributes &g);
     analysis_result gnu_attribute_specifier(node_index n,
@@ -1793,6 +1840,8 @@ class semantic_analysis
     /* the cv-qualifier-seq of the function declarator analysed last
        ([dcl.fct]/6: only a member function's) */
     uint32_t function_cv = 0;
+    /* ... and whether it had a noexcept-specifier ([except.spec]/2) */
+    bool function_exceptions_specified = false;
     /* a declarator analysed now may have a cv-qualifier-seq: a member
        declarator, or one whose declarator-id is a qualified-id */
     bool in_member_declarator = false;
@@ -1824,6 +1873,9 @@ class semantic_analysis
                               bool *decltype_auto = nullptr) const;
     /* [dcl.type.decltype]/1: the type decltype ( expression ) denotes */
     analysis_result decltype_type(node_index n, qualified_type &type);
+    analysis_result clang_type_transformation(node_index n,
+                                              qualified_type &type);
+    owned_array<entity_index> type_transformations;
     /* the type decltype(E) denotes for E analysed as m, E unparenthesized
        id-expression or class member access when named; false when the
        entity it names is not known */
@@ -2075,6 +2127,17 @@ class semantic_analysis
        a qualification conversion */
     bool qualification_convertible(qualified_type from,
                                    qualified_type to) const;
+    /* [conv.fctptr]/1: whether a prvalue of type from (pointer to noexcept
+       function) converts to type to (pointer to function) */
+    bool function_pointer_convertible(qualified_type from,
+                                      qualified_type to) const;
+    /* whether the function types a and b differ in their exception
+       specification only */
+    bool differ_in_exceptions(qualified_type a, qualified_type b) const;
+    /* [class.temporary]/4: whether m is a prvalue of a class with a
+       destructor, whose temporary a discarded-value expression would have
+       to destroy (not analysed) */
+    bool destroyed_temporary(const expression_meaning &m) const;
     /* [dcl.init]/17.9: the standard conversion sequence of an implicit
        conversion of the prvalue m to to (cv-unqualified); ill-formed
        without one */
@@ -2104,6 +2167,10 @@ class semantic_analysis
        type bool, from the expression e */
     analysis_result bool_constant_expression(node_index at, syntax_child e,
                                              bool &constant, bool &value);
+    /* [except.spec]/2: whether the noexcept-specifier n makes the exception
+       specification non-throwing */
+    analysis_result noexcept_specifier(node_index n, bool member,
+                                       bool &non_throwing);
     /* [expr.const]/5: the evaluation of the semantic tree node as a core
        constant expression (expr/expr.const.evaluate.cpp): well_formed with
        its value in v and constant true; constant false if it is not one;
@@ -2682,6 +2749,10 @@ class semantic_analysis
         node_index declarator = 0;
         uint32_t first_parameter = 0, parameter_count = 0;
         bool unusable = false;
+        /* a function template: the GNU attributes of its specializations'
+           symbols (gnu_function_symbol_flags) and abi_tag */
+        uint32_t gnu_flags = 0;
+        token_index abi_tag = 0;
         /* a class template ([temp.class]): definition is its
            class-specifier */
         bool is_class = false;
@@ -2863,6 +2934,14 @@ class semantic_analysis
                                           syntax_child written,
                                           const template_argument *before,
                                           template_argument &out);
+    /* [temp.param]/4: a non-type parameter's dependent type
+       (typename enable_if<B, int>::type) with the arguments before it */
+    entity_index dependent_value_entity(syntax_child written);
+    owned_array<entity_index> dependent_values;
+    analysis_result substituted_parameter_type(uint32_t template_index,
+                                               uint32_t position,
+                                               const template_argument *before,
+                                               qualified_type &type);
     /* [temp.param]/6: a non-type template-parameter's type with rules
        here; one whose arguments are addresses */
     bool structural_parameter_type(qualified_type t) const;
@@ -3158,6 +3237,22 @@ class semantic_analysis
     bool specialization_value(entity_index e, uint32_t i, uint64_t &magnitude,
                               bool &negative, uint32_t &parameter,
                               uint32_t element = 0) const;
+    /* whether the argument is a value-dependent expression
+       (entity_kind::dependent_value), which is not mangled yet */
+    bool specialization_dependent_value(entity_index e, uint32_t i,
+                                        uint32_t element = 0) const;
+    /* that argument's entity (an entity_kind::dependent_value) */
+    entity_index specialization_entity(entity_index e, uint32_t i,
+                                       uint32_t element = 0) const
+    {
+        return specialization_template_argument(e, i, element).template_entity;
+    }
+    /* whether the function template t's template-parameter at i is a
+       non-type one of a dependent type (template <class T, T v>): that
+       type, which [abi:mangle.template-arg] mangles after Tn before the
+       argument */
+    bool dependent_parameter_type(entity_index t, uint32_t i,
+                                  qualified_type &type) const;
     /* whether the argument is a template ([temp.arg.template]/1): the
        class template, or in a template's own declaration the template
        template-parameter it names (also its position plus one in
@@ -3259,6 +3354,16 @@ class semantic_analysis
     };
 
   private:
+    /* [temp.over]/1: the specializations of the templates in group
+       whose deduction from the call's arguments succeeds, appended to
+       candidates; with first_arguments, where each one's deduced
+       arguments start in all */
+    analysis_result
+    template_candidates(node_index n, const owned_array<uint32_t> &group,
+                        const expression_meaning *meanings, uint32_t count,
+                        owned_array<overload_candidate> &candidates,
+                        owned_array<uint32_t> *first_arguments = nullptr,
+                        owned_array<template_argument> *all = nullptr);
     /* [over.best.ics]: the argument a converted to the type of a parameter;
        user-defined conversions considered unless [over.best.ics]/4 says
        not */

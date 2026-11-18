@@ -543,6 +543,10 @@ semantic_analysis::explicitly_instantiated(entity_index f) const
     const entity &x = entity_table[f];
     if (x.kind != entity_kind::function)
         return instantiation_kind::none;
+    /* [ext:gnu_attributes] exclude_from_explicit_instantiation: a member
+       an explicit instantiation of its class leaves implicit */
+    if (x.gnu_flags & gnu_exclude_from_explicit_instantiation)
+        return instantiation_kind::none;
     if (x.explicitly_instantiated != instantiation_kind::none)
         return x.explicitly_instantiated;
     /* /10: a class's member functions that are not special members

@@ -1020,6 +1020,7 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
             syntax_is(tree, c, syntax_kind::typename_specifier) ||
             syntax_is(tree, c, syntax_kind::simple_template_id) ||
             syntax_is(tree, c, syntax_kind::decltype_specifier) ||
+            syntax_is(tree, c, syntax_kind::clang_type_transformation) ||
             syntax_is(tree, c, syntax_kind::placeholder_type_specifier))
             continue;
         /* an attribute specifier has rules unless a class-specifier is
@@ -1105,6 +1106,13 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
                 class_type = denoted.unqualified();
                 cv |= denoted.cv();
             } else if (syntax_is(tree, c,
+                                 syntax_kind::clang_type_transformation)) {
+                /* [ext:clang_type_traits] */
+                qualified_type denoted;
+                r = clang_type_transformation(c.index(), denoted);
+                class_type = denoted.unqualified();
+                cv |= denoted.cv();
+            } else if (syntax_is(tree, c,
                                  syntax_kind::placeholder_type_specifier)) {
                 /* [dcl.spec.auto]: decltype(auto); a type-constraint is
                    [temp.param]'s */
@@ -1139,6 +1147,7 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
             if (!syntax_is(tree, c, syntax_kind::simple_type_specifier) &&
                 !syntax_is(tree, c, syntax_kind::typename_specifier) &&
                 !syntax_is(tree, c, syntax_kind::decltype_specifier) &&
+                !syntax_is(tree, c, syntax_kind::clang_type_transformation) &&
                 !syntax_is(tree, c, syntax_kind::placeholder_type_specifier))
                 declares_class = true;
             continue;
