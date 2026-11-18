@@ -643,10 +643,15 @@ analysis_result semantic_analysis::declarator(node_index declaration,
             m.destructor = true;
             name = tree.children(name.index())[1];
         }
+        /* [over.oper]/1: an operator function's name, X::operator@ */
+        bool operator_name =
+            !m.destructor &&
+            syntax_is(tree, name, syntax_kind::operator_function_id);
         if (qualified.child_count != 2 ||
             !syntax_is(tree, parts[0], syntax_kind::nested_name_specifier) ||
-            !name.is_token() ||
-            tokens[name.index()].kind != token_kind::identifier)
+            (!operator_name &&
+             (!name.is_token() ||
+              tokens[name.index()].kind != token_kind::identifier)))
             return not_supported(q, "dcl.meaning");
         analysis_result r = declarator_qualifier(parts[0].index(), m);
         if (r != analysis_result::well_formed)

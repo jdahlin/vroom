@@ -805,6 +805,12 @@ libstdc++ and json), since sema cannot analyse a declaration kept as tokens.
   declarations as clang, 0 wrong, 448 we accept that clang rejects, 0
   refuted.  cxx-run 148/148, cxx-c-suites 0 wrong.  Left: the allocation
   functions.
+- Status (2026-11-18, members defined outside their class): a declarator-id
+  X::operator@ (`dcl.meaning.cpp`) defines the member operator function
+  declared in X.  Test: `src/test/cxx/run/operators-out-of-class.cpp`.
+  `bench/cxx-sema.py`: 27310 declarations as clang, 0 wrong, 0 refuted
+  (clang's tests define them mostly in templates).  cxx-run 152/152,
+  cxx-c-suites 0 wrong.
 
 ### S4. Classes and the object model (parallel with S3)
 
