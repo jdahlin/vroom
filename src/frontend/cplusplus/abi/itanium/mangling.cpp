@@ -764,7 +764,7 @@ bool itanium_mangler::template_args(entity_index c, entity_index function)
         text("J");
         for (uint32_t k = 1; k < pack; k++) {
             /* a template's own pack expanded (res<A...> in its own
-               declaration): [abi:mangle.type]'s pack expansion of the
+               declaration): [abi:mangle.function-type]'s pack expansion of the
                parameter, <type> ::= Dp <type> */
             if (entity_index own = analysis.specialization_own_pack(c, i, k)) {
                 /* (a non-type or template pack: not mangled yet) */
@@ -1811,8 +1811,10 @@ bool itanium_mangler::array_type(qualified_type t)
 {
     const struct type &r = record(t);
     text("A");
-    /* <array-type> ::= A [<dimension expression>] _ <element type>, the
-       expression a template parameter's <template-param> */
+    /* [abi:mangle.array-type] with the bound a template parameter's
+       <template-param>:
+           <array-type> ::= A <instantiation-dependent array bound expression> _ <element type>
+     */
     if (r.entity)
         template_param(analysis.entity_table[r.entity].value);
     else if (r.bound_known)

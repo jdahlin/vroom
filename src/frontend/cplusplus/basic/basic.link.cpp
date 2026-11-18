@@ -513,7 +513,7 @@ analysis_result semantic_analysis::declare(node_index declaration,
        is the one this declaration redeclares; with none, it declares another
        function of the set */
     entity_index overloads = 0;
-    /* [basic.scope.scope]/4, [temp.over]/1: a function declared after a
+    /* [basic.scope.declarative]/4, [temp.over]/1: a function declared after a
        function template of the name in the same scope: the name is held by
        the template (function_template_definition), the function one of the
        non-template functions a call of it weighs (template_name_functions);
