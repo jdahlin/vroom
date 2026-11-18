@@ -159,6 +159,43 @@ node_index parser::class_or_decltype(scope_index *region)
 /* ---- semantic analysis ---------------------------------------------- */
 
 /*
+ * [class.derived]/2: the class a base-specifier's class-or-decltype
+ * denotes (base) and the token to report it at (id): a type-name, one
+ * after a nested-name-specifier, or a simple-template-id naming a class
+ * template's specialization ([temp.names]/1; decltype has no rules yet)
+ */
+analysis_result semantic_analysis::base_class_name(syntax_child name,
+                                                   node_index n,
+                                                   entity_index &base,
+                                                   token_index &id)
+{
+    if (syntax_is(tree, name, syntax_kind::simple_template_id)) {
+        type_index t = 0;
+        analysis_result r = template_type(name.index(), 0, false, t);
+        if (r != analysis_result::well_formed)
+            return r;
+        id = tree[name.index()].first_token;
+        if (type_table[t].kind != type_kind::class_type)
+            return not_supported(n, "class.derived");
+        base = type_table[t].entity;
+        return analysis_result::well_formed;
+    }
+    if (!name.is_token() &&
+        !syntax_is(tree, name, syntax_kind::class_or_decltype))
+        return not_supported(n, "class.derived");
+    size_t before = unsupported.size();
+    analysis_result named = named_class(name, n, base, id);
+    if (named == analysis_result::ill_formed)
+        return named;
+    if (named != analysis_result::well_formed) {
+        /* a class whose definition was not analysed, a name not found */
+        unsupported.resize(before);
+        return not_supported(n, "class.derived");
+    }
+    return analysis_result::well_formed;
+}
+
+/*
  * The base-clause of the class c being defined, defined with class-key
  * key.  [class.derived]/2: "A class-or-decltype shall denote a (possibly
  * cv-qualified) class type that is not an incompletely defined class
@@ -185,23 +222,90 @@ node_index parser::class_or_decltype(scope_index *region)
 analysis_result semantic_analysis::base_clause(entity_index c, node_index n,
                                                standard_keyword key)
 {
-    owned_array<syntax_child> specifiers;
+    /* [temp.variadic]/5.3: "In a base-specifier-list; the pattern is a
+       base-specifier": a base-specifier followed by an ellipsis is one
+       base per element of the packs it names (an instantiation's; in a
+       template's own definition they are not known) */
+    owned_array<syntax_child> listed;
+    owned_array<bool> expanded;
     for (uint32_t i = 1; i < tree[n].child_count; i++) {
         syntax_child item = tree.children(n)[i];
-        if (syntax_is(tree, item, syntax_kind::base_specifier_list)) {
-            for (uint32_t k = 0; k < tree[item.index()].child_count; k++) {
-                syntax_child one = tree.children(item.index())[k];
-                if (!syntax_is_punctuator(tokens, one,
-                                          preprocessing_op_or_punc::COMMA))
-                    specifiers.append(one);
-            }
-        } else {
-            specifiers.append(item);
+        if (!syntax_is(tree, item, syntax_kind::base_specifier_list)) {
+            listed.append(item);
+            expanded.append(false);
+            continue;
         }
+        for (uint32_t k = 0; k < tree[item.index()].child_count; k++) {
+            syntax_child one = tree.children(item.index())[k];
+            if (syntax_is_punctuator(tokens, one,
+                                     preprocessing_op_or_punc::COMMA))
+                continue;
+            if (syntax_is_punctuator(tokens, one,
+                                     preprocessing_op_or_punc::ELLIPSIS)) {
+                if (expanded.empty())
+                    return not_supported(n, "temp.variadic");
+                expanded[expanded.size() - 1] = true;
+                continue;
+            }
+            listed.append(one);
+            expanded.append(false);
+        }
+    }
+    owned_array<syntax_child> specifiers;
+    /* each specifier's pack element, UINT32_MAX for none */
+    owned_array<uint32_t> elements;
+    for (size_t i = 0; i < listed.size(); i++) {
+        if (!expanded[i]) {
+            specifiers.append(listed[i]);
+            elements.append(UINT32_MAX);
+            continue;
+        }
+        token_index first = listed[i].index(), end = first + 1;
+        if (!listed[i].is_token()) {
+            first = tree[listed[i].index()].first_token;
+            end = tree[listed[i].index()].end_token;
+        }
+        uint32_t count = 0;
+        if (!expansion_count(first, end, count))
+            return not_supported(n, "temp.variadic");
+        for (uint32_t e = 0; e < count; e++) {
+            specifiers.append(listed[i]);
+            elements.append(e);
+        }
+    }
+    /* [class.derived]/2: "A class-or-decltype shall denote a (possibly
+       cv-qualified) class type that is not an incompletely defined class
+       ... During the lookup for a base class name, non-type names are
+       ignored" (base_class_name).  All named first: a specialization
+       instantiated here lists its own bases in class_bases, which must
+       come before this class's range */
+    owned_array<entity_index> named_bases;
+    owned_array<token_index> named_ids;
+    for (size_t si = 0; si < specifiers.size(); si++) {
+        syntax_child name = specifiers[si];
+        if (syntax_is(tree, name, syntax_kind::base_specifier))
+            name =
+                tree.children(name.index())[tree[name.index()].child_count - 1];
+        token_index id = 0;
+        entity_index base = 0;
+        bool saved_expanding = expanding;
+        uint32_t saved_element = expansion_element;
+        if (elements[si] != UINT32_MAX) {
+            expanding = true;
+            expansion_element = elements[si];
+        }
+        analysis_result named = base_class_name(name, n, base, id);
+        expanding = saved_expanding;
+        expansion_element = saved_element;
+        if (named != analysis_result::well_formed)
+            return named;
+        named_bases.append(base);
+        named_ids.append(id);
     }
     entity_table[c].first_base = static_cast<uint32_t>(class_bases.size());
     entity_table[c].base_count = 0;
-    for (syntax_child specifier : specifiers) {
+    for (size_t si = 0; si < specifiers.size(); si++) {
+        syntax_child specifier = specifiers[si];
         uint8_t access = 0;
         bool is_virtual = false;
         if (key == standard_keyword::class_)
@@ -233,32 +337,8 @@ analysis_result semantic_analysis::base_clause(entity_index c, node_index n,
                 }
             }
         }
-        /* [class.derived]/2: "A class-or-decltype shall denote a (possibly
-           cv-qualified) class type that is not an incompletely defined class
-           ... During the lookup for a base class name, non-type names are
-           ignored": a type-name, or one after a nested-name-specifier (a
-           simple-template-id or decltype has no rules yet) */
-        token_index id = 0;
-        entity_index base = 0;
-        if (!name.is_token() &&
-            !syntax_is(tree, name, syntax_kind::class_or_decltype)) {
-            /* [temp.names]: a base named by a simple-template-id */
-            if (syntax_is(tree, name, syntax_kind::simple_template_id))
-                return not_supported(n, "temp.names");
-            return not_supported(n, "class.derived");
-        }
-        {
-            size_t before = unsupported.size();
-            analysis_result named = named_class(name, n, base, id);
-            if (named == analysis_result::ill_formed)
-                return named;
-            if (named != analysis_result::well_formed) {
-                /* a class whose definition was not analysed, a name not
-                   found */
-                unsupported.resize(before);
-                return not_supported(n, "class.derived");
-            }
-        }
+        token_index id = named_ids[si];
+        entity_index base = named_bases[si];
         const entity &bx = entity_table[base];
         if (!bx.size)
             return ill_formed_at_token(id,

@@ -1772,6 +1772,8 @@ class semantic_analysis
        class template specialization c's class-specifier names one of the
        template-parameters (bound in c) */
     bool dependent_base_specifier(entity_index c, syntax_child name) const;
+    analysis_result base_class_name(syntax_child name, node_index n,
+                                    entity_index &base, token_index &id);
     bool in_dependent_base_only(entity_index c, uint32_t name,
                                 bool &unknown) const;
     /* [temp.res]/3: typename-specifier, as a type */
@@ -3276,6 +3278,17 @@ class semantic_analysis
         node_index body;
     };
     owned_array<deferred_body> nested_bodies;
+    /* [temp.inst]/4: the member function bodies of a class template's
+       specialization instantiated while another class is being defined,
+       analysed by instantiate_pending in the instantiation's scope */
+    struct postponed_body {
+        entity_index c;
+        node_index body;
+        entity_index scope;
+        node_index declaration;
+    };
+    owned_array<postponed_body> postponed_bodies;
+    bool postpone_member_bodies = false;
     analysis_result function_body(node_index definition, syntax_child compound,
                                   syntax_child ctor_initializer = {});
     /* [class.base.init]: a constructor's member initializations, the

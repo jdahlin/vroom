@@ -186,9 +186,16 @@ analysis_result semantic_analysis::bind_anonymous_members(entity_index c,
     return analysis_result::well_formed;
 }
 
+/* (class_definition) */
 analysis_result semantic_analysis::class_definition(node_index n,
                                                     type_index &type)
 {
+    /* a class template's specialization defined while another class is
+       (postpone_member_bodies, define_class_instantiation) */
+    bool postpone = postpone_member_bodies;
+    postpone_member_bodies = false;
+    entity_index postponed_scope = current_scope;
+    node_index postponed_declaration = current_declaration;
     const syntax_node &node = tree[n];
     const syntax_child *children = tree.children(n);
     if (!node.child_count ||
@@ -623,6 +630,20 @@ analysis_result semantic_analysis::class_definition(node_index n,
            at its closing } */
         for (node_index body : bodies)
             nested_bodies.append(deferred_body{c, body});
+    } else if (postpone) {
+        /* [temp.inst]/4: a member function's definition is instantiated
+           where it is used; the class that named this specialization
+           (template<class D> struct base { ... static_cast<D *>(this) ...
+           }; struct d : base<d>) is complete only after it: the bodies
+           wait for the end of the translation unit (instantiate_pending) */
+        for (node_index body : bodies)
+            postponed_bodies.append(postponed_body{c, body, postponed_scope,
+                                                   postponed_declaration});
+        for (size_t i = nested_start; i < nested_bodies.size(); i++)
+            postponed_bodies.append(
+                postponed_body{nested_bodies[i].c, nested_bodies[i].body,
+                               postponed_scope, postponed_declaration});
+        nested_bodies.resize(nested_start);
     } else {
         size_t nested_end = nested_bodies.size();
         for (node_index body : bodies) {

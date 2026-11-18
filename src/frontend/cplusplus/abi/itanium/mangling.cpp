@@ -573,8 +573,23 @@ bool itanium_mangler::class_enum_type(qualified_type t)
         return false;
     /* [abi:mangling-compression]: a template's name seen before, with its
        prefix, is a <substitution> before the arguments */
-    if (x.instantiation && substitution(analysis.specialized_template(c)))
+    if (x.instantiation && x.enclosing && !is_std(x.enclosing) &&
+        !local_function(c)) {
+        /* <nested-name> ::= N <template-prefix> <template-args> E, the
+           <template-prefix> a <substitution> */
+        size_t before = out->n;
+        text("N");
+        if (substitution(analysis.specialized_template(c))) {
+            if (!template_args(c))
+                return false;
+            text("E");
+            return true;
+        }
+        out->n = before;
+    } else if (x.instantiation &&
+               substitution(analysis.specialized_template(c))) {
         return template_args(c);
+    }
     if (x.instantiation && analysis.template_template_parameter(
                                analysis.specialized_template(c))) {
         /* [abi:mangling-type]: a template template-parameter's
