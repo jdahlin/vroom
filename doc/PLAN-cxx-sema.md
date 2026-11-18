@@ -1410,6 +1410,18 @@ lines:
   cxx-sema: declarations as clang 29407 -> 29470, 0 we reject and clang
   accepts, we accept and clang rejects 500 -> 477, 0 refuted; cxx-run
   176/176; cxx-c-suites unchanged.
+  Literal types ([basic.types]/10, `basic/basic.types.cpp`):
+  `literal_type` answers unknown where analysis cannot tell (an implicit
+  default constructor or a defaulted destructor, whether constexpr; an
+  incomplete class), and only a sure non-literal type is an error: until
+  C++23 a constexpr function's return and parameter types (P2448R2) and
+  the variables its body defines (/3.5.3, P2242R3).  A user-provided
+  destructor not declared constexpr, a non-aggregate whose constructors
+  are none of them constexpr (copy and move aside), a volatile or
+  non-literal member or base make a class non-literal.  cxx-sema:
+  declarations as clang 29470 -> 29473, 0 we reject and clang accepts,
+  we accept and clang rejects 477 -> 474, 0 refuted; cxx-run 176/176;
+  cxx-c-suites unchanged.
 
 ### S7. Exceptions and RTTI
 

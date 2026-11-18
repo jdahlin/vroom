@@ -1173,6 +1173,10 @@ class semantic_analysis
        its objects are copied as their bytes, passed in registers */
     bool trivial_class(entity_index c) const;
     bool trivial_defaulted_default_constructor(entity_index c) const;
+    /* [basic.types]/10: whether t is a literal type (unknown:
+       analysis cannot tell; basic/basic.types.cpp) */
+    constness literal_type(qualified_type t) const;
+    constness literal_class(entity_index c) const;
     bool copies_bytes(entity_index c) const;
     bool is_copy_constructor(entity_index c, entity_index k) const;
     bool declares_move_constructor(entity_index c) const;

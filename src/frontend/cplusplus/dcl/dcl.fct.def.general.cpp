@@ -213,6 +213,8 @@ namespace
 struct constexpr_body {
     bool returns = false;
     token_index not_in_cplusplus_11 = 0;
+    /* the declaration statements of automatic variables */
+    owned_array<uint32_t> variables;
 };
 
 void walk_constexpr_body(const semantic_tree &tree, uint32_t n,
@@ -231,6 +233,9 @@ void walk_constexpr_body(const semantic_tree &tree, uint32_t n,
     }
     case semantic_kind::return_statement:
         found.returns = true;
+        return;
+    case semantic_kind::declaration_statement:
+        found.variables.append(n);
         return;
     /* (clang allows the other statements as extensions, expression
        statements too; an evaluation that modifies an object is what C++11
@@ -416,6 +421,44 @@ analysis_result semantic_analysis::function_body(node_index definition,
                         "shall be a literal type, which void is not",
                         "dcl.constexpr"));
         }
+        /* [dcl.constexpr]/3 until C++23: "its return type (if any) shall
+           be a literal type; each of its parameter types shall be a
+           literal type"; and (/3.5.3) its body shall not contain "a
+           definition of a variable of non-literal type" (P2448R2,
+           P2242R3) */
+        if (!b.has(language_feature::constexpr_without_constant_result)) {
+            if (literal_type(returns) == constness::not_constant)
+                result = worse(result, ill_formed_at_token(
+                                           first_token(compound),
+                                           "until C++23 the return type of a "
+                                           "constexpr function shall be a "
+                                           "literal type",
+                                           "dcl.constexpr"));
+            type_index ft = entity_table[f].type.unqualified();
+            const qualified_type *parameters = type_table.parameters(ft);
+            for (uint32_t i = 0; i < type_table[ft].parameter_count; i++)
+                if (literal_type(parameters[i]) == constness::not_constant)
+                    result = worse(
+                        result,
+                        ill_formed_at_token(first_token(compound),
+                                            "until C++23 each parameter type "
+                                            "of a constexpr function shall "
+                                            "be a literal type",
+                                            "dcl.constexpr"));
+        }
+        if (!b.has(language_feature::non_literal_constexpr_variables))
+            for (uint32_t v : found.variables) {
+                const entity &e = entity_table[semantics[v].a];
+                if (e.automatic &&
+                    literal_type(e.type) == constness::not_constant)
+                    result = worse(
+                        result,
+                        ill_formed_at_token(
+                            semantics[v].at,
+                            "until C++23 the body of a constexpr function "
+                            "shall not define a variable of non-literal type",
+                            "dcl.constexpr"));
+            }
         /* [dcl.constexpr]/6: "if no argument values exist such that an
            invocation of the function ... could be an evaluated
            subexpression of a core constant expression ..., the program is
