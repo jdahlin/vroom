@@ -64,6 +64,46 @@ bool semantic_analysis::declares_special_member(entity_index c,
 }
 
 /*
+ * [class.base.init]/9.1: member e initialized from its default member
+ * initializer ([class.mem]/10), analysed in the constructor ([class.mem]/6:
+ * a complete-class context, `this` its object), and stored as by an
+ * assignment to (*this).e.  A member of class type with constructors, or
+ * an array, has no rules here yet.
+ */
+analysis_result
+semantic_analysis::default_member_initializer(token_index at, entity_index e,
+                                              uint32_t &statement)
+{
+    qualified_type type = entity_table[e].type;
+    const struct type &record = type_table[type.unqualified()];
+    node_index init = entity_table[e].default_initializer;
+    if (record.kind == type_kind::array ||
+        record.kind == type_kind::lvalue_reference ||
+        record.kind == type_kind::rvalue_reference ||
+        (record.kind == type_kind::class_type &&
+         entity_table[record.entity].first_constructor))
+        return not_supported(init, "class.base.init");
+    expression_meaning object;
+    analysis_result r = subobject(at, e, object);
+    if (r != analysis_result::well_formed)
+        return r;
+    initialized_value value;
+    r = initializer(syntax_child::node(init), type, value);
+    if (r != analysis_result::well_formed)
+        return r;
+    expression_meaning stored = object;
+    stored.type = qualified_type::make(type.unqualified(), cv_none);
+    stored.evaluation = constness::not_constant;
+    stored.entity = 0;
+    uint32_t assigned = expression_node(
+        semantic_kind::assignment, stored, at, object.node, value.node,
+        static_cast<uint8_t>(preprocessing_op_or_punc::EQUAL));
+    statement =
+        statement_node(semantic_kind::expression_statement, at, assigned);
+    return analysis_result::well_formed;
+}
+
+/*
  * [class.copy.ctor]/11: "A copy/move constructor for class X is trivial if
  * it is not user-provided and ... (11.4) for each non-static data member of
  * X that is of class type (or array thereof), the constructor selected to
@@ -689,6 +729,18 @@ analysis_result semantic_analysis::ctor_initializer(syntax_child list,
     for (size_t i = 0; i < subobjects.size(); i++) {
         if (initialized[i])
             continue;
+        if (entity_table[subobjects[i]].default_initializer) {
+            /* (9.1) "if the entity is a non-static data member that has a
+               default member initializer ([class.mem]) and either ... the
+               constructor's class is not a union ... the entity is
+               initialized from its default member initializer as
+               specified in [dcl.init]" */
+            analysis_result r =
+                default_member_initializer(at, subobjects[i], initialized[i]);
+            if (r != analysis_result::well_formed)
+                return r;
+            continue;
+        }
         const struct type &record =
             type_table[entity_table[subobjects[i]].type.unqualified()];
         if (record.kind != type_kind::class_type ||
@@ -819,6 +871,11 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
             if (!assigned_bitwise(k))
                 return not_supported(n, "class.copy.assign");
     bool construction = false, destruction = false, copy = false;
+    /* [class.default.ctor]/3: not trivial when "no non-static data member
+       of its class has a default member initializer" fails */
+    for (uint32_t i = 0; i < x.member_count; i++)
+        if (entity_table[class_members[x.first_member + i]].default_initializer)
+            construction = true;
     for (entity_index k : classes) {
         if (entity_table[k].first_constructor)
             construction = true;

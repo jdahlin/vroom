@@ -1031,7 +1031,33 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
             if (syntax_is_punctuator(tokens, tree.children(d.index())[i],
                                      preprocessing_op_or_punc::COLON))
                 return member_bit_field(c, declaration, d, s, access);
-        return not_supported(d.index(), "class.mem");
+        /* declarator brace-or-equal-initializer: [class.mem]/10 "A
+           brace-or-equal-initializer shall appear only in the declaration
+           of a data member"; for a non-static one it is a default member
+           initializer, analysed where a constructor uses it
+           ([class.base.init]/9), a complete-class context ([class.mem]/6) */
+        const syntax_child *parts = tree.children(d.index());
+        if (node.child_count != 2 ||
+            (!syntax_is(tree, parts[1],
+                        syntax_kind::brace_or_equal_initializer) &&
+             !syntax_is(tree, parts[1], syntax_kind::braced_init_list)))
+            return not_supported(d.index(), "class.mem");
+        last_declared = 0;
+        analysis_result r =
+            member_declarator(c, declaration, parts[0], s, access, definition);
+        if (r != analysis_result::well_formed)
+            return r;
+        entity_index e = last_declared;
+        if (!e || entity_table[e].kind != entity_kind::variable ||
+            !entity_table[e].nonstatic_member)
+            /* a static data member's initializer, a pure-specifier */
+            return not_supported(d.index(), "class.static.data");
+        if (entity_table[c].union_ || !entity_table[c].name)
+            /* [class.union.anon]: at most one variant member's; an unnamed
+               class's members are initialized by no constructor of its own */
+            return not_supported(d.index(), "class.union");
+        entity_table[e].default_initializer = parts[1].index();
+        return analysis_result::well_formed;
     }
     if (!s.has_type && declares_special_member(c, d))
         /* a cv-qualifier or another specifier with a constructor */

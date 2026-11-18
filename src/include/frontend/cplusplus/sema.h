@@ -316,6 +316,10 @@ struct entity {
        member object of it in the enclosing class ([class.union.anon]/1),
        through which a member's name in that class designates it */
     entity_index anonymous_object = 0;
+    /* a non-static data member: its default member initializer
+       ([class.mem]/10: a brace-or-equal-initializer or braced-init-list
+       node), 0 if none */
+    node_index default_initializer = 0;
     uint64_t offset = 0;
     /* a class: its non-static data members, in declaration order, are
        semantic_analysis::class_members[first_member .. first_member +
@@ -1554,6 +1558,8 @@ class semantic_analysis
                                     entity_index to, qualified_type type,
                                     expression_meaning &m);
     /* the subobject e (a base or a non-static data member) of *this */
+    analysis_result default_member_initializer(token_index at, entity_index e,
+                                               uint32_t &statement);
     analysis_result subobject(token_index at, entity_index e,
                               expression_meaning &m);
     /* the classes of the bases and members (arrays' elements) of c */

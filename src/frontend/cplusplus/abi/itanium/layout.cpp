@@ -95,7 +95,9 @@ bool pod_for_layout(const semantic_analysis &a, entity_index c)
         const entity &m = a.entity_table[a.class_members[x.first_member + i]];
         if (m.bit_field && !m.name)
             continue;
-        if (m.access)
+        /* [impl.clang] a default member initializer (no aggregate in
+           C++11, so no C++03 POD) */
+        if (m.access || m.default_initializer)
             return false;
         entity_index of = class_of_component(a, m);
         if (of && !pod_for_layout(a, of))
