@@ -286,11 +286,13 @@ semantic_analysis::function_template_definition(node_index n,
         type_table[type.unqualified()].kind != type_kind::function)
         return not_supported(n, "temp.fct");
     /* [ext:gnu_attributes] its specializations' symbols' (given them at
-       instantiation) */
+       instantiation), and noinline, always_inline and noreturn, which
+       lowering gives each specialization as a non-template function's */
     uint32_t gnu_flags = s.gnu_flags | m.gnu_flags;
     if (s.typedef_ || s.extern_ || c_language ||
-        (gnu_flags & ~gnu_function_symbol_flags) || s.aligned || m.aligned ||
-        s.section || m.section || m.asm_label ||
+        (gnu_flags & ~(gnu_function_symbol_flags | gnu_noinline |
+                       gnu_always_inline | gnu_noreturn)) ||
+        s.aligned || m.aligned || s.section || m.section || m.asm_label ||
         (s.abi_tag && m.abi_tag && s.abi_tag != m.abi_tag))
         return not_supported(n, "temp.fct");
     token_index abi_tag = m.abi_tag;
