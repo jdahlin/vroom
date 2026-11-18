@@ -716,4 +716,153 @@ semantic_analysis::member_pointer_constant(token_index t, entity_index e,
     return analysis_result::well_formed;
 }
 
+/*
+ * [expr.unary.noexcept]/2: "The result of the noexcept operator is a
+ * prvalue of type bool.  The result is false if the full-expression of
+ * the operand is potentially-throwing ([except.spec]), and true
+ * otherwise."  [except.spec]/6: "An expression E is potentially-throwing
+ * if (6.1) E is a function call whose postfix-expression has a function
+ * type, or a pointer-to-function type, with a potentially-throwing
+ * exception specification, or (6.2) E implicitly invokes a function (such
+ * as an overloaded operator, an allocation function in a new-expression,
+ * a constructor for a function argument, or a destructor if E is a
+ * full-expression) that has a potentially-throwing exception
+ * specification, or (6.3) E is a throw-expression, ... or (6.6) any of
+ * the immediate subexpressions of E is potentially-throwing."  The
+ * operand's semantic tree is walked; a node analysis has no rule for here
+ * refuses.
+ */
+analysis_result semantic_analysis::noexcept_operator(node_index n,
+                                                     expression_meaning &m)
+{
+    const syntax_node &node = tree[n];
+    /* before C++17 a function's exception specification is not part of
+       its type, and not kept (dcl.fct.cpp) */
+    if (node.child_count != 4 ||
+        !tokens.files.behavior.has(
+            language_feature::exception_specification_in_type))
+        return not_supported(n, "expr.unary.noexcept");
+    expression_meaning e;
+    unevaluated++;
+    analysis_result r = expression(tree.children(n)[2], e);
+    unevaluated--;
+    if (r != analysis_result::well_formed)
+        return r;
+    bool throwing = false;
+    r = potentially_throwing(n, e.node, throwing);
+    if (r != analysis_result::well_formed)
+        return r;
+    m = expression_meaning();
+    m.type = qualified_type::make(
+        type_table.fundamental(fundamental_type::bool_), cv_none);
+    m.category = value_category::prvalue;
+    m.evaluation = constness::constant;
+    m.value = !throwing;
+    m.node = expression_node(semantic_kind::constant, m, node.first_token);
+    return analysis_result::well_formed;
+}
+
+/* [except.spec]/6 of the semantic node x (0: none) */
+analysis_result semantic_analysis::potentially_throwing(node_index n,
+                                                        uint32_t x,
+                                                        bool &throwing)
+{
+    owned_array<uint32_t> work;
+    if (x)
+        work.append(x);
+    while (!work.empty() && !throwing) {
+        uint32_t k = work.back();
+        work.resize(work.size() - 1);
+        const semantic_node s = semantics[k];
+        switch (s.kind) {
+        case semantic_kind::constant:
+        case semantic_kind::string_literal:
+        case semantic_kind::entity:
+        case semantic_kind::zero:
+            break;
+        case semantic_kind::conversion:
+        case semantic_kind::unary:
+        case semantic_kind::address:
+        case semantic_kind::indirection:
+        case semantic_kind::increment:
+        case semantic_kind::bind_reference:
+        case semantic_kind::member:
+        case semantic_kind::bound_member_function:
+            if (s.a)
+                work.append(s.a);
+            break;
+        case semantic_kind::binary:
+        case semantic_kind::logical_and:
+        case semantic_kind::logical_or:
+        case semantic_kind::assignment:
+        case semantic_kind::comma:
+        case semantic_kind::subscript:
+            work.append(s.a);
+            work.append(s.b);
+            break;
+        case semantic_kind::conditional:
+            work.append(s.a);
+            work.append(s.b);
+            work.append(s.c);
+            break;
+        case semantic_kind::initializer_list:
+            for (uint32_t i = 0; i < s.count; i++)
+                work.append(semantics.items(s.first)[i]);
+            break;
+        case semantic_kind::call: {
+            /* /6.1: the callee's function type */
+            uint32_t callee_node = s.a;
+            qualified_type t = semantics[callee_node].type;
+            if (type_table[t.unqualified()].kind == type_kind::pointer)
+                t = type_table[t.unqualified()].operand;
+            const struct type &f = type_table[t.unqualified()];
+            if (f.kind != type_kind::function)
+                return not_supported(n, "expr.unary.noexcept");
+            /* clang: a function with the nothrow attribute has a
+               non-throwing type */
+            const semantic_node &callee = semantics[callee_node];
+            bool nothrow = callee.kind == semantic_kind::entity && callee.a &&
+                           (entity_table[callee.a].gnu_flags & gnu_nothrow);
+            /* [impl.clang] the attribute is ignored with a
+               noexcept(false): whether there is one is not kept */
+            if (nothrow && !f.non_throwing)
+                return not_supported(n, "expr.unary.noexcept");
+            if (!f.non_throwing) {
+                throwing = true;
+                break;
+            }
+            work.append(s.a);
+            if (s.b)
+                work.append(s.b);
+            for (uint32_t i = 0; i < s.count; i++)
+                work.append(semantics.items(s.first)[i]);
+            break;
+        }
+        case semantic_kind::construct: {
+            /* /6.2: the constructor; an implicit one's exception
+               specification ([except.spec]/8) is not worked out here */
+            if (s.b) {
+                const entity &c = entity_table[s.b];
+                if (c.implicit)
+                    return not_supported(n, "expr.unary.noexcept");
+                if (!type_table[c.type.unqualified()].non_throwing) {
+                    throwing = true;
+                    break;
+                }
+            }
+            if (s.a)
+                work.append(s.a);
+            for (uint32_t i = 0; i < s.count; i++)
+                work.append(semantics.items(s.first)[i]);
+            break;
+        }
+        default:
+            /* a temporary's destruction, a new- or delete-expression, a
+               member pointer: no rule here */
+            return not_supported(n, "expr.unary.noexcept");
+        }
+    }
+    return analysis_result::well_formed;
+}
+
 } // namespace cplusplus
