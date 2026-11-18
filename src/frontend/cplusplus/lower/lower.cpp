@@ -45,6 +45,12 @@ class c_lowering
         records.resize(analysis.entity_table.size());
         for (ast_qualified_type &r : records)
             r = 0;
+        c_fields.resize(analysis.entity_table.size());
+        for (uint32_t &f : c_fields)
+            f = 0;
+        tail_reused.resize(analysis.entity_table.size());
+        for (uint8_t &f : tail_reused)
+            f = 0;
         complete_symbols.resize(analysis.entity_table.size());
         for (uint32_t &s : complete_symbols)
             s = 0;
@@ -69,6 +75,13 @@ class c_lowering
     owned_array<uint32_t> symbols;
     /* the C struct of each class, 0 until made */
     owned_array<ast_qualified_type> records;
+    /* a data member or base subobject: its field's number in its class's
+       C struct, which has padding fields where C's layout would place a
+       member earlier than the ABI does; a class: its C struct's number of
+       fields */
+    owned_array<uint32_t> c_fields;
+    /* a base subobject whose field is the char array of its data size */
+    owned_array<uint8_t> tail_reused;
     /* the labels of the function being lowered: identifier, C label */
     struct label_record {
         uint32_t identifier = 0, label = 0;
@@ -207,6 +220,8 @@ class c_lowering
     uint32_t discard(uint32_t n);
     uint32_t object(uint32_t n);
     uint32_t address_of(uint32_t lvalue, ast_qualified_type pointer);
+    uint32_t data_size_assignment(const semantic_node &n, uint32_t a,
+                                  uint32_t b);
     uint32_t constant(const semantic_node &n);
     uint32_t string_literal(const semantic_node &n);
     uint32_t conversion(const semantic_node &n);
@@ -395,9 +410,19 @@ ast_qualified_type c_lowering::type(qualified_type t, token_index at)
     return made;
 }
 
-/* a class as a C struct of its non-static data members, in order: the
-   Itanium layout of the classes analysis has is C's ([abi:layout] for a
-   POD), which is checked against the offsets analysis gave */
+/*
+ * A class as a C struct of its non-static data members (and base class
+ * subobjects that are not empty), in order, at the offsets of the Itanium
+ * layout ([abi:class-types]), which are C's for a POD ([abi:layout]).
+ * Where they are not, the struct says them anyway:
+ *   - a member the ABI places after where C would (an empty subobject
+ *     moved by a conflict, II) has a char array of padding before it;
+ *   - a base whose tail padding the class reuses (a member placed before
+ *     the base's sizeof ends: [abi:pod]) is an aligned char array of the
+ *     base's data size, which a member access reads as the base's type;
+ *   - the struct ends with padding to the class's size.
+ * The offsets C gives are checked against the analysis's.
+ */
 ast_qualified_type c_lowering::class_type(entity_index e, token_index at)
 {
     if (records[e])
@@ -427,59 +452,123 @@ ast_qualified_type c_lowering::class_type(entity_index e, token_index at)
     owned_array<uint32_t> aligned;
     owned_array<uint8_t> packed;
     owned_array<int32_t> widths;
-    owned_buffer base_names;
+    owned_array<uint64_t> offsets;
+    /* the generated names (__base, __pad), NUL-separated, for the fields
+       whose names[] is null */
+    owned_buffer generated;
+    ast_qualified_type byte = ast_builder_type_basic(AST_TYPE_CHAR);
+    uint64_t end = 0;
+    auto add = [&](ast_qualified_type t, const char *n, size_t length,
+                   uint32_t align, bool pack, int32_t width) {
+        fields.append(t);
+        names.append(n);
+        lengths.append(length);
+        aligned.append(align);
+        packed.append(pack);
+        widths.append(width);
+    };
+    auto padding = [&](uint64_t bytes) {
+        vbuffer_format_append(generated.get(), "__pad%u",
+                              static_cast<uint32_t>(fields.size()));
+        vbuffer_append(generated.get(), "", 1);
+        add(ast_builder_type_array(c, byte, bytes, true), nullptr, 0, 0, false,
+            -1);
+        offsets.append(UINT64_MAX);
+    };
     for (uint32_t i = 0; i < x.member_count; i++) {
         entity_index member = analysis.class_members[x.first_member + i];
         const entity &m = analysis.entity_table[member];
-        fields.append(type(m.type, at));
+        ast_qualified_type t = type(m.type, at);
+        uint64_t size = analysis.size_of_type(m.type);
+        uint64_t align = analysis.alignment_of_type(m.type);
+        if (m.gnu_flags & gnu_packed)
+            align = 1;
+        if (m.alignment > align)
+            align = m.alignment;
+        if (!x.union_ && !m.bit_field) {
+            uint64_t natural = end;
+            if (align)
+                natural = (end + align - 1) / align * align;
+            if (m.offset > natural && m.offset > end)
+                padding(m.offset - end);
+            /* the next member placed inside this base's tail padding */
+            uint64_t next = x.size;
+            if (i + 1 < x.member_count)
+                next = analysis
+                           .entity_table[analysis.class_members[x.first_member +
+                                                                i + 1]]
+                           .offset;
+            if (m.base_subobject && next < m.offset + size) {
+                size = analysis.entity_table[record(m.type).entity].data_size;
+                t = ast_builder_type_array(c, byte, size, true);
+                tail_reused[member] = 1;
+            }
+        }
+        c_fields[member] = static_cast<uint32_t>(fields.size());
+        offsets.append(m.offset);
+        int32_t width = -1;
+        if (m.bit_field)
+            width = m.bit_width;
+        uint32_t field_align = m.alignment;
+        if (tail_reused[member])
+            /* the data-size char array: its base's alignment */
+            field_align = static_cast<uint32_t>(align);
         if (m.base_subobject || (!m.name && !m.bit_field)) {
             /* a base class subobject or an anonymous union's object: a
                field no C name can refer to */
-            vbuffer_format_append(base_names.get(), "__base%u", i);
-            vbuffer_append(base_names.get(), "", 1);
-            names.append(nullptr);
-            lengths.append(0);
+            vbuffer_format_append(generated.get(), "__base%u", i);
+            vbuffer_append(generated.get(), "", 1);
+            add(t, nullptr, 0, field_align, (m.gnu_flags & gnu_packed) != 0,
+                width);
         } else if (!m.name) {
             /* an unnamed bit-field */
-            names.append("");
-            lengths.append(0);
+            add(t, "", 0, field_align, (m.gnu_flags & gnu_packed) != 0, width);
         } else {
             size_t length = 0;
-            names.append(tokens.pp.identifier_spelling(m.name - 1, &length));
-            lengths.append(length);
+            const char *spelled =
+                tokens.pp.identifier_spelling(m.name - 1, &length);
+            add(t, spelled, length, field_align,
+                (m.gnu_flags & gnu_packed) != 0, width);
         }
-        widths.append(-1);
         if (m.bit_field)
-            widths[widths.size() - 1] = m.bit_width;
-        aligned.append(m.alignment);
-        packed.append((m.gnu_flags & gnu_packed) != 0);
-    }
-    for (size_t i = 0, at_name = 0; i < names.size(); i++) {
-        if (names[i])
-            continue;
-        names[i] = base_names.data() + at_name;
-        lengths[i] = strlen(names[i]);
-        at_name += lengths[i] + 1;
+            end = (m.bit_offset + m.bit_width + 7) / 8;
+        else if (m.offset + size > end)
+            end = m.offset + size;
     }
     if (!x.member_count) {
         /* [intro.object]/8: an empty class is one byte, a C struct without
            members none: a char of padding */
-        fields.append(ast_builder_type_basic(AST_TYPE_CHAR));
-        names.append("__empty");
-        lengths.append(7);
-        aligned.append(0);
-        packed.append(0);
-        widths.append(-1);
+        add(byte, "__empty", 7, 0, false, -1);
+        offsets.append(UINT64_MAX);
+        end = 1;
     }
+    if (!x.union_ && end < x.size) {
+        /* the C struct's size, rounded to its alignment, may fall short of
+           the class's: padding at the end where it would */
+        uint64_t rounded = end;
+        if (x.alignment)
+            rounded = (end + x.alignment - 1) / x.alignment * x.alignment;
+        if (rounded < x.size)
+            padding(x.size - end);
+    }
+    for (size_t i = 0, at_name = 0; i < names.size(); i++) {
+        if (names[i])
+            continue;
+        names[i] = generated.data() + at_name;
+        lengths[i] = strlen(names[i]);
+        at_name += lengths[i] + 1;
+    }
+    c_fields[e] = static_cast<uint32_t>(fields.size());
     ast_builder_type_record_complete(
         c, made, fields.data(), names.data(), lengths.data(), aligned.data(),
         packed.data(), widths.data(), static_cast<uint32_t>(fields.size()));
     for (uint32_t i = 0; i < x.member_count; i++) {
         entity_index member = analysis.class_members[x.first_member + i];
         const entity &m = analysis.entity_table[member];
-        if (ast_builder_type_record_offset(c, made, i) != m.offset ||
+        uint32_t f = c_fields[member];
+        if (ast_builder_type_record_offset(c, made, f) != m.offset ||
             (m.bit_field &&
-             ast_builder_type_record_bit_offset(c, made, i) != m.bit_offset))
+             ast_builder_type_record_bit_offset(c, made, f) != m.bit_offset))
             fail("a class whose layout is not C's", at);
     }
     if (ast_builder_type_size(c, made) != x.size)
@@ -1219,8 +1308,25 @@ uint32_t c_lowering::conversion(const semantic_node &n)
     case conversion_kind::derived_to_base:
         /* [conv.ptr]/3: a base at offset 0 (which analysis makes sure
            of): the same address, a null pointer one too */
-        if (analysis.entity_table[n.b].offset)
-            return fail("a pointer to a base at a nonzero offset", n.at);
+        if (analysis.entity_table[n.b].offset) {
+            /* an object's address (never null), to an empty base the
+               layout moved ([abi:class-types] II): &((char *)p)[offset] */
+            if (node(n.a).kind != semantic_kind::address)
+                return fail("a pointer to a base at a nonzero offset", n.at);
+            uint32_t p = expression(n.a);
+            if (!p)
+                return 0;
+            ast_qualified_type byte = ast_builder_type_basic(AST_TYPE_CHAR);
+            ast_qualified_type bytes = ast_builder_type_pointer(c, byte);
+            uint32_t offset =
+                ast_builder_integer(c, ast_builder_type_ptrdiff(c),
+                                    analysis.entity_table[n.b].offset);
+            uint32_t at = make(AST_NODE_INDEX, byte,
+                               cast(p, bytes, AST_CAST_POINTER_TO_POINTER),
+                               offset, 0, 0, AST_NODE_FLAG_LVALUE);
+            return cast(make(AST_NODE_ADDRESS, bytes, at, 0, 0, 0, 0), t,
+                        AST_CAST_POINTER_TO_POINTER);
+        }
         return cast(expression(n.a), t, AST_CAST_POINTER_TO_POINTER);
     case conversion_kind::pointer_to_integral:
         return cast(expression(n.a), t, AST_CAST_POINTER_TO_INTEGER);
@@ -1333,6 +1439,65 @@ uint32_t c_lowering::binary(const semantic_node &n)
     return make(AST_NODE_BINARY, t, a, b, 0, static_cast<uint16_t>(op), 0);
 }
 
+/*
+ * A trivial assignment of a class whose tail padding a derived class may
+ * reuse ([abi:pod]): the left operand may be a base class subobject, so
+ * only the class's data size is copied, as clang copies it:
+ *     *(p = &a, *(struct { char d[dsize]; } *)p = *(... *)&b, p)
+ * with p a temporary.
+ */
+uint32_t c_lowering::data_size_assignment(const semantic_node &n, uint32_t a,
+                                          uint32_t b)
+{
+    if (!collecting)
+        return fail("an assignment of a class with tail padding outside a "
+                    "statement",
+                    n.at);
+    if (!(ast_builder_ast(c)->nodes[b].flags & AST_NODE_FLAG_LVALUE))
+        /* a prvalue: no object to copy the data size of */
+        return fail("an assignment of a class with tail padding from a "
+                    "prvalue",
+                    n.at);
+    const entity &x = analysis.entity_table[record(n.type).entity];
+    ast_qualified_type t = AST_QUALIFIED_TYPE_UNQUALIFIED(type(n.type, n.at));
+    ast_qualified_type pointer = ast_builder_type_pointer(c, t);
+    ast_qualified_type byte = ast_builder_type_basic(AST_TYPE_CHAR);
+    ast_qualified_type view = ast_builder_type_record(c, "", 0, false);
+    ast_qualified_type data =
+        ast_builder_type_array(c, byte, x.data_size, true);
+    const char *field_name = "d";
+    size_t field_length = 1;
+    uint32_t no_alignment = 0;
+    uint8_t not_packed = 0;
+    int32_t no_width = -1;
+    ast_builder_type_record_complete(c, view, &data, &field_name, &field_length,
+                                     &no_alignment, &not_packed, &no_width, 1);
+    ast_qualified_type view_pointer = ast_builder_type_pointer(c, view);
+    ast_qualified_type v = ast_builder_type_basic(AST_TYPE_VOID);
+    uint32_t temporary = ast_builder_symbol(c, AST_SYMBOL_VARIABLE, "", 0,
+                                            pointer, AST_STORAGE_AUTO, 0, 1);
+    temporaries.append(
+        ast_builder_node(c, AST_NODE_DECLARATION, v, temporary, 0, 0, 0, 0));
+    auto p = [&] {
+        return make(AST_NODE_VARIABLE, pointer, temporary, 0, 0, 0,
+                    AST_NODE_FLAG_LVALUE);
+    };
+    auto as_view = [&](uint32_t address) {
+        return make(AST_NODE_DEREFERENCE, view,
+                    cast(address, view_pointer, AST_CAST_POINTER_TO_POINTER), 0,
+                    0, 0, AST_NODE_FLAG_LVALUE);
+    };
+    uint32_t stored =
+        make(AST_NODE_ASSIGN, pointer, p(), address_of(a, pointer), 0, 0, 0);
+    uint32_t copied = make(AST_NODE_ASSIGN, view, as_view(p()),
+                           as_view(address_of(b, pointer)), 0, 0, 0);
+    uint32_t sequence =
+        make(AST_NODE_COMMA, pointer, stored,
+             make(AST_NODE_COMMA, pointer, copied, p(), 0, 0, 0), 0, 0, 0);
+    return make(AST_NODE_DEREFERENCE, t, sequence, 0, 0, 0,
+                AST_NODE_FLAG_LVALUE);
+}
+
 uint32_t c_lowering::assignment(const semantic_node &n)
 {
     uint32_t a = object(n.a);
@@ -1341,8 +1506,14 @@ uint32_t c_lowering::assignment(const semantic_node &n)
         return 0;
     ast_qualified_type t = AST_QUALIFIED_TYPE_UNQUALIFIED(type(n.type, n.at));
     if (preprocessing_op_or_punc_primary(static_cast<preprocessing_op_or_punc>(
-            n.op)) == preprocessing_op_or_punc::EQUAL)
+            n.op)) == preprocessing_op_or_punc::EQUAL) {
+        const struct type &r = record(n.type);
+        if (r.kind == type_kind::class_type &&
+            analysis.entity_table[r.entity].data_size <
+                analysis.entity_table[r.entity].size)
+            return data_size_assignment(n, a, b);
         return make(AST_NODE_ASSIGN, t, a, b, 0, 0, 0);
+    }
     int op = c_operator(static_cast<preprocessing_op_or_punc>(n.op));
     if (!op)
         return fail("an assignment operator", n.at);
@@ -1671,17 +1842,25 @@ uint32_t c_lowering::initializer_list(const semantic_node &n)
            for an unnamed bit-field, which is no element ([class.bit]/2) */
         owned_array<uint32_t> values;
         const uint32_t *items = analysis.semantics.items(n.first);
-        const entity &x = analysis.entity_table[record(n.type).entity];
+        entity_index ce = record(n.type).entity;
+        const entity &x = analysis.entity_table[ce];
+        class_type(ce, n.at);
         for (uint32_t i = 0, item = 0; item < n.count; i++) {
-            if (i < x.member_count) {
-                const entity &m =
-                    analysis.entity_table
-                        [analysis.class_members[x.first_member + i]];
-                if (m.bit_field && !m.name) {
-                    values.append(0);
-                    continue;
-                }
+            if (i >= x.member_count)
+                return fail("an initializer for no member", n.at);
+            entity_index member = analysis.class_members[x.first_member + i];
+            const entity &m = analysis.entity_table[member];
+            /* the padding fields before it (class_type) */
+            while (values.size() < c_fields[member])
+                values.append(0);
+            if (m.bit_field && !m.name) {
+                values.append(0);
+                continue;
             }
+            if (tail_reused[member])
+                return fail("an initializer of a base whose tail padding "
+                            "is reused",
+                            n.at);
             uint32_t e = expression(items[item++]);
             if (!e)
                 return 0;
@@ -1862,8 +2041,7 @@ uint32_t c_lowering::expression(uint32_t index)
         uint32_t object = expression(n.a);
         if (!object)
             return 0;
-        return ast_builder_member(c, object, analysis.entity_table[n.b].field,
-                                  type(n.type, n.at));
+        return ast_builder_member(c, object, c_fields[n.b], type(n.type, n.at));
     }
     case semantic_kind::zero:
         return make(AST_NODE_ZERO, type(n.type, n.at), 0, 0, 0, 0, 0);

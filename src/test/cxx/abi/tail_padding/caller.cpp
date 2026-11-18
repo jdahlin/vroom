@@ -1,4 +1,3 @@
-/* vcc-xfail: doc/PLAN-cxx-sema.md S4: a class whose layout is not C's (a base's tail padding reused) is not lowered */
 #include <stdio.h>
 
 #include "shared.h"
