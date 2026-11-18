@@ -370,6 +370,8 @@ analysis_result semantic_analysis::function_body(node_index definition,
         entity_table.bind(parameters, name, e);
         parameter_entities.back() = e;
     }
+    if (current_lambda()) /* [expr.prim.lambda.capture]/6 */
+        result = worse(result, bind_init_captures(parameters));
     if (!pack_name && function_empty_pack)
         make_bound_pack(parameters, function_empty_pack, nullptr, 0);
     if (pack_name && !entity_table.find(parameters, pack_name))

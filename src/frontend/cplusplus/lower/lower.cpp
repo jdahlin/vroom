@@ -1104,6 +1104,10 @@ uint32_t c_lowering::symbol(entity_index e, token_index at, int variant)
        ([basic.link]/8); [impl.clang] its symbol is local unless the
        function the class is in is inline (then its copies link as one) */
     entity_index local = local_class_function(e);
+    /* (in a member function of a local class, a closure's call operator
+       too: the outermost function's) */
+    while (local && local_class_function(local))
+        local = local_class_function(local);
     if (local && !analysis.entity_table[local].inline_) {
         storage = AST_STORAGE_STATIC;
         flags = AST_SYMBOL_FLAG_GLOBAL;
@@ -6118,6 +6122,18 @@ bool c_lowering::translation_unit()
         if (x.kind == entity_kind::function && x.placeholder_return &&
             !x.defined)
             continue;
+        /* [impl.clang] a specialization for a closure unique to the
+           translation unit: its symbol made at its first use, which
+           numbers the closure (itanium_mangler) */
+        if (x.instantiation) {
+            owned_buffer probe;
+            analysis.number_closures = false;
+            bool mangled = itanium_symbol_name(analysis, tokens.pp, d.entity,
+                                               probe.get(), 0);
+            analysis.number_closures = true;
+            if (!mangled)
+                continue;
+        }
         if (!symbol(d.entity, 0))
             return false;
     }
@@ -6221,6 +6237,10 @@ bool lower_translation_unit(const semantic_analysis &analysis,
                             lowering_failure &why, const char *main_path)
 {
     c_lowering lowering(analysis, tokens, c, target, main_path);
+    /* [impl.clang]: the closures unique to the translation unit numbered
+       in the order their symbols are made (itanium_mangler) */
+    analysis.unnumbered_closures.clear();
+    analysis.number_closures = true;
     bool lowered = lowering.translation_unit();
     why = lowering.failure;
     return lowered;

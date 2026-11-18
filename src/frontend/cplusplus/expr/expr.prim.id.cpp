@@ -547,7 +547,8 @@ analysis_result semantic_analysis::id_expression(token_index t,
 }
 
 analysis_result semantic_analysis::named_entity(token_index t, entity_index e,
-                                                expression_meaning &m)
+                                                expression_meaning &m,
+                                                bool record_use)
 {
     if (entity_table[e].kind == entity_kind::none)
         return not_supported(current_declaration,
@@ -557,8 +558,9 @@ analysis_result semantic_analysis::named_entity(token_index t, entity_index e,
     if (chosen)
         e = overload_target_choice;
     /* [over.over]/1 (below): an overload set's name names no one function */
-    if (entity_table[e].kind != entity_kind::function ||
-        !entity_table[e].next_overload || t == overloaded_callee || chosen)
+    if ((entity_table[e].kind != entity_kind::function ||
+         !entity_table[e].next_overload || t == overloaded_callee || chosen) &&
+        record_use)
         used(t, e);
     if (entity_table[e].kind == entity_kind::enumerator)
         return enumerator_value(t, e, m);
@@ -616,13 +618,21 @@ analysis_result semantic_analysis::named_entity(token_index t, entity_index e,
            there: "If a local entity is odr-used in a declarative region in
            which it is not odr-usable, the program is ill-formed".  Whether
            this use is an odr-use (unevaluated, or a constant read) is not
-           analysed */
+           analysed.  In a lambda's compound-statement it is captured
+           (captured_entity) */
         entity_index s = x.enclosing;
         while (s && entity_table[s].kind == entity_kind::block_scope)
             s = entity_table[s].enclosing;
         if (s && entity_table[s].kind == entity_kind::function &&
-            s != function_state.function)
+            s != function_state.function) {
+            if (current_lambda())
+                return captured_entity(t, e, m);
             return not_supported(current_declaration, "basic.def.odr");
+        }
+        /* [expr.prim.lambda.capture]/6: an init-capture's name designates
+           its member */
+        if (x.capture_member)
+            return closure_member(t, x.capture_member, m);
     }
     const struct type record = type_table[x.type.unqualified()];
     if (record.kind == type_kind::lvalue_reference ||

@@ -67,6 +67,19 @@ struct tree_checker {
         return k >= semantic_kind::block && k <= semantic_kind::null_statement;
     }
 
+    /* [expr.prim.lambda.closure]/2: a lambda-expression's closure object,
+       a prvalue its captures initialize (closure_object) */
+    bool closure_object(uint32_t c) const
+    {
+        const semantic_node &node = analysis.semantics[c];
+        if (node.kind != semantic_kind::initializer_list)
+            return false;
+        const struct type &record =
+            analysis.type_table[node.type.unqualified()];
+        return record.kind == type_kind::class_type &&
+               analysis.entity_table[record.entity].lambda;
+    }
+
     bool is_bool(qualified_type t) const
     {
         const struct type &record = analysis.type_table[t.unqualified()];
@@ -93,7 +106,7 @@ struct tree_checker {
         semantic_kind k = analysis.semantics[c].kind;
         bool right = is_statement(k);
         if (sort == tree_sort::expression)
-            right = is_expression(k);
+            right = is_expression(k) || closure_object(c);
         else if (sort == tree_sort::initializer)
             right = is_initializer(k);
         if (!right) {

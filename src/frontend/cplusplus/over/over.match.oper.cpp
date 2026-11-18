@@ -80,6 +80,18 @@ analysis_result semantic_analysis::overloaded_operator(
             has_conversion_functions(t.entity))
             converts = true;
     }
+    /* [over.call.object]/2: a captureless lambda's surrogate call function
+       ([expr.prim.lambda.closure]/7) has its const function call
+       operator's parameters, and the operator's object binds without the
+       surrogate's user-defined conversion ([over.ics.rank]/3.3): never the
+       better candidate */
+    if (converts && op == preprocessing_op_or_punc::LEFT_PARENTHESIS) {
+        const struct type &t = type_table[operands[0].type.unqualified()];
+        if (t.kind == type_kind::class_type && entity_table[t.entity].lambda &&
+            entity_table[entity_table[t.entity].call_operator].member_cv ==
+                cv_const)
+            converts = false;
+    }
     bool logical = op == preprocessing_op_or_punc::EXCLAMATION ||
                    op == preprocessing_op_or_punc::AMPERSAND_AMPERSAND ||
                    op == preprocessing_op_or_punc::BAR_BAR;

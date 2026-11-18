@@ -335,6 +335,14 @@ analysis_result semantic_analysis::function(node_index parameters,
                                  preprocessing_op_or_punc::RIGHT_PARENTHESIS)) {
             closed = true;
         } else if (!closed) {
+            /* a lambda-declarator's decl-specifier-seq (mutable, constexpr,
+               consteval) and trailing-return-type: lambda_expression's */
+            if (node.kind == syntax_kind::lambda_declarator &&
+                (syntax_is(tree, c, syntax_kind::decl_specifier_seq) ||
+                 syntax_is(tree, c, syntax_kind::trailing_return_type) ||
+                 (c.is_token() &&
+                  tokens[c.index()].kind == token_kind::keyword)))
+                continue;
             /* [ext:gnu_attributes] after the parameters: the
                declarator's (declarator takes them) */
             if (syntax_is(tree, c, syntax_kind::gnu_attribute_specifier))
