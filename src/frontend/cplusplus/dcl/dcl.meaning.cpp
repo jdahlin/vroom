@@ -35,17 +35,40 @@ qualified_type semantic_analysis::add_cv(qualified_type t, uint32_t cv)
     case type_kind::rvalue_reference:
     case type_kind::function:
         return t;
-    case type_kind::array: {
-        qualified_type element = add_cv(record.operand, cv);
-        if (record.bound_known)
-            return qualified_type::make(
-                type_table.array_of(element, record.bound), cv_none);
+    case type_kind::array:
         return qualified_type::make(
-            type_table.array_of_unknown_bound_of(element), cv_none);
-    }
+            array_with_element(record, add_cv(record.operand, cv)), cv_none);
     default:
         return qualified_type::make(t.unqualified(), t.cv() | cv);
     }
+}
+
+type_index semantic_analysis::array_with_element(const struct type &array,
+                                                 qualified_type element)
+{
+    if (array.bound_known)
+        return type_table.array_of(element, array.bound);
+    return type_table.array_of_unknown_bound_of(element);
+}
+
+/* [dcl.ref]/6: "If a typedef-name ... denotes a type TR that is a
+   reference to a type T, an attempt to create the type lvalue reference to
+   cv TR creates the type lvalue reference to T, while an attempt to create
+   the type rvalue reference to cv TR creates the type TR." */
+qualified_type semantic_analysis::reference_to(qualified_type type, bool rvalue)
+{
+    const struct type referred = type_table[type.unqualified()];
+    if (referred.kind == type_kind::lvalue_reference ||
+        referred.kind == type_kind::rvalue_reference) {
+        if (!rvalue)
+            return qualified_type::make(
+                type_table.lvalue_reference_to(referred.operand), cv_none);
+        return type;
+    }
+    if (rvalue)
+        return qualified_type::make(type_table.rvalue_reference_to(type),
+                                    cv_none);
+    return qualified_type::make(type_table.lvalue_reference_to(type), cv_none);
 }
 
 /*
@@ -66,27 +89,12 @@ analysis_result semantic_analysis::reference(node_index at, bool rvalue,
         if (m.reference_made)
             return ill_formed(at, "there shall be no references to references",
                               "dcl.ref");
-        /* [dcl.ref]/6: "If a typedef-name ... denotes a type TR that is a
-           reference to a type T, an attempt to create the type lvalue
-           reference to cv TR creates the type lvalue reference to T, while
-           an attempt to create the type rvalue reference to cv TR creates
-           the type TR." */
-        if (!rvalue)
-            type = qualified_type::make(
-                type_table.lvalue_reference_to(referred.operand), cv_none);
-        m.reference_made = true;
-        return analysis_result::well_formed;
     }
     /* a reference to cv void: clang's error, a rule not found yet */
     if (referred.kind == type_kind::fundamental &&
         referred.fundamental == fundamental_type::void_)
         return not_supported(at, "dcl.ref");
-    if (rvalue)
-        type =
-            qualified_type::make(type_table.rvalue_reference_to(type), cv_none);
-    else
-        type =
-            qualified_type::make(type_table.lvalue_reference_to(type), cv_none);
+    type = reference_to(type, rvalue);
     m.reference_made = true;
     return analysis_result::well_formed;
 }

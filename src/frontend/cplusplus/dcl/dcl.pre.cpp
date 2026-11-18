@@ -855,7 +855,9 @@ analysis_result semantic_analysis::init_declarators(node_index declaration,
             sole_elaborated = tree.children(specifiers)[0].index();
     }
     placeholder_allowed = true;
-    declaration_deduced = qualified_type();
+    /* (a declaration nested in an initializer has its own) */
+    scoped_value<qualified_type> deduced(declaration_deduced, qualified_type());
+    scoped_value<bool> group(placeholder_group, false);
     analysis_result r = decl_specifier_seq(specifiers, s, false);
     sole_elaborated = 0;
     if (r != analysis_result::well_formed)
@@ -935,6 +937,7 @@ analysis_result semantic_analysis::init_declarators(node_index declaration,
     if (items.empty())
         return extension_used(diagnostic_id::sema_no_declarator,
                               tree[declaration].first_token, nullptr);
+    placeholder_group = items.size() > 1 && contains_placeholder(s.type);
     analysis_result result = analysis_result::well_formed;
     for (syntax_child item : items) {
         r = init_declarator(declaration, item, s, definition);
@@ -1077,7 +1080,7 @@ analysis_result semantic_analysis::declare_with_initializer(
         kind = entity_kind::function;
     bool placeholder = contains_placeholder(type);
     if (placeholder || kind == entity_kind::function) {
-        r = placeholder_declaration(declaration, m, kind, placeholder,
+        r = placeholder_declaration(declaration, m, type, kind, placeholder,
                                     initialized);
         if (r != analysis_result::well_formed)
             return r;
@@ -1285,9 +1288,8 @@ analysis_result semantic_analysis::declare_with_initializer(
     }
     uint32_t calls_before = constexpr_calls;
     if (placeholder) {
-        deducing_variable = declared_entity;
+        scoped_value<entity_index> deducing(deducing_variable, declared_entity);
         r = deduced_initializer(init, declared_entity, type, value);
-        deducing_variable = 0;
     } else
         r = initializer(init, type, value);
     if (r != analysis_result::well_formed)

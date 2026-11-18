@@ -74,24 +74,6 @@ struct template_parameters_in_effect {
     operator=(const template_parameters_in_effect &) = delete;
 };
 
-/* RAII: the scope a template-declaration's declaration declares its name
-   in, for as long as it is parsed (parser::declared_kind) */
-struct template_scope_set {
-    scope_index &scope;
-    scope_index was;
-    template_scope_set(scope_index &scope, scope_index value)
-        : scope(scope), was(scope)
-    {
-        scope = value;
-    }
-    ~template_scope_set()
-    {
-        scope = was;
-    }
-    template_scope_set(const template_scope_set &) = delete;
-    template_scope_set &operator=(const template_scope_set &) = delete;
-};
-
 } // namespace
 
 /*
@@ -112,9 +94,9 @@ node_index parser::template_declaration(node_index (parser::*declaration)())
         add_token();
         add_token();
         add_token();
-        template_scope_set none(template_scope, UINT32_MAX);
-        template_scope_set single(single_declarator_scope,
-                                  names.declaring_scope());
+        scoped_value<scope_index> none(template_scope, UINT32_MAX);
+        scoped_value<scope_index> single(single_declarator_scope,
+                                         names.declaring_scope());
         flag_set explicit_(explicit_declaration, true);
         flag_set not_instantiation(explicit_instantiation_, false);
         (this->*declaration)();
@@ -134,8 +116,9 @@ node_index parser::template_declaration(node_index (parser::*declaration)())
         return violates("a declaration that declares a name in a "
                         "template-declaration",
                         "temp.pre", position);
-    template_scope_set scope(template_scope, names.declaring_scope());
-    template_scope_set single(single_declarator_scope, names.declaring_scope());
+    scoped_value<scope_index> scope(template_scope, names.declaring_scope());
+    scoped_value<scope_index> single(single_declarator_scope,
+                                     names.declaring_scope());
     flag_set not_explicit(explicit_declaration, false);
     flag_set not_instantiation(explicit_instantiation_, false);
     if (at(standard_keyword::concept_))
@@ -164,8 +147,9 @@ node_index parser::explicit_instantiation(node_index (parser::*declaration)())
         add_token();
     }
     add_token(); /* template */
-    template_scope_set none(template_scope, UINT32_MAX);
-    template_scope_set single(single_declarator_scope, names.declaring_scope());
+    scoped_value<scope_index> none(template_scope, UINT32_MAX);
+    scoped_value<scope_index> single(single_declarator_scope,
+                                     names.declaring_scope());
     flag_set explicit_(explicit_declaration, true);
     flag_set instantiation(explicit_instantiation_, true);
     /* [temp.explicit]/3: the declaration is no explicit-instantiation, an

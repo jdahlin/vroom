@@ -72,6 +72,15 @@ bool same_parameters(const types &table, type_index a, type_index b)
     return true;
 }
 
+/* [basic.link]/4.3: an unnamed class without a typedef name for linkage
+   purposes ([dcl.typedef]/9), or an array of one */
+bool semantic_analysis::unnamed_class_object(qualified_type t) const
+{
+    entity_index k = element_class(t);
+    return is_class_entity(k) && !entity_table[k].name &&
+           !entity_table[k].linkage_name;
+}
+
 /* [basic.link]/4: a class or enumeration of an unnamed namespace has
    internal linkage, an unnamed one without a typedef name for linkage
    purposes and a local one none ([basic.link]/8): whether t is such a
@@ -618,17 +627,9 @@ analysis_result semantic_analysis::declare(node_index declaration,
            linkage purposes ([dcl.typedef]/9) has no name for linkage; a
            variable of its type is [basic.link]/8's "entity with no
            linkage" type's, which clang gives internal linkage */
-        qualified_type object = type;
-        while (type_table[object.unqualified()].kind == type_kind::array)
-            object = type_table[object.unqualified()].operand;
         bool unnamed_type = false;
         if (kind == entity_kind::variable && implied == linkage::external &&
-            type_table[object.unqualified()].kind == type_kind::class_type &&
-            entity_table[type_table[object.unqualified()].entity].kind ==
-                entity_kind::class_type &&
-            !entity_table[type_table[object.unqualified()].entity].name &&
-            !entity_table[type_table[object.unqualified()].entity]
-                 .linkage_name) {
+            unnamed_class_object(type)) {
             implied = linkage::internal;
             unnamed_type = true;
         }

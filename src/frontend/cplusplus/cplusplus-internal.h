@@ -262,21 +262,23 @@ struct complete_class_context {
     complete_class_context &operator=(const complete_class_context &) = delete;
 };
 
-/* RAII: a flag of the parser set for as long as the object lives */
-struct flag_set {
-    bool &flag;
-    bool was;
-    flag_set(bool &flag, bool value) : flag(flag), was(flag)
+/* RAII: a variable (of the parser or the analysis) set to value for as
+   long as the object lives, its earlier value restored after */
+template <typename T> struct scoped_value {
+    T &variable;
+    T was;
+    scoped_value(T &variable, T value) : variable(variable), was(variable)
     {
-        flag = value;
+        variable = value;
     }
-    ~flag_set()
+    ~scoped_value()
     {
-        flag = was;
+        variable = was;
     }
-    flag_set(const flag_set &) = delete;
-    flag_set &operator=(const flag_set &) = delete;
+    scoped_value(const scoped_value &) = delete;
+    scoped_value &operator=(const scoped_value &) = delete;
 };
+using flag_set = scoped_value<bool>;
 
 /* [lex.operators]: whether a token is the operator or punctuator op, in
    either of its spellings ([lex.digraph]) */

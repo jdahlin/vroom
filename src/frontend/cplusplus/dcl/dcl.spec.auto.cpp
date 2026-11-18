@@ -67,45 +67,45 @@ qualified_type semantic_analysis::replace_placeholder(qualified_type t,
         return qualified_type::make(
             type_table.pointer_to(replace_placeholder(r.operand, by)), t.cv());
     case type_kind::lvalue_reference:
-    case type_kind::rvalue_reference: {
-        qualified_type referred = replace_placeholder(r.operand, by);
-        const struct type &inner = type_table[referred.unqualified()];
-        bool lvalue = r.kind == type_kind::lvalue_reference;
-        if (inner.kind == type_kind::lvalue_reference)
-            return referred;
-        if (inner.kind == type_kind::rvalue_reference) {
-            if (!lvalue)
-                return referred;
-            referred = inner.operand;
-        }
-        if (lvalue)
-            return qualified_type::make(
-                type_table.lvalue_reference_to(referred), cv_none);
-        return qualified_type::make(type_table.rvalue_reference_to(referred),
-                                    cv_none);
-    }
-    case type_kind::array: {
-        qualified_type element = replace_placeholder(r.operand, by);
-        if (r.bound_known)
-            return qualified_type::make(type_table.array_of(element, r.bound),
-                                        t.cv());
+    case type_kind::rvalue_reference:
+        return reference_to(replace_placeholder(r.operand, by),
+                            r.kind == type_kind::rvalue_reference);
+    case type_kind::array:
         return qualified_type::make(
-            type_table.array_of_unknown_bound_of(element), t.cv());
-    }
-    case type_kind::function: {
-        owned_array<qualified_type> parameters;
-        const qualified_type *list = type_table.parameters(t.unqualified());
-        for (uint32_t i = 0; i < r.parameter_count; i++)
-            parameters.append(list[i]);
-        return qualified_type::make(
-            type_table.function(replace_placeholder(r.operand, by),
-                                parameters.data(), parameters.size(),
-                                r.variadic),
-            t.cv());
-    }
+            array_with_element(r, replace_placeholder(r.operand, by)), t.cv());
+    case type_kind::function:
+        return function_returning(t, replace_placeholder(r.operand, by));
     default:
         return t;
     }
+}
+
+qualified_type semantic_analysis::function_returning(qualified_type f,
+                                                     qualified_type returns)
+{
+    const struct type r = type_table[f.unqualified()];
+    owned_array<qualified_type> parameters;
+    const qualified_type *list = type_table.parameters(f.unqualified());
+    for (uint32_t i = 0; i < r.parameter_count; i++)
+        parameters.append(list[i]);
+    return qualified_type::make(type_table.function(returns, parameters.data(),
+                                                    parameters.size(),
+                                                    r.variadic),
+                                f.cv());
+}
+
+/* a type deduced as an array, a function or void: what the declaration
+   then means (an object of that type, a function returning it) is not
+   analysed */
+analysis_result semantic_analysis::deduced_type_supported(node_index at,
+                                                          qualified_type t)
+{
+    const struct type record = type_table[t.unqualified()];
+    if (record.kind == type_kind::array || record.kind == type_kind::function ||
+        (record.kind == type_kind::fundamental &&
+         record.fundamental == fundamental_type::void_))
+        return not_supported(at, "dcl.type.auto.deduct");
+    return analysis_result::well_formed;
 }
 
 /*
@@ -118,12 +118,45 @@ qualified_type semantic_analysis::replace_placeholder(qualified_type t,
  * also use that placeholder, not a deduced type.  Similarly, redeclarations
  * or specializations of a function or function template with a declared
  * return type that does not use a placeholder type shall not use a
- * placeholder": not analysed, any redeclaration of the name is unsupported.
+ * placeholder": not analysed.  A declaration with a placeholder of a name
+ * already declared in its scope is unsupported, and so is a function
+ * declared without a placeholder whose name has a function with a
+ * placeholder return type; a later declaration without a placeholder of
+ * a variable declared with one is analysed as any redeclaration of a
+ * variable ([basic.link]/11: the types are the same, the deduced type
+ * being the variable's).
  */
 analysis_result semantic_analysis::placeholder_declaration(
-    node_index declaration, const declarator_meaning &m, entity_kind kind,
-    bool placeholder, bool initialized)
+    node_index declaration, const declarator_meaning &m, qualified_type type,
+    entity_kind kind, bool placeholder, bool initialized)
 {
+    /* [dcl.spec.auto]/7: "If the init-declarator-list contains more than
+       one init-declarator, they shall all form declarations of
+       variables."  (CWG1265: a declarator with a trailing-return-type, a
+       function's, in such a list is so ill-formed) */
+    if (placeholder_group && kind == entity_kind::function)
+        return ill_formed_at_token(m.id,
+                                   "if the init-declarator-list contains more "
+                                   "than one init-declarator, they shall all "
+                                   "form declarations of variables",
+                                   "dcl.spec.auto");
+    /* [dcl.type.auto.deduct]/5: "If the placeholder-type-specifier is of
+       the form type-constraint_opt decltype(auto), T shall be the
+       placeholder alone." */
+    bool decltype_auto = false;
+    if (placeholder && contains_placeholder(type, &decltype_auto) &&
+        decltype_auto) {
+        qualified_type t = type;
+        if (kind == entity_kind::function)
+            t = type_table[type.unqualified()].operand;
+        if (type_table[t.unqualified()].kind != type_kind::placeholder ||
+            t.cv())
+            return ill_formed_at_token(m.id,
+                                       "if the placeholder-type-specifier is "
+                                       "of the form decltype(auto), T shall "
+                                       "be the placeholder alone",
+                                       "dcl.type.auto.deduct");
+    }
     /* N3638 (C++14): a function's deduced return type */
     if (placeholder && kind == entity_kind::function &&
         !tokens.files.behavior.has(language_feature::return_type_deduction))
@@ -185,13 +218,7 @@ analysis_result semantic_analysis::deduce_placeholder(
         argument.kind == type_kind::dependent || e.bit_field_width)
         return not_supported(at, "dcl.type.auto.deduct");
     if (decltype_auto) {
-        if (type_table[declared.unqualified()].kind != type_kind::placeholder ||
-            declared.cv())
-            return ill_formed(at,
-                              "if the placeholder-type-specifier is of the "
-                              "form decltype(auto), T shall be the "
-                              "placeholder alone",
-                              "dcl.type.auto.deduct");
+        /* (T is the placeholder alone: placeholder_declaration) */
         if (!decltype_of(e, named, deduced))
             return not_supported(at, "dcl.type.auto.deduct");
         replacement = deduced;
@@ -288,20 +315,12 @@ analysis_result semantic_analysis::deduced_initializer(syntax_child init,
     entity_table[e].type = type;
     /* [basic.link]/8: the linkage a variable's type implies (declare's
        rules) was not known when its name was declared */
-    if (entity_table[e].linkage_of_name == linkage::external) {
-        qualified_type object = type;
-        while (type_table[object.unqualified()].kind == type_kind::array)
-            object = type_table[object.unqualified()].operand;
-        const struct type &k = type_table[object.unqualified()];
-        if (type_without_external_linkage(type) ||
-            (k.kind == type_kind::class_type && !entity_table[k.entity].name))
-            return not_supported(n, "basic.link");
-    }
-    const struct type record = type_table[type.unqualified()];
-    if (record.kind == type_kind::array || record.kind == type_kind::function ||
-        (record.kind == type_kind::fundamental &&
-         record.fundamental == fundamental_type::void_))
-        return not_supported(n, "dcl.type.auto.deduct");
+    if (entity_table[e].linkage_of_name == linkage::external &&
+        (type_without_external_linkage(type) || unnamed_class_object(type)))
+        return not_supported(n, "basic.link");
+    r = deduced_type_supported(n, type);
+    if (r != analysis_result::well_formed)
+        return r;
     return initialize_with(n, m, type, direct, list, value);
 }
 
@@ -345,10 +364,9 @@ analysis_result semantic_analysis::deduce_return(node_index at,
             deduce_placeholder(at, declared, *e, named, deduced, replacement);
         if (r != analysis_result::well_formed)
             return r;
-        const struct type record = type_table[deduced.unqualified()];
-        if (record.kind == type_kind::array ||
-            record.kind == type_kind::function)
-            return not_supported(at, "dcl.type.auto.deduct");
+        r = deduced_type_supported(at, deduced);
+        if (r != analysis_result::well_formed)
+            return r;
     }
     if (function_state.deduced) {
         if (!(deduced == function_state.returns))
@@ -361,16 +379,7 @@ analysis_result semantic_analysis::deduce_return(node_index at,
     function_state.deduced = true;
     function_state.returns = deduced;
     entity_index f = function_state.function;
-    qualified_type type = entity_table[f].type;
-    const struct type record = type_table[type.unqualified()];
-    owned_array<qualified_type> parameters;
-    const qualified_type *list = type_table.parameters(type.unqualified());
-    for (uint32_t i = 0; i < record.parameter_count; i++)
-        parameters.append(list[i]);
-    entity_table[f].type = qualified_type::make(
-        type_table.function(deduced, parameters.data(), parameters.size(),
-                            record.variadic),
-        type.cv());
+    entity_table[f].type = function_returning(entity_table[f].type, deduced);
     for (declared_name &d : this->declared)
         if (d.entity == f)
             d.type = entity_table[f].type;

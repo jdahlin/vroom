@@ -982,17 +982,9 @@ analysis_result semantic_analysis::class_list_initialization(
     /* [dcl.init.list]/3.6: "Otherwise, if T is a specialization of
        std::initializer_list<E>, the object is constructed as described
        below": not analysed */
-    {
-        static const char list_name[] = "initializer_list", std_name[] = "std";
-        entity_index n = entity_table[c].enclosing;
-        if (entity_table[c].name ==
-                tokens.pp.identifier(list_name, sizeof list_name - 1) + 1 &&
-            n && entity_table[n].kind == entity_kind::namespace_entity &&
-            !entity_table[n].enclosing &&
-            entity_table[n].name ==
-                tokens.pp.identifier(std_name, sizeof std_name - 1) + 1)
-            return not_supported(list, "dcl.init.list");
-    }
+    if (named(c, "initializer_list") &&
+        std_namespace(entity_table[c].enclosing))
+        return not_supported(list, "dcl.init.list");
     if (!entity_table[c].size)
         /* [dcl.init.list]/3: list-initialization of an incomplete class:
            clang's "incomplete type" error */

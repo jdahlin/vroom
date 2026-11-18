@@ -1183,6 +1183,11 @@ class semantic_analysis
         return r.entity;
     }
     /* whether entity k is a class (not a union or an enumeration) */
+    /* [namespace.std]: whether scope is ::std, the namespace std of the
+       global namespace */
+    bool std_namespace(entity_index scope) const;
+    /* whether entity e has a name and it is spelled text */
+    bool named(entity_index e, const char *text) const;
     bool is_class_entity(entity_index k) const
     {
         return k && entity_table[k].kind == entity_kind::class_type;
@@ -1594,6 +1599,9 @@ class semantic_analysis
     /* whether the type is, or is made of, a class or enumeration whose
        name has no external linkage */
     bool type_without_external_linkage(qualified_type t) const;
+    /* [basic.link]/4.3: whether t is (an array of) an unnamed class
+       without a typedef name for linkage purposes */
+    bool unnamed_class_object(qualified_type t) const;
     /* [basic.link]/4: whether the namespace n is an unnamed namespace or
        declared directly or indirectly within one */
     bool within_unnamed_namespace(entity_index n) const;
@@ -1655,6 +1663,13 @@ class semantic_analysis
                           qualified_type &type);
     analysis_result reference(node_index at, bool rvalue, qualified_type &type,
                               declarator_meaning &m);
+    /* [dcl.ref]/6: the type lvalue (rvalue) reference to type, a reference
+       type collapsing; type is not cv void */
+    qualified_type reference_to(qualified_type type, bool rvalue);
+    /* the array type array (a record of type_kind::array) is with its
+       element type replaced by element (its bound kept) */
+    type_index array_with_element(const struct type &array,
+                                  qualified_type element);
     /* [dcl.fct] */
     analysis_result function(node_index parameters, qualified_type &type);
     /* [ext:gnu_attributes] the attributes of a gnu-attribute-specifier
@@ -1739,6 +1754,7 @@ class semantic_analysis
        or a function's: what [dcl.spec.auto] allows of it */
     analysis_result placeholder_declaration(node_index declaration,
                                             const declarator_meaning &m,
+                                            qualified_type type,
                                             entity_kind kind, bool placeholder,
                                             bool initialized);
     /* [dcl.spec.auto]/1: the placeholder type of auto or decltype(auto) */
@@ -1769,10 +1785,19 @@ class semantic_analysis
     entity_index invented_parameter = 0;
     /* t with its placeholder replaced by by */
     qualified_type replace_placeholder(qualified_type t, qualified_type by);
+    /* the function type f with its return type replaced by returns */
+    qualified_type function_returning(qualified_type f, qualified_type returns);
+    /* a deduced type the analysis does not take (array, function, void) */
+    analysis_result deduced_type_supported(node_index at, qualified_type t);
     /* [dcl.spec.auto]/7: the type the init-declarators of the declaration
-       analysed now deduced for the placeholder (none before the first) */
+       analysed now deduced for the placeholder (none before the first);
+       init_declarators and condition save and restore it */
     qualified_type declaration_deduced;
-    /* the variable whose initializer deduces its type now */
+    /* [dcl.spec.auto]/7: the declaration analysed now has a placeholder in
+       its decl-specifier-seq and more than one init-declarator */
+    bool placeholder_group = false;
+    /* the variable whose initializer deduces its type now (saved and
+       restored around the deduction) */
     entity_index deducing_variable = 0;
     /* [dcl.spec.auto]/11: a use of e, whose type may have an undeduced
        placeholder */
