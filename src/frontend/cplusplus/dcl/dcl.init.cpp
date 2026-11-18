@@ -842,55 +842,18 @@ analysis_result semantic_analysis::list_initialization_of(
             type = qualified_type::make(type_table.array_of(element, bound),
                                         type.cv());
         }
-        /* brace elision ([dcl.init.aggr]/15): an element that is an
-           aggregate initialized by a clause that is no braced-init-list
-           (nor a string-literal for an array of characters) */
-        const struct type of_element = type_table[element.unqualified()];
-        if (of_element.kind != type_kind::fundamental &&
-            of_element.kind != type_kind::pointer && !enumeration_of(element))
-            for (syntax_child clause : clauses)
-                if (!syntax_is(tree, clause, syntax_kind::braced_init_list) &&
-                    !is_string_literal(tokens, clause))
-                    return not_supported(list, "dcl.init.aggr");
-        /* [dcl.init.aggr]/11: "An initializer-list is ill-formed if the
-           number of initializer-clauses exceeds the number of elements of
-           the aggregate." */
-        if (clauses.size() > bound)
-            return ill_formed(list,
-                              "an initializer-list is ill-formed if the "
-                              "number of initializer-clauses exceeds the "
-                              "number of elements of the aggregate",
-                              "dcl.init.aggr");
-        /* [dcl.init.aggr]/4.2: "Otherwise, the element is copy-initialized
-           from the corresponding initializer-clause ... If the
-           initializer-clause is an expression and a narrowing conversion is
-           required to convert the expression, the program is ill-formed." */
-        constness all = constness::constant;
-        owned_array<uint32_t> elements;
-        for (syntax_child clause : clauses) {
-            qualified_type e = element;
-            initialized_value one;
-            node_index at = list;
-            if (!clause.is_token())
-                at = clause.index();
-            analysis_result r =
-                initialize_from(at, clause, e, false, true, one);
-            if (r != analysis_result::well_formed)
-                return r;
-            all = combined_constness(all, one.evaluation);
-            elements.append(one.node);
-        }
-        result.evaluation = all;
-        result.value = 0;
-        expression_meaning list_meaning;
-        list_meaning.type = type;
-        list_meaning.evaluation = all;
-        result.node = expression_node(semantic_kind::initializer_list,
-                                      list_meaning, node.first_token);
-        semantics[result.node].first =
-            semantics.list(elements.data(), elements.size());
-        semantics[result.node].count = static_cast<uint32_t>(elements.size());
-        return analysis_result::well_formed;
+        size_t next = 0;
+        analysis_result r =
+            aggregate_elements(list, clauses, next, type, result);
+        if (r != analysis_result::well_formed)
+            return r;
+        if (!target.bound_known && clauses.size())
+            /* the elements the clauses initialized, with brace elision */
+            type = qualified_type::make(
+                type_table.array_of(element, semantics[result.node].count),
+                type.cv());
+        semantics[result.node].type = type;
+        return too_many_clauses(list, clauses, next);
     }
     if (target.kind == type_kind::class_type)
         return class_list_initialization(list, clauses, type, result);
@@ -1021,11 +984,13 @@ analysis_result semantic_analysis::class_list_initialization(
            value-initialized"; [dcl.init]/8.1: "if T is a (possibly
            cv-qualified) class type with ... a user-provided ... default
            constructor, then the object is default-initialized" */
-        if (!clauses.empty() || !entity_table[c].first_constructor)
-            /* (3.7) with narrowing checked ([over.match.list]) */
+        if (clauses.empty() && entity_table[c].first_constructor) {
+            owned_array<expression_meaning> none;
+            return construct(list, type, none, 0, result);
+        }
+        if (clauses.empty() || !entity_table[c].first_constructor)
             return not_supported(list, "over.match.list");
-        owned_array<expression_meaning> none;
-        return construct(list, type, none, 0, result);
+        return constructor_list_initialization(list, clauses, type, result);
     }
     if (clauses.size() == 1 &&
         !syntax_is(tree, clauses[0], syntax_kind::braced_init_list)) {
@@ -1038,83 +1003,212 @@ analysis_result semantic_analysis::class_list_initialization(
             return initialize_with(list, e, type, false, true, result);
         /* an element initialized from it: analysed again below */
     }
-    const entity &x = entity_table[c];
-    /* [dcl.init.aggr]/1: "The elements of an aggregate are: ... for a
-       class, the direct base classes in declaration order, followed by the
-       direct non-static data members ([class.mem]) that are not members of
-       an anonymous union, in declaration order"; [class.bit]/2: "Unnamed
-       bit-fields are not members" */
-    owned_array<entity_index> members;
-    for (uint32_t i = 0; i < x.member_count; i++) {
-        entity_index member = class_members[x.first_member + i];
-        if (!entity_table[member].bit_field || entity_table[member].name)
-            members.append(member);
+    size_t next = 0;
+    analysis_result r = aggregate_elements(list, clauses, next, type, result);
+    if (r != analysis_result::well_formed)
+        return r;
+    return too_many_clauses(list, clauses, next);
+}
+
+/*
+ * [dcl.init.list]/3.7: "Otherwise, if T is a class type, constructors are
+ * considered.  The applicable constructors are enumerated and the best one
+ * is chosen through overload resolution ([over.match], [over.match.list]).
+ * If a narrowing conversion (see below) is required to convert any of the
+ * arguments, the program is ill-formed."  [over.match.list]/1.2: without
+ * an initializer-list constructor, "the candidate functions are all the
+ * constructors of the class T and the argument list consists of the
+ * elements of the initializer list".  A constructor taking a class named
+ * initializer_list (3.6), and braced elements, are not analysed; explicit
+ * constructors are not declared yet ([class.ctor]), so copy-list-
+ * initialization never chooses one.
+ */
+analysis_result semantic_analysis::constructor_list_initialization(
+    node_index list, const owned_array<syntax_child> &clauses,
+    qualified_type type, initialized_value &result)
+{
+    entity_index c = type_table[type.unqualified()].entity;
+    for (entity_index k = entity_table[c].first_constructor; k;
+         k = entity_table[k].next_constructor) {
+        const struct type &f = type_table[entity_table[k].type.unqualified()];
+        if (!f.parameter_count)
+            continue;
+        qualified_type first =
+            type_table.parameters(entity_table[k].type.unqualified())[0];
+        const struct type &p = type_table[first.unqualified()];
+        if (p.kind == type_kind::lvalue_reference ||
+            p.kind == type_kind::rvalue_reference)
+            first = p.operand;
+        const struct type &named = type_table[first.unqualified()];
+        if (named.kind == type_kind::class_type && named.entity != c)
+            return not_supported(list, "over.match.list");
     }
-    uint32_t count = static_cast<uint32_t>(members.size());
-    /* [dcl.init.aggr]/16: "When a union is initialized with an initializer
-       list, there shall not be more than one explicitly initialized
-       element"; without designators, the first ([dcl.init.aggr]/3.1: "the
-       explicitly initialized elements of the aggregate are the first n
-       elements"); /5's "non-union aggregate": the others are not
-       initialized */
-    if (x.union_ && count > 1)
-        count = 1;
-    /* [dcl.init.aggr]/11: "An initializer-list is ill-formed if the number
-       of initializer-clauses exceeds the number of elements of the
-       aggregate." */
-    bool elidable = false;
-    for (uint32_t i = 0; i < count; i++) {
-        type_kind k =
-            type_table[entity_table[members[i]].type.unqualified()].kind;
-        if (k == type_kind::class_type || k == type_kind::array)
-            elidable = true;
+    owned_array<expression_meaning> arguments;
+    for (syntax_child clause : clauses) {
+        if (syntax_is(tree, clause, syntax_kind::braced_init_list))
+            return not_supported(list, "over.match.list");
+        expression_meaning e;
+        analysis_result r = expression(clause, e);
+        if (r != analysis_result::well_formed)
+            return r;
+        arguments.append(e);
     }
-    if (clauses.size() > count && elidable)
-        /* brace elision ([dcl.init.aggr]/15) */
-        return not_supported(list, "dcl.init.aggr");
-    if (clauses.size() > count)
+    if (arguments.size() == 1 &&
+        arguments[0].category == value_category::prvalue &&
+        arguments[0].type.unqualified() == type.unqualified())
+        /* one prvalue of the class itself: clang initializes the object
+           from it with no constructor (CWG2311), the copy or move one
+           deleted or not */
+        return not_supported(list, "dcl.init.list");
+    /* the arguments before the conversions overload resolution adds */
+    owned_array<expression_meaning> before;
+    for (const expression_meaning &e : arguments)
+        before.append(e);
+    analysis_result r = construct(list, type, arguments, 0, result);
+    if (r != analysis_result::well_formed)
+        return r;
+    entity_index chosen = semantics[result.node].b;
+    if (!chosen || semantics[result.node].kind != semantic_kind::construct)
+        return not_supported(list, "over.match.list");
+    const qualified_type *parameters =
+        type_table.parameters(entity_table[chosen].type.unqualified());
+    uint32_t count =
+        type_table[entity_table[chosen].type.unqualified()].parameter_count;
+    for (size_t i = 0; i < before.size() && i < count; i++) {
+        qualified_type to = parameters[i];
+        const struct type &p = type_table[to.unqualified()];
+        bool reference = p.kind == type_kind::lvalue_reference ||
+                         p.kind == type_kind::rvalue_reference;
+        if (reference)
+            to = p.operand;
+        if (type_table[before[i].type.unqualified()].kind ==
+                type_kind::class_type ||
+            type_table[to.unqualified()].kind == type_kind::class_type)
+            continue;
+        node_index at = list;
+        if (!clauses[i].is_token())
+            at = clauses[i].index();
+        expression_meaning value = before[i];
+        r = operand_value(at, value);
+        if (r != analysis_result::well_formed)
+            return r;
+        bool narrows = false;
+        r = narrowing(at, value, to, narrows);
+        if (r != analysis_result::well_formed)
+            return r;
+        /* [impl.clang] into a reference's temporary: its own warning
+           group (-Wc++11-narrowing-const-reference) */
+        if (narrows &&
+            (reference || tokens.files.behavior.microsoft_extensions))
+            return not_supported(at, "dcl.init.list");
+        if (narrows) {
+            r = extension_used(diagnostic_id::sema_narrowing,
+                               tree[at].first_token, nullptr);
+            if (r != analysis_result::well_formed)
+                return r;
+        }
+    }
+    return analysis_result::well_formed;
+}
+
+/* [dcl.init.aggr]/11: "An initializer-list is ill-formed if the number of
+   initializer-clauses exceeds the number of elements of the aggregate." */
+analysis_result semantic_analysis::too_many_clauses(
+    node_index list, const owned_array<syntax_child> &clauses, size_t next)
+{
+    if (next < clauses.size())
         return ill_formed(list,
                           "an initializer-list is ill-formed if the number of "
                           "initializer-clauses exceeds the number of elements "
                           "of the aggregate",
                           "dcl.init.aggr");
+    return analysis_result::well_formed;
+}
+
+/*
+ * The elements of the aggregate type (an array or an aggregate class),
+ * initialized from clauses[next ..], next moved past the clauses used.
+ * [dcl.init.aggr]/1: "The elements of an aggregate are: for an array, the
+ * array elements in increasing subscript order, or for a class, the direct
+ * base classes in declaration order, followed by the direct non-static data
+ * members ([class.mem]) that are not members of an anonymous union, in
+ * declaration order"; [class.bit]/2: "Unnamed bit-fields are not members".
+ * /3.2: "the explicitly initialized elements of the aggregate are the first
+ * n elements"; /5: the others are value-initialized (zero here: the
+ * elements analysis has).  /16: "When a union is initialized with an
+ * initializer list, there shall not be more than one explicitly initialized
+ * element": without designators, the first.
+ */
+analysis_result semantic_analysis::aggregate_elements(
+    node_index list, const owned_array<syntax_child> &clauses, size_t &next,
+    qualified_type type, initialized_value &result)
+{
+    const struct type target = type_table[type.unqualified()];
+    owned_array<qualified_type> types;
+    owned_array<node_index> defaults;
+    uint64_t count = 0;
+    bool unknown_bound = false;
+    if (target.kind == type_kind::array) {
+        count = target.bound;
+        unknown_bound = !target.bound_known;
+    } else {
+        const entity &x = entity_table[target.entity];
+        for (uint32_t i = 0; i < x.member_count; i++) {
+            const entity &m = entity_table[class_members[x.first_member + i]];
+            if (!m.bit_field || m.name) {
+                types.append(m.type);
+                defaults.append(m.default_initializer);
+            }
+        }
+        count = types.size();
+        if (x.union_ && count > 1)
+            count = 1;
+    }
     owned_array<uint32_t> elements;
     constness all = constness::constant;
-    for (uint32_t i = 0; i < count; i++) {
-        entity_index member = members[i];
-        qualified_type element = entity_table[member].type;
-        const struct type &record = type_table[element.unqualified()];
+    for (uint64_t i = 0; i < count || unknown_bound; i++) {
+        if (unknown_bound && next == clauses.size())
+            break;
+        qualified_type element = target.operand;
+        if (target.kind != type_kind::array)
+            element = types[i];
         initialized_value one;
-        if (i < clauses.size()) {
-            syntax_child clause = clauses[i];
-            node_index at = list;
-            if (!clause.is_token())
-                at = clause.index();
-            bool braced =
-                syntax_is(tree, clause, syntax_kind::braced_init_list);
-            analysis_result r;
-            if (record.kind == type_kind::class_type && !braced) {
-                /* [dcl.init.aggr]/15: "If the initializer-clause is an
-                   expression and an implicit conversion sequence can be
-                   formed that converts the expression to the type of the
-                   element, the element is initialized"; else the braces
-                   are elided, not analysed yet */
-                expression_meaning e;
-                r = expression(clause, e);
-                if (r != analysis_result::well_formed)
-                    return r;
-                if (e.type.unqualified() != element.unqualified())
-                    return not_supported(list, "dcl.init.aggr");
-                r = initialize_with(at, e, element, false, true, one);
-            } else if (record.kind == type_kind::array && !braced &&
-                       !is_string_literal(tokens, clause)) {
-                /* brace elision */
-                return not_supported(list, "dcl.init.aggr");
-            } else {
-                r = initialize_from(at, clause, element, false, true, one);
-            }
+        const struct type &of_element = type_table[element.unqualified()];
+        if (next >= clauses.size() &&
+            of_element.kind == type_kind::class_type &&
+            entity_table[of_element.entity].kind == entity_kind::class_type &&
+            (entity_table[of_element.entity].first_constructor ||
+             destroys(of_element.entity)))
+            /* (5.2): an element left out is copy-initialized from an empty
+               initializer list: a constructor call, not analysed */
+            return not_supported(list, "dcl.init.aggr");
+        if (next >= clauses.size() &&
+            (of_element.kind == type_kind::lvalue_reference ||
+             of_element.kind == type_kind::rvalue_reference) &&
+            !(target.kind != type_kind::array && defaults[i]))
+            /* (5.2): "If the element is not a reference, the element is
+               copy-initialized from an empty initializer list"; (5.3):
+               "Otherwise, the program is ill-formed" */
+            return ill_formed(list,
+                              "an element of reference type that is not "
+                              "explicitly initialized and has no default "
+                              "member initializer makes the program "
+                              "ill-formed",
+                              "dcl.init.aggr");
+        if (next < clauses.size()) {
+            analysis_result r =
+                aggregate_element(list, clauses, next, element, one);
             if (r != analysis_result::well_formed)
                 return r;
+        } else if (target.kind == type_kind::array) {
+            /* the rest of an array: zero, as the lowering fills it */
+            break;
+        } else if (defaults[i]) {
+            /* (5.1): "If the element has a default member initializer
+               ([class.mem]), the element is initialized from that
+               initializer", whose this is the aggregate being initialized:
+               not analysed */
+            return not_supported(list, "dcl.init.aggr");
         } else {
             /* (5.2): from an empty initializer list: value-initialization
                ([dcl.init.list]/3.11 for a scalar, an aggregate's own
@@ -1133,6 +1227,8 @@ analysis_result semantic_analysis::class_list_initialization(
     result.value = 0;
     expression_meaning list_meaning;
     list_meaning.type = qualified_type::make(type.unqualified(), cv_none);
+    if (target.kind == type_kind::array)
+        list_meaning.type = type;
     list_meaning.evaluation = all;
     result.node = expression_node(semantic_kind::initializer_list, list_meaning,
                                   tree[list].first_token);
@@ -1140,6 +1236,75 @@ analysis_result semantic_analysis::class_list_initialization(
         semantics.list(elements.data(), elements.size());
     semantics[result.node].count = static_cast<uint32_t>(elements.size());
     return analysis_result::well_formed;
+}
+
+/*
+ * One element of an aggregate from clauses[next], or with its braces elided
+ * from as many clauses as it has elements.  [dcl.init.aggr]/4.2: "the
+ * element is copy-initialized from the corresponding initializer-clause ...
+ * If the initializer-clause is an expression and a narrowing conversion is
+ * required to convert the expression, the program is ill-formed."  /16:
+ * "If the initializer-clause is an expression and an implicit conversion
+ * sequence can be formed that converts the expression to the type of the
+ * element, the element is initialized"; "If the initializer-list of a
+ * subaggregate does not begin with a left brace, then only enough
+ * initializer-clauses from the list are taken to initialize the elements
+ * of the subaggregate".
+ */
+analysis_result semantic_analysis::aggregate_element(
+    node_index list, const owned_array<syntax_child> &clauses, size_t &next,
+    qualified_type element, initialized_value &one)
+{
+    syntax_child clause = clauses[next];
+    node_index at = list;
+    if (!clause.is_token())
+        at = clause.index();
+    /* a copy: analysing the clause adds types, which may move
+       type_table's */
+    const struct type record = type_table[element.unqualified()];
+    bool braced = syntax_is(tree, clause, syntax_kind::braced_init_list);
+    bool subaggregate =
+        record.kind == type_kind::array ||
+        (record.kind == type_kind::class_type &&
+         entity_table[record.entity].kind == entity_kind::class_type &&
+         is_aggregate(record.entity));
+    if (braced ||
+        (record.kind == type_kind::array && is_string_literal(tokens, clause) &&
+         character_type(fundamental_of(record.operand)))) {
+        next++;
+        return initialize_from(at, clause, element, false, true, one);
+    }
+    if (record.kind == type_kind::class_type) {
+        expression_meaning e;
+        analysis_result r = expression(clause, e);
+        if (r != analysis_result::well_formed)
+            return r;
+        if (e.type.unqualified() == element.unqualified()) {
+            next++;
+            return initialize_with(at, e, element, false, true, one);
+        }
+        /* a conversion from another class (a constructor or conversion
+           function), or into a class that is no aggregate */
+        if (!subaggregate ||
+            type_table[e.type.unqualified()].kind == type_kind::class_type)
+            return not_supported(list, "dcl.init.aggr");
+    }
+    if (!subaggregate) {
+        next++;
+        return initialize_from(at, clause, element, false, true, one);
+    }
+    if (record.kind == type_kind::array && !record.bound_known)
+        /* a flexible array member */
+        return not_supported(list, "dcl.init.aggr");
+    if ((record.kind == type_kind::array && !record.bound) ||
+        (record.kind == type_kind::class_type &&
+         !entity_table[record.entity].member_count))
+        /* [impl.clang] a subaggregate with no elements takes no clause:
+           clang's "initializer for aggregate with no elements requires
+           explicit braces" error */
+        return not_supported(list, "dcl.init.aggr");
+    /* the braces elided: the subaggregate's elements from the clauses */
+    return aggregate_elements(list, clauses, next, element, one);
 }
 
 } // namespace cplusplus

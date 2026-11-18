@@ -21,6 +21,10 @@ and prints what clang x clang prints; clang x clang failing is a broken
 test.  A line `/* vcc-xfail: TODO item */` in caller.c marks a known bug
 (a pass is XPASS, an error); `/* vcc-xfail-host: ... */` the same for
 --host only.  Exit status 1 on any failure.
+A directory of src/test/cxx/abi (listed as cxx/NAME) is a C++ test
+(doc/PLAN-cxx-sema.md C5.3): caller.cpp and callee.cpp, built by clang++ and
+by vcc's C++ front end with bench/cxx-run.py's options; arm64 Linux only,
+skipped for the other targets.
 --host (macOS only): both halves built for the host (Apple arm64 ABI,
 system headers), linked by clang and run natively.
 --target wasm64 or wasm32: both halves built for wasm*-unknown-emscripten as
@@ -46,6 +50,8 @@ B = os.path.dirname(os.path.abspath(__file__))
 spec = importlib.util.spec_from_file_location('ct', f'{B}/vcc-ctests.py')
 ct = importlib.util.module_from_spec(spec); spec.loader.exec_module(ct)
 D = f'{ct.T}/abi'
+DXX = f'{ct.T}/cxx/abi'	# the C++ tests, listed as cxx/NAME
+CXXFL = ['-x', 'c++', '-std=c++20', '-fno-exceptions', '-fno-rtti']
 
 
 HOST = False
@@ -61,6 +67,8 @@ def compile_(cc, src, obj, inc):
     base = HOSTFL if HOST else WASM.BASE if WASM else X86.BASE if X86 else W64.BASE if W64 else ct.BASE
     flags, _ = ct.exec_marks(open(src).read())
     base = [*base, *flags]
+    if src.endswith('.cpp'):
+        base = [*base, *CXXFL]
     if (X86 or W64) and cc != 'clang':
         rc, _, err = ct.sh([ct.VPP, '-S'] + base + VIRFL + ['-I', inc, src, '-o', obj + '.s'])
         if not rc:
@@ -75,8 +83,12 @@ def compile_(cc, src, obj, inc):
 
 
 def one(name, wd, verbose):
-    d = f'{D}/{name}'
-    src = open(f'{d}/caller.c').read()
+    d, ext = f'{D}/{name}', '.c'
+    if name.startswith('cxx/'):
+        d, ext = f'{DXX}/{name[4:]}', '.cpp'
+        if HOST or WASM or X86 or W64:
+            return 'skip', 'C++: arm64 Linux only', None
+    src = open(f'{d}/caller{ext}').read()
     contract = re.search(r'/\*\s*abi-targets:\s*linux;(.*?)\*/', src, re.S)
     if contract and (HOST or WASM):
         return 'skip', 'Linux-only ABI contract: ' + ' '.join(contract.group(1).split()), None
@@ -99,9 +111,9 @@ def one(name, wd, verbose):
     for half in ('caller', 'callee'):
         for cc in ('clang', 'vcc'):
             o = f'{wd}/{half}.{cc}.o'
-            rc, err = compile_(cc, f'{d}/{half}.c', o, d)
+            rc, err = compile_(cc, f'{d}/{half}{ext}', o, d)
             if rc:
-                return ('test' if cc == 'clang' else 'fail'), f'{cc} {half}.c: {ct.first_err(err)}', xf
+                return ('test' if cc == 'clang' else 'fail'), f'{cc} {half}{ext}: {ct.first_err(err)}', xf
             objs[half, cc] = o
     ref = None
     bad = []
@@ -197,6 +209,9 @@ def main():
     if not HOST and not WASM and not X86 and not W64:
         ct.build_rt()
     names = sorted(n for n in os.listdir(D) if os.path.isdir(f'{D}/{n}') and (not pat or re.search(pat, n)))
+    if os.path.isdir(DXX):
+        names += sorted(f'cxx/{n}' for n in os.listdir(DXX)
+                        if os.path.isdir(f'{DXX}/{n}') and (not pat or re.search(pat, f'cxx/{n}')))
     tmp = tempfile.mkdtemp(prefix='vcc-abi-')
     fails = passes = xfails = skips = 0
     for n in names:

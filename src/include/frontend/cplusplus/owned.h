@@ -77,7 +77,8 @@ template <typename T> class owned_array
         elements = p;
         capacity = grown;
     }
-    /* value may be an element of this array, which reserve() moves */
+    /* value may be one of this array's own elements, which reserve moves:
+       copied before (std::vector's push_back allows the same) */
     T &append(const T &value)
     {
         T copy = value;

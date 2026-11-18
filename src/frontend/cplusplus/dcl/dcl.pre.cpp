@@ -688,7 +688,14 @@ analysis_result semantic_analysis::function_definition(node_index n)
         !syntax_is(tree, tree.children(n)[k], syntax_kind::decl_specifier_seq))
         /* [class.mem]/12: a constructor or destructor (or a conversion
            function) defined outside its class */
-        return special_member_definition(n);
+        return special_member_definition(n, 0);
+    bool constexpr_specified = false;
+    if (!k && node.child_count == 3 &&
+        function_specifiers_only(tree.children(n)[0].index(),
+                                 constexpr_specified))
+        /* the same, constexpr ([class.ctor]/1): a decl-specifier-seq of
+           constexpr alone has no type, so names no other function */
+        return special_member_definition(n, 1);
     if (!node.child_count)
         return not_supported(n, "dcl.fct.def.general");
     analysis_result r = init_declarators(n, tree.children(n)[k].index(), true);
@@ -1067,19 +1074,34 @@ analysis_result semantic_analysis::declare_with_initializer(
            The applicable constructors are enumerated ([over.match.ctor]),
            and the best one for the initializer () is chosen through
            overload resolution" */
-        qualified_type object = type;
-        while (type_table[object.unqualified()].kind == type_kind::array)
-            object = type_table[object.unqualified()].operand;
-        const struct type &record = type_table[object.unqualified()];
-        if (record.kind == type_kind::class_type &&
-            entity_table[record.entity].kind == entity_kind::class_type &&
-            entity_table[record.entity].first_constructor) {
-            if (!(object == type))
-                /* [dcl.init]/7.2: each element default-initialized */
+        qualified_type object = element_type(type);
+        entity_index record = element_class(object);
+        if (is_class_entity(record) && default_constructor_deleted(record)) {
+            /* C++03 has no deleted functions: the implicit default
+               constructor's definition is ill-formed ([class.ctor]/7 there),
+               reported at the class */
+            if (!tokens.files.behavior.has(language_feature::rvalue_references))
+                return not_supported(declaration, "class.default.ctor");
+            return ill_formed(declaration,
+                              "the defaulted default constructor is defined "
+                              "as deleted",
+                              "class.default.ctor");
+        }
+        if (is_class_entity(record) && entity_table[record].first_constructor &&
+            !trivial_defaulted_default_constructor(record)) {
+            /* [dcl.init]/7.2: "If T is an array type, each element is
+               default-initialized": one element's construction, which the
+               lowering repeats for each, first to last, in an automatic
+               array of one dimension */
+            const struct type &array = type_table[type.unqualified()];
+            if (!(object == type) &&
+                (!entity_table[declared_entity].automatic ||
+                 !(array.operand == object) || !array.bound_known ||
+                 !array.bound))
                 return not_supported(declaration, "dcl.init");
             owned_array<expression_meaning> none;
             initialized_value value;
-            r = construct(declaration, type, none, 0, value);
+            r = construct(declaration, object, none, 0, value);
             if (r != analysis_result::well_formed)
                 return r;
             entity_table[declared_entity].definition = value.node;
@@ -1091,13 +1113,8 @@ analysis_result semantic_analysis::declare_with_initializer(
         /* C++03's [stmt.dcl]/3: "unless the variable has POD type and is
            declared without an initializer": a class's POD-ness before
            C++11 is not analysed */
-        qualified_type t = entity_table[declared_entity].type;
-        while (type_table[t.unqualified()].kind == type_kind::array)
-            t = type_table[t.unqualified()].operand;
-        const struct type &k = type_table[t.unqualified()];
-        if (k.kind == type_kind::class_type &&
-            entity_table[k.entity].kind == entity_kind::class_type &&
-            !assigned_bitwise(k.entity))
+        entity_index k = element_class(entity_table[declared_entity].type);
+        if (is_class_entity(k) && !assigned_bitwise(k))
             return not_supported(declaration, "stmt.dcl");
     }
     if (r != analysis_result::well_formed || !initialized)
@@ -1128,9 +1145,17 @@ analysis_result semantic_analysis::declare_with_initializer(
         entity_table[declared_entity].bound_unknown =
             t.kind == type_kind::array && !t.bound_known;
     }
+    uint32_t calls_before = constexpr_calls;
     r = initializer(init, type, value);
     if (r != analysis_result::well_formed)
         return r;
+    /* [basic.start.static]/2: "Constant initialization is performed if a
+       variable or temporary object with static or thread storage duration
+       is constant-initialized": an initializer that invokes a constexpr
+       function or constructor may be one, which the evaluator (S6) decides */
+    if (!entity_table[declared_entity].automatic &&
+        constexpr_calls != calls_before)
+        return not_supported(declaration, "basic.start.static");
     entity_table[declared_entity].bound_unknown = false;
     const struct type record = type_table[type.unqualified()];
     /* [basic.def]/5: "In the definition of an object, the type of that

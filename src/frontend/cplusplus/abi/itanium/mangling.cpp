@@ -30,6 +30,31 @@ class itanium_mangler
     }
 
     bool mangled_name(entity_index e);
+    /* [abi:mangling-special-vtables]: <special-name> ::= TV <type> */
+    bool vtable_name(entity_index c)
+    {
+        text("_ZTV");
+        return type(analysis.entity_table[c].type);
+    }
+    /* [abi:mangling-special-vtables]: <special-name> ::= TT <type>, the VTT
+       ([abi:vtable-ctor-vtt]) */
+    bool vtt_name(entity_index c)
+    {
+        text("_ZTT");
+        return type(analysis.entity_table[c].type);
+    }
+    /* [[impl.clang]] a construction virtual table ([abi:vtable-ctor]):
+       TC <type> <offset> _ <base type>, the base's at offset in c */
+    bool construction_vtable_name(entity_index c, uint64_t offset,
+                                  entity_index base)
+    {
+        text("_ZTC");
+        if (!type(analysis.entity_table[c].type))
+            return false;
+        vbuffer_format_append(out, "%llu_",
+                              static_cast<unsigned long long>(offset));
+        return type(analysis.entity_table[base].type);
+    }
 
   private:
     const semantic_analysis &analysis;
@@ -76,6 +101,8 @@ class itanium_mangler
     bool ctor_dtor_name(special_member which);
     void number(uint64_t n);
     bool local_name(entity_index e, entity_index function);
+    entity_index local_function(entity_index e) const;
+    bool function_scope(entity_index function);
     bool nested_name(entity_index e);
     bool prefix(entity_index scope);
     bool class_enum_type(qualified_type t);
@@ -190,6 +217,14 @@ bool itanium_mangler::name(entity_index e)
     entity_index scope = table[e].enclosing;
     if (scope == 0 || is_std(scope))
         return unscoped_name(e);
+    entity_index local = local_function(e);
+    if (local && table[scope].kind == entity_kind::class_type) {
+        /* a member of a local class: Z <function encoding> E
+           <nested-name> */
+        if (!function_scope(local))
+            return false;
+        return nested_name(e);
+    }
     if (table[scope].kind == entity_kind::class_type ||
         table[scope].kind == entity_kind::namespace_entity)
         return nested_name(e);
@@ -237,8 +272,8 @@ bool itanium_mangler::nested_name(entity_index e)
  * prefix is a substitution candidate, a class's being its type's (the
  * class named again as a prefix or a type is the same candidate), a
  * namespace's its own; ::std as a prefix is the substitution St, which is
- * no candidate.  A class of a block scope (a <local-name> as prefix) has
- * no rule yet.
+ * no candidate.  A local class starts the prefix: the <local-name>'s
+ * function scope is written before the <nested-name> (function_scope).
  */
 bool itanium_mangler::prefix(entity_index scope)
 {
@@ -255,7 +290,12 @@ bool itanium_mangler::prefix(entity_index scope)
         return true;
     if (!is_class && substitution(scope))
         return true;
-    if (c.enclosing && !prefix(c.enclosing))
+    /* a local class: the function scope (function_scope) came before the
+       <nested-name>, whose prefix starts at the class */
+    bool local = is_class && c.enclosing &&
+                 table[c.enclosing].kind != entity_kind::class_type &&
+                 table[c.enclosing].kind != entity_kind::namespace_entity;
+    if (c.enclosing && !local && !prefix(c.enclosing))
         return false;
     if (!unqualified_name(scope))
         return false;
@@ -311,8 +351,14 @@ bool itanium_mangler::class_enum_type(qualified_type t)
         return false;
     if (x.enclosing == 0 || is_std(x.enclosing))
         return unscoped_name(c);
-    if (table[x.enclosing].kind != entity_kind::class_type &&
-        table[x.enclosing].kind != entity_kind::namespace_entity)
+    if (entity_index local = local_function(c)) {
+        /* [abi:mangling-scope]: a local class, or one nested in it */
+        if (!function_scope(local))
+            return false;
+        if (table[x.enclosing].kind != entity_kind::class_type)
+            return unqualified_name(c);
+    } else if (table[x.enclosing].kind != entity_kind::class_type &&
+               table[x.enclosing].kind != entity_kind::namespace_entity)
         return false;
     /* <nested-name>: the prefix and the name; the type as a whole is the
        candidate type() adds */
@@ -395,13 +441,15 @@ bool itanium_mangler::unqualified_name(entity_index e)
  *
  *     <ctor-dtor-name> ::= C1
  *                      ::= C2
+ *                      ::= D0
  *                      ::= D1
  *                      ::= D2
  *
- * C1 and D1 are the complete object's, C2 and D2 the base object's.
- * The complete object constructor of a class without virtual bases does
- * what the base object constructor does ([abi:mangling-special-ctor-dtor]);
- * there are no allocating constructors or deleting destructors yet.
+ * C1 and D1 are the complete object's, C2 and D2 the base object's, D0
+ * the deleting destructor (variant 0).  The complete object constructor
+ * of a class without virtual bases does what the base object constructor
+ * does ([abi:mangling-special-ctor-dtor]); there are no allocating
+ * constructors yet.
  */
 bool itanium_mangler::ctor_dtor_name(special_member which)
 {
@@ -411,6 +459,8 @@ bool itanium_mangler::ctor_dtor_name(special_member which)
         text("D");
     if (variant == 1)
         text("1");
+    else if (variant == 0 && which == special_member::destructor)
+        text("0");
     else
         text("2");
     return true;
@@ -655,6 +705,55 @@ bool itanium_mangler::operator_name(const entity &x)
 void itanium_mangler::number(uint64_t n)
 {
     vbuffer_format_append(out, "%llu", static_cast<unsigned long long>(n));
+}
+
+/*
+ * The function a class of block scope (a local class, [class.local]) is
+ * declared in, for e that is such a class, a class nested in one, or a
+ * member of either; 0 otherwise.  A local class whose name another class
+ * of the function also has would need a discriminator, which is not
+ * written: no function then.
+ */
+entity_index itanium_mangler::local_function(entity_index e) const
+{
+    const entities &table = analysis.entity_table;
+    entity_index c = e;
+    if (table[c].kind != entity_kind::class_type)
+        c = table[c].enclosing;
+    while (c && table[c].kind == entity_kind::class_type &&
+           table[table[c].enclosing].kind == entity_kind::class_type)
+        c = table[c].enclosing;
+    if (!c || table[c].kind != entity_kind::class_type || !table[c].enclosing ||
+        table[table[c].enclosing].kind == entity_kind::namespace_entity)
+        return 0;
+    entity_index function = enclosing_function(table, c);
+    if (!function)
+        return 0;
+    for (entity_index other = 1; other < table.size(); other++)
+        if (other != c && table[other].kind == entity_kind::class_type &&
+            table[other].name == table[c].name &&
+            enclosing_function(table, other) == function)
+            return UINT32_MAX;
+    return function;
+}
+
+/* [abi:mangling-scope]: Z <function encoding> E, the scope of a
+   <local-name>; main's encoding is its name alone (local_name) */
+bool itanium_mangler::function_scope(entity_index function)
+{
+    if (function == UINT32_MAX)
+        return false;
+    const entity &f = analysis.entity_table[function];
+    text("Z");
+    size_t length = 0;
+    const char *identifier = spelling(f.name, &length);
+    if (f.enclosing == 0 && length == 4 && !memcmp(identifier, "main", 4)) {
+        if (!unqualified_name(function))
+            return false;
+    } else if (!encoding(function))
+        return false;
+    text("E");
+    return true;
 }
 
 /*
@@ -1067,6 +1166,29 @@ bool itanium_symbol_name(const semantic_analysis &analysis,
 {
     itanium_mangler m(analysis, pp, out, variant);
     return m.mangled_name(e);
+}
+
+bool itanium_vtable_name(const semantic_analysis &analysis,
+                         const preprocessor &pp, entity_index c, vbuffer *out)
+{
+    itanium_mangler m(analysis, pp, out, 2);
+    return m.vtable_name(c);
+}
+
+bool itanium_vtt_name(const semantic_analysis &analysis, const preprocessor &pp,
+                      entity_index c, vbuffer *out)
+{
+    itanium_mangler m(analysis, pp, out, 2);
+    return m.vtt_name(c);
+}
+
+bool itanium_construction_vtable_name(const semantic_analysis &analysis,
+                                      const preprocessor &pp, entity_index c,
+                                      uint64_t offset, entity_index base,
+                                      vbuffer *out)
+{
+    itanium_mangler m(analysis, pp, out, 2);
+    return m.construction_vtable_name(c, offset, base);
 }
 
 } // namespace cplusplus

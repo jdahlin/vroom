@@ -308,9 +308,27 @@ struct entity {
     /* a non-static member function: [class.mfct.non-static]/5 the
        cv-qualifier-seq of its declarator, which qualifies `this` */
     uint32_t member_cv = 0;
-    /* a non-static data member: its number among the class's and its
-       offset in bytes ([class.mem]/19, [abi:layout]) */
+    /* a non-static data member: its number among the class's and, once
+       the class is complete, its offset in bytes ([class.mem]/19,
+       [abi:class-types]) */
     uint32_t field = 0;
+    /* an anonymous union (or clang's anonymous struct): the unnamed
+       member object of it in the enclosing class ([class.union.anon]/1),
+       through which a member's name in that class designates it */
+    entity_index anonymous_object = 0;
+    /* a non-static data member: its default member initializer
+       ([class.mem]/10: a brace-or-equal-initializer or braced-init-list
+       node), 0 if none */
+    node_index default_initializer = 0;
+    /* a class: its default constructor is declared = default
+       ([dcl.fct.def.default]), declared as the implicit one is */
+    bool defaulted_default_constructor = false;
+    /* [class.default.ctor]/2: the implicit default constructor is deleted
+       (a subobject without a usable default constructor) */
+    bool implicit_default_deleted = false;
+    /* a function (the first of its overloads) a using-declaration names
+       ([namespace.udecl]/11) */
+    bool named_by_using = false;
     uint64_t offset = 0;
     /* a class: its non-static data members, in declaration order, are
        semantic_analysis::class_members[first_member .. first_member +
@@ -319,8 +337,9 @@ struct entity {
        type ... at the closing } of the class-specifier") */
     uint32_t first_member = 0, member_count = 0;
     uint64_t size = 0;
-    /* a class: [abi:layout] its data size (dsize), the size without the
-       tail padding a derived class may reuse; its direct base classes
+    /* a class: [abi:general] its data size (dsize), the size without the
+       tail padding a derived class may reuse (its size, for a POD for the
+       purpose of layout: [abi:pod]); its direct base classes
        ([class.derived]/2), in the order of the base-specifier-list, are
        semantic_analysis::class_bases[first_base .. first_base +
        base_count) */
@@ -392,6 +411,8 @@ struct entity {
     /* a class: a union ([class.union]/1: "A union is a class defined
        with the class-key union") */
     bool union_ = false;
+    /* a class that is defined: the class-key of its class-specifier */
+    token_index class_key = 0;
     /* a function or variable: [ext:gnu_attributes] the GNU attributes
        its declarations gave it (gnu_attribute_flag) and a section
        attribute's string-literal, 0 if none; its aligned attribute's
@@ -418,6 +439,85 @@ struct entity {
     /* ... and, its underlying type not fixed, the type it promotes to
        ([conv.prom]/4) */
     fundamental_type promoted = fundamental_type::none;
+    /* a non-static member function: [class.virtual]/2 a virtual function
+       (declared virtual, or overriding one), pure ([class.abstract]/2),
+       and its slot in the virtual table of its class (the index of its
+       function pointer after the offset to top and the RTTI pointer,
+       [abi:vtable-components]) */
+    bool virtual_ = false, pure = false, final_function = false;
+    uint32_t vtable_slot = 0;
+    /* a class: [class.virtual]/1 a polymorphic (dynamic, [abi:definitions])
+       class: its record in semantic_analysis::dynamic_classes plus one, 0
+       if it is none */
+    uint32_t dynamic = 0;
+    /* a base class subobject that is a virtual base ([class.mi]/4): a
+       direct one (its base-specifier has virtual) in class_bases, or one
+       of a class's virtual bases, direct or indirect
+       (semantic_analysis::class_virtual_bases), whose offset is its
+       offset in a complete object of the class; neither is a member */
+    bool virtual_base = false;
+    /* a class: its virtual bases, direct and indirect, are
+       semantic_analysis::class_virtual_bases[first_virtual_base ..
+       first_virtual_base + virtual_base_count), in the order of their
+       construction ([class.base.init]/13.1: depth-first left-to-right, a
+       base's virtual bases before it) */
+    uint32_t first_virtual_base = 0, virtual_base_count = 0;
+    /* a class: [abi:general] nvsize and nvalign, its size and alignment
+       without its virtual bases (a base subobject's); for a class
+       without virtual bases nvsize is its data size */
+    uint64_t nv_size = 0;
+    uint32_t nv_alignment = 0;
+};
+
+/* [class.virtual], [abi:vtable-components]: what a dynamic class adds to
+   its entity: its primary base (a base class subobject entity sharing the
+   virtual table pointer at offset 0, [abi:class-types] I; 0: the class
+   allocates the pointer itself), its virtual functions' final overriders
+   by slot (semantic_analysis::vtable_slots[first_slot .. first_slot +
+   slot_count)), whether it is abstract ([class.abstract]/2) and its key
+   function ([abi:vague-vtable]: the first non-pure virtual function not
+   inline at the closing }, 0 if none) */
+struct dynamic_class {
+    entity_index primary_base = 0;
+    uint32_t first_slot = 0, slot_count = 0;
+    bool abstract = false;
+    entity_index key_function = 0;
+    /* [abi:vtable-general]: the virtual table group, the primary virtual
+       table (semantic_analysis::vtable_groups[first_group], whose slots are
+       first_slot .. first_slot + slot_count) and a secondary one per
+       dynamic base class subobject that is not a primary base, in the
+       order of [abi:vtable-construction] (each non-primary dynamic base's
+       group, in declaration order) */
+    uint32_t first_group = 0, group_count = 0;
+    /* [class.dtor]/12: the deallocation function the deleting destructor
+       of a virtual destructor calls, and whether it takes the size */
+    entity_index deallocation = 0;
+    bool deallocation_sized = false;
+    /* [abi:vtable-components]: the virtual bases whose offsets the primary
+       virtual table has, nearest the address point first
+       (semantic_analysis::vbase_entries[first_vbase_entry ..
+       first_vbase_entry + vbase_entry_count), classes): the primary
+       base's, then the class's others in inheritance graph order */
+    uint32_t first_vbase_entry = 0, vbase_entry_count = 0;
+};
+
+/* one virtual table of a group ([abi:vtable-general]): the offset of the
+   subobject whose virtual table pointer points into it (its offset to
+   top negated), and its function slots, vtable_slots[first_slot ..
+   first_slot + slot_count); vtable_adjustments has, per slot, what a
+   this-adjusting thunk adds to the subobject's address to call the
+   overrider ([abi:thunks]: 0, the function itself) */
+struct vtable_group {
+    uint64_t offset = 0;
+    uint32_t first_slot = 0, slot_count = 0;
+    /* the class whose primary virtual table this is (its vbase offsets
+       are the table's, [abi:vtable-components]); when the subobject is
+       in a virtual base, that base's class and the subobject's offset in
+       it (offset is then in the complete object); whether the table is
+       the virtual base's own primary one, which has vcall offsets */
+    entity_index subobject_class = 0, in_virtual_base = 0;
+    uint64_t offset_in_virtual = 0;
+    bool virtual_primary = false;
 };
 
 /* one declaration of an entity: the syntax node that declares it */
@@ -662,7 +762,9 @@ enum class semantic_kind : uint8_t {
     /* a: the function lvalue or pointer prvalue; the arguments, each
        initialized as its parameter, are list[first .. first + count); b:
        for a non-static member function, the object's address, its
-       implicit object argument ([over.match.funcs]/4: `this`), else 0 */
+       implicit object argument ([over.match.funcs]/4: `this`), else 0;
+       c: 1 for a virtual call ([class.virtual]/16: the final overrider in
+       the object's dynamic type, through its virtual table) */
     call,
     /* a: the pointer prvalue, b: the integer prvalue (E1[E2] with the
        operands in that order) */
@@ -695,21 +797,39 @@ enum class semantic_kind : uint8_t {
        the object's initialization (0: none), a construct node whose
        object is the allocated node's, or the value stored in it; c: 1 when
        the allocation function may return a null pointer, which the
-       initialization is skipped for ([expr.new]/20) */
+       initialization is skipped for ([expr.new]/20); d: for an array of
+       a class with a constructor or destructor, the element count (a
+       std::size_t prvalue, evaluated once), b then each element's
+       initialization (its object *allocated, the element), value the
+       size of the array cookie before the elements ([abi:array-cookies]:
+       0 for none) */
     new_object,
     /* the pointer (a prvalue of type) the enclosing new_object's
-       allocation returned, or the enclosing delete_object's operand */
+       allocation returned, or the enclosing delete_object's operand (in
+       an array's construction or destruction, the element's) */
     allocated,
+    /* the element count (a std::size_t prvalue) the enclosing new_object
+       or delete_object holds (new_object's d; the array cookie's) */
+    array_count,
     /* [expr.new]/9, /15: an array's size in bytes, its count a times the
-       element's size value; the size no allocation can give (all ones)
-       when the product does not fit in std::size_t */
+       element's size value plus d, the array cookie's size; the size no
+       allocation can give (all ones) when that does not fit in
+       std::size_t */
     array_size,
     /* [expr.delete]: a: the operand (a pointer prvalue), b: the
        destructor's call on *allocated (0: none), c: the deallocation
        function's call; nothing when the operand is a null pointer.
        computation: the type of the allocated node, the operand's without
-       the pointee's cv-qualifiers ([expr.delete]/11) */
+       the pointee's cv-qualifiers ([expr.delete]/11).  value: 1 when the
+       deleting destructor is called through the virtual table instead of
+       b and c; d: for an array with a cookie, its size: b is each
+       element's destruction (last first), c is given the cookie's address
+       as allocated and array_count is the cookie's count */
     delete_object,
+    /* [class.cdtor]/4, [abi:vtable-ctor]: a: the address of the object
+       under construction or destruction (this), b: its class, whose
+       virtual table pointer is stored in it */
+    vtable_pointer_store,
     /* ---- statements ---- */
     /* the statements in list[first .. first + count) */
     block,
@@ -862,6 +982,9 @@ struct analysed_expression {
 class semantic_analysis
 {
   public:
+    /* an expression_statement's d: run only by the complete object
+       constructor or destructor */
+    static constexpr uint32_t complete_object_only = 1;
     semantic_analysis(const syntax_tree &tree, token_stream &tokens,
                       const parser &p, diagnostic_consumer &diagnostics);
     semantic_analysis(const semantic_analysis &) = delete;
@@ -892,13 +1015,106 @@ class semantic_analysis
     owned_array<entity_index> class_members;
     /* the direct base class subobjects of the classes (entity::first_base) */
     owned_array<entity_index> class_bases;
+    /* the virtual base subobjects of the classes
+       (entity::first_virtual_base) */
+    owned_array<entity_index> class_virtual_bases;
+    /* the classes of the vbase offsets of the virtual tables
+       (dynamic_class::first_vbase_entry) */
+    owned_array<entity_index> vbase_entries;
+    /* the virtual base subobject of class c whose class is v, 0 if v is
+       no virtual base of c */
+    entity_index virtual_base_of(entity_index c, entity_index v) const;
+    /* the virtual bases of class c in inheritance graph order (preorder,
+       [abi:class-types] III), classes */
+    void virtual_bases_in_graph_order(entity_index c,
+                                      owned_array<entity_index> &out) const;
+    /* the base class subobjects of class base in an object of class c:
+       through non-virtual bases only, and in all ([class.mi]/4: a virtual
+       base is one subobject however many paths lead to it) */
+    uint32_t nonvirtual_subobjects(entity_index c, entity_index base) const;
+    uint32_t base_subobjects(entity_index c, entity_index base) const;
+    /* the dynamic classes (entity::dynamic) and their virtual tables'
+       functions (dynamic_class::first_slot) */
+    owned_array<dynamic_class> dynamic_classes;
+    owned_array<entity_index> vtable_slots;
+    owned_array<int64_t> vtable_adjustments;
+    owned_array<vtable_group> vtable_groups;
+    /* while a class's group is made: per slot, whether the class itself
+       overrides it (its thunk's adjustment is the group's offset, known
+       after the layout: dynamic_class_offsets) */
+    owned_array<bool> vtable_own;
+    struct group_source {
+        entity_index base = 0;
+        entity_index virtual_class = 0;
+        uint64_t offset = 0;
+    };
+    owned_array<group_source> vtable_group_sources;
+    void dynamic_class_offsets(entity_index c);
+    const dynamic_class *dynamic_of(entity_index c) const
+    {
+        if (!entity_table[c].dynamic)
+            return nullptr;
+        return &dynamic_classes[entity_table[c].dynamic - 1];
+    }
+    /* t, or the innermost element type of an array t ([dcl.array]) */
+    qualified_type element_type(qualified_type t) const
+    {
+        while (type_table[t.unqualified()].kind == type_kind::array)
+            t = type_table[t.unqualified()].operand;
+        return t;
+    }
+    /* the class of type t or of its innermost array element, 0 for any
+       other type */
+    entity_index element_class(qualified_type t) const
+    {
+        const struct type &r = type_table[element_type(t).unqualified()];
+        if (r.kind != type_kind::class_type)
+            return 0;
+        return r.entity;
+    }
+    /* whether entity k is a class (not a union or an enumeration) */
+    bool is_class_entity(entity_index k) const
+    {
+        return k && entity_table[k].kind == entity_kind::class_type;
+    }
+    bool abstract_class(qualified_type t) const;
+    /* the keyword node n begins with, none when it begins with a node or
+       a token that is not a keyword */
+    standard_keyword leading_keyword(node_index n) const
+    {
+        if (!tree[n].child_count || !tree.children(n)[0].is_token())
+            return standard_keyword::none;
+        return p.keyword_of(tokens[tree.children(n)[0].index()]);
+    }
+    /* whether x is the keyword k */
+    bool is_keyword(syntax_child x, standard_keyword k) const
+    {
+        return x.is_token() && p.keyword_of(tokens[x.index()]) == k;
+    }
     /* whether a class is trivially copyable and has a trivial destructor:
        its objects are copied as their bytes, passed in registers */
     bool trivial_class(entity_index c) const;
+    bool trivial_defaulted_default_constructor(entity_index c) const;
     bool copies_bytes(entity_index c) const;
     bool is_copy_constructor(entity_index c, entity_index k) const;
+    bool declares_move_constructor(entity_index c) const;
+    bool copy_assignment_deleted(entity_index c) const;
+    bool default_constructor_deleted(entity_index c) const;
+    bool default_constructed(entity_index c, entity_index k) const;
+    entity_index implicitly_movable(syntax_child operand);
     /* whether destroying an object of class c runs code */
     bool destroys(entity_index c) const;
+    /* the type's size and alignment in bytes ([expr.sizeof],
+       [expr.alignof]), 0 if not complete */
+    uint64_t size_of_type(qualified_type t) const;
+    /* the size (and alignment) of a pointer, which a reference member
+       takes in a class ([abi:class-types]) */
+    uint64_t pointer_size() const;
+    uint64_t alignment_of_type(qualified_type t) const;
+    /* [class.virtual]/2: whether member function e has the name,
+       parameter-type-list and cv-qualification of virtual function g (a
+       destructor: whether both are destructors) */
+    bool overrides_function(entity_index e, entity_index g) const;
 
     /* the uses of names lookup resolved, each with the entity found:
        what -fcxx-dump=lookup-claims writes for clang to
@@ -960,7 +1176,9 @@ class semantic_analysis
            cv-qualifier was there */
         bool has_type = false;
         bool typedef_ = false, static_ = false, extern_ = false,
-             inline_ = false, constexpr_ = false;
+             inline_ = false, constexpr_ = false, virtual_ = false;
+        /* [class.friend]: the friend specifier (only where friend_allowed) */
+        bool friend_ = false;
         /* a class-specifier or elaborated-type-specifier was there: a
            declaration with no declarator declares the class
            ([dcl.pre]/5) */
@@ -1131,6 +1349,32 @@ class semantic_analysis
        blocks: members of their namespaces whose names are not bound
        there */
     owned_array<entity_index> block_declared;
+    /* [class.friend]/1: a class's friends.  A friend class not declared
+       yet ([namespace.memdef]/3: the elaborated-type-specifier declares it
+       in the innermost enclosing namespace, where ordinary lookup does
+       not find it) is the class of that name and scope declared later
+       (befriended 0); a function first declared by a friend declaration
+       is in block_declared, unbound in its namespace until declared
+       there, and found by argument-dependent lookup through the
+       granting class ([basic.lookup.argdep]/4.3) */
+    struct friend_record {
+        entity_index granting = 0;
+        entity_index befriended = 0;
+        entity_index scope = 0;
+        uint32_t name = 0;
+    };
+    owned_array<friend_record> friends;
+    analysis_result friend_declaration(entity_index c, node_index n);
+    analysis_result friend_class(entity_index c, node_index n,
+                                 syntax_child type);
+    analysis_result friend_function(entity_index c, node_index n);
+    bool friend_names(const friend_record &f, entity_index e) const;
+    bool grants(entity_index k, entity_index e) const;
+    bool in_friend_of(entity_index k) const;
+    /* a function of block_declared whose name and parameter-type-list
+       are these, in namespace scope, 0 if none */
+    entity_index declared_unbound(entity_index scope, uint32_t name,
+                                  qualified_type type) const;
     /* [basic.scope.hiding]/2: the class or enumeration of the scope that
        the variable or function declare() declares now hides, 0 if none */
     entity_index declaration_hides = 0;
@@ -1261,6 +1505,35 @@ class semantic_analysis
     /* a declarator analysed now may have a cv-qualifier-seq: a member
        declarator, or one whose declarator-id is a qualified-id */
     bool in_member_declarator = false;
+    /* [dcl.fct.spec]/2: virtual is analysed on a member-declaration's
+       decl-specifier-seq only; a member-declarator's virt-specifiers and
+       pure-specifier ([class.mem]/1) for the declarator it holds */
+    bool virtual_allowed = false;
+    /* [class.friend]: friend is analysed on a friend declaration's
+       decl-specifier-seq only */
+    bool friend_allowed = false;
+    /* construct() is called for a base class subobject, which may be of an
+       abstract class ([class.abstract]/2) */
+    bool constructing_base = false;
+    bool virt_override = false, virt_final = false, virt_pure = false;
+    /* the virtual functions declared, with their class, in order: a
+       class's are its new slots at its closing } (dynamic_class_record) */
+    struct declared_virtual {
+        entity_index c = 0, f = 0;
+        /* the slot of a base's virtual table it overrides, or ~0u */
+        uint32_t overrides = ~0u;
+        node_index declaration = 0;
+    };
+    owned_array<declared_virtual> declared_virtuals;
+    analysis_result dynamic_class_record(entity_index c, node_index n);
+    bool primary_base_choice(entity_index c, entity_index &primary) const;
+    analysis_result virtual_member(entity_index c, entity_index e,
+                                   node_index declaration, token_index id,
+                                   bool virtual_specified);
+    uint32_t vtable_pointer_store(entity_index c, token_index at);
+    /* whether the syntax is a virt-specifier or virt-specifier-seq
+       ([class.mem]/1), and which */
+    bool virt_specifier(syntax_child d, bool &override_, bool &final_) const;
     analysis_result parameter_declaration(node_index n, qualified_type &type,
                                           bool &unnamed, token_index &id,
                                           syntax_child &default_argument);
@@ -1454,6 +1727,20 @@ class semantic_analysis
     class_list_initialization(node_index list,
                               const owned_array<syntax_child> &clauses,
                               qualified_type type, initialized_value &result);
+    analysis_result constructor_list_initialization(
+        node_index list, const owned_array<syntax_child> &clauses,
+        qualified_type type, initialized_value &result);
+    analysis_result too_many_clauses(node_index list,
+                                     const owned_array<syntax_child> &clauses,
+                                     size_t next);
+    analysis_result aggregate_elements(node_index list,
+                                       const owned_array<syntax_child> &clauses,
+                                       size_t &next, qualified_type type,
+                                       initialized_value &result);
+    analysis_result aggregate_element(node_index list,
+                                      const owned_array<syntax_child> &clauses,
+                                      size_t &next, qualified_type element,
+                                      initialized_value &one);
     analysis_result string_initialization(node_index at,
                                           const expression_meaning &string,
                                           qualified_type &type);
@@ -1465,9 +1752,6 @@ class semantic_analysis
     /* [dcl.init.list]/7: whether converting m to to narrows */
     analysis_result narrowing(node_index at, const expression_meaning &m,
                               qualified_type to, bool &narrows);
-    /* the type's size in bytes ([expr.sizeof]), 0 if not complete */
-    uint64_t size_of_type(qualified_type t) const;
-    uint64_t alignment_of_type(qualified_type t) const;
 
     /* ---- classes ([class]) ---- */
     /* [class.pre]: a class-specifier, the class's type */
@@ -1475,6 +1759,7 @@ class semantic_analysis
     analysis_result class_definition(node_index n, type_index &type);
     /* "class.nest" or "class.local" for a class declared in scope */
     const char *inner_class_rule(entity_index scope) const;
+    const char *local_class_rule(entity_index c) const;
     /* [class.static.data]: the definition of a static data member */
     analysis_result
     static_member_definition(node_index declaration, token_index id,
@@ -1509,6 +1794,9 @@ class semantic_analysis
     /* the body of a member function defined in its class, analysed at the
        end of the class ([class.mem]/6: a complete-class context) */
     analysis_result member_function_body(entity_index c, node_index definition);
+    analysis_result member_function_definition(entity_index c,
+                                               node_index definition,
+                                               const syntax_child *children);
     /* [expr.ref]: the member e of the object m (a glvalue of class type) */
     analysis_result member_access(token_index at, entity_index e,
                                   expression_meaning &m);
@@ -1524,6 +1812,12 @@ class semantic_analysis
        when more than one path leads to it ([class.member.lookup]) */
     entity_index base_step(entity_index c, entity_index base,
                            bool &ambiguous) const;
+    entity_index nonvirtual_step(entity_index c, entity_index base) const;
+    entity_index virtual_route(entity_index c, entity_index base) const;
+    bool virtual_base_accessible(entity_index c, entity_index v) const;
+    bool public_path_to(entity_index c, entity_index v) const;
+    analysis_result to_virtual_base(token_index at, entity_index c,
+                                    entity_index v, expression_meaning &m);
     /* [class.member.lookup]: name looked up in class c and its bases;
        ambiguous when found in more than one base */
     entity_index class_member_lookup(entity_index c, uint32_t name,
@@ -1535,15 +1829,35 @@ class semantic_analysis
     /* the base-clause of class c ([class.derived]) */
     analysis_result base_clause(entity_index c, node_index n,
                                 standard_keyword key);
-    analysis_result empty_base_conflict(entity_index c, node_index n);
     /* [conv.ptr]/3: the pointer m to class from as a pointer to its base
        to, of type type */
     analysis_result pointer_to_base(token_index at, entity_index from,
                                     entity_index to, qualified_type type,
                                     expression_meaning &m);
+    analysis_result defaulted_or_deleted_special_member(
+        entity_index c, node_index n, syntax_child d, syntax_child body,
+        uint8_t access, bool constexpr_specified, bool virtual_specified);
+    analysis_result static_member_initializer(node_index declarator,
+                                              entity_index e, syntax_child init,
+                                              const specified &s);
+    analysis_result default_member_initializer(token_index at, entity_index e,
+                                               uint32_t &statement);
     /* the subobject e (a base or a non-static data member) of *this */
     analysis_result subobject(token_index at, entity_index e,
                               expression_meaning &m);
+    /* [class.base.init]/13: c's direct bases, then its non-static data
+       members, in the order they are constructed */
+    void construction_order(entity_index c,
+                            owned_array<entity_index> &order) const;
+    /* the subobject object's initialization from value: its bytes, stored
+       as by an assignment, a statement */
+    uint32_t subobject_store(const expression_meaning &object,
+                             qualified_type type, token_index at,
+                             uint32_t value);
+    /* a block of the statements */
+    uint32_t complete_object(uint32_t statement);
+    uint32_t block_statement(token_index at,
+                             const owned_array<uint32_t> &statements);
     /* the classes of the bases and members (arrays' elements) of c */
     void subobject_classes(entity_index c,
                            owned_array<entity_index> &out) const;
@@ -1586,14 +1900,23 @@ class semantic_analysis
     analysis_result special_member_declarator(entity_index c,
                                               node_index declaration,
                                               syntax_child d, uint8_t access,
-                                              bool definition);
+                                              bool definition,
+                                              bool constexpr_specified = false,
+                                              bool virtual_specified = false);
+    /* virtual_specified: in a class, where virtual is one of them */
+    bool function_specifiers_only(node_index seq, bool &constexpr_specified,
+                                  bool *virtual_specified = nullptr) const;
     /* the function-body of a constructor or destructor definition
        (last_declared): ctor-initializer_opt compound-statement */
     analysis_result special_member_body(node_index definition,
                                         syntax_child body);
     /* [dcl.meaning]/1: Class::Class or Class::~Class defined outside the
        class: the function-definition n without a decl-specifier-seq */
-    analysis_result special_member_definition(node_index n);
+    analysis_result special_member_definition(node_index n, uint32_t at);
+    analysis_result anonymous_union_member(entity_index c, node_index n,
+                                           const specified &s, uint8_t access);
+    analysis_result bind_anonymous_members(entity_index c, node_index n,
+                                           entity_index u);
     /* whether the declarator d with no decl-specifier-seq declares a
        constructor or destructor of c */
     bool declares_special_member(entity_index c, syntax_child d) const;
@@ -1610,17 +1933,11 @@ class semantic_analysis
     analysis_result
     expression_list_meanings(syntax_child list,
                              owned_array<expression_meaning> &out);
-    /* the class whose member-specification is analysed, 0 if none, and
-       its layout so far */
+    /* the class whose member-specification is analysed, 0 if none */
     entity_index defining_class = 0;
     /* the access of the member-declaration analysed (an enumeration's and
        its enumerators' in a class) */
     uint8_t declaration_access = 0;
-    uint64_t layout_size = 0;
-    uint32_t layout_alignment = 1;
-    /* the bits at the end of layout_size the last bit-field left unused
-       (a next bit-field may take them) */
-    uint64_t layout_unfilled = 0;
     analysis_result member_bit_field(entity_index c, node_index declaration,
                                      syntax_child d, const specified &s,
                                      uint8_t access);
@@ -1681,6 +1998,17 @@ class semantic_analysis
         /* the function whose body it is */
         entity_index function = 0;
     } function_state;
+    /* the invocations of constexpr functions analysed so far: an
+       initializer that has one is the evaluator's to decide
+       ([basic.start.static]/2) */
+    uint32_t constexpr_calls = 0;
+    /* [class.mem]/6: member function bodies of nested classes, analysed
+       at the closing } of the outermost class being defined */
+    struct deferred_body {
+        entity_index c;
+        node_index body;
+    };
+    owned_array<deferred_body> nested_bodies;
     analysis_result function_body(node_index definition, syntax_child compound,
                                   syntax_child ctor_initializer = {});
     /* [class.base.init]: a constructor's member initializations, the
@@ -1909,15 +2237,29 @@ class semantic_analysis
     uint32_t allocation_declarations_analysed = 0;
     uint32_t allocation_names_spelled();
     /* [expr.new]/11, [expr.delete]/9: the functions named kind found in
-       class c (0: none; in_class) or else in the global scope */
+       class c (0: none; in_class) or else in the global scope;
+       class_complete: at c's closing }, whose members (and its bases') are
+       all analysed */
     analysis_result allocation_functions(node_index n, allocation_function kind,
                                          entity_index c,
                                          owned_array<entity_index> &set,
-                                         bool &in_class);
+                                         bool &in_class,
+                                         bool class_complete = false);
 
     /* [expr.new] and [expr.delete]: the expressions */
     analysis_result new_expression(node_index n, expression_meaning &m);
     analysis_result delete_expression(node_index n, expression_meaning &m);
+    analysis_result usual_deallocation(node_index n, entity_index c,
+                                       bool global, bool array,
+                                       entity_index &function, bool &sized,
+                                       bool class_complete = false,
+                                       bool cookie = false);
+    /* [abi:array-cookies]: the size of the cookie before an array of
+       element (of class c, 0 if none) that a new[] or delete[] (::delete[]
+       when global) gives, 0 if none */
+    analysis_result array_cookie(node_index n, entity_index c,
+                                 qualified_type element, bool global,
+                                 uint64_t &cookie);
     /* the type of the new-type-id n ([expr.new]/1), the expression of the
        first bound of its noptr-new-declarator if any (bound) */
     analysis_result new_type_id(node_index n, qualified_type &type,
@@ -1986,6 +2328,14 @@ class semantic_analysis
 
 /* ---- the Itanium C++ ABI (abi/itanium/) ---- */
 
+/* [abi:class-types]: the layout of class c at its closing }, from its
+   bases (class_bases) and non-static data members (class_members) in
+   declaration order: each one's entity::offset (a bit-field's bit_offset
+   too), and the class's size, data_size and alignment.  nullptr, or the
+   subclause whose rules a part of the layout needs that are not written
+   yet: the class then has no layout, and stays incomplete */
+const char *itanium_class_layout(semantic_analysis &analysis, entity_index c);
+
 /* [abi:mangling]: the symbol of entity e, a function or a variable,
    appended to out: its mangled name, or its identifier where the ABI does
    not mangle it; false if the name needs rules not written yet (out may
@@ -1995,6 +2345,18 @@ class semantic_analysis
 bool itanium_symbol_name(const semantic_analysis &analysis,
                          const preprocessor &pp, entity_index e, vbuffer *out,
                          int variant = 2);
+/* [abi:mangling-special-vtables]: the symbol of class c's virtual table
+   (_ZTV <type>) */
+bool itanium_vtable_name(const semantic_analysis &analysis,
+                         const preprocessor &pp, entity_index c, vbuffer *out);
+/* its VTT's (_ZTT <type>, [abi:vtable-ctor-vtt]) and the construction
+   virtual table of its base at offset (_ZTC <type> <offset> _ <base>) */
+bool itanium_vtt_name(const semantic_analysis &analysis, const preprocessor &pp,
+                      entity_index c, vbuffer *out);
+bool itanium_construction_vtable_name(const semantic_analysis &analysis,
+                                      const preprocessor &pp, entity_index c,
+                                      uint64_t offset, entity_index base,
+                                      vbuffer *out);
 
 } // namespace cplusplus
 

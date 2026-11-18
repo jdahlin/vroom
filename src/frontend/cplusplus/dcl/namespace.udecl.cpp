@@ -246,6 +246,8 @@ analysis_result semantic_analysis::using_declarator(node_index n)
                                    "namespace.udecl");
     entity_index scope = current_scope;
     entity_index prior = entity_table.find(scope, name);
+    if (kind == entity_kind::function)
+        entity_table[e].named_by_using = true;
     if (!prior) {
         entity_table.bind(scope, name, e, true);
         used(t, e);

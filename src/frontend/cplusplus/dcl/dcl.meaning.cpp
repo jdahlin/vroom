@@ -192,6 +192,11 @@ analysis_result semantic_analysis::array(node_index at,
         (element.kind == type_kind::fundamental &&
          element.fundamental == fundamental_type::void_))
         return ill_formed(at, rule, "dcl.array");
+    /* an array of an abstract class: ill-formed before C++20 (C++17's
+       [dcl.array]/1: "T ... shall not be ... an abstract class type"),
+       where clang still reports it */
+    if (abstract_class(type))
+        return not_supported(at, "class.abstract");
     if (!bound) {
         type = qualified_type::make(type_table.array_of_unknown_bound_of(type),
                                     cv_none);

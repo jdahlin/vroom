@@ -1,3 +1,8 @@
+/*
+ * scratch.h: vscratch, one reusable heap block a pass sizes up front and
+ * cuts into views, kept by its owner from one run to the next so that the
+ * pass allocates only when a run needs more than any before.
+ */
 #ifndef VCC_COMMON_SCRATCH_H
 #define VCC_COMMON_SCRATCH_H
 #include "common/literal.h"

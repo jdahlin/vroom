@@ -18,6 +18,9 @@ LANGUAGE_FEATURE(less_colon_colon_is_less, cplusplus_11, never,
 LANGUAGE_FEATURE(universal_character_names_for_basic_characters_in_literals, cplusplus_11, never,
                  "[lex.charset]/2: allowed inside literals; C++03 forbade them everywhere")
 /* C++14 */
+LANGUAGE_FEATURE(aggregates_with_default_member_initializers, cplusplus_14, never,
+                 "[diff.cpp11.dcl.dcl]/2: classes with default member initializers can "
+                 "be aggregates")
 LANGUAGE_FEATURE(digit_separators, cplusplus_14, never,
                  "[diff.cpp11.lex]/1: pp-number can contain one or more single quotes")
 LANGUAGE_FEATURE(binary_literals, cplusplus_14, never, "N3472: binary-literal")
@@ -53,10 +56,15 @@ LANGUAGE_FEATURE(rvalue_references, cplusplus_11, never, "N2118: the ptr-operato
 /* [dcl.init] */
 LANGUAGE_FEATURE(list_initialization, cplusplus_11, never,
                  "N2672: a braced-init-list outside = { }")
+LANGUAGE_FEATURE(aggregates_without_user_declared_constructors, cplusplus_20, never,
+                 "[diff.cpp17.dcl.dcl]/3: a class with user-declared constructors is "
+                 "never an aggregate")
 LANGUAGE_FEATURE(designated_initializers, cplusplus_20, never,
                  "P0329R4: designated-initializer-list")
 /* [dcl.struct.bind], [dcl.fct.spec] */
 LANGUAGE_FEATURE(structured_bindings, cplusplus_17, never, "P0217R3: structured bindings")
+LANGUAGE_FEATURE(aggregates_with_bases, cplusplus_17, never,
+                 "[diff.cpp14.dcl.dcl]/4: an aggregate may have base classes")
 LANGUAGE_FEATURE(conditional_explicit, cplusplus_20, never,
                  "P0892R2: explicit ( constant-expression )")
 /* [class] */

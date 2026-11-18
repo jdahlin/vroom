@@ -270,6 +270,27 @@ analysis_result semantic_analysis::static_cast_expression(node_index n,
     bool from_value = is_arithmetic(m.type) || enumeration_of(m.type);
     if (to_void || (to_value && from_value))
         return explicit_conversion(n, to, m);
+    if ((target.kind == type_kind::rvalue_reference ||
+         target.kind == type_kind::lvalue_reference) &&
+        m.category != value_category::prvalue &&
+        target.operand.unqualified() == m.type.unqualified() &&
+        (m.type.cv() & ~target.operand.cv()) == 0) {
+        /* [expr.static.cast]/3: "A glvalue of type cv1 T1 can be cast to
+           type rvalue reference to cv2 T2 if cv2 T2 is reference-compatible
+           with cv1 T1 ([dcl.init.ref]).  If the value is not a bit-field,
+           the result refers to the object or the specified base class
+           subobject thereof"; /1: "If T is an lvalue reference type ... the
+           result is an lvalue; if T is an rvalue reference to object type,
+           the result is an xvalue".  The same type only, not a bit-field
+           (a base class is not analysed) */
+        if (m.bit_field_width)
+            return not_supported(n, "expr.static.cast");
+        m.type = target.operand;
+        m.category = value_category::xvalue;
+        if (target.kind == type_kind::lvalue_reference)
+            m.category = value_category::lvalue;
+        return analysis_result::well_formed;
+    }
     return not_supported(n, "expr.static.cast");
 }
 
@@ -889,6 +910,11 @@ analysis_result semantic_analysis::call_with(
     if (member ||
         (f.entity && entity_table[f.entity].kind == entity_kind::function))
         m.evaluation = constness::not_constant;
+    /* a constexpr member function's invocation is the evaluator's */
+    if (called && entity_table[called].constexpr_) {
+        m.evaluation = constness::unknown;
+        constexpr_calls++;
+    }
     uint32_t callee = f.node;
     if (member) {
         /* the member function, as an lvalue of its type; the object's
@@ -901,8 +927,31 @@ analysis_result semantic_analysis::call_with(
         callee = expression_node(semantic_kind::entity, named, node.first_token,
                                  member);
     }
+    /* [class.virtual]/16: "Explicit qualification with the scope operator
+       ([expr.prim.id.qual]) suppresses the virtual call mechanism" */
+    bool dispatched = false;
+    if (member && entity_table[member].virtual_) {
+        if (!node.child_count)
+            return not_supported(n, "class.virtual");
+        syntax_child name = tree.children(n)[0];
+        if (!name.is_token() &&
+            syntax_is(tree, name, syntax_kind::postfix_expression) &&
+            tree[name.index()].child_count == 3 &&
+            (syntax_is_punctuator(tokens, tree.children(name.index())[1],
+                                  preprocessing_op_or_punc::DOT) ||
+             syntax_is_punctuator(tokens, tree.children(name.index())[1],
+                                  preprocessing_op_or_punc::ARROW)))
+            name = tree.children(name.index())[2];
+        if (name.is_token() &&
+            tokens[name.index()].kind == token_kind::identifier)
+            dispatched = true;
+        else if (!syntax_is(tree, name, syntax_kind::qualified_id))
+            return not_supported(n, "class.virtual");
+    }
     m.node = expression_node(semantic_kind::call, m, node.first_token, callee,
                              object);
+    if (dispatched)
+        semantics[m.node].c = 1;
     semantics[m.node].first =
         semantics.list(argument_nodes.data(), argument_nodes.size());
     semantics[m.node].count = static_cast<uint32_t>(argument_nodes.size());

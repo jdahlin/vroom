@@ -121,8 +121,8 @@ bool semantic_analysis::type_without_external_linkage(qualified_type t) const
  * union, for each anonymous union member with at least one non-static data
  * member (if any), exactly one non-static data member has a default member
  * initializer, and (7.7) each potentially constructed base class of T is
- * const-default-constructible."  No member analysis has has a default
- * member initializer.
+ * const-default-constructible."  A union's default member initializers
+ * (7.5) and anonymous union members (7.6) are not told apart.
  */
 bool semantic_analysis::const_default_constructible(entity_index c) const
 {
@@ -138,6 +138,10 @@ bool semantic_analysis::const_default_constructible(entity_index c) const
         const entity &m = entity_table[class_members[x.first_member + i]];
         /* an unnamed bit-field is not a member ([class.bit]/2) */
         if (m.bit_field && !m.name)
+            continue;
+        /* (7.4): "each direct non-variant non-static data member
+           M of T has a default member initializer or ..." */
+        if (m.default_initializer && !x.union_)
             continue;
         qualified_type t = m.type;
         while (type_table[t.unqualified()].kind == type_kind::array)
@@ -233,7 +237,12 @@ analysis_result semantic_analysis::declare(node_index declaration,
             (kind == entity_kind::function || kind == entity_kind::variable))
             for (entity_index e : block_declared)
                 if (entity_table[e].enclosing == scope &&
-                    entity_table[e].name == name) {
+                    entity_table[e].name == name &&
+                    (kind != entity_kind::function ||
+                     entity_table[e].kind != entity_kind::function ||
+                     same_parameters(type_table,
+                                     entity_table[e].type.unqualified(),
+                                     type.unqualified()))) {
                     /* [dcl.array]/8: a bound given in the block is not
                        this scope's */
                     if (!(entity_table[e].type == type) &&
@@ -368,6 +377,19 @@ analysis_result semantic_analysis::declare(node_index declaration,
            yet */
         if (is_void)
             return not_supported(declaration, "basic.types");
+        /* [basic.def]/5: "In the definition of an object, the type of that
+           object shall not be ... an abstract class type, or a (possibly
+           multi-dimensional) array thereof" (a declaration that is no
+           definition: clang's error too, from no rule found yet) */
+        if (abstract_class(type)) {
+            if (!definition)
+                return not_supported(declaration, "class.abstract");
+            return ill_formed_at_token(id,
+                                       "in the definition of an object, the "
+                                       "type of that object shall not be an "
+                                       "abstract class type",
+                                       "basic.def");
+        }
         if (record.kind == type_kind::class_type) {
             const entity &c = entity_table[record.entity];
             if (c.kind != entity_kind::class_type)
@@ -460,6 +482,10 @@ analysis_result semantic_analysis::declare(node_index declaration,
             if (same_parameters(type_table, entity_table[o].type.unqualified(),
                                 type.unqualified()))
                 same = o;
+        /* a function declared before by a friend declaration only
+           ([namespace.memdef]/3), whose name is bound to others */
+        if (!same && !qualified && declared_unbound(scope, name, type))
+            return not_supported(declaration, "class.friend");
         if (!same && qualified)
             /* [dcl.meaning]/1: "the declaration shall refer to a previously
                declared member of the class or namespace to which the
@@ -600,6 +626,12 @@ analysis_result semantic_analysis::declare(node_index declaration,
         }
         if (!overloads)
             no_claims_after_hiding(name);
+        if (overloads && entity_table[overloads].named_by_using)
+            /* [namespace.udecl]/11: a using-declaration names the
+               declarations before it, so this overload is not one of the
+               set it introduced; the name is bound to the chain, not to a
+               copy of it */
+            return not_supported(declaration, "namespace.udecl");
         entity_index e = entity_table.make(kind, name, scope);
         entity_table[e].hidden_type = hides;
         entity_table[e].unnamed_type_linkage = unnamed_type;

@@ -600,6 +600,20 @@ analysis_result semantic_analysis::named_entity(token_index t, entity_index e,
        ([expr.const]/3) */
     if (x.automatic)
         m.evaluation = constness::unknown;
+    if (x.automatic && function_state.active) {
+        /* [basic.def.odr]/10: a local entity of an enclosing function
+           (named in a local class's member function) is not odr-usable
+           there: "If a local entity is odr-used in a declarative region in
+           which it is not odr-usable, the program is ill-formed".  Whether
+           this use is an odr-use (unevaluated, or a constant read) is not
+           analysed */
+        entity_index s = x.enclosing;
+        while (s && entity_table[s].kind == entity_kind::block_scope)
+            s = entity_table[s].enclosing;
+        if (s && entity_table[s].kind == entity_kind::function &&
+            s != function_state.function)
+            return not_supported(current_declaration, "basic.def.odr");
+    }
     const struct type record = type_table[x.type.unqualified()];
     if (record.kind == type_kind::lvalue_reference ||
         record.kind == type_kind::rvalue_reference) {

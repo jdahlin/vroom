@@ -1,3 +1,7 @@
+/*
+ * options-help.h: vlink's --help text: the options it accepts, by output
+ * format.
+ */
 #ifndef VCC_LINKER_OPTIONS_HELP_H
 #define VCC_LINKER_OPTIONS_HELP_H
 

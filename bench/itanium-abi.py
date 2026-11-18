@@ -22,7 +22,9 @@ committed, the prose is not: code cites a section by its label and says its
 rules in its own words.  A section of
 abi.html is labelled by its HTML anchor (`vtable-components` is 2.5.2); one
 of abi-eh.html, which has no anchors, by `eh-` and its number, or its title
-when it has none (`eh-1.6.1`, `eh-unwind-raiseexception`).
+when it has none (`eh-1.6.1`, `eh-unwind-raiseexception`).  A heading of
+abi.html without an anchor (the four parts of 2.4's layout procedure) does
+not start a section: its text is the section's it is in.
 
   bench/itanium-abi.py           rewrite the index, and write each section's
                                  text to work/itanium-abi/LABEL.txt to read
@@ -32,13 +34,29 @@ when it has none (`eh-1.6.1`, `eh-unwind-raiseexception`).
 import html
 import os
 import re
+import subprocess
 import sys
 
 R = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SOURCE = os.path.join(R, 'work', 'testsuites', 'itanium-abi')
+
+
+def work_dir():
+    """work/ of this checkout, or of the main checkout from a git worktree
+    (as bench/cxx-pp.py)"""
+    w = os.path.join(R, 'work')
+    if os.path.isdir(os.path.join(w, 'testsuites', 'itanium-abi')):
+        return w
+    common = subprocess.run(['git', '-C', R, 'rev-parse', '--git-common-dir'], capture_output=True,
+                            text=True).stdout.strip()
+    if not common:
+        return w
+    return os.path.join(os.path.dirname(os.path.abspath(os.path.join(R, common))), 'work')
+
+
+SOURCE = os.path.join(work_dir(), 'testsuites', 'itanium-abi')
 INDEX = os.path.join(R, 'docs', 'itanium-abi-index.tsv')
 GRAMMAR = os.path.join(R, 'docs', 'itanium-abi-grammar.tsv')
-TEXT = os.path.join(R, 'work', 'itanium-abi')
+TEXT = os.path.join(work_dir(), 'itanium-abi')
 HEADING = re.compile(r'<h([1-5])>(.*?)</h\1>', re.S | re.I)
 
 
@@ -59,6 +77,8 @@ def sections():
     for name in ('abi.html', 'abi-eh.html'):
         page = open(os.path.join(SOURCE, name), encoding='utf-8', errors='replace').read()
         heads = list(HEADING.finditer(page))
+        if name == 'abi.html':
+            heads = [m for m in heads if re.search(r'href="?#([\w.-]+)', m.group(2))]
         for k, m in enumerate(heads):
             inner = m.group(2)
             title = text_of(inner).split("\n")[0].strip()

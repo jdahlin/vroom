@@ -1,3 +1,7 @@
+/*
+ * options-help.h: the compiler driver's --help text: the options vcc
+ * accepts, grouped by kind.
+ */
 #ifndef VCC_COMPILER_OPTIONS_HELP_H
 #define VCC_COMPILER_OPTIONS_HELP_H
 

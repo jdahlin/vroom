@@ -1,3 +1,7 @@
+/*
+ * udivconst.cpp: wasm's unsigned division by a constant, expanded only
+ * for the compact quotient recipes; the rest keep div/rem.
+ */
 #include "wimpl.h"
 
 /* Expand only the compact quotient recipes. Add-corrected reciprocals and

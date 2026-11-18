@@ -270,6 +270,16 @@ uint32_t ast_builder_list(cc *c, const uint32_t *items, uint32_t count)
     return cc_id_list_freeze(c, &l);
 }
 
+uint32_t ast_builder_atomic_load(cc *c, ast_qualified_type t, uint32_t pointer,
+                                 uint32_t order)
+{
+    uint32_t arguments[2] = {pointer, order};
+
+    return ast_builder_node(c, AST_NODE_BUILTIN, t, 0,
+                            ast_builder_list(c, arguments, 2), 2,
+                            CC_BUILTIN_ATOMIC_LOAD_N, 0);
+}
+
 uint32_t ast_builder_integer(cc *c, ast_qualified_type t, int64_t value)
 {
     /* the constant's value as C keeps it, in 128 bits: an unsigned type's

@@ -231,12 +231,13 @@ analysis_result semantic_analysis::new_type_id(node_index n,
 
 analysis_result semantic_analysis::allocation_functions(
     node_index n, allocation_function kind, entity_index c,
-    owned_array<entity_index> &set, bool &in_class)
+    owned_array<entity_index> &set, bool &in_class, bool class_complete)
 {
     implicit_allocation_functions();
     uint32_t name = allocation_function_name(kind);
     in_class = false;
-    if (c && allocation_names_spelled() != allocation_declarations_analysed)
+    if (c && !class_complete &&
+        allocation_names_spelled() != allocation_declarations_analysed)
         /* the class may declare one analysis did not follow */
         return not_supported(n, "class.free");
     if (c) {
@@ -268,10 +269,9 @@ analysis_result semantic_analysis::allocation_functions(
  * Otherwise, the new-initializer is interpreted according to the
  * initialization rules of [dcl.init] for direct-initialization."
  *
- * Not analysed: a placeholder type (/2), an array of class type (its
- * constructors and destructors run per element, with a cookie, [expr.new]/15),
- * an array with a new-initializer, new-extended alignment (/18), the
- * deallocation when the initialization throws (/25).
+ * Not analysed: a placeholder type (/2), an array with a new-initializer,
+ * new-extended alignment (/18), the deallocation when the initialization
+ * throws (/25).
  */
 analysis_result semantic_analysis::new_expression(node_index n,
                                                   expression_meaning &m)
@@ -359,12 +359,25 @@ analysis_result semantic_analysis::new_expression(node_index n,
     qualified_type size_type = qualified_type::make(
         type_table.fundamental(fundamental_type::unsigned_long_int), cv_none);
     expression_meaning requested;
+    /* an array of a class with a constructor or destructor: each element
+       initialized ([expr.new]/22), and, with a cookie (array_cookie), the
+       element count stored before the elements for delete[]
+       ([abi:array-cookies]: it "is stored immediately before the first
+       element", the allocation /15's "array allocation overhead") */
+    uint64_t cookie = 0;
+    expression_meaning element_count;
     if (array) {
-        if (c && (entity_table[c].first_constructor || destroys(c)))
-            return not_supported(n, "expr.new");
         if (init.bits)
             return not_supported(n, "expr.new");
+        /* the class's operator delete[], as clang looks it up, ::new or
+           not */
+        r = array_cookie(n, c, type, false, cookie);
+        if (r != analysis_result::well_formed)
+            return r;
     }
+    bool elements =
+        array && c &&
+        (entity_table[c].first_constructor || destroys(c) || cookie);
     if (array && bound.bits) {
         /* [expr.new]/9: "If the expression in a noptr-new-declarator is
            present, it is implicitly converted to std::size_t." */
@@ -406,14 +419,24 @@ analysis_result semantic_analysis::new_expression(node_index n,
                                   "object too large",
                                   "expr.new");
             requested = integer_constant(fundamental_type::unsigned_long_int,
-                                         b.value * size, at);
+                                         b.value * size + cookie, at);
+            element_count = integer_constant(
+                fundamental_type::unsigned_long_int, b.value, at);
         } else {
             requested.type = size_type;
             requested.category = value_category::prvalue;
             requested.evaluation = constness::not_constant;
+            uint32_t counted = b.node;
+            if (elements) {
+                /* the count, held: the size's and the elements' */
+                element_count = b;
+                expression_meaning held = b;
+                counted = expression_node(semantic_kind::array_count, held, at);
+            }
             requested.node = expression_node(semantic_kind::array_size,
-                                             requested, at, b.node);
+                                             requested, at, counted);
             semantics[requested.node].value = size;
+            semantics[requested.node].d = static_cast<uint32_t>(cookie);
         }
     } else {
         if (array && known_count && size > UINT64_MAX / 2 / known_count)
@@ -421,13 +444,16 @@ analysis_result semantic_analysis::new_expression(node_index n,
                               "the expression in a noptr-new-declarator is "
                               "erroneous: the allocated object too large",
                               "expr.new");
-        if (array)
+        if (array) {
             size *= known_count;
+            element_count = integer_constant(
+                fundamental_type::unsigned_long_int, known_count, at);
+        }
         /* [expr.new]/15: "the new-expression passes the amount of space
            requested to the allocation function as the first argument of
            type std::size_t" */
-        requested =
-            integer_constant(fundamental_type::unsigned_long_int, size, at);
+        requested = integer_constant(fundamental_type::unsigned_long_int,
+                                     size + cookie, at);
     }
     /* /18: "Overload resolution is performed on a function call created by
        assembling an argument list.  The first argument is the amount of
@@ -508,6 +534,9 @@ analysis_result semantic_analysis::new_expression(node_index n,
            performed."  /7: "If a program calls for the
            default-initialization of an object of a const-qualified type
            T, T shall be a const-default-constructible class type" */
+        if (c && entity_table[c].kind == entity_kind::class_type &&
+            default_constructor_deleted(c))
+            return not_supported(n, "class.default.ctor");
         if (c && entity_table[c].first_constructor) {
             r = construct(n, type, none, object.node, value);
         } else if (type.cv() & cv_const) {
@@ -528,16 +557,31 @@ analysis_result semantic_analysis::new_expression(node_index n,
             /* [dcl.init]/11: "An object whose initializer is an empty set
                of parentheses, i.e., (), shall be value-initialized."; /8:
                (8.3) "Otherwise, the object is zero-initialized." */
+            bool user_provided = false;
             if (c)
-                /* a class's value-initialization: default-initialized,
-                   zero-initialized first unless a constructor is
-                   user-provided (8.1, 8.2) */
+                for (entity_index q = entity_table[c].first_constructor; q;
+                     q = entity_table[q].next_constructor)
+                    if (!entity_table[q].implicit &&
+                        !type_table[entity_table[q].type.unqualified()]
+                             .parameter_count)
+                        user_provided = true;
+            if (c && user_provided) {
+                /* (8.1): "if T is a (possibly cv-qualified) class type with
+                   ... a default constructor that is user-provided ..., then
+                   the object is default-initialized" */
+                r = construct(n, type, none, object.node, value);
+            } else if (c) {
+                /* (8.2): zero-initialized, then default-initialized when
+                   the default constructor is non-trivial; a default
+                   constructor with default arguments */
                 return not_supported(n, "dcl.init");
-            expression_meaning zero;
-            zero.type = qualified_type::make(type.unqualified(), cv_none);
-            zero.category = value_category::prvalue;
-            zero.evaluation = constness::constant;
-            value.node = expression_node(semantic_kind::zero, zero, at);
+            } else {
+                expression_meaning zero;
+                zero.type = qualified_type::make(type.unqualified(), cv_none);
+                zero.category = value_category::prvalue;
+                zero.evaluation = constness::constant;
+                value.node = expression_node(semantic_kind::zero, zero, at);
+            }
         } else if (k.child_count == 3 &&
                    syntax_is(tree, parts[1], syntax_kind::initializer_list)) {
             /* [dcl.init]/17.6.2: the constructor called with the
@@ -586,6 +630,12 @@ analysis_result semantic_analysis::new_expression(node_index n,
        return null ([basic.stc.dynamic.allocation]/4) */
     if (value.node && !entity_table[function].implicit)
         semantics[m.node].c = 1;
+    if (elements) {
+        if (!entity_table[function].implicit)
+            semantics[m.node].c = 1;
+        semantics[m.node].d = element_count.node;
+        semantics[m.node].value = cookie;
+    }
     return analysis_result::well_formed;
 }
 
