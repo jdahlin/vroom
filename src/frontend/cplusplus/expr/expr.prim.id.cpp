@@ -560,6 +560,11 @@ analysis_result semantic_analysis::named_entity(token_index t, entity_index e,
         used(t, e);
     if (entity_table[e].kind == entity_kind::enumerator)
         return enumerator_value(t, e, m);
+    if (contains_placeholder(entity_table[e].type)) {
+        analysis_result r = undeduced_use(t, e);
+        if (r != analysis_result::well_formed)
+            return r;
+    }
     const entity &x = entity_table[e];
     if (x.kind != entity_kind::variable && x.kind != entity_kind::function)
         return not_supported(current_declaration, "expr.prim.id");
@@ -747,6 +752,11 @@ analysis_result semantic_analysis::qualified_id(node_index n,
         return not_supported(n, "over.over");
     if (x.kind == entity_kind::function && !x.next_overload) {
         analysis_result r = deleted_use(t, e);
+        if (r != analysis_result::well_formed)
+            return r;
+    }
+    if (contains_placeholder(x.type)) {
+        analysis_result r = undeduced_use(t, e);
         if (r != analysis_result::well_formed)
             return r;
     }

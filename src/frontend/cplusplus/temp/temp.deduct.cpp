@@ -238,6 +238,52 @@ static bool deduction_may_succeed(const types &table, qualified_type p,
     }
 }
 
+/* [temp.deduct.call]/2-3: the P and A deduce_type compares, for a
+   parameter of type p and an argument of type a and value category c */
+void semantic_analysis::adjust_call_deduction(qualified_type &p,
+                                              qualified_type &a,
+                                              value_category c)
+{
+    const struct type argument = type_table[a.unqualified()];
+    const struct type pr = type_table[p.unqualified()];
+    if (pr.kind == type_kind::rvalue_reference &&
+        type_table[pr.operand.unqualified()].kind ==
+            type_kind::template_parameter &&
+        !pr.operand.cv() && c == value_category::lvalue) {
+        /* [temp.deduct.call]/3: "A forwarding reference is an rvalue
+           reference to a cv-unqualified template parameter ... If P
+           is a forwarding reference and the argument is an lvalue,
+           the type "lvalue reference to A" is used in place of A for
+           type deduction." */
+        p = pr.operand;
+        a = qualified_type::make(type_table.lvalue_reference_to(a), cv_none);
+    } else if (pr.kind == type_kind::lvalue_reference ||
+               pr.kind == type_kind::rvalue_reference) {
+        /* /3: "If P is a reference type, the type referred to by P is
+           used for type deduction." */
+        p = pr.operand;
+    } else {
+        /* /2: "If P is not a reference type: If A is an array type,
+           the pointer type produced by the array-to-pointer standard
+           conversion is used in place of A for type deduction;
+           otherwise, If A is a function type, the pointer type
+           produced by the function-to-pointer standard conversion is
+           used in place of A for type deduction; otherwise, If A is a
+           cv-qualified type, the top-level cv-qualifiers of A's type
+           are ignored for type deduction."  /3: "If P is a
+           cv-qualified type, the top-level cv-qualifiers of P's type
+           are ignored" */
+        if (argument.kind == type_kind::array)
+            a = qualified_type::make(type_table.pointer_to(argument.operand),
+                                     cv_none);
+        else if (argument.kind == type_kind::function)
+            a = qualified_type::make(type_table.pointer_to(a), cv_none);
+        else
+            a = qualified_type::make(a.unqualified(), cv_none);
+        p = qualified_type::make(p.unqualified(), cv_none);
+    }
+}
+
 analysis_result semantic_analysis::deduce_from_call(
     node_index at, uint32_t function_template,
     const expression_meaning *arguments, uint32_t count,
@@ -313,45 +359,7 @@ analysis_result semantic_analysis::deduce_from_call(
         if (ar.kind == type_kind::none || ar.kind == type_kind::placeholder ||
             ar.kind == type_kind::dependent)
             return not_supported(at, "temp.deduct.call");
-        const struct type pr = type_table[p.unqualified()];
-        if (pr.kind == type_kind::rvalue_reference &&
-            type_table[pr.operand.unqualified()].kind ==
-                type_kind::template_parameter &&
-            !pr.operand.cv() &&
-            arguments[i].category == value_category::lvalue) {
-            /* [temp.deduct.call]/3: "A forwarding reference is an rvalue
-               reference to a cv-unqualified template parameter ... If P
-               is a forwarding reference and the argument is an lvalue,
-               the type "lvalue reference to A" is used in place of A for
-               type deduction." */
-            p = pr.operand;
-            a = qualified_type::make(type_table.lvalue_reference_to(a),
-                                     cv_none);
-        } else if (pr.kind == type_kind::lvalue_reference ||
-                   pr.kind == type_kind::rvalue_reference) {
-            /* /3: "If P is a reference type, the type referred to by P is
-               used for type deduction." */
-            p = pr.operand;
-        } else {
-            /* /2: "If P is not a reference type: If A is an array type,
-               the pointer type produced by the array-to-pointer standard
-               conversion is used in place of A for type deduction;
-               otherwise, If A is a function type, the pointer type
-               produced by the function-to-pointer standard conversion is
-               used in place of A for type deduction; otherwise, If A is a
-               cv-qualified type, the top-level cv-qualifiers of A's type
-               are ignored for type deduction."  /3: "If P is a
-               cv-qualified type, the top-level cv-qualifiers of P's type
-               are ignored" */
-            if (ar.kind == type_kind::array)
-                a = qualified_type::make(type_table.pointer_to(ar.operand),
-                                         cv_none);
-            else if (ar.kind == type_kind::function)
-                a = qualified_type::make(type_table.pointer_to(a), cv_none);
-            else
-                a = qualified_type::make(a.unqualified(), cv_none);
-            p = qualified_type::make(p.unqualified(), cv_none);
-        }
+        adjust_call_deduction(p, a, arguments[i].category);
         /* a parameter that does not match: deduction fails, which
            overload resolution of the function templates of the name and
            its other functions decides; neither is analysed yet */

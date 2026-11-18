@@ -854,6 +854,10 @@ analysis_result semantic_analysis::init_declarators(node_index declaration,
         if (!declarators)
             sole_elaborated = tree.children(specifiers)[0].index();
     }
+    placeholder_allowed = true;
+    /* (a declaration nested in an initializer has its own) */
+    scoped_value<qualified_type> deduced(declaration_deduced, qualified_type());
+    scoped_value<bool> group(placeholder_group, false);
     analysis_result r = decl_specifier_seq(specifiers, s, false);
     sole_elaborated = 0;
     if (r != analysis_result::well_formed)
@@ -876,6 +880,14 @@ analysis_result semantic_analysis::init_declarators(node_index declaration,
         syntax_child c = tree.children(declaration)[i];
         if (syntax_is(tree, c, syntax_kind::function_body))
             break;
+        /* [dcl.struct.bind]/1: ref-qualifier_opt [ identifier-list ] */
+        if (syntax_is_punctuator(tokens, c,
+                                 preprocessing_op_or_punc::LEFT_BRACKET) ||
+            syntax_is_punctuator(tokens, c,
+                                 preprocessing_op_or_punc::AMPERSAND) ||
+            syntax_is_punctuator(tokens, c,
+                                 preprocessing_op_or_punc::AMPERSAND_AMPERSAND))
+            return not_supported(declaration, "dcl.struct.bind");
         /* a declarator that is only its identifier is the token */
         if (c.is_token()) {
             if (tokens[c.index()].kind != token_kind::identifier)
@@ -925,6 +937,7 @@ analysis_result semantic_analysis::init_declarators(node_index declaration,
     if (items.empty())
         return extension_used(diagnostic_id::sema_no_declarator,
                               tree[declaration].first_token, nullptr);
+    placeholder_group = items.size() > 1 && contains_placeholder(s.type);
     analysis_result result = analysis_result::well_formed;
     for (syntax_child item : items) {
         r = init_declarator(declaration, item, s, definition);
@@ -1065,6 +1078,13 @@ analysis_result semantic_analysis::declare_with_initializer(
         kind = entity_kind::typedef_name;
     else if (type_table[type.unqualified()].kind == type_kind::function)
         kind = entity_kind::function;
+    bool placeholder = contains_placeholder(type);
+    if (placeholder || kind == entity_kind::function) {
+        r = placeholder_declaration(declaration, m, type, kind, placeholder,
+                                    initialized);
+        if (r != analysis_result::well_formed)
+            return r;
+    }
     /* [ext:gnu_attributes] noreturn on what is no function (a pointer to
        function, a typedef-name): GCC and clang make it part of the
        function type pointed to */
@@ -1146,6 +1166,9 @@ analysis_result semantic_analysis::declare_with_initializer(
             r = literal_operator_declaration(declaration, declared_entity);
     }
     last_declared = declared_entity;
+    if (r == analysis_result::well_formed && placeholder &&
+        kind == entity_kind::function)
+        entity_table[declared_entity].placeholder_return = true;
     if (r == analysis_result::well_formed && !s.typedef_ &&
         (aligned || gnu_flags)) {
         entity &x = entity_table[declared_entity];
@@ -1264,7 +1287,11 @@ analysis_result semantic_analysis::declare_with_initializer(
             t.kind == type_kind::array && !t.bound_known;
     }
     uint32_t calls_before = constexpr_calls;
-    r = initializer(init, type, value);
+    if (placeholder) {
+        scoped_value<entity_index> deducing(deducing_variable, declared_entity);
+        r = deduced_initializer(init, declared_entity, type, value);
+    } else
+        r = initializer(init, type, value);
     if (r != analysis_result::well_formed)
         return r;
     entity_table[declared_entity].bound_unknown = false;

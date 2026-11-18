@@ -488,8 +488,9 @@ analysis_result semantic_analysis::unary(node_index n, expression_meaning &m)
         /* /3.1: "If the operand is a qualified-id naming a non-static or
            variant member m of some class C ... the result has type
            pointer to member" ([dcl.mptr], S5) */
-        if (m.category != value_category::lvalue &&
-            syntax_is(tree, children[1], syntax_kind::qualified_id))
+        if (syntax_is(tree, children[1], syntax_kind::qualified_id) &&
+            (m.category != value_category::lvalue ||
+             (m.node && semantics[m.node].kind == semantic_kind::member)))
             return not_supported(n, "dcl.mptr");
         if (m.category != value_category::lvalue)
             return ill_formed(n,

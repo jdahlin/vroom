@@ -270,6 +270,21 @@ analysis_result semantic_analysis::pointer_conversion(node_index at,
         converted(m, conversion_kind::qualification_cast);
         return analysis_result::well_formed;
     }
+    if (to_void && is_object_pointer(m.type)) {
+        /* [expr.cast]/4: "a static_cast followed by a const_cast": to
+           "pointer to cv void" with the pointee's cv-qualifiers
+           ([conv.ptr]/2), then the qualification cast */
+        qualified_type via = qualified_type::make(
+            type_table.pointer_to(qualified_type::make(
+                target_pointee.unqualified(), pointee.cv())),
+            cv_none);
+        analysis_result r = implicit_conversion(at, m, via, true);
+        if (r != analysis_result::well_formed)
+            return r;
+        m.type = result;
+        converted(m, conversion_kind::qualification_cast);
+        return analysis_result::well_formed;
+    }
     m.type = result;
     m.evaluation = constness::not_constant;
     converted(m, conversion_kind::pointer_cast);

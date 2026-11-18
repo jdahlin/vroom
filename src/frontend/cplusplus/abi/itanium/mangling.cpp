@@ -389,13 +389,7 @@ bool itanium_mangler::prefix(entity_index scope)
    std of the global namespace */
 bool itanium_mangler::is_std(entity_index scope) const
 {
-    const entity &n = analysis.entity_table[scope];
-    if (!scope || n.kind != entity_kind::namespace_entity || n.enclosing ||
-        !n.name)
-        return false;
-    size_t length = 0;
-    const char *identifier = spelling(n.name, &length);
-    return length == 3 && !memcmp(identifier, "std", 3);
+    return analysis.std_namespace(scope);
 }
 
 /* whether e is declared, directly or not, within an unnamed namespace */

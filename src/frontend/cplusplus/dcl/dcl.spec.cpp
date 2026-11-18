@@ -988,6 +988,11 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
                                                       bool parameter)
 {
     const syntax_node &node = tree[seq];
+    /* [dcl.spec.auto]/6: "A program that uses a placeholder type in a
+       context not explicitly allowed in this subclause is ill-formed": the
+       contexts analysed allow it (placeholder_allowed) */
+    bool allow_placeholder = placeholder_allowed && !parameter;
+    placeholder_allowed = false;
     simple_type_keywords k;
     uint32_t cv = cv_none;
     unsigned const_ = 0, volatile_ = 0, typedef_ = 0, static_ = 0, extern_ = 0,
@@ -1012,7 +1017,9 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
             syntax_is(tree, c, syntax_kind::elaborated_enum_specifier) ||
             syntax_is(tree, c, syntax_kind::simple_type_specifier) ||
             syntax_is(tree, c, syntax_kind::typename_specifier) ||
-            syntax_is(tree, c, syntax_kind::simple_template_id))
+            syntax_is(tree, c, syntax_kind::simple_template_id) ||
+            syntax_is(tree, c, syntax_kind::decltype_specifier) ||
+            syntax_is(tree, c, syntax_kind::placeholder_type_specifier))
             continue;
         /* an attribute specifier has rules unless a class-specifier is
            among the specifiers */
@@ -1090,6 +1097,26 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
                 uint32_t named_cv = 0;
                 r = typename_type(c.index(), class_type, named_cv);
                 cv |= named_cv;
+            } else if (syntax_is(tree, c, syntax_kind::decltype_specifier)) {
+                /* [dcl.type.decltype] */
+                qualified_type denoted;
+                r = decltype_type(c.index(), denoted);
+                class_type = denoted.unqualified();
+                cv |= denoted.cv();
+            } else if (syntax_is(tree, c,
+                                 syntax_kind::placeholder_type_specifier)) {
+                /* [dcl.spec.auto]: decltype(auto); a type-constraint is
+                   [temp.param]'s */
+                const syntax_child *parts = tree.children(c.index());
+                if (!allow_placeholder ||
+                    !tokens.files.behavior.has(
+                        language_feature::return_type_deduction) ||
+                    !parts[0].is_token() ||
+                    p.keyword_of(tokens[parts[0].index()]) !=
+                        standard_keyword::decltype_)
+                    return not_supported(seq, "dcl.spec.auto");
+                class_type = placeholder_type(true).unqualified();
+                r = analysis_result::well_formed;
             } else if (syntax_is(tree, c,
                                  syntax_kind::gnu_attribute_specifier)) {
                 /* [ext:gnu_attributes] a decl-specifier: it applies to
@@ -1109,7 +1136,9 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
             named = class_type;
             named_at = tree[c.index()].first_token;
             if (!syntax_is(tree, c, syntax_kind::simple_type_specifier) &&
-                !syntax_is(tree, c, syntax_kind::typename_specifier))
+                !syntax_is(tree, c, syntax_kind::typename_specifier) &&
+                !syntax_is(tree, c, syntax_kind::decltype_specifier) &&
+                !syntax_is(tree, c, syntax_kind::placeholder_type_specifier))
                 declares_class = true;
             continue;
         }
@@ -1258,6 +1287,17 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
             if (!virtual_allowed)
                 return not_supported(seq, specifier_subclause(kw));
             count(virtual_, t, "virtual");
+            break;
+        case standard_keyword::auto_:
+            /* [dcl.spec.auto]/1: a placeholder-type-specifier */
+            if (!allow_placeholder ||
+                !tokens.files.behavior.has(
+                    language_feature::auto_type_specifier))
+                return not_supported(seq, specifier_subclause(kw));
+            if (named)
+                k.alone++;
+            named = placeholder_type(false).unqualified();
+            named_at = t;
             break;
         case standard_keyword::friend_:
             if (!friend_allowed)
