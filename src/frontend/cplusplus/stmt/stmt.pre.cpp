@@ -506,6 +506,7 @@ analysis_result semantic_analysis::statement(syntax_child s, uint32_t &built)
             hold_names(n);
         return r;
     }
+    case syntax_kind::static_assert_declaration:
     case syntax_kind::using_directive:
     case syntax_kind::namespace_alias_definition:
     case syntax_kind::using_declaration: {

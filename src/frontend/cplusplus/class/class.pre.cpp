@@ -1583,7 +1583,16 @@ analysis_result semantic_analysis::member_bit_field(entity_index c,
     if (r != analysis_result::well_formed)
         return r;
     promote_enumeration(w);
-    if (!is_integral(w.type) || w.evaluation != constness::constant)
+    if (!is_integral(w.type))
+        return not_supported(declaration, "class.bit");
+    /* [class.bit]/1: "The constant-expression shall be an integral
+       constant expression with a value greater than or equal to zero and
+       is called the width of the bit-field." */
+    bool constant_width = false;
+    r = integral_constant_expression(declaration, w, constant_width);
+    if (r != analysis_result::well_formed)
+        return r;
+    if (!constant_width)
         return not_supported(declaration, "class.bit");
     __int128 width_value =
         integer_value(tokens.files.behavior, fundamental_of(w.type), w.value);

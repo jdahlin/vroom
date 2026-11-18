@@ -137,4 +137,109 @@ uint64_t floating_kept(double v)
     return kept;
 }
 
+/*
+ * [expr.const]/11: "A constant expression is either a glvalue core constant
+ * expression that refers to an entity that is a permitted result of a
+ * constant expression (as defined below), or a prvalue core constant
+ * expression whose value satisfies the following constraints".
+ *
+ * The one place a construct that requires a constant expression learns
+ * whether it has one.  Today the answer is what the operators folded as the
+ * expression was analysed (expression_meaning::evaluation); an evaluation
+ * analysis could not follow (constness::unknown: a call, an object read
+ * through a pointer, a class value) is unsupported here, and is where the
+ * evaluator of the semantic tree is to be asked.
+ */
+analysis_result semantic_analysis::constant_expression(
+    node_index at, const expression_meaning &m, bool &constant)
+{
+    constant = false;
+    if (m.evaluation == constness::unknown)
+        return not_supported(at, "expr.const");
+    constant = m.evaluation == constness::constant;
+    return analysis_result::well_formed;
+}
+
+/*
+ * [expr.const]/8: "An integral constant expression is an expression of
+ * integral or unscoped enumeration type, implicitly converted to a prvalue,
+ * where the converted expression is a core constant expression."  The
+ * caller has checked the type.
+ */
+analysis_result semantic_analysis::integral_constant_expression(
+    node_index at, const expression_meaning &m, bool &constant)
+{
+    analysis_result r = constant_expression(at, m, constant);
+    if (r != analysis_result::well_formed || !constant)
+        return r;
+    /* [expr.const]/1 of C++03: "An integral constant-expression can involve
+       only literals, enumerators, const variables or static data members of
+       integral or enumeration types initialized with constant expressions
+       ... Floating literals can appear only if they are cast to integral or
+       enumeration types.": what clang folds beyond that is its extension */
+    if (!tokens.files.behavior.has(language_feature::list_initialization) &&
+        m.beyond_integral_constant) {
+        constant = false;
+        return not_supported(at, "expr.const");
+    }
+    return analysis_result::well_formed;
+}
+
+/*
+ * [expr.const]/10: "A converted constant expression of type T is an
+ * expression, implicitly converted to type T, where the converted
+ * expression is a constant expression and the implicit conversion sequence
+ * contains only ... integral conversions other than narrowing conversions".
+ * m is an integral constant expression; a narrowing conversion is clang's
+ * -Wc++11-narrowing, an error by default.
+ */
+analysis_result semantic_analysis::converted_constant_expression(
+    node_index at, expression_meaning &m, fundamental_type to, bool &constant)
+{
+    constant = false;
+    if (tokens.files.behavior.has(language_feature::list_initialization)) {
+        bool narrows = false;
+        analysis_result r = narrowing(
+            at, m, qualified_type::make(type_table.fundamental(to), cv_none),
+            narrows);
+        if (r != analysis_result::well_formed)
+            return r;
+        if (narrows) {
+            r = extension_used(diagnostic_id::sema_narrowing,
+                               tree[at].first_token, nullptr);
+            if (r != analysis_result::well_formed)
+                return r;
+        }
+    }
+    convert_arithmetic(m, to);
+    return constant_expression(at, m, constant);
+}
+
+/*
+ * [expr.const]/10: "A contextually converted constant expression of type
+ * bool is an expression, contextually converted to bool, where the
+ * converted expression is a constant expression and the conversion sequence
+ * contains only the conversions above."
+ */
+analysis_result semantic_analysis::bool_constant_expression(node_index at,
+                                                            syntax_child e,
+                                                            bool &constant,
+                                                            bool &value)
+{
+    constant = false;
+    value = false;
+    expression_meaning m;
+    analysis_result r = expression(e, m);
+    if (r != analysis_result::well_formed)
+        return r;
+    r = contextual_bool(at, m);
+    if (r != analysis_result::well_formed)
+        return r;
+    r = constant_expression(at, m, constant);
+    if (r != analysis_result::well_formed)
+        return r;
+    value = constant && m.value != 0;
+    return analysis_result::well_formed;
+}
+
 } // namespace cplusplus

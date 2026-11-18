@@ -348,9 +348,14 @@ analysis_result semantic_analysis::function(node_index parameters,
                 cv |= cv_volatile;
                 continue;
             }
-            /* a ref-qualifier, a noexcept-specifier, attributes, a
-               cv-qualifier-seq of a type that is not a member
-               function's */
+            /* [except.spec]/2: "In a noexcept-specifier, the
+               constant-expression, if supplied, shall be a contextually
+               converted constant expression of type bool": the exception
+               specification is not in the function type analysis keeps */
+            if (syntax_is(tree, c, syntax_kind::noexcept_specifier))
+                return not_supported(parameters, "except.spec");
+            /* a ref-qualifier, attributes, a cv-qualifier-seq of a type
+               that is not a member function's */
             return not_supported(parameters, "dcl.fct");
         }
     }

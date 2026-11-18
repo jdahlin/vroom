@@ -230,15 +230,11 @@ analysis_result semantic_analysis::array(node_index at,
                           "dcl.array");
     /* a bound that is not a constant expression: a variable length array
        (C99's, clang's extension), or one clang folds */
-    if (m.evaluation != constness::constant)
-        return not_supported(at, "expr.const");
-    /* [expr.const]/1 of C++03: "An integral constant-expression can involve
-       only literals, enumerators, const variables or static data members of
-       integral or enumeration types initialized with constant expressions
-       ... Floating literals can appear only if they are cast to integral or
-       enumeration types." */
-    if (!tokens.files.behavior.has(language_feature::list_initialization) &&
-        m.beyond_integral_constant)
+    bool constant = false;
+    r = integral_constant_expression(at, m, constant);
+    if (r != analysis_result::well_formed)
+        return r;
+    if (!constant)
         return not_supported(at, "expr.const");
     const implementation_defined_behavior &b = tokens.files.behavior;
     fundamental_type f = fundamental_of(m.type);

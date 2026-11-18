@@ -1155,6 +1155,7 @@ class semantic_analysis
 
     /* [dcl.pre] */
     analysis_result empty_declaration(node_index n);
+    analysis_result static_assert_declaration(node_index n);
     analysis_result simple_declaration(node_index n);
     analysis_result function_definition(node_index n);
     /* [dcl.link]: extern "C" or extern "C++", and the declarations in it */
@@ -1697,6 +1698,29 @@ class semantic_analysis
                                         qualified_type to, bool direct);
     /* [conv.bool], [expr.context]/1: contextually converted to bool */
     analysis_result contextual_bool(node_index at, expression_meaning &m);
+
+    /* ---- constant expressions ([expr.const], expr/expr.const.cpp) ----
+       What every construct that requires a constant expression asks,
+       after operand_value: whether m is one (constant), with its value in
+       m as an expression_meaning keeps it.  Unsupported when analysis
+       cannot tell. */
+    /* [expr.const]/11 */
+    analysis_result constant_expression(node_index at,
+                                        const expression_meaning &m,
+                                        bool &constant);
+    /* [expr.const]/8 */
+    analysis_result integral_constant_expression(node_index at,
+                                                 const expression_meaning &m,
+                                                 bool &constant);
+    /* [expr.const]/10, of the integer type to: m converted to it */
+    analysis_result converted_constant_expression(node_index at,
+                                                  expression_meaning &m,
+                                                  fundamental_type to,
+                                                  bool &constant);
+    /* [expr.const]/10: a contextually converted constant expression of
+       type bool, from the expression e */
+    analysis_result bool_constant_expression(node_index at, syntax_child e,
+                                             bool &constant, bool &value);
 
     /* ---- initialization ([dcl.init]) ---- */
     struct initialized_value {

@@ -143,6 +143,8 @@ analysis_result semantic_analysis::declaration_by_kind(node_index n)
     switch (tree[n].kind) {
     case syntax_kind::empty_declaration:
         return empty_declaration(n);
+    case syntax_kind::static_assert_declaration:
+        return static_assert_declaration(n);
     case syntax_kind::simple_declaration:
         return simple_declaration(n);
     case syntax_kind::function_definition:

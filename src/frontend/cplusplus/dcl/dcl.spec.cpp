@@ -1049,6 +1049,16 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
                 break;
             }
         }
+        /* [dcl.align]/2: "the constant-expression shall be an integral
+           constant expression" */
+        bool alignment = syntax_is(tree, c, syntax_kind::alignment_specifier);
+        if (syntax_is(tree, c, syntax_kind::attribute_specifier_seq))
+            for (uint32_t k = 0; k < tree[c.index()].child_count; k++)
+                if (syntax_is(tree, tree.children(c.index())[k],
+                              syntax_kind::alignment_specifier))
+                    alignment = true;
+        if (alignment)
+            return not_supported(c.index(), "dcl.align");
         return not_supported(c.index());
     }
     for (uint32_t i = 0; i < node.child_count; i++) {

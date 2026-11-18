@@ -325,8 +325,13 @@ analysis_result semantic_analysis::gnu_attribute_specifier(node_index n,
                 if (r != analysis_result::well_formed)
                     return r;
                 if (!is_integral(e.type) ||
-                    e.category != value_category::prvalue ||
-                    e.evaluation != constness::constant)
+                    e.category != value_category::prvalue)
+                    return not_supported(at, "ext.gnu");
+                bool constant = false;
+                r = constant_expression(at, e, constant);
+                if (r != analysis_result::well_formed)
+                    return r;
+                if (!constant)
                     return not_supported(at, "ext.gnu");
                 alignment = e.value;
                 if (!alignment || (alignment & (alignment - 1)) ||

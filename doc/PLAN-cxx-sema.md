@@ -1229,6 +1229,26 @@ lines:
   parser's guesses about dependent names): the skeleton keeps that and
   analyses a template's parsed body again per instantiation; analysis per
   declaration is a change of its own, as S2's status says.
+- Status (2026-11-18): commit 1 done, on S3's 1fad9cdb.
+  `constant_expression` ([expr.const]/11), `integral_constant_expression`
+  (/8, with C++03's narrower rule), `converted_constant_expression` and
+  `bool_constant_expression` (/10) in `expr/expr.const.cpp`; array bounds,
+  case labels, enumerators, bit-field widths and GNU `aligned` ask them
+  (a constexpr variable's initializer is an `initialized_value`, not an
+  expression: commit 2 moves it).  A noexcept-specifier is reported as
+  [except.spec] and an alignment-specifier among the decl-specifiers as
+  [dcl.align] (a leading one is still [dcl.attr]); `if constexpr` already
+  was [stmt.if].  `static_assert_declaration` exists and answers
+  [expr.const]: with [dcl.pre]/6 enforced cxx-sema had 11 declarations we
+  reject and clang accepts and 310 refuted claims, none from the rule
+  itself: _Complex literals typed double, `__has_builtin` and
+  `__has_cpp_attribute`, `alignof` of a class with an aligned attribute,
+  `static_cast` of a floating value to an enumeration, `sizeof` of an
+  array whose bound an earlier declaration gave.  Those are S6a's first
+  work: [expr.const] is now third in cxx-sema's list (10841 declarations,
+  static_assert's).  cxx-sema 0 we reject, 0 refuted (types 33262,
+  constants 13335, lookup 10063 verified); cxx-run 124/124; cxx-c-suites
+  2206 pass, 0 wrong, the 8 lost passes S3's commit has (`#pragma pack`).
 
 ### S7. Exceptions and RTTI
 

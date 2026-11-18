@@ -637,6 +637,26 @@ analysis_result semantic_analysis::empty_declaration(node_index)
 }
 
 /*
+ * [dcl.pre]/6: "In a static_assert-declaration, the constant-expression
+ * shall be a contextually converted constant expression of type bool.  If
+ * the value of the expression when so converted is true, the declaration
+ * has no effect.  Otherwise, the program is ill-formed".
+ *
+ * Not analysed yet (bool_constant_expression is its entry point): the
+ * assertions of clang's tests reach values analysis has wrong or does not
+ * have, and a false one is an error.  With the rule on, cxx-sema.py had
+ * 11 declarations we reject and clang accepts and 310 refuted claims:
+ * _Complex literals typed double, __has_builtin and __has_cpp_attribute,
+ * alignof of a class with an aligned attribute, static_cast of a
+ * floating value to an enumeration, sizeof of an array whose bound an
+ * earlier declaration gave.
+ */
+analysis_result semantic_analysis::static_assert_declaration(node_index n)
+{
+    return not_supported(n, "expr.const");
+}
+
+/*
  *     simple-declaration:
  *         decl-specifier-seq init-declarator-list_opt ;
  *         attribute-specifier-seq decl-specifier-seq init-declarator-list ;
