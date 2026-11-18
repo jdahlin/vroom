@@ -1483,7 +1483,9 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
         /* [class.static.data]/3: "The declaration of a non-inline static
            data member in its class definition is not a definition and may
            be of an incomplete type other than cv void." */
-        if (s.inline_)
+        /* an inline static data member ([dcl.inline]/6: defined in the
+           class) has rules when it is const too: the constexpr path */
+        if (s.inline_ && !s.constexpr_ && !(type.cv() & cv_const))
             return not_supported(declaration, "class.static.data");
         /* [dcl.constexpr]/10: "A constexpr specifier used in an object
            declaration declares the object as const"; [dcl.constexpr]/1 a
@@ -1918,8 +1920,6 @@ semantic_analysis::static_member_initializer(node_index declarator,
     qualified_type type = entity_table[e].type;
     uint32_t cv = cv_of(type_table, type);
     const struct type record = type_table[type.unqualified()];
-    if (s.inline_)
-        return not_supported(declarator, "class.static.data");
     if (!(cv & cv_const) || (cv & cv_volatile) ||
         record.kind != type_kind::fundamental || !is_integral(type))
         /* an enumeration's too, which analysis does not fold yet */
@@ -1942,15 +1942,16 @@ semantic_analysis::static_member_initializer(node_index declarator,
     x.usable = constness::constant;
     x.value = value.value;
     x.definition = value.node;
-    if (s.constexpr_) {
+    if (s.constexpr_ || s.inline_) {
         /* [dcl.inline]/1 (C++17): "A function or static data member
            declared with the constexpr specifier is implicitly an inline
-           function or variable"; this declaration is its definition
-           ([basic.def]/2.3), and an odr-use emits it (COMDAT, as clang) */
+           function or variable"; this declaration (of it or of an inline
+           one) is its definition ([basic.def]/2.3), and an odr-use emits it
+           (COMDAT, as clang) */
         if (tokens.files.behavior.edition < standard_edition::cplusplus_17)
             return not_supported(declarator, "class.static.data");
         x.inline_ = true;
-        x.constexpr_ = true;
+        x.constexpr_ = s.constexpr_;
         x.defined = true;
     }
     return analysis_result::well_formed;
