@@ -706,11 +706,38 @@ libstdc++ and json), since sema cannot analyse a declaration kept as tokens.
   clang rejects (S2: 413), 0 refuted; lookup 10063 verified (S2: 9388),
   symbols 1458 (S2: 1400), lowering 211 files (S2: 206); CXX/over 1101 as
   clang, 0 wrong.  cxx-run 124/124; cxx-c-suites 0 wrong (its eight
-  `#pragma pack` entries in the passing list fail on main too).  Left, as
-  `not_supported`: [over.oper], [over.match.oper] and [over.built]
-  (operator functions), [over.over] (an overload set's address),
+  `#pragma pack` entries in the passing list fail on main too).
+- Status (2026-11-18, operator functions): `over/over.oper.cpp` names an
+  operator-function-id (operator@ as an identifier number, so declaration
+  and lookup are unchanged) and checks [over.oper]/7-10 and [over.inc];
+  `over/over.match.oper.cpp` forms the member, non-member and (C++20)
+  rewritten and reversed operator== candidates of a unary, binary,
+  compound assignment, increment or decrement operator with an operand of
+  class or enumeration type, and makes the expression a call of the
+  function chosen (`!` around a rewritten !=); [over.match.best]/2.8-2.9's
+  tie-breaks are in `best_viable_function`.  Built-in candidates are not
+  formed: none is viable for an operand of class type (no conversion
+  functions), and for an enumeration operand the operator function is
+  taken only when it beats every built-in candidate (all arguments Exact
+  Match, a comparison's own parameter-type-list).  A declaration not
+  analysed that has the keyword operator makes every operator on a class
+  or enumeration unsupported from there (`operators_held`).  The mangler
+  writes [abi:mangling-operator]'s codes.  Also: a braced-init-list
+  returned for a class lowers as a compound literal; an lvalue reference
+  returned by name is no implicitly movable entity.  Tests:
+  `src/test/cxx/run/operators.cpp`.  `bench/cxx-sema.py`: 26564
+  declarations as clang, 0 we reject that clang accepts, 448 we accept
+  that clang rejects, 0 refuted; lookup 10128, symbols 1484, lowering 212
+  files; CXX/over 1234 as clang (1101 before), 0 wrong; type claims fell
+  from 33262 to 32792 (constants 13335 to 13182): operators of enumeration
+  operands in translation units with an operator declaration analysis did
+  not follow are no longer taken as built-in.  cxx-run 128/128,
+  cxx-c-suites 0 wrong.  Left, as `not_supported`: operator=, (), [], ->,
+  ->*, comma, unary &, <=> and the allocation functions, members defined
+  outside their class, [over.over] (an overload set's address),
   [over.literal], [over.ics.list] and [over.match.list], member functions'
-  default arguments, and static and non-static members in one set.
+  default arguments, static and non-static members in one set.  The parser
+  takes `(a < b) + (b < a)` for a template-id (the function is not parsed).
 
 ### S4. Classes and the object model (parallel with S3)
 

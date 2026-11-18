@@ -2223,6 +2223,12 @@ uint32_t c_lowering::statement(uint32_t index)
             value = make(AST_NODE_VARIABLE,
                          type(analysis.entity_table[named_return].type, n.at),
                          s, 0, 0, 0, AST_NODE_FLAG_LVALUE);
+        } else if (n.a && node(n.a).kind == semantic_kind::initializer_list) {
+            /* a class's result initialized by a braced-init-list
+               ([stmt.return]/2, [dcl.init.list]/3.4): its value */
+            value = compound_literal(n.a);
+            if (!value)
+                return 0;
         } else if (n.a) {
             value = full_expression(n.a, false, items, after);
             if (!value)

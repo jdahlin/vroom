@@ -1093,6 +1093,14 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
            ([dcl.inline])" */
         entity_table[e].inline_ = definition || s.inline_;
         entity_table[e].defined = definition;
+        if (m.operator_function) {
+            entity_table[e].operator_function = true;
+            entity_table[e].implemented = m.implemented;
+            analysis_result checked =
+                operator_function_declaration(declaration, e);
+            if (checked != analysis_result::well_formed)
+                return checked;
+        }
     } else if (s.static_) {
         /* [class.static.data]/3: "The declaration of a non-inline static
            data member in its class definition is not a definition and may

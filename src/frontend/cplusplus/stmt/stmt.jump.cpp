@@ -175,7 +175,10 @@ analysis_result semantic_analysis::return_statement(node_index n,
         if (named.is_token() &&
             tokens[named.index()].kind == token_kind::identifier) {
             entity_index e = lookup(tokens.identifier(named.index()));
-            if (e && entity_table[e].automatic)
+            /* an lvalue reference is not implicitly movable */
+            if (e && entity_table[e].automatic &&
+                type_table[entity_table[e].type.unqualified()].kind !=
+                    type_kind::lvalue_reference)
                 return not_supported(n, "class.copy.elision");
         }
     }

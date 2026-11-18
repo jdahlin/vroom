@@ -336,6 +336,27 @@ analysis_result semantic_analysis::increment(node_index n, syntax_child operand,
     analysis_result r = expression(operand, m);
     if (r != analysis_result::well_formed)
         return r;
+    {
+        /* [over.inc]: an operand of class or enumeration type
+           ([over.match.oper]/2) */
+        owned_array<syntax_child> syntax;
+        owned_array<expression_meaning> operands;
+        syntax.append(operand);
+        operands.append(m);
+        preprocessing_op_or_punc op = preprocessing_op_or_punc::PLUS_PLUS;
+        if (decrement)
+            op = preprocessing_op_or_punc::MINUS_MINUS;
+        expression_meaning result;
+        bool handled = false;
+        r = overloaded_operator(n, tree[n].first_token, op, postfix, syntax,
+                                operands, handled, result);
+        if (r != analysis_result::well_formed)
+            return r;
+        if (handled) {
+            m = result;
+            return r;
+        }
+    }
     const char *subclause = "expr.pre.incr";
     if (postfix)
         subclause = "expr.post.incr";
@@ -419,6 +440,24 @@ analysis_result semantic_analysis::unary(node_index n, expression_meaning &m)
         return r;
     const implementation_defined_behavior &b = tokens.files.behavior;
     token_index at = children[0].index();
+    {
+        /* [over.unary]: an operand of class or enumeration type
+           ([over.match.oper]/2) */
+        owned_array<syntax_child> syntax;
+        owned_array<expression_meaning> operands;
+        syntax.append(children[1]);
+        operands.append(m);
+        expression_meaning result;
+        bool handled = false;
+        r = overloaded_operator(n, at, o, false, syntax, operands, handled,
+                                result);
+        if (r != analysis_result::well_formed)
+            return r;
+        if (handled) {
+            m = result;
+            return r;
+        }
+    }
     switch (o) {
     case preprocessing_op_or_punc::AMPERSAND: {
         /* [expr.unary.op]/3: "The operand shall be an lvalue or a

@@ -54,7 +54,8 @@ enum class viability : uint8_t { not_viable, viable, unknown };
 analysis_result semantic_analysis::best_viable_function(
     node_index at, const owned_array<overload_candidate> &candidates,
     const expression_meaning *object,
-    const owned_array<expression_meaning> &arguments, size_t &chosen)
+    const owned_array<expression_meaning> &arguments, size_t &chosen,
+    bool *none_viable)
 {
     size_t n = arguments.size();
     /* each candidate's conversion sequences: the implicit object
@@ -67,11 +68,17 @@ analysis_result semantic_analysis::best_viable_function(
         const qualified_type *parameters =
             type_table.parameters(c.type.unqualified());
         size_t count = f.parameter_count;
+        /* a member candidate's first argument is for its implicit object
+           parameter ([over.match.oper]/3): its parameters are for the
+           arguments after it */
+        size_t first = 0;
+        if (c.member)
+            first = 1;
         size_t defaults = 0;
         if (c.function)
             defaults = entity_table[c.function].default_arguments;
         if (c.function && entity_table[c.function].unknown_defaults &&
-            n < count)
+            n < count + first)
             return not_supported(at, "dcl.fct.default");
         viability v = viability::viable;
         /* [over.match.viable]/2: "If there are m arguments in the list, all
@@ -80,7 +87,8 @@ analysis_result semantic_analysis::best_viable_function(
            if it has an ellipsis in its parameter list.  ...  A candidate
            function having more than m parameters is viable only if all
            parameters following the mth have default arguments." */
-        if (n + defaults < count || (n > count && !f.variadic))
+        if (n < first || n - first + defaults < count ||
+            (n - first > count && !f.variadic))
             v = viability::not_viable;
         sequence s;
         s.kind = sequence::form::standard;
@@ -88,17 +96,29 @@ analysis_result semantic_analysis::best_viable_function(
         if (object && c.function && v == viability::viable)
             s = object_sequence(*object, c.function);
         ics.append(s);
+        size_t base = ics.size();
+        ics.extend(n);
         for (size_t i = 0; i < n; i++) {
+            /* [over.match.oper]/3.4: a synthesized candidate with the order
+               of its two parameters reversed takes the arguments the other
+               way round; the sequences are kept by argument */
+            size_t k = i;
+            if (c.reversed)
+                k = n - 1 - i;
+            const expression_meaning &argument = arguments[k];
             sequence a;
             if (v == viability::not_viable) {
                 a.kind = sequence::form::bad;
-            } else if (i < count) {
+            } else if (i < first) {
+                /* [over.match.funcs]/5: the implied object argument */
+                a = object_sequence(argument, c.function);
+            } else if (i - first < count) {
                 /* [over.match.viable]/3: "for F to be a viable function,
                    there shall exist for each argument an implicit
                    conversion sequence ([over.best.ics]) that converts that
                    argument to the corresponding parameter of F." */
-                a = implicit_conversion_sequence(arguments[i], parameters[i],
-                                                 true);
+                a = implicit_conversion_sequence(argument,
+                                                 parameters[i - first], true);
             } else {
                 /* [over.ics.ellipsis]/1: "An ellipsis conversion sequence
                    occurs when an argument in a function call is matched
@@ -106,7 +126,7 @@ analysis_result semantic_analysis::best_viable_function(
                    called" */
                 a.kind = sequence::form::ellipsis;
             }
-            ics.append(a);
+            ics[base + k] = a;
         }
         for (size_t i = 0; i <= n && v != viability::not_viable; i++) {
             const sequence &a = ics[ics.size() - width + i];
@@ -142,7 +162,16 @@ analysis_result semantic_analysis::best_viable_function(
             if (c < 0)
                 some = true;
         }
-        return some;
+        if (some)
+            return true;
+        /* (2.8) "F2 is a rewritten candidate ([over.match.oper]) and F1 is
+           not"; (2.9) "F1 and F2 are rewritten candidates, and F2 is a
+           synthesized candidate with reversed order of parameters and F1
+           is not" */
+        const overload_candidate &a = candidates[f1], &b = candidates[f2];
+        if (b.rewritten && !a.rewritten)
+            return true;
+        return a.rewritten && b.rewritten && b.reversed && !a.reversed;
     };
     size_t w = candidates.size();
     bool unknown = false;
@@ -157,6 +186,10 @@ analysis_result semantic_analysis::best_viable_function(
     if (w == candidates.size()) {
         if (unknown)
             return not_supported(at, "over.best.ics");
+        if (none_viable) {
+            *none_viable = true;
+            return analysis_result::well_formed;
+        }
         return ill_formed(at,
                           "overload resolution fails when there is no viable "
                           "function, and the invocation is ill-formed",
@@ -169,6 +202,12 @@ analysis_result semantic_analysis::best_viable_function(
     for (size_t i = 0; i < candidates.size(); i++) {
         if (i == w || state[i] != viability::viable)
             continue;
+        if (!better(w, i) &&
+            (candidates[w].rewritten || candidates[i].rewritten))
+            /* [impl.clang] an ambiguity a reversed candidate makes is
+               resolved for the non-reversed one with a warning
+               (-Wambiguous-reversed-operator) */
+            return not_supported(at, "over.match.oper");
         if (!better(w, i))
             return ill_formed(at,
                               "overload resolution fails when no viable "

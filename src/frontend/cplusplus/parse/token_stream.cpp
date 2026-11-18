@@ -137,11 +137,19 @@ size_t token_stream::spelling(token_index i, vbuffer *out)
 uint32_t token_stream::identifier(token_index i)
 {
     const token &t = (*this)[i];
+    if (i < identifiers.size() && t.kind != token_kind::identifier)
+        return identifiers[i];
     if (t.kind != token_kind::identifier || i >= tokens.size())
         return 0;
     if (!identifiers[i])
         identifiers[i] = pp.identifier(t.preprocessing) + 1;
     return identifiers[i];
+}
+
+void token_stream::name_token(token_index i, uint32_t id)
+{
+    if (i < identifiers.size())
+        identifiers[i] = id;
 }
 
 } // namespace cplusplus

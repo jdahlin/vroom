@@ -673,6 +673,21 @@ analysis_result semantic_analysis::call(node_index n, expression_meaning &m)
         if (member)
             member = semantics[f.node].b;
     }
+    return call_with(n, f, function_type, object, member, arguments, early, m);
+}
+
+/*
+ * [expr.call]/7: "When a function is called, each parameter is initialized
+ * with its corresponding argument."  The call of f, its function chosen.
+ */
+analysis_result semantic_analysis::call_with(
+    node_index n, expression_meaning &f, qualified_type function_type,
+    uint32_t object, entity_index member,
+    const owned_array<syntax_child> &arguments,
+    const owned_array<expression_meaning> &early, expression_meaning &m)
+{
+    analysis_result r = analysis_result::well_formed;
+    const syntax_node &node = tree[n];
     const struct type function = type_table[function_type.unqualified()];
     size_t count = function.parameter_count;
     owned_array<uint32_t> argument_nodes;
@@ -718,7 +733,7 @@ analysis_result semantic_analysis::call(node_index n, expression_meaning &m)
                     r = expression(a, e);
                 /* an argument that is one token is reported at the call */
                 node_index at = n;
-                if (!a.is_token())
+                if (!a.is_token() && a.index())
                     at = a.index();
                 if (r == analysis_result::well_formed)
                     r = initialize_with(at, e, parameter, false, false, value);

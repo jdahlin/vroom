@@ -23,6 +23,7 @@
  * A template-id of an operator-function-id or literal-operator-id is P7's.
  */
 #include "../cplusplus-internal.h"
+#include "frontend/cplusplus/sema.h"
 
 namespace cplusplus
 {
@@ -166,6 +167,172 @@ node_index parser::operator_unqualified_id()
     if (at(preprocessing_op_or_punc::LESS))
         return template_id_rest(mark, first, syntax_kind::template_id);
     return n;
+}
+
+/* ---- semantic analysis ---- */
+
+uint32_t semantic_analysis::operator_name(preprocessing_op_or_punc op)
+{
+    /* the spelling operator@, which no identifier has */
+    owned_buffer spelling;
+    vbuffer_string_append(spelling.get(), "operator");
+    vbuffer_string_append(spelling.get(),
+                          preprocessing_op_or_punc_spelling(op));
+    return tokens.pp.identifier(spelling.data(), spelling.size()) + 1;
+}
+
+/*
+ * The operator-function-id of a declarator: operator @.  The operators
+ * analysis has no expressions for (assignment, function call, subscript,
+ * class member access, the allocation functions, co_await, ->*, comma and
+ * <=>) are not analysed; neither is unary & (operator_function_declaration).
+ */
+analysis_result semantic_analysis::operator_function_id(node_index id,
+                                                        declarator_meaning &m)
+{
+    const syntax_node &node = tree[id];
+    const syntax_child *children = tree.children(id);
+    operators_held = true;
+    if (node.child_count != 2 || !children[0].is_token() ||
+        !children[1].is_token() ||
+        tokens[children[1].index()].kind != token_kind::operator_or_punctuator)
+        /* new, delete, new[], delete[], co_await, () and [] */
+        return not_supported(id, "over.oper");
+    preprocessing_op_or_punc op = preprocessing_op_or_punc_primary(
+        tokens[children[1].index()].op_or_punc);
+    switch (op) {
+    case preprocessing_op_or_punc::EQUAL:
+        return not_supported(id, "over.ass");
+    case preprocessing_op_or_punc::ARROW:
+        return not_supported(id, "over.ref");
+    case preprocessing_op_or_punc::ARROW_STAR:
+    case preprocessing_op_or_punc::COMMA:
+    case preprocessing_op_or_punc::SPACESHIP:
+        return not_supported(id, "over.oper");
+    default:
+        break;
+    }
+    operators_held = false;
+    m.has_id = true;
+    m.id = children[0].index();
+    m.operator_function = true;
+    m.implemented = op;
+    tokens.name_token(m.id, operator_name(op));
+    return analysis_result::well_formed;
+}
+
+namespace
+{
+
+/* the operators that have a unary form ([expr.unary.op]/1, [over.oper]/2)
+   and those that have only one */
+bool has_unary_form(preprocessing_op_or_punc op)
+{
+    switch (op) {
+    case preprocessing_op_or_punc::PLUS:
+    case preprocessing_op_or_punc::MINUS:
+    case preprocessing_op_or_punc::STAR:
+    case preprocessing_op_or_punc::AMPERSAND:
+    case preprocessing_op_or_punc::TILDE:
+    case preprocessing_op_or_punc::EXCLAMATION:
+        return true;
+    default:
+        return false;
+    }
+}
+
+bool only_unary(preprocessing_op_or_punc op)
+{
+    return op == preprocessing_op_or_punc::TILDE ||
+           op == preprocessing_op_or_punc::EXCLAMATION;
+}
+
+} // namespace
+
+analysis_result semantic_analysis::operator_function_declaration(node_index n,
+                                                                 entity_index f)
+{
+    const entity &x = entity_table[f];
+    preprocessing_op_or_punc op = x.implemented;
+    const struct type &function = type_table[x.type.unqualified()];
+    const qualified_type *parameters =
+        type_table.parameters(x.type.unqualified());
+    bool member = x.enclosing &&
+                  entity_table[x.enclosing].kind == entity_kind::class_type;
+    /* [over.oper]/7: "An operator function shall either be a non-static
+       member function or be a non-member function that has at least one
+       parameter whose type is a class, a reference to a class, an
+       enumeration, or a reference to an enumeration." */
+    if (member && !x.nonstatic_member)
+        return ill_formed(n,
+                          "an operator function shall either be a "
+                          "non-static member function or be a non-member "
+                          "function",
+                          "over.oper");
+    if (!member) {
+        bool of_class = false;
+        for (uint32_t i = 0; i < function.parameter_count; i++) {
+            qualified_type t = parameters[i];
+            const struct type &r = type_table[t.unqualified()];
+            if (r.kind == type_kind::lvalue_reference ||
+                r.kind == type_kind::rvalue_reference)
+                t = r.operand;
+            type_kind k = type_table[t.unqualified()].kind;
+            if (k == type_kind::class_type || k == type_kind::enumeration)
+                of_class = true;
+        }
+        if (!of_class)
+            return ill_formed(n,
+                              "a non-member operator function shall have at "
+                              "least one parameter whose type is a class, a "
+                              "reference to a class, an enumeration, or a "
+                              "reference to an enumeration",
+                              "over.oper");
+    }
+    /* [over.oper]/10: "An operator function cannot have default arguments
+       ([dcl.fct.default]), except where explicitly stated below.  Operator
+       functions cannot have more or fewer parameters than the number
+       required for the corresponding operator" */
+    if (x.default_arguments)
+        return ill_formed(n,
+                          "an operator function cannot have default "
+                          "arguments",
+                          "over.oper");
+    uint32_t operands = function.parameter_count;
+    if (member)
+        operands++;
+    bool count_ok = operands == 2 && !only_unary(op);
+    if (operands == 1)
+        count_ok = has_unary_form(op) ||
+                   op == preprocessing_op_or_punc::PLUS_PLUS ||
+                   op == preprocessing_op_or_punc::MINUS_MINUS;
+    if (!count_ok || function.variadic)
+        return ill_formed(n,
+                          "operator functions cannot have more or fewer "
+                          "parameters than the number required for the "
+                          "corresponding operator",
+                          "over.oper");
+    if (op == preprocessing_op_or_punc::PLUS_PLUS ||
+        op == preprocessing_op_or_punc::MINUS_MINUS) {
+        /* [over.inc]/1: "a non-static member function with one parameter
+           (which shall be of type int) or a non-member function with two
+           parameters (the second of which shall be of type int)" */
+        if (operands == 2 &&
+            fundamental_of(parameters[function.parameter_count - 1]) !=
+                fundamental_type::int_)
+            return ill_formed(n,
+                              "the parameter of a postfix increment or "
+                              "decrement operator function shall be of type "
+                              "int",
+                              "over.inc");
+    }
+    if (op == preprocessing_op_or_punc::AMPERSAND && operands == 1) {
+        /* [over.unary]: the address of an object of the class would be
+           the operator function's */
+        operators_held = true;
+        return not_supported(n, "over.unary");
+    }
+    return analysis_result::well_formed;
 }
 
 } // namespace cplusplus

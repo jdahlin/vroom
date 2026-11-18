@@ -360,6 +360,10 @@ struct entity {
        Declarations that appear in different scopes have completely distinct
        sets of default arguments.") */
     bool unknown_defaults = false;
+    /* a function: [over.oper]/1 an operator function, and the operator
+       it implements (its name is operator_name's) */
+    bool operator_function = false;
+    preprocessing_op_or_punc implemented = {};
     /* a class: its user-declared constructors (a chain through
        next_constructor) and destructor, 0 if none */
     entity_index first_constructor = 0, destructor = 0;
@@ -971,6 +975,9 @@ class semantic_analysis
         token_index section = 0;
         /* the declarator-id is ~ class-name: a destructor ([class.dtor]/1) */
         bool destructor = false;
+        /* the declarator-id is an operator-function-id ([over.oper]/1) */
+        bool operator_function = false;
+        preprocessing_op_or_punc implemented = {};
     };
     analysis_result declarator(node_index declaration, syntax_child d,
                                qualified_type &type, declarator_meaning &m);
@@ -1710,6 +1717,14 @@ class semantic_analysis
     struct overload_candidate {
         entity_index function = 0;
         qualified_type type;
+        /* [over.match.oper]/3: a member candidate among non-member ones:
+           the first argument is its implied object argument, the rest
+           its parameters' */
+        bool member = false;
+        /* [over.match.oper]/3.4: a rewritten candidate (an operator== for
+           x != y or y == x), and one synthesized with the order of its two
+           parameters reversed */
+        bool rewritten = false, reversed = false;
     };
 
   private:
@@ -1741,10 +1756,12 @@ class semantic_analysis
        the candidates for the arguments (and the object expression of a
        member function call, or none): its index; ill-formed when there is
        no unique one */
-    analysis_result best_viable_function(
-        node_index at, const owned_array<overload_candidate> &candidates,
-        const expression_meaning *object,
-        const owned_array<expression_meaning> &arguments, size_t &chosen);
+    analysis_result
+    best_viable_function(node_index at,
+                         const owned_array<overload_candidate> &candidates,
+                         const expression_meaning *object,
+                         const owned_array<expression_meaning> &arguments,
+                         size_t &chosen, bool *none_viable = nullptr);
     /* the functions of the overload set whose first is e
        (entity::next_overload), each once, added to out */
     void overload_set(entity_index e, owned_array<entity_index> &out) const;
@@ -1767,6 +1784,38 @@ class semantic_analysis
        overload resolution chooses from ([over.call.func]); 0 elsewhere,
        where a name of an overload set is [over.over]'s */
     token_index overloaded_callee = 0;
+    /* [expr.call]: the call of the function f (whose type is function_type;
+       a member function's object's address object, member the function)
+       with the arguments, those analysed so far in early: m */
+    analysis_result call_with(node_index n, expression_meaning &f,
+                              qualified_type function_type, uint32_t object,
+                              entity_index member,
+                              const owned_array<syntax_child> &arguments,
+                              const owned_array<expression_meaning> &early,
+                              expression_meaning &m);
+    /* ---- [over.oper] operator functions (over/over.oper.cpp) ---- */
+    /* the name of the operator function of op, as an identifier number
+       (operator+ for both forms of +, [over.unary]/2) */
+    uint32_t operator_name(preprocessing_op_or_punc op);
+    /* the operator-function-id node id as a declarator-id */
+    analysis_result operator_function_id(node_index id, declarator_meaning &m);
+    /* [over.oper]/7-10: the rules of the declaration n of operator
+       function f */
+    analysis_result operator_function_declaration(node_index n, entity_index f);
+    /* a declaration analysis did not follow may declare an operator
+       function (hold_names): what an operator means is not known */
+    bool operators_held = false;
+    /* [over.match.oper]: the operator op applied to the analysed operands
+       (their syntax, for the call), at the token at: handled when an
+       operator function is chosen (m its call), not when the operator is
+       the built-in one.  postfix: a++ or a--, whose operator function has
+       a second parameter of type int */
+    analysis_result
+    overloaded_operator(node_index n, token_index at,
+                        preprocessing_op_or_punc op, bool postfix,
+                        const owned_array<syntax_child> &syntax,
+                        owned_array<expression_meaning> &operands,
+                        bool &handled, expression_meaning &m);
     /* the initialization of type from the analysed expression m */
     analysis_result initialize_with(node_index at, expression_meaning &m,
                                     qualified_type type, bool direct, bool list,

@@ -55,6 +55,9 @@ class token_stream
     /* the number of the token's identifier (the preprocessor's, so equal
        spellings are equal numbers), 0 if it is no identifier */
     uint32_t identifier(token_index i);
+    /* the token is the first of a name that is no identifier (operator +,
+       [over.oper]/1): identifier() is id for it from now on */
+    void name_token(token_index i, uint32_t id);
 
     preprocessor &pp;
     source_files &files;

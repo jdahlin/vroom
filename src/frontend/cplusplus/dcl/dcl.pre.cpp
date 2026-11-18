@@ -1000,6 +1000,12 @@ analysis_result semantic_analysis::declare_with_initializer(
                 kind == entity_kind::function && declared_entity)
                 entity_table[declared_entity].unknown_defaults = true;
         }
+        if (r == analysis_result::well_formed && m.operator_function &&
+            kind == entity_kind::function) {
+            entity_table[declared_entity].operator_function = true;
+            entity_table[declared_entity].implemented = m.implemented;
+            r = operator_function_declaration(declaration, declared_entity);
+        }
     }
     last_declared = declared_entity;
     if (r == analysis_result::well_formed && !s.typedef_ &&

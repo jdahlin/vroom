@@ -304,6 +304,13 @@ void semantic_analysis::hold_names(node_index declaration)
 {
     owned_array<token_index> ids;
     const syntax_node &node = tree[declaration];
+    /* [over.oper]/1: an operator function, or a conversion function, it
+       may declare: the meaning of operators on classes and enumerations is
+       not known from now on */
+    for (token_index t = node.first_token; t < node.end_token; t++)
+        if (tokens[t].kind == token_kind::keyword &&
+            p.keyword_of(tokens[t]) == standard_keyword::operator_)
+            operators_held = true;
     if (node.kind == syntax_kind::linkage_specification) {
         /* extern "C" { ... }: the declarations in it are the scope's */
         for (uint32_t i = 0; i < node.child_count; i++) {
@@ -574,6 +581,8 @@ analysis_result semantic_analysis::declarator(node_index declaration,
     case syntax_kind::declarator:
         /* a trailing-return-type */
         return not_supported(n, "dcl.fct");
+    case syntax_kind::operator_function_id:
+        return operator_function_id(n, m);
     default:
         return not_supported(n);
     }
@@ -594,6 +603,13 @@ analysis_result semantic_analysis::declarator(node_index declaration,
         i = 3;
     } else if (node.child_count && children[0].is_token() &&
                tokens[children[0].index()].kind == token_kind::identifier) {
+        has_head = true;
+        head = children[0];
+        i = 1;
+    } else if (node.child_count &&
+               syntax_is(tree, children[0],
+                         syntax_kind::operator_function_id)) {
+        /* [over.oper]/1: an operator function's name */
         has_head = true;
         head = children[0];
         i = 1;
