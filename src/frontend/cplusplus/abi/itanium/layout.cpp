@@ -325,7 +325,9 @@ static uint64_t nonvirtual_size(semantic_analysis &analysis, entity_index of)
 {
     const entities &table = analysis.entity_table;
     const entity &d = table[of];
-    uint64_t end = d.virtual_base_count ? d.nv_size : d.data_size;
+    uint64_t end = d.data_size;
+    if (d.virtual_base_count)
+        end = d.nv_size;
     for (uint32_t i = 0; i < d.base_count; i++) {
         const entity &b = table[analysis.class_bases[d.first_base + i]];
         if (b.virtual_base)
