@@ -1163,6 +1163,55 @@ lines:
   ([expr.prim.lambda]), range-based `for`, structured bindings.
 - Gate: type claims 0 wrong on CXX/expr; `unsupported` 0 on SingleSource's
   template-free files.
+- Status (2026-11-18, step 1: placeholder types and decltype):
+  `dcl/dcl.type.decltype.cpp` gives decltype(E) its type
+  ([dcl.type.decltype]/1: the entity's declared type for an
+  unparenthesized id-expression or class member access, else T&&, T& or T
+  by value category), the operand analysed as an unevaluated operand.
+  `dcl/dcl.spec.auto.cpp` has [dcl.spec.auto] and [dcl.type.auto.deduct]:
+  auto and decltype(auto) are `type_kind::placeholder` types that
+  `decl_specifier_seq` accepts only where `placeholder_allowed` says (a
+  simple-declaration's or function-definition's decl-specifier-seq, a
+  condition's); a variable with an initializer (= e, (e), {e}) has its type
+  deduced as [temp.deduct.call] deduces an invented parameter U
+  (`deduce_type`, with the P/A adjustment of /2-3 now
+  `adjust_call_deduction`, shared with `deduce_from_call`), all declarators
+  of a declaration the same U (/7), at namespace and block scope and in
+  init-statements and conditions; a non-member function's return type is
+  deduced from its return statements (/3, /8, /9; C++14 on), the entity's
+  type replaced at the first; a name of an entity whose placeholder is not
+  deduced yet is ill-formed (/11); `auto f(...) -> T` ([dcl.fct]/2, in
+  `trailing_return`, called by `declarator`).  decltype(auto) for
+  variables and return types (/5).  Also: [dcl.init.list]/3.6
+  (std::initializer_list) and a structured binding declaration are
+  unsupported where they used to be rejected or accepted wrongly once
+  decltype let them be reached; [expr.cond]/4 with a bit-field converted to
+  the more cv-qualified type is a prvalue; [expr.cast]/4's static_cast to
+  `cv void*` then const_cast; &C::m in a member function of C is
+  [dcl.mptr]'s.  A deduced return type mangles as nothing for a
+  non-template function (`-O0` symbols as clang's).  Tests:
+  `src/test/cxx/run/auto.cpp`, `decltype.cpp`, `auto-return.cpp`.  Not
+  analysed: copy-list-initialization from a braced-init-list
+  (std::initializer_list<U>), a deduction `deduce_type` does not make
+  ([temp.deduct.call]/4's derived class), a redeclaration of a function or
+  variable declared with a placeholder (/13; any earlier or later
+  declaration of the name), member functions, static data members and
+  function templates with placeholders, a variable whose deduced type has
+  internal linkage by [basic.link]/8, a trailing-return-type that names a
+  parameter or with a derived-declarator-type-list, decltype in a
+  member-specification or with a type-dependent operand, decltype(auto)
+  of an implicitly movable entity (P2266R3), generic parameter types, auto
+  template parameters, class template argument deduction, constrained
+  placeholders, and lambdas, range-based for and structured bindings
+  (their own steps).  `bench/cxx-sema.py`: declarations 49855 -> 50855 as
+  clang, 8 we reject and clang accepts (the same 8), 2285 -> 2352 we
+  accept and clang rejects, unsupported [dcl.spec.auto] 3694 -> 1692;
+  declared types 25899 -> 26681, types 43087 -> 44826, constants 17608 ->
+  18347, lookup 17154 -> 18983, symbols 2171 -> 2216, layout 13223 ->
+  13274, all 0 refuted; lowering 356 -> 362 files, 1 refuted (as before);
+  one more `tree` problem (p4-cxx0x.cpp's decltype(static_cast<int&&>(i)),
+  the static_cast to an rvalue reference that already has it elsewhere).
+  cxx-run 364/364 (91 programs).
 
 ### S6. Constant evaluation and templates
 
