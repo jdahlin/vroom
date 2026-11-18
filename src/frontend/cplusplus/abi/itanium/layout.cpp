@@ -165,6 +165,20 @@ class class_layout
        included, while it returns true */
     template <typename F>
     bool each_subobject(entity_index of, uint64_t at, F &&f);
+    /* the objects of class `of` a member of that class type (or an array
+       of them) is, at most most_recorded_elements (too_many past it) */
+    uint64_t elements(const entity &m, entity_index of)
+    {
+        uint64_t element = table[of].size;
+        uint64_t count = 1;
+        if (element)
+            count = analysis.size_of_type(m.type) / element;
+        if (count > most_recorded_elements) {
+            too_many = true;
+            count = most_recorded_elements;
+        }
+        return count;
+    }
     bool conflicts(entity_index of, uint64_t at);
     void record(entity_index of, uint64_t at);
     bool elements_conflict(entity_index of, uint64_t at, uint64_t element,
@@ -202,13 +216,7 @@ bool class_layout::each_subobject(entity_index of, uint64_t at, F &&f)
         if (!inner || m.base_subobject)
             continue;
         uint64_t element = table[inner].size;
-        uint64_t count = 1;
-        if (element)
-            count = analysis.size_of_type(m.type) / element;
-        if (count > most_recorded_elements) {
-            too_many = true;
-            count = most_recorded_elements;
-        }
+        uint64_t count = elements(m, inner);
         for (uint64_t k = 0; k < count; k++)
             if (!each_subobject(inner, at + m.offset + k * element, f))
                 return false;
@@ -375,13 +383,7 @@ const char *class_layout::data_member(entity &m)
         uint64_t element = 0, count = 0;
         if (of) {
             element = table[of].size;
-            count = 1;
-            if (element)
-                count = member_size / element;
-            if (count > most_recorded_elements) {
-                too_many = true;
-                count = most_recorded_elements;
-            }
+            count = elements(m, of);
         }
         m.offset = align_up(data_size(), member_alignment);
         while (elements_conflict(of, m.offset, element, count))
