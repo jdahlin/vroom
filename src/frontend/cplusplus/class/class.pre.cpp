@@ -1101,6 +1101,12 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
             if (checked != analysis_result::well_formed)
                 return checked;
         }
+        if (m.literal_operator) {
+            analysis_result checked =
+                literal_operator_declaration(declaration, e);
+            if (checked != analysis_result::well_formed)
+                return checked;
+        }
     } else if (s.static_) {
         /* [class.static.data]/3: "The declaration of a non-inline static
            data member in its class definition is not a definition and may

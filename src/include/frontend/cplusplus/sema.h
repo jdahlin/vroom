@@ -978,6 +978,8 @@ class semantic_analysis
         /* the declarator-id is an operator-function-id ([over.oper]/1) */
         bool operator_function = false;
         preprocessing_op_or_punc implemented = {};
+        /* the declarator-id is a literal-operator-id ([over.literal]) */
+        bool literal_operator = false;
     };
     analysis_result declarator(node_index declaration, syntax_child d,
                                qualified_type &type, declarator_meaning &m);
@@ -1818,6 +1820,17 @@ class semantic_analysis
     /* a declaration analysis did not follow may declare an operator
        function (hold_names): what an operator means is not known */
     bool operators_held = false;
+    /* ---- [over.literal] literal operators (over/over.literal.cpp) ---- */
+    /* the name of the literal operator of the literal suffix identifier
+       suffix, as an identifier number */
+    uint32_t literal_operator_name(const char *suffix, size_t length);
+    /* the literal-operator-id node id as a declarator-id */
+    analysis_result literal_operator_id(node_index id, declarator_meaning &m);
+    /* [over.literal]/2-6: the rules of the declaration n of literal
+       operator f */
+    analysis_result literal_operator_declaration(node_index n, entity_index f);
+    /* [lex.ext]: the user-defined-literal t as its literal operator's call */
+    analysis_result user_defined_literal(token_index t, expression_meaning &m);
     /* [over.match.oper]: the operator op applied to the analysed operands
        (their syntax, for the call), at the token at: handled when an
        operator function is chosen (m its call), not when the operator is

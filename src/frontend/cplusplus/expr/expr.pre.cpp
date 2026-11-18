@@ -56,6 +56,8 @@ analysis_result semantic_analysis::expression_kind(syntax_child e,
     if (e.is_token()) {
         const token &t = tokens[e.index()];
         /* true, false and nullptr are keywords that are literals */
+        if (t.literal == literal_kind::user_defined_literal)
+            return user_defined_literal(e.index(), m);
         if (t.literal != literal_kind::none) {
             /* the value of a literal analysis does not evaluate (a long
                double's) is the token's */

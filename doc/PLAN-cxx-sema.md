@@ -734,7 +734,7 @@ libstdc++ and json), since sema cannot analyse a declaration kept as tokens.
   not follow are no longer taken as built-in.  cxx-run 128/128,
   cxx-c-suites 0 wrong.  Left, as `not_supported`: operator=, (), [], ->,
   ->*, comma, unary &, <=> and the allocation functions, members defined
-  outside their class, [over.literal], [over.ics.list] and [over.match.list], member functions'
+  outside their class, [over.ics.list] and [over.match.list], member functions'
   default arguments, static and non-static members in one set.  The parser
   takes `(a < b) + (b < a)` for a template-id (the function is not parsed).
 - Status (2026-11-18, [over.over]): `over/over.over.cpp`'s
@@ -751,6 +751,22 @@ libstdc++ and json), since sema cannot analyse a declaration kept as tokens.
   `src/test/cxx/run/overload-address.cpp`.  `bench/cxx-sema.py`: 26592
   declarations as clang, 0 wrong, 0 refuted; lookup 10161; CXX/over 1259
   as clang.  cxx-run 132/132, cxx-c-suites 0 wrong.
+- Status (2026-11-18, [over.literal]): `over/over.literal.cpp`.  A
+  literal-operator-id names the function operator""X (an identifier, so
+  declaration and lookup are any function's); its declaration is checked
+  against /1 (an empty string-literal), /2 (a namespace-scope function),
+  /3 (the parameter-declaration-clauses, no default argument) and /6 (no C
+  language linkage); it mangles as `li <source-name>`.  A
+  user-defined-literal ([lex.ext]) is a call of the operator unqualified
+  lookup finds: an integer literal's with parameter unsigned long long
+  (/3), a character literal's with the type of ch (/6), a string literal's
+  as (str, len) by overload resolution (/5).  Not analysed: literal
+  operator templates, raw literal operators called for numbers, floating
+  literals, suffixes without `_` ([usrlit.suffix]: the standard
+  library's).  Test: `src/test/cxx/run/user-defined-literals.cpp`.
+  `bench/cxx-sema.py`: 26683 declarations as clang, 0 we reject that
+  clang accepts, 448 we accept that clang rejects, 0 refuted; symbols
+  1487.  cxx-run 136/136, cxx-c-suites 0 wrong.
 
 ### S4. Classes and the object model (parallel with S3)
 

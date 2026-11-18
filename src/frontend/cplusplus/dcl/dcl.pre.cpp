@@ -1006,6 +1006,8 @@ analysis_result semantic_analysis::declare_with_initializer(
             entity_table[declared_entity].implemented = m.implemented;
             r = operator_function_declaration(declaration, declared_entity);
         }
+        if (r == analysis_result::well_formed && m.literal_operator)
+            r = literal_operator_declaration(declaration, declared_entity);
     }
     last_declared = declared_entity;
     if (r == analysis_result::well_formed && !s.typedef_ &&

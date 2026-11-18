@@ -371,6 +371,18 @@ bool itanium_mangler::unqualified_name(entity_index e)
         return ctor_dtor_name(x.special);
     if (x.operator_function)
         return operator_name(x);
+    if (x.kind == entity_kind::function && x.name) {
+        /* [abi:mangling-operator]: "<operator-name> ::= li <source-name>
+           # operator \"\"": a literal operator, named operator""X */
+        size_t length = 0;
+        const char *bytes = spelling(x.name, &length);
+        if (length > 10 && !memcmp(bytes, "operator\"\"", 10)) {
+            text("li");
+            number(length - 10);
+            vbuffer_append(out, bytes + 10, length - 10);
+            return true;
+        }
+    }
     /* [dcl.typedef]/9: an unnamed class's name for linkage purposes */
     if (!x.name && (x.kind == entity_kind::class_type ||
                     x.kind == entity_kind::enumeration))

@@ -583,6 +583,8 @@ analysis_result semantic_analysis::declarator(node_index declaration,
         return not_supported(n, "dcl.fct");
     case syntax_kind::operator_function_id:
         return operator_function_id(n, m);
+    case syntax_kind::literal_operator_id:
+        return literal_operator_id(n, m);
     default:
         return not_supported(n);
     }
@@ -607,9 +609,11 @@ analysis_result semantic_analysis::declarator(node_index declaration,
         head = children[0];
         i = 1;
     } else if (node.child_count &&
-               syntax_is(tree, children[0],
-                         syntax_kind::operator_function_id)) {
-        /* [over.oper]/1: an operator function's name */
+               (syntax_is(tree, children[0],
+                          syntax_kind::operator_function_id) ||
+                syntax_is(tree, children[0],
+                          syntax_kind::literal_operator_id))) {
+        /* [over.oper]/1, [over.literal]/1: an operator function's name */
         has_head = true;
         head = children[0];
         i = 1;
