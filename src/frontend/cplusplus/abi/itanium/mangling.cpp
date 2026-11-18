@@ -30,6 +30,31 @@ entity_index enclosing_function(const entities &table, entity_index e)
     return 0;
 }
 
+entity_index next_enclosing_function(const entities &table, entity_index f)
+{
+    entity_index k = table[f].enclosing;
+    if (!k || table[k].kind != entity_kind::class_type)
+        return 0;
+    while (table[k].enclosing &&
+           table[table[k].enclosing].kind == entity_kind::class_type)
+        k = table[k].enclosing;
+    return enclosing_function(table, k);
+}
+
+bool visible_local_class(const entities &table, entity_index c)
+{
+    while (table[c].enclosing &&
+           table[table[c].enclosing].kind == entity_kind::class_type)
+        c = table[c].enclosing;
+    entity_index f = enclosing_function(table, c);
+    if (!f)
+        return false;
+    for (entity_index g = next_enclosing_function(table, f); g;
+         g = next_enclosing_function(table, g))
+        f = g;
+    return table[f].inline_ || table[f].instantiation;
+}
+
 namespace
 {
 
@@ -150,6 +175,7 @@ class itanium_mangler
     bool function_type(qualified_type t);
     bool array_type(qualified_type t);
     bool substitution(qualified_type t);
+    bool same_candidate(qualified_type a, qualified_type b) const;
     bool substitution(entity_index scope);
     void substitution_at(size_t i);
     void seq_id(size_t n);
@@ -1326,18 +1352,12 @@ bool itanium_mangler::local_name(entity_index e, entity_index function)
 bool itanium_mangler::closure_numbered(entity_index c) const
 {
     const entities &table = analysis.entity_table;
-    for (entity_index f = enclosing_function(table, c); f;) {
+    /* (a member function of a local class: its enclosing function's
+       too) */
+    for (entity_index f = enclosing_function(table, c); f;
+         f = next_enclosing_function(table, f))
         if (table[f].inline_ || table[f].instantiation)
             return true;
-        /* a member function of a local class: its enclosing function's */
-        entity_index k = table[f].enclosing;
-        if (!k || table[k].kind != entity_kind::class_type)
-            break;
-        while (table[k].enclosing &&
-               table[table[k].enclosing].kind == entity_kind::class_type)
-            k = table[k].enclosing;
-        f = enclosing_function(table, k);
-    }
     return false;
 }
 
@@ -1769,11 +1789,42 @@ bool itanium_mangler::array_type(qualified_type t)
 bool itanium_mangler::substitution(qualified_type t)
 {
     for (size_t i = 0; i < candidates.size(); i++)
-        if (!candidates[i].scope && candidates[i].type == t) {
+        if (!candidates[i].scope && same_candidate(candidates[i].type, t)) {
             substitution_at(i);
             return true;
         }
     return false;
+}
+
+/* [impl.clang] whether a and b are one candidate: the same type, or made
+   the same way of template parameters at the same positions (clang keys a
+   template parameter by its position: a function template's T_ in a
+   <local-name>'s encoding and the T_ of the function encoded after it are
+   one candidate) */
+bool itanium_mangler::same_candidate(qualified_type a, qualified_type b) const
+{
+    for (;;) {
+        if (a == b)
+            return true;
+        const struct type &x = record(a);
+        const struct type &y = record(b);
+        if (a.cv() != b.cv() || x.kind != y.kind)
+            return false;
+        switch (x.kind) {
+        case type_kind::template_parameter:
+            return analysis.entity_table[x.entity].value ==
+                   analysis.entity_table[y.entity].value;
+        case type_kind::pointer:
+        case type_kind::lvalue_reference:
+        case type_kind::rvalue_reference:
+        case type_kind::pack_expansion:
+            a = x.operand;
+            b = y.operand;
+            continue;
+        default:
+            return false;
+        }
+    }
 }
 
 /* a namespace seen as a prefix before */
