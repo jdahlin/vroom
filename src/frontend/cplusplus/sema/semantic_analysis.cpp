@@ -180,6 +180,10 @@ analysis_result semantic_analysis::declaration_by_kind(node_index n)
         return namespace_alias_definition(n);
     case syntax_kind::using_declaration:
         return using_declaration(n);
+    case syntax_kind::opaque_enum_declaration: {
+        type_index type = 0;
+        return enum_specifier(n, type);
+    }
     default:
         return not_supported(n);
     }

@@ -430,6 +430,10 @@ analysis_result semantic_analysis::enum_specifier(node_index n,
     const syntax_child *children = tree.children(n);
     owned_array<syntax_child> head;
     uint32_t i = 0;
+    /* [dcl.enum]/3: "An opaque-enum-declaration is either a redeclaration
+       of an enumeration in the current scope or a declaration of a new
+       enumeration": its head and no enumerator-list */
+    bool opaque = node.kind == syntax_kind::opaque_enum_declaration;
     if (node.child_count &&
         syntax_is(tree, children[0], syntax_kind::enum_head)) {
         const syntax_node &h = tree[children[0].index()];
@@ -459,6 +463,9 @@ analysis_result semantic_analysis::enum_specifier(node_index n,
         if (c.is_token() &&
             p.keyword_of(tokens[c.index()]) == standard_keyword::enum_)
             continue;
+        if (opaque && syntax_is_punctuator(tokens, c,
+                                           preprocessing_op_or_punc::SEMICOLON))
+            continue;
         if (c.is_token() && tokens[c.index()].kind == token_kind::identifier) {
             name = tokens.identifier(c.index());
             name_at = c.index();
@@ -467,9 +474,10 @@ analysis_result semantic_analysis::enum_specifier(node_index n,
         /* an attribute-specifier-seq, a nested-name-specifier */
         return not_supported(n, "dcl.enum");
     }
-    if (i >= node.child_count ||
-        !syntax_is_punctuator(tokens, children[i],
-                              preprocessing_op_or_punc::LEFT_BRACE))
+    if (!opaque &&
+        (i >= node.child_count ||
+         !syntax_is_punctuator(tokens, children[i],
+                               preprocessing_op_or_punc::LEFT_BRACE)))
         return not_supported(n, "dcl.enum");
     owned_array<syntax_child> enumerators;
     for (i++; i < node.child_count; i++) {
@@ -529,9 +537,31 @@ analysis_result semantic_analysis::enum_specifier(node_index n,
     if (defining_class)
         scope = defining_class;
     entity_index e = 0;
+    bool is_fixed = fixed != fundamental_type::none;
     if (name) {
         entity_index prior = entity_table.find(scope, name);
-        if (prior) {
+        if (prior && entity_table[prior].kind == entity_kind::enumeration &&
+            (opaque || !entity_table[prior].defined)) {
+            /* [dcl.enum]/3: "If an enum-head-name contains a
+               nested-name-specifier ...  Otherwise, ... the enumeration
+               ... shall be a redeclaration ...: the enum-key and the
+               underlying type shall be the same" ("An enumeration whose
+               underlying type is fixed ... both shall specify the same
+               underlying type"; scoped-ness the same) */
+            const entity &x = entity_table[prior];
+            if (!x.fixed_underlying || !is_fixed || x.scoped != scoped ||
+                x.underlying != fixed)
+                return ill_formed_at_token(name_at,
+                                           "each redeclaration of an "
+                                           "enumeration shall have the same "
+                                           "enum-key and underlying type",
+                                           "dcl.enum");
+            entity_table.add_declaration(prior, current_declaration);
+            type = x.type.unqualified();
+            if (opaque)
+                return analysis_result::well_formed;
+            e = prior;
+        } else if (prior) {
             if (entity_table[prior].kind == entity_kind::enumeration)
                 /* [basic.def.odr]/1: "No translation unit shall contain
                    more than one definition of any variable, function, class
@@ -546,8 +576,12 @@ analysis_result semantic_analysis::enum_specifier(node_index n,
             return not_supported(n, "basic.scope.declarative");
         }
     }
-    bool is_fixed = fixed != fundamental_type::none;
-    e = entity_table.make(entity_kind::enumeration, name, scope);
+    if (opaque && !is_fixed)
+        /* (the parser requires an unscoped one's enum-base) */
+        return not_supported(n, "dcl.enum");
+    bool redeclared = e != 0;
+    if (!redeclared)
+        e = entity_table.make(entity_kind::enumeration, name, scope);
     entity &x = entity_table[e];
     x.scoped = scoped;
     x.fixed_underlying = is_fixed;
@@ -563,17 +597,24 @@ analysis_result semantic_analysis::enum_specifier(node_index n,
            class's name */
         x.linkage_of_name = entity_table[defining_class].linkage_of_name;
     }
-    x.type = qualified_type::make(
-        type_table.of_entity(type_kind::enumeration, e), cv_none);
-    entity_table.add_declaration(e, current_declaration);
-    if (name)
-        entity_table.bind(scope, name, e);
+    if (!redeclared) {
+        x.type = qualified_type::make(
+            type_table.of_entity(type_kind::enumeration, e), cv_none);
+        entity_table.add_declaration(e, current_declaration);
+        if (name)
+            entity_table.bind(scope, name, e);
+    }
     type = entity_table[e].type.unqualified();
     /* [dcl.enum]/6: "An enumeration whose underlying type is fixed is an
        incomplete type from its point of declaration
        ([basic.scope.pdecl]) to immediately after its enum-base (if any),
        at which point it becomes a complete type." */
     entity_table[e].underlying = fixed;
+    if (opaque) {
+        /* [conv.prom]/4: a fixed underlying type promotes as itself */
+        entity_table[e].promoted = fixed;
+        return analysis_result::well_formed;
+    }
 
     owned_array<entity_index> enumerators_declared;
     /* [dcl.enum]/5: "Following the closing brace of an enum-specifier, each
