@@ -520,9 +520,50 @@ analysis_result semantic_analysis::statement(syntax_child s, uint32_t &built)
             hold_names(n);
         return r;
     }
+    case syntax_kind::statement:
+        return attributed_statement(n, built);
     default:
         return not_supported(n);
     }
+}
+
+/*
+ * [stmt.pre]/1: "The optional attribute-specifier-seq appertains to the
+ * respective statement."  [dcl.attr.likelihood]/1: "The attribute-token
+ * likely and unlikely may be applied to labels or statements"; /2 they are
+ * hints for the path of execution, which change nothing vcc generates.
+ * Other attributes of a statement have no rules here.
+ */
+analysis_result semantic_analysis::attributed_statement(node_index n,
+                                                        uint32_t &built)
+{
+    /* the attribute-specifiers, then the statement */
+    const syntax_node &node = tree[n];
+    if (node.child_count < 2)
+        return not_supported(n, "stmt.pre");
+    syntax_child inner = tree.children(n)[node.child_count - 1];
+    if (syntax_is(tree, inner, syntax_kind::simple_declaration))
+        return not_supported(n, "dcl.attr");
+    for (uint32_t i = 0; i + 1 < node.child_count; i++) {
+        syntax_child c = tree.children(n)[i];
+        if (!syntax_is(tree, c, syntax_kind::attribute_specifier) &&
+            !syntax_is(tree, c, syntax_kind::attribute_specifier_seq))
+            return not_supported(n, "dcl.attr");
+        const syntax_node &a = tree[c.index()];
+        for (token_index t = a.first_token; t < a.end_token; t++) {
+            if (tokens[t].kind == token_kind::operator_or_punctuator)
+                continue;
+            owned_buffer spelling;
+            tokens.spelling(t, spelling.get());
+            bool likely =
+                spelling.size() == 6 && !memcmp(spelling.data(), "likely", 6);
+            bool unlikely =
+                spelling.size() == 8 && !memcmp(spelling.data(), "unlikely", 8);
+            if (!likely && !unlikely)
+                return not_supported(n, "dcl.attr");
+        }
+    }
+    return statement(inner, built);
 }
 
 /*

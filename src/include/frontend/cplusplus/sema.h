@@ -3563,6 +3563,7 @@ class semantic_analysis
     /* the statement functions give the statement's node in built (when
        well-formed) */
     analysis_result statement(syntax_child s, uint32_t &built);
+    analysis_result attributed_statement(node_index n, uint32_t &built);
     /* a substatement ([stmt.pre]/2): a block scope of its own whose
        outermost names shall not redeclare conflicts' */
     analysis_result substatement(syntax_child s, entity_index conflicts,
