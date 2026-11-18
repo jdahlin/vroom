@@ -61,6 +61,14 @@ analysis_result semantic_analysis::overloaded_operator(
     }
     if (!any_class && !any_enumeration)
         return analysis_result::well_formed;
+    /* [over.match.oper], Table 15: a=b, a[b] and (by [over.call.object]) a(b)
+       have member candidates alone: a of class type */
+    bool member_only = op == preprocessing_op_or_punc::EQUAL ||
+                       op == preprocessing_op_or_punc::LEFT_BRACKET ||
+                       op == preprocessing_op_or_punc::LEFT_PARENTHESIS;
+    if (member_only && type_table[operands[0].type.unqualified()].kind !=
+                           type_kind::class_type)
+        return analysis_result::well_formed;
     if (operators_held)
         return not_supported(n, "over.match.oper");
     owned_array<overload_candidate> candidates;
@@ -108,6 +116,16 @@ analysis_result semantic_analysis::overloaded_operator(
            function calls ([basic.lookup.argdep]) except that all member
            functions are ignored."  A member found is not passed over: not
            analysed */
+        if (member_only) {
+            for (entity_index e : members) {
+                overload_candidate c;
+                c.function = e;
+                c.type = entity_table[e].type;
+                c.member = true;
+                candidates.append(c);
+            }
+            return analysis_result::well_formed;
+        }
         lookup_result found = lookup_unqualified(name, lookup_filter::any);
         if (found.unknown || found.ambiguous)
             return not_supported(n, "over.match.oper");
@@ -186,6 +204,18 @@ analysis_result semantic_analysis::overloaded_operator(
         return r;
     if (candidates.empty())
         return analysis_result::well_formed;
+    if (op == preprocessing_op_or_punc::EQUAL) {
+        /* [class.copy.assign]/2: "If the class definition does not
+           explicitly declare a copy assignment operator, one is declared
+           implicitly": a candidate too, which analysis does not form */
+        entity_index c = type_table[operands[0].type.unqualified()].entity;
+        bool copy = false;
+        for (const overload_candidate &k : candidates)
+            if (copy_assignment_operator(k.function, c))
+                copy = true;
+        if (!copy)
+            return not_supported(n, "class.copy.assign");
+    }
     /* [over.match.oper]/2, Table 15: a@ is "(a).operator@ (0)" or
        "operator@(a, 0)" */
     owned_array<expression_meaning> arguments;
@@ -209,6 +239,10 @@ analysis_result semantic_analysis::overloaded_operator(
     bool none_viable = false;
     r = best_viable_function(n, candidates, nullptr, arguments, chosen,
                              &none_viable);
+    if (r == analysis_result::well_formed && none_viable && member_only)
+        /* no built-in operator either: whether a conversion makes one
+           viable is not analysed */
+        return not_supported(n, "over.match.oper");
     if (r != analysis_result::well_formed || none_viable)
         /* /9: none viable, the built-in operator's meaning (whose rules
            reject an operand of class type) */

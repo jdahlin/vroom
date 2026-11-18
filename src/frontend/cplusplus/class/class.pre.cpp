@@ -1100,6 +1100,9 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
                 operator_function_declaration(declaration, e);
             if (checked != analysis_result::well_formed)
                 return checked;
+            if (copy_assignment_operator(e, entity_table[e].enclosing))
+                entity_table[entity_table[e].enclosing].user_copy_assignment =
+                    true;
         }
         if (m.literal_operator) {
             analysis_result checked =

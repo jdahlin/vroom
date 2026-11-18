@@ -735,6 +735,13 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
     }
     owned_array<entity_index> classes;
     subobject_classes(c, classes);
+    /* [class.copy.assign]/12 before C++11: the implicit copy assignment
+       operator that calls a subobject's user-declared one (clang defines
+       it, and reports what its call breaks, at the class) */
+    if (!tokens.files.behavior.has(language_feature::rvalue_references))
+        for (entity_index k : classes)
+            if (!assigned_bitwise(k))
+                return not_supported(n, "class.copy.assign");
     bool construction = false, destruction = false, copy = false;
     for (entity_index k : classes) {
         if (entity_table[k].first_constructor)

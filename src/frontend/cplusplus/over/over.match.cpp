@@ -208,6 +208,18 @@ analysis_result semantic_analysis::best_viable_function(
                resolved for the non-reversed one with a warning
                (-Wambiguous-reversed-operator) */
             return not_supported(at, "over.match.oper");
+        bool user_defined = false;
+        for (size_t k = 0; k < width; k++)
+            if (ics[w * width + k].kind ==
+                    conversion_sequence::form::user_defined &&
+                ics[i * width + k].kind ==
+                    conversion_sequence::form::user_defined)
+                user_defined = true;
+        if (!better(w, i) && user_defined)
+            /* /3.3: two user-defined conversion sequences of one
+               constructor, told apart by their second standard conversion
+               sequences (a reference binding's, /3.2.3): not analysed */
+            return not_supported(at, "over.ics.rank");
         if (!better(w, i))
             return ill_formed(at,
                               "overload resolution fails when no viable "

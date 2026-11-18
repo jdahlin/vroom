@@ -471,6 +471,9 @@ bool itanium_mangler::source_name(uint32_t identifier)
  *                     ::= oo        # ||
  *                     ::= pp        # ++ (postfix in <expression> context)
  *                     ::= mm        # --
+ *                     ::= aS        # =
+ *                     ::= cl        # ()
+ *                     ::= ix        # []
  *
  * and rs (>>), rS (>>=), gt (>) and ge (>=), whose lines the grammar
  * index lost.  The unary forms of + - & * are the operator functions of one operand,
@@ -588,6 +591,15 @@ bool itanium_mangler::operator_name(const entity &x)
         break;
     case preprocessing_op_or_punc::MINUS_MINUS:
         code = "mm";
+        break;
+    case preprocessing_op_or_punc::EQUAL:
+        code = "aS";
+        break;
+    case preprocessing_op_or_punc::LEFT_PARENTHESIS:
+        code = "cl";
+        break;
+    case preprocessing_op_or_punc::LEFT_BRACKET:
+        code = "ix";
         break;
     default:
         return false;

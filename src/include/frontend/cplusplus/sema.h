@@ -364,6 +364,9 @@ struct entity {
        it implements (its name is operator_name's) */
     bool operator_function = false;
     preprocessing_op_or_punc implemented = {};
+    /* a class: it declares a copy assignment operator
+       ([class.copy.assign]/1) */
+    bool user_copy_assignment = false;
     /* a class: its user-declared constructors (a chain through
        next_constructor) and destructor, 0 if none */
     entity_index first_constructor = 0, destructor = 0;
@@ -1820,6 +1823,12 @@ class semantic_analysis
     /* a declaration analysis did not follow may declare an operator
        function (hold_names): what an operator means is not known */
     bool operators_held = false;
+    /* [class.copy.assign]/1: f is a copy assignment operator of class c */
+    bool copy_assignment_operator(entity_index f, entity_index c) const;
+    /* [class.copy.assign]/12: the implicit copy assignment of class c
+       assigns its members as the built-in operator does (no member's
+       assignment is a user-provided operator=) */
+    bool assigned_bitwise(entity_index c);
     /* ---- [over.literal] literal operators (over/over.literal.cpp) ---- */
     /* the name of the literal operator of the literal suffix identifier
        suffix, as an identifier number */

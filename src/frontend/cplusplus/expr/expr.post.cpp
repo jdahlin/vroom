@@ -462,6 +462,22 @@ analysis_result semantic_analysis::postfix(node_index n, expression_meaning &m)
             r = expression(children[2], i);
         if (r != analysis_result::well_formed)
             return r;
+        {
+            /* [over.sub]/1: "the operator function is selected by overload
+               resolution ([over.match.oper])" */
+            owned_array<syntax_child> syntax;
+            owned_array<expression_meaning> operands;
+            syntax.append(children[0]);
+            operands.append(a);
+            syntax.append(children[2]);
+            operands.append(i);
+            bool handled = false;
+            r = overloaded_operator(n, children[1].index(),
+                                    preprocessing_op_or_punc::LEFT_BRACKET,
+                                    false, syntax, operands, handled, m);
+            if (r != analysis_result::well_formed || handled)
+                return r;
+        }
         expression_meaning *base = &a, *index = &i;
         auto is_array = [&](const expression_meaning &x) {
             return type_table[x.type.unqualified()].kind == type_kind::array;
@@ -634,6 +650,35 @@ analysis_result semantic_analysis::call(node_index n, expression_meaning &m)
     }
     if (r != analysis_result::well_formed)
         return r;
+    if (type_table[f.type.unqualified()].kind == type_kind::class_type) {
+        /* [over.call]/1: "where the postfix-expression is of class type,
+           the operator function is selected by overload resolution
+           ([over.call.object])" and the expression "interpreted as
+           postfix-expression . operator () (expression-list_opt)" */
+        owned_array<syntax_child> syntax;
+        owned_array<expression_meaning> operands;
+        syntax.append(children[0]);
+        operands.append(f);
+        for (syntax_child a : arguments) {
+            if (syntax_is(tree, a, syntax_kind::braced_init_list))
+                return not_supported(n, "over.ics.list");
+            expression_meaning e;
+            r = expression(a, e);
+            if (r != analysis_result::well_formed)
+                return r;
+            syntax.append(a);
+            operands.append(e);
+        }
+        bool handled = false;
+        r = overloaded_operator(n, children[1].index(),
+                                preprocessing_op_or_punc::LEFT_PARENTHESIS,
+                                false, syntax, operands, handled, m);
+        if (r != analysis_result::well_formed || handled)
+            return r;
+        /* [over.call.object]/2: no surrogate call functions (no conversion
+           functions are analysed) */
+        return not_supported(n, "over.call.object");
+    }
     qualified_type function_type = f.type;
     /* [expr.call]/2: "For a call to a non-static member function, the
        postfix expression shall be an implicit ([class.mfct.non-static],

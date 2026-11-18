@@ -130,6 +130,10 @@ analysis_result semantic_analysis::pointer_operator(node_index op,
         } else if (syntax_is_punctuator(
                        tokens, c,
                        preprocessing_op_or_punc::AMPERSAND_AMPERSAND)) {
+            if (!tokens.files.behavior.has(language_feature::rvalue_references))
+                /* [ext.clang] an rvalue reference before C++11, an
+                   extension (an error with -pedantic-errors) */
+                return not_supported(op, "ext.clang");
             analysis_result r = reference(op, true, type, m);
             if (r != analysis_result::well_formed)
                 return r;

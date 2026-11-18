@@ -173,14 +173,15 @@ uint64_t align_to(uint64_t n, uint64_t alignment)
  * C++03's sense, whose tail padding a derived class does not reuse.
  * C++03's POD class is an aggregate (no user-declared constructors, no
  * private or protected non-static data members, no base classes, no
- * virtual functions) without a user-declared destructor whose non-static
- * data members are PODs.
+ * virtual functions) without a user-declared copy assignment operator or
+ * destructor whose non-static data members are PODs.
  */
 static bool pod_for_layout(const semantic_analysis &a, const types &table,
                            entity_index c)
 {
     const entity &x = a.entity_table[c];
-    if (x.first_constructor || x.destructor || x.base_count)
+    if (x.first_constructor || x.destructor || x.base_count ||
+        x.user_copy_assignment)
         return false;
     for (uint32_t i = 0; i < x.member_count; i++) {
         const entity &m = a.entity_table[a.class_members[x.first_member + i]];

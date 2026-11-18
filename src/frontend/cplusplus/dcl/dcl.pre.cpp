@@ -1074,6 +1074,21 @@ analysis_result semantic_analysis::declare_with_initializer(
             entity_table[declared_entity].definition = value.node;
         }
     }
+    if (r == analysis_result::well_formed && !initialized &&
+        entity_table[declared_entity].automatic && function_state.active &&
+        !tokens.files.behavior.has(language_feature::rvalue_references)) {
+        /* C++03's [stmt.dcl]/3: "unless the variable has POD type and is
+           declared without an initializer": a class's POD-ness before
+           C++11 is not analysed */
+        qualified_type t = entity_table[declared_entity].type;
+        while (type_table[t.unqualified()].kind == type_kind::array)
+            t = type_table[t.unqualified()].operand;
+        const struct type &k = type_table[t.unqualified()];
+        if (k.kind == type_kind::class_type &&
+            entity_table[k.entity].kind == entity_kind::class_type &&
+            !assigned_bitwise(k.entity))
+            return not_supported(declaration, "stmt.dcl");
+    }
     if (r != analysis_result::well_formed || !initialized)
         return r;
     /* [stmt.dcl]/3: a local variable with automatic storage duration and an

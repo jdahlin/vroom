@@ -123,7 +123,7 @@ analysis_result semantic_analysis::assignment(node_index n,
         r = expression(children[2], right);
     if (r != analysis_result::well_formed)
         return r;
-    if (op != preprocessing_op_or_punc::EQUAL) {
+    {
         /* [over.match.oper]/2: an operand of class or enumeration type */
         owned_array<syntax_child> syntax;
         owned_array<expression_meaning> operands;
@@ -286,6 +286,11 @@ analysis_result semantic_analysis::class_assignment(node_index n,
                           "expr.ass");
     if (right.type.unqualified() != left.type.unqualified())
         return not_supported(n, "over.match.oper");
+    /* [class.copy.assign]/12: the implicitly-defined copy assignment
+       operator "performs memberwise copy assignment of its subobjects":
+       one that calls an operator function is not analysed */
+    if (!assigned_bitwise(c))
+        return not_supported(n, "class.copy.assign");
     const entity &x = entity_table[c];
     for (uint32_t i = 0; i < x.member_count; i++)
         if (cv_of(type_table,

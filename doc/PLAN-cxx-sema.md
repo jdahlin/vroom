@@ -733,7 +733,8 @@ libstdc++ and json), since sema cannot analyse a declaration kept as tokens.
   operands in translation units with an operator declaration analysis did
   not follow are no longer taken as built-in.  cxx-run 128/128,
   cxx-c-suites 0 wrong.  Left, as `not_supported`: operator=, (), [], ->,
-  ->*, comma, unary &, <=> and the allocation functions, members defined
+  ->*, comma, unary &, <=> and the allocation functions (=, () and []:
+  below), members defined
   outside their class, [over.ics.list] and [over.match.list], member functions'
   default arguments, static and non-static members in one set.  The parser
   takes `(a < b) + (b < a)` for a template-id (the function is not parsed).
@@ -767,6 +768,23 @@ libstdc++ and json), since sema cannot analyse a declaration kept as tokens.
   `bench/cxx-sema.py`: 26683 declarations as clang, 0 we reject that
   clang accepts, 448 we accept that clang rejects, 0 refuted; symbols
   1487.  cxx-run 136/136, cxx-c-suites 0 wrong.
+- Status (2026-11-18, operator=, () and []): [over.ass], [over.call] and
+  [over.sub] in `over/over.oper.cpp` (non-static members alone; static
+  operator() and operator[], C++23's, and C++23's operator[] of several
+  parameters not analysed) and `over.match.oper.cpp` (member candidates
+  alone, Table 15).  a = b with a user-declared operator= is overload
+  resolution among them when one is a copy assignment operator
+  ([class.copy.assign]/1; otherwise the implicit one would be a candidate:
+  not analysed); the built-in class assignment is kept for classes whose
+  subobjects declare none (`assigned_bitwise`).  A user-declared copy
+  assignment makes a class no POD for layout ([abi:pod]).  Also: two
+  user-defined conversion sequences ranked alike are not_supported, not an
+  ambiguity ([over.ics.rank]/3.3); && before C++11 is clang's extension.
+  Test: `src/test/cxx/run/operators-member.cpp`.  `bench/cxx-sema.py`:
+  27208 declarations as clang, 0 we reject that clang accepts, 448 we
+  accept that clang rejects, 0 refuted; lookup 10591, symbols 1496,
+  lowering 216.  cxx-run 140/140, cxx-c-suites 0 wrong.  Left: ->, ->*,
+  comma, unary &, <=>, the allocation functions.
 
 ### S4. Classes and the object model (parallel with S3)
 
