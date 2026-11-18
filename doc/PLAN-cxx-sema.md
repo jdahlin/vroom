@@ -1503,6 +1503,19 @@ lines:
   lookup 21395 -> 21465, symbols 2483 -> 2496, layout 15020 -> 15025,
   lowering 437 -> 439 files.  cxx-run 480/480 (120 programs);
   cxx-c-suites 0 wrong; quality unchanged.
+  After review (2026-11-18): std::tuple_size/tuple_element found in an
+  inline namespace of std (libc++'s std::__1: a tuple-like type was bound
+  by its members, wrong code), get<i> in the inline namespaces of the
+  associated ones ([basic.lookup.argdep]/2, `associated_namespaces`
+  shared with ADL); a const object whose class has a destructor that
+  runs is emitted writable ([class.dtor]/5, clang's .data); `auto [x, x]`
+  ill-formed (redefinition) except C++26's `_`; the binding decltype
+  reads kept in `expression_meaning`.  Test
+  `structured-bindings-inline.cpp`.  Still not supported: copying a class
+  with an rvalue-reference member is accepted though its implicit copy
+  constructor is deleted ([class.copy.ctor]/10; the class copies its
+  bytes, the fix is not local); a mutable member ([dcl.stc]).
+  cxx-sema unchanged; cxx-run 488/488 (122 programs).
 
 ### S6. Constant evaluation and templates
 
