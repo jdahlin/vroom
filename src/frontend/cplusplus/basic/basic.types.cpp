@@ -81,12 +81,14 @@ constness semantic_analysis::literal_class(entity_index c) const
     /* "an aggregate type, or has at least one constexpr constructor ...
        that is not a copy or move constructor" */
     if (!is_aggregate(c)) {
-        constness constructor = constness::not_constant;
-        if (!x.first_constructor)
-            /* the implicit default constructor: constexpr when it would
-               satisfy a constexpr constructor's requirements
-               ([class.default.ctor]/4), which analysis does not check */
-            constructor = constness::unknown;
+        /* the implicitly declared ones: constexpr when they would satisfy
+           a constexpr constructor's requirements ([class.default.ctor]/4,
+           [class.copy.ctor]/12), which analysis does not check */
+        constness constructor = constness::unknown;
+        for (entity_index k = x.first_constructor; k;
+             k = entity_table[k].next_constructor)
+            if (!entity_table[k].implicit)
+                constructor = constness::not_constant;
         for (entity_index k = x.first_constructor; k;
              k = entity_table[k].next_constructor)
             if (entity_table[k].constexpr_ && !is_copy_constructor(c, k))
@@ -95,8 +97,10 @@ constness semantic_analysis::literal_class(entity_index c) const
     }
     /* the subobjects: each non-volatile and literal, or for a union one
        of them */
+    /* (a union without members is literal for clang, which the rule's
+       "at least one" does not say) */
     constness members = constness::constant;
-    if (x.union_)
+    if (x.union_ && x.member_count)
         members = constness::not_constant;
     for (uint32_t i = 0; i < x.member_count; i++) {
         qualified_type m = entity_table[class_members[x.first_member + i]].type;

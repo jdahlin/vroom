@@ -1432,6 +1432,19 @@ lines:
   as clang 30080 (S4's tip alone 28677), 0 we reject and clang accepts, 0
   refuted (types 39366, constants 15708; S4's tip 32273 and 12230);
   cxx-run 184/184; cxx-c-suites 2214 pass, 0 wrong.
+  Class objects in the evaluator: constexpr constructors (member
+  initializers, then the body) and member functions through `this`,
+  members, `*`, `&`, class prvalues as temporaries, copies by value, a
+  constexpr variable of class type evaluated and emitted as data
+  ([basic.start.static]/2); a non-literal class type of a constexpr
+  variable is ill-formed.  Unknown still: bases, unions, bit-fields,
+  value-initialization of a class, implicit default constructors.  An
+  implicit special member's call is the evaluator's, not "not constant"
+  ([class.copy.ctor]/12), and a member of array type takes the object's cv
+  on its elements ([basic.type.qualifier]/3).  cxx-sema: declarations as
+  clang 30185, 0 we reject and clang accepts, 0 refuted (types 39465,
+  constants 15796); cxx-run 188/188 (constexpr-classes.cpp);
+  cxx-c-suites 2214 pass, 0 wrong.
 
 ### S7. Exceptions and RTTI
 

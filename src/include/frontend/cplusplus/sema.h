@@ -1887,11 +1887,42 @@ class semantic_analysis
                             constant_value &v);
     constness evaluate_condition(constant_evaluation &state, uint32_t node,
                                  constant_value &v);
-    /* an object of type t initialized by init (0: none, its value
-       indeterminate), arrays with their elements in state.elements */
+    /* the object of type t at place initialized by init (0: none, its
+       value indeterminate), arrays and class objects with their elements
+       in state.elements.  The evaluator's own values: a pointer is
+       kind pointer with the place it points to in first (count 0: a null
+       pointer); a class object is kind class_object, designator its
+       class, its non-static data members' values in elements[first ..
+       first + count) */
     constness evaluate_initialization(constant_evaluation &state,
                                       qualified_type t, uint32_t init,
-                                      bool read_only, constant_value &v);
+                                      bool read_only, uint32_t place);
+    /* the class of t when the evaluator models its objects: complete, no
+       base classes, not a union (0: not) */
+    entity_index evaluated_class(qualified_type t) const;
+    /* a copy of v whose elements (an array's, a class object's) are new */
+    constant_value copy_value(constant_evaluation &state,
+                              const constant_value &v, bool read_only);
+    /* [class.ctor]: the constructor call node initializes the object at
+       place */
+    constness evaluate_construct(constant_evaluation &state, uint32_t node,
+                                 uint32_t place);
+    /* the invocation of function f (a pointer to the object for a
+       non-static member function's this, or kind none), the arguments
+       list[first .. first + count) */
+    constness evaluate_invocation(constant_evaluation &state, entity_index f,
+                                  const constant_value &self, uint32_t first,
+                                  uint32_t count, bool &returned,
+                                  constant_value &result);
+    /* [dcl.constexpr]/10 for a constexpr variable of class type: whether
+       its initialization init is a constant expression */
+    constness evaluate_variable(qualified_type t, uint32_t init, token_index at,
+                                uint32_t &value);
+    /* the tree of constant and initializer_list nodes for an evaluated
+       object of type t, which lowering emits as data (0: a value it cannot
+       be, an indeterminate member, a pointer) */
+    uint32_t value_tree(const constant_evaluation &state, qualified_type t,
+                        const constant_value &v, token_index at);
     /* the case or default label of switch body a jump with the kept value
        goes to, or 0 ([stmt.switch]/5) */
     uint32_t switch_target(uint32_t body, uint64_t value, bool &found) const;

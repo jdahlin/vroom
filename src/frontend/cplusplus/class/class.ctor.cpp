@@ -641,8 +641,10 @@ semantic_analysis::construct(node_index at, qualified_type type,
     made.evaluation = constness::not_constant;
     result.evaluation = constness::not_constant;
     /* [expr.const]/5.2: a constexpr constructor's invocation is the
-       evaluator's (S6) */
-    if (entity_table[chosen].constexpr_) {
+       evaluator's (S6), and so is an implicit one's: it is constexpr when
+       its definition would satisfy [dcl.constexpr]'s rules
+       ([class.copy.ctor]/12), which is not decided here */
+    if (entity_table[chosen].constexpr_ || entity_table[chosen].implicit) {
         made.evaluation = constness::unknown;
         result.evaluation = constness::unknown;
         constexpr_calls++;

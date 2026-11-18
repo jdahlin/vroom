@@ -1010,10 +1010,20 @@ analysis_result semantic_analysis::declare_with_initializer(
         while (type_table[element.unqualified()].kind == type_kind::array)
             element = type_table[element.unqualified()].operand;
         const struct type record = type_table[element.unqualified()];
-        if (record.kind == type_kind::class_type ||
-            record.kind == type_kind::enumeration ||
+        if (record.kind == type_kind::class_type &&
+            literal_type(element) == constness::not_constant)
+            return ill_formed_at_token(m.id,
+                                       "a constexpr object shall have "
+                                       "literal type",
+                                       "dcl.constexpr");
+        if (record.kind == type_kind::enumeration ||
             record.kind == type_kind::none)
             return not_supported(declaration, "basic.types");
+        /* an object of class type default-initialized: its default
+           constructor ([dcl.init]/7.1), which the evaluator does not run
+           here yet */
+        if (!initialized && record.kind == type_kind::class_type)
+            return not_supported(declaration, "dcl.init");
         if (!initialized)
             return ill_formed_at_token(m.id,
                                        "a constexpr object shall be "
@@ -1200,9 +1210,34 @@ analysis_result semantic_analysis::declare_with_initializer(
         value.evaluation == constness::unknown) {
         /* an initializer with no tree (a list of a class's members, ...)
            the evaluator cannot run */
+        qualified_type element = type;
+        while (type_table[element.unqualified()].kind == type_kind::array)
+            element = type_table[element.unqualified()].operand;
+        bool of_class =
+            type_table[element.unqualified()].kind == type_kind::class_type;
         if (!value.node) {
             if (s.constexpr_)
                 return not_supported(declaration, "expr.const");
+        } else if (of_class) {
+            /* an object of class type: the evaluator checks that its
+               initialization is a constant expression, and lowering
+               initializes it as written (a variable that is not constexpr
+               is initialized dynamically, which gives the same value) */
+            if (s.constexpr_) {
+                uint32_t data = 0;
+                constness c = evaluate_variable(type, value.node,
+                                                semantics[value.node].at, data);
+                if (c == constness::unknown)
+                    return not_supported(declaration, "expr.const");
+                if (c == constness::not_constant)
+                    value.evaluation = constness::not_constant;
+                /* [basic.start.static]/2: constant initialization, its
+                   value as data */
+                if (data)
+                    value.node = data;
+            } else if (!entity_table[declared_entity].automatic) {
+                return not_supported(declaration, "basic.start.static");
+            }
         } else {
             constant_value v;
             bool constant = false;

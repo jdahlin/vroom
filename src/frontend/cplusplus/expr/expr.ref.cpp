@@ -103,6 +103,9 @@ analysis_result semantic_analysis::member_access(token_index at, entity_index e,
         uint32_t cv = m.type.cv() | x.type.cv();
         expression_meaning result;
         result.type = qualified_type::make(x.type.unqualified(), cv);
+        /* an array's cv-qualifiers are its elements' ([basic.type.qualifier]/3) */
+        if (type_table[x.type.unqualified()].kind == type_kind::array)
+            result.type = add_cv(x.type, m.type.cv());
         result.category = value_category::xvalue;
         if (m.category == value_category::lvalue)
             result.category = value_category::lvalue;
