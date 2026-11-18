@@ -326,6 +326,9 @@ struct entity {
     /* [class.default.ctor]/2: the implicit default constructor is deleted
        (a subobject without a usable default constructor) */
     bool implicit_default_deleted = false;
+    /* a function (the first of its overloads) a using-declaration names
+       ([namespace.udecl]/11) */
+    bool named_by_using = false;
     uint64_t offset = 0;
     /* a class: its non-static data members, in declaration order, are
        semantic_analysis::class_members[first_member .. first_member +

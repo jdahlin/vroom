@@ -600,6 +600,12 @@ analysis_result semantic_analysis::declare(node_index declaration,
         }
         if (!overloads)
             no_claims_after_hiding(name);
+        if (overloads && entity_table[overloads].named_by_using)
+            /* [namespace.udecl]/11: a using-declaration names the
+               declarations before it, so this overload is not one of the
+               set it introduced; the name is bound to the chain, not to a
+               copy of it */
+            return not_supported(declaration, "namespace.udecl");
         entity_index e = entity_table.make(kind, name, scope);
         entity_table[e].hidden_type = hides;
         entity_table[e].unnamed_type_linkage = unnamed_type;

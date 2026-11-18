@@ -1595,10 +1595,40 @@ analysis_result semantic_analysis::class_conversion(node_index n,
         } else if (node.child_count != 3) {
             return not_supported(n, "expr.type.conv");
         }
-        if (!entity_table[c].first_constructor)
-            /* value-initialization, or the copy of an aggregate */
-            return not_supported(n, "expr.type.conv");
-        r = construct(n, type, arguments, 0, value);
+        if (!entity_table[c].first_constructor && arguments.empty()) {
+            /* [dcl.init]/8.2: value-initialization of a class without a
+               user-provided default constructor zero-initializes it (the
+               implicit one is trivial: no constructor entity); the empty
+               list's elements are the same zeros ([dcl.init.aggr]/5.2),
+               and the same errors (a reference member, a deleted default
+               constructor) */
+            if (default_constructor_deleted(c)) {
+                /* (8.2): "if T has a non-trivial default constructor [or
+                   one defined as deleted], the object is
+                   default-initialized": the deleted function called.
+                   C++03 reports it at the class */
+                if (!tokens.files.behavior.has(
+                        language_feature::rvalue_references))
+                    return not_supported(n, "dcl.init");
+                return ill_formed(n,
+                                  "value-initialization calls the default "
+                                  "constructor, which is defined as deleted",
+                                  "dcl.init");
+            }
+            owned_array<syntax_child> none;
+            r = list_initialization_of(n, none, type, true, value);
+        } else if (!entity_table[c].first_constructor) {
+            /* T(x): "the type conversion expression is equivalent to the
+               corresponding cast expression" ([expr.type.conv]/2): of the
+               class's own type, a copy; C++20's parenthesized aggregate
+               initialization is not analysed */
+            if (arguments.size() != 1 ||
+                arguments[0].type.unqualified() != type.unqualified())
+                return not_supported(n, "expr.type.conv");
+            r = initialize_with(n, arguments[0], type, true, false, value);
+        } else {
+            r = construct(n, type, arguments, 0, value);
+        }
     }
     if (r != analysis_result::well_formed)
         return r;
