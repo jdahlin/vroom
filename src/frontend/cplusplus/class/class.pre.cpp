@@ -960,7 +960,20 @@ entity_index semantic_analysis::current_class() const
 {
     if (!function_state.active || !function_state.function)
         return 0;
-    entity_index c = entity_table[function_state.function].enclosing;
+    /* [expr.prim.lambda.closure]/12: "The lambda-expression's
+       compound-statement yields the function-body of the function call
+       operator, but for purposes of name lookup, determining the type and
+       value of this and transforming id-expressions referring to
+       non-static class members into class member access expressions using
+       (*this), the compound-statement is considered in the context of the
+       lambda-expression." */
+    entity_index f = function_state.function;
+    for (size_t i = lambdas.size(); i-- > 0;)
+        if (lambdas[i].call == f)
+            f = lambdas[i].enclosing_function;
+    if (!f)
+        return 0;
+    entity_index c = entity_table[f].enclosing;
     if (c && entity_table[c].kind == entity_kind::class_type)
         return c;
     return 0;

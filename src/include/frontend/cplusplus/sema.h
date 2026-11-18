@@ -564,6 +564,13 @@ struct entity {
     /* a function declared with a return type that has a placeholder
        ([dcl.spec.auto]/3), deduced or not */
     bool placeholder_return = false;
+    /* a closure type ([expr.prim.lambda.closure]/1): its lambda-expression
+       (0: the class is no closure) and its function call operator */
+    node_index lambda = 0;
+    entity_index call_operator = 0;
+    /* an init-capture's name ([expr.prim.lambda.capture]/6): the variable
+       is the closure's non-static data member this names */
+    entity_index capture_member = 0;
 };
 
 /* [class.virtual], [abi:vtable-components]: what a dynamic class adds to
@@ -861,6 +868,9 @@ uint32_t cv_of(const types &table, qualified_type t);
 /* whether the function types a and b have the same parameter-type-list
    ([dcl.fct]/4) */
 bool same_parameters(const types &table, type_index a, type_index b);
+/* the function whose definition a block-scope entity is declared in, 0
+   for an entity not in a function (abi/itanium/mangling.cpp) */
+entity_index enclosing_function(const entities &table, entity_index e);
 
 /* [basic.lval]/1: "Every expression belongs to exactly one of the
    fundamental classifications in this taxonomy: lvalue, xvalue, or
@@ -1376,6 +1386,13 @@ class semantic_analysis
     {
         return tokens.spelling(i, out);
     }
+
+    /* the closure numbers of the translation unit [impl.clang] gives a
+       lambda whose closure has no mangling number ($_N, in the order the
+       symbols of their members are made); numbered only when allowed (by
+       lowering) */
+    mutable owned_array<entity_index> unnumbered_closures;
+    mutable bool number_closures = false;
 
   private:
     /* the node needs rules that are not written: those of the subclause
@@ -2044,9 +2061,82 @@ class semantic_analysis
     /* [expr.prim.id]: the expression that names the entity e, found by
        lookup of the identifier t */
     analysis_result named_entity(token_index t, entity_index e,
-                                 expression_meaning &m);
+                                 expression_meaning &m, bool record_use = true);
     /* [expr.prim.this] */
+    analysis_result function_this(token_index t, expression_meaning &m);
     analysis_result this_pointer(token_index t, expression_meaning &m);
+
+    /* ---- lambda expressions ([expr.prim.lambda], expr/expr.prim.lambda*.cpp) */
+    enum class capture_default : uint8_t { none, copy, reference };
+    /* an entity a lambda captures ([expr.prim.lambda.capture]): a
+       variable (0: this), by reference or not (*this: star_this), the
+       closure's member for it, and an init-capture's initialization (its
+       variable then) */
+    struct capture_record {
+        entity_index variable = 0, member = 0;
+        bool by_reference = false, star_this = false, init_capture = false;
+        token_index at = 0;
+        uint32_t initialization = 0;
+    };
+    /* a lambda-expression whose compound-statement is analysed: its closure
+       type, function call operator, the function of the context it is in,
+       its capture-default, whether it is mutable, the type of this in that
+       context (none if it has no this) and its captures,
+       lambda_captures[first_capture ..] */
+    struct lambda_context {
+        entity_index closure = 0, call = 0, enclosing_function = 0;
+        capture_default default_capture = capture_default::none;
+        bool mutable_ = false;
+        qualified_type enclosing_this;
+        node_index at = 0;
+        uint32_t first_capture = 0;
+    };
+    owned_array<lambda_context> lambdas;
+    owned_array<capture_record> lambda_captures;
+    /* the lambda whose compound-statement is analysed now (its body, not a
+       local class's member function in it), nullptr if none */
+    lambda_context *current_lambda();
+    analysis_result lambda_expression(node_index n, expression_meaning &m);
+    analysis_result lambda_introducer(node_index n, lambda_context &l);
+    analysis_result lambda_captures_of(node_index n,
+                                       owned_array<syntax_child> &out);
+    analysis_result init_capture(node_index n, lambda_context &l,
+                                 capture_record &c);
+    /* the current lambda's init-captures' variables, bound in its
+       function parameter scope */
+    analysis_result bind_init_captures(entity_index scope);
+    /* [expr.prim.lambda.capture]/10, /12: the type of the member that
+       captures an entity of type t */
+    analysis_result capture_type(node_index at, qualified_type t,
+                                 bool by_reference, qualified_type &type);
+    /* the closure's non-static data member of type type for a capture */
+    entity_index capture_member_of(entity_index closure, qualified_type type);
+    /* the entity e of an enclosing function named at t in the body: its
+       capture's member ([expr.prim.lambda.capture]/11) */
+    analysis_result captured_entity(token_index t, entity_index e,
+                                    expression_meaning &m);
+    /* this in the body: the captured this ([expr.prim.lambda.capture]/12) */
+    analysis_result captured_this(token_index t, expression_meaning &m);
+    /* member of the closure object, through the call operator's this */
+    analysis_result closure_member(token_index t, entity_index member,
+                                   expression_meaning &m);
+    /* the closure object: each capture's member initialized in the
+       lambda-expression's context ([expr.prim.lambda.capture]/15) */
+    analysis_result closure_object(lambda_context &l,
+                                   const owned_array<capture_record> &captures,
+                                   expression_meaning &m);
+    /* the closure type c complete after the body: its layout, special
+       members and, for a lambda without a lambda-capture, the conversion
+       function */
+    analysis_result closure_class(entity_index c, node_index n,
+                                  bool has_capture);
+    /* [expr.prim.lambda.closure]/7: the conversion function to pointer to
+       function of a lambda without captures, and the static member
+       function it returns */
+    /* [expr.call]/14: a call's type and category from its result type */
+    void call_result(qualified_type result, expression_meaning &m) const;
+    analysis_result closure_conversion(entity_index c, entity_index call,
+                                       node_index n);
     /* [expr.prim.paren] */
     analysis_result parenthesized(node_index n, expression_meaning &m);
     /* [expr.unary] */
@@ -2738,6 +2828,21 @@ class semantic_analysis
         /* the function whose body it is */
         entity_index function = 0;
     } function_state;
+    /* the state of the enclosing function's analysis that a lambda's body
+       changes, kept aside meanwhile (as class_definition does for a local
+       class's member functions) */
+    struct lambda_enclosing_state {
+        function_context function;
+        owned_array<entity_index> block_variables;
+        owned_array<parameter_meaning> parameters;
+        entity_index scope = 0, last_declared = 0, deducing_variable = 0;
+        node_index declaration = 0;
+        token_index claim_place = 0;
+        entity_index claim_scope = 0;
+        qualified_type declaration_deduced;
+        bool placeholder_group = false, in_condition = false;
+        uint32_t function_cv = 0, function_empty_pack = 0;
+    };
     /* the invocations of constexpr functions analysed so far: an
        initializer that has one is the evaluator's to decide
        ([basic.start.static]/2) */

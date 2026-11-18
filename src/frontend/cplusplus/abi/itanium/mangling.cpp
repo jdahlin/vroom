@@ -17,6 +17,19 @@
 namespace cplusplus
 {
 
+/* the function whose definition a block-scope entity is declared in: the
+   enclosing block scopes end at its parameter scope, whose enclosing entity
+   is the function (function_body); 0 for an entity not in a function */
+entity_index enclosing_function(const entities &table, entity_index e)
+{
+    entity_index s = table[e].enclosing;
+    while (s && table[s].kind == entity_kind::block_scope)
+        s = table[s].enclosing;
+    if (s && table[s].kind == entity_kind::function)
+        return s;
+    return 0;
+}
+
 namespace
 {
 
@@ -120,6 +133,8 @@ class itanium_mangler
     bool ctor_dtor_name(special_member which);
     void number(uint64_t n);
     bool local_name(entity_index e, entity_index function);
+    bool closure_type_name(entity_index c);
+    bool closure_numbered(entity_index c) const;
     entity_index local_function(entity_index e) const;
     bool function_scope(entity_index function);
     bool nested_name(entity_index e);
@@ -141,19 +156,6 @@ class itanium_mangler
     bool is_std(entity_index scope) const;
     bool in_unnamed_namespace(entity_index e) const;
 };
-
-/* the function whose definition a block-scope entity is declared in: the
-   enclosing block scopes end at its parameter scope, whose enclosing entity
-   is the function (function_body); 0 for an entity not in a function */
-entity_index enclosing_function(const entities &table, entity_index e)
-{
-    entity_index s = table[e].enclosing;
-    while (s && table[s].kind == entity_kind::block_scope)
-        s = table[s].enclosing;
-    if (s && table[s].kind == entity_kind::function)
-        return s;
-    return 0;
-}
 
 /*
  * [abi:mangling-structure]:
@@ -569,7 +571,7 @@ bool itanium_mangler::class_enum_type(qualified_type t)
         x.kind != entity_kind::enumeration &&
         x.kind != entity_kind::template_specialization)
         return false;
-    if (!x.name && !x.linkage_name)
+    if (!x.name && !x.linkage_name && !x.lambda)
         return false;
     /* [abi:mangling-compression]: a template's name seen before, with its
        prefix, is a <substitution> before the arguments */
@@ -913,7 +915,12 @@ bool itanium_mangler::unqualified_name_untagged(entity_index e)
     bool namespace_scope =
         x.enclosing == 0 ||
         table[x.enclosing].kind == entity_kind::namespace_entity;
-    if (x.linkage_of_name == linkage::internal && namespace_scope &&
+    /* [impl.clang]: L for a name declared with internal linkage, not for
+       a specialization whose internal linkage is its arguments' */
+    linkage declared = x.linkage_of_name;
+    if (x.instantiation && x.kind == entity_kind::function)
+        declared = table[analysis.specialized_template(e)].linkage_of_name;
+    if (declared == linkage::internal && namespace_scope &&
         (x.kind == entity_kind::function || x.kind == entity_kind::variable) &&
         !in_unnamed_namespace(e) && !x.unnamed_type_linkage)
         text("L");
@@ -938,6 +945,8 @@ bool itanium_mangler::unqualified_name_untagged(entity_index e)
             return true;
         }
     }
+    if (x.kind == entity_kind::class_type && x.lambda)
+        return closure_type_name(e);
     /* [dcl.typedef]/9: an unnamed class's name for linkage purposes */
     if (!x.name && (x.kind == entity_kind::class_type ||
                     x.kind == entity_kind::enumeration))
@@ -1238,9 +1247,12 @@ entity_index itanium_mangler::local_function(entity_index e) const
     entity_index function = enclosing_function(table, c);
     if (!function)
         return 0;
+    /* (a closure type's name is numbered: closure_type_name) */
+    if (table[c].lambda)
+        return function;
     for (entity_index other = 1; other < table.size(); other++)
         if (other != c && table[other].kind == entity_kind::class_type &&
-            table[other].name == table[c].name &&
+            table[other].name == table[c].name && !table[other].lambda &&
             enclosing_function(table, other) == function)
             return UINT32_MAX;
     return function;
@@ -1301,6 +1313,100 @@ bool itanium_mangler::local_name(entity_index e, entity_index function)
             earlier++;
     if (earlier)
         discriminator(earlier - 1);
+    return true;
+}
+
+/*
+ * [abi:closure-types]: "In the following contexts, however, the
+ * one-definition rule requires closure types in different translation
+ * units to "correspond": ... the bodies of inline or templated functions"
+ * (a lambda's function call operator is inline: one in a lambda's body
+ * too); a closure type elsewhere is "unique to the translation unit".
+ */
+bool itanium_mangler::closure_numbered(entity_index c) const
+{
+    const entities &table = analysis.entity_table;
+    for (entity_index f = enclosing_function(table, c); f;) {
+        if (table[f].inline_ || table[f].instantiation)
+            return true;
+        /* a member function of a local class: its enclosing function's */
+        entity_index k = table[f].enclosing;
+        if (!k || table[k].kind != entity_kind::class_type)
+            break;
+        while (table[k].enclosing &&
+               table[table[k].enclosing].kind == entity_kind::class_type)
+            k = table[k].enclosing;
+        f = enclosing_function(table, k);
+    }
+    return false;
+}
+
+/*
+ * [abi:closure-types]:
+ *
+ *     <closure-type-name> ::= Ul <lambda-sig> E [ <nonnegative number> ] _
+ *     <lambda-sig> ::= <parameter type>+
+ *
+ * "The number is omitted for the first closure type with a given
+ * <lambda-sig> in a given context; it is n-2 for the nth closure type (in
+ * lexical order) with that same <lambda-sig> and context."  A closure type
+ * unique to the translation unit has no encoding in the ABI: [impl.clang]
+ * names it $_N, a <source-name>, N the closure's number among those of
+ * its function in the order their names are first mangled (as clang's
+ * code generator mangles them).
+ */
+bool itanium_mangler::closure_type_name(entity_index c)
+{
+    const entities &table = analysis.entity_table;
+    entity_index call = table[c].call_operator;
+    if (!call)
+        return false;
+    if (!closure_numbered(c)) {
+        if (!analysis.number_closures)
+            return false;
+        entity_index context = enclosing_function(table, c);
+        size_t n = 0;
+        bool seen = false;
+        for (entity_index k : analysis.unnumbered_closures) {
+            if (k == c) {
+                seen = true;
+                break;
+            }
+            if (enclosing_function(table, k) == context)
+                n++;
+        }
+        if (!seen)
+            analysis.unnumbered_closures.append(c);
+        owned_buffer written;
+        vbuffer_format_append(written.get(), "$_%llu",
+                              static_cast<unsigned long long>(n));
+        number(written.size());
+        vbuffer_append(out, written.data(), written.size());
+        return true;
+    }
+    text("Ul");
+    qualified_type signature = table[call].type;
+    if (!bare_function_type(signature))
+        return false;
+    text("E");
+    entity_index context = enclosing_function(table, c);
+    uint64_t earlier = 0;
+    for (entity_index other = 1; other < c; other++) {
+        const entity &k = table[other];
+        if (k.kind != entity_kind::class_type || !k.lambda ||
+            !k.call_operator || enclosing_function(table, other) != context)
+            continue;
+        const struct type &a = record(table[k.call_operator].type);
+        const struct type &b = record(signature);
+        if (a.variadic == b.variadic &&
+            same_parameters(analysis.type_table,
+                            table[k.call_operator].type.unqualified(),
+                            signature.unqualified()))
+            earlier++;
+    }
+    if (earlier)
+        number(earlier - 1);
+    text("_");
     return true;
 }
 

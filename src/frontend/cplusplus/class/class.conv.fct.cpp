@@ -421,7 +421,9 @@ analysis_result semantic_analysis::conversion_function_call(
     analysis_result r = deleted_use(t, f);
     if (r != analysis_result::well_formed)
         return r;
-    if (aggregate_prvalue(m) ||
+    /* (a captureless lambda's closure object has no members: its
+       temporary is the call's object argument, as for its call operator) */
+    if ((aggregate_prvalue(m) && !entity_table[c].lambda) ||
         (m.category == value_category::prvalue && entity_table[c].destructor))
         /* the temporary's destruction ([class.temporary]/4), an aggregate's
            temporary (aggregate_prvalue) */
