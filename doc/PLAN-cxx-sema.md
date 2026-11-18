@@ -1337,7 +1337,12 @@ lines:
   lowering emits as data ([basic.start.static]/2: `int g = square(7);` has
   no dynamic initializer).  The folds are the evaluator's own, written
   apart from `arithmetic()` (expr.compound.cpp is S3's while it works
-  there); sharing them is for after S3.  cxx-sema: declarations as clang
+  there); sharing them is for after S3.  Shared since, on S3's b9a0ee64:
+  `expr/folding.cpp` has `fold_binary` and `fold_unary` on values as
+  `expression_meaning` keeps them, which `arithmetic()`, `comparison()`,
+  the unary operators and the evaluator (its operators, compound
+  assignment and increment) all call; cxx-sema, cxx-run (156/156) and
+  cxx-c-suites unchanged.  cxx-sema: declarations as clang
   27704 -> 27826, 0 we reject and clang accepts, 0 refuted (types 47348,
   constants 18837, lookup 12628 verified); cxx-run 132/132 with
   constexpr-functions.cpp's constant uses; cxx-c-suites unchanged.

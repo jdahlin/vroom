@@ -548,28 +548,7 @@ analysis_result semantic_analysis::unary(node_index n, expression_meaning &m)
         if (m.evaluation != constness::constant ||
             o == preprocessing_op_or_punc::PLUS)
             break;
-        if (fundamental_type_is_floating(t)) {
-            double d = floating_value(m.value);
-            m.value = floating_kept(-d);
-            break;
-        }
-        /* (a 128-bit operation is not evaluated here) */
-        if (fundamental_type_width(b, t) >= 128) {
-            m.evaluation = constness::unknown;
-            break;
-        }
-        __int128 v = integer_value(b, t, m.value);
-        if (o == preprocessing_op_or_punc::TILDE) {
-            m.value = integer_wrap(b, t, ~static_cast<unsigned __int128>(v));
-            break;
-        }
-        /* [expr.unary.op]/8: "The negative of an unsigned quantity is
-           computed by subtracting its value from 2^n"; a signed one that
-           overflows is undefined ([expr.pre]/4) */
-        if (fundamental_type_is_signed(b, t) && !integer_holds(b, t, -v))
-            m.evaluation = constness::not_constant;
-        else
-            m.value = integer_wrap(b, t, static_cast<unsigned __int128>(-v));
+        m.evaluation = fold_unary(b, o, t, m.value, m.value);
         break;
     }
     case preprocessing_op_or_punc::EXCLAMATION: {

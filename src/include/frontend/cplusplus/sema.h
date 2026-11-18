@@ -735,6 +735,19 @@ constness combined_constness(constness a, constness b);
 /* a floating-point value as an expression_meaning keeps it */
 double floating_value(uint64_t kept);
 uint64_t floating_kept(double v);
+/* the operators of the arithmetic types on values as expression_meaning
+   keeps them (expr/folding.cpp): constant with the value in out,
+   not_constant where [expr.pre]/4 makes the operation undefined, unknown
+   for what is not folded (long double, 128 bits, a pragma's rounding).
+   fold_binary: operands converted to t, a shift's right operand of type
+   right; fold_unary: + - ~ on an operand promoted to t, ! on a bool */
+constness fold_binary(const implementation_defined_behavior &b,
+                      bool floating_point_pragma, preprocessing_op_or_punc op,
+                      fundamental_type t, fundamental_type right, uint64_t x,
+                      uint64_t y, uint64_t &out);
+constness fold_unary(const implementation_defined_behavior &b,
+                     preprocessing_op_or_punc op, fundamental_type t,
+                     uint64_t x, uint64_t &out);
 
 /* the cv-qualifiers of a type, an array's those of its elements
    ([basic.type.qualifier]/3) */
@@ -1848,9 +1861,14 @@ class semantic_analysis
                                         fundamental_type to, bool &constant);
     analysis_result evaluate_binary(uint8_t op, fundamental_type t,
                                     fundamental_type right,
+                                    fundamental_type result,
                                     const constant_value &x,
                                     const constant_value &y,
                                     constant_value &out, bool &constant);
+    /* a value of the arithmetic type t as expression_meaning keeps it, and
+       back */
+    uint64_t kept_of(fundamental_type t, const constant_value &v) const;
+    constant_value value_of(fundamental_type t, uint64_t kept) const;
     /* m's value as expression_meaning keeps it, from the evaluator's */
     void evaluated_meaning(expression_meaning &m, const constant_value &v);
 

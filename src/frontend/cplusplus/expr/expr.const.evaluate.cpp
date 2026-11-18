@@ -24,8 +24,6 @@
  * lifetime began within the evaluation of E".  Only the outermost node's
  * not_constant is taken as it is.
  */
-#include <math.h>
-
 #include "../cplusplus-internal.h"
 #include "frontend/cplusplus/sema.h"
 
@@ -51,24 +49,6 @@ constant_value evaluated_floating(double v)
     r.kind = constant_value_kind::floating;
     r.floating = v;
     return r;
-}
-
-__int128 signed_of(const constant_value &v)
-{
-    return static_cast<__int128>(v.integer);
-}
-
-/* the number of value bits of the integer type t and the sign bit:
-   [basic.fundamental]/1's width */
-unsigned integer_width(const implementation_defined_behavior &b,
-                       fundamental_type t)
-{
-    unsigned k = 0;
-    while (k < 64 && integer_holds(b, t, static_cast<__int128>(1) << (k + 1)))
-        k++;
-    if (fundamental_type_is_signed(b, t))
-        return k + 2;
-    return k + 1;
 }
 
 /* the binary operator a compound assignment applies ([expr.ass]/6) */
@@ -121,16 +101,27 @@ fundamental_type semantic_analysis::evaluated_type(qualified_type t) const
     return f;
 }
 
+uint64_t semantic_analysis::kept_of(fundamental_type t,
+                                    const constant_value &v) const
+{
+    if (v.kind == constant_value_kind::floating)
+        return floating_kept(v.floating);
+    return integer_wrap(tokens.files.behavior, t, v.integer);
+}
+
+constant_value semantic_analysis::value_of(fundamental_type t,
+                                           uint64_t kept) const
+{
+    if (fundamental_type_is_floating(t))
+        return evaluated_floating(floating_value(kept));
+    return evaluated_integer(integer_value(tokens.files.behavior, t, kept));
+}
+
 void semantic_analysis::evaluated_meaning(expression_meaning &m,
                                           const constant_value &v)
 {
     m.evaluation = constness::constant;
-    if (v.kind == constant_value_kind::floating) {
-        m.value = floating_kept(v.floating);
-        return;
-    }
-    m.value =
-        integer_wrap(tokens.files.behavior, evaluated_type(m.type), v.integer);
+    m.value = kept_of(evaluated_type(m.type), v);
 }
 
 /* [conv.integral], [conv.double], [conv.fpint], [conv.bool]: the rules
@@ -143,209 +134,42 @@ analysis_result semantic_analysis::evaluate_conversion(constant_value &v,
     constant = false;
     if (from == fundamental_type::none || to == fundamental_type::none)
         return analysis_result::unsupported;
-    const implementation_defined_behavior &b = tokens.files.behavior;
     expression_meaning m;
     m.type = qualified_type::make(type_table.fundamental(from), cv_none);
     m.evaluation = constness::constant;
-    if (v.kind == constant_value_kind::floating)
-        m.value = floating_kept(v.floating);
-    else
-        m.value = integer_wrap(b, from, v.integer);
+    m.value = kept_of(from, v);
     arithmetic_value(m, to);
     if (m.evaluation == constness::unknown)
         return analysis_result::unsupported;
     if (m.evaluation == constness::not_constant)
         return analysis_result::well_formed;
-    if (fundamental_type_is_floating(to))
-        v = evaluated_floating(floating_value(m.value));
-    else
-        v = evaluated_integer(integer_value(b, to, m.value));
+    v = value_of(to, m.value);
     constant = true;
     return analysis_result::well_formed;
 }
 
 /*
- * The operators of [expr.mul], [expr.add], [expr.shift], [expr.rel],
- * [expr.eq], [expr.bit.and], [expr.xor], [expr.or] on operands converted
- * to t (the right operand of a shift to right).  [expr.pre]/4: "If during
- * the evaluation of an expression, the result is not mathematically
- * defined or not in the range of representable values for its type, the
- * behavior is undefined", and [expr.const]/5.7 makes that not a core
- * constant expression.
+ * A binary operator on values: folding.cpp's rules, analysis's.  t is the
+ * operands' type (a shift's right operand has right), result the
+ * operation's (bool for a comparison).
  */
 analysis_result semantic_analysis::evaluate_binary(
     uint8_t op, fundamental_type t, fundamental_type right,
-    const constant_value &x, const constant_value &y, constant_value &out,
-    bool &constant)
+    fundamental_type result, const constant_value &x, const constant_value &y,
+    constant_value &out, bool &constant)
 {
     constant = false;
-    const implementation_defined_behavior &b = tokens.files.behavior;
-    preprocessing_op_or_punc o = static_cast<preprocessing_op_or_punc>(op);
-    bool comparison = false;
-    bool less = false, equal = false;
-    if (fundamental_type_is_floating(t)) {
-        /* a pragma may change the rounding: the evaluator does not know
-           which ([cpp.pragma]) */
-        if (tokens.files.floating_point_pragma)
-            return analysis_result::unsupported;
-        double p = x.floating, q = y.floating, r = 0;
-        switch (o) {
-        case preprocessing_op_or_punc::PLUS:
-            r = p + q;
-            break;
-        case preprocessing_op_or_punc::MINUS:
-            r = p - q;
-            break;
-        case preprocessing_op_or_punc::STAR:
-            r = p * q;
-            break;
-        case preprocessing_op_or_punc::SLASH:
-            /* [expr.mul]/4: "If the second operand of / or % is zero the
-               behavior is undefined" */
-            if (q == 0)
-                return analysis_result::well_formed;
-            r = p / q;
-            break;
-        default:
-            comparison = true;
-            less = p < q;
-            equal = p == q;
-            break;
-        }
-        if (!comparison) {
-            if (t == fundamental_type::float_)
-                r = static_cast<float>(r);
-            /* a result out of range or not a number: clang's "floating
-               point arithmetic produces an infinity" or "a NaN" */
-            if (!isfinite(r))
-                return analysis_result::unsupported;
-            out = evaluated_floating(r);
-            constant = true;
-            return analysis_result::well_formed;
-        }
-        if (isnan(p) || isnan(q))
-            return analysis_result::unsupported;
-    } else {
-        bool is_signed = fundamental_type_is_signed(b, t);
-        __int128 p = signed_of(x), q = signed_of(y), r = 0;
-        switch (o) {
-        case preprocessing_op_or_punc::PLUS:
-            r = p + q;
-            break;
-        case preprocessing_op_or_punc::MINUS:
-            r = p - q;
-            break;
-        case preprocessing_op_or_punc::STAR:
-            if (!is_signed) {
-                /* [basic.fundamental]/2: arithmetic modulo 2^N */
-                out = evaluated_integer(integer_value(
-                    b, t, integer_wrap(b, t, x.integer * y.integer)));
-                constant = true;
-                return analysis_result::well_formed;
-            }
-            r = p * q;
-            break;
-        case preprocessing_op_or_punc::SLASH:
-        case preprocessing_op_or_punc::PERCENT:
-            if (q == 0)
-                return analysis_result::well_formed;
-            /* [expr.mul]/4: "if the quotient a/b is representable in the
-               type of the result ...; otherwise, the behavior of both a/b
-               and a%b is undefined" */
-            if (!integer_holds(b, t, p / q))
-                return analysis_result::well_formed;
-            r = p / q;
-            if (o == preprocessing_op_or_punc::PERCENT)
-                r = p % q;
-            break;
-        case preprocessing_op_or_punc::LESS_LESS:
-        case preprocessing_op_or_punc::GREATER_GREATER: {
-            /* [expr.shift]/1: "The behavior is undefined if the right
-               operand is negative, or greater than or equal to the width of
-               the promoted left operand." */
-            if ((fundamental_type_is_signed(b, right) && q < 0) ||
-                q >= static_cast<__int128>(integer_width(b, t)))
-                return analysis_result::well_formed;
-            if (o == preprocessing_op_or_punc::GREATER_GREATER) {
-                r = p >> static_cast<int>(q);
-                break;
-            }
-            if (!is_signed) {
-                out = evaluated_integer(integer_value(
-                    b, t,
-                    integer_wrap(b, t, x.integer << static_cast<int>(q))));
-                constant = true;
-                return analysis_result::well_formed;
-            }
-            /* a negative or overflowing signed left shift: undefined before
-               C++20, a value modulo 2^N in C++20 ([expr.shift]/2); which
-               one applies is not decided here */
-            if (p < 0)
-                return analysis_result::unsupported;
-            r = p << static_cast<int>(q);
-            if (!integer_holds(b, t, r))
-                return analysis_result::unsupported;
-            break;
-        }
-        case preprocessing_op_or_punc::AMPERSAND:
-            r = p & q;
-            break;
-        case preprocessing_op_or_punc::BAR:
-            r = p | q;
-            break;
-        case preprocessing_op_or_punc::CARET:
-            r = p ^ q;
-            break;
-        case preprocessing_op_or_punc::LESS:
-        case preprocessing_op_or_punc::GREATER:
-        case preprocessing_op_or_punc::LESS_EQUAL:
-        case preprocessing_op_or_punc::GREATER_EQUAL:
-        case preprocessing_op_or_punc::EQUAL_EQUAL:
-        case preprocessing_op_or_punc::EXCLAMATION_EQUAL:
-            comparison = true;
-            less = p < q;
-            equal = p == q;
-            break;
-        default:
-            return analysis_result::unsupported;
-        }
-        if (!comparison) {
-            if (!is_signed)
-                r = integer_value(
-                    b, t,
-                    integer_wrap(b, t, static_cast<unsigned __int128>(r)));
-            else if (!integer_holds(b, t, r))
-                return analysis_result::well_formed;
-            out = evaluated_integer(r);
-            constant = true;
-            return analysis_result::well_formed;
-        }
-    }
-    bool result = false;
-    switch (o) {
-    case preprocessing_op_or_punc::LESS:
-        result = less;
-        break;
-    case preprocessing_op_or_punc::GREATER:
-        result = !less && !equal;
-        break;
-    case preprocessing_op_or_punc::LESS_EQUAL:
-        result = less || equal;
-        break;
-    case preprocessing_op_or_punc::GREATER_EQUAL:
-        result = !less;
-        break;
-    case preprocessing_op_or_punc::EQUAL_EQUAL:
-        result = equal;
-        break;
-    case preprocessing_op_or_punc::EXCLAMATION_EQUAL:
-        result = !equal;
-        break;
-    default:
+    uint64_t value = 0;
+    constness c =
+        fold_binary(tokens.files.behavior, tokens.files.floating_point_pragma,
+                    static_cast<preprocessing_op_or_punc>(op), t, right,
+                    kept_of(t, x), kept_of(right, y), value);
+    if (c == constness::unknown)
         return analysis_result::unsupported;
+    if (c == constness::constant) {
+        out = value_of(result, value);
+        constant = true;
     }
-    out = evaluated_integer(result);
-    constant = true;
     return analysis_result::well_formed;
 }
 
@@ -436,8 +260,8 @@ analysis_result semantic_analysis::evaluate_object(constant_evaluation &state,
                 right = c;
             }
             constant_value result;
-            r = evaluate_binary(static_cast<uint8_t>(binary), c, right, old, y,
-                                result, constant);
+            r = evaluate_binary(static_cast<uint8_t>(binary), c, right, c, old,
+                                y, result, constant);
             if (r != analysis_result::well_formed || !constant)
                 return r;
             r = evaluate_conversion(result, c, t, constant);
@@ -595,38 +419,19 @@ analysis_result semantic_analysis::evaluate_node(constant_evaluation &state,
         r = evaluate_node(state, x.a, v, constant);
         if (r != analysis_result::well_formed || !constant)
             return r;
+        /* the operand is promoted to t, or a bool for ! */
+        fundamental_type operand = evaluated_type(semantics[x.a].type);
+        uint64_t value = 0;
+        constness c = fold_unary(tokens.files.behavior,
+                                 static_cast<preprocessing_op_or_punc>(x.op),
+                                 operand, kept_of(operand, v), value);
         constant = false;
-        const implementation_defined_behavior &b = tokens.files.behavior;
-        switch (static_cast<preprocessing_op_or_punc>(x.op)) {
-        case preprocessing_op_or_punc::PLUS:
-            break;
-        case preprocessing_op_or_punc::MINUS:
-            if (fundamental_type_is_floating(t)) {
-                v.floating = -v.floating;
-                break;
-            }
-            if (!fundamental_type_is_signed(b, t)) {
-                /* [expr.unary.op]/8: "The negative of an unsigned quantity
-                   is computed by subtracting its value from 2^n" */
-                v = evaluated_integer(
-                    integer_value(b, t, integer_wrap(b, t, -v.integer)));
-                break;
-            }
-            if (!integer_holds(b, t, -signed_of(v)))
-                return analysis_result::well_formed;
-            v = evaluated_integer(-signed_of(v));
-            break;
-        case preprocessing_op_or_punc::TILDE:
-            v = evaluated_integer(
-                integer_value(b, t, integer_wrap(b, t, ~v.integer)));
-            break;
-        case preprocessing_op_or_punc::EXCLAMATION:
-            v = evaluated_integer(v.integer == 0);
-            break;
-        default:
+        if (c == constness::unknown)
             return analysis_result::unsupported;
+        if (c == constness::constant) {
+            v = value_of(t, value);
+            constant = true;
         }
-        constant = true;
         return analysis_result::well_formed;
     }
     case semantic_kind::binary: {
@@ -642,7 +447,8 @@ analysis_result semantic_analysis::evaluate_node(constant_evaluation &state,
         r = evaluate_node(state, x.b, q, constant);
         if (r != analysis_result::well_formed || !constant)
             return r;
-        return evaluate_binary(x.op, t, right, p, q, v, constant);
+        return evaluate_binary(x.op, t, right, evaluated_type(x.type), p, q, v,
+                               constant);
     }
     /* [expr.log.and]/1: "the second operand is not evaluated if the first
        operand is false"; [expr.log.or]/1: "if the first operand evaluates
@@ -692,29 +498,26 @@ analysis_result semantic_analysis::evaluate_node(constant_evaluation &state,
         increment_kind k = static_cast<increment_kind>(x.op);
         bool up = k == increment_kind::pre_increment ||
                   k == increment_kind::post_increment;
+        /* [expr.pre.incr]/1: "The expression ++x is equivalent to x+=1":
+           computed in the promoted type, converted back */
+        fundamental_type promoted = promotion_of(t);
         constant_value updated = old;
-        const implementation_defined_behavior &b = tokens.files.behavior;
-        if (fundamental_type_is_floating(t)) {
-            if (up)
-                updated.floating = old.floating + 1;
-            else
-                updated.floating = old.floating - 1;
-            if (t == fundamental_type::float_)
-                updated.floating = static_cast<float>(updated.floating);
-        } else {
-            __int128 n = signed_of(old) - 1;
-            if (up)
-                n = signed_of(old) + 1;
-            /* computed in the promoted type, converted back
-               ([expr.pre.incr]/1: "The expression ++x is equivalent to
-               x+=1") */
-            fundamental_type promoted = promotion_of(t);
-            if (fundamental_type_is_signed(b, promoted) &&
-                !integer_holds(b, promoted, n))
-                return analysis_result::well_formed;
-            updated = evaluated_integer(integer_value(
-                b, t, integer_wrap(b, t, static_cast<unsigned __int128>(n))));
-        }
+        r = evaluate_conversion(updated, t, promoted, constant);
+        if (r != analysis_result::well_formed || !constant)
+            return r;
+        preprocessing_op_or_punc o = preprocessing_op_or_punc::MINUS;
+        if (up)
+            o = preprocessing_op_or_punc::PLUS;
+        constant_value one = evaluated_integer(1);
+        if (fundamental_type_is_floating(promoted))
+            one = evaluated_floating(1);
+        r = evaluate_binary(static_cast<uint8_t>(o), promoted, promoted,
+                            promoted, updated, one, updated, constant);
+        if (r != analysis_result::well_formed || !constant)
+            return r;
+        r = evaluate_conversion(updated, promoted, t, constant);
+        if (r != analysis_result::well_formed || !constant)
+            return r;
         state.objects[object].value = updated;
         v = old;
         if (k == increment_kind::pre_increment ||
