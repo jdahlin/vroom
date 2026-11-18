@@ -1640,6 +1640,38 @@ lines:
   14907, symbols 1845, layouts 10190); cxx-run 216/216
   (template-dependent-names.cpp); cxx-c-suites unchanged (the #pragma pack
   tests pr109318 and pr79737-1 not yet, [cpp.pragma]).
+  Then explicit instantiations ([temp.explicit]) and explicit
+  specializations of function templates ([temp.expl.spec]).
+  `named_specialization` (temp.decls.cpp) finds the function template's
+  specialization a declaration names: its declarator-id the template's name
+  or a simple-template-id of it (`declarator_template_id` lets
+  declarator() take one), the arguments not given deduced from the declared
+  function type ([temp.deduct.decl]/1), which shall be the
+  specialization's.  `template int f<int>(int);` and `template long
+  f(long);` instantiate it, `template struct S<int>;` the class
+  (`class_explicit_instantiation`), `template void S<long>::g(long);` one
+  member function (`member_explicit_instantiation`); the subject is marked
+  (`entity::explicitly_instantiated`, a member function through its class,
+  not the special members, [temp.explicit]/10), and lowering emits it
+  whether used or not, weak (clang's weak_odr).  `extern template` (/11)
+  declares it: no definition emitted, not even an inline one, as clang.
+  `template<> int f<int>(int) {...}` (or deduced) makes the specialization
+  with its own inline and constexpr ([temp.expl.spec]/12), its first
+  declaration the explicit specialization (lookup claims name it), never
+  instantiated; declared first and defined later works.  Unsupported (as
+  clang's errors or not known): an explicit specialization after a use, a
+  duplicate explicit instantiation, one after an explicit specialization, an
+  explicit instantiation declaration after a use, an undefined template,
+  deleted or defaulted specializations, members of class templates
+  explicitly specialized, member templates, static data members, overloaded
+  templates.  An increment whose operand is not a variable is no longer
+  "not constant" before evaluation (a reference a constexpr call returns
+  may designate a temporary of the evaluation, [expr.const]/5.16).
+  cxx-sema: declarations as clang 40790 -> 41545, 0 we reject and clang
+  accepts, 0 refuted (types 42846, lookup 14998, symbols 1904, layouts
+  10241); [temp.explicit] unsupported ~3.8k -> 1569, [temp.expl.spec] 1695;
+  cxx-run 220/220 (template-explicit.cpp); cxx-c-suites unchanged (the
+  #pragma pack tests not yet, [cpp.pragma]).
 
 ### S7. Exceptions and RTTI
 

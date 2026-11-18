@@ -642,6 +642,19 @@ analysis_result semantic_analysis::declarator(node_index declaration,
         has_head = true;
         head = children[0];
         i = 1;
+    } else if (declarator_template_id && node.child_count &&
+               syntax_is(tree, children[0], syntax_kind::simple_template_id) &&
+               tree[children[0].index()].child_count >= 3 &&
+               tree.children(children[0].index())[0].is_token() &&
+               tokens[tree.children(children[0].index())[0].index()].kind ==
+                   token_kind::identifier) {
+        /* [temp.expl.spec]/1, [temp.explicit]/3: a specialization's
+           template-id (its template-name the declarator-id's name) */
+        m.template_id = children[0].index();
+        declarator_template_id = false;
+        has_head = true;
+        head = tree.children(children[0].index())[0];
+        i = 1;
     } else if (node.child_count &&
                (syntax_is(tree, children[0],
                           syntax_kind::operator_function_id) ||

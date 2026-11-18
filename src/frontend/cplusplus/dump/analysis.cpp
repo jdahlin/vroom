@@ -397,6 +397,13 @@ static void dump_symbols(const semantic_analysis &analysis,
         /* emitted where it is odr-used ([basic.def.odr]/11) */
         if (e.defined && e.inline_)
             defined = "inline";
+        /* [temp.explicit]/10 and /11: emitted, or not here */
+        instantiation_kind explicit_ =
+            analysis.explicitly_instantiated(d.entity);
+        if (e.defined && explicit_ == instantiation_kind::definition)
+            defined = "defined";
+        if (explicit_ == instantiation_kind::declaration)
+            defined = "declared";
         vbuffer_format_append(out, "\t%s\t%s\n", defined, linkage);
     }
 }

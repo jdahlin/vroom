@@ -391,7 +391,15 @@ analysis_result semantic_analysis::increment(node_index n, syntax_child operand,
         (!is_object_pointer(m.type) ||
          !size_of_type(type_table[m.type.unqualified()].operand)))
         return not_supported(n, subclause);
-    m.evaluation = constness::not_constant;
+    /* [expr.const]/5.16: the modification of a variable whose lifetime
+       did not begin within the evaluation (the evaluator's, inside a
+       constexpr function's); another glvalue (a call's, *p) may designate
+       an object whose lifetime did (a temporary bound to a reference
+       parameter that the function returns) */
+    if (m.node && semantics[m.node].kind == semantic_kind::entity)
+        m.evaluation = constness::not_constant;
+    else if (m.evaluation != constness::not_constant)
+        m.evaluation = constness::unknown;
     m.entity = 0;
     increment_kind kind = increment_kind::pre_increment;
     if (decrement)

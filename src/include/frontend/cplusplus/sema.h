@@ -230,6 +230,9 @@ enum class constness : uint8_t { constant, not_constant, unknown };
 
 /* [special]: a member function a class's objects are made and ended by */
 enum class special_member : uint8_t { none, constructor, destructor };
+/* [temp.explicit]/2: "An explicit instantiation definition is an explicit
+   instantiation that does not begin with the extern keyword" */
+enum class instantiation_kind : uint8_t { none, declaration, definition };
 /* [basic.stc.dynamic]/1: operator new, operator new[], operator delete
    and operator delete[] */
 enum class allocation_function : uint8_t {
@@ -544,6 +547,11 @@ struct vtable_group {
        a function template (template_entity) or one of its type
        parameters: its function_template record plus one */
     uint32_t instantiation = 0;
+    /* a function template's specialization, a member function of a class
+       template's specialization or such a class: the subject of an
+       explicit instantiation ([temp.explicit]/2) declaration (extern) or
+       definition */
+    instantiation_kind explicitly_instantiated = instantiation_kind::none;
 };
 
 /* one declaration of an entity: the syntax node that declares it */
@@ -1187,6 +1195,9 @@ class semantic_analysis
        its objects are copied as their bytes, passed in registers */
     bool trivial_class(entity_index c) const;
     bool trivial_defaulted_default_constructor(entity_index c) const;
+    /* the explicit instantiation a function is the subject of, its own or
+       its class's ([temp.explicit]/10) */
+    instantiation_kind explicitly_instantiated(entity_index f) const;
     /* [basic.types]/10: whether t is a literal type (unknown:
        analysis cannot tell; basic/basic.types.cpp) */
     constness literal_type(qualified_type t) const;
@@ -1263,6 +1274,14 @@ class semantic_analysis
                                                  node_index definition);
     analysis_result explicit_specialization(node_index n);
     analysis_result explicit_instantiation(node_index n);
+    analysis_result class_explicit_instantiation(node_index n, node_index id,
+                                                 bool extern_);
+    analysis_result member_explicit_instantiation(node_index n,
+                                                  node_index declaration,
+                                                  bool extern_);
+    /* whether the declarator may have a simple-template-id as its
+       declarator-id */
+    bool declarator_template_id = false;
     analysis_result deduction_guide(node_index n);
     analysis_result simple_declaration(node_index n);
     analysis_result function_definition(node_index n);
@@ -1302,6 +1321,13 @@ class semantic_analysis
     };
     analysis_result decl_specifier_seq(node_index seq, specified &s,
                                        bool parameter);
+    /* [temp.explicit], [temp.expl.spec]: the function template's
+       specialization a declaration of one declarator names (its
+       instantiation record, which an explicit specialization makes);
+       its decl-specifier-seq's meaning in s */
+    analysis_result named_specialization(node_index n, node_index declaration,
+                                         bool specialization, bool extern_,
+                                         specified &s, uint32_t &index);
     /* [dcl.type.simple] Table 14: the type of the simple-type-specifier
        keywords of a decl-specifier-seq */
     struct simple_type_keywords {
@@ -1342,6 +1368,9 @@ class semantic_analysis
         allocation_function allocation = allocation_function::none;
         /* the declarator-id is a literal-operator-id ([over.literal]) */
         bool literal_operator = false;
+        /* the declarator-id is a simple-template-id (declarator_template_id
+           allows it): an explicit specialization's or instantiation's */
+        node_index template_id = 0;
     };
     analysis_result declarator(node_index declaration, syntax_child d,
                                qualified_type &type, declarator_meaning &m);
@@ -2367,6 +2396,9 @@ class semantic_analysis
            0 the primary template's) and its parameters' arguments
            (template_arguments[first_deduced ..]) */
         uint32_t pattern = 0, first_deduced = 0;
+        /* a function template's specialization declared by an explicit
+           specialization ([temp.expl.spec]/1): never instantiated */
+        bool explicit_specialization = false;
     };
     /* [temp.fct]/1: a function template: its entity (template_entity,
        whose type is the function type with the type parameters' types,
@@ -2555,6 +2587,10 @@ class semantic_analysis
     owned_array<constant_value> instantiation_values;
     owned_array<instantiation_input> instantiation_inputs;
     owned_array<instantiation_record> instantiations;
+    /* the instantiation record of the template's specialization for the
+       arguments, plus one; 0 if there is none yet */
+    uint32_t find_instantiation(entity_index t,
+                                const owned_array<template_argument> &a) const;
     /* [temp.inst]/1: the specialization of the template for the
        arguments, instantiated (or found, if it already was) */
     analysis_result instantiate(node_index at, entity_index template_entity,

@@ -997,7 +997,12 @@ uint32_t c_lowering::symbol(entity_index e, token_index at, int variant)
        every translation unit that odr-uses it: emitted where referenced,
        weak so that the copies link as one ([abi:vague-inline] wants a
        COMDAT group too, which C's code generator does not make yet) */
-    if (x.inline_)
+    instantiation_kind explicit_ = analysis.explicitly_instantiated(e);
+    if (explicit_ == instantiation_kind::definition)
+        /* [temp.explicit]/10's explicit instantiation definition: emitted
+           whether used or not, weak (clang's weak_odr) */
+        flags |= AST_SYMBOL_FLAG_WEAK;
+    else if (x.inline_ && explicit_ != instantiation_kind::declaration)
         flags |= AST_SYMBOL_FLAG_LINKONCE | AST_SYMBOL_FLAG_WEAK;
     /* [class.local]: a member of a local class has no linkage
        ([basic.link]/8); [impl.clang] its symbol is local unless the
@@ -5219,6 +5224,12 @@ bool c_lowering::translation_unit()
         if (!x.defined || x.automatic || enclosing_function(d.entity) ||
             x.deleted)
             continue;
+        /* [temp.explicit]/11: an explicit instantiation declaration's
+           specialization is defined in another translation unit (clang
+           emits none, not even an inline one) */
+        if (analysis.explicitly_instantiated(d.entity) ==
+            instantiation_kind::declaration)
+            continue;
         bool again = false;
         for (entity_index s : done)
             if (s == d.entity)
@@ -5249,6 +5260,9 @@ bool c_lowering::translation_unit()
         const entity &x = analysis.entity_table[d.entity];
         if (x.kind != entity_kind::function || !x.enclosing ||
             analysis.entity_table[x.enclosing].kind != entity_kind::class_type)
+            continue;
+        if (analysis.explicitly_instantiated(d.entity) ==
+            instantiation_kind::declaration)
             continue;
         if (!function_definition(d.entity))
             return false;
