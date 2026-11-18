@@ -173,7 +173,9 @@ analysis_result semantic_analysis::virtual_member(entity_index c,
 analysis_result semantic_analysis::dynamic_class_record(entity_index c,
                                                         node_index n)
 {
-    const entity &x = entity_table[c];
+    /* a copy: declare_implicit below adds an entity, which may move
+       entity_table's (its bases, members and type, read here, stay) */
+    const entity x = entity_table[c];
     entity_index primary = 0;
     for (uint32_t i = 0; i < x.base_count; i++) {
         entity_index b = type_table[entity_table[class_bases[x.first_base + i]]

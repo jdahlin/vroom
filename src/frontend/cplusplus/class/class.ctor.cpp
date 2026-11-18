@@ -1188,7 +1188,8 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
     if (x.defaulted_default_constructor && user_constructors && construction)
         declare_implicit(c, special_member::constructor, false);
     bool user_copy = false;
-    for (entity_index k = x.first_constructor; k;
+    /* entity_table[c], not x: declare_implicit may have moved it */
+    for (entity_index k = entity_table[c].first_constructor; k;
          k = entity_table[k].next_constructor)
         if (is_copy_constructor(c, k))
             user_copy = true;
