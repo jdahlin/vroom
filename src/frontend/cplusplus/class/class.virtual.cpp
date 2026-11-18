@@ -322,10 +322,12 @@ analysis_result semantic_analysis::dynamic_class_record(entity_index c,
                         vtable_own.back() = true;
                     }
             }
-            vtable_groups.append(group);
+            /* bg is an element of vtable_groups: read before the append,
+               which may move it */
             group_source source;
             source.base = base;
             source.offset = bg.offset;
+            vtable_groups.append(group);
             vtable_group_sources.append(source);
         }
     };
