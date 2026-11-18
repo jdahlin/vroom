@@ -525,15 +525,8 @@ analysis_result semantic_analysis::class_definition(node_index n,
     auto resume_outer = [&]() {
         defining_class = outer;
         declaration_access = outer_access;
-        if (!outer)
-            return;
-        entity &o = entity_table[outer];
-        if (o.first_member + o.member_count == class_members.size())
-            return;
-        uint32_t first = static_cast<uint32_t>(class_members.size());
-        for (uint32_t i = 0; i < o.member_count; i++)
-            class_members.append(class_members[o.first_member + i]);
-        entity_table[outer].first_member = first;
+        if (outer)
+            make_members_contiguous(outer);
     };
     entity_table[c].first_base = static_cast<uint32_t>(class_bases.size());
     entity_table[c].base_count = 0;
@@ -960,7 +953,20 @@ entity_index semantic_analysis::current_class() const
 {
     if (!function_state.active || !function_state.function)
         return 0;
-    entity_index c = entity_table[function_state.function].enclosing;
+    /* [expr.prim.lambda.closure]/12: "The lambda-expression's
+       compound-statement yields the function-body of the function call
+       operator, but for purposes of name lookup, determining the type and
+       value of this and transforming id-expressions referring to
+       non-static class members into class member access expressions using
+       (*this), the compound-statement is considered in the context of the
+       lambda-expression." */
+    entity_index f = function_state.function;
+    for (size_t i = lambdas.size(); i-- > 0;)
+        if (lambdas[i].call == f)
+            f = lambdas[i].enclosing_function;
+    if (!f)
+        return 0;
+    entity_index c = entity_table[f].enclosing;
     if (c && entity_table[c].kind == entity_kind::class_type)
         return c;
     return 0;
@@ -2171,6 +2177,21 @@ analysis_result semantic_analysis::alignment_specifier(node_index n,
         return ill_formed(n, "an alignment shall be a power of two",
                           "dcl.align");
     return analysis_result::well_formed;
+}
+
+/* class c's members one range of class_members again, at its end, after
+   a class whose analysis began within c's (a nested or local class, a
+   specialization instantiated) added its own after c's so far */
+void semantic_analysis::make_members_contiguous(entity_index c)
+{
+    const entity &x = entity_table[c];
+    if (x.first_member + x.member_count == class_members.size())
+        return;
+    uint32_t first = static_cast<uint32_t>(class_members.size());
+    uint32_t old_first = x.first_member, count = x.member_count;
+    for (uint32_t i = 0; i < count; i++)
+        class_members.append(class_members[old_first + i]);
+    entity_table[c].first_member = first;
 }
 
 } // namespace cplusplus

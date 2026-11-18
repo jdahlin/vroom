@@ -953,6 +953,11 @@ constness semantic_analysis::evaluate_call(constant_evaluation &state,
         callee = semantics[callee].a;
     if (semantics[callee].kind != semantic_kind::entity)
         return constness::unknown;
+    /* [expr.prim.lambda.closure]/4: whether a closure's function call
+       operator is constexpr is not decided yet (evaluate_invocation) */
+    entity_index enclosing = entity_table[semantics[callee].a].enclosing;
+    if (enclosing && entity_table[enclosing].lambda)
+        return constness::unknown;
     /* [class.this]/1: a non-static member function's this, the address
        of the object expression */
     constant_value self;
@@ -1001,6 +1006,11 @@ constness semantic_analysis::evaluate_invocation(
            definition would satisfy [dcl.constexpr]'s rules
            ([class.copy.ctor]/12), which is not decided yet */
         if (e.implicit)
+            return constness::unknown;
+        /* [expr.prim.lambda.closure]/4: a closure's function call operator
+           is constexpr if it satisfies those rules, not decided yet; its
+           conversion function and the function it returns (/11) too */
+        if (e.enclosing && entity_table[e.enclosing].lambda)
             return constness::unknown;
         return constness::not_constant;
     }
@@ -1160,10 +1170,7 @@ uint32_t semantic_analysis::value_tree(const constant_evaluation &state,
         elements.append(e);
     }
     uint32_t node = expression_node(semantic_kind::initializer_list, m, at);
-    if (!elements.empty())
-        semantics[node].first =
-            semantics.list(elements.data(), elements.size());
-    semantics[node].count = static_cast<uint32_t>(elements.size());
+    semantics.set_list(node, elements.data(), elements.size());
     return node;
 }
 

@@ -1020,7 +1020,7 @@ analysis_result semantic_analysis::init_declarator(node_index declaration,
 
 analysis_result semantic_analysis::declare_with_initializer(
     node_index declaration, syntax_child d, syntax_child init, bool initialized,
-    const specified &s, bool definition)
+    const specified &s, bool definition, const expression_meaning *supplied)
 {
     last_declared = 0;
     qualified_type type = s.type;
@@ -1336,11 +1336,21 @@ analysis_result semantic_analysis::declare_with_initializer(
             t.kind == type_kind::array && !t.bound_known;
     }
     uint32_t calls_before = constexpr_calls;
-    if (placeholder) {
+    if (supplied) {
+        /* an initializer analysis made, "= E" ([stmt.ranged]/1) */
+        expression_meaning given = *supplied;
+        scoped_value<entity_index> deducing(deducing_variable, declared_entity);
+        if (placeholder)
+            r = deduced_initialization(declaration, given, false, false, false,
+                                       declared_entity, type, value);
+        else
+            r = initialize_with(declaration, given, type, false, false, value);
+    } else if (placeholder) {
         scoped_value<entity_index> deducing(deducing_variable, declared_entity);
         r = deduced_initializer(init, declared_entity, type, value);
-    } else
+    } else {
         r = initializer(init, type, value);
+    }
     if (r != analysis_result::well_formed)
         return r;
     entity_table[declared_entity].bound_unknown = false;

@@ -397,6 +397,9 @@ struct entity {
     /* [class.default.ctor]/2: the implicit default constructor is deleted
        (a subobject without a usable default constructor) */
     bool implicit_default_deleted = false;
+    /* [expr.prim.lambda.closure]/13: a closure type's copy assignment
+       operator is deleted (a lambda-capture) */
+    bool closure_assignment_deleted = false;
     /* a function (the first of its overloads) a using-declaration names
        ([namespace.udecl]/11) */
     bool named_by_using = false;
@@ -564,6 +567,13 @@ struct entity {
     /* a function declared with a return type that has a placeholder
        ([dcl.spec.auto]/3), deduced or not */
     bool placeholder_return = false;
+    /* a closure type ([expr.prim.lambda.closure]/1): its lambda-expression
+       (0: the class is no closure) and its function call operator */
+    node_index lambda = 0;
+    entity_index call_operator = 0;
+    /* an init-capture's name ([expr.prim.lambda.capture]/6): the variable
+       is the closure's non-static data member this names */
+    entity_index capture_member = 0;
 };
 
 /* [class.virtual], [abi:vtable-components]: what a dynamic class adds to
@@ -861,6 +871,18 @@ uint32_t cv_of(const types &table, qualified_type t);
 /* whether the function types a and b have the same parameter-type-list
    ([dcl.fct]/4) */
 bool same_parameters(const types &table, type_index a, type_index b);
+/* the function whose definition a block-scope entity is declared in, 0
+   for an entity not in a function (abi/itanium/mangling.cpp) */
+entity_index enclosing_function(const entities &table, entity_index e);
+/* the function a member of a local class (or of a class nested in one)
+   is in (for a member function of a local class: the next function out),
+   0 for any other entity (abi/itanium/mangling.cpp) */
+entity_index next_enclosing_function(const entities &table, entity_index f);
+/* [impl.clang] (clang's VisibleNoLinkage): whether c, a local class or
+   closure type (or a class nested in one), is named in other translation
+   units: the outermost function it is in is inline or a template's
+   specialization (abi/itanium/mangling.cpp) */
+bool visible_local_class(const entities &table, entity_index c);
 
 /* [basic.lval]/1: "Every expression belongs to exactly one of the
    fundamental classifications in this taxonomy: lvalue, xvalue, or
@@ -1156,6 +1178,13 @@ class semantic_tree
     uint32_t add(const semantic_node &n);
     /* a list of node or entity indexes: its first index */
     uint32_t list(const uint32_t *items, size_t count);
+    /* node n's list ([first, + count)): items[0 .. count) */
+    void set_list(uint32_t n, const uint32_t *items, size_t count)
+    {
+        if (count)
+            nodes[n].first = list(items, count);
+        nodes[n].count = static_cast<uint32_t>(count);
+    }
 
     const semantic_node &operator[](uint32_t n) const
     {
@@ -1376,6 +1405,13 @@ class semantic_analysis
     {
         return tokens.spelling(i, out);
     }
+
+    /* the closure numbers of the translation unit [impl.clang] gives a
+       lambda whose closure has no mangling number ($_N, in the order the
+       symbols of their members are made); numbered only when allowed (by
+       lowering) */
+    mutable owned_array<entity_index> unnumbered_closures;
+    mutable bool number_closures = false;
 
   private:
     /* the node needs rules that are not written: those of the subclause
@@ -1730,7 +1766,8 @@ class semantic_analysis
     entity_index qualified_scope = 0;
     /* whether the type is, or is made of, a class or enumeration whose
        name has no external linkage */
-    bool type_without_external_linkage(qualified_type t) const;
+    bool type_without_external_linkage(qualified_type t,
+                                       bool visible = false) const;
     /* [basic.link]/4.3: whether t is (an array of) an unnamed class
        without a typedef name for linkage purposes */
     bool unnamed_class_object(qualified_type t) const;
@@ -2044,9 +2081,92 @@ class semantic_analysis
     /* [expr.prim.id]: the expression that names the entity e, found by
        lookup of the identifier t */
     analysis_result named_entity(token_index t, entity_index e,
-                                 expression_meaning &m);
+                                 expression_meaning &m, bool record_use = true);
     /* [expr.prim.this] */
+    analysis_result function_this(token_index t, expression_meaning &m);
     analysis_result this_pointer(token_index t, expression_meaning &m);
+    /* *this, an lvalue ([expr.unary.op]/1); own: the function's own this
+       (function_this), not a lambda's captured one */
+    analysis_result this_object(token_index t, expression_meaning &m,
+                                bool own = false);
+
+    /* ---- lambda expressions ([expr.prim.lambda], expr/expr.prim.lambda*.cpp) */
+    enum class capture_default : uint8_t { none, copy, reference };
+    /* an entity a lambda captures ([expr.prim.lambda.capture]): a
+       variable (0: this), by reference or not (*this: star_this), the
+       closure's member for it, and an init-capture's initialization (its
+       variable then) */
+    struct capture_record {
+        entity_index variable = 0, member = 0;
+        bool by_reference = false, star_this = false, init_capture = false;
+        token_index at = 0;
+        uint32_t initialization = 0;
+    };
+    /* a lambda-expression whose compound-statement is analysed: its closure
+       type, function call operator, the function of the context it is in,
+       its capture-default, whether it is mutable, the type of this in that
+       context (none if it has no this) and its captures,
+       lambda_captures[first_capture ..] */
+    struct lambda_context {
+        entity_index closure = 0, call = 0, enclosing_function = 0;
+        capture_default default_capture = capture_default::none;
+        bool mutable_ = false;
+        qualified_type enclosing_this;
+        node_index at = 0;
+        uint32_t first_capture = 0;
+    };
+    owned_array<lambda_context> lambdas;
+    owned_array<capture_record> lambda_captures;
+    /* the lambda whose compound-statement is analysed now (its body, not a
+       local class's member function in it), nullptr if none */
+    lambda_context *current_lambda();
+    analysis_result lambda_expression(node_index n, expression_meaning &m);
+    analysis_result lambda_introducer(node_index n, lambda_context &l);
+    analysis_result lambda_captures_of(node_index n,
+                                       owned_array<syntax_child> &out);
+    analysis_result init_capture(node_index n, lambda_context &l,
+                                 capture_record &c);
+    /* the current lambda's init-captures' variables, bound in its
+       function parameter scope */
+    analysis_result bind_init_captures(entity_index scope);
+    /* [expr.prim.lambda.capture]/10, /12: the type of the member that
+       captures an entity of type t */
+    analysis_result capture_type(node_index at, qualified_type t,
+                                 bool by_reference, qualified_type &type);
+    /* the type of local entity e where a lambda-expression is: an
+       enclosing lambda's member when that lambda captures it by copy */
+    qualified_type enclosing_capture_type(entity_index e, size_t count,
+                                          size_t end) const;
+    /* class c's members one range of class_members again (class.pre.cpp) */
+    void make_members_contiguous(entity_index c);
+    /* the closure's non-static data member of type type for a capture */
+    entity_index capture_member_of(entity_index closure, qualified_type type);
+    /* the entity e of an enclosing function named at t in the body: its
+       capture's member ([expr.prim.lambda.capture]/11) */
+    analysis_result captured_entity(token_index t, entity_index e,
+                                    expression_meaning &m);
+    /* this in the body: the captured this ([expr.prim.lambda.capture]/12) */
+    analysis_result captured_this(token_index t, expression_meaning &m);
+    /* member of the closure object, through the call operator's this */
+    analysis_result closure_member(token_index t, entity_index member,
+                                   expression_meaning &m);
+    /* the closure object: each capture's member initialized in the
+       lambda-expression's context ([expr.prim.lambda.capture]/15) */
+    analysis_result closure_object(lambda_context &l,
+                                   const owned_array<capture_record> &captures,
+                                   expression_meaning &m);
+    /* the closure type c complete after the body: its layout, special
+       members and, for a lambda without a lambda-capture, the conversion
+       function */
+    analysis_result closure_class(entity_index c, node_index n,
+                                  bool has_capture);
+    /* [expr.prim.lambda.closure]/7: the conversion function to pointer to
+       function of a lambda without captures, and the static member
+       function it returns */
+    /* [expr.call]/14: a call's type and category from its result type */
+    void call_result(qualified_type result, expression_meaning &m) const;
+    analysis_result closure_conversion(entity_index c, entity_index call,
+                                       node_index n);
     /* [expr.prim.paren] */
     analysis_result parenthesized(node_index n, expression_meaning &m);
     /* [expr.unary] */
@@ -2056,6 +2176,14 @@ class semantic_analysis
     analysis_result increment(node_index n, syntax_child operand,
                               bool decrement, bool postfix,
                               expression_meaning &m);
+    /* ... of the operand analysed as m (syntax operand, if it has one),
+       the operator at the token at */
+    analysis_result increment_of(node_index n, token_index at,
+                                 syntax_child operand, bool decrement,
+                                 bool postfix, expression_meaning &m);
+    /* [expr.unary.op]/1, [over.unary]: *m, as increment_of */
+    analysis_result indirection_of(node_index n, token_index at,
+                                   syntax_child operand, expression_meaning &m);
     /* [expr.post] */
     analysis_result postfix(node_index n, expression_meaning &m);
     /* [expr.ref]: E1.E2 and E1->E2 */
@@ -2084,6 +2212,15 @@ class semantic_analysis
                                        bool &handled);
     /* [expr.mul] to [expr.log.or] */
     analysis_result binary(node_index n, expression_meaning &m);
+    /* E1 op E2 of the operands analysed (their syntax, none for operands
+       [stmt.ranged]/1 makes): an operator function ([over.binary]) or the
+       built-in operator */
+    analysis_result binary_of(node_index n, token_index at,
+                              preprocessing_op_or_punc op,
+                              syntax_child left_syntax,
+                              expression_meaning &left,
+                              syntax_child right_syntax,
+                              expression_meaning &right, expression_meaning &m);
     analysis_result builtin_binary(node_index n, token_index at,
                                    preprocessing_op_or_punc op,
                                    expression_meaning &left,
@@ -2399,6 +2536,10 @@ class semantic_analysis
     analysis_result deduced_initializer(syntax_child init, entity_index e,
                                         qualified_type &type,
                                         initialized_value &value);
+    analysis_result deduced_initialization(node_index n, expression_meaning &m,
+                                           bool named, bool direct, bool list,
+                                           entity_index e, qualified_type &type,
+                                           initialized_value &value);
     /* the object or reference of type type (an array of unknown bound gets
        its bound) initialized by the initializer node (a
        brace-or-equal-initializer, initializer or braced-init-list) */
@@ -2592,6 +2733,25 @@ class semantic_analysis
     analysis_result implicit_special_members(entity_index c, node_index n);
     void declare_implicit(entity_index c, special_member kind, bool copy);
     analysis_result implicit_definitions(entity_index c, node_index n);
+    /* a function whose definition analysis makes itself (an implicit
+       special member, a closure type's __invoke and conversion function):
+       its parameter scope, the scope it is in, its parameters (with a
+       this_type, the this parameter first) */
+    struct synthesized_function {
+        entity_index function = 0, scope = 0, outer_scope = 0;
+        owned_array<uint32_t> parameters;
+    };
+    void begin_synthesized(synthesized_function &s, entity_index f,
+                           qualified_type returns, qualified_type this_type);
+    /* a variable of the parameter scope; a parameter is appended */
+    entity_index synthesized_variable(synthesized_function &s, qualified_type t,
+                                      bool parameter);
+    /* the function-body of block (with a constructor's member
+       initializations and a destructor's destructions), the definition
+       recorded, the function's state left */
+    void finish_synthesized(synthesized_function &s, node_index declaration,
+                            token_index at, uint32_t block,
+                            uint32_t members = 0, uint32_t destructions = 0);
     analysis_result implicit_copy(entity_index c, node_index n,
                                   entity_index source, uint32_t &built);
     /* [class.dtor]/13: after the body of the destructor of class c, the
@@ -2738,6 +2898,21 @@ class semantic_analysis
         /* the function whose body it is */
         entity_index function = 0;
     } function_state;
+    /* the state of the enclosing function's analysis that a lambda's body
+       changes, kept aside meanwhile (as class_definition does for a local
+       class's member functions) */
+    struct lambda_enclosing_state {
+        function_context function;
+        owned_array<entity_index> block_variables;
+        owned_array<parameter_meaning> parameters;
+        entity_index scope = 0, last_declared = 0, deducing_variable = 0;
+        node_index declaration = 0;
+        token_index claim_place = 0;
+        entity_index claim_scope = 0;
+        qualified_type declaration_deduced;
+        bool placeholder_group = false, in_condition = false;
+        uint32_t function_cv = 0, function_empty_pack = 0;
+    };
     /* the invocations of constexpr functions analysed so far: an
        initializer that has one is the evaluator's to decide
        ([basic.start.static]/2) */
@@ -3362,6 +3537,21 @@ class semantic_analysis
     analysis_result expression_statement(node_index n, uint32_t &built);
     analysis_result selection_statement(node_index n, uint32_t &built);
     analysis_result iteration_statement(node_index n, uint32_t &built);
+    /* [stmt.ranged]: the range-based for statement n, whose
+       for-range-declaration is its child declaration */
+    analysis_result range_based_for(node_index n, uint32_t declaration,
+                                    uint32_t &built);
+    analysis_result exposition_variable(node_index n, token_index at,
+                                        expression_meaning &m,
+                                        qualified_type type, bool named,
+                                        uint32_t &declaration,
+                                        expression_meaning &variable);
+    analysis_result range_call(node_index n, token_index at,
+                               const expression_meaning &range, uint32_t name,
+                               bool member, expression_meaning &m);
+    analysis_result for_range_declaration(syntax_child d,
+                                          const expression_meaning &element,
+                                          uint32_t &built);
     analysis_result jump_statement(node_index n, uint32_t &built);
     analysis_result labeled_statement(node_index n, uint32_t &built);
     analysis_result case_label(node_index n, syntax_child value,
@@ -3410,6 +3600,10 @@ class semantic_analysis
     {
         return tokens.identifier(i);
     }
+    /* whether specialization e has internal linkage only from local
+       classes or closure types other translation units name too: its
+       symbol has its template's linkage (basic/basic.link.cpp) */
+    bool specialization_visible(entity_index e) const;
     uint32_t specialization_argument_count(entity_index e) const
     {
         return instantiations[entity_table[e].instantiation - 1].argument_count;
@@ -3823,12 +4017,13 @@ class semantic_analysis
                                     qualified_type type, bool direct, bool list,
                                     initialized_value &result);
     /* a declarator and its initializer (none if !initialized), as in an
-       init-declarator or a condition */
-    analysis_result declare_with_initializer(node_index declaration,
-                                             syntax_child d, syntax_child init,
-                                             bool initialized,
-                                             const specified &s,
-                                             bool definition);
+       init-declarator or a condition; supplied, if not null, is an
+       initializer analysed already ("= E", [stmt.ranged]/1; init none) */
+    analysis_result
+    declare_with_initializer(node_index declaration, syntax_child d,
+                             syntax_child init, bool initialized,
+                             const specified &s, bool definition,
+                             const expression_meaning *supplied = nullptr);
 
     const syntax_tree &tree;
     token_stream &tokens;

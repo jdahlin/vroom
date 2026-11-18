@@ -1377,6 +1377,99 @@ lines:
   we accept and clang rejects, all 0 refuted.  cxx-run 428/428 (107
   programs); cxx-c-suites 0 wrong; quality redundant_tokens 58937,
   duplicate_runs_across_files 351, unchanged.
+- Status (2026-11-18, step 5: non-generic lambdas): a closure is a local
+  class (`expr.prim.lambda.cpp`) with its function call operator (const
+  unless `mutable`, deduced or trailing return type), its captures
+  unnamed members (`expr.prim.lambda.capture.cpp`: by copy, by reference,
+  `[=]`/`[&]`, `this`, `*this`, init-captures, an enclosing lambda's
+  captures for a nested one, [expr.prim.lambda.capture]/14), its object an
+  initializer list of them.  A captureless lambda has the conversion
+  function to pointer to function and clang's static `__invoke`
+  (`expr.prim.lambda.closure.cpp`); `f(args)` on a closure takes the call
+  operator over the surrogate.  Mangling: `Ul<params>E[n]_` in inline and
+  templated contexts (a lambda's call operator among them), clang's
+  per-function `$_N` elsewhere, numbered in the order lowering makes the
+  symbols (`number_closures`; a specialization for such a closure gets
+  its symbol at its first use); a function template specialization
+  internal by its arguments has no `L`.  Not supported: generic lambdas,
+  `constexpr`/`consteval` lambdas and the call operator's implicit
+  constexpr (a constant evaluation of a closure's function is unknown),
+  default arguments, packs, implicit capture of a variable usable in
+  constant expressions (the odr-use question), lambdas outside a
+  function body, an init-capture with a trailing-return-type, the
+  conversion of a variadic lambda; a closure capturing a class with a
+  destructor fails in lowering (a temporary with a destructor).  Test
+  `lambdas.cpp`.  `bench/cxx-sema.py`: declarations 55698 -> 55862 as
+  clang, 12 we reject and clang accepts (the same), 2453 -> 2467 we accept
+  and clang rejects, all 0 refuted; lowering 428 -> 435 files, [expr.prim.lambda]
+  no longer among the reasons.  cxx-run 460/460 (115 programs);
+  cxx-c-suites 0 wrong; quality redundant_tokens 59310 -> 59684,
+  duplicate_runs_across_files 353 -> 360.
+- Status (2026-11-18, step 5 after review): linkage across translation
+  units.  A specialization internal only by local classes or closure types
+  of an inline or templated function has its template's linkage
+  (`specialization_visible`, clang's VisibleNoLinkage; one predicate,
+  `visible_local_class`, beside `closure_numbered`'s walk), a function
+  returning such a closure is weak, not local, and a static local of a
+  function emitted weak is weak (`V`, [dcl.inline]/6): `cnt(mk())` in two
+  units shares one counter.  A template parameter is a substitution
+  candidate by its position, as clang keys it (`...EiS1_` for a closure of
+  a function template).  [expr.prim.lambda.closure]/13: a closure type with
+  a lambda-capture (every one before C++20) has a deleted default
+  constructor and copy assignment operator.  A capture by reference of what
+  an enclosing lambda captured by copy has that lambda's member's type,
+  const unless it is mutable (`enclosing_capture_type`).  A closure type's
+  copy constructor is mangled, so a capture of a class with a user copy
+  constructor compiles.  Helpers in place of copies: `begin_synthesized`/
+  `finish_synthesized`, `semantic_tree::set_list`, `this_object`,
+  `make_members_contiguous`.  `bench/cxx-run.py` links programs of several
+  units (`/* cxx-run-units: */`, `src/test/cxx/run/units/`):
+  `vague-linkage.cpp`; cases added to `lambdas.cpp`.  `bench/cxx-sema.py`:
+  declarations 55862 -> 55874 as clang, 12 we reject and clang accepts
+  (the same), 2467 -> 2464 we accept and clang rejects, all 0 refuted;
+  declared types 27332 -> 27327 verified (declarations now rejected as
+  clang rejects them carry no claims).  cxx-run 464/464 (116 programs);
+  cxx-c-suites 2272 pass, 0 wrong, as before; quality redundant_tokens
+  59684 -> 59295, duplicate_runs_across_files 360 -> 353.
+- Status (2026-11-18, step 6: range-based for): [stmt.ranged]/1's
+  rewrite, built in the semantic tree (`stmt.iter.cpp`,
+  `range_based_for`): a block of the init-statement, the unnamed
+  exposition variables `auto &&range`, `auto begin`, `auto end`
+  (`exposition_variable`, deduced by step 1's `deduced_initialization`),
+  and a for statement whose condition, step and element are `begin !=
+  end`, `++begin` and `*begin` through the operator functions or the
+  built-in operators (`increment_of`, `indirection_of`, split out of
+  their syntax-driven callers); the for-range-declaration is declared
+  by `declare_with_initializer` with the element as its initializer
+  (its `supplied` parameter).  begin-expr and end-expr: an array's `range`
+  and `range + N`, a class's members `begin`/`end` (overload
+  resolution among them), else `begin(range)`/`end(range)` by
+  argument-dependent lookup alone (`range_call`); different begin and
+  end types.  Lowering is the existing block and for statement's
+  (destructors of the loop variable per iteration, break, continue).
+  Test `range-for.cpp`.  Not supported: structured bindings in the
+  for-range-declaration (step 7), a braced-init-list as the range
+  (std::initializer_list), an attribute-specifier-seq on the
+  declaration, member or free `begin`/`end` templates, and any class
+  prvalue bound to a reference: a class temporary as the range
+  (`for (int x : R{})`, with a trivial R too) and `const E &` bound
+  to a class prvalue from `*begin` (both refused at reference_binding's
+  [class.temporary]).  A range of other than array or class type
+  takes `begin(range)` by argument-dependent lookup (an enumeration's
+  namespace); none found, as for `int *`, is ill-formed, as clang
+  reports.  A for-range-declaration defining a class or enumeration
+  is ill-formed ([stmt.ranged]/2).  2026-11-18 review: the supplied
+  initializer a parameter, `binary_of` and `indirection_of` shared with
+  the expression paths; declarations 55926 -> 55935 as clang (types
+  69149 -> 69145, constants 27979 -> 27975: claims of declarations now
+  rejected as clang rejects them), the rest unchanged.
+  `bench/cxx-sema.py`: declarations 55874 -> 55926 as clang, 12 we
+  reject and clang accepts (the same), 2464 we accept and clang rejects
+  (the same), all 0 refuted; declared types 27327 -> 27328, types
+  69136 -> 69149, lookup 20986 -> 21395, symbols 2456 -> 2483 verified;
+  constants 27981 -> 27979 (for-range-dereference.cpp: its functions
+  now rejected as clang rejects them carry no claims); lowering 435 ->
+  437 files.  cxx-run 468/468 (117 programs); quality unchanged.
 
 ### S6. Constant evaluation and templates
 
