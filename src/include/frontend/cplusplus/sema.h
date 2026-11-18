@@ -312,6 +312,10 @@ struct entity {
        the class is complete, its offset in bytes ([class.mem]/19,
        [abi:class-types]) */
     uint32_t field = 0;
+    /* an anonymous union (or clang's anonymous struct): the unnamed
+       member object of it in the enclosing class ([class.union.anon]/1),
+       through which a member's name in that class designates it */
+    entity_index anonymous_object = 0;
     uint64_t offset = 0;
     /* a class: its non-static data members, in declaration order, are
        semantic_analysis::class_members[first_member .. first_member +
@@ -1601,6 +1605,10 @@ class semantic_analysis
     /* [dcl.meaning]/1: Class::Class or Class::~Class defined outside the
        class: the function-definition n without a decl-specifier-seq */
     analysis_result special_member_definition(node_index n, uint32_t at);
+    analysis_result anonymous_union_member(entity_index c, node_index n,
+                                           const specified &s, uint8_t access);
+    analysis_result bind_anonymous_members(entity_index c, node_index n,
+                                           entity_index u);
     /* whether the declarator d with no decl-specifier-seq declares a
        constructor or destructor of c */
     bool declares_special_member(entity_index c, syntax_child d) const;

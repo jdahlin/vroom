@@ -432,8 +432,9 @@ ast_qualified_type c_lowering::class_type(entity_index e, token_index at)
         entity_index member = analysis.class_members[x.first_member + i];
         const entity &m = analysis.entity_table[member];
         fields.append(type(m.type, at));
-        if (m.base_subobject) {
-            /* a base class subobject: a field no C name can refer to */
+        if (m.base_subobject || (!m.name && !m.bit_field)) {
+            /* a base class subobject or an anonymous union's object: a
+               field no C name can refer to */
             vbuffer_format_append(base_names.get(), "__base%u", i);
             vbuffer_append(base_names.get(), "", 1);
             names.append(nullptr);

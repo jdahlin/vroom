@@ -92,6 +92,87 @@ bool semantic_analysis::declares_unnamed_class(node_index seq) const
     return false;
 }
 
+/*
+ * [class.union.anon]/1: "A union of the form union { member-specification
+ * } ; is called an anonymous union; it defines an unnamed type and an
+ * unnamed object of that type called an anonymous union member if it is a
+ * non-static data member or an anonymous union variable otherwise.  Each
+ * member-declaration in the member-specification of an anonymous union
+ * shall either define a non-static data member or be a
+ * static_assert-declaration. ... The names of the members of an anonymous
+ * union are bound in the scope inherited from the scope of the anonymous
+ * union declaration."  An unnamed struct so is clang's extension, the same
+ * with the struct's layout.  The member object takes a field of c like a
+ * named one; a name of a member is bound in c to the member, whose class
+ * says which object it is in (entity::anonymous_object).
+ */
+analysis_result semantic_analysis::anonymous_union_member(entity_index c,
+                                                          node_index n,
+                                                          const specified &s,
+                                                          uint8_t access)
+{
+    const struct type record = type_table[s.type.unqualified()];
+    if (s.typedef_ || s.static_ || s.extern_ || s.inline_ || s.constexpr_ ||
+        s.type.cv() || s.aligned || s.gnu_flags ||
+        record.kind != type_kind::class_type)
+        return not_supported(n, "class.union.anon");
+    entity_index u = record.entity;
+    const entity &x = entity_table[u];
+    if (x.first_constructor || x.destructor || x.base_count ||
+        !size_of_type(s.type))
+        return not_supported(n, "class.union.anon");
+    entity_index e = entity_table.make(entity_kind::variable, 0, c);
+    entity_table[e].type = s.type;
+    entity_table[e].nonstatic_member = true;
+    entity_table[e].defined = true;
+    entity_table[e].field = entity_table[c].member_count;
+    entity_table[e].linkage_of_name = entity_table[c].linkage_of_name;
+    entity_table[e].access = access;
+    entity_table.add_declaration(e, n);
+    class_members.append(e);
+    entity_table[c].member_count++;
+    entity_table[u].anonymous_object = e;
+    return bind_anonymous_members(c, n, u);
+}
+
+/* the names of the members of anonymous union u, and of the anonymous
+   unions among them, bound in c ([class.union.anon]/1) */
+analysis_result semantic_analysis::bind_anonymous_members(entity_index c,
+                                                          node_index n,
+                                                          entity_index u)
+{
+    const entity &x = entity_table[u];
+    for (uint32_t i = 0; i < x.member_count; i++) {
+        entity_index m = class_members[x.first_member + i];
+        const entity &member = entity_table[m];
+        if (!member.name) {
+            entity_index inner = 0;
+            const struct type t = type_table[member.type.unqualified()];
+            if (!member.bit_field && t.kind == type_kind::class_type)
+                inner = t.entity;
+            if (inner && entity_table[inner].anonymous_object == m) {
+                analysis_result r = bind_anonymous_members(c, n, inner);
+                if (r != analysis_result::well_formed)
+                    return r;
+            }
+            continue;
+        }
+        if (member.access)
+            /* [class.union.anon]/1: "an anonymous union shall not have
+               private or protected members" */
+            return ill_formed(n,
+                              "an anonymous union shall not have private or "
+                              "protected members",
+                              "class.union.anon");
+        if (entity_table.find(c, member.name))
+            /* [class.mem]/5: "A member shall not be declared twice in the
+               member-specification" */
+            return not_supported(n, "class.union.anon");
+        entity_table.bind(c, member.name, m);
+    }
+    return analysis_result::well_formed;
+}
+
 analysis_result semantic_analysis::class_definition(node_index n,
                                                     type_index &type)
 {
@@ -871,12 +952,8 @@ semantic_analysis::member_declaration(entity_index c, syntax_child member,
                      !s.constexpr_ && !s.type.cv();
         if (s.declares_enumeration && plain)
             return analysis_result::well_formed;
-        /* [class.union.anon]/1: "A union of the form union { member-
-           specification } ; is called an anonymous union; it defines an
-           unnamed type and an unnamed object of that type"; an unnamed
-           struct so is clang's extension: neither is analysed yet */
         if (declares_unnamed_class(children[0].index()))
-            return not_supported(n, "class.union.anon");
+            return anonymous_union_member(c, n, s, access);
         /* [class.nest]/1: a nested class's definition, or its declaration
            ([class.nest]/3) */
         const syntax_node &seq = tree[children[0].index()];

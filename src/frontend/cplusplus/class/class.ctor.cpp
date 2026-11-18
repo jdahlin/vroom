@@ -588,6 +588,10 @@ analysis_result semantic_analysis::ctor_initializer(syntax_child list,
                                        "mem-initializer is ill-formed",
                                        "class.base.init");
         }
+        if (entity_table[entity_table[e].enclosing].anonymous_object)
+            /* [class.base.init]/2: a member of an anonymous union
+               ([class.union.anon]), initialized in its unnamed object */
+            return not_supported(n, "class.base.init");
         size_t slot = 0;
         while (subobjects[slot] != e)
             slot++;
