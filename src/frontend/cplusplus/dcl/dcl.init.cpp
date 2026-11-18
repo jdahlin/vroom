@@ -1259,7 +1259,9 @@ analysis_result semantic_analysis::aggregate_element(
     node_index at = list;
     if (!clause.is_token())
         at = clause.index();
-    const struct type &record = type_table[element.unqualified()];
+    /* a copy: analysing the clause adds types, which may move
+       type_table's */
+    const struct type record = type_table[element.unqualified()];
     bool braced = syntax_is(tree, clause, syntax_kind::braced_init_list);
     bool subaggregate =
         record.kind == type_kind::array ||

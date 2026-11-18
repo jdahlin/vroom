@@ -789,7 +789,9 @@ analysis_result semantic_analysis::ctor_initializer(syntax_child list,
                                        "once",
                                        "class.base.init");
         qualified_type type = entity_table[e].type;
-        const struct type &record = type_table[type.unqualified()];
+        /* a copy: subobject and the initializer add types, which may move
+           type_table's */
+        const struct type record = type_table[type.unqualified()];
         if (record.kind == type_kind::array)
             return not_supported(n, "class.base.init");
         expression_meaning object;
@@ -1508,6 +1510,8 @@ uint32_t semantic_analysis::subobject_destructions(entity_index c,
         if (r.kind != type_kind::class_type ||
             !entity_table[r.entity].destructor)
             continue;
+        /* read before subobject adds types, which may move r */
+        entity_index destructor = entity_table[r.entity].destructor;
         expression_meaning object;
         if (subobject(at, order[i], object) != analysis_result::well_formed)
             return 0;
@@ -1516,9 +1520,8 @@ uint32_t semantic_analysis::subobject_destructions(entity_index c,
             type_table.fundamental(fundamental_type::void_), cv_none);
         call.category = value_category::prvalue;
         call.evaluation = constness::not_constant;
-        uint32_t destroyed =
-            expression_node(semantic_kind::destroy, call, at, object.node,
-                            entity_table[r.entity].destructor);
+        uint32_t destroyed = expression_node(semantic_kind::destroy, call, at,
+                                             object.node, destructor);
         statements.append(
             statement_node(semantic_kind::expression_statement, at, destroyed));
     }
