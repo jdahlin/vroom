@@ -1558,6 +1558,25 @@ lines:
   exposed (SemaCXX/empty-class-layout.cpp).  cxx-sema: declarations as
   clang 38285, 0 we reject and clang accepts, 0 refuted (symbols 1778,
   layouts 10178); cxx-run 204/204; cxx-c-suites unchanged.
+  Then template-ids in expressions and after `::` ([temp.names]): a
+  simple-template-id naming a class template in a nested-name-specifier
+  names the specialization, whose members are looked up there
+  (`nested_name_specifier`, basic.lookup.cpp: `traits<int>::kind()`,
+  `N::q<int>::g()`); `box<int>(...)` and `box<int>{...}` are explicit
+  type conversions to the specialization ([expr.type.conv]/1,
+  `postfix`); a static data member or static member function reached
+  through an object is the member, the object evaluated first as a
+  comma's left operand ([expr.ref]/6.1, /6.3.1; not an overloaded one).
+  Lowering folds `==`/`!=` of a null pointer and the address of a
+  non-weak variable of static storage duration or function, as clang's
+  code generator does (otherwise the variable is referenced and emitted).
+  Not yet: `template` before a simple-template-id, a dependent
+  specialization before `::` ([temp.res]), a qualified template-id in an
+  expression's type conversion, member typedefs and static data members
+  of class templates (S4).  cxx-sema: declarations as clang 38372, 0 we
+  reject and clang accepts, 0 refuted (symbols 1791, layouts 10189,
+  lowering 280); [temp.names] unsupported 8297 (from ~9.5k); cxx-run
+  208/208; cxx-c-suites unchanged.
 
 ### S7. Exceptions and RTTI
 

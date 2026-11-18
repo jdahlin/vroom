@@ -658,8 +658,8 @@ bool semantic_analysis::argument_dependent_lookup(
  * program is ill-formed."  /3: "A name prefixed by the unary scope operator
  * :: is looked up in global scope".  The first name is looked up as an
  * unqualified name, each later one in the scope the names before it
- * nominate.  A decltype-specifier or a simple-template-id has no rules
- * yet.
+ * nominate.  A simple-template-id names its class template's
+ * specialization; a decltype-specifier has no rules yet.
  */
 analysis_result semantic_analysis::nested_name_specifier(node_index n,
                                                          nominated_scope &scope)
@@ -677,13 +677,36 @@ analysis_result semantic_analysis::nested_name_specifier(node_index n,
         i = 1;
     }
     for (; i < node.child_count; i += 2) {
+        if (!parts[i].is_token() &&
+            syntax_is(tree, parts[i], syntax_kind::simple_template_id) &&
+            i + 1 < node.child_count &&
+            syntax_is_punctuator(tokens, parts[i + 1],
+                                 preprocessing_op_or_punc::COLON_COLON)) {
+            /* [temp.names]/1: a simple-template-id naming a class template
+               names the specialization ([temp.spec]/4), a class; its
+               members are looked up there ([class.qual]/1) */
+            type_index named = 0;
+            analysis_result r =
+                template_type(parts[i].index(), scope.entity, qualified, named);
+            if (r != analysis_result::well_formed)
+                return r;
+            const struct type &st = type_table[named];
+            if (st.kind != type_kind::class_type)
+                return not_supported(n, "temp.res");
+            const entity &x = entity_table[st.entity];
+            if (!x.size && st.entity != defining_class && !x.defined)
+                return not_supported(n, "basic.lookup.qual");
+            scope.entity = st.entity;
+            scope.global = false;
+            qualified = true;
+            continue;
+        }
         if (!parts[i].is_token() ||
             tokens[parts[i].index()].kind != token_kind::identifier ||
             i + 1 >= node.child_count ||
             !syntax_is_punctuator(tokens, parts[i + 1],
                                   preprocessing_op_or_punc::COLON_COLON)) {
-            /* [temp.names]: a simple-template-id in the
-               nested-name-specifier */
+            /* [temp.names]: template before a simple-template-id */
             if (!parts[i].is_token() &&
                 syntax_is(tree, parts[i], syntax_kind::simple_template_id))
                 return not_supported(n, "temp.names");

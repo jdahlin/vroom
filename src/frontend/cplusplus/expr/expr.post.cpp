@@ -401,6 +401,31 @@ analysis_result semantic_analysis::postfix(node_index n, expression_meaning &m)
                 return r;
         }
     }
+    if ((parenthesized || braced) &&
+        syntax_is(tree, children[0], syntax_kind::simple_template_id)) {
+        /* [temp.names]/1 with [expr.type.conv]/1: a simple-template-id
+           naming a class template is a simple-type-specifier
+           ([dcl.type.simple]/1), the specialization's class */
+        const syntax_child *id = tree.children(children[0].index());
+        if (tree[children[0].index()].child_count >= 3 && id[0].is_token() &&
+            tokens[id[0].index()].kind == token_kind::identifier) {
+            lookup_result x = lookup_unqualified(
+                tokens.identifier(id[0].index()), lookup_filter::any);
+            entity_index found = x.entity;
+            if (!found)
+                found = x.unknown_entity;
+            if (class_template_of(found)) {
+                type_index t = 0;
+                analysis_result r =
+                    template_type(children[0].index(), 0, false, t);
+                if (r != analysis_result::well_formed)
+                    return r;
+                if (type_table[t].kind != type_kind::class_type)
+                    return not_supported(n, "temp.res");
+                return class_conversion(n, type_table[t].entity, m);
+            }
+        }
+    }
     if (named) {
         qualified_type to = qualified_type::make(named, cv_none);
         const struct type record = type_table[named];

@@ -442,6 +442,8 @@ class c_lowering
     bool variable_definition(entity_index e);
     bool constant_initializer(uint32_t n) const;
     bool address_constant(uint32_t n) const;
+    bool nonnull_address(uint32_t n) const;
+    bool null_pointer(uint32_t n) const;
     bool needs_run_time(uint32_t n) const;
     bool static_lvalue(uint32_t n) const;
 };
@@ -2094,6 +2096,16 @@ uint32_t c_lowering::binary(const semantic_node &n)
     int op = c_operator(static_cast<preprocessing_op_or_punc>(n.op));
     if (!op)
         return fail("a binary operator", n.at);
+    /* [conv.ptr]/1: a null pointer value is distinct from every pointer to
+       an object or function: the address of a variable or function that is
+       not weak compared with one is known, as clang's code generator folds
+       it (the variable is then not referenced) */
+    if ((op == LEX_TOKEN_EQUAL_EQUAL || op == LEX_TOKEN_EXCLAMATION_EQUAL) &&
+        ((nonnull_address(n.a) && null_pointer(n.b)) ||
+         (null_pointer(n.a) && nonnull_address(n.b))))
+        return to_bool(ast_builder_integer(
+            c, ast_builder_type_basic(AST_TYPE_INT),
+            static_cast<int64_t>(op == LEX_TOKEN_EXCLAMATION_EQUAL)));
     uint32_t a = expression(n.a), b = expression(n.b);
     if (!a || !b)
         return 0;
@@ -3053,6 +3065,51 @@ bool c_lowering::address_constant(uint32_t n) const
     default:
         return false;
     }
+}
+
+/* the address of a variable of static storage duration (or a member of
+   one) or of a function, none of them weak: never a null pointer, and
+   evaluating it has no effect */
+bool c_lowering::nonnull_address(uint32_t n) const
+{
+    const semantic_node &x = node(n);
+    uint32_t object = 0;
+    if (x.kind == semantic_kind::address)
+        object = x.a;
+    else if (x.kind == semantic_kind::conversion) {
+        switch (static_cast<conversion_kind>(x.op)) {
+        case conversion_kind::array_to_pointer:
+        case conversion_kind::function_to_pointer:
+            object = x.a;
+            break;
+        case conversion_kind::pointer:
+        case conversion_kind::qualification_cast:
+            return nonnull_address(x.a);
+        default:
+            return false;
+        }
+    } else {
+        return false;
+    }
+    while (node(object).kind == semantic_kind::member)
+        object = node(object).a;
+    const semantic_node &o = node(object);
+    if (o.kind != semantic_kind::entity)
+        return false;
+    const entity &e = analysis.entity_table[o.a];
+    if (is_reference(e.type) || (e.gnu_flags & gnu_weak))
+        return false;
+    return e.kind == entity_kind::function ||
+           (e.kind == entity_kind::variable && !e.automatic &&
+            !e.nonstatic_member);
+}
+
+/* a null pointer constant converted to a pointer ([conv.ptr]/1) */
+bool c_lowering::null_pointer(uint32_t n) const
+{
+    const semantic_node &x = node(n);
+    return x.kind == semantic_kind::conversion &&
+           static_cast<conversion_kind>(x.op) == conversion_kind::null_pointer;
 }
 
 /* whether evaluating n reads or does something only the running program
