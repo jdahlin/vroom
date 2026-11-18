@@ -670,6 +670,74 @@ analysis_result semantic_analysis::static_assert_declaration(node_index n)
 }
 
 /*
+ * [dcl.typedef]/2: "A typedef-name can also be introduced by an
+ * alias-declaration.  The identifier following the using keyword becomes a
+ * typedef-name and the optional attribute-specifier-seq following the
+ * identifier appertains to that typedef-name."  Its defining-type-id
+ * neither defines nor declares a class or enumeration here, and the
+ * alias-declaration has no attributes.
+ */
+analysis_result semantic_analysis::alias_type(node_index n,
+                                              qualified_type &type)
+{
+    const syntax_node &node = tree[n];
+    const syntax_child *c = tree.children(n);
+    /* using identifier = defining-type-id ; */
+    if (node.child_count != 5 ||
+        !syntax_is(tree, c[3], syntax_kind::defining_type_id))
+        return not_supported(n, "dcl.attr");
+    node_index id = c[3].index();
+    const syntax_node &d = tree[id];
+    const syntax_child *dc = tree.children(id);
+    if (!d.child_count || d.child_count > 2 || dc[0].is_token())
+        return not_supported(n, "dcl.typedef");
+    /* (a simple-template-id counts as declares_class too: the
+       class-specifiers and elaborated-type-specifiers are looked for) */
+    for (uint32_t i = 0; i < tree[dc[0].index()].child_count; i++) {
+        syntax_child k = tree.children(dc[0].index())[i];
+        if (syntax_is(tree, k, syntax_kind::class_specifier) ||
+            syntax_is(tree, k, syntax_kind::elaborated_type_specifier) ||
+            syntax_is(tree, k, syntax_kind::enum_specifier) ||
+            syntax_is(tree, k, syntax_kind::elaborated_enum_specifier))
+            return not_supported(n, "dcl.typedef");
+    }
+    specified s;
+    analysis_result r = decl_specifier_seq(dc[0].index(), s, false);
+    if (r != analysis_result::well_formed)
+        return r;
+    if (!s.has_type || s.declares_enumeration || s.typedef_ || s.static_ ||
+        s.extern_ || s.inline_ || s.constexpr_ || s.gnu_flags || s.aligned)
+        return not_supported(n, "dcl.typedef");
+    type = s.type;
+    if (d.child_count == 1)
+        return analysis_result::well_formed;
+    declarator_meaning m;
+    r = declarator(current_declaration, dc[1], type, m);
+    if (r == analysis_result::well_formed && m.has_id)
+        return not_supported(n, "dcl.name");
+    return r;
+}
+
+analysis_result semantic_analysis::alias_declaration(node_index n)
+{
+    if (defining_class)
+        return not_supported(n, "class.mem");
+    qualified_type type;
+    analysis_result r = alias_type(n, type);
+    if (r != analysis_result::well_formed)
+        return r;
+    specified s;
+    s.typedef_ = true;
+    s.type = type;
+    s.has_type = true;
+    entity_index declared = 0;
+    r = declare(n, tree[n].first_token + 1, entity_kind::typedef_name, type, s,
+                false, false, declared);
+    last_declared = declared;
+    return r;
+}
+
+/*
  *     simple-declaration:
  *         decl-specifier-seq init-declarator-list_opt ;
  *         attribute-specifier-seq decl-specifier-seq init-declarator-list ;

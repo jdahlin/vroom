@@ -1270,6 +1270,10 @@ class semantic_analysis
     /* [dcl.pre] */
     analysis_result empty_declaration(node_index n);
     analysis_result static_assert_declaration(node_index n);
+    /* [dcl.typedef]/2: an alias-declaration's typedef-name */
+    analysis_result alias_declaration(node_index n);
+    /* ... the type its defining-type-id denotes */
+    analysis_result alias_type(node_index n, qualified_type &type);
     /* [temp.pre], [temp.expl.spec], [temp.explicit], [temp.deduct.guide]
        (temp/): the declarations of templates and of their
        specializations; no rules yet, each answers its subclause */
@@ -2461,6 +2465,12 @@ class semantic_analysis
         /* a class template ([temp.class]): definition is its
            class-specifier */
         bool is_class = false;
+        /* an alias template ([temp.alias]): definition is its
+           alias-declaration */
+        bool is_alias = false;
+        /* a variable template ([temp.pre]/1): declarator is its
+           simple-declaration */
+        bool is_variable = false;
         /* a class template's partial ([temp.class.spec]) or explicit
            ([temp.expl.spec]) specialization: its primary template
            (function_templates' index plus one; no name of its own), the
@@ -2517,6 +2527,34 @@ class semantic_analysis
     /* the class template the entity names (its held name, or one of its
        specializations as its injected-class-name), plus one */
     uint32_t class_template_of(entity_index e) const;
+    /* the alias template the held name e is, plus one */
+    uint32_t alias_template_of(entity_index e) const;
+    /* [temp.alias]/1: an alias template defined at namespace scope */
+    analysis_result alias_template_definition(node_index n, node_index alias);
+    /* [temp.alias]/2: the type a simple-template-id naming the alias
+       template at denotes */
+    analysis_result alias_template_type(node_index id, uint32_t at,
+                                        type_index &type);
+    /* the variable template the held name e is, plus one */
+    uint32_t variable_template_of(entity_index e) const;
+    /* [temp.pre]/1: a variable template defined at namespace scope */
+    analysis_result variable_template_definition(node_index n,
+                                                 node_index declaration);
+    /* [temp.inst]/7: a simple-template-id naming a variable template's
+       specialization, as an id-expression */
+    analysis_result variable_template_id(node_index n, expression_meaning &m);
+    /* ... the specialization, instantiated (or found) */
+    analysis_result instantiate_variable(node_index at, uint32_t vt,
+                                         const template_argument *arguments,
+                                         uint32_t count, entity_index &e);
+    /* the instantiation whose variable the declaration analysed now
+       declares (its record's index plus one) */
+    uint32_t variable_instantiating = 0;
+    /* declare()'s part for it */
+    analysis_result
+    declare_variable_specialization(node_index declaration, qualified_type type,
+                                    const specified &s,
+                                    entity_index &declared_entity);
     /* [temp.pre]/1: a template-head's parameters */
     analysis_result
     template_head_parameters(node_index n, owned_array<node_index> &parameters,

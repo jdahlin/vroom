@@ -552,6 +552,47 @@ analysis_result semantic_analysis::declare_specialization(
     return analysis_result::well_formed;
 }
 
+/*
+ * declare()'s part for the variable of a variable template's
+ * specialization (instantiate_variable): of the template's namespace, its
+ * name not bound there, inline ([temp.inst]/7's implicit instantiation,
+ * which clang emits linkonce_odr where used).
+ */
+analysis_result semantic_analysis::declare_variable_specialization(
+    node_index declaration, qualified_type type, const specified &s,
+    entity_index &declared_entity)
+{
+    uint32_t index = variable_instantiating - 1;
+    variable_instantiating = 0;
+    /* (a copy: making the entity can move the table) */
+    const entity t = entity_table[instantiations[index].template_entity];
+    if (s.constexpr_ != t.constexpr_ || s.static_ || s.extern_ || s.typedef_)
+        return not_supported(declaration, "temp.inst");
+    entity_index e =
+        entity_table.make(entity_kind::variable, t.name, t.enclosing);
+    entity_table[e].type = type;
+    entity_table[e].linkage_of_name = t.linkage_of_name;
+    if (type_without_external_linkage(type))
+        entity_table[e].linkage_of_name = linkage::internal;
+    entity_table[e].inline_ = true;
+    entity_table[e].constexpr_ = s.constexpr_;
+    entity_table[e].defined = true;
+    entity_table[e].instantiation = index + 1;
+    entity_table.add_declaration(e, declaration);
+    instantiations[index].specialization = e;
+    declared_name d;
+    d.declaration = declaration;
+    d.outermost = current_declaration;
+    d.entity = e;
+    d.id = 0;
+    d.kind = entity_kind::variable;
+    d.type = type;
+    d.claimable = false;
+    declared.append(d);
+    declared_entity = e;
+    return analysis_result::well_formed;
+}
+
 bool semantic_analysis::specialization_value(entity_index e, uint32_t i,
                                              uint64_t &magnitude,
                                              bool &negative,

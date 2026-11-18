@@ -176,6 +176,9 @@ analysis_result semantic_analysis::declare(node_index declaration,
                                            entity_index &declared_entity)
 {
     declared_entity = 0;
+    if (variable_instantiating && kind == entity_kind::variable)
+        return declare_variable_specialization(declaration, type, s,
+                                               declared_entity);
     if (instantiating && kind == entity_kind::function)
         return declare_specialization(declaration, id, type, s,
                                       declared_entity);

@@ -153,6 +153,8 @@ analysis_result semantic_analysis::declaration_by_kind(node_index n)
         return empty_declaration(n);
     case syntax_kind::static_assert_declaration:
         return static_assert_declaration(n);
+    case syntax_kind::alias_declaration:
+        return alias_declaration(n);
     case syntax_kind::template_declaration:
         return template_declaration(n);
     case syntax_kind::explicit_specialization:

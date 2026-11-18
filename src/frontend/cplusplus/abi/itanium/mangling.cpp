@@ -184,8 +184,10 @@ bool itanium_mangler::mangled_name(entity_index e)
        linkage with the same function name ... that appear in different
        namespace scopes refer to the same function": its symbol is its
        name in any namespace, and so a variable's */
+    /* (a variable template's specialization is mangled, _Z2piIdE) */
+    bool specialization = x.kind == entity_kind::variable && x.instantiation;
     if (x.c_language_linkage ||
-        (global && !internal_variable &&
+        (global && !internal_variable && !specialization &&
          (x.kind == entity_kind::variable || is_main))) {
         vbuffer_append(out, identifier, length);
         return true;
@@ -205,7 +207,8 @@ bool itanium_mangler::mangled_name(entity_index e)
 bool itanium_mangler::encoding(entity_index e)
 {
     const entity &x = analysis.entity_table[e];
-    if (x.kind == entity_kind::function && x.instantiation)
+    if ((x.kind == entity_kind::function || x.kind == entity_kind::variable) &&
+        x.instantiation)
         return specialization_encoding(e);
     if (!name(e))
         return false;
@@ -215,7 +218,8 @@ bool itanium_mangler::encoding(entity_index e)
 }
 
 /*
- * A function template's specialization.  [abi:mangle.function-type]: a
+ * A function or variable template's specialization (a variable's has no
+ * type, as above).  [abi:mangle.function-type]: a
  * template function's return type is encoded: the template's return type,
  * then its parameter types, as the template declares them (a template
  * parameter as <template-param>, type()).  [abi:mangle.name]:
@@ -254,6 +258,9 @@ bool itanium_mangler::specialization_encoding(entity_index e)
         return false;
     if (nested)
         text("E");
+    /* a variable template's specialization: <data name> */
+    if (table[e].kind == entity_kind::variable)
+        return true;
     qualified_type pattern = table[pattern_of].type;
     return type(record(pattern).operand) && bare_function_type(pattern);
 }

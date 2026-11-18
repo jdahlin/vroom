@@ -1781,6 +1781,43 @@ lines:
   lookup 15236, symbols 1910 -> 1911, layouts 10271, lowering 298);
   cxx-run 232/232 (template-sfinae.cpp); cxx-c-suites 2214 pass, 0 wrong.
 
+  Then alias-declarations, alias templates and variable templates
+  ([dcl.typedef]/2, [temp.alias], [temp.pre]/1, [temp.inst]/7).
+  `using X = T;` declares a typedef-name at namespace and block scope
+  (not yet in a class: [class.mem]; not with a class or enum defined or
+  declared in its defining-type-id, nor with attributes).  An alias
+  template of namespace scope (a function_template record with
+  `is_alias`) has its defining-type-id analysed once with the parameters'
+  types; a simple-template-id naming it (template_type ->
+  alias_template_type) is that type-id analysed again where each
+  template-parameter's name is its argument, so `ptr<T>` in a function
+  template's parameter is `T*` (deduction and mangling see the
+  substituted type), and an ill-formed substitution is a deduction
+  failure while a candidate is substituted.  A variable template of
+  namespace scope (`is_variable`; one init-declarator with an
+  initializer, not static or extern) is analysed per specialization at
+  its first use as an id-expression (`pi<int>`, variable_template_id ->
+  instantiate_variable): its simple-declaration again in the
+  instantiation's scope, declare() diverted to
+  declare_variable_specialization, which makes an inline variable of the
+  template's namespace whose name is not bound (clang's linkonce_odr,
+  mangled `_Z4zeroIiE`, weak); a constexpr one is usable in constant
+  expressions.  Not yet: an alias template with a pack, a
+  cv-qualified alias type named by a template-id (template_type takes no
+  cv), redeclarations, member alias templates and static data member
+  templates (S4), a variable template named with a qualifier, with
+  dependent arguments (in a template's definition), its address as a
+  template argument, explicit and partial specializations of variable
+  templates, and a variable template whose initializer the evaluator
+  cannot fold (a floating `T(3.14L)`).  Also: a C++26 type-aware
+  `operator new` (first parameter of class type) is unsupported, no
+  longer an error once `size_t` is an alias-declaration.  cxx-sema:
+  declarations as clang 42357 -> 43376, 0 we reject and clang accepts, 0
+  refuted (types 43689 -> 44005, constants 17851, lookup 15236 -> 15323,
+  symbols 1911 -> 1926, layouts 10271 -> 10291, lowering 298 -> 302);
+  cxx-run 240/240 (template-aliases.cpp, variable-templates.cpp);
+  cxx-c-suites 2214 pass, 0 wrong.
+
 ### S7. Exceptions and RTTI
 
 - Front end: [except.throw], [except.handle], [except.ctor], [except.spec],

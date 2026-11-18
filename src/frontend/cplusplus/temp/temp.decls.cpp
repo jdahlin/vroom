@@ -40,7 +40,7 @@ analysis_result semantic_analysis::template_declaration(node_index n)
        an alias-declaration declares the identifier to be an alias
        template." */
     case syntax_kind::alias_declaration:
-        return not_supported(n, "temp.alias");
+        return alias_template_definition(n, inner);
     /* [temp.fct]/1: "A function template defines an unbounded set of
        related functions." */
     case syntax_kind::function_definition:
@@ -78,6 +78,14 @@ analysis_result semantic_analysis::template_declaration(node_index n)
                     return class_template_declaration(
                         n, tree.children(seq)[0].index());
             }
+            /* [temp.pre]/1: a variable template, its one init-declarator
+               with an initializer */
+            if (d.child_count == 3 &&
+                syntax_is(tree, tree.children(inner)[0],
+                          syntax_kind::decl_specifier_seq) &&
+                syntax_is(tree, tree.children(inner)[1],
+                          syntax_kind::init_declarator))
+                return variable_template_definition(n, inner);
             /* [temp.fct]/1: a function template's declaration
                (template<class T> T f(T);), one declarator not in an
                init-declarator-list */
@@ -89,8 +97,8 @@ analysis_result semantic_analysis::template_declaration(node_index n)
                 return function_template_definition(n, inner);
             return not_supported(n, "temp.class");
         }
-        /* a function template's declaration or a variable template: which
-           needs the declarator's type */
+        /* a function template's declaration or a variable template of
+           several declarators: which needs the declarator's type */
         return not_supported(n, "temp.pre");
     }
     default:
@@ -1212,7 +1220,10 @@ uint32_t semantic_analysis::function_template_of(entity_index held) const
 {
     for (size_t i = 0; i < function_templates.size(); i++)
         if (function_templates[i].name == held && held &&
-            !function_templates[i].unusable && !function_templates[i].is_class)
+            !function_templates[i].unusable &&
+            !function_templates[i].is_class &&
+            !function_templates[i].is_alias &&
+            !function_templates[i].is_variable)
             return static_cast<uint32_t>(i + 1);
     return 0;
 }
@@ -1223,7 +1234,10 @@ void semantic_analysis::function_template_overloads(
     out.clear();
     for (size_t i = 0; i < function_templates.size(); i++)
         if (function_templates[i].name == held && held &&
-            !function_templates[i].unusable && !function_templates[i].is_class)
+            !function_templates[i].unusable &&
+            !function_templates[i].is_class &&
+            !function_templates[i].is_alias &&
+            !function_templates[i].is_variable)
             out.append(static_cast<uint32_t>(i + 1));
 }
 
@@ -1243,6 +1257,392 @@ uint32_t semantic_analysis::class_template_of(entity_index e) const
             !function_templates[i].unusable)
             return static_cast<uint32_t>(i + 1);
     return 0;
+}
+
+uint32_t semantic_analysis::alias_template_of(entity_index e) const
+{
+    if (!e)
+        return 0;
+    for (size_t i = 0; i < function_templates.size(); i++)
+        if (function_templates[i].name == e && function_templates[i].is_alias &&
+            !function_templates[i].unusable)
+            return static_cast<uint32_t>(i + 1);
+    return 0;
+}
+
+/*
+ * [temp.alias]/1: "A template-declaration in which the declaration is an
+ * alias-declaration declares the identifier to be an alias template.  An
+ * alias template is a name for a family of types."  One at namespace
+ * scope, not declared before: its defining-type-id is analysed with the
+ * template-parameters' types, then per template-id (alias_template_type).
+ */
+analysis_result semantic_analysis::alias_template_definition(node_index n,
+                                                             node_index alias)
+{
+    entity_index outer = current_scope;
+    owned_array<node_index> parameters;
+    analysis_result r = template_head_parameters(n, parameters);
+    if (r != analysis_result::well_formed)
+        return r;
+    uint32_t name = tokens.identifier(tree[alias].first_token + 1);
+    if (entity_table.find(outer, name))
+        return not_supported(n, "temp.alias");
+    uint32_t index = static_cast<uint32_t>(function_templates.size());
+    entity_index scope = entity_table.make(entity_kind::block_scope, 0, outer);
+    uint32_t first = static_cast<uint32_t>(template_parameter_entities.size());
+    r = declare_template_parameters(n, parameters, scope, index, name);
+    if (r != analysis_result::well_formed)
+        return r;
+    /* [temp.param]/14's rule is a class template's: a default after which
+       one is missing is left to clang */
+    for (size_t i = 1; i < parameters.size(); i++)
+        if (tree[parameters[i - 1]].child_count == 4 &&
+            tree[parameters[i]].child_count != 4)
+            return not_supported(n, "temp.param");
+    qualified_type pattern;
+    entity_index saved_scope = current_scope;
+    current_scope = scope;
+    r = alias_type(alias, pattern);
+    current_scope = saved_scope;
+    if (r != analysis_result::well_formed)
+        return r;
+    entity_index t =
+        entity_table.make(entity_kind::template_entity, name, outer);
+    entity_table[t].defined = true;
+    entity_table[t].instantiation = index + 1;
+    entity_table[t].linkage_of_name = linkage::external;
+    if (within_unnamed_namespace(outer))
+        entity_table[t].linkage_of_name = linkage::internal;
+    entity_table.add_declaration(t, n);
+    function_template record;
+    record.entity = t;
+    record.declaration = n;
+    record.definition = alias;
+    record.first_parameter = first;
+    record.parameter_count = static_cast<uint32_t>(parameters.size());
+    record.is_alias = true;
+    entity_index held = entity_table.make(entity_kind::none, name, outer);
+    entity_table[held].held_by_template = true;
+    entity_table.bind(outer, name, held);
+    record.name = held;
+    function_templates.append(record);
+    return analysis_result::well_formed;
+}
+
+uint32_t semantic_analysis::variable_template_of(entity_index e) const
+{
+    if (!e)
+        return 0;
+    for (size_t i = 0; i < function_templates.size(); i++)
+        if (function_templates[i].name == e &&
+            function_templates[i].is_variable &&
+            !function_templates[i].unusable)
+            return static_cast<uint32_t>(i + 1);
+    return 0;
+}
+
+/*
+ * [temp.pre]/1: "A template defines a family of classes, functions, or
+ * variables"; /5: "the init-declarator-list in the declaration shall
+ * contain at most one declarator".  One
+ * at namespace scope, not declared before, whose init-declarator has an
+ * initializer: its decl-specifier-seq and declarator are analysed with the
+ * template-parameters' types, the initializer per specialization
+ * (instantiate_variable).
+ */
+analysis_result
+semantic_analysis::variable_template_definition(node_index n,
+                                                node_index declaration)
+{
+    entity_index outer = current_scope;
+    owned_array<node_index> parameters;
+    analysis_result r = template_head_parameters(n, parameters);
+    if (r != analysis_result::well_formed)
+        return r;
+    const syntax_child *parts = tree.children(declaration);
+    node_index item = parts[1].index();
+    if (tree[item].child_count != 2 ||
+        syntax_is(tree, tree.children(item)[1], syntax_kind::requires_clause))
+        return not_supported(n, "temp.pre");
+    uint32_t index = static_cast<uint32_t>(function_templates.size());
+    entity_index scope = entity_table.make(entity_kind::block_scope, 0, outer);
+    uint32_t first = static_cast<uint32_t>(template_parameter_entities.size());
+    /* (the name is not known before the declarator: the template-parameters
+       are checked against it below) */
+    r = declare_template_parameters(n, parameters, scope, index, 0);
+    if (r != analysis_result::well_formed)
+        return r;
+    for (size_t i = 1; i < parameters.size(); i++)
+        if (tree[parameters[i - 1]].child_count == 4 &&
+            tree[parameters[i]].child_count != 4)
+            return not_supported(n, "temp.param");
+    entity_index saved_scope = current_scope;
+    uint32_t saved_cv = function_cv;
+    current_scope = scope;
+    specified s;
+    declarator_meaning m;
+    r = decl_specifier_seq(parts[0].index(), s, false);
+    qualified_type type = s.type;
+    if (r == analysis_result::well_formed) {
+        function_cv = 0;
+        r = declarator(declaration, tree.children(item)[0], type, m);
+    }
+    current_scope = saved_scope;
+    function_cv = saved_cv;
+    if (r != analysis_result::well_formed)
+        return r;
+    if (!m.has_id || m.qualifier || m.qualified_namespace || !s.has_type ||
+        s.typedef_ || s.static_ || s.extern_ || s.declares_enumeration ||
+        s.gnu_flags || s.aligned || m.operator_function || m.literal_operator ||
+        type_table[type.unqualified()].kind == type_kind::function ||
+        type_table[type.unqualified()].kind == type_kind::none)
+        return not_supported(n, "temp.pre");
+    for (uint32_t i = 0; i < tree[parts[0].index()].child_count; i++) {
+        syntax_child k = tree.children(parts[0].index())[i];
+        if (syntax_is(tree, k, syntax_kind::class_specifier) ||
+            syntax_is(tree, k, syntax_kind::elaborated_type_specifier) ||
+            syntax_is(tree, k, syntax_kind::enum_specifier))
+            return not_supported(n, "temp.pre");
+    }
+    uint32_t name = tokens.identifier(m.id);
+    if (entity_table.find(outer, name))
+        return not_supported(n, "temp.pre");
+    /* [temp.local]/6: "A template-parameter shall not have the same name
+       as the template name." (clang's error) */
+    for (uint32_t i = 0; i < parameters.size(); i++)
+        if (entity_table[template_parameter_entities[first + i]].name == name)
+            return not_supported(n, "temp.local");
+    entity_index t =
+        entity_table.make(entity_kind::template_entity, name, outer);
+    entity_table[t].defined = true;
+    entity_table[t].constexpr_ = s.constexpr_;
+    entity_table[t].instantiation = index + 1;
+    entity_table[t].linkage_of_name = linkage::external;
+    if (within_unnamed_namespace(outer))
+        entity_table[t].linkage_of_name = linkage::internal;
+    entity_table.add_declaration(t, n);
+    function_template record;
+    record.entity = t;
+    record.declaration = n;
+    record.definition = declaration;
+    record.declarator = declaration;
+    record.first_parameter = first;
+    record.parameter_count = static_cast<uint32_t>(parameters.size());
+    record.is_variable = true;
+    entity_index held = entity_table.make(entity_kind::none, name, outer);
+    entity_table[held].held_by_template = true;
+    entity_table.bind(outer, name, held);
+    record.name = held;
+    function_templates.append(record);
+    return analysis_result::well_formed;
+}
+
+/*
+ * [temp.inst]/7: "Unless a variable template specialization is a declared
+ * specialization, the variable template specialization is implicitly
+ * instantiated when it is referenced in a context that requires a
+ * variable definition to exist or if the existence of the definition
+ * affects the semantics of the program."  Here at any use: the template's
+ * simple-declaration analysed again where each template-parameter's name
+ * is its argument, the variable made in the template's namespace without
+ * binding its name (declare_variable_specialization); inline, as clang
+ * makes an implicit instantiation (linkonce_odr).
+ */
+analysis_result semantic_analysis::variable_template_id(node_index n,
+                                                        expression_meaning &m)
+{
+    const syntax_child *parts = tree.children(n);
+    if (tree[n].child_count < 3 || !parts[0].is_token() ||
+        tokens[parts[0].index()].kind != token_kind::identifier)
+        return not_supported(n, "temp.names");
+    lookup_result x = lookup_unqualified(tokens.identifier(parts[0].index()),
+                                         lookup_filter::any);
+    entity_index named = x.entity;
+    if (!named)
+        named = x.unknown_entity;
+    uint32_t vt = variable_template_of(named);
+    if (!vt || x.ambiguous)
+        return not_supported(n, "temp.names");
+    owned_array<template_argument> arguments;
+    analysis_result r = template_id_arguments(n, vt, arguments);
+    if (r != analysis_result::well_formed)
+        return r;
+    for (const template_argument &a : arguments)
+        if (a.kind == template_argument::kind_t::pack ||
+            depends(type_table, a.type) || a.template_entity)
+            return not_supported(n, "temp.dep");
+    entity_index e = 0;
+    r = instantiate_variable(n, vt, arguments.data(),
+                             static_cast<uint32_t>(arguments.size()), e);
+    if (r != analysis_result::well_formed)
+        return r;
+    size_t uses_before = name_uses.size();
+    r = named_entity(parts[0].index(), e, m);
+    /* (clang's lookup of the name finds the template, no claim here) */
+    name_uses.resize(uses_before);
+    return r;
+}
+
+analysis_result
+semantic_analysis::instantiate_variable(node_index at, uint32_t vt,
+                                        const template_argument *arguments,
+                                        uint32_t count, entity_index &e)
+{
+    e = 0;
+    const function_template ft = function_templates[vt - 1];
+    if (count != ft.parameter_count)
+        return not_supported(at, "temp.inst");
+    for (uint32_t k = 0; k < instantiations.size(); k++) {
+        const instantiation_record &x = instantiations[k];
+        if (x.template_entity != ft.entity || x.argument_count != count)
+            continue;
+        bool same = true;
+        for (uint32_t i = 0; i < count && same; i++)
+            same = template_arguments[x.first_argument + i] == arguments[i];
+        if (!same)
+            continue;
+        /* (one whose initializer uses itself, or that failed) */
+        if (!x.specialization || !x.defined)
+            return not_supported(at, "temp.inst");
+        e = x.specialization;
+        return analysis_result::well_formed;
+    }
+    if (instantiation_depth >= 64)
+        return not_supported(at, "temp.inst");
+    const entity t = entity_table[ft.entity];
+    instantiation_record record;
+    record.template_entity = ft.entity;
+    record.first_argument = static_cast<uint32_t>(template_arguments.size());
+    record.argument_count = count;
+    for (uint32_t i = 0; i < count; i++)
+        template_arguments.append(arguments[i]);
+    record.scope = entity_table.make(entity_kind::block_scope, 0, t.enclosing);
+    for (uint32_t i = 0; i < count; i++)
+        bind_template_argument(
+            record.scope, template_parameter_entities[ft.first_parameter + i],
+            arguments[i]);
+    uint32_t index = static_cast<uint32_t>(instantiations.size());
+    instantiations.append(record);
+    entity_index saved_scope = current_scope;
+    entity_index saved_class = defining_class;
+    entity_index saved_last = last_declared;
+    entity_index saved_member_scope = template_member_scope;
+    node_index saved_declaration = current_declaration;
+    uint32_t saved_cv = function_cv;
+    bool saved_condition = in_condition;
+    token_index saved_callee = overloaded_callee;
+    bool saved_claimable = declarations_claimable;
+    uint32_t saved_instantiating = instantiating;
+    uint32_t saved_variable = variable_instantiating;
+    token_index saved_horizon = lookup_horizon;
+    unsigned saved_unevaluated = unevaluated;
+    bool saved_expanding = expanding;
+    function_context saved_function =
+        static_cast<function_context &&>(function_state);
+    function_state = function_context();
+    owned_array<parameter_meaning> saved_parameters =
+        static_cast<owned_array<parameter_meaning> &&>(function_parameters);
+    size_t expressions_before = expressions.size();
+    size_t uses_before = name_uses.size();
+    current_scope = record.scope;
+    template_member_scope = record.scope;
+    current_declaration = ft.declaration;
+    defining_class = 0;
+    in_condition = false;
+    overloaded_callee = 0;
+    declarations_claimable = false;
+    unevaluated = 0;
+    expanding = false;
+    instantiating = 0;
+    variable_instantiating = index + 1;
+    lookup_horizon = tree[ft.declaration].first_token;
+    instantiations[index].defining = true;
+    instantiation_depth++;
+    analysis_result r = simple_declaration(ft.declarator);
+    instantiation_depth--;
+    instantiations[index].defining = false;
+    expanding = saved_expanding;
+    unevaluated = saved_unevaluated;
+    lookup_horizon = saved_horizon;
+    variable_instantiating = saved_variable;
+    instantiating = saved_instantiating;
+    declarations_claimable = saved_claimable;
+    overloaded_callee = saved_callee;
+    in_condition = saved_condition;
+    function_cv = saved_cv;
+    last_declared = saved_last;
+    current_declaration = saved_declaration;
+    defining_class = saved_class;
+    template_member_scope = saved_member_scope;
+    current_scope = saved_scope;
+    function_state = static_cast<function_context &&>(saved_function);
+    function_parameters =
+        static_cast<owned_array<parameter_meaning> &&>(saved_parameters);
+    expressions.resize(expressions_before);
+    name_uses.resize(uses_before);
+    /* an argument that makes the declaration ill-formed: clang reports it
+       at the template, with a note at the use */
+    if (r != analysis_result::well_formed ||
+        !instantiations[index].specialization)
+        return not_supported(at, "temp.inst");
+    instantiations[index].defined = true;
+    e = instantiations[index].specialization;
+    return analysis_result::well_formed;
+}
+
+/*
+ * [temp.alias]/2: "When a template-id refers to the specialization of an
+ * alias template, it is equivalent to the associated type obtained by
+ * substitution of its template-arguments for the template-parameters in
+ * the defining-type-id of the alias template."  The defining-type-id
+ * analysed again where each template-parameter's name is its argument
+ * (a dependent argument's type a template's own, which deduction then
+ * sees through).
+ */
+analysis_result semantic_analysis::alias_template_type(node_index id,
+                                                       uint32_t at,
+                                                       type_index &type)
+{
+    const function_template ft = function_templates[at - 1];
+    owned_array<template_argument> arguments;
+    analysis_result r = template_id_arguments(id, at, arguments);
+    if (r != analysis_result::well_formed)
+        return r;
+    for (const template_argument &a : arguments)
+        if (a.kind == template_argument::kind_t::pack)
+            return not_supported(id, "temp.variadic");
+    entity_index scope = entity_table.make(entity_kind::block_scope, 0,
+                                           entity_table[ft.entity].enclosing);
+    for (uint32_t i = 0; i < ft.parameter_count; i++)
+        bind_template_argument(
+            scope, template_parameter_entities[ft.first_parameter + i],
+            arguments[i]);
+    entity_index saved_scope = current_scope;
+    token_index saved_horizon = lookup_horizon;
+    bool saved_expanding = expanding;
+    current_scope = scope;
+    lookup_horizon = tree[ft.declaration].first_token;
+    expanding = false;
+    qualified_type t;
+    r = alias_type(ft.definition, t);
+    current_scope = saved_scope;
+    lookup_horizon = saved_horizon;
+    expanding = saved_expanding;
+    /* an argument that makes the type ill-formed: clang reports it at the
+       alias template, with a note at the use; while a candidate is
+       substituted, [temp.alias]/3's deduction failure */
+    if (r == analysis_result::ill_formed && substituting)
+        return r;
+    if (r == analysis_result::ill_formed)
+        return not_supported(id, "temp.alias");
+    if (r != analysis_result::well_formed)
+        return r;
+    /* (a cv-qualified type: template_type's callers take no cv) */
+    if (t.cv())
+        return not_supported(id, "temp.alias");
+    type = t.unqualified();
+    return analysis_result::well_formed;
 }
 
 /* whether a type is made of a template-parameter type, of one at
@@ -1691,8 +2091,12 @@ analysis_result semantic_analysis::template_type(node_index id,
     if (!named)
         named = x.unknown_entity;
     uint32_t ct = class_template_of(named);
-    if (!ct)
+    if (!ct) {
+        uint32_t at = alias_template_of(named);
+        if (at)
+            return alias_template_type(id, at, type);
         return not_supported(id, "temp.names");
+    }
     owned_array<template_argument> arguments;
     analysis_result filled = template_id_arguments(id, ct, arguments);
     if (filled != analysis_result::well_formed)
