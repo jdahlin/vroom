@@ -157,6 +157,42 @@ analysis_result semantic_analysis::virtual_member(entity_index c,
     return analysis_result::well_formed;
 }
 
+/*
+ * [class.virtual]/2, /9 (a final overrider is unique): slot k of the
+ * virtual table bg of virtual base v in class c, taken from c's direct
+ * bases' groups for v (other than v itself); v's own function if none
+ * overrides it, ambiguous when two bases have different overriders.
+ */
+entity_index semantic_analysis::virtual_base_overrider(entity_index c,
+                                                       entity_index v,
+                                                       const vtable_group &bg,
+                                                       uint32_t k,
+                                                       bool &ambiguous) const
+{
+    entity_index own = vtable_slots[bg.first_slot + k];
+    entity_index found = own;
+    uint32_t first = entity_table[c].first_base;
+    for (uint32_t i = first; i < first + entity_table[c].base_count; i++) {
+        entity_index b = element_class(entity_table[class_bases[i]].type);
+        const dynamic_class *bd = dynamic_of(b);
+        if (b == v || !bd)
+            continue;
+        for (uint32_t g = 0; g < bd->group_count; g++) {
+            const vtable_group &h = vtable_groups[bd->first_group + g];
+            if (h.in_virtual_base != v || h.offset_in_virtual != bg.offset ||
+                h.subobject_class != bg.subobject_class)
+                continue;
+            entity_index f = vtable_slots[h.first_slot + k];
+            if (f == own || f == found)
+                continue;
+            if (found != own)
+                ambiguous = true;
+            found = f;
+        }
+    }
+    return found;
+}
+
 /* [abi:class-types] I: the primary base, "the first non-virtual dynamic
    base class"; false if a base without a virtual table pointer comes
    before it */
@@ -349,7 +385,7 @@ analysis_result semantic_analysis::dynamic_class_record(entity_index c,
     /* then the secondary virtual tables: the primary base's own secondary
        ones, then each other dynamic base's group, each slot the class
        overrides replaced (called through a this-adjusting thunk) */
-    bool secondary_destructor = false, across_virtual = false;
+    bool across_virtual = false;
     /* the groups of a base's virtual table group that are not in one of
        its virtual bases (each virtual base's are the class's own, after
        the others) */
@@ -369,22 +405,33 @@ analysis_result semantic_analysis::dynamic_class_record(entity_index c,
             group.virtual_primary = virtual_class && g == 0;
             for (uint32_t k = 0; k < bg.slot_count; k++) {
                 copy(bg.first_slot + k);
-                if (entity_table[vtable_slots.back()].special ==
-                    special_member::destructor)
-                    /* a virtual destructor in a secondary virtual table:
-                       its thunks (D1's and D0's) are not made */
-                    secondary_destructor = true;
+                entity_index own = vtable_slots.back();
+                bool ambiguous = false;
+                if (virtual_class) {
+                    /* [class.virtual]/2: the final overrider another base
+                       of c has for the virtual base's function */
+                    vtable_slots.back() = virtual_base_overrider(
+                        c, virtual_class, bg, k, ambiguous);
+                }
                 for (const declared_virtual &v : declared_virtuals)
-                    if (v.c == c &&
-                        overrides_function(v.f, vtable_slots.back())) {
+                    if (v.c == c && overrides_function(v.f, own)) {
                         vtable_slots.back() = v.f;
-                        vtable_own.back() = true;
-                        /* [abi:mangling-special-thunks]: overriding a function of a virtual
-                           base needs a virtual thunk (its vcall offset):
-                           not made */
-                        if (virtual_class)
-                            across_virtual = true;
+                        vtable_own.back() = !virtual_class;
+                        ambiguous = false;
                     }
+                if (vtable_slots.back() != own && virtual_class) {
+                    /* [abi:mangling-special-thunks]: an overrider outside
+                       the virtual base is called through a virtual thunk
+                       (the lowering's, from the slot's vcall offset);
+                       none in a table at a nonzero offset in it */
+                    vtable_adjustments.back() = 0;
+                    if (bg.offset)
+                        across_virtual = true;
+                }
+                if (ambiguous)
+                    across_virtual = true;
+                /* a virtual destructor in a secondary virtual table:
+                   its thunks are D1's and D0's (the lowering's) */
             }
             group_source source;
             source.base = base;
@@ -415,8 +462,6 @@ analysis_result semantic_analysis::dynamic_class_record(entity_index c,
     d.group_count = static_cast<uint32_t>(vtable_groups.size()) - d.first_group;
     if (across_virtual)
         return not_supported(n, "class.mi");
-    if (secondary_destructor)
-        return not_supported(n, "class.dtor");
     if (destructor && entity_table[destructor].virtual_) {
         /* [class.dtor]/12: "At the point of definition of a virtual
            destructor (including an implicit definition), the non-array
