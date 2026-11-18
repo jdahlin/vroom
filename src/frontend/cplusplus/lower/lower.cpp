@@ -6124,6 +6124,15 @@ bool c_lowering::translation_unit()
         if (x.kind == entity_kind::function && x.placeholder_return &&
             !x.defined)
             continue;
+        /* a function declared, not defined, whose symbol is not mangled
+           yet (a specialization of a template whose signature names a
+           dependent decltype): a use of it fails where it is */
+        if (x.kind == entity_kind::function && !x.defined) {
+            owned_buffer name;
+            if (!itanium_symbol_name(analysis, tokens.pp, d.entity, name.get(),
+                                     0))
+                continue;
+        }
         if (!symbol(d.entity, 0))
             return false;
     }

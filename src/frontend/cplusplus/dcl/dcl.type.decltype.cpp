@@ -102,9 +102,21 @@ analysis_result semantic_analysis::decltype_type(node_index n,
         lookup_result found =
             lookup_unqualified(tokens.identifier(t), lookup_filter::any);
         entity_index e = found.entity;
+        /* a function template's type depends on its own parameters, not
+           the call's: only parameters, variables and type names count */
         if (e && (entity_table[e].kind == entity_kind::none ||
-                  depends_on_template_parameter(entity_table[e].type)))
-            return not_supported(n, "temp.dep.expr");
+                  ((entity_table[e].kind == entity_kind::variable ||
+                    entity_table[e].kind == entity_kind::typedef_name) &&
+                   depends_on_template_parameter(entity_table[e].type)))) {
+            /* [temp.dep.type]/10.3: "denoted by decltype(expression),
+               where expression is type-dependent" a dependent type, in
+               a template's own declaration (an instantiation's names are
+               bound to arguments) */
+            if (instantiating || class_instantiating || substituting)
+                return not_supported(n, "temp.dep.expr");
+            type = qualified_type::make(dependent_decltype_type(n), cv_none);
+            return analysis_result::well_formed;
+        }
     }
     expression_meaning m;
     unevaluated++;
@@ -118,6 +130,28 @@ analysis_result semantic_analysis::decltype_type(node_index n,
     if (!decltype_of(m, named, type))
         return not_supported(n, "dcl.type.decltype");
     return analysis_result::well_formed;
+}
+
+/* the dependent type of decltype-specifier n: one for the operands of the
+   same tokens */
+type_index semantic_analysis::dependent_decltype_type(node_index n)
+{
+    const syntax_node &x = tree[n];
+    for (entity_index e : dependent_decltypes) {
+        const syntax_node &y =
+            tree[static_cast<node_index>(entity_table[e].value)];
+        bool same = y.end_token - y.first_token == x.end_token - x.first_token;
+        for (token_index i = 0; same && i < x.end_token - x.first_token; i++)
+            same = same_token_spelling(x.first_token + i, y.first_token + i);
+        if (same)
+            return entity_table[e].type.unqualified();
+    }
+    entity_index e = entity_table.make(entity_kind::dependent_decltype, 0, 0);
+    entity_table[e].value = n;
+    entity_table[e].type = qualified_type::make(
+        type_table.of_entity(type_kind::dependent, e), cv_none);
+    dependent_decltypes.append(e);
+    return entity_table[e].type.unqualified();
 }
 
 } // namespace cplusplus

@@ -236,6 +236,12 @@ enum class entity_kind : uint8_t {
        negated), one entity for the same three ([temp.over.link]); else
        value 0, an entity of its own */
     dependent_value,
+    /* not an entity: [temp.dep.type]/10.3 decltype(expression) of a
+       type-dependent expression in a template's own declaration; its
+       type is a type_kind::dependent of it, value the decltype-specifier
+       (a node), one for operands of the same tokens ([temp.over.link]/5:
+       equivalent expressions).  An instantiation analyses it again */
+    dependent_decltype,
     /* not an entity: a block scope or a function parameter scope
        ([basic.scope.block], [basic.scope.param]), the scope the names
        declared in it are bound in */
@@ -1784,7 +1790,9 @@ class semantic_analysis
                               uint32_t name, uint64_t value);
     /* the type typename Q::name for a dependent Q, one per Q and name */
     type_index dependent_member_type(type_index qualifier, uint32_t name);
+    type_index dependent_decltype_type(node_index n);
     owned_array<entity_index> dependent_members;
+    owned_array<entity_index> dependent_decltypes;
     /* a block scope in the current one, made current */
     entity_index open_scope(entity_index conflicts, bool parameters);
     analysis_result pointer_operator(node_index op, qualified_type &type,
@@ -3531,7 +3539,15 @@ class semantic_analysis
                         const expression_meaning *meanings, uint32_t count,
                         owned_array<overload_candidate> &candidates,
                         owned_array<uint32_t> *first_arguments = nullptr,
-                        owned_array<template_argument> *all = nullptr);
+                        owned_array<template_argument> *all = nullptr,
+                        const owned_array<syntax_child> *written = nullptr,
+                        node_index written_at = 0);
+    /* a call's template-id naming several function templates: its
+       template-arguments as written, checked against each template by
+       template_candidates ([temp.over]/1), from template_callee_parts to
+       template_call */
+    owned_array<syntax_child> overloaded_written;
+    node_index overloaded_written_at = 0;
     /* [over.best.ics]: the argument a converted to the type of a parameter;
        user-defined conversions considered unless [over.best.ics]/4 says
        not */
