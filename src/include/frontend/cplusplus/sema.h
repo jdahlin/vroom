@@ -1886,6 +1886,8 @@ class semantic_analysis
     bool gnu_attributes_without_effect(syntax_child n) const;
     bool class_head_attributes_without_effect(syntax_child c) const;
     uint32_t attributes_without_effect_before(node_index declaration) const;
+    bool pack_only_expanded(uint32_t name, token_index first,
+                            token_index end) const;
     bool declares_unnamed_class(node_index seq) const;
     /* [ext:gnu_library_builtins] the function __builtin_NAME (an
        identifier) declares at its first use, 0 if it is not one */
@@ -3693,6 +3695,19 @@ class semantic_analysis
         if (a.kind != template_argument::kind_t::pack)
             return 0;
         return a.count + 1;
+    }
+    /* whether element of argument i is a template's own pack expanded,
+       not bound to elements (res<A...> in its own declaration): the
+       pack parameter's entity (a type parameter's typedef-name), 0 if
+       not */
+    entity_index specialization_own_pack(entity_index e, uint32_t i,
+                                         uint32_t element) const
+    {
+        const template_argument &a =
+            specialization_template_argument(e, i, element);
+        if (a.kind != template_argument::kind_t::pack || a.count != UINT32_MAX)
+            return 0;
+        return a.template_entity;
     }
     /* whether the argument is a value (non-type, integral): its
        magnitude, and whether it is negative; or, in a template's own
