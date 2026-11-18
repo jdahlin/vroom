@@ -1892,13 +1892,14 @@ uint32_t c_lowering::string_literal(const semantic_node &n)
         break;
     }
     const uint32_t *units = tokens.files.phase7().string_code_units();
+    const literal_value &v = tokens.files.value_of(t);
     owned_array<uint8_t> bytes;
-    uint32_t count = t.string_length + 1;
+    uint32_t count = v.string_length + 1;
     bytes.resize(static_cast<size_t>(count) * size);
     for (uint32_t i = 0; i < count; i++) {
         uint32_t u = 0;
-        if (i < t.string_length)
-            u = units[t.string_offset + i];
+        if (i < v.string_length)
+            u = units[v.string_offset + i];
         /* little-endian, as the targets are */
         for (uint8_t b = 0; b < size; b++)
             bytes[static_cast<size_t>(i) * size + b] =

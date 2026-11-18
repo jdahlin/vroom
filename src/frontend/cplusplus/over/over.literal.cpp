@@ -283,8 +283,11 @@ analysis_result semantic_analysis::user_defined_literal(token_index t,
                                        "whose only parameter has the type of "
                                        "the character literal",
                                        "lex.ext");
-        arguments.append(integer_constant(
-            k.type, integer_wrap(tokens.files.behavior, k.type, k.value), t));
+        arguments.append(
+            integer_constant(k.type,
+                             integer_wrap(tokens.files.behavior, k.type,
+                                          tokens.files.value_of(k).value),
+                             t));
     } else {
         /* /5: "let str be the literal without its ud-suffix and let len be
            the number of code units in str (i.e., its length excluding the
@@ -295,8 +298,9 @@ analysis_result semantic_analysis::user_defined_literal(token_index t,
             return not_supported(current_declaration, "lex.ext");
         str.node = expression_node(semantic_kind::string_literal, str, t);
         arguments.append(str);
-        arguments.append(integer_constant(fundamental_type::unsigned_long_int,
-                                          k.string_length, t));
+        arguments.append(
+            integer_constant(fundamental_type::unsigned_long_int,
+                             tokens.files.value_of(k).string_length, t));
         owned_array<overload_candidate> candidates;
         for (entity_index f : set) {
             overload_candidate c;

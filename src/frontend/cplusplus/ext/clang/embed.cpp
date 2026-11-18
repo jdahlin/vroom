@@ -307,8 +307,13 @@ void preprocessor::clang_embed_directive(const preprocessing_token &name)
                           first.location);
         return;
     }
+    /* the file went away after find_embed saw it: not found, as there */
     uint64_t size;
-    embedded_size(path.data(), p, &size);
+    if (!embedded_size(path.data(), p, &size)) {
+        diagnostics.issue(diagnostic_id::err_pp_file_not_found, first.location)
+            .text(header.data() + 1, header.size() - 2);
+        return;
+    }
 
     owned_array<preprocessing_token> out;
     auto append = [&](const owned_array<preprocessing_token> &from) {

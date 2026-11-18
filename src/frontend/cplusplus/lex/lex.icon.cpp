@@ -104,7 +104,7 @@ void lexer::convert_integer_literal(const pp_number_analysis &a, token &out)
         value_bits++;
     bool too_large = beyond_128_bits || value_bits > 64;
     out.literal = literal_kind::integer_literal;
-    out.value = (uint64_t)value;
+    add_value(out).value = (uint64_t)value;
     out.value_known = true;
 
     if (a.bit_precise_suffix) {

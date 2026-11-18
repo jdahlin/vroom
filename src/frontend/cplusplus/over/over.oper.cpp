@@ -120,7 +120,7 @@ node_index parser::operator_unqualified_id()
                                 "encoding-prefix after operator",
                                 "over.literal", position);
         }
-        if (t.string_length != 0)
+        if (tokens.files.value_of(t).string_length != 0)
             return violates("an empty string-literal with no "
                             "encoding-prefix after operator",
                             "over.literal", position);

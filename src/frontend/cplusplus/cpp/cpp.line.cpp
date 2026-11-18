@@ -66,11 +66,11 @@ bool preprocessor::string_contents(const preprocessing_token &t,
     if (t.kind != preprocessing_token_kind::string_literal ||
         t.prefix != encoding_prefix::none)
         return false;
-    token converted = files.convert(t);
+    literal_value string = files.value_of(files.convert(t));
     const uint32_t *units = files.phase7().string_code_units();
     out.clear();
-    for (uint32_t i = 0; i < converted.string_length; i++) {
-        char c = (char)units[converted.string_offset + i];
+    for (uint32_t i = 0; i < string.string_length; i++) {
+        char c = (char)units[string.string_offset + i];
         vbuffer_append(out.get(), &c, 1);
     }
     return true;

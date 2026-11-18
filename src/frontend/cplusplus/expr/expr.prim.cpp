@@ -114,6 +114,7 @@ analysis_result semantic_analysis::literal(token_index t, expression_meaning &m)
 {
     const implementation_defined_behavior &b = tokens.files.behavior;
     const token &k = tokens[t];
+    const literal_value &v = tokens.files.value_of(k);
     m.category = value_category::prvalue;
     switch (k.literal) {
     case literal_kind::integer_literal:
@@ -126,9 +127,9 @@ analysis_result semantic_analysis::literal(token_index t, expression_meaning &m)
         if (!k.value_known)
             return not_supported(current_declaration, "lex.icon");
         m.evaluation = constness::constant;
-        m.value = integer_wrap(b, k.type, k.value);
+        m.value = integer_wrap(b, k.type, v.value);
         m.zero_literal =
-            k.literal == literal_kind::integer_literal && k.value == 0;
+            k.literal == literal_kind::integer_literal && v.value == 0;
         return analysis_result::well_formed;
     case literal_kind::floating_point_literal:
         if (!fundamental_type_is_floating(k.type))
@@ -141,12 +142,12 @@ analysis_result semantic_analysis::literal(token_index t, expression_meaning &m)
             return analysis_result::well_formed;
         m.evaluation = constness::constant;
         if (k.type == fundamental_type::float_) {
-            uint32_t bits = static_cast<uint32_t>(k.floating_bits_low);
+            uint32_t bits = static_cast<uint32_t>(v.floating_bits_low);
             float f;
             memcpy(&f, &bits, sizeof f);
             m.value = floating_kept(f);
         } else {
-            m.value = k.floating_bits_low;
+            m.value = v.floating_bits_low;
         }
         return analysis_result::well_formed;
     case literal_kind::boolean_literal:
@@ -155,7 +156,7 @@ analysis_result semantic_analysis::literal(token_index t, expression_meaning &m)
         m.type = qualified_type::make(
             type_table.fundamental(fundamental_type::bool_), cv_none);
         m.evaluation = constness::constant;
-        m.value = integer_wrap(b, fundamental_type::bool_, k.value);
+        m.value = integer_wrap(b, fundamental_type::bool_, v.value);
         return analysis_result::well_formed;
     case literal_kind::pointer_literal:
         /* [lex.nullptr]/1: "The pointer-literal is the keyword nullptr.
@@ -210,7 +211,9 @@ bool semantic_analysis::string_literal_meaning(token_index t,
     qualified_type e =
         qualified_type::make(type_table.fundamental(element), cv_const);
     m.type = qualified_type::make(
-        type_table.array_of(e, uint64_t(k.string_length) + 1), cv_none);
+        type_table.array_of(
+            e, uint64_t(tokens.files.value_of(k).string_length) + 1),
+        cv_none);
     m.category = value_category::lvalue;
     m.evaluation = constness::constant;
     m.string_literal = t;

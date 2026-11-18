@@ -29,6 +29,10 @@ namespace cplusplus
 
 template <typename T> class owned_array
 {
+    /* the elements are moved with realloc and never destroyed */
+    static_assert(__is_trivially_copyable(T) && __is_trivially_destructible(T),
+                  "owned_array<T>: T is not trivially copyable");
+
   public:
     owned_array() = default;
     ~owned_array()
@@ -155,14 +159,24 @@ template <typename T> class owned_array
     size_t count = 0, capacity = 0;
 };
 
-/* a vbuffer whose storage is freed with the owner */
+/*
+ * A vbuffer whose storage is freed with the owner.  The first bytes are in
+ * the owner itself (VBUFFER_INLINE): most buffers hold one spelling or one
+ * path, and a function that makes one for every token must not allocate for
+ * it (doc/RESEARCH-cxx-performance.md, finding 2).  An owner therefore does
+ * not move.
+ */
 class owned_buffer
 {
   public:
-    owned_buffer() = default;
+    owned_buffer()
+    {
+        vbuffer_inline(&buffer, first_bytes, sizeof first_bytes);
+    }
     ~owned_buffer()
     {
-        ::free(buffer.p);
+        if (!(buffer.flags & VBUFFER_INLINE))
+            ::free(buffer.p);
     }
     owned_buffer(const owned_buffer &) = delete;
     owned_buffer &operator=(const owned_buffer &) = delete;
@@ -177,8 +191,6 @@ class owned_buffer
     }
     const char *data() const
     {
-        if (!buffer.p)
-            return "";
         return buffer.p;
     }
     size_t size() const
@@ -191,7 +203,8 @@ class owned_buffer
     }
 
   private:
-    vbuffer buffer = {};
+    vbuffer buffer;
+    char first_bytes[128];
 };
 
 /* objects of any type T, each made in place at an address that does not

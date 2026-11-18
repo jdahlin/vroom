@@ -78,6 +78,8 @@ arm64)
 	step memory-cells-generated python3 src/tools/gen-memory-cells.py --check
 	# the C++ front end's citations and quoted grammar against docs/cxx-spec
 	step cxx-spec-refs python3 bench/cxx-spec-refs.py
+	# each file of the C++ front end alone, with its flags (no RTTI, no C++ library, -Werror)
+	step cxx-files-alone make -C src -k -j "$J" cplusplus-check
 	# the C++ front end's tables and the claims' encoding (-fcxx-dump=selftest, dump/dump.h)
 	: >"$BUILD/empty.cpp"
 	step cxx-selftest "$BUILD/vpp" -x c++ -fsyntax-only -fcxx-dump=selftest "$BUILD/empty.cpp"
@@ -184,6 +186,8 @@ asan)
 	step bitint-replay python3 bench/vcc-bitint-replay.py --bin-dir "$B" --output "$LOGS/bitint-replay-asan"
 	step diag         python3 bench/vcc-diag.py -j "$J" --bin-dir "$B"
 	step field-uses   python3 bench/vcc-field-uses.py -j "$J" --bin-dir "$B"
+	# the C++ front end compiling its run tests: its own memory errors
+	step cxx-run      env VCC_BIN="$B" python3 bench/cxx-run.py -j "$J"
 	step stress       python3 bench/vcc-stress.py --bin-dir "$B"
 	step vccd         python3 bench/vccd-test.py --bin-dir "$B"
 	step vlink-bad    python3 bench/vlink-bad.py --bin-dir "$B"

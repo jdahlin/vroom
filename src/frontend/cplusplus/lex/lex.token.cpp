@@ -21,6 +21,13 @@
 namespace cplusplus
 {
 
+literal_value &lexer::add_value(token &out)
+{
+    literal_value &v = values.append(literal_value());
+    out.value_index = (uint32_t)values.size();
+    return v;
+}
+
 token lexer::convert(const preprocessing_token &pp)
 {
     token out;
@@ -46,13 +53,13 @@ token lexer::convert(const preprocessing_token &pp)
             if (spelling_buffer.size() == 4 &&
                 !memcmp(spelling_buffer.data(), "true", 4))
                 out.literal = literal_kind::boolean_literal,
-                out.type = fundamental_type::bool_, out.value = 1,
+                out.type = fundamental_type::bool_, add_value(out).value = 1,
                 out.value_known = true;
             else if (spelling_buffer.size() == 5 &&
                      !memcmp(spelling_buffer.data(), "false", 5))
+                /* its value is 0, as value_of() gives without an entry */
                 out.literal = literal_kind::boolean_literal,
-                out.type = fundamental_type::bool_, out.value = 0,
-                out.value_known = true;
+                out.type = fundamental_type::bool_, out.value_known = true;
             else if (spelling_buffer.size() == 7 &&
                      !memcmp(spelling_buffer.data(), "nullptr", 7))
                 out.literal = literal_kind::pointer_literal,

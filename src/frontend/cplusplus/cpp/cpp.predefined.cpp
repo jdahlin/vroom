@@ -317,7 +317,7 @@ void preprocessor::write_definitions(vbuffer *out)
         vbuffer_format_append(out, "#define %.*s", (int)n, name);
         if (m.function_like) {
             vbuffer_append(out, "(", 1);
-            for (uint16_t i = 0; i < m.parameter_count; i++) {
+            for (uint32_t i = 0; i < m.parameter_count; i++) {
                 if (i)
                     vbuffer_append(out, ",", 1);
                 if (m.variadic && !m.named_variadic &&

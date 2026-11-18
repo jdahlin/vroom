@@ -6,6 +6,7 @@
  * files in this document."
  */
 #include <stdio.h>
+#include <sys/stat.h>
 
 #include "../cplusplus-internal.h"
 
@@ -30,12 +31,19 @@ bool source_file::open(const char *path)
     FILE *f = fopen(path, "rb");
     if (!f)
         return false;
+    /* a regular file is read at once into a buffer of its size and the
+       padding (most headers are far smaller than a chunk); anything else,
+       and a file that grew meanwhile, chunk by chunk */
+    size_t chunk = 65536;
+    struct stat st;
+    if (fstat(fileno(f), &st) == 0 && S_ISREG(st.st_mode))
+        chunk = (size_t)st.st_size + source_file_padding;
     owned_array<char> text;
     size_t length = 0;
     for (;;) {
-        size_t n = fread(text.extend(65536), 1, 65536, f);
+        size_t n = fread(text.extend(chunk), 1, chunk, f);
         length += n;
-        if (n < 65536)
+        if (n < chunk)
             break;
     }
     fclose(f);

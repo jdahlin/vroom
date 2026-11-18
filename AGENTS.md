@@ -65,6 +65,14 @@ relative to it); `TODO.md` stays at the top.
 - `RESEARCH-cplusplus.md`: whether vroom's architecture (vccd, prefix
   snapshots, direct -O0 emitter) carries to C++, prior compile-server work on
   the LLVM/GCC/kernel lists, and the inputs where it stops paying.
+- `RESEARCH-cxx-style.md`: a style guide for vcc's own C++ and a lint for it
+  in vcc: other projects' rules and how they enforce them, the C++ front end
+  measured with clang-tidy and clang-query, 30 candidate rules by what a
+  checker must know, the front end run on vcc's own sources, decisions needed.
+- `RESEARCH-cxx-performance.md`: the C++ front end's speed: instructions and
+  heap calls per token against clang and vcc's C front end, where they go
+  (a profile, three findings), how the fastest compilers write their source,
+  15 rules for fast code with what can check each, decisions needed.
 - `PLAN-cxx.md`: the first C++ plan (steps X0-X7): a minimal front end to
   test the instantiation cache and per-symbol codegen on libc++'s tests and
   nlohmann/json.  Update a step's status there.  `bench/cxx-profile.py
@@ -288,6 +296,7 @@ relative to it); `TODO.md` stays at the top.
 make -C src -j 6 vcc                # all vcc tools, hosted in GNU C++20
 make -C src -j 6 vcc VCC_LANG=c     # build the implementation as C11
 make -C src -j 6 vcc VCC_UNITY= OUT=../build/src-parts   # file by file: each file compiles alone
+make -C src -k -j 6 cplusplus-check # the C++ front end's files, each alone with its flags (CPLUSPLUS_FLAGS: no RTTI, no C++ library, -Werror; ~3 s)
 bench/vcc-diff.py ref -j 6          # clang -E references (once, ~1 min)
 bench/vcc-diff.py cmp -j 6 --kernel # preprocessor parity, kernel TUs
 bench/vcc-diff.py cmp -j 6          # ... including host tools (scripts/)
