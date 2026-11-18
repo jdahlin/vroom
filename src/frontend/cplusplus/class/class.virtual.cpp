@@ -157,6 +157,29 @@ analysis_result semantic_analysis::virtual_member(entity_index c,
     return analysis_result::well_formed;
 }
 
+/* [abi:class-types] I: the primary base, "the first non-virtual dynamic
+   base class"; false if a base without a virtual table pointer comes
+   before it */
+bool semantic_analysis::primary_base_choice(entity_index c,
+                                            entity_index &primary) const
+{
+    const entity &x = entity_table[c];
+    bool nonvirtual_before = false;
+    for (uint32_t i = 0; i < x.base_count && !primary; i++) {
+        entity_index specifier = class_bases[x.first_base + i];
+        const entity &base = entity_table[specifier];
+        if (base.virtual_base)
+            continue;
+        if (!entity_table[type_table[base.type.unqualified()].entity].dynamic)
+            nonvirtual_before = true;
+        else if (nonvirtual_before)
+            return false;
+        else
+            primary = specifier;
+    }
+    return true;
+}
+
 /*
  * At the closing } of class c (before its layout): [class.virtual]/1 "A
  * class that declares or inherits a virtual function is called a
@@ -177,24 +200,10 @@ analysis_result semantic_analysis::dynamic_class_record(entity_index c,
        entity_table's (its bases, members and type, read here, stay) */
     const entity x = entity_table[c];
     entity_index primary = 0;
-    bool nonvirtual_before = false;
-    for (uint32_t i = 0; i < x.base_count; i++) {
-        entity_index specifier = class_bases[x.first_base + i];
-        if (entity_table[specifier].virtual_base)
-            continue;
-        entity_index b =
-            type_table[entity_table[specifier].type.unqualified()].entity;
-        if (!entity_table[b].dynamic) {
-            nonvirtual_before = true;
-            continue;
-        }
-        if (nonvirtual_before && !primary)
-            /* a primary base that is not the first base: allocated first
-               ([abi:class-types] II), out of declaration order */
-            return not_supported(n, "class.virtual");
-        if (!primary)
-            primary = specifier;
-    }
+    if (!primary_base_choice(c, primary))
+        /* a primary base that is not the first base: allocated first
+           ([abi:class-types] II), out of declaration order */
+        return not_supported(n, "class.virtual");
     /* [abi:class-types] I: without a non-virtual dynamic base, "a nearly
        empty virtual base class" would be the primary base, sharing the
        virtual table pointer: not analysed */

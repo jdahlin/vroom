@@ -982,6 +982,9 @@ struct analysed_expression {
 class semantic_analysis
 {
   public:
+    /* an expression_statement's d: run only by the complete object
+       constructor or destructor */
+    static constexpr uint32_t complete_object_only = 1;
     semantic_analysis(const syntax_tree &tree, token_stream &tokens,
                       const parser &p, diagnostic_consumer &diagnostics);
     semantic_analysis(const semantic_analysis &) = delete;
@@ -1108,6 +1111,10 @@ class semantic_analysis
        takes in a class ([abi:class-types]) */
     uint64_t pointer_size() const;
     uint64_t alignment_of_type(qualified_type t) const;
+    /* [class.virtual]/2: whether member function e has the name,
+       parameter-type-list and cv-qualification of virtual function g (a
+       destructor: whether both are destructors) */
+    bool overrides_function(entity_index e, entity_index g) const;
 
     /* the uses of names lookup resolved, each with the entity found:
        what -fcxx-dump=lookup-claims writes for clang to
@@ -1519,11 +1526,11 @@ class semantic_analysis
     };
     owned_array<declared_virtual> declared_virtuals;
     analysis_result dynamic_class_record(entity_index c, node_index n);
+    bool primary_base_choice(entity_index c, entity_index &primary) const;
     analysis_result virtual_member(entity_index c, entity_index e,
                                    node_index declaration, token_index id,
                                    bool virtual_specified);
     uint32_t vtable_pointer_store(entity_index c, token_index at);
-    bool overrides_function(entity_index e, entity_index g) const;
     /* whether the syntax is a virt-specifier or virt-specifier-seq
        ([class.mem]/1), and which */
     bool virt_specifier(syntax_child d, bool &override_, bool &final_) const;
@@ -1848,9 +1855,6 @@ class semantic_analysis
                              qualified_type type, token_index at,
                              uint32_t value);
     /* a block of the statements */
-    /* an expression_statement's d: run only by the complete object
-       constructor or destructor */
-    static constexpr uint32_t complete_object_only = 1;
     uint32_t complete_object(uint32_t statement);
     uint32_t block_statement(token_index at,
                              const owned_array<uint32_t> &statements);
@@ -2345,6 +2349,14 @@ bool itanium_symbol_name(const semantic_analysis &analysis,
    (_ZTV <type>) */
 bool itanium_vtable_name(const semantic_analysis &analysis,
                          const preprocessor &pp, entity_index c, vbuffer *out);
+/* its VTT's (_ZTT <type>, [abi:vtable-ctor-vtt]) and the construction
+   virtual table of its base at offset (_ZTC <type> <offset> _ <base>) */
+bool itanium_vtt_name(const semantic_analysis &analysis, const preprocessor &pp,
+                      entity_index c, vbuffer *out);
+bool itanium_construction_vtable_name(const semantic_analysis &analysis,
+                                      const preprocessor &pp, entity_index c,
+                                      uint64_t offset, entity_index base,
+                                      vbuffer *out);
 
 } // namespace cplusplus
 

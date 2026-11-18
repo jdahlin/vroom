@@ -36,6 +36,24 @@ class itanium_mangler
         text("_ZTV");
         return type(analysis.entity_table[c].type);
     }
+    /* <special-name> ::= TT <type>, the VTT ([abi:vtable-ctor-vtt]) */
+    bool vtt_name(entity_index c)
+    {
+        text("_ZTT");
+        return type(analysis.entity_table[c].type);
+    }
+    /* [[impl.clang]] a construction virtual table ([abi:vtable-ctor]):
+       TC <type> <offset> _ <base type>, the base's at offset in c */
+    bool construction_vtable_name(entity_index c, uint64_t offset,
+                                  entity_index base)
+    {
+        text("_ZTC");
+        if (!type(analysis.entity_table[c].type))
+            return false;
+        vbuffer_format_append(out, "%llu_",
+                              static_cast<unsigned long long>(offset));
+        return type(analysis.entity_table[base].type);
+    }
 
   private:
     const semantic_analysis &analysis;
@@ -1154,6 +1172,22 @@ bool itanium_vtable_name(const semantic_analysis &analysis,
 {
     itanium_mangler m(analysis, pp, out, 2);
     return m.vtable_name(c);
+}
+
+bool itanium_vtt_name(const semantic_analysis &analysis, const preprocessor &pp,
+                      entity_index c, vbuffer *out)
+{
+    itanium_mangler m(analysis, pp, out, 2);
+    return m.vtt_name(c);
+}
+
+bool itanium_construction_vtable_name(const semantic_analysis &analysis,
+                                      const preprocessor &pp, entity_index c,
+                                      uint64_t offset, entity_index base,
+                                      vbuffer *out)
+{
+    itanium_mangler m(analysis, pp, out, 2);
+    return m.construction_vtable_name(c, offset, base);
 }
 
 } // namespace cplusplus
