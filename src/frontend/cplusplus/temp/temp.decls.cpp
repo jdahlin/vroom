@@ -142,7 +142,7 @@ analysis_result semantic_analysis::template_head_parameters(
            identifier here, the template's last parameter */
         if (x.pack) {
             if (!packs || i + 1 != parameters.size() || !x.type ||
-                x.template_template || !x.named || x.has_default)
+                x.template_template || x.has_default)
                 return not_supported(p, "temp.variadic");
             continue;
         }
@@ -687,7 +687,7 @@ analysis_result semantic_analysis::alias_template_definition(node_index n,
 {
     entity_index outer = current_scope;
     owned_array<node_index> parameters;
-    analysis_result r = template_head_parameters(n, parameters);
+    analysis_result r = template_head_parameters(n, parameters, true);
     if (r != analysis_result::well_formed)
         return r;
     uint32_t name = tokens.identifier(tree[alias].first_token + 1);
@@ -903,9 +903,6 @@ analysis_result semantic_analysis::alias_template_type(node_index id,
     analysis_result r = template_id_arguments(id, at, arguments);
     if (r != analysis_result::well_formed)
         return r;
-    for (const template_argument &a : arguments)
-        if (a.kind == template_argument::kind_t::pack)
-            return not_supported(id, "temp.variadic");
     entity_index scope = entity_table.make(entity_kind::block_scope, 0,
                                            entity_table[ft.entity].enclosing);
     for (uint32_t i = 0; i < ft.parameter_count; i++)
@@ -935,6 +932,26 @@ analysis_result semantic_analysis::alias_template_type(node_index id,
     /* (a cv-qualified type: template_type's callers take no cv) */
     if (t.cv())
         return not_supported(id, "temp.alias");
+    /* [temp.alias]/4 (CWG 1558): "when a template-id refers to the
+       specialization of an alias template ... any substitution failure in
+       the template arguments of the template-id is a substitution failure
+       of the instantiation": dependent arguments the type does not keep
+       (void_t<typename T::type> is void) are substituted again with each
+       instantiation, which a non-dependent type does not record */
+    if (!depends_on_template_parameter(
+            qualified_type::make(t.unqualified(), cv_none))) {
+        for (const template_argument &a : arguments) {
+            bool dependent =
+                depends_on_template_parameter(a.type) || a.template_entity;
+            if (a.kind == template_argument::kind_t::pack)
+                for (uint32_t k = 0; k < a.count; k++)
+                    if (depends_on_template_parameter(
+                            pack_arguments[a.value + k].type))
+                        dependent = true;
+            if (dependent)
+                return not_supported(id, "temp.alias");
+        }
+    }
     type = t.unqualified();
     return analysis_result::well_formed;
 }
