@@ -280,6 +280,10 @@ analysis_result semantic_analysis::lambda_introducer(node_index n,
         if (found.ambiguous || found.unknown || !e ||
             entity_table[e].kind == entity_kind::none)
             return not_supported(n, "basic.lookup.unqual");
+        /* a structured binding (C++20's local entity, [basic.pre]/7):
+           its capture is not analysed */
+        if (entity_table[e].kind == entity_kind::structured_binding)
+            return not_supported(n, "expr.prim.lambda.capture");
         const entity &x = entity_table[e];
         if (x.kind != entity_kind::variable || !x.automatic)
             return ill_formed_at_token(name,

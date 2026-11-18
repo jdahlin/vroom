@@ -1022,10 +1022,15 @@ analysis_result semantic_analysis::template_candidates(
     const expression_meaning *meanings, uint32_t count,
     owned_array<overload_candidate> &candidates,
     owned_array<uint32_t> *first_arguments, owned_array<template_argument> *all,
-    const owned_array<syntax_child> *written, node_index written_at)
+    const owned_array<syntax_child> *written, node_index written_at,
+    const owned_array<template_argument> *specified)
 {
     for (uint32_t g : group) {
+        /* the explicit template arguments ([temp.arg.explicit]), if given */
         owned_array<template_argument> d;
+        if (specified)
+            for (const template_argument &a : *specified)
+                d.append(a);
         bool failed = false;
         /* [temp.deduct]/8: an invalid type or expression in the
            immediate context of the declaration (or of a default

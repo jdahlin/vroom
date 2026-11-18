@@ -72,8 +72,9 @@ node_index parser::cast_expression()
  *   - the other implicit conversions ([expr.static.cast]/4: "An expression
  *     E can be explicitly converted to a type T if there is an implicit
  *     conversion sequence from E to T"): a null pointer constant to a
- *     pointer, a pointer to bool, a pointer to a pointer by [conv.ptr]/2
- *     or [conv.qual];
+ *     pointer, a pointer to bool, a pointer to a pointer by [conv.ptr]/2,
+ *     [conv.qual] or [conv.fctptr] (a pointer to a noexcept function to
+ *     a pointer to function);
  *   - between pointers otherwise, pointer_conversion;
  *   - to a reference, reference_cast;
  *   - a pointer to an integral type, [expr.reinterpret.cast]/4: "A pointer
@@ -500,6 +501,7 @@ analysis_result semantic_analysis::pointer_conversion(node_index at,
     bool lesser = qualifiers(pointee) & ~qualifiers(target_pointee);
     if (by_static && (m.type.unqualified() == to.unqualified() ||
                       qualification_convertible(m.type, to) ||
+                      function_pointer_convertible(m.type, to) ||
                       (to_void && is_object_pointer(m.type) && !lesser)))
         return implicit_conversion(at, m, to, true);
     /* [expr.const.cast]/9: "conversions between pointers to functions

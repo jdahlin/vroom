@@ -569,6 +569,8 @@ analysis_result semantic_analysis::named_entity(token_index t, entity_index e,
         if (r != analysis_result::well_formed)
             return r;
     }
+    if (entity_table[e].kind == entity_kind::structured_binding)
+        return structured_binding_use(t, e, m);
     const entity &x = entity_table[e];
     if (x.kind != entity_kind::variable && x.kind != entity_kind::function)
         return not_supported(current_declaration, "expr.prim.id");

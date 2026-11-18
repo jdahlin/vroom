@@ -94,6 +94,8 @@ analysis_result semantic_analysis::this_object(token_index t,
 analysis_result semantic_analysis::member_access(token_index at, entity_index e,
                                                  expression_meaning &m)
 {
+    /* E1.E2 names no structured binding, whatever E1 does */
+    m.binding = 0;
     entity_index object_class = type_table[m.type.unqualified()].entity;
     entity_index through =
         entity_table[entity_table[e].enclosing].anonymous_object;
