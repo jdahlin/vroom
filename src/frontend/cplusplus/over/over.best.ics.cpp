@@ -131,12 +131,11 @@ semantic_analysis::standard_conversion_sequence(const expression_meaning &a,
            of type bool."  std::nullptr_t converts to bool only in a
            direct-initialization ([dcl.init]/17.8), and a parameter is
            copy-initialized */
-        if (f.kind == type_kind::pointer) {
+        if (f.kind == type_kind::pointer ||
+            f.kind == type_kind::pointer_to_member) {
             s.pointer_to_bool = true;
             return s;
         }
-        if (f.kind == type_kind::pointer_to_member)
-            return of_form(sequence::form::unknown);
         return of_form(sequence::form::bad);
     }
     bool null_pointer_constant =
@@ -157,6 +156,21 @@ semantic_analysis::standard_conversion_sequence(const expression_meaning &a,
         if (maybe_null)
             return of_form(sequence::form::unknown);
         return of_form(sequence::form::bad);
+    }
+    if (t.kind == type_kind::pointer_to_member) {
+        /* [conv.mem]/1: "A null pointer constant ([conv.ptr]) can be
+           converted to a pointer-to-member type"; /2, a pointer to member
+           of a base, is not ranked here ([over.ics.rank]/4.4.3) */
+        if (null_pointer_constant)
+            return s;
+        if (f.kind != type_kind::pointer_to_member) {
+            if (maybe_null || f.kind == type_kind::class_type)
+                return of_form(sequence::form::unknown);
+            return of_form(sequence::form::bad);
+        }
+        if (f.operand.unqualified() != t.operand.unqualified())
+            return of_form(sequence::form::bad);
+        return of_form(sequence::form::unknown);
     }
     if (t.kind != type_kind::pointer) {
         if (t.kind == type_kind::fundamental && f.kind != type_kind::class_type)

@@ -942,6 +942,16 @@ enum class semantic_kind : uint8_t {
     /* [expr.ref]/6.3.2: a: the object's address (a prvalue), b: the
        non-static member function; only the postfix-expression of a call */
     bound_member_function,
+    /* [expr.unary.op]/3.1: &C::m, a prvalue of type "pointer to member of
+       class C": a: the non-static member m (a data member or a member
+       function) */
+    member_pointer,
+    /* [expr.mptr.oper]: E1.*E2 and E1->*E2: a: the address of the object
+       (a prvalue of type pointer to the member pointer's class), b: the
+       pointer to member (a prvalue).  To a data member, an lvalue (or an
+       xvalue) of its type; to a member function, a prvalue of function
+       type, only the postfix-expression of a call ([expr.mptr.oper]/6) */
+    member_pointer_access,
     /* ---- initializers ---- */
     /* value- or zero-initialization: a scalar's 0, an array's all zero */
     zero,
@@ -1079,6 +1089,15 @@ enum class conversion_kind : uint8_t {
        pointer to the derived class containing it: b: the base subobject;
        a null pointer stays one */
     base_to_derived,
+    /* [conv.mem]/1: a null pointer constant to the null member pointer
+       value */
+    null_member_pointer,
+    /* [conv.mem]/2: a pointer to member of a base class to a pointer to
+       member of the derived class: value: the base's offset in it, added
+       ([abi:data-member-pointers]); a null member pointer stays one */
+    member_pointer_to_derived,
+    /* [expr.static.cast]/12: the other way: value: the offset subtracted */
+    member_pointer_to_base,
 };
 
 /* [expr.cast]/4: the casts that may perform an explicit conversion */
@@ -2034,6 +2053,9 @@ class semantic_analysis
     /* ... to a reference: the glvalue m through a pointer to it */
     analysis_result reference_cast(node_index at, qualified_type to,
                                    expression_meaning &m, uint8_t kinds);
+    /* ... to a pointer to member ([expr.static.cast]/12) */
+    analysis_result member_pointer_cast(node_index at, qualified_type to,
+                                        expression_meaning &m, uint8_t kinds);
     /* ... between pointers to classes related by derivation */
     analysis_result class_pointer_cast(node_index at, qualified_type to,
                                        expression_meaning &m, uint8_t kinds,
@@ -2088,6 +2110,32 @@ class semantic_analysis
     bool is_arithmetic(qualified_type t) const;
     bool is_pointer(qualified_type t) const;
     bool is_object_pointer(qualified_type t) const;
+    /* [conv.ptr]/1, [conv.mem]/1: the null pointer constant m to the null
+       (member) pointer value of type to, by conversion kind */
+    void null_pointer_constant_to(expression_meaning &m, qualified_type to,
+                                  conversion_kind kind);
+    /* [dcl.mptr]: a pointer to member; to a member function */
+    bool is_member_pointer(qualified_type t) const;
+    bool is_member_function_pointer(qualified_type t) const;
+    /* [conv.mem]: m, a null pointer constant or a pointer to member, to
+       the pointer-to-member type to (handled: to is one) */
+    analysis_result member_pointer_conversion(node_index at,
+                                              expression_meaning &m,
+                                              qualified_type to, bool &handled);
+    /* [conv.mem]/2 (to_base false), [expr.static.cast]/12 (to_base): the
+       pointer to member m between class derived and its base on their
+       non-virtual path, to type type; access checked if access */
+    analysis_result
+    member_pointer_along_path(token_index at, entity_index derived,
+                              entity_index base, qualified_type type,
+                              bool to_base, bool access, expression_meaning &m);
+    /* [expr.mptr.oper]: E1.*E2 (arrow false) and E1->*E2, the operands
+       analysed */
+    analysis_result member_pointer_operator(node_index n, token_index at,
+                                            bool arrow,
+                                            expression_meaning &left,
+                                            expression_meaning &right,
+                                            expression_meaning &m);
     /* [basic.lval]/6: the lvalue-to-rvalue, array-to-pointer and
        function-to-pointer conversions of an operand that is to be a
        prvalue */
@@ -2467,6 +2515,10 @@ class semantic_analysis
     /* the non-virtual bases from class c to its base, outermost first */
     bool nonvirtual_path(entity_index c, entity_index base,
                          owned_array<entity_index> &steps) const;
+    analysis_result accessible_path(token_index at, entity_index derived,
+                                    entity_index base, bool access,
+                                    const char *label,
+                                    owned_array<entity_index> &steps);
     /* [expr.cast]/4: whether class c has one base subobject base, on a
        non-virtual path */
     bool single_nonvirtual_path(entity_index c, entity_index base) const;
@@ -3445,6 +3497,15 @@ class semantic_analysis
        overload resolution chooses from ([over.call.func]); 0 elsewhere,
        where a name of an overload set is [over.over]'s */
     token_index overloaded_callee = 0;
+    /* [expr.unary.op]/4: the qualified-id that is the operand of an
+       explicit & (not in parentheses), whose non-static member is a
+       pointer to member; 0 elsewhere */
+    node_index member_pointer_operand = 0;
+    /* [expr.unary.op]/3.2: the glvalue m as the prvalue of its address */
+    void address_of_glvalue(token_index at, expression_meaning &m);
+    /* [expr.unary.op]/3.1: &C::m, of the non-static member e named at t */
+    analysis_result member_pointer_constant(token_index t, entity_index e,
+                                            expression_meaning &m);
     /* [expr.call]: the call of the function f (whose type is function_type;
        a member function's object's address object, member the function)
        with the arguments, those analysed so far in early: m */

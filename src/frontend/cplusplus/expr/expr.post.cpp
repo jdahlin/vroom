@@ -795,6 +795,13 @@ analysis_result semantic_analysis::call(node_index n, expression_meaning &m)
         semantics[f.node].kind == semantic_kind::bound_member_function) {
         object = semantics[f.node].a;
         member = semantics[f.node].b;
+    } else if (f.node &&
+               semantics[f.node].kind == semantic_kind::member_pointer_access &&
+               type_table[f.type.unqualified()].kind == type_kind::function) {
+        /* [expr.mptr.oper]/6: "If the result of .* or ->* is a function,
+           then that result can be used only as the operand for the
+           function call operator ()": the call's object is the access's
+           (lowering adjusts it and finds the function) */
     } else if (type_table[f.type.unqualified()].kind != type_kind::function ||
                f.category != value_category::lvalue) {
         r = operand_value(n, f);

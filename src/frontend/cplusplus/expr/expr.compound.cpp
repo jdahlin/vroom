@@ -368,10 +368,31 @@ analysis_result semantic_analysis::composite_pointer_type(node_index at,
     if (null(a) && null(b)) {
         composite = qualified_type::make(
             type_table.fundamental(fundamental_type::std_nullptr_t), cv_none);
-    } else if (null(a) && is_pointer(b.type)) {
+    } else if (null(a) && (is_pointer(b.type) || is_member_pointer(b.type))) {
         composite = b.type;
-    } else if (null(b) && is_pointer(a.type)) {
+    } else if (null(b) && (is_pointer(a.type) || is_member_pointer(a.type))) {
         composite = a.type;
+    } else if (is_member_pointer(a.type) && is_member_pointer(b.type)) {
+        /* "if T1 is "pointer to member of C1 of type cv1 U" and T2 is
+           "pointer to member of C2 of type cv2 U", for some non-function
+           type U, where C1 is reference-related to C2 or C2 is
+           reference-related to C1, the cv-combined type of T2 and T1 or
+           the cv-combined type of T1 and T2, respectively": the same U
+           here, the derived class's type */
+        const struct type x = type_table[a.type.unqualified()];
+        const struct type y = type_table[b.type.unqualified()];
+        if (a.type.unqualified() == b.type.unqualified())
+            composite = a.type;
+        else if (!(x.operand == y.operand) ||
+                 type_table[x.operand.unqualified()].kind ==
+                     type_kind::function)
+            return not_supported(at, "expr.type");
+        else if (base_subobjects(x.entity, y.entity))
+            composite = a.type;
+        else if (base_subobjects(y.entity, x.entity))
+            composite = b.type;
+        else
+            return not_supported(at, "expr.type");
     } else if (is_pointer(a.type) && is_pointer(b.type)) {
         qualified_type x = type_table[a.type.unqualified()].operand;
         qualified_type y = type_table[b.type.unqualified()].operand;
@@ -435,7 +456,9 @@ analysis_result semantic_analysis::comparison(node_index n,
             fold_binary(b, false, op, t, t, left.value, right.value, m.value);
         return analysis_result::well_formed;
     }
-    bool pointers = is_pointer(left.type) || is_pointer(right.type);
+    bool pointers = is_pointer(left.type) || is_pointer(right.type) ||
+                    (equality && (is_member_pointer(left.type) ||
+                                  is_member_pointer(right.type)));
     bool nullptrs =
         fundamental_of(left.type) == fundamental_type::std_nullptr_t ||
         fundamental_of(right.type) == fundamental_type::std_nullptr_t;
@@ -538,9 +561,9 @@ analysis_result semantic_analysis::builtin_binary(node_index n, token_index at,
         return not_supported(n, "expr.spaceship");
     if (op == preprocessing_op_or_punc::DOT_STAR ||
         op == preprocessing_op_or_punc::ARROW_STAR)
-        /* the built-in pointer-to-member operators: no pointers to
-           members are analysed */
-        return not_supported(n, "expr.mptr.oper");
+        /* the built-in pointer-to-member operators (expr.mptr.oper.cpp) */
+        return member_pointer_operator(
+            n, at, op == preprocessing_op_or_punc::ARROW_STAR, left, right, m);
     if (op == preprocessing_op_or_punc::AMPERSAND_AMPERSAND ||
         op == preprocessing_op_or_punc::BAR_BAR) {
         /* [expr.log.and]/1: "The operands are both contextually converted

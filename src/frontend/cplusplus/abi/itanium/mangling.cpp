@@ -1300,6 +1300,17 @@ bool itanium_mangler::type(qualified_type t)
     } else if (r.kind == type_kind::rvalue_reference) {
         text("O");
         done = type(r.operand);
+    } else if (r.kind == type_kind::pointer_to_member) {
+        /* [abi:mangle.pointer-to-member-type]: "Pointer-to-member types
+           encode the class and member types":
+
+               <pointer-to-member-type> ::= M <class type> <member type>
+        */
+        text("M");
+        done =
+            type(qualified_type::make(
+                analysis.entity_table[r.entity].type.unqualified(), cv_none)) &&
+            type(r.operand);
     } else if (r.kind == type_kind::pack_expansion) {
         /* [abi:mangle.function-type]: a pack expansion,
 

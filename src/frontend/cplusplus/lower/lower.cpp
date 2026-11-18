@@ -451,12 +451,53 @@ class c_lowering
     uint32_t constant(const semantic_node &n);
     uint32_t string_literal(const semantic_node &n);
     uint32_t conversion(const semantic_node &n);
+    /* pointers to members ([dcl.mptr], [abi:member-pointers]) */
+    ast_qualified_type member_function_pair = 0;
+    ast_qualified_type member_function_pointer_type();
+    /* the C type of a member function of type function called on an
+       object of type object: the object's address first ([class.this]) */
+    ast_qualified_type member_function_type(qualified_type object,
+                                            qualified_type function,
+                                            token_index at);
+    /* whether n is a member pointer constant (&C::m, a null member
+       pointer) through conversions: the member (0: the null value) and
+       the offset the conversions add */
+    bool member_pointer_value(uint32_t n, entity_index &member,
+                              int64_t &adjustment) const;
+    uint32_t member_pointer(uint32_t n);
+    uint32_t member_pointer_constant(qualified_type t, entity_index member,
+                                     int64_t adjustment, token_index at);
+    uint32_t null_member_pointer(qualified_type t, token_index at);
+    uint32_t member_function_pointer_of(uint32_t ptr, uint32_t adj,
+                                        token_index at);
+    uint32_t member_pointer_conversion(const semantic_node &n);
+    uint32_t member_pointer_object(const semantic_node &n);
+    uint32_t member_pointer_test(uint32_t n, token_index at);
+    uint32_t member_pointer_equality(const semantic_node &n, int op);
+    uint32_t member_function_call(const semantic_node &n,
+                                  owned_array<uint32_t> &items,
+                                  uint32_t &object);
+    /* a value read more than once: lowered again when that has no effect,
+       else held in a temporary of the full-expression */
+    struct reread {
+        uint32_t node = 0, symbol = 0;
+        ast_qualified_type type = 0;
+    };
+    uint32_t read_first(uint32_t n, reread &r, const char *what);
+    uint32_t read_again(const reread &r);
+    bool rereadable_member_pointer(uint32_t n) const;
     uint32_t binary(const semantic_node &n);
     uint32_t assignment(const semantic_node &n);
     uint32_t call(const semantic_node &n);
     uint32_t bind_reference(const semantic_node &n);
     uint32_t initializer_list(const semantic_node &n);
     uint32_t compound_literal(uint32_t n);
+    uint32_t compound_literal_of(uint32_t value, ast_qualified_type t);
+    /* whether an object of type t has a pointer to data member in it,
+       whose null value is not all zero bits */
+    bool holds_data_member_pointer(qualified_type t) const;
+    bool static_zero_initialization(const entity &x, uint32_t s,
+                                    token_index at);
     void address_taken(uint32_t lvalue);
 
     /* statements */
@@ -628,6 +669,14 @@ ast_qualified_type c_lowering::type(qualified_type t, token_index at)
         made = fundamental(u, at);
         break;
     }
+    case type_kind::pointer_to_member:
+        /* [abi:data-member-pointers]: "The basic ABI properties of data
+           member pointer types are those of ptrdiff_t." */
+        if (record(r.operand).kind == type_kind::function)
+            made = member_function_pointer_type();
+        else
+            made = ast_builder_type_ptrdiff(c);
+        break;
     case type_kind::placeholder:
         /* [dcl.spec.auto]/11: a name of an entity whose type has an
            undeduced placeholder is in no expression, so the analysis
@@ -920,13 +969,20 @@ ast_qualified_type c_lowering::entity_type(entity_index e, token_index at)
         return parameter_type(x.type, at);
     if (x.kind != entity_kind::function || !x.nonstatic_member)
         return type(x.type, at);
-    const struct type &f = record(x.type);
-    owned_array<ast_qualified_type> parameters;
     qualified_type object = qualified_type::make(
         analysis.entity_table[x.enclosing].type.unqualified(), x.member_cv);
+    return member_function_type(object, x.type, at);
+}
+
+ast_qualified_type c_lowering::member_function_type(qualified_type object,
+                                                    qualified_type function,
+                                                    token_index at)
+{
+    const struct type &f = record(function);
+    owned_array<ast_qualified_type> parameters;
     parameters.append(ast_builder_type_pointer(c, type(object, at)));
     const qualified_type *p =
-        analysis.type_table.parameters(x.type.unqualified());
+        analysis.type_table.parameters(function.unqualified());
     for (uint32_t i = 0; i < f.parameter_count; i++)
         parameters.append(parameter_type(p[i], at));
     return ast_builder_type_function(c, type(f.operand, at), parameters.data(),
@@ -1370,6 +1426,8 @@ uint32_t c_lowering::new_object(const semantic_node &n)
                     c, ast_builder_type_basic(AST_TYPE_INT), 0);
                 if (r.kind == type_kind::pointer)
                     value = cast(zero, u, AST_CAST_NULL_POINTER);
+                else if (r.kind == type_kind::pointer_to_member)
+                    value = null_member_pointer(object, n.at);
                 else if (r.kind == type_kind::fundamental &&
                          fundamental_type_is_floating(r.fundamental))
                     value = cast(zero, u, AST_CAST_INTEGER_TO_FLOAT);
@@ -1981,7 +2039,13 @@ uint32_t c_lowering::conversion(const semantic_node &n)
         return cast(expression(n.a), t, AST_CAST_FLOAT_TO_INTEGER);
     }
     case conversion_kind::boolean:
+        if (record(node(n.a).type).kind == type_kind::pointer_to_member)
+            return member_pointer_test(n.a, n.at);
         return cast(expression(n.a), t, AST_CAST_BOOL);
+    case conversion_kind::null_member_pointer:
+    case conversion_kind::member_pointer_to_derived:
+    case conversion_kind::member_pointer_to_base:
+        return member_pointer_conversion(n);
     case conversion_kind::null_pointer: {
         /* [conv.ptr]/1: "A null pointer constant can be converted to a
            pointer type; the result is the null pointer value of that
@@ -2002,37 +2066,26 @@ uint32_t c_lowering::conversion(const semantic_node &n)
                complete object whose layout gives the offset */
             entity_index k = analysis.entity_table[n.b].enclosing;
             entity_index v = record(analysis.entity_table[n.b].type).entity;
-            uint32_t p = expression(n.a);
-            if (!p)
-                return 0;
             if ((structor_variant == 1 || structor_variant == 3) &&
-                k == structor_class && at_this(n.a))
+                k == structor_class && at_this(n.a)) {
+                uint32_t p = expression(n.a);
+                if (!p)
+                    return 0;
                 return offset_pointer(
                     p, static_cast<int64_t>(analysis.entity_table[n.b].offset),
                     t);
+            }
             /* the pointer read three times: a temporary holds one with
                side effects */
-            uint32_t first = p, second = 0, third = 0;
-            if (side_effect_free(p)) {
-                second = expression(n.a);
-                third = expression(n.a);
-            } else {
-                if (!collecting)
-                    return fail("a pointer to a virtual base of an expression "
-                                "with side effects outside a statement",
-                                n.at);
-                ast_qualified_type pt = type_of(p);
-                uint32_t temporary = full_expression_temporary(pt);
-                auto read = [&]() {
-                    return make(AST_NODE_VARIABLE, pt, temporary, 0, 0, 0,
-                                AST_NODE_FLAG_LVALUE);
-                };
-                first = make(AST_NODE_COMMA, pt,
-                             make(AST_NODE_ASSIGN, pt, read(), p, 0, 0, 0),
-                             read(), 0, 0, 0);
-                second = read();
-                third = read();
-            }
+            reread r;
+            uint32_t first =
+                read_first(n.a, r,
+                           "a pointer to a virtual base of an expression with "
+                           "side effects outside a statement");
+            if (!first)
+                return 0;
+            uint32_t second = read_again(r);
+            uint32_t third = read_again(r);
             if (node(n.a).kind == semantic_kind::address)
                 return virtual_base_address(first, second, k, v, t);
             uint32_t null = cast(
@@ -2065,6 +2118,502 @@ uint32_t c_lowering::conversion(const semantic_node &n)
                     AST_CAST_VOID);
     }
     return fail("a conversion", n.at);
+}
+
+/* ---- pointers to members ([dcl.mptr]) ------------------------------- */
+
+/*
+ * [abi:member-function-pointers]: "the basic ABI properties of member
+ * function pointer types are those of the following class, where fnptr_t
+ * is the appropriate function-pointer type for a member function of this
+ * type: struct { fnptr_t ptr; ptrdiff_t adj; };": one C struct, ptr a
+ * void *.  The target (AArch64) has the 32-bit ARM representation: "the
+ * this-adjustment stored in adj is left-shifted by one, and the low bit of
+ * adj indicates whether ptr is a function pointer (including null) or the
+ * offset of a v-table entry."
+ */
+ast_qualified_type c_lowering::member_function_pointer_type()
+{
+    if (member_function_pair)
+        return member_function_pair;
+    ast_qualified_type v = ast_builder_type_basic(AST_TYPE_VOID);
+    ast_qualified_type fields[2] = {ast_builder_type_pointer(c, v),
+                                    ast_builder_type_ptrdiff(c)};
+    const char *names[2] = {"ptr", "adj"};
+    size_t lengths[2] = {3, 3};
+    uint32_t aligned[2] = {0, 0};
+    uint8_t packed[2] = {0, 0};
+    int32_t widths[2] = {-1, -1};
+    member_function_pair = ast_builder_type_record(c, "", 0, false);
+    ast_builder_type_record_complete(c, member_function_pair, fields, names,
+                                     lengths, aligned, packed, widths, 2);
+    return member_function_pair;
+}
+
+bool c_lowering::holds_data_member_pointer(qualified_type t) const
+{
+    const struct type &r = record(t);
+    if (r.kind == type_kind::array)
+        return holds_data_member_pointer(r.operand);
+    if (r.kind == type_kind::pointer_to_member)
+        return record(r.operand).kind != type_kind::function;
+    if (r.kind != type_kind::class_type)
+        return false;
+    const entity &x = analysis.entity_table[r.entity];
+    for (uint32_t i = 0; i < x.member_count; i++)
+        if (holds_data_member_pointer(
+                analysis
+                    .entity_table[analysis.class_members[x.first_member + i]]
+                    .type))
+            return true;
+    for (uint32_t i = 0; i < x.virtual_base_count; i++)
+        if (holds_data_member_pointer(
+                analysis
+                    .entity_table
+                        [analysis.class_virtual_bases[x.first_virtual_base + i]]
+                    .type))
+            return true;
+    return false;
+}
+
+bool c_lowering::member_pointer_value(uint32_t n, entity_index &member,
+                                      int64_t &adjustment) const
+{
+    adjustment = 0;
+    for (;;) {
+        const semantic_node &x = node(n);
+        if (x.kind == semantic_kind::member_pointer) {
+            member = x.a;
+            return true;
+        }
+        if (x.kind != semantic_kind::conversion)
+            return false;
+        switch (static_cast<conversion_kind>(x.op)) {
+        case conversion_kind::null_member_pointer:
+            member = 0;
+            return true;
+        case conversion_kind::member_pointer_to_derived:
+            adjustment += static_cast<int64_t>(x.value);
+            break;
+        case conversion_kind::member_pointer_to_base:
+            adjustment -= static_cast<int64_t>(x.value);
+            break;
+        default:
+            return false;
+        }
+        n = x.a;
+    }
+}
+
+/* {ptr, adj}: an initializer at namespace scope, an object in a
+   function */
+uint32_t c_lowering::member_function_pointer_of(uint32_t ptr, uint32_t adj,
+                                                token_index at)
+{
+    ast_qualified_type t = member_function_pointer_type();
+    uint32_t values[2] = {ptr, adj};
+    uint32_t init = make(AST_NODE_INITIALIZER, t, 0,
+                         ast_builder_list(c, values, 2), 2, 0, 0);
+    if (!in_function)
+        return init;
+    return compound_literal_of(init, t);
+}
+
+/*
+ * A member pointer constant: [expr.unary.op]/3.1's, or the null member
+ * pointer value, through conversions.  [abi:data-member-pointers]: "A data
+ * member pointer is represented as the data member's offset in bytes from
+ * the address point of an object of the base type"; "A null data member
+ * pointer is represented as an offset of -1."
+ * [abi:member-function-pointers]: "A member function pointer for a
+ * non-virtual member function is represented with ptr set to a pointer to
+ * the function"; in the ARM representation "A virtual member function
+ * pointer sets ptr to the v-table entry offset"; "A null member function
+ * pointer sets ptr to a null function pointer and must ensure that the low
+ * bit of adj is clear".
+ */
+uint32_t c_lowering::member_pointer(uint32_t n)
+{
+    const semantic_node &x = node(n);
+    entity_index member = 0;
+    int64_t adjustment = 0;
+    if (!member_pointer_value(n, member, adjustment))
+        return fail("a pointer to member", x.at);
+    return member_pointer_constant(x.type, member, adjustment, x.at);
+}
+
+uint32_t c_lowering::member_pointer_constant(qualified_type t,
+                                             entity_index member,
+                                             int64_t adjustment, token_index at)
+{
+    if (!member)
+        return null_member_pointer(t, at);
+    ast_qualified_type d = ast_builder_type_ptrdiff(c);
+    const entity &f = analysis.entity_table[member];
+    if (record(record(t).operand).kind != type_kind::function)
+        return ast_builder_integer(c, d,
+                                   static_cast<int64_t>(f.offset) + adjustment);
+    ast_qualified_type v = ast_builder_type_basic(AST_TYPE_VOID);
+    ast_qualified_type vp = ast_builder_type_pointer(c, v);
+    uint32_t ptr = 0;
+    int64_t adj = 2 * adjustment;
+    if (f.virtual_) {
+        ptr = cast(ast_builder_integer(
+                       c, d,
+                       static_cast<int64_t>(f.vtable_slot) *
+                           static_cast<int64_t>(analysis.pointer_size())),
+                   vp, AST_CAST_INTEGER_TO_POINTER);
+        adj |= 1;
+    } else {
+        uint32_t s = symbol(member, at);
+        if (!s)
+            return 0;
+        ast_builder_symbol_flags_add(c, s, AST_SYMBOL_FLAG_USED);
+        ast_qualified_type ft = entity_type(member, at);
+        ptr =
+            cast(cast(make(AST_NODE_VARIABLE, ft, s, 0, 0, 0, 0),
+                      ast_builder_type_pointer(c, ft), AST_CAST_FUNCTION_DECAY),
+                 vp, AST_CAST_POINTER_TO_POINTER);
+    }
+    return member_function_pointer_of(ptr, ast_builder_integer(c, d, adj), at);
+}
+
+uint32_t c_lowering::null_member_pointer(qualified_type t, token_index at)
+{
+    if (record(record(t).operand).kind != type_kind::function)
+        return ast_builder_integer(c, ast_builder_type_ptrdiff(c), -1);
+    ast_qualified_type v = ast_builder_type_basic(AST_TYPE_VOID);
+    uint32_t zero =
+        ast_builder_integer(c, ast_builder_type_basic(AST_TYPE_INT), 0);
+    return member_function_pointer_of(
+        cast(zero, ast_builder_type_pointer(c, v), AST_CAST_NULL_POINTER),
+        ast_builder_integer(c, ast_builder_type_ptrdiff(c), 0), at);
+}
+
+uint32_t c_lowering::read_first(uint32_t n, reread &r, const char *what)
+{
+    r = reread();
+    r.node = n;
+    uint32_t p = expression(n);
+    if (!p)
+        return 0;
+    r.type = AST_QUALIFIED_TYPE_UNQUALIFIED(type_of(p));
+    if (side_effect_free(p) || rereadable_member_pointer(n))
+        return p;
+    if (!collecting)
+        return fail(what, node(n).at);
+    r.symbol = full_expression_temporary(r.type);
+    return make(AST_NODE_COMMA, r.type,
+                make(AST_NODE_ASSIGN, r.type, read_again(r), p, 0, 0, 0),
+                read_again(r), 0, 0, 0);
+}
+
+/* a member pointer constant, or a variable's value, through member pointer
+   conversions: lowered as new objects (compound literals) each time, with
+   no effect */
+bool c_lowering::rereadable_member_pointer(uint32_t n) const
+{
+    for (;;) {
+        const semantic_node &x = node(n);
+        if (x.kind == semantic_kind::member_pointer)
+            return true;
+        if (x.kind != semantic_kind::conversion)
+            return false;
+        switch (static_cast<conversion_kind>(x.op)) {
+        case conversion_kind::null_member_pointer:
+            return true;
+        case conversion_kind::lvalue_to_rvalue:
+            return node(x.a).kind == semantic_kind::entity;
+        case conversion_kind::member_pointer_to_derived:
+        case conversion_kind::member_pointer_to_base:
+            n = x.a;
+            break;
+        default:
+            return false;
+        }
+    }
+}
+
+uint32_t c_lowering::read_again(const reread &r)
+{
+    if (!r.symbol)
+        return expression(r.node);
+    return make(AST_NODE_VARIABLE, r.type, r.symbol, 0, 0, 0,
+                AST_NODE_FLAG_LVALUE);
+}
+
+/*
+ * [conv.mem]/1, /2 and [expr.static.cast]/12: a constant is folded
+ * (member_pointer); otherwise [abi:data-member-pointers]: "Base-to-derived
+ * and derived-to-base conversions of a non-null data member pointer can be
+ * performed by adding or subtracting (respectively) the static offset of
+ * the base within the derived class" (p == -1 ? -1 : p + offset), and
+ * [abi:member-function-pointers]: "in the 32-bit ARM representation, the
+ * addend must be left-shifted by one.  Because the adjustment does not
+ * factor into whether a member function pointer is null, this addition can
+ * be done unconditionally when performing a conversion."
+ */
+uint32_t c_lowering::member_pointer_conversion(const semantic_node &n)
+{
+    if (static_cast<conversion_kind>(n.op) ==
+        conversion_kind::null_member_pointer)
+        return null_member_pointer(n.type, n.at);
+    int64_t offset = static_cast<int64_t>(n.value);
+    if (static_cast<conversion_kind>(n.op) ==
+        conversion_kind::member_pointer_to_base)
+        offset = -offset;
+    entity_index member = 0;
+    int64_t adjustment = 0;
+    if (member_pointer_value(n.a, member, adjustment))
+        return member_pointer_constant(n.type, member, adjustment + offset,
+                                       n.at);
+    ast_qualified_type d = ast_builder_type_ptrdiff(c);
+    if (record(record(n.type).operand).kind == type_kind::function) {
+        /* {p.ptr, p.adj + 2 * offset}, p read twice */
+        if (!offset)
+            return expression(n.a);
+        ast_qualified_type v = ast_builder_type_basic(AST_TYPE_VOID);
+        reread r;
+        uint32_t first = read_first(n.a, r,
+                                    "a pointer to member function converted "
+                                    "outside a statement");
+        if (!first)
+            return 0;
+        uint32_t held = first;
+        if (r.symbol)
+            held = read_again(r);
+        uint32_t adj =
+            make(AST_NODE_BINARY, d, ast_builder_member(c, read_again(r), 1, d),
+                 ast_builder_integer(c, d, 2 * offset), 0, LEX_TOKEN_PLUS, 0);
+        uint32_t pair = member_function_pointer_of(
+            ast_builder_member(c, held, 0, ast_builder_type_pointer(c, v)), adj,
+            n.at);
+        if (!r.symbol)
+            return pair;
+        /* the temporary assigned before the pair reads it */
+        return make(AST_NODE_COMMA, r.type, first, pair, 0, 0, 0);
+    }
+    if (!offset)
+        return expression(n.a);
+    reread r;
+    uint32_t first = read_first(n.a, r,
+                                "a pointer to data member converted "
+                                "outside a statement");
+    if (!first)
+        return 0;
+    uint32_t null = ast_builder_integer(c, d, -1);
+    uint32_t test =
+        make(AST_NODE_BINARY, ast_builder_type_basic(AST_TYPE_INT), first,
+             ast_builder_integer(c, d, -1), 0, LEX_TOKEN_EQUAL_EQUAL, 0);
+    uint32_t moved =
+        make(AST_NODE_BINARY, d, read_again(r),
+             ast_builder_integer(c, d, offset), 0, LEX_TOKEN_PLUS, 0);
+    return make(AST_NODE_CONDITIONAL, d, test, null, moved, 0, 0);
+}
+
+/*
+ * [expr.mptr.oper]/2: "The result is an object ... of the type specified
+ * by the second operand": *(T *)((char *)object + p), the object's address
+ * first ([expr.mptr.oper]/4: "the expression E1 is sequenced before the
+ * expression E2").
+ */
+uint32_t c_lowering::member_pointer_object(const semantic_node &n)
+{
+    if (record(n.type).kind == type_kind::function)
+        return fail("a member function through a pointer to member outside "
+                    "a call",
+                    n.at);
+    uint32_t object = expression(n.a);
+    uint32_t offset = expression(n.b);
+    if (!object || !offset)
+        return 0;
+    if (!side_effect_free(object) && !side_effect_free(offset))
+        /* C's operands are unsequenced */
+        return fail("a pointer to data member applied with effects in both "
+                    "operands",
+                    n.at);
+    ast_qualified_type byte = ast_builder_type_basic(AST_TYPE_CHAR);
+    ast_qualified_type bytes = ast_builder_type_pointer(c, byte);
+    ast_qualified_type t = type(n.type, n.at);
+    uint32_t at = make(AST_NODE_INDEX, byte,
+                       cast(object, bytes, AST_CAST_POINTER_TO_POINTER),
+                       to_ptrdiff(offset), 0, 0, AST_NODE_FLAG_LVALUE);
+    uint32_t address =
+        cast(make(AST_NODE_ADDRESS, bytes, at, 0, 0, 0, 0),
+             ast_builder_type_pointer(c, t), AST_CAST_POINTER_TO_POINTER);
+    return make(AST_NODE_DEREFERENCE, t, address, 0, 0, 0,
+                AST_NODE_FLAG_LVALUE);
+}
+
+/*
+ * [conv.bool]/1: "A zero value, null pointer value, or null member pointer
+ * value is converted to false": [abi:data-member-pointers] p != -1;
+ * [abi:member-function-pointers]: "A member function pointer is null if
+ * ptr is equal to a null function pointer and (only when using the 32-bit
+ * ARM representation) the low bit of adj is clear": p.ptr != 0 || (p.adj &
+ * 1).
+ */
+uint32_t c_lowering::member_pointer_test(uint32_t n, token_index at)
+{
+    ast_qualified_type i = ast_builder_type_basic(AST_TYPE_INT);
+    ast_qualified_type d = ast_builder_type_ptrdiff(c);
+    if (record(record(node(n).type).operand).kind != type_kind::function) {
+        uint32_t p = expression(n);
+        if (!p)
+            return 0;
+        return to_bool(make(AST_NODE_BINARY, i, p,
+                            ast_builder_integer(c, d, -1), 0,
+                            LEX_TOKEN_EXCLAMATION_EQUAL, 0));
+    }
+    ast_qualified_type v = ast_builder_type_basic(AST_TYPE_VOID);
+    ast_qualified_type vp = ast_builder_type_pointer(c, v);
+    reread r;
+    uint32_t first = read_first(n, r,
+                                "a pointer to member function tested "
+                                "outside a statement");
+    if (!first)
+        return 0;
+    uint32_t ptr = ast_builder_member(c, first, 0, vp);
+    uint32_t adj = ast_builder_member(c, read_again(r), 1, d);
+    uint32_t odd = make(AST_NODE_BINARY, d, adj, ast_builder_integer(c, d, 1),
+                        0, LEX_TOKEN_AMPERSAND, 0);
+    return to_bool(make(AST_NODE_LOGICAL_OR, i, ptr, odd, 0, 0, 0));
+}
+
+/*
+ * [expr.eq]/4: "If two pointers to members are both the null member
+ * pointer value, they compare equal. ... Otherwise, they compare equal if
+ * and only if they would refer to the same member of the same most derived
+ * object or the same subobject if indirection with a hypothetical object
+ * of the associated class type were performed".  [abi:data-member-pointers]
+ * as integers; [abi:member-function-pointers]: "Two member function
+ * pointers are equal if they are both null or if their corresponding
+ * values of ptr and adj are equal": a.ptr == b.ptr && (a.adj == b.adj ||
+ * (a.ptr == 0 && ((a.adj | b.adj) & 1) == 0)).
+ */
+uint32_t c_lowering::member_pointer_equality(const semantic_node &n, int op)
+{
+    ast_qualified_type i = ast_builder_type_basic(AST_TYPE_INT);
+    ast_qualified_type d = ast_builder_type_ptrdiff(c);
+    if (record(record(node(n.a).type).operand).kind != type_kind::function) {
+        uint32_t a = expression(n.a), b = expression(n.b);
+        if (!a || !b)
+            return 0;
+        return to_bool(
+            make(AST_NODE_BINARY, i, a, b, 0, static_cast<uint16_t>(op), 0));
+    }
+    ast_qualified_type v = ast_builder_type_basic(AST_TYPE_VOID);
+    ast_qualified_type vp = ast_builder_type_pointer(c, v);
+    const char *what = "pointers to member functions compared outside a "
+                       "statement";
+    reread ra, rb;
+    uint32_t a = read_first(n.a, ra, what);
+    if (!a)
+        return 0;
+    uint32_t b = read_first(n.b, rb, what);
+    if (!b)
+        return 0;
+    auto binary_int = [&](uint32_t x, uint32_t y, int o) {
+        return make(AST_NODE_BINARY, i, x, y, 0, static_cast<uint16_t>(o), 0);
+    };
+    uint32_t same_ptr =
+        binary_int(ast_builder_member(c, a, 0, vp),
+                   ast_builder_member(c, b, 0, vp), LEX_TOKEN_EQUAL_EQUAL);
+    uint32_t same_adj = binary_int(ast_builder_member(c, read_again(ra), 1, d),
+                                   ast_builder_member(c, read_again(rb), 1, d),
+                                   LEX_TOKEN_EQUAL_EQUAL);
+    uint32_t null_ptr =
+        make(AST_NODE_UNARY, i, ast_builder_member(c, read_again(ra), 0, vp), 0,
+             0, LEX_TOKEN_EXCLAMATION, 0);
+    uint32_t both =
+        make(AST_NODE_BINARY, d, ast_builder_member(c, read_again(ra), 1, d),
+             ast_builder_member(c, read_again(rb), 1, d), 0, LEX_TOKEN_PIPE, 0);
+    uint32_t even =
+        binary_int(make(AST_NODE_BINARY, d, both, ast_builder_integer(c, d, 1),
+                        0, LEX_TOKEN_AMPERSAND, 0),
+                   ast_builder_integer(c, d, 0), LEX_TOKEN_EQUAL_EQUAL);
+    uint32_t equal = make(
+        AST_NODE_LOGICAL_AND, i, same_ptr,
+        make(AST_NODE_LOGICAL_OR, i, same_adj,
+             make(AST_NODE_LOGICAL_AND, i, null_ptr, even, 0, 0, 0), 0, 0, 0),
+        0, 0, 0);
+    if (op == LEX_TOKEN_EXCLAMATION_EQUAL)
+        equal = make(AST_NODE_UNARY, i, equal, 0, 0, LEX_TOKEN_EXCLAMATION, 0);
+    return to_bool(equal);
+}
+
+/*
+ * [expr.mptr.oper]/6: (E1.*E2)(args), as [abi:member-function-pointers]
+ * says: "A call is performed as follows: Add the stored adjustment to the
+ * this address.  If the member pointer stores a v-table entry offset,
+ * load the v-table from the adjusted this address and call the v-table
+ * entry at the stored offset.  Otherwise, call the stored function
+ * pointer."  Into items: p = E2's value, o = (char *)E1's address + (p.adj
+ * >> 1); the callee returned, (p.adj & 1 ? *(F **)(*(char **)o +
+ * (ptrdiff_t)p.ptr) : (F *)p.ptr), and object o.
+ */
+uint32_t c_lowering::member_function_call(const semantic_node &n,
+                                          owned_array<uint32_t> &items,
+                                          uint32_t &object)
+{
+    const semantic_node &access = node(n.a);
+    ast_qualified_type v = ast_builder_type_basic(AST_TYPE_VOID);
+    ast_qualified_type vp = ast_builder_type_pointer(c, v);
+    ast_qualified_type d = ast_builder_type_ptrdiff(c);
+    ast_qualified_type byte = ast_builder_type_basic(AST_TYPE_CHAR);
+    ast_qualified_type bytes = ast_builder_type_pointer(c, byte);
+    uint32_t address = held_value(access.a, bytes, items);
+    if (!address)
+        return 0;
+    uint32_t pair = held_value(access.b, member_function_pointer_type(), items);
+    if (!pair)
+        return 0;
+    ast_qualified_type t = member_function_pointer_type();
+    auto read = [&](uint32_t s, ast_qualified_type type_) {
+        return make(AST_NODE_VARIABLE, type_, s, 0, 0, 0, AST_NODE_FLAG_LVALUE);
+    };
+    auto adj = [&] { return ast_builder_member(c, read(pair, t), 1, d); };
+    /* o = (char *)E1 + (p.adj >> 1) */
+    uint32_t moved =
+        make(AST_NODE_INDEX, byte, read(address, bytes),
+             make(AST_NODE_BINARY, d, adj(), ast_builder_integer(c, d, 1), 0,
+                  LEX_TOKEN_GREATER_GREATER, 0),
+             0, 0, AST_NODE_FLAG_LVALUE);
+    items.append(ast_builder_node(
+        c, AST_NODE_EXPRESSION, v,
+        make(AST_NODE_ASSIGN, bytes, read(address, bytes),
+             make(AST_NODE_ADDRESS, bytes, moved, 0, 0, 0, 0), 0, 0, 0),
+        0, 0, 0, 0));
+    const struct type &pointer = record(node(access.b).type);
+    qualified_type class_type_ = qualified_type::make(
+        analysis.entity_table[pointer.entity].type.unqualified(), cv_none);
+    ast_qualified_type ft =
+        member_function_type(class_type_, pointer.operand, n.at);
+    ast_qualified_type fp = ast_builder_type_pointer(c, ft);
+    /* *(F **)(*(char **)o + (ptrdiff_t)p.ptr) */
+    uint32_t table =
+        make(AST_NODE_DEREFERENCE, bytes,
+             cast(read(address, bytes), ast_builder_type_pointer(c, bytes),
+                  AST_CAST_POINTER_TO_POINTER),
+             0, 0, 0, AST_NODE_FLAG_LVALUE);
+    uint32_t entry = make(AST_NODE_INDEX, byte, table,
+                          cast(ast_builder_member(c, read(pair, t), 0, vp), d,
+                               AST_CAST_POINTER_TO_INTEGER),
+                          0, 0, AST_NODE_FLAG_LVALUE);
+    uint32_t virtual_callee =
+        make(AST_NODE_DEREFERENCE, fp,
+             cast(make(AST_NODE_ADDRESS, bytes, entry, 0, 0, 0, 0),
+                  ast_builder_type_pointer(c, fp), AST_CAST_POINTER_TO_POINTER),
+             0, 0, 0, AST_NODE_FLAG_LVALUE);
+    uint32_t direct_callee = cast(ast_builder_member(c, read(pair, t), 0, vp),
+                                  fp, AST_CAST_POINTER_TO_POINTER);
+    uint32_t odd = make(AST_NODE_BINARY, d, adj(), ast_builder_integer(c, d, 1),
+                        0, LEX_TOKEN_AMPERSAND, 0);
+    object = cast(read(address, bytes),
+                  ast_builder_type_pointer(c, type(class_type_, n.at)),
+                  AST_CAST_POINTER_TO_POINTER);
+    return make(AST_NODE_CONDITIONAL, fp, odd, virtual_callee, direct_callee, 0,
+                0);
 }
 
 /* the C token of an operator */
@@ -2155,6 +2704,8 @@ uint32_t c_lowering::binary(const semantic_node &n)
         return to_bool(ast_builder_integer(
             c, ast_builder_type_basic(AST_TYPE_INT),
             static_cast<int64_t>(op == LEX_TOKEN_EXCLAMATION_EQUAL)));
+    if (record(node(n.a).type).kind == type_kind::pointer_to_member)
+        return member_pointer_equality(n, op);
     uint32_t a = expression(n.a), b = expression(n.b);
     if (!a || !b)
         return 0;
@@ -2273,7 +2824,22 @@ uint32_t c_lowering::call(const semantic_node &n)
     qualified_type function_type = node(n.a).type;
     uint32_t callee = 0;
     owned_array<uint32_t> arguments;
-    if (n.c) {
+    /* a call through a pointer to member function: its statements
+       first ([expr.mptr.oper]/6) */
+    owned_array<uint32_t> through;
+    bool member_pointer_call =
+        node(n.a).kind == semantic_kind::member_pointer_access;
+    if (member_pointer_call) {
+        if (passed_indirectly(record(function_type).operand))
+            return fail("a call through a pointer to member function "
+                        "returning a class by address",
+                        n.at);
+        uint32_t object = 0;
+        callee = member_function_call(n, through, object);
+        if (!callee)
+            return 0;
+        arguments.append(object);
+    } else if (n.c) {
         /* [class.virtual]/16: the final overrider, the function pointer in
            the object's virtual table at the function's slot
            ([abi:vtable-components]); the object's address is read twice,
@@ -2333,6 +2899,14 @@ uint32_t c_lowering::call(const semantic_node &n)
     uint32_t made =
         make(AST_NODE_CALL, t, callee,
              ast_builder_list(c, arguments.data(), count), count, 0, 0);
+    if (member_pointer_call) {
+        through.append(
+            ast_builder_node(c, AST_NODE_EXPRESSION, t, made, 0, 0, 0, 0));
+        made =
+            make(AST_NODE_STATEMENT_EXPRESSION, t,
+                 block(through.data(), static_cast<uint32_t>(through.size())),
+                 0, 0, 0, 0);
+    }
     if (passed_indirectly(result) && !initializes)
         return materialize(made, result, n.at);
     if (!is_reference(result))
@@ -2613,7 +3187,12 @@ uint32_t c_lowering::compound_literal(uint32_t n)
     uint32_t value = expression(n);
     if (!value)
         return 0;
-    ast_qualified_type t = type(held.type, held.at);
+    return compound_literal_of(value, type(held.type, held.at));
+}
+
+/* (t){value}: an object of type t initialized by an initializer node */
+uint32_t c_lowering::compound_literal_of(uint32_t value, ast_qualified_type t)
+{
     uint32_t temporary =
         ast_builder_symbol(c, AST_SYMBOL_VARIABLE, "", 0, t, AST_STORAGE_AUTO,
                            AST_SYMBOL_FLAG_ADDRESS_TAKEN, 1);
@@ -2654,6 +3233,20 @@ uint32_t c_lowering::initializer_list(const semantic_node &n)
                 return 0;
             values.append(e);
         }
+        /* the members C zero-fills: a pointer to data member's null value
+           is not zero bits ([abi:data-member-pointers]) */
+        if (holds_data_member_pointer(n.type)) {
+            for (uint32_t i = 0; i < x.member_count; i++) {
+                entity_index member =
+                    analysis.class_members[x.first_member + i];
+                if (c_fields[member] >= values.size() &&
+                    holds_data_member_pointer(
+                        analysis.entity_table[member].type))
+                    return fail("a pointer to data member zero-initialized "
+                                "as part of an object",
+                                n.at);
+            }
+        }
         uint32_t value_count = static_cast<uint32_t>(values.size());
         /* a union's: the value of field a (C's aux 2), the first */
         uint16_t aux = 0;
@@ -2665,6 +3258,11 @@ uint32_t c_lowering::initializer_list(const semantic_node &n)
     }
     owned_array<uint32_t> runs;
     const uint32_t *items = analysis.semantics.items(n.first);
+    if (holds_data_member_pointer(n.type) &&
+        (!record(n.type).bound_known || n.count < record(n.type).bound))
+        return fail("a pointer to data member zero-initialized as part of "
+                    "an object",
+                    n.at);
     for (uint32_t i = 0; i < n.count; i++) {
         uint32_t e = expression(items[i]);
         if (!e)
@@ -2841,7 +3439,17 @@ uint32_t c_lowering::expression(uint32_t index)
         return make(AST_NODE_DEREFERENCE, type(n.type, n.at), pointer, 0, 0, 0,
                     AST_NODE_FLAG_LVALUE);
     }
+    case semantic_kind::member_pointer:
+        return member_pointer(index);
+    case semantic_kind::member_pointer_access:
+        return member_pointer_object(n);
     case semantic_kind::zero:
+        if (record(n.type).kind == type_kind::pointer_to_member)
+            return null_member_pointer(n.type, n.at);
+        if (holds_data_member_pointer(n.type))
+            return fail("a zero-initialized object with a pointer to data "
+                        "member in it",
+                        n.at);
         return make(AST_NODE_ZERO, type(n.type, n.at), 0, 0, 0, 0, 0);
     case semantic_kind::initializer_list:
         return initializer_list(n);
@@ -3185,7 +3793,8 @@ bool c_lowering::needs_run_time(uint32_t n) const
     default:
         break;
     }
-    if (x.kind == semantic_kind::entity || x.kind == semantic_kind::member)
+    if (x.kind == semantic_kind::entity || x.kind == semantic_kind::member ||
+        x.kind == semantic_kind::member_pointer)
         return false;
     if (needs_run_time(x.a) || needs_run_time(x.b) || needs_run_time(x.c) ||
         needs_run_time(x.d))
@@ -3213,14 +3822,21 @@ bool c_lowering::constant_initializer(uint32_t n) const
                 return false;
         return true;
     }
-    case semantic_kind::conversion:
+    case semantic_kind::member_pointer:
+        return true;
+    case semantic_kind::conversion: {
         if (address_constant(n))
+            return true;
+        entity_index member = 0;
+        int64_t adjustment = 0;
+        if (member_pointer_value(n, member, adjustment))
             return true;
         /* a read of a variable is code, unless read() folds it */
         return x.evaluation == constness::constant &&
                (static_cast<conversion_kind>(x.op) !=
                     conversion_kind::lvalue_to_rvalue ||
                 folded_read(node(x.a)));
+    }
     case semantic_kind::bind_reference:
         /* a reference bound to an object of static storage duration */
         return static_lvalue(x.a);
@@ -3248,6 +3864,13 @@ uint32_t c_lowering::declaration(const semantic_node &n, bool in_block)
                     "init-statement",
                     n.at);
     uint32_t init = 0;
+    if (!x.automatic && !n.b && holds_data_member_pointer(x.type)) {
+        if (record(x.type).kind != type_kind::pointer_to_member)
+            return fail("a pointer to data member zero-initialized as part "
+                        "of an object",
+                        n.at);
+        init = null_member_pointer(x.type, n.at);
+    }
     if (n.b) {
         if (!x.automatic && !constant_initializer(n.b))
             return fail("a static local with dynamic initialization", n.at);
@@ -4443,32 +5066,20 @@ uint32_t c_lowering::null_checked_offset(const semantic_node &n, int64_t offset,
         offset += by;
         operand = x.a;
     }
-    uint32_t p = expression(operand);
+    if (node(operand).kind == semantic_kind::address) {
+        uint32_t p = expression(operand);
+        if (!p)
+            return 0;
+        return offset_pointer(p, offset, t);
+    }
+    /* (e.g. a pointer to the virtual base it is in, read from the virtual
+       table, is held in a temporary) */
+    reread r;
+    uint32_t p =
+        read_first(operand, r, "a pointer to a base at a nonzero offset");
     if (!p)
         return 0;
-    if (node(operand).kind == semantic_kind::address)
-        return offset_pointer(p, offset, t);
-    uint32_t again = 0;
-    if (side_effect_free(p)) {
-        again = expression(operand);
-    } else {
-        /* (e.g. a pointer to the virtual base it is in, read from the
-           virtual table): a temporary holds it */
-        if (!collecting)
-            return fail("a pointer to a base at a nonzero offset", n.at);
-        ast_qualified_type pt = type_of(p);
-        uint32_t temporary = full_expression_temporary(pt);
-        uint32_t assigned = make(AST_NODE_ASSIGN, pt,
-                                 make(AST_NODE_VARIABLE, pt, temporary, 0, 0, 0,
-                                      AST_NODE_FLAG_LVALUE),
-                                 p, 0, 0, 0);
-        p = make(AST_NODE_COMMA, pt, assigned,
-                 make(AST_NODE_VARIABLE, pt, temporary, 0, 0, 0,
-                      AST_NODE_FLAG_LVALUE),
-                 0, 0, 0);
-        again = make(AST_NODE_VARIABLE, pt, temporary, 0, 0, 0,
-                     AST_NODE_FLAG_LVALUE);
-    }
+    uint32_t again = read_again(r);
     uint32_t null =
         cast(ast_builder_integer(c, ast_builder_type_basic(AST_TYPE_INT), 0), t,
              AST_CAST_NULL_POINTER);
@@ -5056,6 +5667,8 @@ bool c_lowering::variable_definition(entity_index e)
     uint32_t s = symbol(e, 0);
     if (!s)
         return false;
+    if (!static_zero_initialization(x, s, 0))
+        return false;
     if (x.definition) {
         /* [basic.start.static]/2: constant initialization; anything else is
            dynamic initialization, which needs code before main */
@@ -5104,6 +5717,30 @@ bool c_lowering::variable_definition(entity_index e)
     }
     ast_builder_symbol_flags_add(c, s, AST_SYMBOL_FLAG_DEFINED);
     return true;
+}
+
+/*
+ * [basic.start.static]/2: "If constant initialization is not performed, a
+ * variable with static storage duration ... is zero-initialized", which
+ * for "a scalar type" is "the value obtained by converting the integer
+ * literal 0 to T" ([dcl.init]/6.1): the null member pointer value, which
+ * [abi:data-member-pointers] represents as -1, not C's zero bits.  A
+ * pointer to data member without an initializer gets it; one inside a
+ * class or array that is not constant-initialized is not lowered.
+ */
+bool c_lowering::static_zero_initialization(const entity &x, uint32_t s,
+                                            token_index at)
+{
+    if (!holds_data_member_pointer(x.type))
+        return true;
+    if (x.definition && constant_initializer(x.definition))
+        return true;
+    if (!x.definition && record(x.type).kind == type_kind::pointer_to_member) {
+        ast_builder_symbol_body(c, s, null_member_pointer(x.type, at));
+        return true;
+    }
+    fail("a pointer to data member zero-initialized as part of an object", at);
+    return false;
 }
 
 /* a function void name(void) of internal linkage, named as written (its

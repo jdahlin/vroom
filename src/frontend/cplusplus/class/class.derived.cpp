@@ -763,14 +763,10 @@ analysis_result semantic_analysis::pointer_along_path(
     qualified_type type, bool to_derived, bool access, expression_meaning &m)
 {
     owned_array<entity_index> steps;
-    if (!nonvirtual_path(derived, base, steps))
-        return not_supported(current_declaration, "conv.ptr");
-    for (size_t i = 0; access && i < steps.size(); i++) {
-        analysis_result r =
-            base_pointer_access(at, entity_table[steps[i]].enclosing, steps[i]);
-        if (r != analysis_result::well_formed)
-            return r;
-    }
+    analysis_result r =
+        accessible_path(at, derived, base, access, "conv.ptr", steps);
+    if (r != analysis_result::well_formed)
+        return r;
     /* the steps at a nonzero offset in the order the pointer passes
        them */
     owned_array<size_t> shifts;
@@ -814,6 +810,24 @@ analysis_result semantic_analysis::pointer_along_path(
         converted(m, kind);
         if (m.node)
             semantics[m.node].b = steps[shifts[k]];
+    }
+    return analysis_result::well_formed;
+}
+
+/* the non-virtual path from class derived to its base (unsupported, as
+   subclause label, where there is none), each base on it accessible
+   ([conv.ptr]/3, [conv.mem]/2) if access */
+analysis_result semantic_analysis::accessible_path(
+    token_index at, entity_index derived, entity_index base, bool access,
+    const char *label, owned_array<entity_index> &steps)
+{
+    if (!nonvirtual_path(derived, base, steps))
+        return not_supported(current_declaration, label);
+    for (size_t i = 0; access && i < steps.size(); i++) {
+        analysis_result r =
+            base_pointer_access(at, entity_table[steps[i]].enclosing, steps[i]);
+        if (r != analysis_result::well_formed)
+            return r;
     }
     return analysis_result::well_formed;
 }

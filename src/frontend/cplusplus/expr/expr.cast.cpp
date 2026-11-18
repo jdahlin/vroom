@@ -255,12 +255,24 @@ analysis_result semantic_analysis::explicit_conversion(node_index at,
         converted(m, conversion_kind::integral);
         return analysis_result::well_formed;
     }
+    if (target.kind == type_kind::pointer_to_member)
+        return member_pointer_cast(at, to, m, kinds);
     if (target.kind != type_kind::fundamental &&
         target.kind != type_kind::pointer)
         return not_supported(at, "expr.cast");
     analysis_result r = operand_value(at, m);
     if (r != analysis_result::well_formed)
         return r;
+    if (is_member_pointer(m.type)) {
+        /* [conv.bool]/1: "A prvalue of ... pointer-to-member type can be
+           converted to a prvalue of type bool" (a static_cast,
+           [expr.static.cast]/4); [expr.reinterpret.cast]/10's casts are
+           not analysed */
+        if (target.kind == type_kind::fundamental &&
+            target.fundamental == fundamental_type::bool_ && by_static)
+            return implicit_conversion(at, m, to, true);
+        return not_supported(at, "expr.cast");
+    }
     /* [expr.static.cast]/9: "A value of a scoped enumeration type can be
        explicitly converted to an integral type"; and to a floating-point
        type; an unscoped one converts so implicitly */
@@ -351,6 +363,74 @@ analysis_result semantic_analysis::explicit_conversion(node_index at,
     if (target.fundamental == fundamental_type::std_nullptr_t && by_static)
         return implicit_conversion(at, m, to, true);
     return not_supported(at, "expr.cast");
+}
+
+/*
+ * To a pointer to member: the implicit conversions ([conv.mem], a static_cast
+ * by [expr.static.cast]/4), and [expr.static.cast]/12: "A prvalue of type
+ * "pointer to member of D of type cv1 T" can be converted to a prvalue of
+ * type "pointer to member of B of type cv2 T", where D is a complete class
+ * type and B is a base class ([class.derived]) of D, if cv2 is the same
+ * cv-qualification as, or greater cv-qualification than, cv1. ... If no
+ * valid standard conversion from "pointer to member of B of type T" to
+ * "pointer to member of D of type T" exists ([conv.mem]), the program is
+ * ill-formed.  The null member pointer value ([conv.mem]) is converted to
+ * the null member pointer value of the destination type."  The const_casts
+ * and reinterpret_casts of pointers to members are not analysed.
+ */
+analysis_result semantic_analysis::member_pointer_cast(node_index at,
+                                                       qualified_type to,
+                                                       expression_meaning &m,
+                                                       uint8_t kinds)
+{
+    analysis_result r = operand_value(at, m);
+    if (r != analysis_result::well_formed)
+        return r;
+    if (!(kinds & cast_static))
+        return not_supported(at, "expr.cast");
+    const struct type source = type_table[m.type.unqualified()];
+    const struct type target = type_table[to.unqualified()];
+    if (source.kind != type_kind::pointer_to_member ||
+        m.type.unqualified() == to.unqualified())
+        return implicit_conversion(at, m, to, true);
+    entity_index d = source.entity, b = target.entity;
+    if (source.operand.unqualified() != target.operand.unqualified() ||
+        (source.operand.cv() & ~target.operand.cv()) ||
+        entity_table[d].kind != entity_kind::class_type ||
+        entity_table[b].kind != entity_kind::class_type)
+        return not_supported(at, "expr.static.cast");
+    if (source.operand == target.operand && entity_table[d].size &&
+        base_subobjects(d, b) == 0 && entity_table[b].size &&
+        base_subobjects(b, d)) {
+        /* [conv.mem]/2; [expr.cast]/4: "a pointer to member of an
+           unambiguous non-virtual base class type may be explicitly
+           converted to ... a pointer to member of a derived class type"
+           even if the base class is inaccessible */
+        if (kinds == cast_static)
+            return implicit_conversion(at, m, to, true);
+        if (base_subobjects(b, d) != 1 || !nonvirtual_subobjects(b, d))
+            return ill_formed(at,
+                              "if B is an ambiguous or virtual base class of "
+                              "D, or a base class of a virtual base class of "
+                              "D, a program that necessitates this "
+                              "conversion is ill-formed",
+                              "conv.mem");
+        return member_pointer_along_path(tree[at].first_token, b, d, to, false,
+                                         false, m);
+    }
+    if (!entity_table[d].size || !base_subobjects(d, b))
+        return not_supported(at, "expr.static.cast");
+    if (base_subobjects(d, b) != 1 || !nonvirtual_subobjects(d, b))
+        return ill_formed(at,
+                          "if no valid standard conversion from \"pointer to "
+                          "member of B of type T\" to \"pointer to member of "
+                          "D of type T\" exists, the program is ill-formed",
+                          "expr.static.cast");
+    /* [expr.cast]/4: "in performing a static_cast in the following
+       situations the conversion is valid even if the base class is
+       inaccessible" */
+    return member_pointer_along_path(tree[at].first_token, d, b, to, true,
+                                     kinds == cast_static, m);
 }
 
 /*

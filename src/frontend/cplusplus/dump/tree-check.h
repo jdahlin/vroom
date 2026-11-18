@@ -48,7 +48,7 @@ struct tree_checker {
     static bool is_expression(semantic_kind k)
     {
         return (k >= semantic_kind::constant &&
-                k <= semantic_kind::bound_member_function) ||
+                k <= semantic_kind::member_pointer_access) ||
                k == semantic_kind::condition_declaration ||
                /* T(args), a prvalue of class type ([expr.type.conv]/2) */
                k == semantic_kind::construct ||
@@ -233,6 +233,16 @@ struct tree_checker {
             child(n, node.a, tree_sort::expression, false, "object");
             if (!node.b)
                 problem(n, "no member");
+            break;
+        case semantic_kind::member_pointer:
+            if (!node.a || !analysis.entity_table[node.a].nonstatic_member)
+                problem(n, "no non-static member");
+            break;
+        case semantic_kind::member_pointer_access:
+            child(n, node.a, tree_sort::expression, false, "object address");
+            prvalue(n, node.a, "object address");
+            child(n, node.b, tree_sort::expression, false, "pointer to member");
+            prvalue(n, node.b, "pointer to member");
             break;
         case semantic_kind::bound_member_function:
             /* only a call's function, which the call replaces */
@@ -455,6 +465,7 @@ void dump_node(const semantic_analysis &analysis, token_stream &tokens,
         vbuffer_format_append(out, " =%llu",
                               static_cast<unsigned long long>(node.value));
     bool a_is_entity = node.kind == semantic_kind::entity ||
+                       node.kind == semantic_kind::member_pointer ||
                        node.kind == semantic_kind::declaration_statement;
     if (a_is_entity)
         vbuffer_format_append(out, " entity #%u", node.a);

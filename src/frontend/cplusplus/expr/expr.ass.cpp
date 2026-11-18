@@ -134,6 +134,8 @@ analysis_result semantic_analysis::assignment(node_index n,
         return class_assignment(n, op, left, right, m);
     if (record.kind != type_kind::fundamental &&
         record.kind != type_kind::pointer &&
+        !(record.kind == type_kind::pointer_to_member &&
+          op == preprocessing_op_or_punc::EQUAL) &&
         !(record.kind == type_kind::enumeration && enumeration_of(left.type)))
         return not_supported(n, "expr.ass");
     /* [basic.lval]/10: "An lvalue is modifiable unless its type is

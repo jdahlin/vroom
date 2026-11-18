@@ -748,7 +748,12 @@ analysis_result semantic_analysis::initialize_with(node_index at,
         return analysis_result::well_formed;
     }
     if (target.kind != type_kind::fundamental &&
-        target.kind != type_kind::pointer && !enumeration_of(type))
+        target.kind != type_kind::pointer &&
+        target.kind != type_kind::pointer_to_member && !enumeration_of(type))
+        return not_supported(at, "dcl.init");
+    if (target.kind == type_kind::pointer_to_member &&
+        type_table[m.type.unqualified()].kind == type_kind::class_type)
+        /* a conversion function to a pointer to member: not analysed */
         return not_supported(at, "dcl.init");
     if (type_table[m.type.unqualified()].kind == type_kind::class_type) {
         /* [dcl.init]/17.7: by a conversion function */
@@ -921,16 +926,20 @@ analysis_result semantic_analysis::list_initialization_of(
         target.kind == type_kind::rvalue_reference)
         return not_supported(list, "dcl.init.list");
     if (target.kind != type_kind::fundamental &&
-        target.kind != type_kind::pointer)
+        target.kind != type_kind::pointer &&
+        target.kind != type_kind::pointer_to_member)
         return not_supported(list, "dcl.init.list");
     if (clauses.empty()) {
         /* [dcl.init]/8: to value-initialize a scalar is to zero-initialize
-           it: the value 0, a null pointer */
+           it: the value 0, a null pointer, a null member pointer (whose
+           value analysis does not keep) */
         result.evaluation = constness::constant;
+        if (target.kind == type_kind::pointer_to_member)
+            result.evaluation = constness::unknown;
         result.value = 0;
         expression_meaning zero;
         zero.type = qualified_type::make(type.unqualified(), cv_none);
-        zero.evaluation = constness::constant;
+        zero.evaluation = result.evaluation;
         result.node =
             expression_node(semantic_kind::zero, zero, node.first_token);
         return analysis_result::well_formed;
