@@ -1,3 +1,7 @@
+/*
+ * sdivpow2.cpp: wasm's signed division by a power of two, expanded only
+ * where the recipe is cheaper than div/rem, as LLVM's wasm lowering does.
+ */
 #include "wimpl.h"
 
 /* Keep wasm's compact constant division for its execution engine, as LLVM's

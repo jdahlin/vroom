@@ -1,3 +1,7 @@
+/*
+ * dircache.h: the include-directory cache: whether a header's directory
+ * exists, known without a syscall after its first probe.
+ */
 #ifndef VCC_DIRCACHE_H
 #define VCC_DIRCACHE_H
 #include <stddef.h>
@@ -7,5 +11,6 @@
  * decide.  Shared by all threads.
  */
 int pp_directory_exists(const char *path, size_t len);
-void pp_directory_cache_flush(void);	/* forget every directory (a new build); none in flight */
+void pp_directory_cache_flush(
+    void); /* forget every directory (a new build); none in flight */
 #endif
