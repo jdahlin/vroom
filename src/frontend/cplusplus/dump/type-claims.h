@@ -74,6 +74,9 @@ static bool write_type_claim_unqualified(const types &table, type_index t,
     case type_kind::class_type:
     case type_kind::enumeration:
     case type_kind::pointer_to_member:
+    case type_kind::template_parameter:
+    case type_kind::dependent:
+    case type_kind::placeholder:
         return false;
     }
     if (!write_type_claim(table, record.operand, out))

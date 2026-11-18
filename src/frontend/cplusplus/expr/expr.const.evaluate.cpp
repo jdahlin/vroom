@@ -76,7 +76,7 @@ analysis_result semantic_analysis::evaluate_node(constant_evaluation &state,
     case semantic_kind::logical_or:
     case semantic_kind::conditional:
     case semantic_kind::comma:
-    /* [expr.const]/5.16: "a modification of an object unless it is
+    /* [expr.const]/5.16: "a modification of an object ... unless it is
        applied to a non-volatile lvalue of literal type that refers to a
        non-volatile object whose lifetime began within the evaluation of
        E" */

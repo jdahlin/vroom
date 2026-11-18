@@ -1135,8 +1135,13 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
                 named_at = t;
                 continue;
             }
-            if (!e || entity_table[e].kind != entity_kind::typedef_name)
-                return not_supported(seq, "basic.lookup.unqual");
+            if (!e || entity_table[e].kind != entity_kind::typedef_name) {
+                entity_index unknown = e;
+                if (!unknown)
+                    unknown = found.unknown_entity;
+                return not_supported(seq, unknown_name_subclause(
+                                              unknown, "basic.lookup.unqual"));
+            }
             if (named || !k.first)
                 k.first = t;
             if (named)
@@ -1362,8 +1367,14 @@ analysis_result semantic_analysis::qualified_type_name(node_index n,
     if (node.child_count != 2 ||
         !syntax_is(tree, parts[0], syntax_kind::nested_name_specifier) ||
         !parts[1].is_token() ||
-        tokens[parts[1].index()].kind != token_kind::identifier)
+        tokens[parts[1].index()].kind != token_kind::identifier) {
+        /* [temp.names]: nested-name-specifier template_opt
+           simple-template-id */
+        if (node.child_count == 2 &&
+            syntax_is(tree, parts[1], syntax_kind::simple_template_id))
+            return not_supported(n, "temp.names");
         return not_supported(n, "dcl.type.simple");
+    }
     nominated_scope scope;
     analysis_result r = nested_name_specifier(parts[0].index(), scope);
     if (r != analysis_result::well_formed)

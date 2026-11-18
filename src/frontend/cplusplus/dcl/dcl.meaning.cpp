@@ -425,6 +425,8 @@ void semantic_analysis::hold_names(node_index declaration)
     }
     /* a template's declaration: its declarator-ids too, which may be in
        parentheses (template<class T> void (f)(T);) */
+    bool by_template = node.kind == syntax_kind::template_declaration ||
+                       node.kind == syntax_kind::explicit_specialization;
     for (node_index inner = declaration;
          tree[inner].kind == syntax_kind::template_declaration ||
          tree[inner].kind == syntax_kind::explicit_specialization;) {
@@ -471,12 +473,16 @@ void semantic_analysis::hold_names(node_index declaration)
             /* a declaration of the name that analysis could not follow
                (an overload, a redeclaration with default arguments ...):
                what the name denotes is not known from here on */
-            if (!declared_by(found, declaration))
+            if (!declared_by(found, declaration)) {
                 entity_table[found].kind = entity_kind::none;
+                if (by_template)
+                    entity_table[found].held_by_template = true;
+            }
             continue;
         }
         entity_index e =
             entity_table.make(entity_kind::none, name, current_scope);
+        entity_table[e].held_by_template = by_template;
         entity_table.bind(current_scope, name, e);
     }
 }

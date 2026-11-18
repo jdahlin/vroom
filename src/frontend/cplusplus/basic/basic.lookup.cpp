@@ -110,11 +110,24 @@ entity_index semantic_analysis::declared_in(entity_index scope, uint32_t name,
     }
 }
 
+const char *
+semantic_analysis::unknown_name_subclause(entity_index e,
+                                          const char *otherwise) const
+{
+    /* [temp.names]/1: "A template specialization ... can be referred to
+       by a template-id" */
+    if (e && entity_table[e].held_by_template)
+        return "temp.names";
+    return otherwise;
+}
+
 void semantic_analysis::found_also(lookup_result &r, entity_index e,
                                    entity_index in) const
 {
     if (entity_table[e].kind == entity_kind::none) {
         r.unknown = true;
+        if (!r.unknown_entity)
+            r.unknown_entity = e;
         return;
     }
     if (!r.entity) {
@@ -649,8 +662,14 @@ analysis_result semantic_analysis::nested_name_specifier(node_index n,
             tokens[parts[i].index()].kind != token_kind::identifier ||
             i + 1 >= node.child_count ||
             !syntax_is_punctuator(tokens, parts[i + 1],
-                                  preprocessing_op_or_punc::COLON_COLON))
+                                  preprocessing_op_or_punc::COLON_COLON)) {
+            /* [temp.names]: a simple-template-id in the
+               nested-name-specifier */
+            if (!parts[i].is_token() &&
+                syntax_is(tree, parts[i], syntax_kind::simple_template_id))
+                return not_supported(n, "temp.names");
             return not_supported(n, "basic.lookup.qual");
+        }
         token_index t = parts[i].index();
         uint32_t name = tokens.identifier(t);
         lookup_result r;

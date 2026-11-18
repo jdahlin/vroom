@@ -241,8 +241,12 @@ analysis_result semantic_analysis::base_clause(entity_index c, node_index n,
         token_index id = 0;
         entity_index base = 0;
         if (!name.is_token() &&
-            !syntax_is(tree, name, syntax_kind::class_or_decltype))
+            !syntax_is(tree, name, syntax_kind::class_or_decltype)) {
+            /* [temp.names]: a base named by a simple-template-id */
+            if (syntax_is(tree, name, syntax_kind::simple_template_id))
+                return not_supported(n, "temp.names");
             return not_supported(n, "class.derived");
+        }
         {
             size_t before = unsupported.size();
             analysis_result named = named_class(name, n, base, id);

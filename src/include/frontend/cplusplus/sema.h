@@ -98,6 +98,14 @@ enum class type_kind : uint8_t {
     class_type,        /* [class], unions included; the entity says which */
     enumeration,       /* [dcl.enum] */
     pointer_to_member, /* [dcl.mptr] */
+    /* [temp.param]/1: a template-parameter's type (a type parameter);
+       made by no analysis yet */
+    template_parameter,
+    /* [temp.dep.type]/9: a type that depends on template parameters
+       without being one */
+    dependent,
+    /* [dcl.spec.auto]/1: auto or decltype(auto) before deduction */
+    placeholder,
 };
 
 struct type {
@@ -268,6 +276,10 @@ struct entity {
        namespace is not known, a using-enum-declaration): a name not found
        in it is not known to be undeclared */
     bool unknown_names = false;
+    /* a name hold_names kept with no entity (kind none) because a
+       template-declaration or explicit-specialization declared it: what
+       it denotes needs [temp]'s rules */
+    bool held_by_template = false;
     /* a scope (a namespace, 0 the global one, or a block): a
        using-directive appears in it ([namespace.udir]; an unnamed or
        inline namespace's implied one in its enclosing namespace) */
@@ -1203,6 +1215,13 @@ class semantic_analysis
     /* [dcl.pre] */
     analysis_result empty_declaration(node_index n);
     analysis_result static_assert_declaration(node_index n);
+    /* [temp.pre], [temp.expl.spec], [temp.explicit], [temp.deduct.guide]
+       (temp/): the declarations of templates and of their
+       specializations; no rules yet, each answers its subclause */
+    analysis_result template_declaration(node_index n);
+    analysis_result explicit_specialization(node_index n);
+    analysis_result explicit_instantiation(node_index n);
+    analysis_result deduction_guide(node_index n);
     analysis_result simple_declaration(node_index n);
     analysis_result function_definition(node_index n);
     /* [dcl.link]: extern "C" or extern "C++", and the declarations in it */
@@ -1332,7 +1351,15 @@ class semantic_analysis
            templates, the use of the name is ill-formed";
            [class.member.lookup]/6 for a class */
         bool ambiguous = false;
+        /* unknown: the first name found that analysis kept with no entity
+           (kind none) */
+        entity_index unknown_entity = 0;
     };
+    /* the subclause an unsupported use of the name found as r (not
+       known, kind none) waits for: [temp.names] for a template's name,
+       else otherwise */
+    const char *unknown_name_subclause(entity_index e,
+                                       const char *otherwise) const;
     lookup_result lookup_unqualified(uint32_t name, lookup_filter filter) const;
     /* [namespace.qual]/2: the name looked up in the namespace n (0: the
        global namespace) */
@@ -2108,6 +2135,64 @@ class semantic_analysis
         node_index body;
     };
     owned_array<deferred_body> nested_bodies;
+
+    /* ---- instantiation (sema/instantiation.cpp, doc/PLAN-cxx-sema.md
+       3.5) ----
+       An instantiation's result with its key and everything it read from
+       outside itself, which is what a cache would check before reusing
+       it.  Nothing is instantiated yet. */
+    struct template_argument {
+        /* [temp.arg]/1: a type, a value (a constant_value index into
+           instantiation_values) or a template */
+        enum class kind_t : uint8_t {
+            type,
+            value,
+            template_name
+        } kind = kind_t::type;
+        qualified_type type;
+        uint32_t value = 0;
+        entity_index template_entity = 0;
+    };
+    struct instantiation_input {
+        /* what the instantiation looked up outside itself: a name in a
+           scope and what it found, an overload set at a call, the
+           specializations of a template visible */
+        enum class kind_t : uint8_t {
+            lookup,
+            overload_set,
+            specializations
+        } kind = kind_t::lookup;
+        entity_index scope = 0;
+        uint32_t name = 0;
+        entity_index found = 0;
+    };
+    struct instantiation_record {
+        /* the key: the template and its arguments
+           (template_arguments[first_argument .. + argument_count)) */
+        entity_index template_entity = 0;
+        uint32_t first_argument = 0, argument_count = 0;
+        /* the specialization made ([temp.inst]) */
+        entity_index specialization = 0;
+        /* inputs[first_input .. + input_count) */
+        uint32_t first_input = 0, input_count = 0;
+    };
+    owned_array<template_argument> template_arguments;
+    owned_array<constant_value> instantiation_values;
+    owned_array<instantiation_input> instantiation_inputs;
+    owned_array<instantiation_record> instantiations;
+    /* [temp.inst]/1: the specialization of the template for the
+       arguments, instantiated (or found, if it already was) */
+    analysis_result instantiate(node_index at, entity_index template_entity,
+                                const template_argument *arguments,
+                                uint32_t count, entity_index &specialization);
+    /* [temp.deduct]/1: "When a function template specialization is
+       referenced, all of the template arguments shall have values"; the
+       arguments deduced from a call's ([temp.deduct.call]) */
+    analysis_result deduce_from_call(node_index at,
+                                     entity_index function_template,
+                                     const expression_meaning *arguments,
+                                     uint32_t count,
+                                     owned_array<template_argument> &deduced);
     analysis_result function_body(node_index definition, syntax_child compound,
                                   syntax_child ctor_initializer = {});
     /* [class.base.init]: a constructor's member initializations, the

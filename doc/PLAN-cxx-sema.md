@@ -1272,6 +1272,29 @@ lines:
   15574, lookup 11445, symbols 1461 verified), we accept and clang
   rejects 447 -> 511 (the bodies' rules); cxx-run 128/128; cxx-c-suites
   unchanged.
+  Commit 3 done, after S3's operators (cb2daf6d): the template skeleton.
+  `type_kind` has `template_parameter`, `dependent` and `placeholder` (no
+  analysis makes them yet); `temp/temp.decls.cpp` gives
+  template-declarations, explicit specializations and instantiations and
+  deduction guides their functions, each answering by what it declares
+  ([temp.class], [temp.fct], [temp.alias], [temp.concept], [temp.mem],
+  [temp.pre] for a declarator's, [temp.expl.spec], [temp.explicit],
+  [temp.deduct.guide]), and `deduce_from_call` ([temp.deduct.call]);
+  `sema/instantiation.cpp` and `sema.h` have 3.5's record (key, inputs,
+  result) and `instantiate` ([temp.inst]), called by nothing yet.  One
+  change from the plan above: a template's name is not bound to a
+  `template_entity`.  36 places treat a held name (`entity_kind::none`) as
+  unknown, and a use of a template's name stays unsupported either way;
+  instead hold_names marks it `held_by_template`, and a use of it is
+  [temp.names] rather than [basic.lookup.unqual].  A qualified
+  template-id as a type, a template-id base and one in a
+  nested-name-specifier are [temp.names]; a specialization's class-head
+  [temp.spec].  The mangler's `<template-args>` are left for the first
+  instantiation.  cxx-sema's list now starts [temp.class] 16779,
+  [basic.lookup.unqual] 11965 (17102 at S2), [expr.const] 11002,
+  [temp.names] 9666, [temp.fct] 5023; with S3's operators, declarations
+  as clang 27232, 0 we reject and clang accepts, 0 refuted; cxx-run
+  132/132; cxx-c-suites unchanged.
 
 ### S7. Exceptions and RTTI
 

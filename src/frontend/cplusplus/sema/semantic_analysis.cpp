@@ -145,6 +145,14 @@ analysis_result semantic_analysis::declaration_by_kind(node_index n)
         return empty_declaration(n);
     case syntax_kind::static_assert_declaration:
         return static_assert_declaration(n);
+    case syntax_kind::template_declaration:
+        return template_declaration(n);
+    case syntax_kind::explicit_specialization:
+        return explicit_specialization(n);
+    case syntax_kind::explicit_instantiation:
+        return explicit_instantiation(n);
+    case syntax_kind::deduction_guide:
+        return deduction_guide(n);
     case syntax_kind::simple_declaration:
         return simple_declaration(n);
     case syntax_kind::function_definition:

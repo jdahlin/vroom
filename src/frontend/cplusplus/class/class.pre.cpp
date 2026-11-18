@@ -217,8 +217,12 @@ analysis_result semantic_analysis::class_definition(node_index n,
                        syntax_kind::nested_name_specifier) ||
             !name_parts[1].is_token() ||
             tokens[name_parts[1].index()].kind != token_kind::identifier)
-            /* a simple-template-id */
-            return not_supported(n, "class.pre");
+            /* a simple-template-id: an explicit or partial
+               specialization's class-head ([temp.spec]/4: "A
+               specialization is a class, variable, function, or class
+               member that is either instantiated ... from a templated entity
+               or is an explicit specialization") */
+            return not_supported(n, "temp.spec");
         head_qualifier = name_parts[0].index();
         head_name = name_parts[1].index();
     } else if (!unnamed) {
