@@ -790,14 +790,40 @@ entity_index semantic_analysis::declare_class(entity_index scope, uint32_t name,
 bool semantic_analysis::is_aggregate(entity_index c) const
 {
     const entity &x = entity_table[c];
-    if (x.first_constructor)
+    const implementation_defined_behavior &b = tokens.files.behavior;
+    /* [dcl.init.aggr]/1.1: "no user-declared or inherited constructors"
+       (C++20); "no user-provided, explicit, or inherited constructors"
+       before, where X() = default and = delete are not user-provided
+       ([dcl.fct.def.default]/5) */
+    if (b.has(
+            language_feature::aggregates_without_user_declared_constructors) &&
+        x.defaulted_default_constructor)
+        return false;
+    for (entity_index k = x.first_constructor; k;
+         k = entity_table[k].next_constructor)
+        if (!entity_table[k].implicit &&
+            (!entity_table[k].deleted ||
+             b.has(language_feature::
+                       aggregates_without_user_declared_constructors)))
+            return false;
+    /* [dcl.init.aggr]/1.4: "no virtual, private, or protected base
+       classes" (C++17); "no base classes" before */
+    if (x.base_count && !b.has(language_feature::aggregates_with_bases))
         return false;
     for (uint32_t i = 0; i < x.base_count; i++)
         if (entity_table[class_bases[x.first_base + i]].field == UINT32_MAX)
             return false;
-    for (uint32_t i = 0; i < x.member_count; i++)
-        if (entity_table[class_members[x.first_member + i]].access)
+    for (uint32_t i = 0; i < x.member_count; i++) {
+        const entity &m = entity_table[class_members[x.first_member + i]];
+        if (m.access)
             return false;
+        /* C++11's [dcl.init.aggr]/1: "no brace-or-equal-initializers for
+           non-static data members" */
+        if (m.default_initializer &&
+            !b.has(
+                language_feature::aggregates_with_default_member_initializers))
+            return false;
+    }
     return true;
 }
 

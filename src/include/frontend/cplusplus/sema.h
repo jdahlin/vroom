@@ -1481,6 +1481,17 @@ class semantic_analysis
     class_list_initialization(node_index list,
                               const owned_array<syntax_child> &clauses,
                               qualified_type type, initialized_value &result);
+    analysis_result too_many_clauses(node_index list,
+                                     const owned_array<syntax_child> &clauses,
+                                     size_t next);
+    analysis_result aggregate_elements(node_index list,
+                                       const owned_array<syntax_child> &clauses,
+                                       size_t &next, qualified_type type,
+                                       initialized_value &result);
+    analysis_result aggregate_element(node_index list,
+                                      const owned_array<syntax_child> &clauses,
+                                      size_t &next, qualified_type element,
+                                      initialized_value &one);
     analysis_result string_initialization(node_index at,
                                           const expression_meaning &string,
                                           qualified_type &type);

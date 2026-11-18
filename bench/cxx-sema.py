@@ -805,6 +805,7 @@ def check(test, opts, clang, vpp):
                     rejected.append(first)
             else:
                 res['verdict']['we_accept'] += 1
+                res.setdefault('accepted', []).append(first)
     every_error_line = set()
     for m in CLANG_ERROR.finditer(c[2]):
         if m.group(1) == name:
@@ -895,6 +896,11 @@ def main():
         if r['fail'] or a.v:
             for k, why in r['fail'] or [('ok', '')]:
                 print(f'{k:7} {relative(r["test"])} {" ".join(r["opts"])}: {why}')
+        if a.v and r.get('accepted'):
+            # well-formed for us, rejected by clang: not a failure (a rule
+            # analysis does not check yet), listed to see which
+            print(f'accepts {relative(r["test"])} {" ".join(r["opts"])}: '
+                  f'lines {" ".join(str(n) for n in r["accepted"])}')
     runs = len(jobs)
     print(f'{runs} runs of {len(seen)} tests ({unrunnable} not run, {skipped} skipped): '
           f'no crash {runs - crashes}/{runs}')
