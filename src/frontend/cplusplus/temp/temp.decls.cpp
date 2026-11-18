@@ -1265,9 +1265,9 @@ semantic_analysis::class_template_definition(node_index n, node_index specifier)
         !syntax_is(tree, tree.children(specifier)[0], syntax_kind::class_head))
         return not_supported(n, "temp.class");
     node_index head = tree.children(specifier)[0].index();
-    if (tree[head].child_count >= 2 &&
-        syntax_is(tree, tree.children(head)[1],
-                  syntax_kind::simple_template_id)) {
+    syntax_child head_name = class_head_name(head);
+    if (head_name.bits &&
+        syntax_is(tree, head_name, syntax_kind::simple_template_id)) {
         /* a partial specialization's pack (its arguments' pack
            expansions) */
         for (node_index p : parameters)
@@ -1277,8 +1277,8 @@ semantic_analysis::class_template_definition(node_index n, node_index specifier)
                 return not_supported(n, "temp.variadic");
         return class_specialization_definition(n, specifier, parameters);
     }
-    if (tree[head].child_count < 2 || !tree.children(head)[1].is_token() ||
-        tokens[tree.children(head)[1].index()].kind != token_kind::identifier)
+    if (!head_name.is_token() ||
+        tokens[head_name.index()].kind != token_kind::identifier)
         return not_supported(n, "temp.class");
     /* a specialization declares the friend
        functions its class defines in the template's namespace
@@ -1287,7 +1287,7 @@ semantic_analysis::class_template_definition(node_index n, node_index specifier)
     for (token_index i = spec.first_token; i < spec.end_token; i++)
         if (p.keyword_of(tokens[i]) == standard_keyword::friend_)
             return not_supported(n, "class.friend");
-    uint32_t name = tokens.identifier(tree.children(head)[1].index());
+    uint32_t name = tokens.identifier(head_name.index());
     uint32_t index = 0, first = 0;
     entity_index scope = 0;
     r = template_parameter_scope(n, parameters, outer, name, index, scope,
@@ -1407,7 +1407,7 @@ analysis_result semantic_analysis::class_specialization_definition(
         return not_supported(n, rule);
     const syntax_node &spec = tree[specifier];
     node_index head = tree.children(specifier)[0].index();
-    node_index id = tree.children(head)[1].index();
+    node_index id = class_head_name(head).index();
     lookup_result x;
     entity_index named = 0;
     if (!template_id_name(id, x, named))
@@ -1535,7 +1535,7 @@ analysis_result semantic_analysis::substitute_specialization(
         id = variable_specialization_id(s.declarator);
     } else {
         node_index head = tree.children(s.definition)[0].index();
-        id = tree.children(head)[1].index();
+        id = class_head_name(head).index();
     }
     entity_index scope = entity_table.make(entity_kind::block_scope, 0,
                                            entity_table[s.entity].enclosing);

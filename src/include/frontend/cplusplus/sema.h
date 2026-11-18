@@ -421,6 +421,9 @@ struct entity {
     /* a class: its alignment; a non-static data member: the alignment
        its aligned attribute asks for, 0 if none ([ext:gnu_attributes]) */
     uint32_t alignment = 0;
+    /* a class: the alignment its alignment-specifiers ask for, 0 if none
+       ([dcl.align]) */
+    uint32_t requested_alignment = 0;
     /* a non-static data member with the packed attribute: aligned to 1
        before its aligned attribute ([ext:gnu_attributes]) */
     bool packed = false;
@@ -2104,6 +2107,8 @@ class semantic_analysis
     analysis_result comma(node_index n, expression_meaning &m);
     /* a type-id ([dcl.name]) */
     analysis_result type_id(node_index n, qualified_type &type);
+    analysis_result alignment_specifier(node_index n, uint64_t &alignment);
+    syntax_child class_head_name(node_index head) const;
 
     /* ---- standard conversions ([conv]) ---- */
     /* the fundamental type of t, none if t is no fundamental type */

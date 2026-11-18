@@ -196,12 +196,34 @@ analysis_result semantic_analysis::class_definition(node_index n,
         return not_supported(n, "class.pre");
     node_index head = children[0].index();
     const syntax_node &h = tree[head];
-    const syntax_child *head_children = tree.children(head);
-    if (!h.child_count || !head_children[0].is_token())
+    /* class-key attribute-specifier-seq_opt class-head-name ...: the
+       alignment-specifiers left out of head_children, kept in alignas */
+    owned_array<syntax_child> head_list;
+    owned_array<node_index> alignas_list;
+    for (uint32_t i = 0; i < h.child_count; i++) {
+        syntax_child c = tree.children(head)[i];
+        bool only_alignment =
+            i && syntax_is(tree, c, syntax_kind::attribute_specifier_seq);
+        for (uint32_t k = 0; only_alignment && k < tree[c.index()].child_count;
+             k++)
+            only_alignment = syntax_is(tree, tree.children(c.index())[k],
+                                       syntax_kind::alignment_specifier);
+        if (only_alignment) {
+            for (uint32_t k = 0; k < tree[c.index()].child_count; k++)
+                alignas_list.append(tree.children(c.index())[k].index());
+        } else if (i && syntax_is(tree, c, syntax_kind::alignment_specifier)) {
+            alignas_list.append(c.index());
+        } else {
+            head_list.append(c);
+        }
+    }
+    const syntax_child *head_children = head_list.data();
+    uint32_t head_count = static_cast<uint32_t>(head_list.size());
+    if (!head_count || !head_children[0].is_token())
         return not_supported(n, "class.pre");
     /* [class.pre]/1: "A class-specifier whose class-head omits the
        class-head-name defines an unnamed class." */
-    bool unnamed = h.child_count == 1;
+    bool unnamed = head_count == 1;
     /* class-head-name: nested-name-specifier_opt class-name */
     token_index head_name = 0;
     node_index head_qualifier = 0;
@@ -236,9 +258,9 @@ analysis_result semantic_analysis::class_definition(node_index n,
         return not_supported(n, "class.pre");
     }
     bool has_bases =
-        h.child_count == 3 && !unnamed &&
+        head_count == 3 && !unnamed &&
         syntax_is(tree, head_children[2], syntax_kind::base_clause);
-    if (h.child_count > 2 && !has_bases)
+    if (head_count > 2 && !has_bases)
         /* a class-virt-specifier, a base-clause of an unnamed class */
         return not_supported(n, "class.derived");
     standard_keyword key = p.keyword_of(tokens[head_children[0].index()]);
@@ -509,6 +531,15 @@ analysis_result semantic_analysis::class_definition(node_index n,
     analysis_result result = analysis_result::well_formed;
     if (has_bases)
         result = base_clause(c, head_children[2].index(), key);
+    entity_table[c].requested_alignment = 0;
+    for (node_index a : alignas_list) {
+        uint64_t alignment = 0;
+        if (result == analysis_result::well_formed)
+            result = alignment_specifier(a, alignment);
+        if (alignment > entity_table[c].requested_alignment)
+            entity_table[c].requested_alignment =
+                static_cast<uint32_t>(alignment);
+    }
     if (result != analysis_result::well_formed) {
         resume_outer();
         entity_table[c].kind = entity_kind::none;
@@ -2035,6 +2066,79 @@ bool semantic_analysis::virt_specifier(syntax_child d, bool &override_,
         if (!one(tree.children(d.index())[i]))
             return false;
     return true;
+}
+
+/* a class-head's class-head-name (or what is in its place), after the
+   class-key and alignment-specifiers; none in an unnamed class's */
+syntax_child semantic_analysis::class_head_name(node_index head) const
+{
+    for (uint32_t i = 1; i < tree[head].child_count; i++) {
+        syntax_child c = tree.children(head)[i];
+        if (syntax_is(tree, c, syntax_kind::alignment_specifier))
+            continue;
+        bool only_alignment =
+            syntax_is(tree, c, syntax_kind::attribute_specifier_seq);
+        for (uint32_t k = 0; only_alignment && k < tree[c.index()].child_count;
+             k++)
+            only_alignment = syntax_is(tree, tree.children(c.index())[k],
+                                       syntax_kind::alignment_specifier);
+        if (!only_alignment)
+            return c;
+    }
+    return syntax_child();
+}
+
+/*
+ * [dcl.align]/2: "When the alignment-specifier is of the form alignas(
+ * constant-expression ): the constant-expression shall be an integral
+ * constant expression; if the constant expression does not evaluate to an
+ * alignment value, or evaluates to an extended alignment and the
+ * implementation does not support that alignment in the context of the
+ * declaration, the program is ill-formed."  /3: "An alignment-specifier of
+ * the form alignas( type-id ) has the same effect as alignas(alignof(
+ * type-id ))."  /4: zero has no effect.  A pack expansion: no rules yet.
+ */
+analysis_result semantic_analysis::alignment_specifier(node_index n,
+                                                       uint64_t &alignment)
+{
+    alignment = 0;
+    const syntax_child *parts = tree.children(n);
+    if (tree[n].child_count != 4)
+        return not_supported(n, "dcl.align");
+    if (syntax_is(tree, parts[2], syntax_kind::type_id)) {
+        qualified_type t;
+        analysis_result r = type_id(parts[2].index(), t);
+        if (r != analysis_result::well_formed)
+            return r;
+        const struct type &record = type_table[t.unqualified()];
+        if (record.kind == type_kind::function ||
+            (record.kind == type_kind::array && !record.bound_known))
+            return not_supported(n, "dcl.align");
+        alignment = alignment_of_type(t);
+        /* an incomplete type, void: not known */
+        if (!alignment)
+            return not_supported(n, "dcl.align");
+        return analysis_result::well_formed;
+    }
+    expression_meaning e;
+    analysis_result r = expression(parts[2], e);
+    if (r != analysis_result::well_formed)
+        return r;
+    if (!is_integral(e.type) || e.category != value_category::prvalue)
+        return not_supported(n, "dcl.align");
+    bool constant = false;
+    r = constant_expression(n, e, constant);
+    if (r != analysis_result::well_formed)
+        return r;
+    if (!constant)
+        return not_supported(n, "dcl.align");
+    alignment = e.value;
+    /* [basic.align]/4: "Every alignment value shall be a non-negative
+       integral power of two"; clang's limit 2^29 */
+    if (alignment && ((alignment & (alignment - 1)) || alignment > (1u << 28)))
+        return ill_formed(n, "an alignment shall be a power of two",
+                          "dcl.align");
+    return analysis_result::well_formed;
 }
 
 } // namespace cplusplus

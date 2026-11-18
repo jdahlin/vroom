@@ -905,6 +905,12 @@ ast_qualified_type c_lowering::class_type(entity_index e, token_index at)
         lengths[i] = strlen(names[i]);
         at_name += lengths[i] + 1;
     }
+    /* [dcl.align]: the class's alignment-specifiers, as C's aligned on
+       its first field (at offset 0), which raises the struct's alignment
+       and rounds its size */
+    if (x.requested_alignment && !aligned.empty() &&
+        aligned[0] < x.requested_alignment)
+        aligned[0] = x.requested_alignment;
     c_fields[e] = static_cast<uint32_t>(fields.size());
     ast_builder_type_record_complete(
         c, made, fields.data(), names.data(), lengths.data(), aligned.data(),

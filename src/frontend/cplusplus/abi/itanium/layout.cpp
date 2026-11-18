@@ -303,6 +303,10 @@ const char *class_layout::initialization()
     size = 0;
     alignment = 1;
     data_bits = 0;
+    /* [dcl.align]: the class's own alignment-specifiers, before its
+       bases and members (clang's) */
+    if (table[c].requested_alignment)
+        raise_alignment(table[c].requested_alignment);
     const dynamic_class *d = analysis.dynamic_of(c);
     if (d && !d->primary_base) {
         uint64_t pointer = analysis.pointer_size();
