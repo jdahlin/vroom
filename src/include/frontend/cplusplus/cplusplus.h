@@ -435,6 +435,20 @@ enum class literal_kind : uint8_t {
     user_defined_literal,
 };
 
+/* the value of a literal, kept apart from its token: few of a translation
+   unit's tokens have one */
+struct literal_value {
+    /* the value of an integer, character or boolean literal */
+    uint64_t value = 0;
+    /* the bits of a floating-point literal's value in its format
+       (binary16/32/64/128) */
+    uint64_t floating_bits_low = 0, floating_bits_high = 0;
+    /* a string literal: its code units in lexer::string_code_units(),
+       without the terminating '\0' of [lex.string]/12 */
+    uint32_t string_offset = 0, string_length = 0;
+};
+inline constexpr literal_value no_literal_value = {};
+
 struct token {
     token_kind kind = token_kind::end_of_file;
     literal_kind literal = literal_kind::none;
@@ -443,22 +457,17 @@ struct token {
     int16_t keyword = -1; /* index in the keyword table ([lex.key]) */
     /* N of _BitInt(N) */
     uint16_t bit_precise_width = 0;
-    /* value, or floating_bits_low and _high, is the literal's value */
+    /* the literal's value is the one lexer::value_of() gives */
     bool value_known = false;
     preprocessing_token
         preprocessing; /* the preprocessing token it came from */
-    /* a string literal: its code units in lexer::string_code_units(),
-       without the terminating '\0' of [lex.string]/12 */
-    uint32_t string_offset = 0, string_length = 0;
-    /* the bits of a floating-point literal's value in its format
-       (binary16/32/64/128), when value_known */
-    uint64_t floating_bits_low = 0, floating_bits_high = 0;
-    /* the value of an integer or boolean literal, when value_known */
-    uint64_t value = 0;
+    /* which literal_value of the lexer that converted the token is its
+       value, counted from 1 (0: none) */
+    uint32_t value_index = 0;
 };
-/* one per token of the translation unit: the members are in this order so
-   that none is padded apart from its neighbour (it was 80 bytes) */
-static_assert(sizeof(token) == 72, "token changed size");
+/* one per token of the translation unit (it was 80 bytes with the literal's
+   value in it) */
+static_assert(sizeof(token) == 40, "token changed size");
 
 /* [lex.phases]/1.3: decomposes a source file into preprocessing tokens */
 class lexer
@@ -533,6 +542,13 @@ class lexer
     {
         return code_units.data();
     }
+    /* the value of a literal this lexer converted: until the next convert */
+    const literal_value &value_of(const token &t) const
+    {
+        if (!t.value_index)
+            return no_literal_value;
+        return values[t.value_index - 1];
+    }
     struct pp_number_analysis;
     bool analyze_pp_number(const char *spelling, size_t length,
                            source_location at, pp_number_analysis &a);
@@ -545,6 +561,9 @@ class lexer
     void append_code_unit(uint32_t unit);
     void append_encoded(uint32_t code_point, encoding_prefix prefix);
     owned_array<uint32_t> code_units;
+    /* a new value for a literal being converted, all zeros */
+    literal_value &add_value(token &out);
+    owned_array<literal_value> values;
     uint32_t position = 0;
     bool at_start_of_line = true, after_white_space = false;
     /* where the previous preprocessing token ended, and whether it was an
@@ -642,6 +661,11 @@ class source_files
     const lexer &phase7() const
     {
         return conversion.lex;
+    }
+    /* the value of a literal that convert() made a token of */
+    const literal_value &value_of(const token &t) const
+    {
+        return conversion.lex.value_of(t);
     }
 
     const implementation_defined_behavior &behavior;

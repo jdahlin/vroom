@@ -163,6 +163,28 @@ start of the day).  Per token, without start-up, the front end is at about
 15,000 to 16,000 instructions.  What is left of finding 3, the local
 `owned_array`s, is 0.2 heap calls per token.
 
+**The literal's value out of the token** (same day, P5).  A token carried
+the value of a literal it mostly is not: 32 of its 72 bytes were an integer
+value, the two halves of a floating-point value and a string's place.  In
+the unity TU 26,219 of 332,871 tokens (7.9 %) have a value.  The value is
+now a `literal_value` in a table of the lexer that converted the token
+(`lexer::value_of`, `source_files::value_of`), the token holds its number,
+and `token` is 40 bytes, asserted.  23 reads in 8 files changed.
+
+| `-fsyntax-only` | Instructions | Bytes requested | Peak heap |
+|---|---|---|---|
+| four C headers | 306 M to 306 M | 15.4 MB to 14.5 MB | 7.4 MB to 6.9 MB |
+| `verify.cpp` | 567 M to 568 M | 41.3 MB to 37.4 MB | 17.4 MB to 15.5 MB |
+| the unity TU | 2,354 M to 2,342 M | 190 MB to 159 MB | 95.8 MB to 80.2 MB |
+
+The unity TU's footprint goes from 74 MB to 66 MB; on the small inputs it
+moves by less than its run-to-run noise.  Instructions do not change: the
+time is not in the size of the token, the memory was.  Running the dumps
+under ASan for this change on one more file found an old error in
+`owned_array::append` (a value that is an element of the array itself, read
+after the array moved); it is fixed in the type, and the asan job now runs
+`cxx-run.py`.
+
 **Not findings.**  No record type larger than 16 bytes is passed by value
 (0 parameters; 5 functions return one); 16 range-`for` loops copy a record
 per element, 11 of them one of the larger types; one function has a stack
@@ -267,11 +289,11 @@ N names, Y types and layout); B the benchmark gate; R review only.
 
 | # | Rule | Today | Check |
 |---|---|---|---|
-| P1 | A type stored once per token, node, type or entity asserts its size next to its definition: `static_assert(sizeof(token) == 72)`.  Changing the number is a decision, visible in the diff | `token` has one; the others do not | C; L (N): every element type of a translation unit's tables has one |
-| P2 | No padding in such a type: members ordered by alignment | `entity` 47 of 216 bytes (`token` is done: 80 to 72) | L (Y), with the front end's own layout; reference: the analyzer's Padding checker |
+| P1 | A type stored once per token, node, type or entity asserts its size next to its definition: `static_assert(sizeof(token) == 40)`.  Changing the number is a decision, visible in the diff | `token` has one; the others do not | C; L (N): every element type of a translation unit's tables has one |
+| P2 | No padding in such a type: members ordered by alignment | `entity` 47 of 216 bytes (`token` is done) | L (Y), with the front end's own layout; reference: the analyzer's Padding checker |
 | P3 | An enumeration has the smallest underlying type that holds it | 11 do not | L (S); reference `performance-enum-size` |
 | P4 | Tables and 32-bit indexes, not pointers between nodes | holds | C once indexes are distinct types (style rule 23) |
-| P5 | What the common path reads per element is one array; what few elements have is a side table | `token` carries its literal's value; `entity` is one 216-byte record | R |
+| P5 | What the common path reads per element is one array; what few elements have is a side table | `token` is done (`literal_value`, 80 bytes to 40); `entity` is one 216-byte record | R |
 
 ### Allocation
 

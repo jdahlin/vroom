@@ -362,7 +362,7 @@ token lexer::convert_string_literals(const preprocessing_token *pieces,
 
     owned_buffer spelling_buffer, suffix;
     size_t suffix_piece = count;
-    out.string_offset = (uint32_t)code_units.size();
+    uint32_t offset = (uint32_t)code_units.size();
     for (size_t k = 0; k < count; k++) {
         const preprocessing_token &piece = pieces[k];
         spelling_buffer.clear();
@@ -399,7 +399,9 @@ token lexer::convert_string_literals(const preprocessing_token *pieces,
         out.preprocessing.kind =
             preprocessing_token_kind::user_defined_string_literal;
     }
-    out.string_length = (uint32_t)(code_units.size() - out.string_offset);
+    literal_value &v = add_value(out);
+    v.string_offset = offset;
+    v.string_length = (uint32_t)(code_units.size() - offset);
     out.value_known = !error;
     return out;
 }

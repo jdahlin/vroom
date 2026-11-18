@@ -169,8 +169,9 @@ void lexer::convert_floating_point_literal(const pp_number_analysis &a,
                        out.preprocessing.location)
                 .text(type_name, (size_t)type_length)
             << f.minimum;
-    out.floating_bits_low = (uint64_t)bits;
-    out.floating_bits_high = (uint64_t)(bits >> 64);
+    literal_value &v = add_value(out);
+    v.floating_bits_low = (uint64_t)bits;
+    v.floating_bits_high = (uint64_t)(bits >> 64);
     out.value_known = true;
 }
 

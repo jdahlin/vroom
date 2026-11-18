@@ -310,7 +310,7 @@ analysis_result semantic_analysis::string_initialization(
                           "string literal, respectively",
                           "dcl.init.string");
     }
-    uint64_t size = uint64_t(literal.string_length) + 1;
+    uint64_t size = uint64_t(tokens.files.value_of(literal).string_length) + 1;
     if (!array.bound_known) {
         type = qualified_type::make(type_table.array_of(array.operand, size),
                                     type.cv());

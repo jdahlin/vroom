@@ -346,7 +346,7 @@ static bool evaluate_value(preprocessor &p, preprocessor::expression_reader &r,
         if (converted.literal == literal_kind::user_defined_literal)
             p.diagnostics.issue(diagnostic_id::err_pp_invalid_udl, t.location)
                 << 1;
-        v.bits = converted.value;
+        v.bits = p.condition_lexer.value_of(converted).value;
         v.is_unsigned =
             !fundamental_type_is_signed(p.condition_behavior, converted.type);
         r.advance();
@@ -364,7 +364,8 @@ static bool evaluate_value(preprocessor &p, preprocessor::expression_reader &r,
            the value of its type, as intmax_t or uintmax_t */
         unsigned width = fundamental_type_width(p.behavior, converted.type);
         bool is_signed = fundamental_type_is_signed(p.behavior, converted.type);
-        v.bits = value_of_width(converted.value, width, is_signed);
+        v.bits =
+            value_of_width(p.files.value_of(converted).value, width, is_signed);
         /* [cpp.cond]/12: "whether a single-character character-literal may
            have a negative value is implementation-defined": [impl.clang]
            the literal is unsigned when its type is, and stays so */
