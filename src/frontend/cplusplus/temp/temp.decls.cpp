@@ -141,10 +141,9 @@ syntax_child semantic_analysis::head_constraint(node_index n) const
     return syntax_child();
 }
 
-analysis_result
-semantic_analysis::template_head_parameters(node_index n,
-                                            owned_array<node_index> &parameters,
-                                            bool packs, bool constrained)
+analysis_result semantic_analysis::template_head_parameters(
+    node_index n, owned_array<node_index> &parameters, bool packs,
+    bool constrained, bool pack_anywhere)
 {
     const syntax_node &node = tree[n];
     if (node.child_count != 2 ||
@@ -175,8 +174,15 @@ semantic_analysis::template_head_parameters(node_index n,
            parameter-declaration's, int... N: the template's last
            parameter */
         if (x.pack) {
-            if (!packs || i + 1 != parameters.size() || x.template_template ||
-                x.has_default)
+            /* [temp.param]/14: "If a template-parameter of a primary class
+               template ... is a template parameter pack, it shall be the
+               last template-parameter.  A template parameter pack of a
+               function template shall not be followed by another
+               template parameter unless that template parameter can be
+               deduced": a partial specialization's are all deduced
+               ([temp.class.spec]/8.3 aside) */
+            if (!packs || (i + 1 != parameters.size() && !pack_anywhere) ||
+                x.template_template || x.has_default)
                 return not_supported(p, "temp.variadic");
             continue;
         }
@@ -1304,9 +1310,6 @@ semantic_analysis::class_template_definition(node_index n, node_index specifier)
 {
     entity_index outer = current_scope;
     owned_array<node_index> parameters;
-    analysis_result r = template_head_parameters(n, parameters, true);
-    if (r != analysis_result::well_formed)
-        return r;
     /* class-head: class-key identifier base-clause_opt */
     const syntax_node &spec = tree[specifier];
     if (!spec.child_count ||
@@ -1314,8 +1317,14 @@ semantic_analysis::class_template_definition(node_index n, node_index specifier)
         return not_supported(n, "temp.class");
     node_index head = tree.children(specifier)[0].index();
     syntax_child head_name = class_head_name(head);
-    if (head_name.bits &&
-        syntax_is(tree, head_name, syntax_kind::simple_template_id)) {
+    bool specialization =
+        head_name.bits &&
+        syntax_is(tree, head_name, syntax_kind::simple_template_id);
+    analysis_result r =
+        template_head_parameters(n, parameters, true, false, specialization);
+    if (r != analysis_result::well_formed)
+        return r;
+    if (specialization) {
         return class_specialization_definition(n, specifier, parameters);
     }
     if (!head_name.is_token() ||

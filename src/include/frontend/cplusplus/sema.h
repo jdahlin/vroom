@@ -3009,7 +3009,8 @@ class semantic_analysis
     /* [temp.pre]/1: a template-head's parameters */
     analysis_result
     template_head_parameters(node_index n, owned_array<node_index> &parameters,
-                             bool packs = false, bool constrained = false);
+                             bool packs = false, bool constrained = false,
+                             bool pack_anywhere = false);
     syntax_child head_constraint(node_index n) const;
     /* [temp.constr.atomic]/3: the satisfaction of a concept-id, once per
        concept and arguments (a later different result would be ill-formed,
