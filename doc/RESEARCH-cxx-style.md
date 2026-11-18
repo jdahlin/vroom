@@ -457,6 +457,11 @@ tried here.
 
 ## 7. Order of work
 
+Decided 2026-11-18: finishing the semantic integration into code generation
+comes first.  Steps 2 to 5 below, and the features of a wider C++ in the
+front end, are taken up once most of the test suite compiles.  Rules for
+fast code are in `RESEARCH-cxx-performance.md`.
+
 1. **Flags, no code.**  Done 2026-11-18: `CPLUSPLUS_FLAGS` in
    `src/Makefile` (`-fno-rtti -nostdinc++ -Wglobal-constructors
    -Wexit-time-destructors -Werror`) for the front end's objects (rules

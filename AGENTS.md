@@ -69,6 +69,10 @@ relative to it); `TODO.md` stays at the top.
   in vcc: other projects' rules and how they enforce them, the C++ front end
   measured with clang-tidy and clang-query, 30 candidate rules by what a
   checker must know, the front end run on vcc's own sources, decisions needed.
+- `RESEARCH-cxx-performance.md`: the C++ front end's speed: instructions and
+  heap calls per token against clang and vcc's C front end, where they go
+  (a profile, three findings), how the fastest compilers write their source,
+  15 rules for fast code with what can check each, decisions needed.
 - `PLAN-cxx.md`: the first C++ plan (steps X0-X7): a minimal front end to
   test the instantiation cache and per-symbol codegen on libc++'s tests and
   nlohmann/json.  Update a step's status there.  `bench/cxx-profile.py
