@@ -452,6 +452,8 @@ analysis_result semantic_analysis::postfix(node_index n, expression_meaning &m)
         }
         if (parenthesized && node.child_count == 4) {
             if (syntax_is(tree, children[2], syntax_kind::initializer_list)) {
+                if (has_pack_expansion(children[2]))
+                    return not_supported(n, "temp.variadic");
                 /* [dcl.init]/14: "If the entity being initialized does not
                    have class type, the expression-list in a parenthesized
                    initializer shall be a single expression." */
@@ -584,18 +586,63 @@ analysis_result semantic_analysis::call(node_index n, expression_meaning &m)
     const syntax_node &node = tree[n];
     const syntax_child *children = tree.children(n);
     owned_array<syntax_child> arguments;
+    /* [temp.variadic]/5: the arguments, pack expansions instantiated: each
+       analysed now, one per element of the packs its pattern names */
+    owned_array<expression_meaning> expanded;
     if (node.child_count == 4) {
         syntax_child c = children[2];
         if (syntax_is(tree, c, syntax_kind::initializer_list)) {
+            owned_array<syntax_child> written;
+            owned_array<bool> expansion;
             for (uint32_t i = 0; i < tree[c.index()].child_count; i++) {
                 syntax_child a = tree.children(c.index())[i];
                 if (syntax_is_punctuator(tokens, a,
                                          preprocessing_op_or_punc::COMMA))
                     continue;
                 if (syntax_is_punctuator(tokens, a,
-                                         preprocessing_op_or_punc::ELLIPSIS))
+                                         preprocessing_op_or_punc::ELLIPSIS)) {
+                    if (written.empty() || expansion.back())
+                        return not_supported(n, "temp.variadic");
+                    expansion.back() = true;
+                    continue;
+                }
+                written.append(a);
+                expansion.append(false);
+            }
+            bool any = false;
+            for (bool x : expansion)
+                any = any || x;
+            for (size_t i = 0; i < written.size(); i++) {
+                syntax_child a = written[i];
+                if (!any) {
+                    arguments.append(a);
+                    continue;
+                }
+                if (syntax_is(tree, a, syntax_kind::braced_init_list))
                     return not_supported(n, "temp.variadic");
-                arguments.append(a);
+                if (!expansion[i]) {
+                    expression_meaning e;
+                    analysis_result r = expression(a, e);
+                    if (r != analysis_result::well_formed)
+                        return r;
+                    arguments.append(a);
+                    expanded.append(e);
+                    continue;
+                }
+                uint32_t count = 0;
+                token_index end = first_token(a) + 1;
+                if (!a.is_token())
+                    end = tree[a.index()].end_token;
+                if (!expansion_count(first_token(a), end, count))
+                    return not_supported(n, "temp.variadic");
+                for (uint32_t k = 0; k < count; k++) {
+                    expression_meaning e;
+                    analysis_result r = expansion_element_expression(a, k, e);
+                    if (r != analysis_result::well_formed)
+                        return r;
+                    arguments.append(a);
+                    expanded.append(e);
+                }
             }
         } else {
             arguments.append(c);
@@ -619,6 +666,8 @@ analysis_result semantic_analysis::call(node_index n, expression_meaning &m)
             return r;
         if (ft) {
             owned_array<expression_meaning> early;
+            for (const expression_meaning &e : expanded)
+                early.append(e);
             r = template_call(n, name, ft, specified, qualified, arguments,
                               early, f);
             if (r != analysis_result::well_formed)
@@ -657,7 +706,20 @@ analysis_result semantic_analysis::call(node_index n, expression_meaning &m)
                         (is_namespace(x.found_in) ||
                          entity_table.bound_by_using(x.found_in, name));
         }
-        if (dependent) {
+        if (dependent && !expanded.empty()) {
+            owned_array<qualified_type> types;
+            for (const expression_meaning &e : expanded) {
+                types.append(e.type);
+                early.append(e);
+            }
+            owned_array<entity_index> set;
+            if (x.entity)
+                set.append(x.entity);
+            if (!argument_dependent_lookup(name, types, set) || !x.entity)
+                return not_supported(n, "basic.lookup.argdep");
+            for (entity_index e : set)
+                overload_set(e, found_by_adl);
+        } else if (dependent) {
             owned_array<qualified_type> types;
             for (syntax_child a : arguments) {
                 expression_meaning e;
@@ -702,6 +764,9 @@ analysis_result semantic_analysis::call(node_index n, expression_meaning &m)
             }
         }
     }
+    if (!expanded.empty() && early.empty())
+        for (const expression_meaning &e : expanded)
+            early.append(e);
     if (!looked_up) {
         overloaded_callee = callee_name(children[0]);
         r = expression(children[0], f);
@@ -714,6 +779,8 @@ analysis_result semantic_analysis::call(node_index n, expression_meaning &m)
            the operator function is selected by overload resolution
            ([over.call.object])" and the expression "interpreted as
            postfix-expression . operator () (expression-list_opt)" */
+        if (!expanded.empty())
+            return not_supported(n, "temp.variadic");
         owned_array<syntax_child> syntax;
         owned_array<expression_meaning> operands;
         syntax.append(children[0]);
@@ -916,7 +983,16 @@ analysis_result semantic_analysis::template_call(
     owned_array<expression_meaning> &early, expression_meaning &f)
 {
     owned_array<qualified_type> types;
+    /* (arguments analysed already: a pack expansion's, call) */
+    bool given = !early.empty();
+    for (const expression_meaning &e : early) {
+        if (e.entity && entity_table[e.entity].kind == entity_kind::function)
+            return not_supported(n, "temp.deduct.call");
+        types.append(e.type);
+    }
     for (syntax_child a : arguments) {
+        if (given)
+            break;
         expression_meaning e;
         if (syntax_is(tree, a, syntax_kind::braced_init_list))
             return not_supported(n, "temp.deduct.call");

@@ -586,6 +586,8 @@ analysis_result semantic_analysis::new_expression(node_index n,
                    syntax_is(tree, parts[1], syntax_kind::initializer_list)) {
             /* [dcl.init]/17.6.2: the constructor called with the
                expression-list as its arguments */
+            if (has_pack_expansion(parts[1]))
+                return not_supported(n, "temp.variadic");
             if (!c)
                 return ill_formed(n,
                                   "if the entity being initialized does not "

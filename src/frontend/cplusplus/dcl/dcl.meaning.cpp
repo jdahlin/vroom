@@ -642,6 +642,24 @@ analysis_result semantic_analysis::declarator(node_index declaration,
         has_head = true;
         head = children[0];
         i = 1;
+    } else if (node.child_count &&
+               syntax_is_punctuator(tokens, children[0],
+                                    preprocessing_op_or_punc::ELLIPSIS)) {
+        /* [dcl.fct]/21: "A declarator-id or abstract-declarator
+           containing an ellipsis shall only be used in a
+           parameter-declaration.  When it is part of a
+           parameter-declaration-clause, the parameter-declaration declares
+           a function parameter pack" */
+        if (!pack_declarator || m.pack)
+            return not_supported(n, "temp.variadic");
+        m.pack = children[0].index();
+        i = 1;
+        if (node.child_count >= 2 && children[1].is_token() &&
+            tokens[children[1].index()].kind == token_kind::identifier) {
+            has_head = true;
+            head = children[1];
+            i = 2;
+        }
     } else if (declarator_template_id && node.child_count &&
                syntax_is(tree, children[0], syntax_kind::simple_template_id) &&
                tree[children[0].index()].child_count >= 3 &&

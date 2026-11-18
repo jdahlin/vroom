@@ -291,8 +291,29 @@ analysis_result semantic_analysis::size_of(node_index n, bool alignment,
         if (e.bit_field_width)
             return not_supported(n, "class.bit");
         operand = e.type;
+    } else if (!alignment && node.child_count == 5 &&
+               syntax_is_punctuator(tokens, children[1],
+                                    preprocessing_op_or_punc::ELLIPSIS) &&
+               children[3].is_token() &&
+               tokens[children[3].index()].kind == token_kind::identifier) {
+        /* [expr.sizeof]/4: "The identifier in a sizeof... expression shall
+           name a pack.  The sizeof... operator yields the number of
+           elements in the pack ([temp.variadic]).  A sizeof... expression
+           is a pack expansion ([temp.variadic])."  An instantiation's pack;
+           a template's own is not analysed */
+        entity_index pack = find_pack(tokens.identifier(children[3].index()));
+        if (!pack)
+            return not_supported(n, "expr.sizeof");
+        m.type = qualified_type::make(
+            type_table.fundamental(fundamental_type::unsigned_long_int),
+            cv_none);
+        m.category = value_category::prvalue;
+        m.evaluation = constness::constant;
+        m.value = entity_table[pack].member_count;
+        m.node = expression_node(semantic_kind::constant, m, node.first_token);
+        return analysis_result::well_formed;
     } else {
-        /* sizeof...; alignof of an expression (GCC's) */
+        /* alignof of an expression (GCC's) */
         return not_supported(n, "expr.sizeof");
     }
     const struct type record = type_table[operand.unqualified()];

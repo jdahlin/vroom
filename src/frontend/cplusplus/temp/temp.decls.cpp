@@ -638,9 +638,8 @@ analysis_result semantic_analysis::deduction_guide(node_index n)
  * default, pack or type-constraint; a requires-clause is [temp.constr].
  * The template is one of namespace scope.
  */
-analysis_result
-semantic_analysis::template_head_parameters(node_index n,
-                                            owned_array<node_index> &parameters)
+analysis_result semantic_analysis::template_head_parameters(
+    node_index n, owned_array<node_index> &parameters, bool packs)
 {
     const syntax_node &node = tree[n];
     if (node.child_count != 2 ||
@@ -676,11 +675,26 @@ semantic_analysis::template_head_parameters(node_index n,
        decl-specifier-seq identifier, each with = and a default
        template-argument or not: a pack, a type-constraint, an unnamed
        parameter or another declarator is a rule of its own */
-    for (node_index p : parameters) {
+    for (size_t i = 0; i < parameters.size(); i++) {
+        node_index p = parameters[i];
         const syntax_node &x = tree[p];
         const syntax_child *c = tree.children(p);
         bool type =
             syntax_is(tree, syntax_child::node(p), syntax_kind::type_parameter);
+        /* [temp.param]/18: "If a template-parameter is a type-parameter
+           with an ellipsis prior to its optional identifier ... then the
+           template-parameter is a template parameter pack"; class ...
+           identifier here, the template's last parameter, and only a
+           function template's */
+        if (type && x.child_count == 3 &&
+            syntax_is_punctuator(tokens, c[1],
+                                 preprocessing_op_or_punc::ELLIPSIS) &&
+            c[2].is_token() &&
+            tokens[c[2].index()].kind == token_kind::identifier) {
+            if (!packs || i + 1 != parameters.size())
+                return not_supported(p, "temp.variadic");
+            continue;
+        }
         if (type != c[0].is_token() ||
             (x.child_count != 2 && x.child_count != 4) || !c[1].is_token() ||
             tokens[c[1].index()].kind != token_kind::identifier ||
@@ -693,6 +707,9 @@ semantic_analysis::template_head_parameters(node_index n,
         return not_supported(n, "temp.param");
     return analysis_result::well_formed;
 }
+
+static bool depends(const types &table, qualified_type t,
+                    const entities *parameters = nullptr, uint64_t from = 0);
 
 /*
  * [temp.fct]/1: "A function template defines an unbounded set of related
@@ -712,7 +729,7 @@ semantic_analysis::function_template_definition(node_index n,
 {
     entity_index outer = current_scope;
     owned_array<node_index> parameters;
-    analysis_result head = template_head_parameters(n, parameters);
+    analysis_result head = template_head_parameters(n, parameters, true);
     if (head != analysis_result::well_formed)
         return head;
     const syntax_node &d = tree[definition];
@@ -772,6 +789,31 @@ semantic_analysis::function_template_definition(node_index n,
     for (const parameter_meaning &p : function_parameters)
         if (p.default_argument.index())
             return not_supported(n, "dcl.fct.default");
+    /* [temp.variadic]/7: "A pack whose name appears within the pattern of
+       a pack expansion is expanded by that pack expansion"; a pack named
+       outside one is ill-formed (/7), which the template's own declarator
+       does not tell apart from a pattern analysis has no rules for: the
+       last parameter's type the only pack expansion, a function parameter
+       pack of the template parameter pack (the last) */
+    {
+        uint32_t last = static_cast<uint32_t>(parameters.size()) - 1;
+        bool pack = template_parameter_is_pack(first + last);
+        const struct type ft = type_table[type.unqualified()];
+        const qualified_type *list = type_table.parameters(type.unqualified());
+        if (pack && depends(type_table, ft.operand, &entity_table, last))
+            return not_supported(n, "temp.variadic");
+        for (uint32_t i = 0; i < ft.parameter_count; i++) {
+            const struct type pt = type_table[list[i].unqualified()];
+            if (pt.kind != type_kind::pack_expansion) {
+                if (pack && depends(type_table, list[i], &entity_table, last))
+                    return not_supported(n, "temp.variadic");
+                continue;
+            }
+            if (!pack || i + 1 != ft.parameter_count || ft.variadic ||
+                !depends(type_table, pt.operand, &entity_table, last))
+                return not_supported(n, "temp.variadic");
+        }
+    }
     uint32_t name = tokens.identifier(m.id);
     /* another declaration of a template declared before
        ([temp.over.link]/6: equivalent template-heads and function types),
@@ -866,9 +908,6 @@ semantic_analysis::function_template_definition(node_index n,
     return analysis_result::well_formed;
 }
 
-static bool depends(const types &table, qualified_type t,
-                    const entities *parameters = nullptr, uint64_t from = 0);
-
 /*
  * [temp.param]/2: "There is no semantic difference between class and
  * typename in a type-parameter-key."  A type parameter's name is a
@@ -884,7 +923,7 @@ analysis_result semantic_analysis::declare_template_parameters(
     (void)n;
     for (size_t i = 0; i < parameters.size(); i++) {
         node_index node = parameters[i];
-        token_index id = tree.children(node)[1].index();
+        token_index id = template_parameter_id(node);
         uint32_t name = tokens.identifier(id);
         /* [temp.local]/6: "The name of a template-parameter shall not be
            redeclared within its scope (including nested scopes)." */
@@ -939,6 +978,29 @@ void semantic_analysis::bind_template_argument(entity_index scope,
                                                const template_argument &a)
 {
     uint32_t name = entity_table[parameter].name;
+    if (a.kind == template_argument::kind_t::pack) {
+        /* [temp.variadic]/1: a pack of its elements' names */
+        owned_array<entity_index> elements;
+        for (uint32_t k = 0; k < a.count; k++) {
+            const template_argument x = pack_arguments[a.value + k];
+            entity_index e = 0;
+            if (x.kind == template_argument::kind_t::value) {
+                e = entity_table.make(entity_kind::enumerator, name, scope);
+                entity_table[e].value = x.value;
+            } else if (x.kind == template_argument::kind_t::type) {
+                e = entity_table.make(entity_kind::typedef_name, name, scope);
+            } else {
+                /* (a value-dependent element: not made) */
+                continue;
+            }
+            entity_table[e].type = x.type;
+            entity_table[e].defined = true;
+            elements.append(e);
+        }
+        make_bound_pack(scope, name, elements.data(),
+                        static_cast<uint32_t>(elements.size()));
+        return;
+    }
     if (a.template_entity) {
         /* a value-dependent argument: the parameter it names */
         entity_table.bind(scope, name, a.template_entity);
@@ -1120,6 +1182,7 @@ static bool depends(const types &table, qualified_type t,
     case type_kind::lvalue_reference:
     case type_kind::rvalue_reference:
     case type_kind::array:
+    case type_kind::pack_expansion:
         return depends(table, r.operand, parameters, from);
     case type_kind::function: {
         if (depends(table, r.operand, parameters, from))
@@ -1133,6 +1196,11 @@ static bool depends(const types &table, qualified_type t,
     default:
         return false;
     }
+}
+
+bool semantic_analysis::depends_on_template_parameter(qualified_type t) const
+{
+    return depends(type_table, t);
 }
 
 /*
@@ -1627,6 +1695,7 @@ bool semantic_analysis::deduce_type(qualified_type p, qualified_type a,
     case type_kind::pointer:
     case type_kind::lvalue_reference:
     case type_kind::rvalue_reference:
+    case type_kind::pack_expansion:
         return deduce_type(pr.operand, ar.operand, deduced, set, exact);
     case type_kind::array:
         if (pr.bound_known != ar.bound_known || pr.bound != ar.bound)
@@ -1667,17 +1736,35 @@ semantic_analysis::deduce_from_call(node_index at, uint32_t function_template,
         function_templates[function_template - 1];
     qualified_type type = entity_table[ft.entity].type;
     const struct type f = type_table[type.unqualified()];
-    if (f.variadic || count != f.parameter_count)
-        return not_supported(at, "temp.deduct.call");
     const qualified_type *parameters =
         type_table.parameters(type.unqualified());
+    /* [temp.deduct.call]/1: "For a function parameter pack that occurs at
+       the end of the parameter-declaration-list, deduction is performed
+       for each remaining argument of the call, taking the type P of the
+       declarator-id of the function parameter pack as the corresponding
+       function template parameter type.  Each deduction deduces template
+       arguments for subsequent positions in the template parameter packs
+       expanded by the function parameter pack." */
+    uint32_t fixed = f.parameter_count;
+    if (fixed && type_table[parameters[fixed - 1].unqualified()].kind ==
+                     type_kind::pack_expansion)
+        fixed--;
+    if (f.variadic || count < fixed ||
+        (fixed == f.parameter_count && count != fixed))
+        return not_supported(at, "temp.deduct.call");
+    uint32_t pack = ft.parameter_count;
+    if (ft.parameter_count &&
+        template_parameter_is_pack(ft.first_parameter + ft.parameter_count - 1))
+        pack = ft.parameter_count - 1;
     /* [temp.arg.explicit]/3: "A template argument list may be specified
        when referring to a specialization of a function template"; /6:
        "The template argument list shall not specify more
        template-arguments than there are corresponding
        template-parameters" (clang: no candidate) */
     uint32_t specified = static_cast<uint32_t>(deduced.size());
-    if (specified > ft.parameter_count)
+    if (specified > ft.parameter_count || specified > pack)
+        /* (arguments of a pack given: [temp.arg.explicit]/9's sequence,
+           extended by deduction) */
         return not_supported(at, "temp.arg.explicit");
     owned_array<template_argument> values;
     owned_array<bool> set;
@@ -1688,8 +1775,11 @@ semantic_analysis::deduce_from_call(node_index at, uint32_t function_template,
         values.append(v);
         set.append(i < specified);
     }
+    owned_array<template_argument> elements;
     for (uint32_t i = 0; i < count; i++) {
         qualified_type p = parameters[i];
+        if (i >= fixed)
+            p = type_table[parameters[fixed].unqualified()].operand;
         /* /7: "Implicit conversions will be performed on a function
            argument to convert it to the type of the corresponding function
            parameter if the parameter type contains no template-parameters
@@ -1744,8 +1834,36 @@ semantic_analysis::deduce_from_call(node_index at, uint32_t function_template,
         /* a parameter that does not match: deduction fails, which
            overload resolution of the function templates of the name and
            its other functions decides; neither is analysed yet */
-        if (!deduce_type(p, a, values, set))
+        if (i < fixed) {
+            if (!deduce_type(p, a, values, set))
+                return not_supported(at, "temp.deduct.call");
+            continue;
+        }
+        /* the pack's next element, the other parameters the pattern names
+           the same in each */
+        owned_array<template_argument> one;
+        owned_array<bool> one_set;
+        for (uint32_t k = 0; k < values.size(); k++) {
+            one.append(values[k]);
+            one_set.append(set[k] && k != pack);
+        }
+        if (!deduce_type(p, a, one, one_set) || pack >= one.size() ||
+            !one_set[pack])
             return not_supported(at, "temp.deduct.call");
+        for (uint32_t k = 0; k < values.size(); k++)
+            if (k != pack && one_set[k] && !set[k]) {
+                values[k] = one[k];
+                set[k] = true;
+            }
+        elements.append(one[pack]);
+    }
+    /* [temp.arg.explicit]/4: "A trailing template parameter pack not
+       otherwise deduced will be deduced as an empty sequence of template
+       arguments." */
+    if (pack < ft.parameter_count) {
+        values[pack] =
+            make_pack(elements.data(), static_cast<uint32_t>(elements.size()));
+        set[pack] = true;
     }
     /* [temp.deduct]/5: "If a template argument has not been deduced and
        its corresponding template parameter has a default argument, the
@@ -1823,7 +1941,8 @@ bool semantic_analysis::same_template_parameters(uint32_t first,
         const entity &a = entity_table[template_parameter_entities[first + i]];
         const entity &b =
             entity_table[template_parameter_entities[other_first + i]];
-        if (a.kind != b.kind)
+        if (a.kind != b.kind || template_parameter_is_pack(first + i) !=
+                                    template_parameter_is_pack(other_first + i))
             return false;
         if (a.kind == entity_kind::none && !(a.type == b.type))
             return false;

@@ -328,8 +328,24 @@ analysis_result semantic_analysis::function_body(node_index definition,
         parameter_entities.append(t);
         function_state.this_entity = t;
     }
+    /* [temp.variadic]/2: a function parameter pack's elements, whose
+       name is the pack's */
+    owned_array<entity_index> pack;
+    uint32_t pack_name = 0;
     for (const parameter_meaning &parameter : function_parameters) {
         parameter_entities.append(0);
+        if (parameter.pack_name) {
+            entity_index e = entity_table.make(entity_kind::variable,
+                                               parameter.pack_name, parameters);
+            entity_table[e].type = parameter.type;
+            entity_table[e].defined = true;
+            entity_table[e].automatic = true;
+            entity_table.add_declaration(e, definition);
+            parameter_entities.back() = e;
+            pack.append(e);
+            pack_name = parameter.pack_name;
+            continue;
+        }
         if (!parameter.id)
             continue;
         uint32_t name = tokens.identifier(parameter.id);
@@ -353,6 +369,11 @@ analysis_result semantic_analysis::function_body(node_index definition,
         entity_table.bind(parameters, name, e);
         parameter_entities.back() = e;
     }
+    if (!pack_name && function_empty_pack)
+        make_bound_pack(parameters, function_empty_pack, nullptr, 0);
+    if (pack_name && !entity_table.find(parameters, pack_name))
+        make_bound_pack(parameters, pack_name, pack.data(),
+                        static_cast<uint32_t>(pack.size()));
     /* [class.base.init]/2: "Lookup for an unqualified name in a
        mem-initializer-id ignores the constructor's function parameter
        scope" (the name is looked up in the class); the expressions are in

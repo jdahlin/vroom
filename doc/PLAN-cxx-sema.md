@@ -1672,6 +1672,41 @@ lines:
   10241); [temp.explicit] unsupported ~3.8k -> 1569, [temp.expl.spec] 1695;
   cxx-run 220/220 (template-explicit.cpp); cxx-c-suites unchanged (the
   #pragma pack tests not yet, [cpp.pragma]).
+  Then variadic function templates ([temp.variadic], [expr.prim.fold];
+  temp/temp.variadic.cpp).  A function template's last template-parameter
+  may be a type parameter pack (`class... Ts`); its function parameter
+  pack (`Ts... args`, `const Ts &...rest`, the last parameter) has type
+  `type_kind::pack_expansion` of the pattern in the template's own
+  declaration, and the pack named anywhere else there is unsupported.
+  Deduction ([temp.deduct.call]/1) deduces the pattern against each
+  trailing argument; the pack's argument is a `template_argument` of kind
+  pack whose elements are stored once (`make_pack`, so equal packs are the
+  same key), an empty one when nothing deduces it ([temp.arg.explicit]/4).
+  An instantiation binds the pack's name to an entity of kind pack of its
+  elements' typedef-names; the declarator's parameter pack becomes one
+  parameter per element (`parameter_pack_expansion`, dcl.fct.cpp), whose
+  name the body finds as a pack of their variables.  A pattern is analysed
+  once per element (`expanding`, `expansion_element`: declared_in gives the
+  element for a pack's name, a pack named outside a pattern is unknown).
+  Pack expansions in a call's arguments (`g(args...)`, `g(h(args)...)`,
+  mixed with other arguments; the parser now keeps the `...` as the
+  initializer-list's child), `sizeof...` of either pack ([expr.sizeof]/4)
+  and fold expressions, unary and binary, left and right, over the
+  built-in operators of [expr.mul] to [expr.log.or] and the comma on
+  operands of neither class nor enumeration type, with Table 17's values
+  for `&&` and `||` of an empty pack ([temp.variadic]/10).  Mangling: `J
+  ... E` for a pack's arguments and `Dp <type>` for the expansion
+  (`_Z5countIJidcEEiDpT_`, as clang).  Not yet: packs of class templates
+  (`box<Ts...>`, partial specializations with packs, bases), non-type
+  packs (`int... Ns`), explicit arguments for a pack, packs not last,
+  overloaded function templates (so no head/tail recursion), pack
+  expansions in braced or parenthesized initializers, template-argument
+  lists and other contexts, folds over assignment operators, `.*`,
+  `->*` or class operands, a nested pack expansion within a pattern.
+  cxx-sema: declarations as clang 41545 -> 41733, 0 we reject and clang
+  accepts, 0 refuted (types 43363, lookup 15142, symbols 1905, layouts
+  10241, lowering 295); cxx-run 224/224 (variadic-templates.cpp);
+  cxx-c-suites unchanged.
 
 ### S7. Exceptions and RTTI
 

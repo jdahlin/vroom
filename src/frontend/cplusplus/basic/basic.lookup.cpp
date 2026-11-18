@@ -84,6 +84,11 @@ entity_index semantic_analysis::declared_in(entity_index scope, uint32_t name,
                                             lookup_filter filter) const
 {
     entity_index e = entity_table.find(scope, name);
+    /* [temp.variadic]/7: in a pack expansion's pattern analysed for one
+       element, a pack's name is that element (temp.variadic.cpp) */
+    if (e && expanding && entity_table[e].kind == entity_kind::pack &&
+        expansion_element < entity_table[e].member_count)
+        e = pack_elements[entity_table[e].value + expansion_element];
     if (!e || filter == lookup_filter::any ||
         entity_table[e].kind == entity_kind::none)
         return e;
@@ -314,6 +319,10 @@ semantic_analysis::lookup_unqualified(uint32_t name, lookup_filter filter) const
             if (entity_table[o].kind != entity_kind::function)
                 break;
         }
+    /* a pack named outside a pack expansion's pattern: ill-formed
+       ([temp.variadic]/7) unless it is one analysis has no rules for */
+    if (r.entity && entity_table[r.entity].kind == entity_kind::pack)
+        r.unknown = true;
     if (r.unknown || r.ambiguous)
         r.entity = 0;
     return r;

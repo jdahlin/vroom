@@ -106,6 +106,10 @@ enum class type_kind : uint8_t {
     dependent,
     /* [dcl.spec.auto]/1: auto or decltype(auto) before deduction */
     placeholder,
+    /* [temp.variadic]/5: a pack expansion whose pattern (operand) names a
+       template parameter pack, the type of a function parameter pack
+       ([dcl.fct]/21) in a template's own declaration */
+    pack_expansion,
 };
 
 struct type {
@@ -153,6 +157,7 @@ class types
                         size_t parameter_count, bool variadic);
     type_index of_entity(type_kind kind, uint32_t entity);
     type_index pointer_to_member(uint32_t class_entity, qualified_type member);
+    type_index pack_expansion_of(qualified_type pattern);
 
     const type &operator[](type_index t) const
     {
@@ -1371,7 +1376,22 @@ class semantic_analysis
         /* the declarator-id is a simple-template-id (declarator_template_id
            allows it): an explicit specialization's or instantiation's */
         node_index template_id = 0;
+        /* [dcl.fct]/21: the declarator-id (or the abstract declarator)
+           has an ellipsis: a function parameter pack (pack_declarator
+           allows it) */
+        token_index pack = 0;
     };
+    bool pack_declarator = false;
+    /* [temp.variadic]/5: whether the parameter-declaration d is a pack
+       expansion of an instantiation's packs: its ellipsis and the packs'
+       length (ellipsis 0: it is not); last: it may be one */
+    analysis_result parameter_pack_expansion(node_index d, bool last,
+                                             uint32_t &elements,
+                                             token_index &ellipsis);
+    bool depends_on_template_parameter(qualified_type t) const;
+    /* the ellipsis of the last parameter-declaration's declarator, if it
+       declares a function parameter pack, else 0 */
+    token_index declared_pack = 0;
     analysis_result declarator(node_index declaration, syntax_child d,
                                qualified_type &type, declarator_meaning &m);
     token_index declarator_id(syntax_child d) const;
@@ -1642,6 +1662,9 @@ class semantic_analysis
            default argument ([dcl.fct.default]/1), none if it has none */
         node_index declaration = 0;
         syntax_child default_argument;
+        /* [temp.variadic]/5: an element of the function parameter pack
+           (an instantiation's) of this name, id 0 */
+        uint32_t pack_name = 0;
     };
     /* [dcl.fct.default]: the default arguments of function_parameters,
        which the declaration n of the function f gives it */
@@ -1668,6 +1691,9 @@ class semantic_analysis
        without one */
     owned_array<uint32_t> default_argument_nodes;
     owned_array<parameter_meaning> function_parameters;
+    /* [temp.variadic]/2: the name of the function parameter pack of no
+       parameters function_parameters has, 0 if none */
+    uint32_t function_empty_pack = 0;
     /* the cv-qualifier-seq of the function declarator analysed last
        ([dcl.fct]/6: only a member function's) */
     uint32_t function_cv = 0;
@@ -1780,6 +1806,11 @@ class semantic_analysis
                                         expression_meaning &m);
     /* [expr.mul] to [expr.log.or] */
     analysis_result binary(node_index n, expression_meaning &m);
+    analysis_result builtin_binary(node_index n, token_index at,
+                                   preprocessing_op_or_punc op,
+                                   expression_meaning &left,
+                                   expression_meaning &right,
+                                   expression_meaning &m);
     analysis_result binary_built(analysis_result r, token_index at,
                                  preprocessing_op_or_punc op,
                                  const expression_meaning &left,
@@ -2352,15 +2383,20 @@ class semantic_analysis
         enum class kind_t : uint8_t {
             type,
             value,
-            template_name
+            template_name,
+            /* [temp.variadic]/1's template parameter pack's argument: its
+               count elements pack_arguments[value .. + count), the same
+               elements always at the same place (make_pack) */
+            pack
         } kind = kind_t::type;
         qualified_type type;
         uint64_t value = 0;
         entity_index template_entity = 0;
+        uint32_t count = 0;
         bool operator==(const template_argument &o) const
         {
             return kind == o.kind && type == o.type && value == o.value &&
-                   template_entity == o.template_entity;
+                   template_entity == o.template_entity && count == o.count;
         }
     };
     struct instantiation_input {
@@ -2463,7 +2499,10 @@ class semantic_analysis
     uint32_t class_template_of(entity_index e) const;
     /* [temp.pre]/1: a template-head's parameters */
     analysis_result
-    template_head_parameters(node_index n, owned_array<node_index> &parameters);
+    template_head_parameters(node_index n, owned_array<node_index> &parameters,
+                             bool packs = false);
+    /* a template-parameter's identifier (after the ellipsis of a pack's) */
+    token_index template_parameter_id(node_index parameter) const;
     /* [temp.param]: the parameters' entities in scope, for the template
        function_templates[index] will be; reserved is a name they shall not
        have ([temp.local]/6) */
@@ -2584,6 +2623,37 @@ class semantic_analysis
                      owned_array<template_argument> &deduced,
                      owned_array<bool> &set, bool exact = false) const;
     owned_array<template_argument> template_arguments;
+    /* [temp.variadic]: the elements of the packs among template arguments
+       (template_argument::kind_t::pack) */
+    owned_array<template_argument> pack_arguments;
+    template_argument make_pack(const template_argument *elements,
+                                uint32_t count);
+    /* a template parameter pack: template_parameter_entities[i]'s */
+    bool template_parameter_is_pack(uint32_t i) const;
+    /* [temp.variadic]/1: an instantiation's packs (entity_kind::pack, the
+       elements pack_elements[value .. + member_count)), and the element
+       their names denote while a pack expansion's pattern is analysed
+       for it (expanding) */
+    owned_array<entity_index> pack_elements;
+    bool expanding = false;
+    uint32_t expansion_element = 0;
+    entity_index make_bound_pack(entity_index scope, uint32_t name,
+                                 const entity_index *elements, uint32_t count);
+    /* the pack an identifier names from the current scope, or 0 */
+    entity_index find_pack(uint32_t name) const;
+    /* [temp.variadic]/5: the number of elements of the packs the pattern
+       [first, end) names (false: none, packs of different lengths, or a
+       pack expansion within it) */
+    bool expansion_count(token_index first, token_index end,
+                         uint32_t &count) const;
+    /* expression(pattern) for the element i of the packs it names */
+    analysis_result expansion_element_expression(syntax_child pattern,
+                                                 uint32_t i,
+                                                 expression_meaning &m);
+    /* [expr.prim.fold] */
+    analysis_result fold(node_index n, expression_meaning &m);
+    /* an initializer-list with a pack expansion (an ellipsis child) */
+    bool has_pack_expansion(syntax_child list) const;
     owned_array<constant_value> instantiation_values;
     owned_array<instantiation_input> instantiation_inputs;
     owned_array<instantiation_record> instantiations;
@@ -2661,24 +2731,40 @@ class semantic_analysis
     {
         return instantiations[entity_table[e].instantiation - 1].argument_count;
     }
-    qualified_type specialization_argument(entity_index e, uint32_t i) const
+    qualified_type specialization_argument(entity_index e, uint32_t i,
+                                           uint32_t element = 0) const
     {
-        return specialization_template_argument(e, i).type;
+        return specialization_template_argument(e, i, element).type;
+    }
+    /* whether argument i is a pack's ([temp.variadic]/1): its number of
+       elements plus one, 0 if not; element k + 1 of the functions here
+       is its k-th */
+    uint32_t specialization_pack(entity_index e, uint32_t i) const
+    {
+        const template_argument &a = specialization_template_argument(e, i);
+        if (a.kind != template_argument::kind_t::pack)
+            return 0;
+        return a.count + 1;
     }
     /* whether the argument is a value (non-type, integral): its
        magnitude, and whether it is negative; or, in a template's own
        declaration, the non-type template-parameter it names (its position
        plus one in parameter) */
     bool specialization_value(entity_index e, uint32_t i, uint64_t &magnitude,
-                              bool &negative, uint32_t &parameter) const;
+                              bool &negative, uint32_t &parameter,
+                              uint32_t element = 0) const;
 
   private:
-    const template_argument &specialization_template_argument(entity_index e,
-                                                              uint32_t i) const
+    const template_argument &
+    specialization_template_argument(entity_index e, uint32_t i,
+                                     uint32_t element = 0) const
     {
         const instantiation_record &x =
             instantiations[entity_table[e].instantiation - 1];
-        return template_arguments[x.first_argument + i];
+        const template_argument &a = template_arguments[x.first_argument + i];
+        if (!element)
+            return a;
+        return pack_arguments[a.value + element - 1];
     }
 
   public:

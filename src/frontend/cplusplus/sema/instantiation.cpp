@@ -90,6 +90,10 @@ semantic_analysis::instantiate(node_index at, entity_index template_entity,
         size_t expressions_before = expressions.size();
         size_t uses_before = name_uses.size();
         current_scope = instantiations[index].scope;
+        /* (a pack expansion's pattern that names the template: its own
+           packs are not the pattern's) */
+        bool saved_expanding = expanding;
+        expanding = false;
         specified s;
         declarator_meaning m;
         analysis_result r = decl_specifier_seq(d[0].index(), s, false);
@@ -105,6 +109,7 @@ semantic_analysis::instantiate(node_index at, entity_index template_entity,
             instantiating = 0;
         }
         current_scope = saved_scope;
+        expanding = saved_expanding;
         function_cv = saved_cv;
         function_parameters =
             static_cast<owned_array<parameter_meaning> &&>(saved_parameters);
@@ -173,6 +178,8 @@ analysis_result semantic_analysis::instantiate_definition(node_index at,
     size_t unsupported_before = unsupported.size();
     current_scope = instantiations[index].scope;
     current_declaration = ft.declaration;
+    bool saved_expanding = expanding;
+    expanding = false;
     defining_class = 0;
     in_condition = false;
     overloaded_callee = 0;
@@ -186,6 +193,7 @@ analysis_result semantic_analysis::instantiate_definition(node_index at,
     analysis_result r = function_definition(ft.definition);
     instantiation_depth--;
     instantiations[index].defining = false;
+    expanding = saved_expanding;
     unevaluated = saved_unevaluated;
     lookup_horizon = saved_horizon;
     instantiating = saved_instantiating;
@@ -319,6 +327,16 @@ analysis_result semantic_analysis::define_class_instantiation(node_index at,
                                                               entity_index &c)
 {
     c = 0;
+    /* (within a pack expansion's pattern: the class's names are not its) */
+    struct expanding_restore {
+        bool &flag;
+        bool saved;
+        ~expanding_restore()
+        {
+            flag = saved;
+        }
+    } restore_expanding = {expanding, expanding};
+    expanding = false;
     if (instantiation_depth >= 64)
         return not_supported(at, "temp.inst");
     const instantiation_record record = instantiations[index];
@@ -501,9 +519,11 @@ analysis_result semantic_analysis::declare_specialization(
 bool semantic_analysis::specialization_value(entity_index e, uint32_t i,
                                              uint64_t &magnitude,
                                              bool &negative,
-                                             uint32_t &parameter) const
+                                             uint32_t &parameter,
+                                             uint32_t element) const
 {
-    const template_argument &a = specialization_template_argument(e, i);
+    const template_argument &a =
+        specialization_template_argument(e, i, element);
     magnitude = a.value;
     negative = false;
     parameter = 0;

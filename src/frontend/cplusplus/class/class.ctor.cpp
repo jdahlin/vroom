@@ -856,6 +856,8 @@ analysis_result semantic_analysis::ctor_initializer(syntax_child list,
         } else if (node.child_count == 4) {
             syntax_child init = children[2];
             if (syntax_is(tree, init, syntax_kind::initializer_list)) {
+                if (has_pack_expansion(init))
+                    return not_supported(n, "temp.variadic");
                 if (record.kind != type_kind::class_type)
                     return ill_formed(n,
                                       "if the entity being initialized does "

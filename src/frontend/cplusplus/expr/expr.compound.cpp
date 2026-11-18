@@ -521,6 +521,17 @@ analysis_result semantic_analysis::binary(node_index n, expression_meaning &m)
                                      right, handled, m);
     if (r != analysis_result::well_formed || handled)
         return r;
+    return builtin_binary(n, at, op, left, right, m);
+}
+
+/* the built-in operator of E1 op E2, its operands analysed */
+analysis_result semantic_analysis::builtin_binary(node_index n, token_index at,
+                                                  preprocessing_op_or_punc op,
+                                                  expression_meaning &left,
+                                                  expression_meaning &right,
+                                                  expression_meaning &m)
+{
+    analysis_result r = analysis_result::well_formed;
     if (op == preprocessing_op_or_punc::SPACESHIP)
         /* [expr.spaceship]: the built-in three-way comparison, whose
            result is of a type of <compare> */

@@ -96,6 +96,7 @@ class itanium_mangler
     bool specialization_encoding(entity_index e);
     bool class_template_args(entity_index c);
     bool template_args(entity_index c);
+    bool template_arg(entity_index c, uint32_t i, uint32_t element);
     void template_param(uint64_t position)
     {
         text("T");
@@ -557,33 +558,52 @@ bool itanium_mangler::template_args(entity_index c)
     text("I");
     uint32_t count = analysis.specialization_argument_count(c);
     for (uint32_t i = 0; i < count; i++) {
-        uint64_t v = 0;
-        bool negative = false;
-        uint32_t parameter = 0;
-        if (!analysis.specialization_value(c, i, v, negative, parameter)) {
-            if (!type(analysis.specialization_argument(c, i)))
+        uint32_t pack = analysis.specialization_pack(c, i);
+        if (!pack) {
+            if (!template_arg(c, i, 0))
                 return false;
             continue;
         }
-        if (parameter) {
-            /* [abi:mangle.template-arg]: a parameter's name, as an
-               expression:
+        /* [abi:mangle.template-arg]: a template parameter pack's
+           arguments,
 
-                   <template-arg> ::= X <expression> E
-            */
-            text("X");
-            template_param(parameter - 1);
-            text("E");
-            continue;
-        }
-        text("L");
-        if (!type(analysis.specialization_argument(c, i)))
-            return false;
-        if (negative)
-            text("n");
-        number(v);
+               <template-arg> ::= J <template-arg>* E
+        */
+        text("J");
+        for (uint32_t k = 1; k < pack; k++)
+            if (!template_arg(c, i, k))
+                return false;
         text("E");
     }
+    text("E");
+    return true;
+}
+
+/* argument i of c's (its element - 1 if element) */
+bool itanium_mangler::template_arg(entity_index c, uint32_t i, uint32_t element)
+{
+    uint64_t v = 0;
+    bool negative = false;
+    uint32_t parameter = 0;
+    if (!analysis.specialization_value(c, i, v, negative, parameter, element))
+        return type(analysis.specialization_argument(c, i, element));
+    if (parameter) {
+        /* [abi:mangle.template-arg]: a parameter's name, as an
+           expression:
+
+               <template-arg> ::= X <expression> E
+        */
+        text("X");
+        template_param(parameter - 1);
+        text("E");
+        return true;
+    }
+    text("L");
+    if (!type(analysis.specialization_argument(c, i, element)))
+        return false;
+    if (negative)
+        text("n");
+    number(v);
     text("E");
     return true;
 }
@@ -1116,6 +1136,13 @@ bool itanium_mangler::type(qualified_type t)
         done = type(r.operand);
     } else if (r.kind == type_kind::rvalue_reference) {
         text("O");
+        done = type(r.operand);
+    } else if (r.kind == type_kind::pack_expansion) {
+        /* [abi:mangle.function-type]: a pack expansion,
+
+               <type> ::= Dp <type>
+        */
+        text("Dp");
         done = type(r.operand);
     } else if (r.kind == type_kind::function)
         done = function_type(t);
