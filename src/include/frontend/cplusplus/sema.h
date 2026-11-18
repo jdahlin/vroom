@@ -2160,6 +2160,9 @@ class semantic_analysis
                                       type_index &type, uint32_t &cv);
     analysis_result qualified_type_name(node_index n, type_index &type,
                                         uint32_t &cv);
+    /* [dcl.type.decltype]: decltype ( expression ), the type and its
+       cv-qualifiers */
+    analysis_result decltype_type(node_index n, type_index &type, uint32_t &cv);
     /* [dcl.enum]: an enum-specifier, the enumeration's type */
     analysis_result enum_specifier(node_index n, type_index &type);
     /* [dcl.type.elab]: enum identifier, the enumeration's type */
