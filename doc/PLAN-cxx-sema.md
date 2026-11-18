@@ -1177,6 +1177,58 @@ lines:
 - Instantiation recorded as 3.5 says, bodies only on use.
 - Gate: each libstdc++ header alone with no `unsupported`; instantiation and
   type claims 0 wrong; the first `libcxx/test/std` numbers.
+- Plan (2026-11-18): stubs first.  The final interfaces and files land
+  before the rules, each body answering `unsupported` with its subclause,
+  so that `sema.h` is settled once for the sessions working beside S3 and
+  S4.  Three commits, on top of S3's commit of its shared surface (`sema.h`,
+  the call node of `expr/expr.post.cpp`, `over/`); each keeps cxx-run and
+  cxx-c-suites where they are, cxx-sema's "we reject, clang accepts" at 0,
+  and moves `unsupported` only between labels.
+  1. One entry point for constant expressions (S6a).  There is none today:
+     each site reads `expression_meaning::evaluation` itself.
+     `constant_expression` and `converted_constant_expression`
+     ([expr.const]/10) in one block of `sema.h`; array bounds, case labels,
+     enumerators, bit-field widths, GNU `aligned`, constexpr variables and
+     list-initialization's narrowing go through them with no change of
+     behaviour; `static_assert` (reported as [dcl.pre] today), `alignas`,
+     `noexcept(expr)` and `if constexpr`, which are not analysed, get a
+     stub under their own subclause.
+  2. The evaluator's skeleton (S6a).  A value type in place of one
+     `uint64_t`: integer (128 bits), floating (long double through
+     `common/softfloat.h`), pointer or lvalue designator, array, class
+     object, union, reference; the integer and double cases filled, the
+     others `unsupported` [expr.const].  New files beside
+     `expr/expr.const.cpp`: the dispatch over every `semantic_kind`, a
+     store for locals and parameters, the step and depth limits of
+     [implimits] (sema has none).  `constexpr` functions declarable (the
+     rejections at `dcl.pre.cpp` and `class.pre.cpp` go, the entity is
+     marked, a call asks the evaluator); `consteval` and `constinit` stubs.
+     Lowering's `constant_initializer` takes the evaluator's value: a
+     `call` marked constant would be lowered as a call in static data
+     today.  A `constant-claims` dump kind, apart from `type-claims`' fifth
+     field.
+  3. The template skeleton (S6b).  Analysis has no template code: `temp/`
+     is the parser's, `template_entity`, `template_specialization` and
+     `pack` are unused, and a template's name is bound to
+     `entity_kind::none`, which makes every later use of it unknown.  The
+     name bound to its entity; dependent, template-parameter and
+     placeholder kinds in `type_kind`; `sema/instantiation.cpp` with 3.5's
+     record as an interface; one semantic function per subclause
+     ([temp.param], [temp.arg], [temp.names], [temp.res], [temp.dep],
+     [temp.inst], [temp.explicit], [temp.expl.spec], [temp.class.spec],
+     [temp.deduct], [temp.variadic], [temp.alias], [temp.deduct.guide],
+     [expr.prim.fold]); the reports under another subclause corrected (a
+     qualified template-id as a type is [dcl.type.simple] today, one as a
+     base [class.derived], a partial specialization's head [class.pre]);
+     stubs for `<template-args>` and `<template-param>` in the mangler.
+  After them: S6a's statements, locals, loops, non-member constexpr
+  functions, arrays and aggregates need nothing more of S3; constexpr
+  constructors, member functions and `this` wait for S4; S6b's rules for
+  S3 and S5.  3.3 is not implemented (analysis runs after the whole
+  translation unit is parsed, and bodies are parsed in full with the
+  parser's guesses about dependent names): the skeleton keeps that and
+  analyses a template's parsed body again per instantiation; analysis per
+  declaration is a change of its own, as S2's status says.
 
 ### S7. Exceptions and RTTI
 
