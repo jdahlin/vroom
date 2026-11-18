@@ -290,7 +290,7 @@ semantic_analysis::function_template_definition(node_index n,
     uint32_t gnu_flags = s.gnu_flags | m.gnu_flags;
     if (s.typedef_ || s.extern_ || c_language ||
         (gnu_flags & ~gnu_function_symbol_flags) || s.aligned || m.aligned ||
-        s.section || m.section ||
+        s.section || m.section || m.asm_label ||
         (s.abi_tag && m.abi_tag && s.abi_tag != m.abi_tag))
         return not_supported(n, "temp.fct");
     token_index abi_tag = m.abi_tag;
@@ -890,6 +890,10 @@ void semantic_analysis::equivalent_partial_specializations(uint32_t added)
         const function_template &o = function_templates[k];
         if (k + 1 == added || o.primary != a.primary || !o.parameter_count)
             continue;
+        /* [temp.over.link]/7: the template-heads' constraints equivalent
+           too */
+        if (!same_constraints(a.declaration, o.declaration))
+            continue;
         bool unknown = false;
         bool forward = class_at_least_as_specialized(added, k + 1, unknown);
         bool backward = class_at_least_as_specialized(k + 1, added, unknown);
@@ -1235,10 +1239,14 @@ static bool depends(const types &table, qualified_type t,
                     cv_none),
                 parameters, from);
         return true;
+    case type_kind::array:
+        /* T[N]: N a non-type template-parameter */
+        if (r.entity && (!parameters || (*parameters)[r.entity].value >= from))
+            return true;
+        return depends(table, r.operand, parameters, from);
     case type_kind::pointer:
     case type_kind::lvalue_reference:
     case type_kind::rvalue_reference:
-    case type_kind::array:
     case type_kind::pack_expansion:
         return depends(table, r.operand, parameters, from);
     case type_kind::function: {
@@ -1370,10 +1378,12 @@ semantic_analysis::class_template_definition(node_index n, node_index specifier)
     bool specialization =
         head_name.bits &&
         syntax_is(tree, head_name, syntax_kind::simple_template_id);
-    analysis_result r =
-        template_head_parameters(n, parameters, true, false, specialization);
+    analysis_result r = template_head_parameters(
+        n, parameters, true, specialization, specialization);
     if (r != analysis_result::well_formed)
         return r;
+    /* a partial specialization's requires-clause is checked where it is
+       matched (matching_specialization); the primary's are not analysed */
     if (specialization) {
         return class_specialization_definition(n, specifier, parameters);
     }
@@ -1506,8 +1516,17 @@ analysis_result semantic_analysis::class_specialization_definition(
     if (!is_namespace(outer) || defining_class)
         return not_supported(n, rule);
     const syntax_node &spec = tree[specifier];
-    node_index head = tree.children(specifier)[0].index();
-    node_index id = class_head_name(head).index();
+    /* [temp.expl.spec]/1 also declares a specialization without defining
+       it: class-key simple-template-id ; (an elaborated-type-specifier),
+       whose definition may follow */
+    bool defines = spec.kind == syntax_kind::class_specifier;
+    node_index id = 0;
+    if (defines) {
+        node_index head = tree.children(specifier)[0].index();
+        id = class_head_name(head).index();
+    } else {
+        id = tree.children(specifier)[1].index();
+    }
     lookup_result x;
     entity_index named = 0;
     if (!template_id_name(id, x, named))
@@ -1525,10 +1544,13 @@ analysis_result semantic_analysis::class_specialization_definition(
     /* [temp.expl.spec]/7, [temp.class.spec]/1: one declared after a
        specialization it would be used for was instantiated makes the
        program ill-formed (no diagnostic required); any instantiation
-       before it is not analysed */
+       before it is not analysed.  One of an explicit specialization is
+       that specialization's own (declared, it is defined at its next
+       use), never another's */
     for (const instantiation_record &r : instantiations)
         if (r.template_entity == primary.entity && r.specialization &&
-            entity_table[r.specialization].kind == entity_kind::class_type)
+            entity_table[r.specialization].kind == entity_kind::class_type &&
+            !(r.pattern && !function_templates[r.pattern - 1].parameter_count))
             return not_supported(n, rule);
     uint32_t index = 0, first = 0;
     entity_index scope = 0;
@@ -1569,13 +1591,20 @@ analysis_result semantic_analysis::class_specialization_definition(
     /* [temp.expl.spec]: no dependent argument; [temp.class.spec]/9: "The
        specialization shall be more specialized than the primary template"
        (the primary's own arguments are not; other cases are
-       [temp.class.order]'s, not analysed) */
+       [temp.class.order]'s, not analysed); /9 Example 1's #2: the
+       primary's arguments with a requires-clause, more constrained than
+       the unconstrained primary ([temp.constr.order]) */
+    if (identity && head_constraint(n).bits &&
+        !head_constraint(function_templates[ct - 1].declaration).bits)
+        identity = false;
     if (parameters.empty() == dependent || identity)
         return not_supported(n, rule);
     function_template record;
     record.entity = primary.entity;
     record.declaration = n;
-    record.definition = specifier;
+    record.definition = 0;
+    if (defines)
+        record.definition = specifier;
     record.first_parameter = first;
     record.parameter_count = static_cast<uint32_t>(parameters.size());
     record.is_class = true;
@@ -1584,14 +1613,24 @@ analysis_result semantic_analysis::class_specialization_definition(
     record.pattern_count = static_cast<uint32_t>(arguments.size());
     /* a second explicit specialization of the same arguments: a
        redefinition ([basic.def.odr]/1) */
-    for (const function_template &o : function_templates) {
+    for (function_template &o : function_templates) {
         if (o.primary != ct || o.parameter_count || !parameters.empty())
             continue;
         bool same = true;
         for (uint32_t i = 0; i < o.pattern_count && same; i++)
             same = template_arguments[o.first_pattern + i] == arguments[i];
-        if (same)
+        if (!same)
+            continue;
+        /* [basic.def]/1: declared again, or defined after its
+           declaration (the instantiations that named it define it at
+           their next use, instantiate_class) */
+        if (!defines)
+            return analysis_result::well_formed;
+        if (o.definition)
             return not_supported(n, rule);
+        o.declaration = n;
+        o.definition = specifier;
+        return analysis_result::well_formed;
     }
     for (const template_argument &a : arguments)
         template_arguments.append(a);
@@ -1781,6 +1820,15 @@ analysis_result semantic_analysis::matching_specialization(
         if (again != analysis_result::well_formed)
             return again;
         if (!substituted)
+            continue;
+        /* [temp.class.spec.match]/2: "and the deduced template arguments
+           satisfy the associated constraints of the partial
+           specialization, if any" */
+        bool satisfied = true;
+        analysis_result c = template_constraints_satisfied(k + 1, d, satisfied);
+        if (c != analysis_result::well_formed)
+            return c;
+        if (!satisfied)
             continue;
         matches++;
         found.append(k + 1);

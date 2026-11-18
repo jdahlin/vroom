@@ -241,9 +241,20 @@ semantic_analysis::parameter_declaration(node_index n, qualified_type &type,
 {
     id = 0;
     default_argument = syntax_child();
-    const syntax_node &node = tree[n];
-    const syntax_child *children = tree.children(n);
-    if (!node.child_count ||
+    /* [dcl.fct]/3: the attribute-specifier-seq_opt before the
+       decl-specifier-seq appertains to the parameter: those without effect
+       (libc++'s [[__maybe_unused__]]) are left out */
+    uint32_t lead = 0;
+    while (lead < tree[n].child_count && !tree.children(n)[lead].is_token() &&
+           (syntax_is(tree, tree.children(n)[lead],
+                      syntax_kind::attribute_specifier_seq) ||
+            syntax_is(tree, tree.children(n)[lead],
+                      syntax_kind::attribute_specifier)) &&
+           attributes_without_effect(tree.children(n)[lead]))
+        lead++;
+    const syntax_child *children = tree.children(n) + lead;
+    uint32_t child_count = tree[n].child_count - lead;
+    if (!child_count ||
         !syntax_is(tree, children[0], syntax_kind::decl_specifier_seq))
         return not_supported(n, "dcl.attr");
     specified s;
@@ -270,11 +281,11 @@ semantic_analysis::parameter_declaration(node_index n, qualified_type &type,
     /* [dcl.fct.default]/1: "If an initializer-clause is specified in a
        parameter-declaration this initializer-clause is used as a default
        argument" (default_arguments analyses it) */
-    uint32_t declarator_count = node.child_count;
-    for (uint32_t i = 1; i + 1 < node.child_count; i++)
+    uint32_t declarator_count = child_count;
+    for (uint32_t i = 1; i + 1 < child_count; i++)
         if (syntax_is_punctuator(tokens, children[i],
                                  preprocessing_op_or_punc::EQUAL)) {
-            if (i + 2 != node.child_count)
+            if (i + 2 != child_count)
                 return not_supported(n, "dcl.fct.default");
             default_argument = children[i + 1];
             declarator_count = i;
@@ -295,7 +306,7 @@ semantic_analysis::parameter_declaration(node_index n, qualified_type &type,
        the type of the function it points to, the others have no rules for
        a parameter */
     if (r == analysis_result::well_formed &&
-        (m.gnu_flags || m.aligned || m.section))
+        (m.gnu_flags || m.aligned || m.section || m.asm_label))
         return not_supported(n, "ext.gnu");
     return r;
 }

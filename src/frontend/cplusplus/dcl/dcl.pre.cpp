@@ -792,8 +792,9 @@ uint32_t semantic_analysis::leading_gnu_attributes(node_index n) const
    [[nodiscard]] before libc++'s functions */
 bool semantic_analysis::gnu_or_without_effect(node_index n) const
 {
+    uint32_t flags = 0;
     if (tree[n].kind == syntax_kind::attribute_specifier)
-        return attributes_without_effect(syntax_child::node(n));
+        return attributes_as_gnu(syntax_child::node(n), flags);
     if (tree[n].kind != syntax_kind::attribute_specifier_seq)
         return only_gnu_attributes(tree, n);
     for (uint32_t i = 0; i < tree[n].child_count; i++) {
@@ -1232,6 +1233,19 @@ analysis_result semantic_analysis::declare_with_initializer(
             x.abi_tag = abi_tag;
         if (aligned > x.alignment)
             x.alignment = static_cast<uint32_t>(aligned);
+    }
+    /* [ext:gnu_asm_labels] the symbol of a function or variable with
+       static storage duration; a later declaration may leave it out, a
+       different one is clang's error */
+    if (r == analysis_result::well_formed && m.asm_label) {
+        entity &x = entity_table[declared_entity];
+        if (s.typedef_ || x.automatic || m.qualifier || m.qualified_namespace ||
+            (x.kind != entity_kind::function &&
+             x.kind != entity_kind::variable))
+            return not_supported(declaration, "ext.gnu");
+        if (x.asm_label && !same_token_spelling(x.asm_label, m.asm_label))
+            return not_supported(declaration, "ext.gnu");
+        x.asm_label = m.asm_label;
     }
     /* [dcl.array]/8: the bound of an earlier declaration (declare took it)
        is the one the initializer fills */

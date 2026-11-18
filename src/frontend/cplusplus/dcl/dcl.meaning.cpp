@@ -201,6 +201,10 @@ analysis_result semantic_analysis::pointer_operator(node_index op,
                 if (!q.is_token())
                     return not_supported(op, "dcl.ptr");
                 standard_keyword kw = p.keyword_of(tokens[q.index()]);
+                /* [ext:clang_nullability]: no effect on the type */
+                if (p.extension_keyword_of(tokens[q.index()]) ==
+                    extension_keyword::nullability)
+                    continue;
                 if (kw == standard_keyword::const_)
                     type = add_cv(type, cv_const);
                 else if (kw == standard_keyword::volatile_)
@@ -210,6 +214,9 @@ analysis_result semantic_analysis::pointer_operator(node_index op,
             }
         } else if (c.is_token()) {
             standard_keyword kw = p.keyword_of(tokens[c.index()]);
+            if (p.extension_keyword_of(tokens[c.index()]) ==
+                extension_keyword::nullability)
+                continue;
             if (kw == standard_keyword::const_)
                 type = add_cv(type, cv_const);
             else if (kw == standard_keyword::volatile_)
@@ -264,6 +271,28 @@ analysis_result semantic_analysis::array(node_index at,
        converted expression is a constant expression and the implicit
        conversion sequence contains only ... integral conversions other than
        narrowing conversions") */
+    /* [temp.dep.constexpr]/2: in a template's own declaration, a bound
+       that is a non-type template-parameter's name (T (&)[N]) is
+       value-dependent: the type records the parameter, which deduction
+       ([temp.deduct.type]/8's T[i]) gives a value; each instantiation
+       analyses the declarator again with the parameter bound to it */
+    if (bound->is_token() &&
+        tokens[bound->index()].kind == token_kind::identifier) {
+        lookup_result x = lookup_unqualified(tokens.identifier(bound->index()),
+                                             lookup_filter::any);
+        entity_index named = x.entity;
+        if (!named)
+            named = x.unknown_entity;
+        if (named && entity_table[named].kind == entity_kind::none &&
+            entity_table[named].instantiation &&
+            !entity_table[named].held_by_template) {
+            if (!is_integral(entity_table[named].type))
+                return not_supported(at, "temp.dep.constexpr");
+            type = qualified_type::make(
+                type_table.array_of_parameter_bound(type, named), cv_none);
+            return analysis_result::well_formed;
+        }
+    }
     expression_meaning m;
     analysis_result r = expression(*bound, m);
     if (r != analysis_result::well_formed)
@@ -765,6 +794,33 @@ analysis_result semantic_analysis::declarator(node_index declaration,
     }
     case syntax_kind::declarator:
         return trailing_return(declaration, n, type, m);
+    case syntax_kind::gnu_declarator: {
+        /* [ext:gnu_asm_labels] declarator gnu-asm-label_opt
+           gnu-attribute-specifier-seq_opt: the label is the symbol, one
+           ordinary string-literal (concatenated or not) without escape
+           sequences here */
+        for (uint32_t k = 1; k < node.child_count; k++) {
+            if (syntax_is(tree, children[k],
+                          syntax_kind::gnu_attribute_specifier)) {
+                analysis_result r =
+                    gnu_attribute_specifier(children[k].index(), m);
+                if (r != analysis_result::well_formed)
+                    return r;
+                continue;
+            }
+            if (!syntax_is(tree, children[k], syntax_kind::gnu_asm_label) ||
+                tree[children[k].index()].child_count != 4)
+                return not_supported(n, "ext.gnu");
+            syntax_child literal = tree.children(children[k].index())[2];
+            owned_buffer written;
+            tokens.spelling(literal.index(), written.get());
+            if (!literal.is_token() || written.size() < 2 ||
+                memchr(written.data(), '\\', written.size()))
+                return not_supported(n, "ext.gnu");
+            m.asm_label = literal.index();
+        }
+        return declarator(declaration, children[0], type, m);
+    }
     case syntax_kind::operator_function_id:
         return operator_function_id(n, m);
     case syntax_kind::literal_operator_id:

@@ -309,6 +309,10 @@ semantic_analysis::class_sequence(const expression_meaning &a,
         return of_form(sequence::form::unknown);
     if (!user_defined)
         return of_form(sequence::form::bad);
+    /* [temp.mem]/1: a constructor template of c1 is a candidate too: not
+       analysed */
+    if (entity_table[c1].constructor_template)
+        return of_form(sequence::form::unknown);
     /* the converting constructors of c1 with one parameter to take the
        argument */
     sequence best = of_form(sequence::form::bad);

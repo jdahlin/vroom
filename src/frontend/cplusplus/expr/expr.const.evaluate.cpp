@@ -187,6 +187,7 @@ void semantic_analysis::evaluate_analysed_expressions()
         if (declarations[j].result != analysis_result::well_formed)
             continue;
         constant_evaluation state;
+        state.any_expression = true;
         /* a function defined after the expression is undefined at its
            point ([expr.const]/5.3) */
         if (x.at.is_token())
@@ -953,6 +954,18 @@ constness semantic_analysis::evaluate_call(constant_evaluation &state,
         callee = semantics[callee].a;
     if (semantics[callee].kind != semantic_kind::entity)
         return constness::unknown;
+    /* [meta.const.eval]/1: true within a manifestly constant-evaluated
+       expression ([expr.const]/14), which this evaluation is unless it is
+       potential_constant's or the claims' */
+    if (entity_table[semantics[callee].a].gnu_flags &
+        gnu_is_constant_evaluated) {
+        if (state.potential || state.any_expression)
+            return constness::unknown;
+        v = constant_value();
+        v.kind = constant_value_kind::integer;
+        v.integer = 1;
+        return constness::constant;
+    }
     /* [expr.prim.lambda.closure]/4: whether a closure's function call
        operator is constexpr is not decided yet (evaluate_invocation) */
     entity_index enclosing = entity_table[semantics[callee].a].enclosing;

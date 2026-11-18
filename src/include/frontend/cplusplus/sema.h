@@ -132,7 +132,9 @@ struct type {
     qualified_type operand;
     /* class, enumeration: the entity; pointer to member: the class's */
     uint32_t entity = 0;
-    /* array: the bound N */
+    /* array: the bound N; in a template's own declaration a bound that is
+       a non-type template-parameter's name (T[N], [temp.deduct.type]/8's
+       T[i]) is that parameter's entity, with bound_known and bound 0 */
     uint64_t bound = 0;
     /* function: the parameter types are parameters[first_parameter ..
        first_parameter + parameter_count) */
@@ -157,6 +159,8 @@ class types
     type_index rvalue_reference_to(qualified_type referred);
     type_index array_of(qualified_type element, uint64_t bound);
     type_index array_of_unknown_bound_of(qualified_type element);
+    type_index array_of_parameter_bound(qualified_type element,
+                                        uint32_t parameter);
     type_index function(qualified_type result, const qualified_type *parameters,
                         size_t parameter_count, bool variadic,
                         bool non_throwing = false);
@@ -302,6 +306,9 @@ enum gnu_attribute_flag : uint32_t {
     /* clang's exclude_from_explicit_instantiation: an explicit
        instantiation of the class leaves the member out */
     gnu_exclude_from_explicit_instantiation = 8192,
+    /* [ext:gnu_library_builtins] __builtin_is_constant_evaluated: a
+       manifestly constant evaluation's call is true, any other false */
+    gnu_is_constant_evaluated = 16384,
 };
 /* the GNU attributes of a function's own symbol that analysis carries to
    member functions and function templates */
@@ -394,6 +401,11 @@ struct entity {
     /* a class: its default constructor is declared = default
        ([dcl.fct.def.default]), declared as the implicit one is */
     bool defaulted_default_constructor = false;
+    /* ... and explicit: explicit X() = default ([class.conv.ctor]/2: a
+       copy-initialization does not consider it) */
+    bool explicit_default_constructor = false;
+    /* X& operator=(const X&) = default (defaulted_copy_assignment) */
+    bool defaulted_copy_assignment = false;
     /* [class.default.ctor]/2: the implicit default constructor is deleted
        (a subobject without a usable default constructor) */
     bool implicit_default_deleted = false;
@@ -486,6 +498,11 @@ struct entity {
     /* a class: its user-declared constructors (a chain through
        next_constructor) and destructor, 0 if none */
     entity_index first_constructor = 0, destructor = 0;
+    /* a class: [temp.mem]/1 the first constructor template it declares
+       (its template-declaration), 0 if none.  Such a class has a
+       user-declared constructor; the template is not analysed, and a
+       construction of the class that would consider it is not either */
+    node_index constructor_template = 0;
     /* a non-static data member that is a bit-field ([class.bit]): its
        width and the offset of its first bit in the class (offset is the
        byte that bit is in); an unnamed one (name 0) is in the layout but
@@ -506,6 +523,9 @@ struct entity {
     token_index section = 0;
     /* ... and an abi_tag attribute's string-literal, 0 if none */
     token_index abi_tag = 0;
+    /* [ext:gnu_asm_labels] a function's or variable's asm label: the
+       string-literal that is its symbol, 0 if none */
+    token_index asm_label = 0;
     /* [dcl.link]/1: a function or variable with C language linkage,
        whose name is its symbol */
     bool c_language_linkage = false;
@@ -1556,6 +1576,8 @@ class semantic_analysis
         uint64_t aligned = 0;
         uint32_t gnu_flags = 0;
         token_index section = 0, abi_tag = 0;
+        /* [ext:gnu_asm_labels] the asm label's string-literal, 0 if none */
+        token_index asm_label = 0;
         /* the declarator-id is ~ class-name: a destructor ([class.dtor]/1) */
         bool destructor = false;
         /* the declarator-id is an operator-function-id ([over.oper]/1) */
@@ -1884,6 +1906,8 @@ class semantic_analysis
     /* [dcl.attr.grammar]: every attribute at n (an attribute-specifier,
        -seq or -list) changes nothing vcc generates */
     bool attributes_without_effect(syntax_child n) const;
+    /* ... or [[noreturn]], whose GCC flag goes into flags */
+    bool attributes_as_gnu(syntax_child n, uint32_t &flags) const;
     bool gnu_attributes_without_effect(syntax_child n) const;
     bool class_head_attributes_without_effect(syntax_child c) const;
     uint32_t attributes_without_effect_before(node_index declaration) const;
@@ -2460,6 +2484,10 @@ class semantic_analysis
            the evaluation of the operands beside it, nor an unknown
            condition that of both arms of a conditional */
         bool potential = false;
+        /* evaluate_analysed_expressions' evaluation of any expression,
+           which need not be manifestly constant-evaluated
+           ([expr.const]/14): __builtin_is_constant_evaluated is unknown */
+        bool any_expression = false;
         /* for the claims (evaluate_analysed_expressions): a function whose
            body begins after this token is not defined yet where the claim
            is placed ([expr.const]/5.3); 0: every body counts */
@@ -2660,6 +2688,9 @@ class semantic_analysis
     /* [dcl.type.elab]: class-key identifier, the class's type */
     analysis_result elaborated_type_specifier(node_index n, type_index &type);
     /* [class.mem]: one member-declaration of the class being defined */
+    /* [temp.mem]/1: the member template n (a template-declaration) of
+       class c */
+    analysis_result member_template_declaration(entity_index c, node_index n);
     analysis_result member_declaration(entity_index c, syntax_child n,
                                        uint8_t access,
                                        owned_array<node_index> &bodies);
@@ -2738,7 +2769,12 @@ class semantic_analysis
                                        expression_meaning &m);
     analysis_result defaulted_or_deleted_special_member(
         entity_index c, node_index n, syntax_child d, syntax_child body,
-        uint8_t access, bool constexpr_specified, bool virtual_specified);
+        uint8_t access, bool constexpr_specified, bool virtual_specified,
+        bool explicit_specified);
+    analysis_result defaulted_copy_assignment(entity_index c, node_index n,
+                                              syntax_child d,
+                                              const specified &s,
+                                              uint8_t access);
     analysis_result static_member_initializer(node_index declarator,
                                               entity_index e, syntax_child init,
                                               const specified &s);
@@ -3446,6 +3482,9 @@ class semantic_analysis
        (of value category c) adjusted for deduce_type */
     void adjust_call_deduction(qualified_type &p, qualified_type &a,
                                value_category c);
+    bool deduce_bound(entity_index parameter, uint64_t bound,
+                      owned_array<template_argument> &deduced,
+                      owned_array<bool> &set);
     bool deduce_type(qualified_type p, qualified_type a,
                      owned_array<template_argument> &deduced,
                      owned_array<bool> &set, bool exact = false);

@@ -85,6 +85,13 @@ PRODUCTION(gnu_asm_labels, "declarator",
 PRODUCTION(gnu_restrict, "cv-qualifier", "__restrict")
 PRODUCTION(gnu_restrict, "cv-qualifier", "__restrict__")
 
+/* ---- clang Language Extensions, Nullability ---- */
+
+PRODUCTION(clang_nullability, "cv-qualifier", "_Nonnull")
+PRODUCTION(clang_nullability, "cv-qualifier", "_Nullable")
+PRODUCTION(clang_nullability, "cv-qualifier", "_Nullable_result")
+PRODUCTION(clang_nullability, "cv-qualifier", "_Null_unspecified")
+
 /* ---- GCC manual 6.48, Alternate Keywords: __extension__ ---- */
 
 PRODUCTION(gnu_extension_keyword, "declaration", "__extension__ declaration")

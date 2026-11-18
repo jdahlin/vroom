@@ -65,6 +65,72 @@ bool semantic_analysis::declares_special_member(entity_index c,
 }
 
 /*
+ * [temp.mem]/1: "A template can be declared within a class or class
+ * template; such a template is called a member template."  [temp.mem]/5:
+ * a constructor template is never a copy or move constructor; it is a
+ * user-declared constructor ([dcl.init.aggr]/1.1, [class.default.ctor]/1:
+ * no default constructor is implicitly declared).  Only a constructor
+ * template of a class of namespace scope is known: its declaration is not
+ * analysed beyond its form, and a construction of the class, which would
+ * consider it ([over.match.ctor]), is not analysed either (construct).
+ */
+analysis_result semantic_analysis::member_template_declaration(entity_index c,
+                                                               node_index n)
+{
+    const syntax_node &node = tree[n];
+    if (node.child_count != 2 ||
+        !syntax_is(tree, tree.children(n)[0], syntax_kind::template_head) ||
+        tree.children(n)[1].is_token())
+        return not_supported(n, "temp.mem");
+    owned_array<node_index> parameters;
+    if (!template_head_list(tree.children(n)[0].index(), parameters) ||
+        parameters.empty() || head_constraint(n).bits)
+        return not_supported(n, "temp.mem");
+    node_index inner = tree.children(n)[1].index();
+    const syntax_node &d = tree[inner];
+    if ((d.kind != syntax_kind::function_definition &&
+         d.kind != syntax_kind::member_declaration) ||
+        !is_namespace(entity_table[c].enclosing))
+        return not_supported(n, "temp.mem");
+    /* [ext:gnu_attributes] before it all; [class.ctor]/1: "Each
+       decl-specifier in the decl-specifier-seq of a constructor
+       declaration (if any) shall be friend, inline, constexpr, or an
+       explicit-specifier" (and consteval, [dcl.consteval]) */
+    uint32_t at = leading_gnu_attributes(inner);
+    const syntax_child *dc = tree.children(inner);
+    if (at < d.child_count &&
+        syntax_is(tree, dc[at], syntax_kind::decl_specifier_seq)) {
+        node_index seq = dc[at].index();
+        for (uint32_t i = 0; i < tree[seq].child_count; i++) {
+            syntax_child x = tree.children(seq)[i];
+            if (syntax_is(tree, x, syntax_kind::gnu_attribute_specifier))
+                continue;
+            if (!x.is_token())
+                return not_supported(n, "temp.mem");
+            switch (p.keyword_of(tokens[x.index()])) {
+            case standard_keyword::constexpr_:
+            case standard_keyword::consteval_:
+            case standard_keyword::inline_:
+            case standard_keyword::explicit_:
+                continue;
+            default:
+                return not_supported(n, "temp.mem");
+            }
+        }
+        at++;
+    }
+    /* a constructor's declarator, not a destructor's (which [temp.mem]/3
+       does not allow a template of) */
+    if (at >= d.child_count || !declares_special_member(c, dc[at]) ||
+        syntax_is(tree, tree.children(dc[at].index())[0],
+                  syntax_kind::unqualified_id))
+        return not_supported(n, "temp.mem");
+    if (!entity_table[c].constructor_template)
+        entity_table[c].constructor_template = n;
+    return analysis_result::well_formed;
+}
+
+/*
  * [class.base.init]/9.1: member e initialized from its default member
  * initializer ([class.mem]/10), analysed in the constructor ([class.mem]/6:
  * a complete-class context, `this` its object), and stored as by an
@@ -398,8 +464,13 @@ analysis_result semantic_analysis::special_member_declarator(
     if (kind == special_member::destructor) {
         /* [class.virtual]/7: a virtual destructor, declared so or
            overriding a base's ([class.dtor]/13) */
-        virt_override = virt_final = virt_pure = false;
-        return virtual_member(c, e, declaration, m.id, virtual_specified);
+        /* virt_override, virt_final: the destructor's virt-specifier-seq
+           (member_declaration) */
+        virt_pure = false;
+        analysis_result r =
+            virtual_member(c, e, declaration, m.id, virtual_specified);
+        virt_override = virt_final = false;
+        return r;
     }
     return analysis_result::well_formed;
 }
@@ -419,9 +490,12 @@ analysis_result semantic_analysis::special_member_declarator(
  */
 analysis_result semantic_analysis::defaulted_or_deleted_special_member(
     entity_index c, node_index n, syntax_child d, syntax_child body,
-    uint8_t access, bool constexpr_specified, bool virtual_specified)
+    uint8_t access, bool constexpr_specified, bool virtual_specified,
+    bool explicit_specified)
 {
     if (deleted_body(body)) {
+        if (explicit_specified)
+            return not_supported(n, "dcl.fct.def.delete");
         analysis_result r = special_member_declarator(
             c, n, d, access, false, constexpr_specified, virtual_specified);
         if (r != analysis_result::well_formed)
@@ -479,7 +553,7 @@ analysis_result semantic_analysis::defaulted_or_deleted_special_member(
     entity &x = entity_table[c];
     if (m.destructor) {
         /* [class.dtor]/4: as the implicitly-declared destructor */
-        if (x.destructor || f.parameter_count)
+        if (x.destructor || f.parameter_count || explicit_specified)
             return not_supported(n, "dcl.fct.def.default");
         if (!virtual_specified)
             return analysis_result::well_formed;
@@ -495,11 +569,16 @@ analysis_result semantic_analysis::defaulted_or_deleted_special_member(
         if (x.defaulted_default_constructor)
             return not_supported(n, "class.mem");
         x.defaulted_default_constructor = true;
+        x.explicit_default_constructor = explicit_specified;
         return analysis_result::well_formed;
     }
     const qualified_type *parameters =
         type_table.parameters(type.unqualified());
     const struct type &first = type_table[parameters[0].unqualified()];
+    if (explicit_specified)
+        /* an explicit copy constructor: [class.copy.ctor]/7's implicit
+           one is not */
+        return not_supported(n, "dcl.fct.def.default");
     if (f.parameter_count == 1 && first.kind == type_kind::lvalue_reference &&
         first.operand.unqualified() == x.type.unqualified() &&
         first.operand.cv() == cv_const) {
@@ -512,6 +591,67 @@ analysis_result semantic_analysis::defaulted_or_deleted_special_member(
     }
     /* X(X&) = default, a move constructor */
     return not_supported(n, "dcl.fct.def.default");
+}
+
+/*
+ * X& operator=(const X&) = default in class X: [dcl.fct.def.default]/5, not
+ * user-provided; declared as [class.copy.assign]/2's implicit one would be
+ * ("X& X::operator=(const X&)", public, inline), which analysis declares
+ * no entity for (assigned_bitwise looks the operator up and finds none).
+ * Not analysed: another form, access other than public, a cv- or
+ * ref-qualifier, default arguments, the specifiers static, virtual,
+ * constexpr, friend.  Unlike the implicit one it suppresses the implicit
+ * move constructor and move assignment operator ([class.copy.ctor]/8,
+ * [class.copy.assign]/4), which analysis does not declare either.
+ */
+analysis_result semantic_analysis::defaulted_copy_assignment(entity_index c,
+                                                             node_index n,
+                                                             syntax_child d,
+                                                             const specified &s,
+                                                             uint8_t access)
+{
+    if (access || !s.has_type || s.typedef_ || s.static_ || s.extern_ ||
+        s.constexpr_ || s.virtual_ || s.friend_ || s.explicit_ ||
+        s.declares_class || s.aligned)
+        return not_supported(n, "dcl.fct.def.default");
+    qualified_type type = s.type;
+    declarator_meaning m;
+    function_cv = 0;
+    in_member_declarator = true;
+    function_parameters.clear();
+    analysis_result r = declarator(n, d, type, m);
+    in_member_declarator = false;
+    if (r != analysis_result::well_formed)
+        return r;
+    if (!m.has_id || m.qualifier || function_cv || m.aligned ||
+        !m.operator_function ||
+        m.implemented != preprocessing_op_or_punc::EQUAL)
+        return not_supported(n, "dcl.fct.def.default");
+    for (const parameter_meaning &parameter : function_parameters)
+        if (parameter.default_argument.index())
+            return not_supported(n, "dcl.fct.def.default");
+    const struct type &f = type_table[type.unqualified()];
+    if (f.kind != type_kind::function || f.variadic || f.parameter_count != 1)
+        return not_supported(n, "dcl.fct.def.default");
+    const entity &x = entity_table[c];
+    const struct type &result = type_table[f.operand.unqualified()];
+    const struct type &first =
+        type_table[type_table.parameters(type.unqualified())[0].unqualified()];
+    if (f.operand.cv() || result.kind != type_kind::lvalue_reference ||
+        !(result.operand ==
+          qualified_type::make(x.type.unqualified(), cv_none)) ||
+        first.kind != type_kind::lvalue_reference ||
+        !(first.operand ==
+          qualified_type::make(x.type.unqualified(), cv_const)))
+        return not_supported(n, "dcl.fct.def.default");
+    /* a second one, or beside a user-declared copy assignment operator */
+    lookup_result found = lookup_qualified(
+        c, operator_name(preprocessing_op_or_punc::EQUAL), lookup_filter::any);
+    if (found.entity || found.unknown || found.ambiguous ||
+        x.defaulted_copy_assignment)
+        return not_supported(n, "class.mem");
+    entity_table[c].defaulted_copy_assignment = true;
+    return analysis_result::well_formed;
 }
 
 /* the expressions of an expression-list (an initializer_list node, or one
@@ -578,6 +718,10 @@ semantic_analysis::construct(node_index at, qualified_type type,
         /* value-initialization through a trivial X() = default
            ([dcl.init]/8.2: zero-initialized): not analysed */
         return not_supported(at, "dcl.init");
+    /* [temp.mem]/1: a constructor template is a candidate too
+       (member_template_declaration) */
+    if (x.constructor_template)
+        return not_supported(at, "temp.mem");
     /* [over.match.ctor]/1: "the candidate functions are all the
        constructors of the class of the object being initialized" */
     owned_array<overload_candidate> candidates;
@@ -1276,7 +1420,15 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
              (!x.destructor || !declares_copy || !x.first_constructor)))
             return not_supported(n, "class.default.ctor");
     }
-    bool user_constructors = x.first_constructor != 0;
+    /* [temp.mem]/1: a constructor template is user-declared; the copy
+       constructor declared beside it makes every construction of the
+       class one construct refuses */
+    bool user_constructors =
+        x.first_constructor != 0 || x.constructor_template != 0;
+    if (x.constructor_template) {
+        construction = true;
+        copy = true;
+    }
     /* [dcl.fct.def.default]: X() = default beside other constructors: the
        default constructor, trivial or not, that a default-initialization
        chooses */
@@ -1406,6 +1558,9 @@ void semantic_analysis::declare_implicit(entity_index c, special_member kind,
     f.defined = true;
     f.implicit = true;
     f.linkage_of_name = entity_table[c].linkage_of_name;
+    /* explicit X() = default */
+    f.explicit_ = kind == special_member::constructor && !copy &&
+                  entity_table[c].explicit_default_constructor;
     if (kind == special_member::destructor) {
         entity_table[c].destructor = e;
         return;

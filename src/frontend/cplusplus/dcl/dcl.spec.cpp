@@ -162,8 +162,17 @@ name_class classify(parser &p, unsigned ahead, unsigned *length,
                 return name_class::not_a_type;
             }
         }
-        if (template_ids && p.at(preprocessing_op_or_punc::LESS, after))
+        /* a variable's or an enumerator's name followed by < is no
+           template-name ([temp.names]/2): (v < 2) is an expression */
+        if (template_ids && p.at(preprocessing_op_or_punc::LESS, after) &&
+            kind != name_kind::other)
             return name_class::unknown;
+        /* nested-name-specifier template identifier with no
+           template-argument-list names a template, not a type: a template
+           template argument's id-expression ([temp.arg.template]/1,
+           [temp.names]/5) */
+        if (template_keyword)
+            return name_class::not_a_type;
         switch (kind) {
         case name_kind::type_name:
         /* a class template's name alone: its injected-class-name in its
@@ -392,7 +401,8 @@ node_index parser::decl_specifier_seq(decl_specifier_facts &facts,
             continue;
         }
         /* [ext:gnu_restrict] a cv-qualifier ([dcl.decl]) */
-        if (accept(extension_keyword::restrict))
+        if (accept(extension_keyword::restrict) ||
+            accept(extension_keyword::nullability))
             continue;
         standard_keyword k = keyword_of(peek());
         token_index specifier = position;
@@ -1199,6 +1209,9 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
             named_at = t;
             continue;
         }
+        /* [ext:clang_nullability]: no effect on the type */
+        if (p.extension_keyword_of(tok) == extension_keyword::nullability)
+            continue;
         if (p.extension_keyword_of(tok) == extension_keyword::int128) {
             /* [ext:gnu_int128] */
             if (!k.first)

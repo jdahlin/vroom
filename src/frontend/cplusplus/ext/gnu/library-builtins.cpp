@@ -24,7 +24,11 @@ namespace cplusplus
 enum class builtin_type : uint8_t {
     end,
     void_,
+    bool_,
     int_,
+    float_,
+    double_,
+    long_double,
     size_t_,
     char_pointer,
     const_char_pointer,
@@ -44,10 +48,13 @@ struct library_builtin_rule {
 using bt = builtin_type;
 
 /* clang's Builtins.td, the LibBuiltin entries' prototypes (<stdlib.h>,
-   <string.h>, <stdio.h>, <strings.h>) */
+   <string.h>, <stdio.h>, <strings.h>, <math.h>) */
 static const library_builtin_rule library_builtins[] = {
     {"abort", true, {bt::void_, bt::end}},
     {"abs", false, {bt::int_, bt::int_, bt::end}},
+    {"fabs", false, {bt::double_, bt::double_, bt::end}},
+    {"fabsf", false, {bt::float_, bt::float_, bt::end}},
+    {"fabsl", false, {bt::long_double, bt::long_double, bt::end}},
     {"ffs", false, {bt::int_, bt::int_, bt::end}},
     {"memcmp",
      false,
@@ -103,8 +110,20 @@ qualified_type semantic_analysis::builtin_parameter_type(uint8_t t)
     uint32_t pointee_cv = cv_none;
     bool pointer = false;
     switch (static_cast<builtin_type>(t)) {
+    case builtin_type::bool_:
+        f = fundamental_type::bool_;
+        break;
     case builtin_type::int_:
         f = fundamental_type::int_;
+        break;
+    case builtin_type::float_:
+        f = fundamental_type::float_;
+        break;
+    case builtin_type::double_:
+        f = fundamental_type::double_;
+        break;
+    case builtin_type::long_double:
+        f = fundamental_type::long_double;
         break;
     case builtin_type::size_t_:
         /* [support.types.layout]/3: "The type size_t is an
@@ -145,6 +164,25 @@ entity_index semantic_analysis::library_builtin(uint32_t name)
         return 0;
     spelling += 10;
     length -= 10;
+    /* clang's bool __builtin_is_constant_evaluated(void) (Builtins.td):
+       [meta.const.eval]/1's std::is_constant_evaluated, true "if and only
+       if evaluation of the call occurs within the evaluation of an
+       expression or conversion that is manifestly constant-evaluated"; no
+       library function: the evaluator answers true, lowering false */
+    if (length == 21 && !memcmp(spelling, "is_constant_evaluated", 21)) {
+        qualified_type type = qualified_type::make(
+            type_table.function(builtin_parameter_type(
+                                    static_cast<uint8_t>(builtin_type::bool_)),
+                                nullptr, 0, false),
+            cv_none);
+        entity_index e = entity_table.make(entity_kind::function, name, 0);
+        entity_table[e].type = type;
+        entity_table[e].linkage_of_name = linkage::external;
+        entity_table[e].c_language_linkage = true;
+        entity_table[e].gnu_flags = gnu_is_constant_evaluated;
+        entity_table.bind(0, name, e);
+        return e;
+    }
     const library_builtin_rule *found = nullptr;
     for (const library_builtin_rule &b : library_builtins)
         if (strlen(b.name) == length && !memcmp(b.name, spelling, length))

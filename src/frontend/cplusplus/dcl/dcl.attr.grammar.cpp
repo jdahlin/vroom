@@ -470,7 +470,8 @@ bool name_is(const char *name, size_t length, const char *s)
  * The attributes that change nothing vcc generates or lays out: they ask
  * for a diagnostic or describe the program to a tool.  Standard:
  * maybe_unused, nodiscard, deprecated, likely, unlikely; GCC's, as
- * gnu::NAME: nodebug, unused, deprecated; clang's, as clang::NAME:
+ * gnu::NAME: nodebug, unused, deprecated, returns_nonnull, alloc_size,
+ * alloc_align, nonnull; clang's, as clang::NAME:
  * preferred_name, no_specializations, lifetimebound (the names clang 23
  * knows in each namespace; another is an unknown attribute to clang).
  */
@@ -479,7 +480,11 @@ bool attribute_without_effect(const char *ns, size_t ns_length,
 {
     static const char *const standard[] = {"maybe_unused", "nodiscard",
                                            "deprecated", "likely", "unlikely"};
-    static const char *const gnu[] = {"nodebug", "unused", "deprecated"};
+    /* returns_nonnull, alloc_size, alloc_align, nonnull: promises about a
+       function's parameters and result that vcc does not use */
+    static const char *const gnu[] = {
+        "nodebug",    "unused",      "deprecated", "returns_nonnull",
+        "alloc_size", "alloc_align", "nonnull"};
     static const char *const clang[] = {"preferred_name", "no_specializations",
                                         "lifetimebound"};
     if (!ns) {
@@ -510,6 +515,15 @@ bool attribute_without_effect(const char *ns, size_t ns_length,
  */
 bool semantic_analysis::attributes_without_effect(syntax_child n) const
 {
+    uint32_t flags = 0;
+    return attributes_as_gnu(n, flags) && !flags;
+}
+
+/* The same, also accepting [dcl.attr.noreturn] noreturn (and
+   gnu::noreturn), whose GCC flag goes into flags: GCC's noreturn says
+   the same */
+bool semantic_analysis::attributes_as_gnu(syntax_child n, uint32_t &flags) const
+{
     owned_array<syntax_child> work;
     work.append(n);
     while (!work.empty()) {
@@ -524,12 +538,69 @@ bool semantic_analysis::attributes_without_effect(syntax_child n) const
             const char *name;
             size_t length;
             attribute_name(spelling, &name, &length);
+            if (name_is(name, length, "noreturn")) {
+                flags |= gnu_noreturn;
+                continue;
+            }
             if (!attribute_without_effect(nullptr, 0, name, length))
                 return false;
             continue;
         }
         const syntax_node &node = tree[c.index()];
         const syntax_child *children = tree.children(c.index());
+        if (node.kind == syntax_kind::attribute_specifier &&
+            node.child_count > 2 &&
+            syntax_is(tree, children[2], syntax_kind::attribute_using_prefix)) {
+            /* [dcl.attr.grammar]/3: "If an attribute-specifier contains an
+               attribute-using-prefix, ... each attribute-token in that
+               attribute-list is treated as if its identifier were prefixed
+               with N::" */
+            const syntax_child *prefix = tree.children(children[2].index());
+            if (tree[children[2].index()].child_count != 3 ||
+                !prefix[1].is_token())
+                return false;
+            owned_buffer ns_spelling;
+            tokens.spelling(prefix[1].index(), ns_spelling.get());
+            const char *ns;
+            size_t ns_length;
+            attribute_name(ns_spelling, &ns, &ns_length);
+            owned_array<syntax_child> names;
+            for (uint32_t i = 3; i < node.child_count; i++)
+                names.append(children[i]);
+            while (!names.empty()) {
+                syntax_child a = names.back();
+                names.resize(names.size() - 1);
+                if (!a.is_token()) {
+                    const syntax_node &an = tree[a.index()];
+                    if (an.kind == syntax_kind::attribute_list) {
+                        for (uint32_t i = 0; i < an.child_count; i++)
+                            names.append(tree.children(a.index())[i]);
+                        continue;
+                    }
+                    /* an attribute: its token and an argument clause,
+                       which none of these takes for anything vcc
+                       generates */
+                    if (an.kind != syntax_kind::attribute || !an.child_count ||
+                        !tree.children(a.index())[0].is_token())
+                        return false;
+                    a = tree.children(a.index())[0];
+                }
+                if (tokens[a.index()].kind ==
+                    token_kind::operator_or_punctuator)
+                    continue; /* , ] ] */
+                owned_buffer spelling;
+                tokens.spelling(a.index(), spelling.get());
+                const char *name;
+                size_t length;
+                attribute_name(spelling, &name, &length);
+                if (name_is(ns, ns_length, "gnu") &&
+                    name_is(name, length, "noreturn"))
+                    flags |= gnu_noreturn;
+                else if (!attribute_without_effect(ns, ns_length, name, length))
+                    return false;
+            }
+            continue;
+        }
         if (node.kind == syntax_kind::attribute_specifier_seq ||
             node.kind == syntax_kind::attribute_specifier ||
             node.kind == syntax_kind::attribute_list) {
@@ -558,6 +629,11 @@ bool semantic_analysis::attributes_without_effect(syntax_child n) const
         size_t ns_length, length;
         attribute_name(ns_spelling, &ns, &ns_length);
         attribute_name(spelling, &name, &length);
+        if (name_is(ns, ns_length, "gnu") &&
+            name_is(name, length, "noreturn")) {
+            flags |= gnu_noreturn;
+            continue;
+        }
         if (!attribute_without_effect(ns, ns_length, name, length))
             return false;
     }
@@ -590,6 +666,23 @@ bool semantic_analysis::gnu_attributes_without_effect(syntax_child n) const
                 !children[0].is_token())
                 return false;
             name_token = children[0];
+            /* visibility("default") (libc++'s _LIBCPP_EXPORTED_FROM_ABI):
+               the visibility every symbol vcc emits has already
+               (gnu_attribute_specifier's rule) */
+            owned_buffer spelling, value;
+            tokens.spelling(name_token.index(), spelling.get());
+            const char *name;
+            size_t length;
+            attribute_name(spelling, &name, &length);
+            if (name_is(name, length, "visibility")) {
+                if (node.child_count != 4 || !children[2].is_token())
+                    return false;
+                tokens.spelling(children[2].index(), value.get());
+                if (value.size() != 9 || memcmp(value.data(), "\"default\"", 9))
+                    return false;
+                any = true;
+                continue;
+            }
         }
         /* __attribute__ ( ( , ) ): not names */
         if (tokens[name_token.index()].kind != token_kind::identifier)

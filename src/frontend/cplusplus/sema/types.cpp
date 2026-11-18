@@ -142,6 +142,19 @@ type_index types::array_of(qualified_type element, uint64_t bound)
     return intern(t, nullptr);
 }
 
+/* [temp.deduct.type]/8's T[i]: an array whose bound is a non-type
+   template-parameter (its entity) */
+type_index types::array_of_parameter_bound(qualified_type element,
+                                           uint32_t parameter)
+{
+    type t;
+    t.kind = type_kind::array;
+    t.operand = element;
+    t.bound_known = true;
+    t.entity = parameter;
+    return intern(t, nullptr);
+}
+
 /* [dcl.array]/1: "array of unknown bound of T" */
 type_index types::array_of_unknown_bound_of(qualified_type element)
 {

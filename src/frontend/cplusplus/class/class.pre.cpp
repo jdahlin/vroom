@@ -680,13 +680,24 @@ analysis_result semantic_analysis::class_definition(node_index n,
 analysis_result semantic_analysis::elaborated_type_specifier(node_index n,
                                                              type_index &type)
 {
-    const syntax_node &node = tree[n];
     const syntax_child *children = tree.children(n);
+    uint32_t child_count = tree[n].child_count;
+    /* the attribute-specifier-seq (or GNU attributes, libc++'s
+       _LIBCPP_EXPORTED_FROM_ABI) after the class-key: left out when none
+       changes what vcc generates (class_head_attributes_without_effect) */
+    owned_array<syntax_child> kept;
+    if (child_count > 2 && class_head_attributes_without_effect(children[1])) {
+        for (uint32_t i = 0; i < child_count; i++)
+            if (i != 1)
+                kept.append(children[i]);
+        children = kept.data();
+        child_count--;
+    }
     standard_keyword key = leading_keyword(n);
     if (!is_class_key(key))
         return not_supported(n, "dcl.type.elab");
     bool is_union = key == standard_keyword::union_;
-    if (node.child_count == 3 &&
+    if (child_count == 3 &&
         syntax_is(tree, children[1], syntax_kind::nested_name_specifier) &&
         children[2].is_token() &&
         tokens[children[2].index()].kind == token_kind::identifier) {
@@ -733,7 +744,7 @@ analysis_result semantic_analysis::elaborated_type_specifier(node_index n,
         type = entity_table[c].type.unqualified();
         return analysis_result::well_formed;
     }
-    if (node.child_count != 2 || !children[1].is_token() ||
+    if (child_count != 2 || !children[1].is_token() ||
         tokens[children[1].index()].kind != token_kind::identifier)
         return not_supported(n, "dcl.type.elab");
     token_index id = children[1].index();
@@ -920,6 +931,12 @@ bool semantic_analysis::is_aggregate(entity_index c) const
             language_feature::aggregates_without_user_declared_constructors) &&
         x.defaulted_default_constructor)
         return false;
+    /* [dcl.init.aggr]/1.1 before C++20: "no ... explicit ...
+       constructors" */
+    if (x.explicit_default_constructor)
+        return false;
+    if (x.constructor_template)
+        return false;
     for (entity_index k = x.first_constructor; k;
          k = entity_table[k].next_constructor)
         if (!entity_table[k].implicit &&
@@ -1077,6 +1094,8 @@ semantic_analysis::member_declaration(entity_index c, syntax_child member,
         return member_typedef(c, n, node.first_token + 1, type, s,
                               declarator_meaning(), access);
     }
+    if (node.kind == syntax_kind::template_declaration)
+        return member_template_declaration(c, n);
     if (node.kind != syntax_kind::member_declaration &&
         node.kind != syntax_kind::function_definition)
         return not_supported(n);
@@ -1103,18 +1122,40 @@ semantic_analysis::member_declaration(entity_index c, syntax_child member,
     uint32_t at = lead;
     bool constexpr_specified = false, virtual_specified = false,
          explicit_specified = false;
+    /* [class.mem]/1: member-declarator: declarator virt-specifier-seq_opt;
+       a destructor's ([class.virtual]/4, /5): the declarator, its
+       virt-specifiers in override_ and final_ */
+    bool override_ = false, final_ = false;
+    auto special = [&](syntax_child d) {
+        if (!syntax_is(tree, d, syntax_kind::member_declarator) ||
+            tree[d.index()].child_count < 2)
+            return d;
+        const syntax_child *dc = tree.children(d.index());
+        if (!syntax_is(tree, dc[0], syntax_kind::noptr_declarator) ||
+            !syntax_is(tree, tree.children(dc[0].index())[0],
+                       syntax_kind::unqualified_id))
+            return d;
+        bool o = false, f = false;
+        for (uint32_t i = 1; i < tree[d.index()].child_count; i++)
+            if (!virt_specifier(dc[i], o, f))
+                return d;
+        override_ = o;
+        final_ = f;
+        return dc[0];
+    };
     if (node.child_count > lead + 1 &&
         syntax_is(tree, children[lead], syntax_kind::decl_specifier_seq) &&
         function_specifiers_only(children[lead].index(), constexpr_specified,
                                  &virtual_specified, &explicit_specified) &&
-        declares_special_member(c, children[lead + 1]))
+        declares_special_member(c, special(children[lead + 1])))
         at = lead + 1;
     if (lead == node.child_count || at > lead ||
         !syntax_is(tree, children[lead], syntax_kind::decl_specifier_seq)) {
         /* [class.mem]/12: "The decl-specifier-seq may be omitted in
            constructor, destructor, and conversion function declarations
            only" */
-        if (!node.child_count || !declares_special_member(c, children[at])) {
+        if (!node.child_count ||
+            !declares_special_member(c, special(children[at]))) {
             /* a conversion function ([class.conv.fct]) has no rules yet:
                reported at its conversion-function-id */
             owned_array<node_index> work;
@@ -1139,9 +1180,13 @@ semantic_analysis::member_declaration(entity_index c, syntax_child member,
                                       preprocessing_op_or_punc::SEMICOLON))
                 /* = default, = delete, a pure-specifier */
                 return not_supported(n, "dcl.fct.def");
-            return special_member_declarator(
-                c, n, children[at], access, false, constexpr_specified,
+            virt_override = override_;
+            virt_final = final_;
+            analysis_result r = special_member_declarator(
+                c, n, special(children[at]), access, false, constexpr_specified,
                 virtual_specified, explicit_specified);
+            virt_override = virt_final = false;
+            return r;
         }
         if (node.child_count != at + 2 ||
             !syntax_is(tree, children[at + 1], syntax_kind::function_body))
@@ -1151,16 +1196,12 @@ semantic_analysis::member_declaration(entity_index c, syntax_child member,
             syntax_is_punctuator(tokens,
                                  tree.children(children[at + 1].index())[0],
                                  preprocessing_op_or_punc::EQUAL)) {
-            /* an explicit one is declared as the implicit one would be,
-               which is not */
-            if (explicit_specified)
-                return not_supported(n, "dcl.fct.def.default");
             /* = default, = delete: no user-provided function
                ([dcl.fct.def.default]/5), which the layout ([abi:pod]) and
                triviality need to know before the class is complete */
             return defaulted_or_deleted_special_member(
                 c, n, children[at], children[at + 1], access,
-                constexpr_specified, virtual_specified);
+                constexpr_specified, virtual_specified, explicit_specified);
         }
         analysis_result r = special_member_declarator(
             c, n, children[at], access, true, constexpr_specified,
@@ -1221,6 +1262,12 @@ analysis_result semantic_analysis::member_declarators(
             !syntax_is(tree, children[body_at], syntax_kind::function_body))
             return not_supported(n, "dcl.fct.def.general");
         const syntax_node &b = tree[children[body_at].index()];
+        if (body_at == first + 1 && b.child_count == 3 &&
+            tree.children(children[body_at].index())[1].is_token() &&
+            p.keyword_of(
+                tokens[tree.children(children[body_at].index())[1].index()]) ==
+                standard_keyword::default_)
+            return defaulted_copy_assignment(c, n, children[first], s, access);
         /* = delete: member_function_definition's deleted_definition */
         if (!deleted_body(children[body_at]) &&
             (b.child_count != 1 ||
@@ -1388,6 +1435,9 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
     m.gnu_flags |= s.gnu_flags;
     if (!m.section)
         m.section = s.section;
+    /* [ext:gnu_asm_labels] a member's: not yet */
+    if (m.asm_label)
+        return not_supported(declaration, "ext.gnu");
     if (!m.abi_tag)
         m.abi_tag = s.abi_tag;
     if (!s.has_type)
@@ -1751,7 +1801,7 @@ analysis_result semantic_analysis::member_typedef(
     const specified &s, const declarator_meaning &m, uint8_t access)
 {
     if (s.static_ || s.inline_ || s.constexpr_ || s.virtual_ || s.gnu_flags ||
-        s.aligned || m.aligned || m.gnu_flags || m.section)
+        s.aligned || m.aligned || m.gnu_flags || m.section || m.asm_label)
         return not_supported(declaration, "dcl.typedef");
     uint32_t name = tokens.identifier(id);
     if (name == entity_table[c].name)

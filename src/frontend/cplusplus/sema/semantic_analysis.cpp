@@ -207,6 +207,20 @@ void semantic_analysis::translation_unit()
         entity_table[e].defined = true;
         entity_table.bind(0, id, e);
     }
+    /* [impl.clang] __int128_t and __uint128_t, as the parser's names */
+    static const struct {
+        const char *name;
+        fundamental_type type;
+    } int128_names[] = {{"__int128_t", fundamental_type::int128},
+                        {"__uint128_t", fundamental_type::unsigned_int128}};
+    for (const auto &t : int128_names) {
+        uint32_t id = tokens.pp.identifier(t.name, strlen(t.name)) + 1;
+        entity_index e = entity_table.make(entity_kind::typedef_name, id, 0);
+        entity_table[e].type =
+            qualified_type::make(type_table.fundamental(t.type), cv_none);
+        entity_table[e].defined = true;
+        entity_table.bind(0, id, e);
+    }
     owned_array<node_index> all;
     tree.declarations(&all);
     for (node_index n : all)

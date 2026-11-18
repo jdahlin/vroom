@@ -109,6 +109,7 @@ enum class transformation : uint8_t {
     decay,
     make_signed,
     make_unsigned,
+    underlying_type,
 };
 
 static transformation transformation_named(const char *s, size_t n)
@@ -131,6 +132,7 @@ static transformation transformation_named(const char *s, size_t n)
         {"__decay", transformation::decay},
         {"__make_signed", transformation::make_signed},
         {"__make_unsigned", transformation::make_unsigned},
+        {"__underlying_type", transformation::underlying_type},
     };
     for (const auto &k : names)
         if (strlen(k.name) == n && !memcmp(k.name, s, n))
@@ -240,6 +242,21 @@ semantic_analysis::clang_type_transformation(node_index n, qualified_type &type)
     case transformation::make_unsigned:
         return changed_signedness(n, t, which == transformation::make_signed,
                                   type);
+    case transformation::underlying_type: {
+        /* [meta.trans.other] underlying_type: "the underlying type of T"
+           ([dcl.enum]/5, /7), cv-unqualified; "Mandates: T is a complete
+           enumeration type" (clang: an error otherwise) */
+        if (k->kind != type_kind::enumeration)
+            return ill_formed(n,
+                              "the operand of __underlying_type is an "
+                              "enumeration type",
+                              "meta.trans.other");
+        fundamental_type u = entity_table[k->entity].underlying;
+        if (u == fundamental_type::none)
+            return not_supported(n, "dcl.enum");
+        type = qualified_type::make(type_table.fundamental(u), cv_none);
+        break;
+    }
     case transformation::none:
         break;
     }

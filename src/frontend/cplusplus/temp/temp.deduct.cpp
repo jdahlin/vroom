@@ -16,6 +16,10 @@ qualified_type semantic_analysis::remove_cv(qualified_type t, uint32_t cv)
     if (record.kind != type_kind::array)
         return qualified_type::make(t.unqualified(), t.cv() & ~cv);
     qualified_type element = remove_cv(record.operand, cv);
+    if (record.entity)
+        return qualified_type::make(
+            type_table.array_of_parameter_bound(element, record.entity),
+            t.cv() & ~cv);
     if (record.bound_known)
         return qualified_type::make(type_table.array_of(element, record.bound),
                                     t.cv() & ~cv);
@@ -180,8 +184,21 @@ bool semantic_analysis::deduce_type(qualified_type p, qualified_type a,
     case type_kind::pack_expansion:
         return deduce_type(pr.operand, ar.operand, deduced, set, exact);
     case type_kind::array:
-        if (pr.bound_known != ar.bound_known || pr.bound != ar.bound)
+        if (pr.entity && ar.entity && exact) {
+            /* [temp.over.link]/7: the same parameter's position */
+            if (entity_table[pr.entity].value != entity_table[ar.entity].value)
+                return false;
+        } else if (pr.entity) {
+            /* [temp.deduct.type]/8's T[i]: i the bound of A's array,
+               converted to the parameter's type; one it does not fit
+               fails (clang: "cannot be narrowed") */
+            if (!ar.bound_known || ar.entity ||
+                !deduce_bound(pr.entity, ar.bound, deduced, set))
+                return false;
+        } else if (pr.bound_known != ar.bound_known || pr.bound != ar.bound ||
+                   ar.entity) {
             return false;
+        }
         return deduce_type(pr.operand, ar.operand, deduced, set, exact);
     case type_kind::function: {
         if (pr.variadic != ar.variadic || pr.non_throwing != ar.non_throwing ||
@@ -199,6 +216,36 @@ bool semantic_analysis::deduce_type(qualified_type p, qualified_type a,
     default:
         return false;
     }
+}
+
+/* [temp.deduct.type]/8's T[i]: the value of the non-type
+   template-parameter parameter deduced from an array's bound */
+bool semantic_analysis::deduce_bound(entity_index parameter, uint64_t bound,
+                                     owned_array<template_argument> &deduced,
+                                     owned_array<bool> &set)
+{
+    uint64_t i = entity_table[parameter].value;
+    qualified_type to = entity_table[parameter].type;
+    if (i >= deduced.size() || !is_integral(to))
+        return false;
+    const implementation_defined_behavior &b = tokens.files.behavior;
+    fundamental_type f = fundamental_of(to);
+    uint32_t width = fundamental_type_width(b, f);
+    if (fundamental_type_is_signed(b, f))
+        width--;
+    if (f == fundamental_type::bool_)
+        width = 1;
+    if (width < 64 && bound >> width)
+        return false;
+    template_argument value;
+    value.kind = template_argument::kind_t::value;
+    value.type = qualified_type::make(to.unqualified(), cv_none);
+    value.value = bound;
+    if (set[i] && !(deduced[i] == value))
+        return false;
+    deduced[i] = value;
+    set[i] = true;
+    return true;
 }
 
 /*

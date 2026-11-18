@@ -1,5 +1,6 @@
 // [ext:gnu_int128] __int128 and unsigned __int128: an extended integer type
-// ([basic.fundamental]/2), its rank above long long's, mangled n and o
+// ([basic.fundamental]/2), its rank above long long's, mangled n and o;
+// [impl.clang] the predeclared typedef-names __int128_t and __uint128_t
 typedef unsigned __int128 u128;
 static u128 g = 7;
 static __int128 h = -3;
@@ -13,5 +14,8 @@ int main() {
     if (g + h != 4) return 3;
     unsigned __int128 m = -1;
     if ((unsigned long long)(m >> 100) != 0xfffffff) return 4;
+    __uint128_t t = x;
+    __int128_t s = -1;
+    if (t != x || s + 1 != 0 || sizeof(__uint128_t) != 16) return 5;
     return 0;
 }
