@@ -173,6 +173,38 @@ analysis_result semantic_analysis::evaluate_binary(
     return analysis_result::well_formed;
 }
 
+void semantic_analysis::evaluate_analysed_expressions()
+{
+    /* (expressions are recorded in the order of their declarations, as
+       dump_type_claims walks them) */
+    size_t j = 0;
+    for (analysed_expression &x : expressions) {
+        while (j < declarations.size() && declarations[j].node != x.declaration)
+            j++;
+        if (j == declarations.size())
+            break;
+        expression_meaning &m = x.meaning;
+        if (m.category != value_category::prvalue ||
+            m.evaluation != constness::unknown || !m.node ||
+            evaluated_type(m.type) == fundamental_type::none)
+            continue;
+        /* the evaluation of an expression of a declaration analysis did
+           not finish may run a tree in part */
+        if (declarations[j].result != analysis_result::well_formed)
+            continue;
+        constant_evaluation state;
+        constant_value v;
+        bool constant = false;
+        if (evaluate_node(state, m.node, v, constant) !=
+                analysis_result::well_formed ||
+            !constant ||
+            (v.kind != constant_value_kind::integer &&
+             v.kind != constant_value_kind::floating))
+            continue;
+        evaluated_meaning(m, v);
+    }
+}
+
 analysis_result semantic_analysis::evaluate_constant(node_index at,
                                                      uint32_t node,
                                                      constant_value &v,
@@ -409,8 +441,18 @@ analysis_result semantic_analysis::evaluate_node(constant_evaluation &state,
         r = evaluate_node(state, x.a, v, constant);
         if (r != analysis_result::well_formed || !constant)
             return r;
-        return evaluate_conversion(v, evaluated_type(semantics[x.a].type),
-                                   evaluated_type(x.type), constant);
+        fundamental_type to = evaluated_type(x.type);
+        /* an integral conversion to bool, a cast's to an enumeration whose
+           underlying type is bool (expr.cast.cpp): the truncated value of
+           [conv.fpint]/1 "cannot be represented in the destination type"
+           unless it is 0 or 1 */
+        if (k == conversion_kind::integral && to == fundamental_type::bool_ &&
+            v.kind == constant_value_kind::integer && v.integer > 1) {
+            constant = false;
+            return analysis_result::well_formed;
+        }
+        return evaluate_conversion(v, evaluated_type(semantics[x.a].type), to,
+                                   constant);
     }
     case semantic_kind::unary: {
         fundamental_type t = evaluated_type(x.type);

@@ -1067,6 +1067,11 @@ class semantic_analysis
     void translation_unit();
     /* one declaration of a declaration-seq */
     analysis_result declaration(node_index n);
+    /* for -fcxx-dump=type-claims: the value of each analysed prvalue that
+       analysis did not fold and the evaluator of constant expressions can
+       (expr/expr.const.evaluate.cpp), into its analysed_expression, so that
+       the claims have clang check the evaluator's values too */
+    void evaluate_analysed_expressions();
 
     types type_table;
     entities entity_table;

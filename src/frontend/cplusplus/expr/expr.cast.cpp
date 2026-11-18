@@ -146,6 +146,12 @@ analysis_result semantic_analysis::explicit_conversion(node_index at,
             convert_arithmetic(m, fundamental_type::long_long_int);
             if (m.evaluation == constness::constant && m.value > 1)
                 m.evaluation = constness::not_constant;
+            convert_arithmetic(m, fundamental_type::bool_);
+            /* in the tree as [conv.integral]'s, not [conv.bool]'s: the
+               evaluator gives a value other than 0 or 1 none */
+            if (m.node)
+                semantics[m.node].op =
+                    static_cast<uint8_t>(conversion_kind::integral);
         }
         convert_arithmetic(m, entity_table[e].underlying);
         m.type = qualified_type::make(to.unqualified(), cv_none);

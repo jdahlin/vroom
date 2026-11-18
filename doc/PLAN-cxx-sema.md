@@ -1342,7 +1342,18 @@ lines:
   `expression_meaning` keeps them, which `arithmetic()`, `comparison()`,
   the unary operators and the evaluator (its operators, compound
   assignment and increment) all call; cxx-sema, cxx-run (156/156) and
-  cxx-c-suites unchanged.  cxx-sema: declarations as clang
+  cxx-c-suites unchanged.  The evaluator's values are claims too: with -fcxx-dump=type-claims,
+  `evaluate_analysed_expressions` evaluates each analysed prvalue of a
+  well-formed declaration that analysis left unknown, and the claim's
+  value field carries what it found, which cxx-sema has clang check as
+  `static_assert((E) == VALUE)` (no separate constant-claims kind: the
+  existing claims had the place and the check).  The first run refuted
+  one value: a constexpr function's `static_cast<E>(2.5)` to an
+  enumeration whose underlying type is bool, whose truncation to 2 analysis
+  makes not constant and the tree did not say; the cast's step to bool is
+  now an integral conversion, which the evaluator gives no value outside 0
+  and 1.  cxx-sema: constants 18887 -> 19048 verified, 0 refuted; we
+  accept and clang rejects 520 -> 514.  cxx-sema: declarations as clang
   27704 -> 27826, 0 we reject and clang accepts, 0 refuted (types 47348,
   constants 18837, lookup 12628 verified); cxx-run 132/132 with
   constexpr-functions.cpp's constant uses; cxx-c-suites unchanged.
