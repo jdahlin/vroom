@@ -55,15 +55,8 @@ semantic_analysis::lambda_captures_of(node_index n,
 entity_index semantic_analysis::capture_member_of(entity_index closure,
                                                   qualified_type type)
 {
-    /* its members one range of class_members: a class defined in the body
-       since added its own after them */
-    entity &x = entity_table[closure];
-    if (x.first_member + x.member_count != class_members.size()) {
-        uint32_t first = static_cast<uint32_t>(class_members.size());
-        for (uint32_t i = 0; i < x.member_count; i++)
-            class_members.append(class_members[x.first_member + i]);
-        entity_table[closure].first_member = first;
-    }
+    /* (a class defined in the body since added its own members) */
+    make_members_contiguous(closure);
     entity_index e = entity_table.make(entity_kind::variable, 0, closure);
     entity_table[e].type = type;
     entity_table[e].nonstatic_member = true;
@@ -103,6 +96,61 @@ analysis_result semantic_analysis::capture_type(node_index at, qualified_type t,
         return not_supported(at, "expr.prim.lambda.capture");
     type = object;
     return analysis_result::well_formed;
+}
+
+/*
+ * The type of local entity e named where a lambda-expression is whose
+ * enclosing lambdas are lambdas[0 .. count) (the innermost one's captures
+ * end at end): e's own, or, if the nearest of them that does not capture
+ * it by reference captures it by copy, that lambda's member, const unless
+ * the lambda is mutable ([expr.prim.lambda.capture]/11: the name is
+ * "transformed into an access to the corresponding unnamed data member of
+ * the closure type"; [expr.prim.lambda.closure]/5: the function call
+ * operator "is declared const if and only if the lambda-expression's
+ * parameter-declaration-clause is not followed by mutable").  An
+ * enclosing lambda with a capture-default = that does not capture it yet
+ * will (/7).  A reference captured by reference then refers to that
+ * member.
+ */
+qualified_type semantic_analysis::enclosing_capture_type(entity_index e,
+                                                         size_t count,
+                                                         size_t end) const
+{
+    qualified_type t = entity_table[e].type;
+    entity_index owner = enclosing_function(entity_table, e);
+    for (size_t k = count; k-- > 0;) {
+        const lambda_context &l = lambdas[k];
+        size_t last = end;
+        if (k + 1 < count)
+            last = lambdas[k + 1].first_capture;
+        const capture_record *found = nullptr;
+        for (size_t i = l.first_capture; i < last; i++)
+            if (lambda_captures[i].variable == e &&
+                !lambda_captures[i].init_capture)
+                found = &lambda_captures[i];
+        bool by_reference = l.default_capture == capture_default::reference;
+        if (found)
+            by_reference = found->by_reference;
+        else if (l.default_capture == capture_default::none)
+            break;
+        if (!by_reference) {
+            if (found)
+                t = entity_table[found->member].type;
+            else {
+                type_kind kind = type_table[t.unqualified()].kind;
+                if (kind == type_kind::lvalue_reference ||
+                    kind == type_kind::rvalue_reference)
+                    t = type_table[t.unqualified()].operand;
+            }
+            uint32_t cv = t.cv();
+            if (!l.mutable_)
+                cv |= cv_const;
+            return qualified_type::make(t.unqualified(), cv);
+        }
+        if (l.enclosing_function == owner)
+            break;
+    }
+    return t;
 }
 
 /*
@@ -259,7 +307,11 @@ analysis_result semantic_analysis::lambda_introducer(node_index n,
         record.variable = e;
         record.at = name;
         qualified_type type;
-        r = capture_type(n, x.type, record.by_reference, type);
+        qualified_type captured = x.type;
+        if (record.by_reference)
+            captured =
+                enclosing_capture_type(e, lambdas.size(), l.first_capture);
+        r = capture_type(n, captured, record.by_reference, type);
         if (r != analysis_result::well_formed)
             return r;
         record.member = capture_member_of(l.closure, type);
@@ -369,15 +421,9 @@ analysis_result semantic_analysis::closure_member(token_index t,
                                                   expression_meaning &m)
 {
     expression_meaning object;
-    analysis_result r = function_this(t, object);
+    analysis_result r = this_object(t, object, true);
     if (r != analysis_result::well_formed)
         return r;
-    object.type = type_table[object.type.unqualified()].operand;
-    object.category = value_category::lvalue;
-    object.evaluation = constness::not_constant;
-    object.entity = 0;
-    object.node =
-        expression_node(semantic_kind::indirection, object, t, object.node);
     r = member_access(t, member, object);
     if (r != analysis_result::well_formed)
         return r;
@@ -435,8 +481,12 @@ analysis_result semantic_analysis::captured_entity(token_index t,
        entity is not *this" */
     record.by_reference = l.default_capture == capture_default::reference;
     qualified_type type;
-    analysis_result r = capture_type(current_declaration, entity_table[e].type,
-                                     record.by_reference, type);
+    qualified_type captured = entity_table[e].type;
+    if (record.by_reference)
+        captured =
+            enclosing_capture_type(e, lambdas.size() - 1, l.first_capture);
+    analysis_result r =
+        capture_type(current_declaration, captured, record.by_reference, type);
     if (r != analysis_result::well_formed)
         return r;
     record.member = capture_member_of(l.closure, type);
@@ -524,18 +574,12 @@ semantic_analysis::closure_object(lambda_context &l,
         }
         expression_meaning e;
         analysis_result r = analysis_result::well_formed;
-        if (c.variable) {
+        if (c.variable)
             r = named_entity(c.at, c.variable, e, false);
-        } else {
+        else if (c.star_this)
+            r = this_object(c.at, e);
+        else
             r = this_pointer(c.at, e);
-            if (r == analysis_result::well_formed && c.star_this) {
-                e.type = type_table[e.type.unqualified()].operand;
-                e.category = value_category::lvalue;
-                e.evaluation = constness::not_constant;
-                e.node = expression_node(semantic_kind::indirection, e, c.at,
-                                         e.node);
-            }
-        }
         initialized_value value;
         if (r == analysis_result::well_formed)
             r = initialize_with(l.at, e, entity_table[c.member].type, true,
@@ -549,10 +593,7 @@ semantic_analysis::closure_object(lambda_context &l,
     m.category = value_category::prvalue;
     m.evaluation = constness::not_constant;
     m.node = expression_node(semantic_kind::initializer_list, m, at);
-    if (!elements.empty())
-        semantics[m.node].first =
-            semantics.list(elements.data(), elements.size());
-    semantics[m.node].count = static_cast<uint32_t>(elements.size());
+    semantics.set_list(m.node, elements.data(), elements.size());
     return analysis_result::well_formed;
 }
 

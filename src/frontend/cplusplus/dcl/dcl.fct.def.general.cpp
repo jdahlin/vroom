@@ -407,10 +407,8 @@ analysis_result semantic_analysis::function_body(node_index definition,
         statement_node(semantic_kind::function_body, first_token(compound),
                        block, members, destructions);
     if (!parameter_entities.empty()) {
-        semantics[body].first =
-            semantics.list(&parameter_entities[0], parameter_entities.size());
-        semantics[body].count =
-            static_cast<uint32_t>(parameter_entities.size());
+        semantics.set_list(body, &parameter_entities[0],
+                           parameter_entities.size());
     }
     entity_table[f].definition = body;
     /* a body analysed in part has a tree the evaluator cannot run */
@@ -572,6 +570,57 @@ analysis_result semantic_analysis::function_body(node_index definition,
     function_state.function = 0;
     function_state.this_entity = 0;
     return result;
+}
+
+/* the definition of a function analysis makes itself
+   (synthesized_function): analysed as a function of its own */
+void semantic_analysis::begin_synthesized(synthesized_function &s,
+                                          entity_index f,
+                                          qualified_type returns,
+                                          qualified_type this_type)
+{
+    function_state = function_context();
+    function_state.active = true;
+    function_state.function = f;
+    function_state.returns = returns;
+    s.function = f;
+    s.outer_scope = current_scope;
+    s.scope = open_scope(0, true);
+    entity_table[s.scope].enclosing = f;
+    s.parameters.clear();
+    if (this_type.unqualified())
+        function_state.this_entity = synthesized_variable(s, this_type, true);
+}
+
+entity_index semantic_analysis::synthesized_variable(synthesized_function &s,
+                                                     qualified_type t,
+                                                     bool parameter)
+{
+    entity_index v = entity_table.make(entity_kind::variable, 0, s.scope);
+    entity_table[v].type = t;
+    entity_table[v].defined = true;
+    entity_table[v].automatic = true;
+    if (parameter)
+        s.parameters.append(v);
+    return v;
+}
+
+void semantic_analysis::finish_synthesized(synthesized_function &s,
+                                           node_index declaration,
+                                           token_index at, uint32_t block,
+                                           uint32_t members,
+                                           uint32_t destructions)
+{
+    uint32_t body = statement_node(semantic_kind::function_body, at, block,
+                                   members, destructions);
+    semantics.set_list(body, s.parameters.data(), s.parameters.size());
+    entity_table[s.function].definition = body;
+    definition_record record;
+    record.declaration = declaration;
+    record.entity = s.function;
+    definitions.append(record);
+    current_scope = s.outer_scope;
+    function_state = function_context();
 }
 
 } // namespace cplusplus

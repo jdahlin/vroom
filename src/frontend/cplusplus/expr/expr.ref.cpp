@@ -66,6 +66,27 @@ analysis_result semantic_analysis::function_this(token_index t,
     return r;
 }
 
+/* [expr.unary.op]/1: "The unary * operator performs indirection: the
+   expression to which it is applied shall be a pointer to an object type
+   ... and the result is an lvalue referring to the object" */
+analysis_result semantic_analysis::this_object(token_index t,
+                                               expression_meaning &m, bool own)
+{
+    analysis_result r = analysis_result::well_formed;
+    if (own)
+        r = function_this(t, m);
+    else
+        r = this_pointer(t, m);
+    if (r != analysis_result::well_formed)
+        return r;
+    m.type = type_table[m.type.unqualified()].operand;
+    m.category = value_category::lvalue;
+    m.evaluation = constness::not_constant;
+    m.entity = 0;
+    m.node = expression_node(semantic_kind::indirection, m, t, m.node);
+    return analysis_result::well_formed;
+}
+
 /*
  * [expr.ref]/6.2 and /6.3: the member e of the object m, a glvalue (or a
  * prvalue, materialized: [basic.lval]/7) of the member's class.
@@ -246,15 +267,9 @@ analysis_result semantic_analysis::implicit_member_access(token_index at,
         /* in a static member function, or unevaluated ([expr.prim.id]/2) */
         return not_supported(current_declaration, "expr.prim.id");
     expression_meaning object;
-    analysis_result r = this_pointer(at, object);
+    analysis_result r = this_object(at, object);
     if (r != analysis_result::well_formed)
         return r;
-    /* (*this): [expr.unary.op]/1 */
-    object.type = type_table[object.type.unqualified()].operand;
-    object.category = value_category::lvalue;
-    object.evaluation = constness::not_constant;
-    object.node =
-        expression_node(semantic_kind::indirection, object, at, object.node);
     r = member_access(at, e, object);
     if (r != analysis_result::well_formed)
         return r;

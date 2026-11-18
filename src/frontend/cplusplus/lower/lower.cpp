@@ -328,8 +328,17 @@ class c_lowering
     ast_qualified_type entity_type(entity_index e, token_index at);
     bool is_reference(qualified_type t) const;
     bool without_linkage(qualified_type t) const;
-    entity_index enclosing_function(entity_index e) const;
-    entity_index local_class_function(entity_index e) const;
+    /* the function whose definition a block-scope entity is in, 0 if none */
+    entity_index enclosing_function(entity_index e) const
+    {
+        return cplusplus::enclosing_function(analysis.entity_table, e);
+    }
+    /* the function a member of a local class (or of a class nested in
+       one) is in, 0 for any other entity */
+    entity_index local_class_function(entity_index e) const
+    {
+        return next_enclosing_function(analysis.entity_table, e);
+    }
     uint32_t symbol(entity_index e, token_index at, int variant = 2);
     void symbol_linkage(entity_index e, int &storage, uint32_t &flags) const;
     void gnu_attributes(entity_index e, uint32_t s);
@@ -993,31 +1002,6 @@ ast_qualified_type c_lowering::member_function_type(qualified_type object,
 
 /* ---- symbols -------------------------------------------------------- */
 
-/* the function whose definition a block-scope entity is in, 0 if none */
-entity_index c_lowering::enclosing_function(entity_index e) const
-{
-    const entities &table = analysis.entity_table;
-    entity_index s = table[e].enclosing;
-    while (s && table[s].kind == entity_kind::block_scope)
-        s = table[s].enclosing;
-    if (s && table[s].kind == entity_kind::function)
-        return s;
-    return 0;
-}
-
-/* the function a member of a local class (or of a class nested in one)
-   is in, 0 for any other entity */
-entity_index c_lowering::local_class_function(entity_index e) const
-{
-    const entities &table = analysis.entity_table;
-    entity_index c = table[e].enclosing;
-    if (!c || table[c].kind != entity_kind::class_type)
-        return 0;
-    while (table[table[c].enclosing].kind == entity_kind::class_type)
-        c = table[c].enclosing;
-    return enclosing_function(c);
-}
-
 void c_lowering::spelling(entity_index e, owned_buffer &out)
 {
     uint32_t id = analysis.entity_table[e].name;
@@ -1100,7 +1084,7 @@ uint32_t c_lowering::symbol(entity_index e, token_index at, int variant)
         return s;
     }
     if (!itanium_symbol_name(analysis, tokens.pp, e, name.get(), variant))
-        return fail("an entity whose symbol is not mangled yet", at);
+        return fail("an entity whose symbol is not mangled", at);
     int kind = AST_SYMBOL_VARIABLE;
     if (x.kind == entity_kind::function)
         kind = AST_SYMBOL_FUNCTION;
@@ -4219,7 +4203,7 @@ uint32_t c_lowering::vtable(entity_index k, token_index at)
         return fail("the virtual table of a class that is not dynamic", at);
     owned_buffer name;
     if (!itanium_vtable_name(analysis, tokens.pp, k, name.get()))
-        return fail("a virtual table whose symbol is not mangled yet", at);
+        return fail("a virtual table whose symbol is not mangled", at);
     const entity &x = analysis.entity_table[k];
     bool here =
         !d->key_function || analysis.entity_table[d->key_function].defined;
@@ -4810,7 +4794,7 @@ uint32_t c_lowering::vtt_define(entity_index k, uint32_t table, int storage,
 {
     owned_buffer name;
     if (!itanium_vtt_name(analysis, tokens.pp, k, name.get()))
-        return fail("a VTT whose symbol is not mangled yet", at);
+        return fail("a VTT whose symbol is not mangled", at);
     vtt_layout layout;
     vtt_of(k, layout);
     ast_qualified_type v = ast_builder_type_basic(AST_TYPE_VOID);
@@ -5153,7 +5137,7 @@ uint32_t c_lowering::thunk(entity_index f, int64_t adjustment, token_index at,
     owned_buffer function_name;
     if (!itanium_symbol_name(analysis, tokens.pp, f, function_name.get(),
                              variant))
-        return fail("a thunk whose function's symbol is not mangled yet", at);
+        return fail("a thunk whose function's symbol is not mangled", at);
     owned_buffer name;
     if (vcall)
         vbuffer_format_append(name.get(), "_ZTv%lld_n%llu_",
@@ -5934,7 +5918,7 @@ void c_lowering::guarded_initialization(const semantic_node &n,
     owned_buffer name;
     if (!itanium_symbol_name(analysis, tokens.pp, e, name.get(), 0) ||
         name.size() < 2) {
-        fail("an entity whose symbol is not mangled yet", n.at);
+        fail("an entity whose symbol is not mangled", n.at);
         return;
     }
     owned_buffer guard_name;

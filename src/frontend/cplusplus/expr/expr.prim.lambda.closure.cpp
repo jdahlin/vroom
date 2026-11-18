@@ -7,10 +7,10 @@
  *
  * The closure type's layout, special member functions and their
  * definitions are a class's (abi/itanium/layout.cpp, class.ctor.cpp).
- * Not analysed: /13's deleted copy assignment operator of a lambda with a
- * lambda-capture and the default constructor it does not have (the
- * implicit ones of a class are declared), and the conversion function of
- * a variadic lambda.
+ * /13's deleted copy assignment operator and the default constructor a
+ * closure type with a lambda-capture does not have are deleted ones (a
+ * use is an error).  Not analysed: the conversion function of a variadic
+ * lambda.
  */
 #include "../cplusplus-internal.h"
 #include "frontend/cplusplus/sema.h"
@@ -21,6 +21,19 @@ namespace cplusplus
 analysis_result semantic_analysis::closure_class(entity_index c, node_index n,
                                                  bool has_capture)
 {
+    /* [expr.prim.lambda.closure]/13: "The closure type associated with a
+       lambda-expression has no default constructor if the
+       lambda-expression has a lambda-capture and a defaulted default
+       constructor otherwise. ... It has a deleted copy assignment
+       operator if the lambda-expression has a lambda-capture and
+       defaulted copy and move assignment operators otherwise" (before
+       C++20 every closure type has neither: a use is an error either
+       way) */
+    if (has_capture || !tokens.files.behavior.has(
+                           language_feature::default_constructible_lambdas)) {
+        entity_table[c].implicit_default_deleted = true;
+        entity_table[c].closure_assignment_deleted = true;
+    }
     /* [class.mem]/7: complete, its members laid out ([abi:class-types]) */
     if (const char *rule = itanium_class_layout(*this, c))
         return not_supported(n, rule);
@@ -102,22 +115,13 @@ analysis_result semantic_analysis::closure_conversion(entity_index c,
 
     /* __invoke: its parameters, an object of the closure type, and the
        call operator's call on it, returned */
-    function_state = function_context();
-    function_state.active = true;
-    function_state.function = invoke;
-    function_state.returns = f.operand;
-    entity_index parameters = open_scope(0, true);
-    entity_table[parameters].enclosing = invoke;
-    owned_array<uint32_t> parameter_entities, arguments;
+    synthesized_function sf;
+    begin_synthesized(sf, invoke, f.operand, qualified_type());
+    owned_array<uint32_t> arguments;
     for (uint32_t i = 0; i < f.parameter_count; i++) {
         qualified_type t =
             type_table.parameters(function_type.unqualified())[i];
-        entity_index p =
-            entity_table.make(entity_kind::variable, 0, parameters);
-        entity_table[p].type = t;
-        entity_table[p].defined = true;
-        entity_table[p].automatic = true;
-        parameter_entities.append(p);
+        entity_index p = synthesized_variable(sf, t, true);
         /* forwarded: a reference parameter as what it is bound to, an
            rvalue reference's and a class's as an xvalue */
         const struct type record = type_table[t.unqualified()];
@@ -143,11 +147,7 @@ analysis_result semantic_analysis::closure_conversion(entity_index c,
             return r;
         arguments.append(value.node);
     }
-    entity_index object =
-        entity_table.make(entity_kind::variable, 0, parameters);
-    entity_table[object].type = entity_table[c].type;
-    entity_table[object].defined = true;
-    entity_table[object].automatic = true;
+    entity_index object = synthesized_variable(sf, entity_table[c].type, false);
     uint32_t declared =
         statement_node(semantic_kind::declaration_statement, at, object);
     expression_meaning o;
@@ -175,10 +175,7 @@ analysis_result semantic_analysis::closure_conversion(entity_index c,
     result.evaluation = constness::not_constant;
     result.node =
         expression_node(semantic_kind::call, result, at, callee_node, o.node);
-    if (!arguments.empty())
-        semantics[result.node].first =
-            semantics.list(arguments.data(), arguments.size());
-    semantics[result.node].count = static_cast<uint32_t>(arguments.size());
+    semantics.set_list(result.node, arguments.data(), arguments.size());
     uint32_t statement = 0;
     if (fundamental_of(f.operand) == fundamental_type::void_) {
         statement = statement_node(semantic_kind::expression_statement, at,
@@ -194,34 +191,15 @@ analysis_result semantic_analysis::closure_conversion(entity_index c,
     }
     uint32_t items[2] = {declared, statement};
     uint32_t block = statement_node(semantic_kind::block, at);
-    semantics[block].first = semantics.list(items, 2);
-    semantics[block].count = 2;
-    uint32_t body = statement_node(semantic_kind::function_body, at, block);
-    if (!parameter_entities.empty())
-        semantics[body].first = semantics.list(parameter_entities.data(),
-                                               parameter_entities.size());
-    semantics[body].count = static_cast<uint32_t>(parameter_entities.size());
-    entity_table[invoke].definition = body;
-    definition_record record;
-    record.declaration = current_declaration;
-    record.entity = invoke;
-    definitions.append(record);
+    semantics.set_list(block, items, 2);
+    finish_synthesized(sf, current_declaration, at, block);
 
     /* the conversion function: __invoke's address */
-    function_state = function_context();
-    function_state.active = true;
-    function_state.function = conversion;
-    function_state.returns = pointer;
-    parameters = open_scope(0, true);
-    entity_table[parameters].enclosing = conversion;
-    entity_index self = entity_table.make(entity_kind::variable, 0, parameters);
-    entity_table[self].type =
+    begin_synthesized(
+        sf, conversion, pointer,
         qualified_type::make(type_table.pointer_to(qualified_type::make(
                                  entity_table[c].type.unqualified(), cv_const)),
-                             cv_none);
-    entity_table[self].defined = true;
-    entity_table[self].automatic = true;
-    function_state.this_entity = self;
+                             cv_none));
     expression_meaning named;
     named.type = function_type;
     named.category = value_category::lvalue;
@@ -234,16 +212,8 @@ analysis_result semantic_analysis::closure_conversion(entity_index c,
         return r;
     statement = statement_node(semantic_kind::return_statement, at, value.node);
     block = statement_node(semantic_kind::block, at);
-    semantics[block].first = semantics.list(&statement, 1);
-    semantics[block].count = 1;
-    body = statement_node(semantic_kind::function_body, at, block);
-    uint32_t this_parameter = self;
-    semantics[body].first = semantics.list(&this_parameter, 1);
-    semantics[body].count = 1;
-    entity_table[conversion].definition = body;
-    record.entity = conversion;
-    definitions.append(record);
-    function_state = function_context();
+    semantics.set_list(block, &statement, 1);
+    finish_synthesized(sf, current_declaration, at, block);
     return analysis_result::well_formed;
 }
 
