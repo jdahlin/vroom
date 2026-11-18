@@ -9,7 +9,10 @@ for, with the same flags.  Both are linked with the C suites' run time (src/test
 under qemu-system-aarch64 with semihosting, as bench/vcc-ctests.py does;
 the exit status and output must be clang's.  The functions and variables
 the -O0 object defines are also clang -O0's, by name and binding (global,
-local, weak).
+local, weak).  A program of several translation units names the others in
+/* cxx-run-units: FILE... */ (files of src/test/cxx/run/units, which hold
+their headers too); each compiler compiles them as the program and links
+them with it.
 
     bench/cxx-run.py [-j N] [-O LEVELS] [-v] [PATTERN]
 
@@ -90,12 +93,28 @@ def one(job):
     # /* cxx-run-flags: ... */ in the test: flags for both compilers, after
     # the common ones (-std=c++17 replaces -std=c++20)
     with open(src, errors='replace') as f:
-        found = re.search(r'cxx-run-flags:(.*?)\*/', f.read(2000))
+        head = f.read(2000)
+    found = re.search(r'cxx-run-flags:(.*?)\*/', head)
     cxx = CXX + (shlex.split(found.group(1)) if found else [])
+    found = re.search(r'cxx-run-units:(.*?)\*/', head)
+    units = [f'{TESTS}/units/{u}' for u in (found.group(1).split() if found else [])]
+
+    def others(compiler, flags, tag):
+        """the other units' objects, or the first error"""
+        objs = []
+        for i, u in enumerate(units):
+            o = f'{wd}/{tag}-unit{i}.o'
+            rc, _, err = ct.sh([compiler] + cxx + flags + ['-c', u, '-o', o])
+            if rc:
+                return None, (err.decode().strip().splitlines() or ['exit %s' % rc])[-1]
+            objs.append(o)
+        return objs, None
+
     rc, _, err = ct.sh([ct.CL] + cxx + ['-O2', '-c', src, '-o', f'{wd}/ref.o'])
-    if rc:
-        return name, [('ref', 'oracle: ' + ct.first_err(err.decode()))]
-    expected, why = run([f'{wd}/ref.o'], f'{wd}/ref.elf')
+    objs, why = others(ct.CL, ['-O2'], 'ref')
+    if rc or why:
+        return name, [('ref', 'oracle: ' + (why or ct.first_err(err.decode())))]
+    expected, why = run([f'{wd}/ref.o'] + objs, f'{wd}/ref.elf')
     if why:
         return name, [('ref', 'oracle ' + why)]
     rc, _, err = ct.sh([ct.CL] + cxx + ['-O0', '-c', src, '-o', f'{wd}/ref0.o'])
@@ -106,6 +125,10 @@ def one(job):
         if rc:
             results.append((level, 'vcc: ' + (err.decode().strip().splitlines() or ['exit %s' % rc])[-1]))
             continue
+        objs, why = others(VPP, [f'-O{level}'], f'O{level}')
+        if why:
+            results.append((level, 'vcc: ' + why))
+            continue
         ours = defined(o)
         # (above -O0 an inlined static function may be gone)
         if level == '0' and symbols is not None and ours != symbols:
@@ -114,7 +137,7 @@ def one(job):
             bound = sorted(k for k in ours if k in symbols and ours[k] != symbols[k])
             results.append((level, f'symbols: missing {missing} extra {extra} binding {bound}'))
             continue
-        got, why = run([o], elf)
+        got, why = run([o] + objs, elf)
         if why:
             results.append((level, why))
         elif got != expected:

@@ -81,11 +81,32 @@ bool semantic_analysis::unnamed_class_object(qualified_type t) const
            !entity_table[k].linkage_name;
 }
 
+/*
+ * [impl.clang] (clang's VisibleNoLinkage): a specialization whose type is
+ * made of local classes or closure types of inline or templated functions
+ * has no linkage (here internal: instantiation.cpp), but every translation
+ * unit that defines the function names the same specialization; clang
+ * gives it its template's linkage (CXX/basic/basic.link/p8.cpp).
+ */
+bool semantic_analysis::specialization_visible(entity_index e) const
+{
+    const entity &x = entity_table[e];
+    return (x.kind == entity_kind::function ||
+            x.kind == entity_kind::variable) &&
+           x.instantiation && x.linkage_of_name == linkage::internal &&
+           entity_table[specialized_template(e)].linkage_of_name ==
+               linkage::external &&
+           !type_without_external_linkage(x.type, true);
+}
+
 /* [basic.link]/4: a class or enumeration of an unnamed namespace has
    internal linkage, an unnamed one without a typedef name for linkage
    purposes and a local one none ([basic.link]/8): whether t is such a
-   type or compounded from one */
-bool semantic_analysis::type_without_external_linkage(qualified_type t) const
+   type or compounded from one; with visible, a local class or closure
+   type that visible_local_class() names in other translation units does
+   not count */
+bool semantic_analysis::type_without_external_linkage(qualified_type t,
+                                                      bool visible) const
 {
     const struct type &record = type_table[t.unqualified()];
     switch (record.kind) {
@@ -95,25 +116,28 @@ bool semantic_analysis::type_without_external_linkage(qualified_type t) const
         if (x.kind != entity_kind::class_type &&
             x.kind != entity_kind::enumeration)
             return false;
+        if (visible && x.linkage_of_name == linkage::none &&
+            visible_local_class(entity_table, record.entity))
+            return false;
         return x.linkage_of_name != linkage::external;
     }
     case type_kind::pointer:
     case type_kind::array:
     case type_kind::lvalue_reference:
     case type_kind::rvalue_reference:
-        return type_without_external_linkage(record.operand);
+        return type_without_external_linkage(record.operand, visible);
     case type_kind::function: {
         const qualified_type *parameters =
             type_table.parameters(t.unqualified());
         for (uint32_t i = 0; i < record.parameter_count; i++)
-            if (type_without_external_linkage(parameters[i]))
+            if (type_without_external_linkage(parameters[i], visible))
                 return true;
-        return type_without_external_linkage(record.operand);
+        return type_without_external_linkage(record.operand, visible);
     }
     case type_kind::pointer_to_member:
-        return type_without_external_linkage(
-                   entity_table[record.entity].type) ||
-               type_without_external_linkage(record.operand);
+        return type_without_external_linkage(entity_table[record.entity].type,
+                                             visible) ||
+               type_without_external_linkage(record.operand, visible);
     default:
         return false;
     }
