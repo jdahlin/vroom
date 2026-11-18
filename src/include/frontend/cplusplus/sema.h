@@ -1398,6 +1398,9 @@ class semantic_analysis
                                              uint32_t &elements,
                                              token_index &ellipsis);
     bool depends_on_template_parameter(qualified_type t) const;
+    /* whether a type is made of a template-parameter type at position from
+       or after */
+    bool depends_on_parameter_from(qualified_type t, uint64_t from) const;
     /* the ellipsis of the last parameter-declaration's declarator, if it
        declares a function parameter pack, else 0 */
     token_index declared_pack = 0;
