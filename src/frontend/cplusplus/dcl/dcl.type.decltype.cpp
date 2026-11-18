@@ -46,8 +46,8 @@ bool semantic_analysis::decltype_of(const expression_meaning &m, bool named,
            binding ([dcl.struct.bind]), decltype(E) is the referenced type
            as given in the specification of the structured binding
            declaration" */
-        if (m.node == last_binding_node) {
-            type = entity_table[last_binding].type;
+        if (m.binding) {
+            type = entity_table[m.binding].type;
             return true;
         }
         const semantic_node &n = semantics[m.node];

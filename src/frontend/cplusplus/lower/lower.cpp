@@ -1086,9 +1086,15 @@ uint32_t c_lowering::symbol(entity_index e, token_index at, int variant)
         t = structor_type(e, at);
     /* [basic.start.static]/2: an object of static storage duration
        initialized dynamically is written at start-up, so not in read-only
-       memory whatever its type's cv-qualifiers */
+       memory whatever its type's cv-qualifiers; nor is one whose class
+       has a destructor that runs, [class.dtor]/5: "const and volatile
+       semantics are not applied on an object under destruction" (a
+       mutable member, [dcl.stc]: not analysed) */
+    qualified_type element;
     if (x.kind == entity_kind::variable && !x.automatic && x.definition &&
-        (x.type.cv() & cv_const) && !constant_initializer(x.definition))
+        (x.type.cv() & cv_const) &&
+        (!constant_initializer(x.definition) ||
+         element_destructor(x.type, element)))
         t = type(
             qualified_type::make(x.type.unqualified(), x.type.cv() & ~cv_const),
             at);

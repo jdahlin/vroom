@@ -566,6 +566,41 @@ bool semantic_analysis::associated_with(
     }
 }
 
+/* [basic.lookup.argdep]/2's associated entities and namespaces of the
+   arguments' types: "If an associated namespace is an inline namespace,
+   its enclosing namespace is also included in the set. If an associated
+   namespace directly contains inline namespaces, those inline namespaces
+   are also included in the set." */
+bool semantic_analysis::associated_namespaces(
+    const owned_array<qualified_type> &arguments,
+    owned_array<entity_index> &classes,
+    owned_array<entity_index> &namespaces) const
+{
+    for (qualified_type t : arguments)
+        if (!associated_with(t, classes, namespaces))
+            return false;
+    /* the namespaces grow as inline namespaces and their enclosing ones
+       are added */
+    for (size_t i = 0; i < namespaces.size(); i++) {
+        entity_index n = namespaces[i];
+        auto add = [&](entity_index x) {
+            for (entity_index other : namespaces)
+                if (other == x)
+                    return;
+            namespaces.append(x);
+        };
+        if (n && entity_table[n].inline_)
+            add(entity_table[n].enclosing);
+        if (!entity_table[n].has_using_directive)
+            continue;
+        for (const using_directive_record &u : using_directives)
+            if (u.scope == n && entity_table[u.nominated].inline_ &&
+                entity_table[u.nominated].enclosing == n)
+                add(u.nominated);
+    }
+    return true;
+}
+
 /*
  * [basic.lookup.argdep]/1: "When the postfix-expression in a function call is
  * an unqualified-id, other namespaces not considered during the usual
@@ -588,28 +623,8 @@ bool semantic_analysis::argument_dependent_lookup(
     owned_array<entity_index> &found, entity_index known) const
 {
     owned_array<entity_index> classes, namespaces;
-    for (qualified_type t : arguments)
-        if (!associated_with(t, classes, namespaces))
-            return false;
-    /* /3: the namespaces grow as inline namespaces and their enclosing
-       ones are added */
-    for (size_t i = 0; i < namespaces.size(); i++) {
-        entity_index n = namespaces[i];
-        auto add = [&](entity_index x) {
-            for (entity_index other : namespaces)
-                if (other == x)
-                    return;
-            namespaces.append(x);
-        };
-        if (n && entity_table[n].inline_)
-            add(entity_table[n].enclosing);
-        if (!entity_table[n].has_using_directive)
-            continue;
-        for (const using_directive_record &u : using_directives)
-            if (u.scope == n && entity_table[u.nominated].inline_ &&
-                entity_table[u.nominated].enclosing == n)
-                add(u.nominated);
-    }
+    if (!associated_namespaces(arguments, classes, namespaces))
+        return false;
     for (entity_index n : namespaces) {
         entity_index e = entity_table.find(n, name);
         if (!e && entity_table[n].unknown_names)

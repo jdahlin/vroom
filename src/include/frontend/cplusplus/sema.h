@@ -916,6 +916,9 @@ struct expression_meaning {
     token_index string_literal = 0;
     /* an id-expression, perhaps parenthesized: the variable or function */
     entity_index entity = 0;
+    /* an id-expression naming a structured binding: the binding (decltype
+       of it is the referenced type, [dcl.type.decltype]/1.1) */
+    entity_index binding = 0;
     /* a floating-point operand or a comma operator inside: not an integral
        constant expression before C++11 (C++03 [expr.const]/1) */
     bool beyond_integral_constant = false;
@@ -1679,6 +1682,12 @@ class semantic_analysis
                                    const owned_array<qualified_type> &arguments,
                                    owned_array<entity_index> &found,
                                    entity_index known = 0) const;
+    /* [basic.lookup.argdep]/2: the associated classes and namespaces of
+       arguments of these types, with the inline namespaces /2 adds; false
+       as associated_with */
+    bool associated_namespaces(const owned_array<qualified_type> &arguments,
+                               owned_array<entity_index> &classes,
+                               owned_array<entity_index> &namespaces) const;
     /* [basic.lookup.argdep]/2: the associated entities (classes) and
        namespaces of the type t, added to the sets; false if a class of it
        is one analysis did not follow */
@@ -3588,6 +3597,12 @@ class semantic_analysis
                                          expression_meaning &m,
                                          const specified &s, bool direct,
                                          entity_index &e);
+    analysis_result tuple_trait_member(node_index n, const char *trait,
+                                       bool indexed, uint32_t i,
+                                       qualified_type type, const char *member,
+                                       entity_index &found);
+    analysis_result array_element(node_index n, token_index at,
+                                  expression_meaning &object, uint64_t i);
     analysis_result tuple_size_of(node_index n, qualified_type type,
                                   bool &found, uint64_t &value);
     analysis_result tuple_element_of(node_index n, uint32_t i,
@@ -3602,12 +3617,8 @@ class semantic_analysis
                                           entity_index &holder);
     uint32_t binding_member_count(entity_index c) const;
     /* the class template std::NAME, plus one (0: none declared) */
-    uint32_t std_class_template(const char *name);
-    /* the last expression a structured binding's name gave and that
-       binding: decltype of it is the referenced type
-       ([dcl.type.decltype]/1.1) */
-    uint32_t last_binding_node = 0;
-    entity_index last_binding = 0;
+    analysis_result std_class_template(node_index n, const char *name,
+                                       uint32_t &template_index);
     /* the variables binding_variable makes: linkage::none automatic,
        else of static storage duration with this linkage (at namespace
        scope) */

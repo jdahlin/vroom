@@ -19,9 +19,10 @@
  * [dcl.struct.bind]/1: "A structured binding declaration introduces the
  * identifiers v0, v1, v2, ... of the identifier-list as names
  * ([basic.scope.declarative]) of structured bindings."  Which
- * decl-specifiers it may have ([dcl.struct.bind]/1: "The decl-specifier-seq
- * shall contain only the type-specifier auto and cv-qualifiers") is a
- * semantic rule.
+ * decl-specifiers it may have is a semantic rule, [dcl.pre]/8: "If the
+ * decl-specifier-seq contains any decl-specifier other than static,
+ * thread_local, auto ([dcl.spec.auto]), or cv-qualifiers, the program is
+ * ill-formed."
  *
  * Analysed: the variable e (/1), for each of /3 (arrays), /4 (tuple-like
  * types: std::tuple_size, get<i> found in E's associated namespaces,
@@ -91,6 +92,30 @@ node_index parser::structured_binding_identifiers()
 }
 
 /* ---- semantic analysis ---------------------------------------------- */
+
+/* /5's members: the non-static data members, not a base subobject or an
+   unnamed bit-field (which is not a member, [class.bit]/2) */
+static bool binding_data_member(const entity &m)
+{
+    return !m.base_subobject && !(m.bit_field && !m.name);
+}
+
+/* /3: element i of the array object, "*(e + i)" by built-in [expr.sub]:
+   object becomes the element */
+analysis_result semantic_analysis::array_element(node_index n, token_index at,
+                                                 expression_meaning &object,
+                                                 uint64_t i)
+{
+    expression_meaning index =
+        integer_constant(fundamental_type::unsigned_long_int, i, at);
+    expression_meaning sum;
+    analysis_result r = builtin_binary(n, at, preprocessing_op_or_punc::PLUS,
+                                       object, index, sum);
+    if (r == analysis_result::well_formed)
+        r = indirection_of(n, at, syntax_child(), sum);
+    object = sum;
+    return r;
+}
 
 analysis_result semantic_analysis::binding_variable(node_index n,
                                                     expression_meaning &m,
@@ -165,18 +190,13 @@ analysis_result semantic_analysis::array_binding_object(
     qualified_type element = a.operand;
     owned_array<uint32_t> elements;
     for (uint64_t i = 0; i < a.bound; i++) {
-        expression_meaning x, index, sum;
+        expression_meaning x;
         r = named_entity(at, from, x, false);
-        if (r != analysis_result::well_formed)
-            return r;
-        index = integer_constant(fundamental_type::unsigned_long_int, i, at);
-        r = builtin_binary(n, at, preprocessing_op_or_punc::PLUS, x, index,
-                           sum);
         if (r == analysis_result::well_formed)
-            r = indirection_of(n, at, syntax_child(), sum);
+            r = array_element(n, at, x, i);
         initialized_value value;
         if (r == analysis_result::well_formed)
-            r = initialize_with(n, sum, element, direct, false, value);
+            r = initialize_with(n, x, element, direct, false, value);
         if (r != analysis_result::well_formed)
             return r;
         elements.append(value.node);
@@ -196,17 +216,30 @@ analysis_result semantic_analysis::array_binding_object(
     return analysis_result::well_formed;
 }
 
-uint32_t semantic_analysis::std_class_template(const char *name)
+/* std::NAME, found as [namespace.qual] finds it (in an inline namespace
+   of std too) */
+analysis_result semantic_analysis::std_class_template(node_index n,
+                                                      const char *name,
+                                                      uint32_t &template_index)
 {
+    template_index = 0;
     entity_index std_ =
         entity_table.find(0, tokens.pp.identifier("std", 3) + 1);
     if (!std_ || !is_namespace(std_) || !std_namespace(std_))
-        return 0;
-    entity_index held =
-        entity_table.find(std_, tokens.pp.identifier(name, strlen(name)) + 1);
-    if (!held)
-        return 0;
-    return class_template_of(held);
+        return analysis_result::well_formed;
+    lookup_result found = lookup_in_namespace(
+        std_, tokens.pp.identifier(name, strlen(name)) + 1, lookup_filter::any);
+    /* a class template's name is held with no entity of its own
+       (unknown_entity); a name of a declaration analysis did not follow
+       is none (tuple_size_of looks for those) */
+    if (found.ambiguous)
+        return not_supported(n, "namespace.qual");
+    entity_index held = found.entity;
+    if (found.unknown)
+        held = found.unknown_entity;
+    if (held)
+        template_index = class_template_of(held);
+    return analysis_result::well_formed;
 }
 
 /* /4: get<i> and std::tuple_element<i, E>'s argument i, "an index
@@ -235,6 +268,54 @@ analysis_result semantic_analysis::index_argument(node_index n,
 }
 
 /*
+ * /4's std::tuple_size<E> and std::tuple_element<i, E> (indexed): the
+ * member named member of the specialization, accessible, or 0 when the
+ * template is not declared, the specialization is not complete or has no
+ * such member
+ */
+analysis_result semantic_analysis::tuple_trait_member(
+    node_index n, const char *trait, bool indexed, uint32_t i,
+    qualified_type type, const char *member, entity_index &found)
+{
+    found = 0;
+    uint32_t ct = 0;
+    analysis_result r = std_class_template(n, trait, ct);
+    if (r != analysis_result::well_formed || !ct)
+        return r;
+    const function_template ft = function_templates[ct - 1];
+    uint32_t count = 1;
+    if (indexed)
+        count = 2;
+    if (ft.parameter_count != count ||
+        entity_table[template_parameter_entities[ft.first_parameter + count -
+                                                 1]]
+                .kind != entity_kind::typedef_name)
+        return not_supported(n, "dcl.struct.bind");
+    template_argument a[2];
+    if (indexed) {
+        r = index_argument(n, ct, i, a[0]);
+        if (r != analysis_result::well_formed)
+            return r;
+    }
+    a[count - 1].type = type;
+    entity_index c = 0;
+    r = instantiate_class(n, ct, a, count, c);
+    if (r != analysis_result::well_formed)
+        return r;
+    if (entity_table[c].kind != entity_kind::class_type ||
+        !entity_table[c].size)
+        return analysis_result::well_formed;
+    bool ambiguous = false;
+    found = class_member_lookup(
+        c, tokens.pp.identifier(member, strlen(member)) + 1, ambiguous);
+    if (ambiguous)
+        return not_supported(n, "class.member.lookup");
+    if (found && !accessible(found))
+        return not_supported(n, "dcl.struct.bind");
+    return analysis_result::well_formed;
+}
+
+/*
  * /4: "if the qualified-id std::tuple_size<E> names a complete class type
  * with a member named value, the expression std::tuple_size<E>::value
  * shall be a well-formed integral constant expression"
@@ -244,23 +325,14 @@ analysis_result semantic_analysis::tuple_size_of(node_index n,
                                                  bool &found, uint64_t &value)
 {
     found = false;
-    uint32_t ct = std_class_template("tuple_size");
-    if (!ct)
-        return analysis_result::well_formed;
-    const function_template ft = function_templates[ct - 1];
-    if (ft.parameter_count != 1 ||
-        entity_table[template_parameter_entities[ft.first_parameter]].kind !=
-            entity_kind::typedef_name)
-        return not_supported(n, "dcl.struct.bind");
-    template_argument a;
-    a.type = type;
-    entity_index c = 0;
-    analysis_result r = instantiate_class(n, ct, &a, 1, c);
+    entity_index v = 0;
+    analysis_result r =
+        tuple_trait_member(n, "tuple_size", false, 0, type, "value", v);
     if (r != analysis_result::well_formed)
         return r;
-    /* not complete, or no member value: a specialization of
-       std::tuple_size analysis did not follow may give it one */
-    auto none = [&]() {
+    if (!v) {
+        /* not complete, or no member value: a specialization of
+           std::tuple_size analysis did not follow may give it one */
         uint32_t name = tokens.pp.identifier("tuple_size", 10) + 1;
         for (const analysed_declaration &d : declarations) {
             if (d.result == analysis_result::well_formed)
@@ -272,22 +344,11 @@ analysis_result semantic_analysis::tuple_size_of(node_index n,
                     return not_supported(n, "temp.expl.spec");
         }
         return analysis_result::well_formed;
-    };
-    if (entity_table[c].kind != entity_kind::class_type ||
-        !entity_table[c].size)
-        return none();
-    bool ambiguous = false;
-    entity_index v =
-        class_member_lookup(c, tokens.pp.identifier("value", 5) + 1, ambiguous);
-    if (ambiguous)
-        return not_supported(n, "class.member.lookup");
-    if (!v)
-        return none();
+    }
     found = true;
     const entity &x = entity_table[v];
     if (x.kind != entity_kind::variable || x.nonstatic_member ||
-        !is_integral(x.type) || x.usable != constness::constant ||
-        !accessible(v))
+        !is_integral(x.type) || x.usable != constness::constant)
         return not_supported(n, "dcl.struct.bind");
     value = x.value;
     return analysis_result::well_formed;
@@ -298,30 +359,13 @@ analysis_result semantic_analysis::tuple_element_of(node_index n, uint32_t i,
                                                     qualified_type type,
                                                     qualified_type &element)
 {
-    uint32_t ct = std_class_template("tuple_element");
-    if (!ct || function_templates[ct - 1].parameter_count != 2)
-        return not_supported(n, "dcl.struct.bind");
-    template_argument a[2];
-    analysis_result r = index_argument(n, ct, i, a[0]);
+    entity_index t = 0;
+    analysis_result r =
+        tuple_trait_member(n, "tuple_element", true, i, type, "type", t);
     if (r != analysis_result::well_formed)
         return r;
-    const function_template ft = function_templates[ct - 1];
-    if (entity_table[template_parameter_entities[ft.first_parameter + 1]]
-            .kind != entity_kind::typedef_name)
-        return not_supported(n, "dcl.struct.bind");
-    a[1].type = type;
-    entity_index c = 0;
-    r = instantiate_class(n, ct, a, 2, c);
-    if (r != analysis_result::well_formed)
-        return r;
-    if (entity_table[c].kind != entity_kind::class_type ||
-        !entity_table[c].size)
-        return not_supported(n, "dcl.struct.bind");
-    bool ambiguous = false;
-    entity_index t =
-        class_member_lookup(c, tokens.pp.identifier("type", 4) + 1, ambiguous);
-    if (ambiguous || !t || entity_table[t].kind != entity_kind::typedef_name ||
-        !accessible(t) || depends_on_template_parameter(entity_table[t].type))
+    if (!t || entity_table[t].kind != entity_kind::typedef_name ||
+        depends_on_template_parameter(entity_table[t].type))
         return not_supported(n, "dcl.struct.bind");
     element = entity_table[t].type;
     return analysis_result::well_formed;
@@ -353,8 +397,10 @@ analysis_result semantic_analysis::binding_get_call(node_index n,
     if (ambiguous ||
         (member && entity_table[member].kind != entity_kind::function))
         return not_supported(n, "dcl.struct.bind");
+    owned_array<qualified_type> types;
+    types.append(type);
     owned_array<entity_index> classes, namespaces;
-    if (!associated_with(type, classes, namespaces))
+    if (!associated_namespaces(types, classes, namespaces))
         return not_supported(n, "basic.lookup.argdep");
     entity_index held = 0;
     for (entity_index s : namespaces) {
@@ -366,7 +412,7 @@ analysis_result semantic_analysis::binding_get_call(node_index n,
             return not_supported(n, "dcl.struct.bind");
         held = x;
     }
-    /* none: a hidden friend may declare it ([basic.lookup.argdep]/4.2) */
+    /* none: a hidden friend may declare it ([basic.lookup.argdep]/4.3) */
     if (!held)
         return not_supported(n, "dcl.struct.bind");
     expression_meaning object;
@@ -424,8 +470,7 @@ uint32_t semantic_analysis::binding_member_count(entity_index c) const
     uint32_t count = 0;
     for (uint32_t i = 0; i < x.member_count; i++) {
         const entity &m = entity_table[class_members[x.first_member + i]];
-        /* an unnamed bit-field is not a member ([class.bit]/2) */
-        if (!m.base_subobject && !(m.bit_field && !m.name))
+        if (binding_data_member(m))
             count++;
     }
     for (uint32_t i = 0; i < x.base_count; i++)
@@ -451,7 +496,7 @@ analysis_result semantic_analysis::binding_members_class(node_index n,
     uint32_t own = 0;
     for (uint32_t i = 0; i < x.member_count; i++) {
         const entity &m = entity_table[class_members[x.first_member + i]];
-        if (m.base_subobject || (m.bit_field && !m.name))
+        if (!binding_data_member(m))
             continue;
         /* an anonymous union (or struct) member */
         if (!m.name)
@@ -560,8 +605,20 @@ analysis_result semantic_analysis::structured_binding_declaration(
         /* a name the scope (or a block's conflicting scope) declares
            already ([basic.scope.declarative]): clang's redefinition */
         entity_index conflicts = entity_table[current_scope].conflicts;
-        if (entity_table.find(current_scope, name) ||
-            (conflicts && entity_table.find(conflicts, name)))
+        entity_index prior = entity_table.find(current_scope, name);
+        /* [basic.scope.declarative]/4: "they shall all refer to the same
+           entity, or all refer to functions and function templates": a
+           name the identifier-list has twice (C++26's placeholder _,
+           P2169, may be: not analysed) */
+        if (prior && first_binding && prior >= first_binding &&
+            name != tokens.pp.identifier("_", 1) + 1)
+            return ill_formed_at_token(t,
+                                       "declarations of the same name in a "
+                                       "declarative region shall all refer "
+                                       "to the same entity, or all to "
+                                       "functions",
+                                       "basic.scope.declarative");
+        if (prior || (conflicts && entity_table.find(conflicts, name)))
             return not_supported(declaration, "basic.scope.declarative");
         entity_index b = entity_table.make(entity_kind::structured_binding,
                                            name, current_scope);
@@ -737,8 +794,7 @@ analysis_result semantic_analysis::structured_binding_declaration(
         uint32_t k = 0;
         for (uint32_t j = 0; j < h.member_count; j++) {
             entity_index x = class_members[h.first_member + j];
-            if (entity_table[x].base_subobject ||
-                (entity_table[x].bit_field && !entity_table[x].name))
+            if (!binding_data_member(entity_table[x]))
                 continue;
             if (!automatic && entity_table[x].access)
                 return give_up(not_supported(declaration, "dcl.struct.bind"));
@@ -764,14 +820,13 @@ analysis_result semantic_analysis::structured_binding_declaration(
             return give_up(r);
         entity_index member = entity_table[b].binding_target;
         entity_table[b].type = use.type;
-        if (member &&
-            type_table[entity_table[member].type.unqualified()].kind ==
-                type_kind::lvalue_reference)
-            entity_table[b].type = entity_table[member].type;
-        if (member &&
-            type_table[entity_table[member].type.unqualified()].kind ==
-                type_kind::rvalue_reference)
-            entity_table[b].type = entity_table[member].type;
+        if (member) {
+            type_kind kind =
+                type_table[entity_table[member].type.unqualified()].kind;
+            if (kind == type_kind::lvalue_reference ||
+                kind == type_kind::rvalue_reference)
+                entity_table[b].type = entity_table[member].type;
+        }
     }
     return analysis_result::well_formed;
 }
@@ -812,21 +867,13 @@ analysis_result semantic_analysis::structured_binding_use(token_index t,
         if (r == analysis_result::well_formed && x.binding_target) {
             r = member_access(t, x.binding_target, m);
         } else if (r == analysis_result::well_formed) {
-            expression_meaning index = integer_constant(
-                fundamental_type::unsigned_long_int, x.field, t);
-            expression_meaning sum;
-            r = builtin_binary(current_declaration, t,
-                               preprocessing_op_or_punc::PLUS, m, index, sum);
-            if (r == analysis_result::well_formed)
-                r = indirection_of(current_declaration, t, syntax_child(), sum);
-            m = sum;
+            r = array_element(current_declaration, t, m, x.field);
         }
     }
     if (r != analysis_result::well_formed)
         return r;
     m.entity = 0;
-    last_binding_node = m.node;
-    last_binding = b;
+    m.binding = b;
     return analysis_result::well_formed;
 }
 
