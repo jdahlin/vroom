@@ -401,6 +401,31 @@ analysis_result semantic_analysis::postfix(node_index n, expression_meaning &m)
                 return r;
         }
     }
+    if ((parenthesized || braced) &&
+        syntax_is(tree, children[0], syntax_kind::simple_template_id)) {
+        /* [temp.names]/1 with [expr.type.conv]/1: a simple-template-id
+           naming a class template is a simple-type-specifier
+           ([dcl.type.simple]/1), the specialization's class */
+        const syntax_child *id = tree.children(children[0].index());
+        if (tree[children[0].index()].child_count >= 3 && id[0].is_token() &&
+            tokens[id[0].index()].kind == token_kind::identifier) {
+            lookup_result x = lookup_unqualified(
+                tokens.identifier(id[0].index()), lookup_filter::any);
+            entity_index found = x.entity;
+            if (!found)
+                found = x.unknown_entity;
+            if (class_template_of(found)) {
+                type_index t = 0;
+                analysis_result r =
+                    template_type(children[0].index(), 0, false, t);
+                if (r != analysis_result::well_formed)
+                    return r;
+                if (type_table[t].kind != type_kind::class_type)
+                    return not_supported(n, "temp.res");
+                return class_conversion(n, type_table[t].entity, m);
+            }
+        }
+    }
     if (named) {
         qualified_type to = qualified_type::make(named, cv_none);
         const struct type record = type_table[named];
@@ -427,6 +452,8 @@ analysis_result semantic_analysis::postfix(node_index n, expression_meaning &m)
         }
         if (parenthesized && node.child_count == 4) {
             if (syntax_is(tree, children[2], syntax_kind::initializer_list)) {
+                if (has_pack_expansion(children[2]))
+                    return not_supported(n, "temp.variadic");
                 /* [dcl.init]/14: "If the entity being initialized does not
                    have class type, the expression-list in a parenthesized
                    initializer shall be a single expression." */
@@ -559,18 +586,50 @@ analysis_result semantic_analysis::call(node_index n, expression_meaning &m)
     const syntax_node &node = tree[n];
     const syntax_child *children = tree.children(n);
     owned_array<syntax_child> arguments;
+    /* [temp.variadic]/5: the arguments, pack expansions instantiated: each
+       analysed now, one per element of the packs its pattern names */
+    owned_array<expression_meaning> expanded;
     if (node.child_count == 4) {
         syntax_child c = children[2];
         if (syntax_is(tree, c, syntax_kind::initializer_list)) {
-            for (uint32_t i = 0; i < tree[c.index()].child_count; i++) {
-                syntax_child a = tree.children(c.index())[i];
-                if (syntax_is_punctuator(tokens, a,
-                                         preprocessing_op_or_punc::COMMA))
+            owned_array<syntax_child> written;
+            owned_array<bool> expansion;
+            if (!expansion_list(c.index(), written, expansion))
+                return not_supported(n, "temp.variadic");
+            bool any = false;
+            for (bool x : expansion)
+                any = any || x;
+            for (size_t i = 0; i < written.size(); i++) {
+                syntax_child a = written[i];
+                if (!any) {
+                    arguments.append(a);
                     continue;
-                if (syntax_is_punctuator(tokens, a,
-                                         preprocessing_op_or_punc::ELLIPSIS))
+                }
+                if (syntax_is(tree, a, syntax_kind::braced_init_list))
                     return not_supported(n, "temp.variadic");
-                arguments.append(a);
+                if (!expansion[i]) {
+                    expression_meaning e;
+                    analysis_result r = expression(a, e);
+                    if (r != analysis_result::well_formed)
+                        return r;
+                    arguments.append(a);
+                    expanded.append(e);
+                    continue;
+                }
+                uint32_t count = 0;
+                token_index end = first_token(a) + 1;
+                if (!a.is_token())
+                    end = tree[a.index()].end_token;
+                if (!expansion_count(first_token(a), end, count))
+                    return not_supported(n, "temp.variadic");
+                for (uint32_t k = 0; k < count; k++) {
+                    expression_meaning e;
+                    analysis_result r = expansion_element_expression(a, k, e);
+                    if (r != analysis_result::well_formed)
+                        return r;
+                    arguments.append(a);
+                    expanded.append(e);
+                }
             }
         } else {
             arguments.append(c);
@@ -580,6 +639,29 @@ analysis_result semantic_analysis::call(node_index n, expression_meaning &m)
     }
     expression_meaning f;
     analysis_result r = analysis_result::well_formed;
+    {
+        /* [over.match.funcs]/8: "In each case where a candidate is a
+           function template, candidate function template specializations
+           are generated using template argument deduction"; the name is a
+           function template's alone */
+        token_index name = 0;
+        uint32_t ft = 0;
+        bool qualified = false;
+        owned_array<template_argument> specified;
+        r = template_callee(children[0], name, ft, specified, qualified);
+        if (r != analysis_result::well_formed)
+            return r;
+        if (ft) {
+            owned_array<expression_meaning> early;
+            for (const expression_meaning &e : expanded)
+                early.append(e);
+            r = template_call(n, name, ft, specified, qualified, arguments,
+                              early, f);
+            if (r != analysis_result::well_formed)
+                return r;
+            return call_with(n, f, f.type, 0, 0, arguments, early, m);
+        }
+    }
     /* the arguments analysed before the function is known, for
        argument-dependent lookup or overload resolution: each one's
        meaning, or none for a braced-init-list (which has no type) */
@@ -611,7 +693,20 @@ analysis_result semantic_analysis::call(node_index n, expression_meaning &m)
                         (is_namespace(x.found_in) ||
                          entity_table.bound_by_using(x.found_in, name));
         }
-        if (dependent) {
+        if (dependent && !expanded.empty()) {
+            owned_array<qualified_type> types;
+            for (const expression_meaning &e : expanded) {
+                types.append(e.type);
+                early.append(e);
+            }
+            owned_array<entity_index> set;
+            if (x.entity)
+                set.append(x.entity);
+            if (!argument_dependent_lookup(name, types, set) || !x.entity)
+                return not_supported(n, "basic.lookup.argdep");
+            for (entity_index e : set)
+                overload_set(e, found_by_adl);
+        } else if (dependent) {
             owned_array<qualified_type> types;
             for (syntax_child a : arguments) {
                 expression_meaning e;
@@ -656,6 +751,9 @@ analysis_result semantic_analysis::call(node_index n, expression_meaning &m)
             }
         }
     }
+    if (!expanded.empty() && early.empty())
+        for (const expression_meaning &e : expanded)
+            early.append(e);
     if (!looked_up) {
         overloaded_callee = callee_name(children[0]);
         r = expression(children[0], f);
@@ -668,6 +766,8 @@ analysis_result semantic_analysis::call(node_index n, expression_meaning &m)
            the operator function is selected by overload resolution
            ([over.call.object])" and the expression "interpreted as
            postfix-expression . operator () (expression-list_opt)" */
+        if (!expanded.empty())
+            return not_supported(n, "temp.variadic");
         owned_array<syntax_child> syntax;
         owned_array<expression_meaning> operands;
         syntax.append(children[0]);
@@ -744,6 +844,321 @@ analysis_result semantic_analysis::call(node_index n, expression_meaning &m)
             member = semantics[f.node].b;
     }
     return call_with(n, f, function_type, object, member, arguments, early, m);
+}
+
+/*
+ * A call whose name is a function template's ([temp.fct]): the arguments
+ * analysed, the template arguments deduced from them
+ * ([temp.deduct.call]), the specialization instantiated ([temp.inst]) and
+ * named.  [basic.lookup.argdep]/3's lookup set Y may add functions of the
+ * arguments' associated namespaces, which overload resolution would weigh
+ * against the specialization: not analysed.
+ */
+analysis_result semantic_analysis::template_callee(
+    syntax_child callee, token_index &name, uint32_t &function_template,
+    owned_array<template_argument> &specified, bool &qualified)
+{
+    name = 0;
+    function_template = 0;
+    qualified = false;
+    if (callee.is_token()) {
+        if (tokens[callee.index()].kind != token_kind::identifier)
+            return analysis_result::well_formed;
+        name = callee.index();
+        lookup_result x =
+            lookup_unqualified(tokens.identifier(name), lookup_filter::any);
+        function_template = function_template_of(x.unknown_entity);
+        return analysis_result::well_formed;
+    }
+    /* (the uses a callee that is no template's records are recorded
+       again by its analysis as an expression) */
+    size_t uses_before = name_uses.size();
+    analysis_result r = template_callee_parts(callee, name, function_template,
+                                              specified, qualified);
+    if (!function_template)
+        name_uses.resize(uses_before);
+    return r;
+}
+
+analysis_result semantic_analysis::template_callee_parts(
+    syntax_child callee, token_index &name, uint32_t &function_template,
+    owned_array<template_argument> &specified, bool &qualified)
+{
+    syntax_child id = callee;
+    nominated_scope scope;
+    if (syntax_is(tree, callee, syntax_kind::qualified_id)) {
+        /* [namespace.qual]: a function template of a namespace */
+        const syntax_node &q = tree[callee.index()];
+        if (q.child_count != 2 ||
+            !syntax_is(tree, tree.children(callee.index())[0],
+                       syntax_kind::nested_name_specifier))
+            return analysis_result::well_formed;
+        id = tree.children(callee.index())[1];
+        analysis_result r = nested_name_specifier(
+            tree.children(callee.index())[0].index(), scope);
+        if (r != analysis_result::well_formed)
+            return r;
+        if (!is_namespace(scope.entity))
+            return analysis_result::well_formed;
+        qualified = true;
+    }
+    owned_array<syntax_child> written;
+    if (id.is_token()) {
+        if (!qualified || tokens[id.index()].kind != token_kind::identifier)
+            return analysis_result::well_formed;
+        name = id.index();
+    } else if (syntax_is(tree, id, syntax_kind::simple_template_id)) {
+        const syntax_node &t = tree[id.index()];
+        const syntax_child *parts = tree.children(id.index());
+        if (t.child_count < 3 || !parts[0].is_token() ||
+            tokens[parts[0].index()].kind != token_kind::identifier)
+            return analysis_result::well_formed;
+        name = parts[0].index();
+        for (uint32_t i = 2; i + 1 < t.child_count; i++) {
+            if (syntax_is(tree, parts[i],
+                          syntax_kind::template_argument_list)) {
+                for (uint32_t k = 0; k < tree[parts[i].index()].child_count;
+                     k++) {
+                    syntax_child a = tree.children(parts[i].index())[k];
+                    if (!syntax_is_punctuator(tokens, a,
+                                              preprocessing_op_or_punc::COMMA))
+                        written.append(a);
+                }
+            } else {
+                written.append(parts[i]);
+            }
+        }
+    } else {
+        return analysis_result::well_formed;
+    }
+    lookup_result x;
+    if (qualified)
+        x = lookup_qualified(scope.entity, tokens.identifier(name),
+                             lookup_filter::any);
+    else
+        x = lookup_unqualified(tokens.identifier(name), lookup_filter::any);
+    function_template = function_template_of(x.unknown_entity);
+    if (!function_template) {
+        /* a template-id of no function template analysis knows: what it
+           was before */
+        if (!written.empty() || !qualified)
+            return not_supported(id.index(), "temp.names");
+        return analysis_result::well_formed;
+    }
+    if (!written.empty()) {
+        /* explicit template arguments for each of several templates
+           ([temp.over]/1's "checking of any explicit template
+           arguments"): not analysed */
+        owned_array<uint32_t> group;
+        function_template_overloads(
+            function_templates[function_template - 1].name, group);
+        if (group.size() > 1)
+            return not_supported(id.index(), "temp.over");
+    }
+    /* [temp.arg.explicit]/6: "The template argument list shall not
+       specify more template-arguments than there are corresponding
+       template-parameters" (clang: no candidate) */
+    for (syntax_child a : written) {
+        uint32_t position = static_cast<uint32_t>(specified.size());
+        if (position >=
+            function_templates[function_template - 1].parameter_count)
+            return not_supported(id.index(), "temp.arg.explicit");
+        template_argument x;
+        analysis_result r = template_argument_for(
+            id.index(), function_template, position, a, specified.data(), x);
+        if (r != analysis_result::well_formed)
+            return r;
+        specified.append(x);
+    }
+    return analysis_result::well_formed;
+}
+
+analysis_result semantic_analysis::template_call(
+    node_index n, token_index name, uint32_t function_template,
+    owned_array<template_argument> &specified, bool qualified,
+    const owned_array<syntax_child> &arguments,
+    owned_array<expression_meaning> &early, expression_meaning &f)
+{
+    owned_array<qualified_type> types;
+    /* (arguments analysed already: a pack expansion's, call) */
+    bool given = !early.empty();
+    for (const expression_meaning &e : early) {
+        if (e.entity && entity_table[e.entity].kind == entity_kind::function)
+            return not_supported(n, "temp.deduct.call");
+        types.append(e.type);
+    }
+    for (syntax_child a : arguments) {
+        if (given)
+            break;
+        expression_meaning e;
+        if (syntax_is(tree, a, syntax_kind::braced_init_list))
+            return not_supported(n, "temp.deduct.call");
+        /* [temp.deduct.call]/6: "When P is a function type, function
+           pointer type, or pointer-to-member-function type: If the argument
+           is an overload set containing one or more function templates, the
+           parameter is treated as a non-deduced context.  If the argument
+           is an overload set (not containing function templates), trial
+           argument deduction is attempted using each of the members of the
+           set": not analysed */
+        token_index set_at = 0;
+        if (named_overload_set(a, set_at))
+            return not_supported(n, "temp.deduct.call");
+        size_t uses_before = name_uses.size();
+        analysis_result r = expression(a, e);
+        if (r != analysis_result::well_formed)
+            return r;
+        /* (a function's name whose other declarations analysis did not
+           follow may be such a set too) */
+        if (e.entity && entity_table[e.entity].kind == entity_kind::function) {
+            name_uses.resize(uses_before);
+            return not_supported(n, "temp.deduct.call");
+        }
+        types.append(e.type);
+        early.append(e);
+    }
+    /* [basic.lookup.argdep]/1: for an unqualified name only */
+    owned_array<entity_index> others;
+    if (!qualified && (!argument_dependent_lookup(
+                           tokens.identifier(name), types, others,
+                           function_templates[function_template - 1].name) ||
+                       !others.empty()))
+        return not_supported(n, "basic.lookup.argdep");
+    owned_array<template_argument> &deduced = specified;
+    const expression_meaning *meanings = nullptr;
+    if (!early.empty())
+        meanings = &early[0];
+    owned_array<uint32_t> group;
+    function_template_overloads(function_templates[function_template - 1].name,
+                                group);
+    /* the name's non-template functions, candidates unless the name is a
+       template-id's ([temp.arg.explicit]: only templates take template
+       arguments) */
+    owned_array<entity_index> functions;
+    bool template_id =
+        tokens[name + 1].kind == token_kind::operator_or_punctuator &&
+        preprocessing_op_or_punc_primary(tokens[name + 1].op_or_punc) ==
+            preprocessing_op_or_punc::LESS;
+    for (const template_name_function &x : template_name_functions)
+        if (x.name == function_templates[function_template - 1].name &&
+            !template_id)
+            functions.append(x.function);
+    entity_index specialization = 0;
+    if (group.size() > 1 || !functions.empty()) {
+        /* [temp.over]/1: "For each function template, if the argument
+           deduction and checking succeeds, the template-arguments
+           (deduced and/or explicit) are used to synthesize the
+           declaration of a single function template specialization which
+           is added to the candidate functions set to be used in overload
+           resolution."  Each candidate's declaration is instantiated
+           ([temp.inst]/5: not its definition, which only the one chosen
+           needs) */
+        owned_array<overload_candidate> candidates;
+        owned_array<uint32_t> first_arguments;
+        owned_array<template_argument> all;
+        for (entity_index e : functions) {
+            overload_candidate c;
+            c.function = e;
+            c.type = entity_table[e].type;
+            candidates.append(c);
+            first_arguments.append(0);
+        }
+        for (uint32_t g : group) {
+            owned_array<template_argument> d;
+            bool failed = false;
+            /* [temp.deduct]/8: an invalid type or expression in the
+               immediate context of the declaration (or of a default
+               template-argument) substituted is no candidate, and no
+               diagnostic: what substitution issued is taken back */
+            size_t messages = diagnostics.messages.size();
+            size_t errors = diagnostics.error_count;
+            size_t warnings = diagnostics.warning_count;
+            size_t fatals = diagnostics.fatal_count;
+            size_t expressions_before = expressions.size();
+            size_t uses_before = name_uses.size();
+            uint32_t failures = definition_failures;
+            substituting++;
+            analysis_result r = deduce_from_call(
+                n, g, meanings, static_cast<uint32_t>(early.size()), d,
+                &failed);
+            entity_index e = 0;
+            const struct function_template ft = function_templates[g - 1];
+            if (r == analysis_result::well_formed && !failed) {
+                unevaluated++;
+                r = instantiate(n, ft.entity, d.data(),
+                                static_cast<uint32_t>(d.size()), e);
+                unevaluated--;
+            }
+            substituting--;
+            if (r == analysis_result::ill_formed &&
+                failures == definition_failures &&
+                diagnostics.fatal_count == fatals) {
+                diagnostics.messages.resize(messages);
+                diagnostics.error_count = errors;
+                diagnostics.warning_count = warnings;
+                expressions.resize(expressions_before);
+                name_uses.resize(uses_before);
+                continue;
+            }
+            if (r != analysis_result::well_formed)
+                return r;
+            if (failed)
+                continue;
+            overload_candidate c;
+            c.function = e;
+            c.type = entity_table[e].type;
+            c.template_index = g;
+            candidates.append(c);
+            first_arguments.append(static_cast<uint32_t>(all.size()));
+            for (const template_argument &x : d)
+                all.append(x);
+        }
+        if (candidates.empty())
+            /* (deduction failed for each: no viable function, which
+               clang reports with each template's reason) */
+            return not_supported(n, "temp.over");
+        size_t chosen = 0;
+        analysis_result r =
+            best_viable_function(n, candidates, nullptr, early, chosen);
+        if (r != analysis_result::well_formed)
+            return r;
+        if (!candidates[chosen].template_index) {
+            /* a non-template function: [dcl.fct.def.delete]/2 "If a
+               function is overloaded, it is referenced only if the
+               function is selected by overload resolution." */
+            entity_index c = candidates[chosen].function;
+            r = deleted_use(name, c);
+            if (r != analysis_result::well_formed)
+                return r;
+            overloaded_callee = name;
+            r = named_entity(name, c, f);
+            overloaded_callee = 0;
+            return r;
+        }
+        const struct function_template ft =
+            function_templates[candidates[chosen].template_index - 1];
+        r = instantiate(n, ft.entity, &all[first_arguments[chosen]],
+                        ft.parameter_count, specialization);
+        if (r != analysis_result::well_formed)
+            return r;
+    } else {
+        analysis_result r =
+            deduce_from_call(n, function_template, meanings,
+                             static_cast<uint32_t>(early.size()), deduced);
+        if (r != analysis_result::well_formed)
+            return r;
+        r = instantiate(n, function_templates[function_template - 1].entity,
+                        &deduced[0], static_cast<uint32_t>(deduced.size()),
+                        specialization);
+        if (r != analysis_result::well_formed)
+            return r;
+    }
+    analysis_result r = analysis_result::well_formed;
+    /* no claim is made about the name, whose declaration clang finds is
+       the template's */
+    overloaded_callee = name;
+    r = named_entity(name, specialization, f);
+    overloaded_callee = 0;
+    return r;
 }
 
 /*
@@ -903,12 +1318,12 @@ analysis_result semantic_analysis::call_with(
                 type_kind::function)
             m.category = value_category::xvalue;
     }
-    /* [expr.const]/5.2: "an invocation of a non-constexpr function": no
-       function analysis has a declaration of is constexpr, but a pointer
-       or reference may be to one it has none of */
+    /* [expr.const]/5.2: "an invocation of a non-constexpr function"; a
+       constexpr function's invocation is the evaluator's
+       (evaluate_constant), and a pointer or reference may be to a function
+       analysis has no declaration of */
     m.evaluation = constness::unknown;
-    if (member ||
-        (f.entity && entity_table[f.entity].kind == entity_kind::function))
+    if (called && !entity_table[called].constexpr_)
         m.evaluation = constness::not_constant;
     /* a constexpr member function's invocation is the evaluator's */
     if (called && entity_table[called].constexpr_) {

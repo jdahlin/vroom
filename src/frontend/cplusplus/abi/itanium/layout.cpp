@@ -314,6 +314,33 @@ const char *class_layout::initialization()
 }
 
 /*
+ * [impl.clang] where a derived class's data continues after a non-empty
+ * base: its data size, or past an empty base of it moved beyond its data
+ * (a conflict), as clang's NonVirtualSize (ItaniumRecordLayoutBuilder::
+ * LayoutBase), which the ABI's dsize does not count.  A base with virtual
+ * bases takes its nvsize, its virtual bases being the most derived
+ * class's ([abi:class-types] III).
+ */
+static uint64_t nonvirtual_size(semantic_analysis &analysis, entity_index of)
+{
+    const entities &table = analysis.entity_table;
+    const entity &d = table[of];
+    uint64_t end = d.virtual_base_count ? d.nv_size : d.data_size;
+    for (uint32_t i = 0; i < d.base_count; i++) {
+        const entity &b = table[analysis.class_bases[d.first_base + i]];
+        if (b.virtual_base)
+            continue;
+        entity_index bc = class_of_component(analysis, b);
+        uint64_t to = b.offset + table[bc].size;
+        if (!empty_class(analysis, bc))
+            to = b.offset + nonvirtual_size(analysis, bc);
+        if (to > end)
+            end = to;
+    }
+    return end;
+}
+
+/*
  * [abi:class-types] II, a base class D: an empty one at offset 0, any
  * other at dsize(C) rounded up to nvalign(D), taking its data size (its
  * size for a POD for the purpose of layout, [abi:pod]).  When D conflicts
@@ -327,11 +354,9 @@ const char *class_layout::base(entity &b)
 {
     entity_index of = class_of_component(analysis, b);
     const entity &d = table[of];
-    uint64_t base_alignment = d.alignment, base_data = d.data_size;
-    if (d.virtual_base_count) {
+    uint64_t base_alignment = d.alignment;
+    if (d.virtual_base_count)
         base_alignment = d.nv_alignment;
-        base_data = d.nv_size;
-    }
     raise_alignment(base_alignment);
     bool empty = empty_class(analysis, of);
     uint64_t at = 0;
@@ -348,7 +373,7 @@ const char *class_layout::base(entity &b)
     if (empty) {
         raise_size(at + d.size);
     } else {
-        data_bits = (at + base_data) * 8;
+        data_bits = (at + nonvirtual_size(analysis, of)) * 8;
         raise_size(data_size());
     }
     if (too_many)

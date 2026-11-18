@@ -208,6 +208,27 @@ preprocessing_token source_files::next(entry &e, bool header_name_permitted)
     return t;
 }
 
+void source_files::mark_system_header(source_location location, bool system)
+{
+    system_marker m;
+    m.from = location;
+    m.system = system;
+    system_markers.append(m);
+}
+
+bool source_files::in_system_header(source_location location) const
+{
+    const entry *e = find(location);
+    if (!e)
+        return false;
+    /* the last line marker before location in its file */
+    for (size_t i = system_markers.size(); i-- > 0;)
+        if (system_markers[i].from <= location &&
+            system_markers[i].from >= e->base)
+            return system_markers[i].system;
+    return e->system_header;
+}
+
 const source_files::entry *source_files::find(source_location location) const
 {
     size_t lo = 0, hi = files.size();

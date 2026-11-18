@@ -163,41 +163,10 @@ analysis_result semantic_analysis::assignment(node_index n,
            once. ... For += and -=, E1 shall either have arithmetic type or
            be a pointer to a possibly cv-qualified completely-defined object
            type.  In all other cases, E1 shall have arithmetic type." */
-        preprocessing_op_or_punc arithmetic_op;
-        switch (op) {
-        case preprocessing_op_or_punc::PLUS_EQUAL:
-            arithmetic_op = preprocessing_op_or_punc::PLUS;
-            break;
-        case preprocessing_op_or_punc::MINUS_EQUAL:
-            arithmetic_op = preprocessing_op_or_punc::MINUS;
-            break;
-        case preprocessing_op_or_punc::STAR_EQUAL:
-            arithmetic_op = preprocessing_op_or_punc::STAR;
-            break;
-        case preprocessing_op_or_punc::SLASH_EQUAL:
-            arithmetic_op = preprocessing_op_or_punc::SLASH;
-            break;
-        case preprocessing_op_or_punc::PERCENT_EQUAL:
-            arithmetic_op = preprocessing_op_or_punc::PERCENT;
-            break;
-        case preprocessing_op_or_punc::LESS_LESS_EQUAL:
-            arithmetic_op = preprocessing_op_or_punc::LESS_LESS;
-            break;
-        case preprocessing_op_or_punc::GREATER_GREATER_EQUAL:
-            arithmetic_op = preprocessing_op_or_punc::GREATER_GREATER;
-            break;
-        case preprocessing_op_or_punc::AMPERSAND_EQUAL:
-            arithmetic_op = preprocessing_op_or_punc::AMPERSAND;
-            break;
-        case preprocessing_op_or_punc::CARET_EQUAL:
-            arithmetic_op = preprocessing_op_or_punc::CARET;
-            break;
-        case preprocessing_op_or_punc::BAR_EQUAL:
-            arithmetic_op = preprocessing_op_or_punc::BAR;
-            break;
-        default:
+        preprocessing_op_or_punc arithmetic_op =
+            compound_assignment_operator(op);
+        if (arithmetic_op == preprocessing_op_or_punc::count)
             return not_supported(n, "expr.ass");
-        }
         bool additive = arithmetic_op == preprocessing_op_or_punc::PLUS ||
                         arithmetic_op == preprocessing_op_or_punc::MINUS;
         /* [expr.ass]/6: "E1 shall have arithmetic type": an enumeration

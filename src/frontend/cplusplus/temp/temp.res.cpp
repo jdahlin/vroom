@@ -15,6 +15,7 @@
  * (decl_specifier_facts::implicit_typename, parser::type_id_only).
  */
 #include "../cplusplus-internal.h"
+#include "frontend/cplusplus/sema.h"
 
 namespace cplusplus
 {
@@ -68,6 +69,85 @@ node_index parser::typename_specifier()
        as what follows is concerned */
     names.dependent_found++;
     return finish_node(syntax_kind::typename_specifier, mark, first);
+}
+
+/*
+ * [temp.res]/3: "A typename-specifier denotes the type or class template
+ * denoted by the simple-type-specifier ([dcl.type.simple]) formed by
+ * omitting the keyword typename.  The usual qualified name lookup
+ * ([basic.lookup.qual]) is used to find the qualified-id even in the
+ * presence of typename."  With a dependent nested-name-specifier the name
+ * is a member of an unknown specialization ([temp.dep.type]/6), a
+ * dependent type (/9), known per specialization, where the declaration is
+ * analysed again with the template-parameters' names bound to the
+ * arguments.  Otherwise the name found shall be a type (clang rejects one
+ * that is not, at the instantiation; analysis says not supported).
+ */
+analysis_result semantic_analysis::typename_type(node_index n, type_index &type,
+                                                 uint32_t &cv)
+{
+    const syntax_node &node = tree[n];
+    const syntax_child *parts = tree.children(n);
+    type = 0;
+    cv = 0;
+    if (node.child_count != 3 ||
+        !syntax_is(tree, parts[1], syntax_kind::nested_name_specifier))
+        return not_supported(n, "temp.res");
+    /* (not yet: typename nested-name-specifier template_opt
+       simple-template-id) */
+    if (!parts[2].is_token() ||
+        tokens[parts[2].index()].kind != token_kind::identifier)
+        return not_supported(n, "temp.res");
+    token_index t = parts[2].index();
+    uint32_t name = tokens.identifier(t);
+    nominated_scope scope;
+    analysis_result r = nested_name_specifier(parts[1].index(), scope, true);
+    if (r != analysis_result::well_formed)
+        return r;
+    if (scope.dependent) {
+        type = dependent_member_type(scope.dependent, name);
+        return analysis_result::well_formed;
+    }
+    lookup_result found =
+        lookup_qualified(scope.entity, name, lookup_filter::any);
+    if (found.ambiguous)
+        return ill_formed_at_token(t,
+                                   "the use of a name is ill-formed if it "
+                                   "does not allow a unique declaration to "
+                                   "be chosen from those found in the "
+                                   "namespaces",
+                                   "namespace.qual");
+    entity_index e = found.entity;
+    if (!e && !found.unknown && substituting && scope.entity &&
+        entity_table[scope.entity].kind == entity_kind::class_type &&
+        entity_table[scope.entity].defined &&
+        !entity_table[scope.entity].unknown_names)
+        /* [temp.deduct]/11: "Attempting to use a type in a
+           nested-name-specifier of a qualified-id when that type does not
+           contain the specified member" (a deduction failure) */
+        return ill_formed_at_token(t,
+                                   "the name shall represent one or more "
+                                   "members of that class or of one of its "
+                                   "base classes",
+                                   "class.qual");
+    return named_member_type(n, t, e, "temp.res", type, cv);
+}
+
+/* [temp.dep.type]/9: typename Q::name for a dependent Q; [temp.over.link]
+   compares declarations by their types, so the same Q and name give the
+   same type */
+type_index semantic_analysis::dependent_member_type(type_index qualifier,
+                                                    uint32_t name)
+{
+    for (entity_index e : dependent_members)
+        if (entity_table[e].value == qualifier && entity_table[e].name == name)
+            return entity_table[e].type.unqualified();
+    entity_index e = entity_table.make(entity_kind::dependent_member, name, 0);
+    entity_table[e].value = qualifier;
+    entity_table[e].type = qualified_type::make(
+        type_table.of_entity(type_kind::dependent, e), cv_none);
+    dependent_members.append(e);
+    return entity_table[e].type.unqualified();
 }
 
 } // namespace cplusplus

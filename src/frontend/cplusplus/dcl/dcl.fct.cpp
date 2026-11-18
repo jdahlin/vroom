@@ -266,6 +266,7 @@ semantic_analysis::parameter_declaration(node_index n, qualified_type &type,
         return not_supported(n, "ext.gnu");
     type = s.type;
     unnamed = true;
+    declared_pack = 0;
     /* [dcl.fct.default]/1: "If an initializer-clause is specified in a
        parameter-declaration this initializer-clause is used as a default
        argument" (default_arguments analyses it) */
@@ -283,7 +284,10 @@ semantic_analysis::parameter_declaration(node_index n, qualified_type &type,
     if (declarator_count > 2)
         return not_supported(n, "dcl.fct");
     declarator_meaning m;
+    pack_declarator = true;
     r = declarator(n, children[1], type, m);
+    pack_declarator = false;
+    declared_pack = m.pack;
     unnamed = !m.has_id;
     if (m.has_id)
         id = m.id;
@@ -348,9 +352,14 @@ analysis_result semantic_analysis::function(node_index parameters,
                 cv |= cv_volatile;
                 continue;
             }
-            /* a ref-qualifier, a noexcept-specifier, attributes, a
-               cv-qualifier-seq of a type that is not a member
-               function's */
+            /* [except.spec]/2: "In a noexcept-specifier, the
+               constant-expression, if supplied, shall be a contextually
+               converted constant expression of type bool": the exception
+               specification is not in the function type analysis keeps */
+            if (syntax_is(tree, c, syntax_kind::noexcept_specifier))
+                return not_supported(parameters, "except.spec");
+            /* a ref-qualifier, attributes, a cv-qualifier-seq of a type
+               that is not a member function's */
             return not_supported(parameters, "dcl.fct");
         }
     }
@@ -387,15 +396,79 @@ analysis_result semantic_analysis::function(node_index parameters,
     }
     owned_array<qualified_type> list;
     owned_array<parameter_meaning> named;
+    uint32_t empty_pack = 0;
     for (size_t k = 0; k < declarations.size(); k++) {
         qualified_type t;
         bool unnamed = true;
         token_index id = 0;
         syntax_child default_argument;
-        analysis_result r = parameter_declaration(declarations[k], t, unnamed,
-                                                  id, default_argument);
+        /* [temp.variadic]/5: a function parameter pack of an
+           instantiation, whose type names a pack: one parameter per
+           element */
+        uint32_t elements = 0;
+        token_index ellipsis = 0;
+        analysis_result r = parameter_pack_expansion(
+            declarations[k], k + 1 == declarations.size() && !variadic,
+            elements, ellipsis);
         if (r != analysis_result::well_formed)
             return r;
+        if (ellipsis) {
+            uint32_t pack_name = 0;
+            if (tokens[ellipsis + 1].kind == token_kind::identifier)
+                pack_name = tokens.identifier(ellipsis + 1);
+            bool saved = expanding;
+            uint32_t saved_element = expansion_element;
+            for (uint32_t e = 0; e < elements; e++) {
+                expanding = true;
+                expansion_element = e;
+                r = parameter_declaration(declarations[k], t, unnamed, id,
+                                          default_argument);
+                expanding = saved;
+                expansion_element = saved_element;
+                if (r != analysis_result::well_formed)
+                    return r;
+                if (declared_pack != ellipsis || default_argument.index() ||
+                    depends_on_template_parameter(t))
+                    return not_supported(declarations[k], "temp.variadic");
+                const struct type &element = type_table[t.unqualified()];
+                if ((element.kind == type_kind::fundamental &&
+                     element.fundamental == fundamental_type::void_))
+                    return not_supported(declarations[k], "temp.variadic");
+                if (element.kind == type_kind::array)
+                    t = qualified_type::make(
+                        type_table.pointer_to(element.operand), cv_none);
+                else if (element.kind == type_kind::function)
+                    t = qualified_type::make(type_table.pointer_to(t), cv_none);
+                list.append(qualified_type::make(t.unqualified(), cv_none));
+                parameter_meaning parameter;
+                parameter.type = t;
+                parameter.declaration = declarations[k];
+                parameter.pack_name = pack_name;
+                named.append(parameter);
+            }
+            /* an empty pack's name: the pack of no parameters */
+            if (!elements)
+                empty_pack = pack_name;
+            continue;
+        }
+        r = parameter_declaration(declarations[k], t, unnamed, id,
+                                  default_argument);
+        if (r != analysis_result::well_formed)
+            return r;
+        if (declared_pack) {
+            /* [temp.variadic]/5: a template's own function parameter
+               pack, of a type that names a template parameter pack
+               (function_template_definition checks which), the last
+               parameter; [dcl.fct]/22's T... of a type that names none is
+               the clause's ellipsis, not analysed */
+            if (k + 1 != declarations.size() || variadic ||
+                default_argument.index() || !depends_on_template_parameter(t))
+                return not_supported(declarations[k], "temp.variadic");
+            t = qualified_type::make(
+                type_table.pack_expansion_of(
+                    qualified_type::make(t.unqualified(), cv_none)),
+                cv_none);
+        }
         const struct type &record = type_table[t.unqualified()];
         bool is_void = record.kind == type_kind::fundamental &&
                        record.fundamental == fundamental_type::void_;
@@ -440,6 +513,7 @@ analysis_result semantic_analysis::function(node_index parameters,
     function_parameters.clear();
     for (const parameter_meaning &parameter : named)
         function_parameters.append(parameter);
+    function_empty_pack = empty_pack;
     function_cv = cv;
     if (abstract_class(type))
         /* a return type of abstract class type: as a parameter's */

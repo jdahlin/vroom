@@ -208,6 +208,12 @@ analysis_result semantic_analysis::class_definition(node_index n,
     if (!unnamed && head_children[1].is_token() &&
         tokens[head_children[1].index()].kind == token_kind::identifier) {
         head_name = head_children[1].index();
+    } else if (!unnamed && class_instantiating &&
+               syntax_is(tree, head_children[1],
+                         syntax_kind::simple_template_id)) {
+        /* a partial or explicit specialization's definition, instantiated
+           (instantiate_class): the template's name */
+        head_name = tree.children(head_children[1].index())[0].index();
     } else if (!unnamed && syntax_is(tree, head_children[1],
                                      syntax_kind::class_head_name)) {
         node_index hn = head_children[1].index();
@@ -217,8 +223,12 @@ analysis_result semantic_analysis::class_definition(node_index n,
                        syntax_kind::nested_name_specifier) ||
             !name_parts[1].is_token() ||
             tokens[name_parts[1].index()].kind != token_kind::identifier)
-            /* a simple-template-id */
-            return not_supported(n, "class.pre");
+            /* a simple-template-id: an explicit or partial
+               specialization's class-head ([temp.spec]/4: "A
+               specialization is a class, variable, function, or class
+               member that is either instantiated ... from a templated entity
+               or is an explicit specialization") */
+            return not_supported(n, "temp.spec");
         head_qualifier = name_parts[0].index();
         head_name = name_parts[1].index();
     } else if (!unnamed) {
@@ -315,12 +325,56 @@ analysis_result semantic_analysis::class_definition(node_index n,
             scope = found.found_in;
         }
     }
+    /* a class template's specialization (instantiate_class): a class of
+       the template's scope that no name binds there */
+    uint32_t specialization = class_instantiating;
+    class_instantiating = 0;
     if (has_bases && !is_namespace(scope))
         return not_supported(n, inner_class_rule(scope));
     token_index id = head_children[0].index();
     uint32_t name = 0;
     entity_index c = 0;
-    if (!unnamed) {
+    if (specialization) {
+        if (unnamed || head_qualifier || outer)
+            return not_supported(n, "temp.class");
+        id = head_name;
+        name = tokens.identifier(id);
+        /* (one named before its template was defined is the incomplete
+           class made then) */
+        c = instantiations[specialization - 1].specialization;
+        if (!c)
+            c = entity_table.make(entity_kind::class_type, name, scope);
+        entity_table[c].linkage_of_name = linkage::external;
+        if (within_unnamed_namespace(scope))
+            entity_table[c].linkage_of_name = linkage::internal;
+        entity_table[c].type = qualified_type::make(
+            type_table.of_entity(type_kind::class_type, c), cv_none);
+        entity_table[c].instantiation = specialization;
+        instantiation_record &record = instantiations[specialization - 1];
+        record.specialization = c;
+        /* [class.pre]/2: "The class-name is also bound in the scope of the
+           class (template) itself; this is known as the
+           injected-class-name."  The template-parameters' names with it,
+           each its argument ([temp.arg.type]) */
+        entity_table.bind(c, name, c);
+        const function_template &ft = function_templates
+            [entity_table[record.template_entity].instantiation - 1];
+        if (record.pattern) {
+            /* a partial specialization's parameters, each the argument
+               matching deduced */
+            const function_template &ps =
+                function_templates[record.pattern - 1];
+            for (uint32_t i = 0; i < ps.parameter_count; i++)
+                bind_template_argument(
+                    c, template_parameter_entities[ps.first_parameter + i],
+                    template_arguments[record.first_deduced + i]);
+        } else {
+            for (uint32_t i = 0; i < ft.parameter_count; i++)
+                bind_template_argument(
+                    c, template_parameter_entities[ft.first_parameter + i],
+                    template_arguments[record.first_argument + i]);
+        }
+    } else if (!unnamed) {
         id = head_name;
         name = tokens.identifier(id);
         c = entity_table.find(scope, name);
@@ -350,7 +404,8 @@ analysis_result semantic_analysis::class_definition(node_index n,
         c = entity_table[c].hidden_type;
     }
     bool redeclared = false;
-    if (unnamed) {
+    if (specialization) {
+    } else if (unnamed) {
         /* [basic.link]/4: an unnamed class has no linkage until a typedef
            names it for linkage purposes (declare) */
         c = entity_table.make(entity_kind::class_type, 0, scope);
@@ -1583,7 +1638,16 @@ analysis_result semantic_analysis::member_bit_field(entity_index c,
     if (r != analysis_result::well_formed)
         return r;
     promote_enumeration(w);
-    if (!is_integral(w.type) || w.evaluation != constness::constant)
+    if (!is_integral(w.type))
+        return not_supported(declaration, "class.bit");
+    /* [class.bit]/1: "The constant-expression shall be an integral
+       constant expression with a value greater than or equal to zero and
+       is called the width of the bit-field." */
+    bool constant_width = false;
+    r = integral_constant_expression(declaration, w, constant_width);
+    if (r != analysis_result::well_formed)
+        return r;
+    if (!constant_width)
         return not_supported(declaration, "class.bit");
     __int128 width_value =
         integer_value(tokens.files.behavior, fundamental_of(w.type), w.value);
@@ -1664,7 +1728,10 @@ analysis_result semantic_analysis::member_function_definition(
         declarator_meaning m;
         function_cv = 0;
         in_member_declarator = true;
+        entity_index saved_class = defining_class;
+        defining_class = c;
         analysis_result r = declarator(definition, children[at], type, m);
+        defining_class = saved_class;
         in_member_declarator = false;
         if (r != analysis_result::well_formed)
             return r;
@@ -1681,19 +1748,25 @@ analysis_result semantic_analysis::member_function_definition(
             return not_supported(definition, "class.ctor");
         return special_member_body(definition, children[at + 1]);
     }
+    /* [basic.scope.class]: the declarator's names are looked up in the
+       class, as when its declaration was analysed (a class template's
+       parameters are bound there) */
+    entity_index saved_class = defining_class;
+    defining_class = c;
     specified s;
     bool outer_virtual_allowed = virtual_allowed;
     virtual_allowed = true;
     analysis_result r = decl_specifier_seq(children[0].index(), s, false);
     virtual_allowed = outer_virtual_allowed;
-    if (r != analysis_result::well_formed)
-        return r;
     qualified_type type = s.type;
     declarator_meaning m;
-    function_cv = 0;
-    in_member_declarator = true;
-    r = declarator(definition, children[1], type, m);
-    in_member_declarator = false;
+    if (r == analysis_result::well_formed) {
+        function_cv = 0;
+        in_member_declarator = true;
+        r = declarator(definition, children[1], type, m);
+        in_member_declarator = false;
+    }
+    defining_class = saved_class;
     if (r != analysis_result::well_formed)
         return r;
     /* the function of the name this definition declared (one of an

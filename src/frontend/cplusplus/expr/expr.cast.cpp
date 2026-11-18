@@ -136,6 +136,23 @@ analysis_result semantic_analysis::explicit_conversion(node_index at,
                 return not_supported(at, "expr.cast");
             return ill_formed(at, cast_rule, "expr.cast");
         }
+        /* [conv.fpint]/1: "The conversion truncates; that is, the
+           fractional part is discarded.  The behavior is undefined if the
+           truncated value cannot be represented in the destination type."
+           bool is an integer type here, not [conv.bool]'s: 0.5 is false,
+           2.5 has no value (clang 23; CWG1094 changes it later) */
+        if (entity_table[e].underlying == fundamental_type::bool_ &&
+            is_floating(m.type)) {
+            convert_arithmetic(m, fundamental_type::long_long_int);
+            if (m.evaluation == constness::constant && m.value > 1)
+                m.evaluation = constness::not_constant;
+            convert_arithmetic(m, fundamental_type::bool_);
+            /* in the tree as [conv.integral]'s, not [conv.bool]'s: the
+               evaluator gives a value other than 0 or 1 none */
+            if (m.node)
+                semantics[m.node].op =
+                    static_cast<uint8_t>(conversion_kind::integral);
+        }
         convert_arithmetic(m, entity_table[e].underlying);
         m.type = qualified_type::make(to.unqualified(), cv_none);
         converted(m, conversion_kind::integral);

@@ -538,7 +538,9 @@ analysis_result semantic_analysis::id_expression(token_index t,
     if (!e && !found.unknown)
         e = library_builtin(name);
     if (!e)
-        return not_supported(current_declaration, "basic.lookup.unqual");
+        return not_supported(current_declaration,
+                             unknown_name_subclause(found.unknown_entity,
+                                                    "basic.lookup.unqual"));
     return named_entity(t, e, m);
 }
 
@@ -546,7 +548,8 @@ analysis_result semantic_analysis::named_entity(token_index t, entity_index e,
                                                 expression_meaning &m)
 {
     if (entity_table[e].kind == entity_kind::none)
-        return not_supported(current_declaration, "basic.lookup.unqual");
+        return not_supported(current_declaration,
+                             unknown_name_subclause(e, "basic.lookup.unqual"));
     /* [over.over]: the function target_expression chose for the name */
     bool chosen = t && t == overload_target_token;
     if (chosen)

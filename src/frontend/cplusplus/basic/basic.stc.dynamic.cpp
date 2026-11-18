@@ -173,6 +173,15 @@ semantic_analysis::allocation_function_declaration(node_index n, entity_index f)
                               "the return type of an allocation function "
                               "shall be void*",
                               subclause);
+        /* a first parameter of class type: C++26's type-aware allocation
+           functions (std::type_identity<T>, P2719), which C++20 has no
+           rules for */
+        if (function.parameter_count &&
+            (type_table[parameters[0].unqualified()].kind ==
+                 type_kind::class_type ||
+             type_table[parameters[0].unqualified()].kind ==
+                 type_kind::dependent))
+            return not_supported(n, subclause);
         if (!function.parameter_count || !(parameters[0] == size))
             return ill_formed(n,
                               "the first parameter of an allocation function "

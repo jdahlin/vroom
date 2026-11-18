@@ -241,8 +241,12 @@ analysis_result semantic_analysis::base_clause(entity_index c, node_index n,
         token_index id = 0;
         entity_index base = 0;
         if (!name.is_token() &&
-            !syntax_is(tree, name, syntax_kind::class_or_decltype))
+            !syntax_is(tree, name, syntax_kind::class_or_decltype)) {
+            /* [temp.names]: a base named by a simple-template-id */
+            if (syntax_is(tree, name, syntax_kind::simple_template_id))
+                return not_supported(n, "temp.names");
             return not_supported(n, "class.derived");
+        }
         {
             size_t before = unsupported.size();
             analysis_result named = named_class(name, n, base, id);
@@ -274,6 +278,7 @@ analysis_result semantic_analysis::base_clause(entity_index c, node_index n,
         entity_table[e].type = entity_table[base].type;
         entity_table[e].nonstatic_member = true;
         entity_table[e].base_subobject = true;
+        entity_table[e].dependent_base = dependent_base_specifier(c, name);
         entity_table[e].defined = true;
         entity_table[e].access = access;
         entity_table[e].virtual_base = is_virtual;
@@ -416,6 +421,77 @@ uint32_t semantic_analysis::base_subobjects(entity_index c,
         count += nonvirtual_subobjects(v, base);
     }
     return count;
+}
+
+/*
+ * [temp.dep]/3: "In the definition of a class or class template, the scope
+ * of a dependent base class is not examined during unqualified name lookup
+ * either at the point of definition of the class template or member or
+ * during an instantiation of the class template or member."  Analysis
+ * looks up names in a specialization's class, made from the template's
+ * class-specifier; the specialization's base subobjects whose
+ * base-specifier depends on a template-parameter are marked
+ * (entity::dependent_base).  Class c's scope is passed over when the name
+ * is found in such a base and in nothing else of c's; unknown when a
+ * dependent base and c itself or another base may both have it.
+ */
+bool semantic_analysis::dependent_base_specifier(entity_index c,
+                                                 syntax_child name) const
+{
+    if (!entity_table[c].instantiation)
+        return false;
+    token_index first = name.index(), end = name.index() + 1;
+    if (!name.is_token()) {
+        first = tree[name.index()].first_token;
+        end = tree[name.index()].end_token;
+    }
+    for (token_index t = first; t < end; t++) {
+        if (tokens[t].kind != token_kind::identifier)
+            continue;
+        /* (a name after :: is a member's, not the parameter's) */
+        if (t > first &&
+            tokens[t - 1].kind == token_kind::operator_or_punctuator &&
+            preprocessing_op_or_punc_primary(tokens[t - 1].op_or_punc) ==
+                preprocessing_op_or_punc::COLON_COLON)
+            continue;
+        /* the class's own names before its members: the
+           injected-class-name and the template-parameters' */
+        entity_index e = entity_table.find(c, tokens.identifier(t));
+        if (e && e != c)
+            return true;
+    }
+    return false;
+}
+
+bool semantic_analysis::in_dependent_base_only(entity_index c, uint32_t name,
+                                               bool &unknown) const
+{
+    unknown = false;
+    const entity x = entity_table[c];
+    bool dependent = false;
+    for (uint32_t k = 0; k < x.base_count; k++)
+        if (entity_table[class_bases[x.first_base + k]].dependent_base)
+            dependent = true;
+    if (!dependent || entity_table.find(c, name))
+        return false;
+    bool in_dependent = false, in_other = false;
+    for (uint32_t k = 0; k < x.base_count; k++) {
+        const entity &b = entity_table[class_bases[x.first_base + k]];
+        entity_index of = type_table[b.type.unqualified()].entity;
+        bool ambiguous = false;
+        entity_index e = class_member_lookup(of, name, ambiguous);
+        if (!e && !ambiguous)
+            continue;
+        if (b.dependent_base)
+            in_dependent = true;
+        else
+            in_other = true;
+    }
+    if (in_dependent && in_other) {
+        unknown = true;
+        return false;
+    }
+    return in_dependent;
 }
 
 /*

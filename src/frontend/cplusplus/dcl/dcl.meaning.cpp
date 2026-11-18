@@ -230,15 +230,11 @@ analysis_result semantic_analysis::array(node_index at,
                           "dcl.array");
     /* a bound that is not a constant expression: a variable length array
        (C99's, clang's extension), or one clang folds */
-    if (m.evaluation != constness::constant)
-        return not_supported(at, "expr.const");
-    /* [expr.const]/1 of C++03: "An integral constant-expression can involve
-       only literals, enumerators, const variables or static data members of
-       integral or enumeration types initialized with constant expressions
-       ... Floating literals can appear only if they are cast to integral or
-       enumeration types." */
-    if (!tokens.files.behavior.has(language_feature::list_initialization) &&
-        m.beyond_integral_constant)
+    bool constant = false;
+    r = integral_constant_expression(at, m, constant);
+    if (r != analysis_result::well_formed)
+        return r;
+    if (!constant)
         return not_supported(at, "expr.const");
     const implementation_defined_behavior &b = tokens.files.behavior;
     fundamental_type f = fundamental_of(m.type);
@@ -388,6 +384,12 @@ void semantic_analysis::hold_names(node_index declaration)
            brackets and braces, which holds more names than the declaration
            declares and so only makes more declarations unsupported */
         int depth = 0;
+        auto is_punctuator_at = [&](token_index at,
+                                    preprocessing_op_or_punc op) {
+            const token &x = tokens[at];
+            return x.kind == token_kind::operator_or_punctuator &&
+                   preprocessing_op_or_punc_primary(x.op_or_punc) == op;
+        };
         auto is_scope_operator = [&](token_index at) {
             const token &x = tokens[at];
             return x.kind == token_kind::operator_or_punctuator &&
@@ -402,6 +404,49 @@ void semantic_analysis::hold_names(node_index declaration)
             bool qualified =
                 (t + 1 < node.end_token && is_scope_operator(t + 1)) ||
                 (t > node.first_token && is_scope_operator(t - 1));
+            /* a typename-specifier's simple-template-id before ::
+               (typename only_int<T>::type) names a type, never what the
+               declaration declares; its template-arguments neither */
+            if (tok.kind == token_kind::identifier && !depth && !qualified &&
+                t > node.first_token &&
+                p.keyword_of(tokens[t - 1]) == standard_keyword::typename_ &&
+                t + 1 < node.end_token &&
+                is_punctuator_at(t + 1, preprocessing_op_or_punc::LESS)) {
+                token_index close = 0;
+                int angles = 0, nested = 0;
+                for (token_index k = t + 1; k < node.end_token && !close; k++) {
+                    if (is_punctuator_at(
+                            k, preprocessing_op_or_punc::LEFT_PARENTHESIS) ||
+                        is_punctuator_at(
+                            k, preprocessing_op_or_punc::LEFT_BRACKET) ||
+                        is_punctuator_at(k,
+                                         preprocessing_op_or_punc::LEFT_BRACE))
+                        nested++;
+                    else if (is_punctuator_at(
+                                 k,
+                                 preprocessing_op_or_punc::RIGHT_PARENTHESIS) ||
+                             is_punctuator_at(
+                                 k, preprocessing_op_or_punc::RIGHT_BRACKET) ||
+                             is_punctuator_at(
+                                 k, preprocessing_op_or_punc::RIGHT_BRACE))
+                        nested--;
+                    else if (!nested && is_punctuator_at(
+                                            k, preprocessing_op_or_punc::LESS))
+                        angles++;
+                    else if (!nested &&
+                             is_punctuator_at(
+                                 k, preprocessing_op_or_punc::GREATER) &&
+                             --angles == 0)
+                        close = k;
+                    if (nested < 0)
+                        break;
+                }
+                if (close && close + 1 < node.end_token &&
+                    is_scope_operator(close + 1)) {
+                    t = close;
+                    continue;
+                }
+            }
             if (tok.kind == token_kind::identifier && !depth && !qualified)
                 ids.append(t);
             if (tok.kind != token_kind::operator_or_punctuator)
@@ -429,6 +474,8 @@ void semantic_analysis::hold_names(node_index declaration)
     }
     /* a template's declaration: its declarator-ids too, which may be in
        parentheses (template<class T> void (f)(T);) */
+    bool by_template = node.kind == syntax_kind::template_declaration ||
+                       node.kind == syntax_kind::explicit_specialization;
     for (node_index inner = declaration;
          tree[inner].kind == syntax_kind::template_declaration ||
          tree[inner].kind == syntax_kind::explicit_specialization;) {
@@ -471,16 +518,43 @@ void semantic_analysis::hold_names(node_index declaration)
             entity_table.bind(current_scope, name, e);
             continue;
         }
+        if (found &&
+            (entity_table[found].kind == entity_kind::class_type ||
+             entity_table[found].kind == entity_kind::enumeration) &&
+            declared_by(found, declaration)) {
+            /* a declarator-id never names the class or enumeration its
+               declaration's specifier defines (typedef struct S {...} S
+               __attribute__((aligned(8)))): the name is the declarator's
+               entity's, not known; the class stays the one an
+               elaborated-type-specifier would find, behind it
+               ([basic.scope.hiding]/2) */
+            entity_index e =
+                entity_table.make(entity_kind::none, name, current_scope);
+            entity_table[e].held_by_template = by_template;
+            entity_table[e].hidden_type = found;
+            entity_table.bind(current_scope, name, e);
+            continue;
+        }
         if (found) {
             /* a declaration of the name that analysis could not follow
                (an overload, a redeclaration with default arguments ...):
                what the name denotes is not known from here on */
-            if (!declared_by(found, declaration))
+            if (!declared_by(found, declaration)) {
                 entity_table[found].kind = entity_kind::none;
+                if (by_template)
+                    entity_table[found].held_by_template = true;
+                /* a function template's name declared again (an explicit
+                   specialization, an overload): its calls need more than
+                   the template */
+                for (function_template &t : function_templates)
+                    if (t.name == found)
+                        t.unusable = true;
+            }
             continue;
         }
         entity_index e =
             entity_table.make(entity_kind::none, name, current_scope);
+        entity_table[e].held_by_template = by_template;
         entity_table.bind(current_scope, name, e);
     }
 }
@@ -616,6 +690,37 @@ analysis_result semantic_analysis::declarator(node_index declaration,
                tokens[children[0].index()].kind == token_kind::identifier) {
         has_head = true;
         head = children[0];
+        i = 1;
+    } else if (node.child_count &&
+               syntax_is_punctuator(tokens, children[0],
+                                    preprocessing_op_or_punc::ELLIPSIS)) {
+        /* [dcl.fct]/21: "A declarator-id or abstract-declarator
+           containing an ellipsis shall only be used in a
+           parameter-declaration.  When it is part of a
+           parameter-declaration-clause, the parameter-declaration declares
+           a function parameter pack" */
+        if (!pack_declarator || m.pack)
+            return not_supported(n, "temp.variadic");
+        m.pack = children[0].index();
+        i = 1;
+        if (node.child_count >= 2 && children[1].is_token() &&
+            tokens[children[1].index()].kind == token_kind::identifier) {
+            has_head = true;
+            head = children[1];
+            i = 2;
+        }
+    } else if (declarator_template_id && node.child_count &&
+               syntax_is(tree, children[0], syntax_kind::simple_template_id) &&
+               tree[children[0].index()].child_count >= 3 &&
+               tree.children(children[0].index())[0].is_token() &&
+               tokens[tree.children(children[0].index())[0].index()].kind ==
+                   token_kind::identifier) {
+        /* [temp.expl.spec]/1, [temp.explicit]/3: a specialization's
+           template-id (its template-name the declarator-id's name) */
+        m.template_id = children[0].index();
+        declarator_template_id = false;
+        has_head = true;
+        head = tree.children(children[0].index())[0];
         i = 1;
     } else if (node.child_count &&
                (syntax_is(tree, children[0],

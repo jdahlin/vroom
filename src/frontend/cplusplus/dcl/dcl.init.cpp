@@ -152,6 +152,7 @@ node_index parser::initializer_list(bool in_braces)
     token_index first = position;
     unsigned count = 0;
     node_index n = 0;
+    bool expansion = false;
     for (;;) {
         /* [ext.clang] C99's designators in C++: an initializer-list that
            mixes clauses with designators, the array designator [n] = (a
@@ -165,8 +166,10 @@ node_index parser::initializer_list(bool in_braces)
         n = initializer_clause();
         if (failed())
             return 0;
-        if (at(preprocessing_op_or_punc::ELLIPSIS))
-            return beyond_this_step();
+        /* [temp.variadic]/5: a pack expansion, the ... the list's child
+           after its clause */
+        if (accept(preprocessing_op_or_punc::ELLIPSIS))
+            expansion = true;
         count++;
         if (!at(preprocessing_op_or_punc::COMMA))
             break;
@@ -174,7 +177,7 @@ node_index parser::initializer_list(bool in_braces)
             break;
         add_token();
     }
-    if (count < 2)
+    if (count < 2 && !expansion)
         return n;
     return finish_node(syntax_kind::initializer_list, mark, first);
 }
@@ -918,6 +921,8 @@ analysis_result semantic_analysis::initializer(syntax_child init,
         if (node.child_count != 3)
             return not_supported(n, "dcl.init");
         if (syntax_is(tree, children[1], syntax_kind::initializer_list)) {
+            if (has_pack_expansion(children[1]))
+                return not_supported(n, "temp.variadic");
             const struct type target = type_table[type.unqualified()];
             if (target.kind == type_kind::array)
                 return not_supported(n, "dcl.init");

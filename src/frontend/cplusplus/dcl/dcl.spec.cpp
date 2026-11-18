@@ -1010,7 +1010,9 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
             syntax_is(tree, c, syntax_kind::elaborated_type_specifier) ||
             syntax_is(tree, c, syntax_kind::enum_specifier) ||
             syntax_is(tree, c, syntax_kind::elaborated_enum_specifier) ||
-            syntax_is(tree, c, syntax_kind::simple_type_specifier))
+            syntax_is(tree, c, syntax_kind::simple_type_specifier) ||
+            syntax_is(tree, c, syntax_kind::typename_specifier) ||
+            syntax_is(tree, c, syntax_kind::simple_template_id))
             continue;
         /* an attribute specifier has rules unless a class-specifier is
            among the specifiers */
@@ -1049,6 +1051,16 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
                 break;
             }
         }
+        /* [dcl.align]/2: "the constant-expression shall be an integral
+           constant expression" */
+        bool alignment = syntax_is(tree, c, syntax_kind::alignment_specifier);
+        if (syntax_is(tree, c, syntax_kind::attribute_specifier_seq))
+            for (uint32_t k = 0; k < tree[c.index()].child_count; k++)
+                if (syntax_is(tree, tree.children(c.index())[k],
+                              syntax_kind::alignment_specifier))
+                    alignment = true;
+        if (alignment)
+            return not_supported(c.index(), "dcl.align");
         return not_supported(c.index());
     }
     for (uint32_t i = 0; i < node.child_count; i++) {
@@ -1068,9 +1080,15 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
             } else if (syntax_is(tree, c,
                                  syntax_kind::elaborated_enum_specifier))
                 r = elaborated_enum_specifier(c.index(), class_type);
+            else if (syntax_is(tree, c, syntax_kind::simple_template_id))
+                r = template_type(c.index(), 0, false, class_type);
             else if (syntax_is(tree, c, syntax_kind::simple_type_specifier)) {
                 uint32_t named_cv = 0;
                 r = qualified_type_name(c.index(), class_type, named_cv);
+                cv |= named_cv;
+            } else if (syntax_is(tree, c, syntax_kind::typename_specifier)) {
+                uint32_t named_cv = 0;
+                r = typename_type(c.index(), class_type, named_cv);
                 cv |= named_cv;
             } else if (syntax_is(tree, c,
                                  syntax_kind::gnu_attribute_specifier)) {
@@ -1090,7 +1108,8 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
                 k.alone++;
             named = class_type;
             named_at = tree[c.index()].first_token;
-            if (!syntax_is(tree, c, syntax_kind::simple_type_specifier))
+            if (!syntax_is(tree, c, syntax_kind::simple_type_specifier) &&
+                !syntax_is(tree, c, syntax_kind::typename_specifier))
                 declares_class = true;
             continue;
         }
@@ -1125,8 +1144,13 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
                 named_at = t;
                 continue;
             }
-            if (!e || entity_table[e].kind != entity_kind::typedef_name)
-                return not_supported(seq, "basic.lookup.unqual");
+            if (!e || entity_table[e].kind != entity_kind::typedef_name) {
+                entity_index unknown = e;
+                if (!unknown)
+                    unknown = found.unknown_entity;
+                return not_supported(seq, unknown_name_subclause(
+                                              unknown, "basic.lookup.unqual"));
+            }
             if (named || !k.first)
                 k.first = t;
             if (named)
@@ -1352,13 +1376,34 @@ analysis_result semantic_analysis::qualified_type_name(node_index n,
     if (node.child_count != 2 ||
         !syntax_is(tree, parts[0], syntax_kind::nested_name_specifier) ||
         !parts[1].is_token() ||
-        tokens[parts[1].index()].kind != token_kind::identifier)
+        tokens[parts[1].index()].kind != token_kind::identifier) {
+        /* [temp.names]: nested-name-specifier template_opt
+           simple-template-id */
+        if (node.child_count == 2 &&
+            syntax_is(tree, parts[0], syntax_kind::nested_name_specifier) &&
+            syntax_is(tree, parts[1], syntax_kind::simple_template_id)) {
+            nominated_scope scope;
+            analysis_result r = nested_name_specifier(parts[0].index(), scope);
+            if (r != analysis_result::well_formed)
+                return r;
+            if (!is_namespace(scope.entity))
+                return not_supported(n, "temp.names");
+            return template_type(parts[1].index(), scope.entity, true, type);
+        }
         return not_supported(n, "dcl.type.simple");
+    }
     nominated_scope scope;
-    analysis_result r = nested_name_specifier(parts[0].index(), scope);
+    analysis_result r = nested_name_specifier(parts[0].index(), scope, true);
     if (r != analysis_result::well_formed)
         return r;
     token_index t = parts[1].index();
+    if (scope.dependent) {
+        /* [temp.res]/5: a qualified name in a context the parser assumes
+           names a type (C++20's implicit typename), with a dependent
+           nested-name-specifier: typename Q::name */
+        type = dependent_member_type(scope.dependent, tokens.identifier(t));
+        return analysis_result::well_formed;
+    }
     lookup_result found = lookup_qualified(scope.entity, tokens.identifier(t),
                                            lookup_filter::types);
     if (found.ambiguous)
@@ -1369,10 +1414,23 @@ analysis_result semantic_analysis::qualified_type_name(node_index n,
                                    "namespaces",
                                    "namespace.qual");
     entity_index e = found.entity;
+    return named_member_type(n, t, e, "basic.lookup.qual", type, cv);
+}
+
+/*
+ * The entity e a qualified type-name found (t its identifier): a class,
+ * enumeration or typedef-name, accessible ([class.access]/1), as a type and
+ * its cv-qualifiers; anything else is not supported yet (cited by citation).
+ */
+analysis_result
+semantic_analysis::named_member_type(node_index n, token_index t,
+                                     entity_index e, const char *citation,
+                                     type_index &type, uint32_t &cv)
+{
     if (!e || (entity_table[e].kind != entity_kind::class_type &&
                entity_table[e].kind != entity_kind::enumeration &&
                entity_table[e].kind != entity_kind::typedef_name))
-        return not_supported(n, "basic.lookup.qual");
+        return not_supported(n, citation);
     if (entity_table[e].enclosing &&
         entity_table[entity_table[e].enclosing].kind ==
             entity_kind::class_type &&

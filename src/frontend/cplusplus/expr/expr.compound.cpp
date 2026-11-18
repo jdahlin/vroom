@@ -241,46 +241,6 @@ node_index parser::constant_expression()
 
 /* ---- semantic analysis ---------------------------------------------- */
 
-namespace
-{
-
-/* the value of a floating-point operation in type t: computed in float for
-   float, so that each operation rounds as the target's does */
-double floating_operation(fundamental_type t, preprocessing_op_or_punc op,
-                          double a, double b)
-{
-    if (t == fundamental_type::float_) {
-        float x = static_cast<float>(a), y = static_cast<float>(b), r = 0;
-        switch (op) {
-        case preprocessing_op_or_punc::PLUS:
-            r = x + y;
-            break;
-        case preprocessing_op_or_punc::MINUS:
-            r = x - y;
-            break;
-        case preprocessing_op_or_punc::STAR:
-            r = x * y;
-            break;
-        default:
-            r = x / y;
-            break;
-        }
-        return r;
-    }
-    switch (op) {
-    case preprocessing_op_or_punc::PLUS:
-        return a + b;
-    case preprocessing_op_or_punc::MINUS:
-        return a - b;
-    case preprocessing_op_or_punc::STAR:
-        return a * b;
-    default:
-        return a / b;
-    }
-}
-
-} // namespace
-
 /*
  * The operators of [expr.mul], [expr.add] (on arithmetic operands),
  * [expr.shift], [expr.bit.and], [expr.xor] and [expr.or]: the operands are
@@ -374,117 +334,9 @@ analysis_result semantic_analysis::arithmetic(node_index n,
     m.evaluation = combined_constness(left.evaluation, right.evaluation);
     if (m.evaluation != constness::constant)
         return analysis_result::well_formed;
-    if (fundamental_type_is_floating(t)) {
-        /* the rounding mode a pragma sets ([cfenv.syn], C's 7.6.1) */
-        if (t == fundamental_type::long_double ||
-            tokens.files.floating_point_pragma) {
-            m.evaluation = constness::unknown;
-            return analysis_result::well_formed;
-        }
-        double x = floating_value(left.value), y = floating_value(right.value);
-        double r = floating_operation(t, op, x, y);
-        /* [expr.pre]/4: "If during the evaluation of an expression, the
-           result is not mathematically defined or not in the range of
-           representable values for its type, the behavior is undefined." */
-        if ((op == preprocessing_op_or_punc::SLASH && y == 0) || isinf(r) ||
-            isnan(r)) {
-            m.evaluation = constness::not_constant;
-            return analysis_result::well_formed;
-        }
-        m.value = floating_kept(r);
-        return analysis_result::well_formed;
-    }
-    /* (a 128-bit operation is not evaluated here: integer_kept_exactly) */
-    if (fundamental_type_width(b, t) >= 128) {
-        m.evaluation = constness::unknown;
-        return analysis_result::well_formed;
-    }
-    bool is_signed = fundamental_type_is_signed(b, t);
-    __int128 x = integer_value(b, t, left.value);
-    __int128 y = integer_value(b, fundamental_of(right.type), right.value);
-    unsigned width = fundamental_type_width(b, t);
-    __int128 r = 0;
-    bool undefined = false;
-    switch (op) {
-    case preprocessing_op_or_punc::PLUS:
-        r = x + y;
-        break;
-    case preprocessing_op_or_punc::MINUS:
-        r = x - y;
-        break;
-    case preprocessing_op_or_punc::STAR:
-        if (is_signed)
-            r = x * y;
-        else
-            r = static_cast<__int128>(static_cast<unsigned __int128>(x) *
-                                          static_cast<unsigned __int128>(y) &
-                                      ~uint64_t(0));
-        break;
-    case preprocessing_op_or_punc::SLASH:
-    case preprocessing_op_or_punc::PERCENT:
-        /* [expr.mul]/4: "If the second operand of / or % is zero the
-           behavior is undefined. ... if the quotient a/b is representable
-           in the type of the result, (a/b)*b + a%b is equal to a; otherwise,
-           the behavior of both a/b and a%b is undefined." */
-        if (y == 0) {
-            undefined = true;
-            break;
-        }
-        if (op == preprocessing_op_or_punc::SLASH)
-            r = x / y;
-        else
-            r = x % y;
-        if (is_signed && !integer_holds(b, t, x / y))
-            undefined = true;
-        break;
-    case preprocessing_op_or_punc::AMPERSAND:
-        r = x & y;
-        break;
-    case preprocessing_op_or_punc::CARET:
-        r = x ^ y;
-        break;
-    case preprocessing_op_or_punc::BAR:
-        r = x | y;
-        break;
-    case preprocessing_op_or_punc::LESS_LESS:
-    case preprocessing_op_or_punc::GREATER_GREATER:
-        /* [expr.shift]/1: "The behavior is undefined if the right operand
-           is negative, or greater than or equal to the width of the
-           promoted left operand." */
-        if (y < 0 || y >= width) {
-            undefined = true;
-            break;
-        }
-        if (op == preprocessing_op_or_punc::GREATER_GREATER) {
-            /* [expr.shift]/3: "The value of E1 >> E2 is E1/2^E2, rounded
-               down." */
-            r = x >> static_cast<int>(y);
-            break;
-        }
-        /* [expr.shift]/2: "The value of E1 << E2 is the unique value
-           congruent to E1 x 2^E2 modulo 2^N" (C++20); before, for a signed
-           E1, "if E1 has a signed type and non-negative value, and
-           E1 x 2^E2 is representable in the corresponding unsigned type of
-           the result type, then that value, converted to the result type,
-           is the resulting value; otherwise, the behavior is undefined"
-           (C++17 [expr.shift]/2, CWG1457) */
-        r = static_cast<__int128>(static_cast<unsigned __int128>(x)
-                                  << static_cast<int>(y));
-        if (is_signed && !b.has(language_feature::modular_left_shift) &&
-            (x < 0 || (r >> width) != 0))
-            undefined = true;
-        break;
-    default:
-        return not_supported(n, "expr.compound");
-    }
-    if (!undefined && is_signed && !shift && !integer_holds(b, t, r))
-        /* signed overflow: [expr.pre]/4 */
-        undefined = true;
-    if (undefined) {
-        m.evaluation = constness::not_constant;
-        return analysis_result::well_formed;
-    }
-    m.value = integer_wrap(b, t, static_cast<unsigned __int128>(r));
+    m.evaluation = fold_binary(b, tokens.files.floating_point_pragma, op, t,
+                               fundamental_of(right.type), left.value,
+                               right.value, m.value);
     return analysis_result::well_formed;
 }
 
@@ -579,48 +431,8 @@ analysis_result semantic_analysis::comparison(node_index n,
         m.evaluation = combined_constness(left.evaluation, right.evaluation);
         if (m.evaluation != constness::constant)
             return analysis_result::well_formed;
-        if (t == fundamental_type::long_double) {
-            m.evaluation = constness::unknown;
-            return analysis_result::well_formed;
-        }
-        bool less, equal;
-        if (fundamental_type_is_floating(t)) {
-            double x = floating_value(left.value),
-                   y = floating_value(right.value);
-            less = x < y;
-            equal = x == y;
-            if (x != x || y != y) {
-                m.evaluation = constness::unknown;
-                return analysis_result::well_formed;
-            }
-        } else {
-            __int128 x = integer_value(b, t, left.value);
-            __int128 y = integer_value(b, t, right.value);
-            less = x < y;
-            equal = x == y;
-        }
-        bool result = false;
-        switch (op) {
-        case preprocessing_op_or_punc::LESS:
-            result = less;
-            break;
-        case preprocessing_op_or_punc::GREATER:
-            result = !less && !equal;
-            break;
-        case preprocessing_op_or_punc::LESS_EQUAL:
-            result = less || equal;
-            break;
-        case preprocessing_op_or_punc::GREATER_EQUAL:
-            result = !less;
-            break;
-        case preprocessing_op_or_punc::EQUAL_EQUAL:
-            result = equal;
-            break;
-        default:
-            result = !equal;
-            break;
-        }
-        m.value = result;
+        m.evaluation =
+            fold_binary(b, false, op, t, t, left.value, right.value, m.value);
         return analysis_result::well_formed;
     }
     bool pointers = is_pointer(left.type) || is_pointer(right.type);
@@ -709,6 +521,17 @@ analysis_result semantic_analysis::binary(node_index n, expression_meaning &m)
                                      right, handled, m);
     if (r != analysis_result::well_formed || handled)
         return r;
+    return builtin_binary(n, at, op, left, right, m);
+}
+
+/* the built-in operator of E1 op E2, its operands analysed */
+analysis_result semantic_analysis::builtin_binary(node_index n, token_index at,
+                                                  preprocessing_op_or_punc op,
+                                                  expression_meaning &left,
+                                                  expression_meaning &right,
+                                                  expression_meaning &m)
+{
+    analysis_result r = analysis_result::well_formed;
     if (op == preprocessing_op_or_punc::SPACESHIP)
         /* [expr.spaceship]: the built-in three-way comparison, whose
            result is of a type of <compare> */

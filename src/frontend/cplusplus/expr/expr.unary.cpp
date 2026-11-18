@@ -279,7 +279,11 @@ analysis_result semantic_analysis::size_of(node_index n, bool alignment,
            function-to-pointer standard conversions are not applied to the
            operand of sizeof." */
         expression_meaning e;
+        /* [expr.sizeof]/1: "The operand is either an expression, which is
+           an unevaluated operand ([expr.prop])" */
+        unevaluated++;
         analysis_result r = expression(children[1], e);
+        unevaluated--;
         if (r != analysis_result::well_formed)
             return r;
         /* [expr.sizeof]/1: "The sizeof operator shall not be applied to
@@ -287,8 +291,29 @@ analysis_result semantic_analysis::size_of(node_index n, bool alignment,
         if (e.bit_field_width)
             return not_supported(n, "class.bit");
         operand = e.type;
+    } else if (!alignment && node.child_count == 5 &&
+               syntax_is_punctuator(tokens, children[1],
+                                    preprocessing_op_or_punc::ELLIPSIS) &&
+               children[3].is_token() &&
+               tokens[children[3].index()].kind == token_kind::identifier) {
+        /* [expr.sizeof]/4: "The identifier in a sizeof... expression shall
+           name a pack.  The sizeof... operator yields the number of
+           elements in the pack ([temp.variadic]).  A sizeof... expression
+           is a pack expansion ([temp.variadic])."  An instantiation's pack;
+           a template's own is not analysed */
+        entity_index pack = find_pack(tokens.identifier(children[3].index()));
+        if (!pack)
+            return not_supported(n, "expr.sizeof");
+        m.type = qualified_type::make(
+            type_table.fundamental(fundamental_type::unsigned_long_int),
+            cv_none);
+        m.category = value_category::prvalue;
+        m.evaluation = constness::constant;
+        m.value = entity_table[pack].member_count;
+        m.node = expression_node(semantic_kind::constant, m, node.first_token);
+        return analysis_result::well_formed;
     } else {
-        /* sizeof...; alignof of an expression (GCC's) */
+        /* alignof of an expression (GCC's) */
         return not_supported(n, "expr.sizeof");
     }
     const struct type record = type_table[operand.unqualified()];
@@ -387,7 +412,15 @@ analysis_result semantic_analysis::increment(node_index n, syntax_child operand,
         (!is_object_pointer(m.type) ||
          !size_of_type(type_table[m.type.unqualified()].operand)))
         return not_supported(n, subclause);
-    m.evaluation = constness::not_constant;
+    /* [expr.const]/5.16: the modification of a variable whose lifetime
+       did not begin within the evaluation (the evaluator's, inside a
+       constexpr function's); another glvalue (a call's, *p) may designate
+       an object whose lifetime did (a temporary bound to a reference
+       parameter that the function returns) */
+    if (m.node && semantics[m.node].kind == semantic_kind::entity)
+        m.evaluation = constness::not_constant;
+    else if (m.evaluation != constness::not_constant)
+        m.evaluation = constness::unknown;
     m.entity = 0;
     increment_kind kind = increment_kind::pre_increment;
     if (decrement)
@@ -548,28 +581,7 @@ analysis_result semantic_analysis::unary(node_index n, expression_meaning &m)
         if (m.evaluation != constness::constant ||
             o == preprocessing_op_or_punc::PLUS)
             break;
-        if (fundamental_type_is_floating(t)) {
-            double d = floating_value(m.value);
-            m.value = floating_kept(-d);
-            break;
-        }
-        /* (a 128-bit operation is not evaluated here) */
-        if (fundamental_type_width(b, t) >= 128) {
-            m.evaluation = constness::unknown;
-            break;
-        }
-        __int128 v = integer_value(b, t, m.value);
-        if (o == preprocessing_op_or_punc::TILDE) {
-            m.value = integer_wrap(b, t, ~static_cast<unsigned __int128>(v));
-            break;
-        }
-        /* [expr.unary.op]/8: "The negative of an unsigned quantity is
-           computed by subtracting its value from 2^n"; a signed one that
-           overflows is undefined ([expr.pre]/4) */
-        if (fundamental_type_is_signed(b, t) && !integer_holds(b, t, -v))
-            m.evaluation = constness::not_constant;
-        else
-            m.value = integer_wrap(b, t, static_cast<unsigned __int128>(-v));
+        m.evaluation = fold_unary(b, o, t, m.value, m.value);
         break;
     }
     case preprocessing_op_or_punc::EXCLAMATION: {

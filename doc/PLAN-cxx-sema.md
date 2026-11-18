@@ -1177,6 +1177,691 @@ lines:
 - Instantiation recorded as 3.5 says, bodies only on use.
 - Gate: each libstdc++ header alone with no `unsupported`; instantiation and
   type claims 0 wrong; the first `libcxx/test/std` numbers.
+- Plan (2026-11-18): stubs first.  The final interfaces and files land
+  before the rules, each body answering `unsupported` with its subclause,
+  so that `sema.h` is settled once for the sessions working beside S3 and
+  S4.  Three commits, on top of S3's commit of its shared surface (`sema.h`,
+  the call node of `expr/expr.post.cpp`, `over/`); each keeps cxx-run and
+  cxx-c-suites where they are, cxx-sema's "we reject, clang accepts" at 0,
+  and moves `unsupported` only between labels.
+  1. One entry point for constant expressions (S6a).  There is none today:
+     each site reads `expression_meaning::evaluation` itself.
+     `constant_expression` and `converted_constant_expression`
+     ([expr.const]/10) in one block of `sema.h`; array bounds, case labels,
+     enumerators, bit-field widths, GNU `aligned`, constexpr variables and
+     list-initialization's narrowing go through them with no change of
+     behaviour; `static_assert` (reported as [dcl.pre] today), `alignas`,
+     `noexcept(expr)` and `if constexpr`, which are not analysed, get a
+     stub under their own subclause.
+  2. The evaluator's skeleton (S6a).  A value type in place of one
+     `uint64_t`: integer (128 bits), floating (long double through
+     `common/softfloat.h`), pointer or lvalue designator, array, class
+     object, union, reference; the integer and double cases filled, the
+     others `unsupported` [expr.const].  New files beside
+     `expr/expr.const.cpp`: the dispatch over every `semantic_kind`, a
+     store for locals and parameters, the step and depth limits of
+     [implimits] (sema has none).  `constexpr` functions declarable (the
+     rejections at `dcl.pre.cpp` and `class.pre.cpp` go, the entity is
+     marked, a call asks the evaluator); `consteval` and `constinit` stubs.
+     Lowering's `constant_initializer` takes the evaluator's value: a
+     `call` marked constant would be lowered as a call in static data
+     today.  A `constant-claims` dump kind, apart from `type-claims`' fifth
+     field.
+  3. The template skeleton (S6b).  Analysis has no template code: `temp/`
+     is the parser's, `template_entity`, `template_specialization` and
+     `pack` are unused, and a template's name is bound to
+     `entity_kind::none`, which makes every later use of it unknown.  The
+     name bound to its entity; dependent, template-parameter and
+     placeholder kinds in `type_kind`; `sema/instantiation.cpp` with 3.5's
+     record as an interface; one semantic function per subclause
+     ([temp.param], [temp.arg], [temp.names], [temp.res], [temp.dep],
+     [temp.inst], [temp.explicit], [temp.expl.spec], [temp.class.spec],
+     [temp.deduct], [temp.variadic], [temp.alias], [temp.deduct.guide],
+     [expr.prim.fold]); the reports under another subclause corrected (a
+     qualified template-id as a type is [dcl.type.simple] today, one as a
+     base [class.derived], a partial specialization's head [class.pre]);
+     stubs for `<template-args>` and `<template-param>` in the mangler.
+  After them: S6a's statements, locals, loops, non-member constexpr
+  functions, arrays and aggregates need nothing more of S3; constexpr
+  constructors, member functions and `this` wait for S4; S6b's rules for
+  S3 and S5.  3.3 is not implemented (analysis runs after the whole
+  translation unit is parsed, and bodies are parsed in full with the
+  parser's guesses about dependent names): the skeleton keeps that and
+  analyses a template's parsed body again per instantiation; analysis per
+  declaration is a change of its own, as S2's status says.
+- Status (2026-11-18): commit 1 done, on S3's 1fad9cdb.
+  `constant_expression` ([expr.const]/11), `integral_constant_expression`
+  (/8, with C++03's narrower rule), `converted_constant_expression` and
+  `bool_constant_expression` (/10) in `expr/expr.const.cpp`; array bounds,
+  case labels, enumerators, bit-field widths and GNU `aligned` ask them
+  (a constexpr variable's initializer is an `initialized_value`, not an
+  expression: commit 2 moves it).  A noexcept-specifier is reported as
+  [except.spec] and an alignment-specifier among the decl-specifiers as
+  [dcl.align] (a leading one is still [dcl.attr]); `if constexpr` already
+  was [stmt.if].  `static_assert_declaration` exists and answers
+  [expr.const]: with [dcl.pre]/6 enforced cxx-sema had 11 declarations we
+  reject and clang accepts and 310 refuted claims, none from the rule
+  itself: _Complex literals typed double, `__has_builtin` and
+  `__has_cpp_attribute`, `alignof` of a class with an aligned attribute,
+  `static_cast` of a floating value to an enumeration, `sizeof` of an
+  array whose bound an earlier declaration gave.  Those are S6a's first
+  work: [expr.const] is now third in cxx-sema's list (10841 declarations,
+  static_assert's).  cxx-sema 0 we reject, 0 refuted (types 33262,
+  constants 13335, lookup 10063 verified); cxx-run 124/124; cxx-c-suites
+  2206 pass, 0 wrong, the 8 lost passes S3's commit has (`#pragma pack`).
+  Commit 2 done: the evaluator's skeleton.  `constant_value` (integer to
+  128 bits, floating, long double, pointer, lvalue, array, class object,
+  union object) and [implimits]/2's two quantities in `sema.h`;
+  `expr/expr.const.evaluate.cpp`: `evaluate_constant`, a case for every
+  `semantic_kind` (a node analysis folded gives its value, integer or
+  double; the others unsupported [expr.const]), `evaluate_call` and
+  `evaluate_statement` with the depth and full-expression counters.
+  `constant_expression` and a constexpr variable's initializer ask it for
+  what analysis did not fold.  Non-member constexpr functions are
+  declared and called ([dcl.constexpr]/1: inline; /3's rules on the body
+  not checked), their invocations `unknown` rather than `not_constant`; an
+  initializer of a variable of static storage duration that invokes one
+  is unsupported [basic.start.static], since /2 makes it constant
+  initialization when it can be (clang folds `int g = square(7);`).
+  Constexpr member functions stay unsupported (S4), as do `consteval`
+  ([dcl.constexpr]) and `constinit` ([dcl.constinit]).  Not done, for
+  when the evaluator gives values: lowering a value as static data, and
+  a `constant-claims` dump kind (constants ride on `type-claims`).
+  `src/test/cxx/run/constexpr-functions.cpp`.  cxx-sema: declarations as
+  clang 26169 -> 26813, 0 we reject, 0 refuted (types 40156, constants
+  15574, lookup 11445, symbols 1461 verified), we accept and clang
+  rejects 447 -> 511 (the bodies' rules); cxx-run 128/128; cxx-c-suites
+  unchanged.
+  Commit 3 done, after S3's operators (cb2daf6d): the template skeleton.
+  `type_kind` has `template_parameter`, `dependent` and `placeholder` (no
+  analysis makes them yet); `temp/temp.decls.cpp` gives
+  template-declarations, explicit specializations and instantiations and
+  deduction guides their functions, each answering by what it declares
+  ([temp.class], [temp.fct], [temp.alias], [temp.concept], [temp.mem],
+  [temp.pre] for a declarator's, [temp.expl.spec], [temp.explicit],
+  [temp.deduct.guide]), and `deduce_from_call` ([temp.deduct.call]);
+  `sema/instantiation.cpp` and `sema.h` have 3.5's record (key, inputs,
+  result) and `instantiate` ([temp.inst]), called by nothing yet.  One
+  change from the plan above: a template's name is not bound to a
+  `template_entity`.  36 places treat a held name (`entity_kind::none`) as
+  unknown, and a use of a template's name stays unsupported either way;
+  instead hold_names marks it `held_by_template`, and a use of it is
+  [temp.names] rather than [basic.lookup.unqual].  A qualified
+  template-id as a type, a template-id base and one in a
+  nested-name-specifier are [temp.names]; a specialization's class-head
+  [temp.spec].  The mangler's `<template-args>` are left for the first
+  instantiation.  cxx-sema's list now starts [temp.class] 16779,
+  [basic.lookup.unqual] 11965 (17102 at S2), [expr.const] 11002,
+  [temp.names] 9666, [temp.fct] 5023; with S3's operators, declarations
+  as clang 27232, 0 we reject and clang accepts, 0 refuted; cxx-run
+  132/132; cxx-c-suites unchanged.
+  Then [dcl.pre]/6 on, with what enforcing it had shown wrong: GCC's
+  imaginary constants (`0.0j`, typed as without the suffix) unsupported
+  [ext.gnu]; `__has_builtin` of the builtin templates
+  (`__make_integer_seq`, `__type_pack_element`, ...: clang's
+  BuiltinTemplates.td, added to `gen-cplusplus-data.py`'s list and their
+  rows to `feature-checks.inc`, asked of clang 23.1.4 as the rest was of
+  23.1.6) and `__has_cpp_attribute` of `__name__` spellings (`gnu::__const__`,
+  `__gnu__::const`) answer as clang (the C preprocessor's `-E` still does
+  not: a separate path); a typedef-name of a declaration analysis did not
+  follow no longer finds the class its specifier defined (`typedef struct
+  S {...} S __attribute__((aligned(8)))`); a floating value cast to an
+  enumeration whose underlying type is bool truncates ([conv.fpint]/1:
+  0.5 is false, 2.5 has no value, as clang 23; CWG1094 changes it); a weak
+  variable is not usable in constant expressions (clang); lookup claims
+  name an entity only from its first declaration (a static data member's
+  in-class one has no declared name, so its definition was claimed).
+  cxx-sema: declarations as clang 27232 -> 27704, 0 we reject and clang
+  accepts, 0 refuted (types 39708 -> 47474, constants 15419 -> 18879,
+  lookup 11524 -> 12628 verified); [expr.const] is out of the first ten
+  (static_assert's 11002); cxx-run 132/132; cxx-c-suites unchanged.
+  The evaluator (S6a), on 9cc43621: `expr/expr.const.evaluate.cpp` runs
+  non-member constexpr functions on values of the integer types to 64
+  bits, bool, enumerations, float and double: parameters and locals in one
+  frame per invocation, reads of variables usable in constant expressions,
+  conversions (through `arithmetic_value`), the unary, binary, logical,
+  conditional and comma operators with [expr.pre]/4's undefined cases not
+  constant (overflow, division by zero, a shift out of range), assignment,
+  compound assignment and increment on the frame's objects; block, if, while,
+  do, for, break, continue, return, within [implimits]/2's limits.  Not
+  modelled, unsupported [expr.const]: pointers, references, arrays,
+  classes, member functions, switch, goto, static locals, long double and
+  128-bit integers, a signed left shift of a negative value (the rule
+  changed in C++20).  Inside an evaluation analysis's `not_constant` does
+  not decide ([expr.const]/5.8, /5.16), only at the outermost node.  A body
+  analysed in part is marked on its `function_body` node and not run.
+  The value goes back: `constant_expression` sets the meaning's value
+  (array bounds, enumerators, case labels, static_assert), and a constexpr
+  variable or a variable of static storage duration whose initializer
+  invokes a constexpr function gets a `constant` node in its place, which
+  lowering emits as data ([basic.start.static]/2: `int g = square(7);` has
+  no dynamic initializer).  The folds are the evaluator's own, written
+  apart from `arithmetic()` (expr.compound.cpp is S3's while it works
+  there); sharing them is for after S3.  Shared since, on S3's b9a0ee64:
+  `expr/folding.cpp` has `fold_binary` and `fold_unary` on values as
+  `expression_meaning` keeps them, which `arithmetic()`, `comparison()`,
+  the unary operators and the evaluator (its operators, compound
+  assignment and increment) all call; cxx-sema, cxx-run (156/156) and
+  cxx-c-suites unchanged.  The evaluator's values are claims too: with -fcxx-dump=type-claims,
+  `evaluate_analysed_expressions` evaluates each analysed prvalue of a
+  well-formed declaration that analysis left unknown, and the claim's
+  value field carries what it found, which cxx-sema has clang check as
+  `static_assert((E) == VALUE)` (no separate constant-claims kind: the
+  existing claims had the place and the check).  The first run refuted
+  one value: a constexpr function's `static_cast<E>(2.5)` to an
+  enumeration whose underlying type is bool, whose truncation to 2 analysis
+  makes not constant and the tree did not say; the cast's step to bool is
+  now an integral conversion, which the evaluator gives no value outside 0
+  and 1.  cxx-sema: constants 18887 -> 19048 verified, 0 refuted; we
+  accept and clang rejects 520 -> 514.
+  [dcl.constexpr]'s rules on declarations and bodies, as clang 23
+  enforces them (probed per edition): /1, every declaration of a function
+  has constexpr or none does; C++11 (before N3652, `relaxed_constexpr`): no
+  iteration statement in the body and no void return type; until C++23
+  (P2448R2, `constexpr_without_constant_result`): a function that returns
+  a value has a return statement (/6, flowing off the end is never
+  constant).  Not yet: /1 on a declaration that declares no variable or
+  function (`constexpr int;`, in dcl.pre.cpp where S3 works); /3.5.3's
+  variable of non-literal type (no literal-type test yet); and clang's
+  "never produces a constant expression" (/6 for any argument values),
+  which is behind its errors on static and thread_local variables, goto,
+  asm, throw and C++11's modifications: it needs the evaluator to run with
+  unknown parameters.  cxx-sema: declarations as clang 28590 -> 28608, 0
+  we reject and clang accepts, 0 refuted; we accept and clang rejects
+  514 -> 496; cxx-run 156/156; cxx-c-suites unchanged.  cxx-sema: declarations as clang
+  27704 -> 27826, 0 we reject and clang accepts, 0 refuted (types 47348,
+  constants 18837, lookup 12628 verified); cxx-run 132/132 with
+  constexpr-functions.cpp's constant uses; cxx-c-suites unchanged.
+  The evaluator on review (constness throughout, a call of a function
+  defined after the expression unknown, a read of a non-const global not
+  constant), then switch statements and arrays, on S3's f436482e.  A switch
+  ([stmt.switch]/5) finds its case or default label in its body
+  (`switch_target`, not into a nested switch) and runs the body seeking it:
+  statements before the label are passed over, declarations still declare
+  ([stmt.dcl]/2), a label inside another statement is unknown; its break
+  ends it, a continue goes on to the loop.  Arrays of the evaluated types,
+  nested too, live in `constant_evaluation::elements`, an object's value
+  holding its range: a local array initialized by a list, zero or nothing
+  ([dcl.init.aggr]/5, [basic.indet]), a constexpr one (global, or local
+  read outside its function) evaluated from its definition on first use
+  and not modifiable ([expr.const]/5.16); `E1[E2]` on an array converted
+  to a pointer designates an element, an index outside the array not
+  constant ([expr.add]/4).  Pointers, string literals and arrays passed to
+  functions stay unknown.  `src/test/cxx/run/constexpr-switch-arrays.cpp`.
+  cxx-sema: declarations as clang 29354 -> 29407, 0 we reject and clang
+  accepts, 0 refuted (constants 19550 -> 19634); cxx-run 176/176;
+  cxx-c-suites unchanged.
+  Then [dcl.constexpr]'s remaining rules but one.  /1: a declaration
+  with constexpr and no declarator is ill-formed (`constexpr int;`).  /6,
+  clang's "never produces a constant expression" (-Winvalid-constexpr, an
+  error by default until C++23, `sema_constexpr_never_constant`):
+  `potential_constant` evaluates the body once with the parameters
+  opaque, a read of one unknown.  What fails before depending on them
+  fails for every argument; an unknown operand does not stop the operands
+  beside it (a binary operator's, a call's arguments) nor an unknown
+  condition both arms of a conditional, as clang's evaluation goes on.
+  Reads of indeterminate or volatile objects do not count there (clang
+  does not), and a call of a function with C language linkage is unknown
+  (a library builtin clang may evaluate).  The evaluator also gained
+  [expr.const]/5.2 (C++23)'s passing through a static or thread_local
+  local that is not usable in constant expressions.  Not yet: /3.5.3's
+  variable of non-literal type (no literal-type test), and what /6
+  catches through classes, pointers, references and new/delete.
+  cxx-sema: declarations as clang 29407 -> 29470, 0 we reject and clang
+  accepts, we accept and clang rejects 500 -> 477, 0 refuted; cxx-run
+  176/176; cxx-c-suites unchanged.
+  Literal types ([basic.types]/10, `basic/basic.types.cpp`):
+  `literal_type` answers unknown where analysis cannot tell (an implicit
+  default constructor or a defaulted destructor, whether constexpr; an
+  incomplete class), and only a sure non-literal type is an error: until
+  C++23 a constexpr function's return and parameter types (P2448R2) and
+  the variables its body defines (/3.5.3, P2242R3).  A user-provided
+  destructor not declared constexpr, a non-aggregate whose constructors
+  are none of them constexpr (copy and move aside), a volatile or
+  non-literal member or base make a class non-literal.  cxx-sema:
+  declarations as clang 29470 -> 29473, 0 we reject and clang accepts,
+  we accept and clang rejects 477 -> 474, 0 refuted; cxx-run 176/176;
+  cxx-c-suites unchanged.
+  Rebased on S4's R0 and R1 (8bcd463d): R0's placeholder that made a
+  static initializer invoking a constexpr function unsupported
+  [basic.start.static] goes, the evaluator decides it (a constexpr member
+  function's call is unknown to it, so unsupported [expr.const] still);
+  /6's check is not made in a system header, as clang's is not (libstdc++
+  declares constexpr functions on builtins), which needed a line marker's
+  flag 3 kept (`source_files::in_system_header`).  cxx-sema: declarations
+  as clang 30080 (S4's tip alone 28677), 0 we reject and clang accepts, 0
+  refuted (types 39366, constants 15708; S4's tip 32273 and 12230);
+  cxx-run 184/184; cxx-c-suites 2214 pass, 0 wrong.
+  Class objects in the evaluator: constexpr constructors (member
+  initializers, then the body) and member functions through `this`,
+  members, `*`, `&`, class prvalues as temporaries, copies by value, a
+  constexpr variable of class type evaluated and emitted as data
+  ([basic.start.static]/2); a non-literal class type of a constexpr
+  variable is ill-formed.  Unknown still: bases, unions, bit-fields,
+  value-initialization of a class, implicit default constructors.  An
+  implicit special member's call is the evaluator's, not "not constant"
+  ([class.copy.ctor]/12), and a member of array type takes the object's cv
+  on its elements ([basic.type.qualifier]/3).  cxx-sema: declarations as
+  clang 30185, 0 we reject and clang accepts, 0 refuted (types 39465,
+  constants 15796); cxx-run 188/188 (constexpr-classes.cpp);
+  cxx-c-suites 2214 pass, 0 wrong.
+  S6b's first rules: function templates.  A namespace-scope
+  function-definition after `template<class T, typename U>` (type
+  parameters, no defaults, packs or constraints) is a `template_entity`
+  whose type is its function type over `type_kind::template_parameter`
+  types (its declarator analysed with each parameter's name a typedef of
+  one), recorded in `function_templates`; its name stays the one
+  hold_names binds.  A call by that name (`template_call`, expr.post.cpp)
+  analyses the arguments, deduces ([temp.deduct.call]/2-3, forwarding
+  references; `deduce_type` for T, cv T, pointers, references, arrays and
+  function types) and instantiates (sema/instantiation.cpp): the
+  function-definition analysed again in a scope where each parameter
+  names its argument, the caller's state kept aside, declare() making a
+  function of the template's namespace that no name binds
+  (`declare_specialization`), inline (emitted where used, weak), with the
+  parameters' names bound in it for its body.  One record per template
+  and argument list (3.5's `instantiations`), so recursion finds its own
+  specialization.  Itanium names: `<template-args>`, the template's
+  return and parameter types with `T_`, the template name as a
+  substitution candidate (symbols as clang's: `_Z1hIidET_PS0_RKT0_S0_`).
+  Errors in a specialization's body make the template's declaration
+  ill-formed, as clang reports them; a constexpr specialization that
+  breaks /3's rules is still constexpr but not constant
+  ([dcl.constexpr]/7); a name the body finds among a namespace's
+  declarations after the template makes the lookup unknown ([temp.res]/10,
+  no two-phase lookup yet); `T::x` is unsupported [temp.res].  Unusable
+  (unsupported as before) when the name is declared again (an overload,
+  an explicit specialization) or argument-dependent lookup finds other
+  functions.  Not yet: explicit template arguments, qualified calls
+  (`N::f(x)`), declarations without a body, member templates, class
+  templates.  cxx-sema: declarations as clang 30185 -> 31651, 0 we reject
+  and clang accepts, 0 refuted (lookup 14031, symbols 1675); we accept and
+  clang rejects 482 -> 1081 (templates clang rejects at their definition,
+  whose rules on non-dependent constructs are not checked before an
+  instantiation); cxx-run 192/192 (function-templates.cpp); cxx-c-suites
+  2214 pass, 0 wrong.  ASan over SemaTemplate and temp.deduct.call: clean
+  but for a use-after-free in the parser's recovery
+  (`parser::unparsed_declaration`, SemaTemplate/explicit-instantiation.cpp),
+  which is older than this.
+  Then explicit template arguments and qualified calls: `template_callee`
+  (expr.post.cpp) takes `f`, `f<A...>`, `N::f` and `N::f<A...>` (type
+  arguments, [temp.arg.type]/1; a namespace's template found by
+  [namespace.qual], no argument-dependent lookup); deduction starts from
+  the arguments given and leaves out the parameters they determine, whose
+  arguments convert ([temp.arg.explicit]/7).  A specialization's
+  declaration and definition are now instantiated apart ([temp.inst]/5):
+  the declaration where a call names it, the definition at once for a
+  constexpr template and otherwise after the translation unit's
+  declarations ([temp.point]/7, as clang), and not for a call in an
+  unevaluated operand (sizeof) or a default argument (`unevaluated`).  A
+  definition analysis has no rules for makes the template's declaration
+  unsupported.  cxx-sema: declarations as clang 31770, 0 we reject and
+  clang accepts, 0 refuted (types 40137, lookup 14272, symbols 1723); we
+  accept and clang rejects 943; cxx-run 192/192; cxx-c-suites 2214 pass,
+  0 wrong.
+  Then class templates of namespace scope with type parameters
+  (`class_template_definition`, temp.decls.cpp): a template-id names a
+  specialization (`template_type`, from a decl-specifier or after a
+  nested-name-specifier), instantiated there (`instantiate_class`,
+  instantiation.cpp) by analysing the class-specifier again with the
+  parameters bound to the arguments, the injected-class-name bound to the
+  specialization ([temp.local]/1); member functions are defined as the
+  class's.  A template-id with a dependent argument in a template's own
+  declaration is a dependent type ([temp.dep.type]/9), and `TT<T>`
+  parameters deduce from a specialization's arguments.  Mangling: the
+  template name as a candidate, `S_` for it, `Sa`/`Sb` for std's (not
+  `Ss`, `Si`, `So`, `Sd`).  An instantiation's errors make the use
+  unsupported, not the template ([temp.inst]/1: clang reports them "in
+  instantiation of" at the use).  Not yet: default template arguments,
+  non-type parameters, partial and explicit specializations, member
+  templates, a member's default arguments ([temp.inst]/3), a function type
+  as an argument ([temp.spec]/8), friends ([class.friend]/6: the template
+  is unsupported), and instantiation only where a complete type is needed
+  ([temp.inst]/2: today a template-id instantiates).  cxx-sema:
+  declarations as clang 36772, 0 we reject and clang accepts, 0 refuted
+  (types 41066, lookup 14639, symbols 1743, layouts 10142); we accept and
+  clang rejects 1862; cxx-run 196/196; cxx-c-suites unchanged.
+  Then default template-arguments and non-type parameters of integral
+  type, for class and function templates (`declare_template_parameters`,
+  `template_argument_for`, `default_template_arguments`, temp.decls.cpp).
+  A non-type argument is a converted constant expression
+  ([temp.arg.nontype]/2); in an instantiation the parameter's name is a
+  constant, as an enumerator (`bind_template_argument`); in the template's
+  own declaration it is an entity without a value, so only a template-id
+  argument may name it (a value-dependent argument, deduced as
+  [temp.deduct.type]/8's `TT<i>`).  Defaults are analysed with the
+  arguments before them bound ([temp.param]/12; [temp.deduct]/5 for a
+  function template's undeduced parameter), and [temp.param]/14 holds for
+  class templates.  Mangling: `L <type> <value> E`, `n` for a negative
+  value, `X T_ E` for a parameter.  Not yet: non-type parameters of other
+  types (pointers, enumerations, class types), a parameter used in a
+  function template's own declarator other than as a template-id argument
+  (an array bound), defaults across redeclarations ([temp.param]/13).  The
+  evaluator's object of a member call that is a variable from outside the
+  evaluation is now unknown rather than not constant ([expr.const]/5.8
+  forbids reading it, not naming it).  cxx-sema: declarations as clang
+  37781, 0 we reject and clang accepts, 0 refuted (types 41644, lookup
+  14684, symbols 1772, layouts 10166); cxx-run 200/200; cxx-c-suites
+  unchanged.
+  Then partial and explicit specializations of class templates
+  (`class_specialization_definition`, `matching_specialization`,
+  temp.decls.cpp): each a record of its own (`function_template::primary`)
+  with its template-id's arguments in terms of its parameters; an
+  instantiation deduces them from its arguments exactly
+  ([temp.class.spec.match]/2), an explicit specialization of the arguments
+  first, and analyses that class-specifier with the specialization's
+  parameters bound (`instantiation_record::pattern`).  Not yet: partial
+  ordering when two match ([temp.class.order]), one declared after an
+  instantiation of its template, members defined out of the class.  Layout:
+  a derived class continues after a base's NonVirtualSize, as clang (an
+  empty base moved past the base's data counts), which the specializations
+  exposed (SemaCXX/empty-class-layout.cpp).  cxx-sema: declarations as
+  clang 38285, 0 we reject and clang accepts, 0 refuted (symbols 1778,
+  layouts 10178); cxx-run 204/204; cxx-c-suites unchanged.
+  Then template-ids in expressions and after `::` ([temp.names]): a
+  simple-template-id naming a class template in a nested-name-specifier
+  names the specialization, whose members are looked up there
+  (`nested_name_specifier`, basic.lookup.cpp: `traits<int>::kind()`,
+  `N::q<int>::g()`); `box<int>(...)` and `box<int>{...}` are explicit
+  type conversions to the specialization ([expr.type.conv]/1,
+  `postfix`); a static data member or static member function reached
+  through an object is the member, the object evaluated first as a
+  comma's left operand ([expr.ref]/6.1, /6.3.1; not an overloaded one).
+  Lowering folds `==`/`!=` of a null pointer and the address of a
+  non-weak variable of static storage duration or function, as clang's
+  code generator does (otherwise the variable is referenced and emitted).
+  Not yet: `template` before a simple-template-id, a dependent
+  specialization before `::` ([temp.res]), a qualified template-id in an
+  expression's type conversion, member typedefs and static data members
+  of class templates (S4).  cxx-sema: declarations as clang 38372, 0 we
+  reject and clang accepts, 0 refuted (symbols 1791, layouts 10189,
+  lowering 280); [temp.names] unsupported 8297 (from ~9.5k); cxx-run
+  208/208; cxx-c-suites unchanged.
+  Then declarations before definitions and members defined outside the
+  class ([temp.class], [temp.fct], [temp.mem.func]).  `template<class T>
+  struct S;` declares the class template (`class_template_declaration`);
+  its definition completes the same record, taking the declaration's
+  default template-arguments when the parameters' names agree
+  ([temp.param]/10), and a specialization named before then is an
+  incomplete class that a use after the definition defines
+  (`define_class_instantiation`).  `template<class T> T f(T);` declares a
+  function template (`function_template::declarator`); a later declaration
+  or the definition with an equivalent head and function type
+  ([temp.over.link]/6, the same parameter names) is the same template, and
+  a specialization used before the definition is defined after the
+  translation unit's declarations, or never.  `template<class T> R
+  S<T>::f(...) {...}` and a partial specialization's member
+  ([temp.class.spec.mfunc]/1) are kept (`template_member_definitions`) and
+  analysed for each specialization of the class, made before or after
+  (`define_template_member`): the declarator's `S<T>::` names the
+  specialization, the member is defined inline (weak, emitted where used,
+  as clang's).  Its errors make it unsupported, not ill-formed (clang
+  instantiates only the members used, [temp.inst]/4).  A default
+  template-argument the arguments make ill-formed is unsupported at the
+  use (clang reports it at the default); a template call whose argument
+  names a function is unsupported ([temp.deduct.call]/6's overload sets).
+  Not yet: out-of-class constructors (the parser keeps them as tokens),
+  destructors, operators, member templates, static data members, renamed
+  parameters, defaults merged for function templates, a declaration with
+  default arguments.  cxx-sema: declarations as clang 38372 -> 40721, 0
+  we reject and clang accepts, 0 refuted (types 42619, lookup 14842,
+  symbols 1845, layouts 10190, lowering 284); [temp.class] unsupported
+  6401 -> under 2196; cxx-run 212/212 (template-members-out-of-class.cpp);
+  cxx-c-suites unchanged.
+  Then dependent names ([temp.res], [temp.dep]).  A typename-specifier
+  (`typename_type`, temp.res.cpp) and C++20's implicit typename in a
+  simple-type-specifier (`qualified_type_name`) with a dependent
+  nested-name-specifier (a template-parameter, a dependent specialization,
+  or such a name before it: `T::a::b`) are a dependent type of its own
+  (`entity_kind::dependent_member`, one per qualifier and name,
+  [temp.dep.type]/6 and /9), so a function template's declarator can use
+  `typename T::type`; a non-deduced context ([temp.deduct.type]/5.1), the
+  specialization's declarator analysed again with the arguments resolves
+  it.  `nested_name_specifier` reports such a qualifier only to a caller
+  that allows it.  Mangling: `N T_ <source-name>... E`, each prefix a
+  candidate (clang 23: `_Z2g4I1AENT_1a1bES2_S3_S1_`).  [temp.dep]/3: a
+  class template specialization's bases whose base-specifier names a
+  template-parameter are marked (`entity::dependent_base`), and unqualified
+  lookup passes over the class when the name is only in such a base
+  (`in_dependent_base_only`; unknown when another base or
+  -fms-compatibility could find it): `x` in a member of `D<T> : T` was
+  `T::x`, now the global `x` as clang's.  Bodies were already analysed per
+  specialization, so `T::value`, `T::f()`, `t.m` and dependent calls work
+  there.  Measured before going further: the lookup_horizon approximation
+  of two-phase lookup costs 8 declarations in cxx-sema, so binding
+  non-dependent names at the definition ([temp.nondep]) and ADL at the
+  point of instantiation ([temp.dep.candidate]) are not done; the
+  [basic.lookup.unqual] count (14.6k) is names whose declarations analysis
+  has no rules for, not templates'.  Not yet: `typename
+  T::template X<...>`, `struct T::X`, a dependent qualified name as an
+  expression in a template's own declarator (an array bound, a default
+  argument), member templates (S4).  cxx-sema: declarations as clang
+  40790, 0 we reject and clang accepts, 0 refuted (types 42663, lookup
+  14907, symbols 1845, layouts 10190); cxx-run 216/216
+  (template-dependent-names.cpp); cxx-c-suites unchanged (the #pragma pack
+  tests pr109318 and pr79737-1 not yet, [cpp.pragma]).
+  Then explicit instantiations ([temp.explicit]) and explicit
+  specializations of function templates ([temp.expl.spec]).
+  `named_specialization` (temp.decls.cpp) finds the function template's
+  specialization a declaration names: its declarator-id the template's name
+  or a simple-template-id of it (`declarator_template_id` lets
+  declarator() take one), the arguments not given deduced from the declared
+  function type ([temp.deduct.decl]/1), which shall be the
+  specialization's.  `template int f<int>(int);` and `template long
+  f(long);` instantiate it, `template struct S<int>;` the class
+  (`class_explicit_instantiation`), `template void S<long>::g(long);` one
+  member function (`member_explicit_instantiation`); the subject is marked
+  (`entity::explicitly_instantiated`, a member function through its class,
+  not the special members, [temp.explicit]/10), and lowering emits it
+  whether used or not, weak (clang's weak_odr).  `extern template` (/11)
+  declares it: no definition emitted, not even an inline one, as clang.
+  `template<> int f<int>(int) {...}` (or deduced) makes the specialization
+  with its own inline and constexpr ([temp.expl.spec]/12), its first
+  declaration the explicit specialization (lookup claims name it), never
+  instantiated; declared first and defined later works.  Unsupported (as
+  clang's errors or not known): an explicit specialization after a use, a
+  duplicate explicit instantiation, one after an explicit specialization, an
+  explicit instantiation declaration after a use, an undefined template,
+  deleted or defaulted specializations, members of class templates
+  explicitly specialized, member templates, static data members, overloaded
+  templates.  An increment whose operand is not a variable is no longer
+  "not constant" before evaluation (a reference a constexpr call returns
+  may designate a temporary of the evaluation, [expr.const]/5.16).
+  cxx-sema: declarations as clang 40790 -> 41545, 0 we reject and clang
+  accepts, 0 refuted (types 42846, lookup 14998, symbols 1904, layouts
+  10241); [temp.explicit] unsupported ~3.8k -> 1569, [temp.expl.spec] 1695;
+  cxx-run 220/220 (template-explicit.cpp); cxx-c-suites unchanged (the
+  #pragma pack tests not yet, [cpp.pragma]).
+  Then variadic function templates ([temp.variadic], [expr.prim.fold];
+  temp/temp.variadic.cpp).  A function template's last template-parameter
+  may be a type parameter pack (`class... Ts`); its function parameter
+  pack (`Ts... args`, `const Ts &...rest`, the last parameter) has type
+  `type_kind::pack_expansion` of the pattern in the template's own
+  declaration, and the pack named anywhere else there is unsupported.
+  Deduction ([temp.deduct.call]/1) deduces the pattern against each
+  trailing argument; the pack's argument is a `template_argument` of kind
+  pack whose elements are stored once (`make_pack`, so equal packs are the
+  same key), an empty one when nothing deduces it ([temp.arg.explicit]/4).
+  An instantiation binds the pack's name to an entity of kind pack of its
+  elements' typedef-names; the declarator's parameter pack becomes one
+  parameter per element (`parameter_pack_expansion`, dcl.fct.cpp), whose
+  name the body finds as a pack of their variables.  A pattern is analysed
+  once per element (`expanding`, `expansion_element`: declared_in gives the
+  element for a pack's name, a pack named outside a pattern is unknown).
+  Pack expansions in a call's arguments (`g(args...)`, `g(h(args)...)`,
+  mixed with other arguments; the parser now keeps the `...` as the
+  initializer-list's child), `sizeof...` of either pack ([expr.sizeof]/4)
+  and fold expressions, unary and binary, left and right, over the
+  built-in operators of [expr.mul] to [expr.log.or] and the comma on
+  operands of neither class nor enumeration type, with Table 17's values
+  for `&&` and `||` of an empty pack ([temp.variadic]/10).  Mangling: `J
+  ... E` for a pack's arguments and `Dp <type>` for the expansion
+  (`_Z5countIJidcEEiDpT_`, as clang).  Not yet: packs of class templates
+  (below), non-type packs (`int... Ns`), explicit arguments for a pack, packs not last,
+  overloaded function templates (so no head/tail recursion), pack
+  expansions in braced or parenthesized initializers, template-argument
+  lists and other contexts, folds over assignment operators, `.*`,
+  `->*` or class operands, a nested pack expansion within a pattern.
+  cxx-sema: declarations as clang 41545 -> 41733, 0 we reject and clang
+  accepts, 0 refuted (types 43363, lookup 15142, symbols 1905, layouts
+  10241, lowering 295); cxx-run 224/224 (variadic-templates.cpp);
+  cxx-c-suites unchanged.
+  Then class templates with a type parameter pack (the last parameter;
+  [temp.arg]/1: the arguments from its position on are its elements, an
+  empty pack when none) and pack expansions in a template-argument-list
+  (`box<int, Ts...>`, the ellipsis after a type-id or as the list's
+  child; `type_id_expansion` analyses the pattern), in an instantiation
+  only: a template's own declaration naming a pack of dependent
+  arguments is unsupported, as are partial specializations of a variadic
+  primary or with a pack.  Member functions of such a class may have a
+  function parameter pack of the class's pack and use `sizeof...`.
+  cxx-sema: declarations as clang 41733 -> 42029, 0 we reject and clang
+  accepts, 0 refuted (types 43369, lookup 15144, symbols 1905, layouts
+  10243); cxx-run 224/224; cxx-c-suites unchanged.
+  Then overloaded function templates and partial ordering ([temp.over],
+  [over.match.best]/2.4-2.5, [temp.func.order], [temp.deduct.partial],
+  [temp.class.order]).  A function template whose name already names
+  function templates of the same namespace is their redeclaration only
+  when equivalent ([temp.over.link]/7), otherwise another template of the
+  name (`function_template_overloads`); one whose name names the scope's
+  functions (no using-directive, inline namespace or unknown names in the
+  scope) keeps them as candidates (`template_name_functions`), the name
+  held by an entity of its own.  A call (`template_call`) deduces each
+  template with `deduce_from_call`'s trial mode: a deduction that fails
+  (a parameter count, a conflict, a P and A of other shapes) is no
+  candidate, one [temp.deduct.call]/4 might still rescue (a class, a
+  pointer to class or function, a multi-level qualification conversion)
+  unsupported; each candidate's declaration is instantiated (not its
+  definition, only the chosen's), then `best_viable_function` with the
+  tie-breakers: a non-template beats a specialization, and of two
+  specializations the more specialized template's
+  (temp/temp.func.order.cpp: per call argument, the parameter's type or
+  its pack's pattern; references and top-level cv removed, /9's
+  lvalue/cv rule, [temp.deduct.type]/10's pack rule, /11's trailing pack).
+  Head/tail recursive variadic templates work.  Two matching class
+  partial specializations are ordered the same way (deducing one's
+  pattern from the other's).  Unsupported still: an ambiguity or an
+  order analysis cannot tell (templates with non-type parameters, types
+  with template-ids or dependent names, pointers to members), explicit
+  template arguments when the name has several templates, explicit
+  specializations and instantiations of such a name ([temp.func.order]/1.4),
+  a non-template function declared after a template of its name, taking
+  the address of an overloaded template.  cxx-sema: declarations as clang
+  42029 -> 42350, 0 we reject and clang accepts, 0 refuted (types 43630,
+  lookup 15236, symbols 1910, layouts 10271, lowering 295 -> 298); cxx-run
+  228/228 (template-overloads.cpp); cxx-c-suites 2214 pass, 0 wrong.
+  Then substitution failure ([temp.deduct]/8).  Each candidate of an
+  overloaded name (`template_call`) is deduced and its declaration
+  instantiated with `substituting` set: an ill-formed result there (the
+  declarator's types, a default template-argument) is no candidate, the
+  diagnostics, expressions and name uses it made taken back, the
+  instantiation record marked `substitution_failed`; a class defined
+  meanwhile is outside the immediate context (`define_class_outside`
+  counts its failures, which stay errors).  The one invalid form
+  analysis tells yet is /11's member a class does not contain:
+  `typename T::type`, `typename only_int<T>::type` (an explicit or partial
+  specialization giving the member for some arguments), in the return
+  type, a parameter or a default template-argument, the class defined
+  and its names all known (else unsupported).  Also: two templates whose
+  types differ only in `typename Q::name` are different templates
+  ([temp.over.link]/7: deduce_type compares the names and qualifiers);
+  an argument of class type for a P that is not a class template-id, or
+  a pointer to class for a non-pointer P, is a deduction failure, not
+  unsupported; a typename-specifier's template-id no longer holds the
+  class template's name in a declaration analysis keeps as names
+  (hold_names); `N8only_intIT_E4typeE` as a dependent prefix.  Not yet:
+  SFINAE with a single template and no other candidate (an error, as
+  clang's "no matching function": unsupported), `enable_if` on a
+  constant (static data members, `sizeof` of a dependent type and
+  member typedefs are S4's or not analysed), `decltype` in the return
+  type, a non-type argument that does not convert, [temp.deduct.call]/4's
+  derived-to-base and qualification conversions, [temp.deduct.funcaddr]
+  and [temp.deduct.conv].  cxx-sema: declarations as clang 42350 ->
+  42357, 0 we reject and clang accepts, 0 refuted (types 43630 -> 43689,
+  lookup 15236, symbols 1910 -> 1911, layouts 10271, lowering 298);
+  cxx-run 232/232 (template-sfinae.cpp); cxx-c-suites 2214 pass, 0 wrong.
+
+  Then alias-declarations, alias templates and variable templates
+  ([dcl.typedef]/2, [temp.alias], [temp.pre]/1, [temp.inst]/7).
+  `using X = T;` declares a typedef-name at namespace and block scope
+  (not yet in a class: [class.mem]; not with a class or enum defined or
+  declared in its defining-type-id, nor with attributes).  An alias
+  template of namespace scope (a function_template record with
+  `is_alias`) has its defining-type-id analysed once with the parameters'
+  types; a simple-template-id naming it (template_type ->
+  alias_template_type) is that type-id analysed again where each
+  template-parameter's name is its argument, so `ptr<T>` in a function
+  template's parameter is `T*` (deduction and mangling see the
+  substituted type), and an ill-formed substitution is a deduction
+  failure while a candidate is substituted.  A variable template of
+  namespace scope (`is_variable`; one init-declarator with an
+  initializer, not static or extern) is analysed per specialization at
+  its first use as an id-expression (`pi<int>`, variable_template_id ->
+  instantiate_variable): its simple-declaration again in the
+  instantiation's scope, declare() diverted to
+  declare_variable_specialization, which makes an inline variable of the
+  template's namespace whose name is not bound (clang's linkonce_odr,
+  mangled `_Z4zeroIiE`, weak); a constexpr one is usable in constant
+  expressions.  Not yet: an alias template with a pack, a
+  cv-qualified alias type named by a template-id (template_type takes no
+  cv), redeclarations, member alias templates and static data member
+  templates (S4), a variable template named with a qualifier, with
+  dependent arguments (in a template's definition), its address as a
+  template argument, explicit and partial specializations of variable
+  templates, and a variable template whose initializer the evaluator
+  cannot fold (a floating `T(3.14L)`).  Also: a C++26 type-aware
+  `operator new` (first parameter of class type) is unsupported, no
+  longer an error once `size_t` is an alias-declaration.  cxx-sema:
+  declarations as clang 42357 -> 43376, 0 we reject and clang accepts, 0
+  refuted (types 43689 -> 44005, constants 17851, lookup 15236 -> 15323,
+  symbols 1911 -> 1926, layouts 10271 -> 10291, lowering 298 -> 302);
+  cxx-run 240/240 (template-aliases.cpp, variable-templates.cpp);
+  cxx-c-suites 2214 pass, 0 wrong.
+
+  Then template template-parameters, unnamed template-parameters and
+  non-type parameters of other types ([temp.param]/1, /6, /7,
+  [temp.arg.template], [temp.arg.nontype]).  A template-parameter's form
+  is read once (`template_parameter_form`, temp.variadic.cpp: key or
+  template-head, ellipsis, identifier or declarator, default), so an
+  unnamed one (`template<class, int = 3>`) is a parameter like the
+  others whose name is not bound.  `template<class> class C` is an
+  entity of kind template_entity with a function_template record of its
+  own (`is_parameter`, `is_class`, its own parameters in a scope of
+  theirs, made after the template's: declare_template_parameters moves
+  the template's index past them); `C<int>` in the template's own
+  declaration is a dependent type ([temp.dep.type]/9), and in an
+  instantiation `C` names the argument's class template.  An argument
+  (`template_template_argument`) is a class template's name, qualified
+  or not (a template_argument of kind template_name, the template's
+  entity in value), or the template's own template template-parameter
+  (template_entity); its parameters must be the same as the parameter's
+  ([temp.arg.template]/3's matching beyond that, P0522's included, is
+  unsupported), and a default is an id-expression.  [temp.deduct.type]/8's
+  `TT<T>` deduces TT from A's primary template under the same rule.
+  Non-type parameters may now be of enumeration type (an argument of
+  that enumeration, [expr.const]/10), std::nullptr_t (nullptr), a
+  pointer to an object or function or an lvalue reference to one (`&x`,
+  `x` for an array, a function, or a reference's object: a variable or
+  function of namespace scope of exactly the type referred to; the
+  argument's value is the entity, 0 for a null pointer).  In an
+  instantiation such a parameter's name is an entity without rules for
+  its uses but as another template-argument.  Mangling as clang 23: a
+  template argument `3box` / `N1N3bagE` (the template a candidate),
+  `T_` for a template template-parameter (a candidate), its
+  specialization `T_IiE`, an address `XadL_Z1gEE`, a reference `L_Z1gE`,
+  a null pointer `LPi0E`, an enumerator `L1E5E`.  Not yet: `auto` and
+  class-type parameters ([dcl.spec.auto], structural classes), packs of
+  template template-parameters or non-type parameters, a template
+  template-parameter's own default arguments or nested template
+  template-parameters, alias templates as arguments, partial ordering of
+  function templates with template template-parameters, the use of a
+  pointer or reference parameter's value in an expression, an
+  integral argument for an enumeration parameter (and the reverse).
+  cxx-sema: declarations as clang 43376 -> 45710, 0 we reject and clang
+  accepts, 0 refuted (types 44005 -> 44343, constants 17851 -> 17931,
+  lookup 15323 -> 15354, symbols 1926 -> 1942, layouts 10291 -> 10320,
+  lowering 302 -> 308); cxx-run 244/244
+  (template-template-parameters.cpp); cxx-c-suites 2214 pass, 0 wrong.
 
 ### S7. Exceptions and RTTI
 

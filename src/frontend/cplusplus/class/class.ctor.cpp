@@ -144,6 +144,20 @@ bool semantic_analysis::declares_move_constructor(entity_index c) const
     return false;
 }
 
+bool semantic_analysis::declares_copy_constructor(entity_index c) const
+{
+    for (entity_index k = entity_table[c].first_constructor; k;
+         k = entity_table[k].next_constructor) {
+        if (entity_table[k].implicit || !is_copy_constructor(c, k))
+            continue;
+        qualified_type p =
+            type_table.parameters(entity_table[k].type.unqualified())[0];
+        if (type_table[p.unqualified()].kind == type_kind::lvalue_reference)
+            return true;
+    }
+    return false;
+}
+
 bool semantic_analysis::copies_bytes(entity_index c) const
 {
     const entity &x = entity_table[c];
@@ -641,8 +655,10 @@ semantic_analysis::construct(node_index at, qualified_type type,
     made.evaluation = constness::not_constant;
     result.evaluation = constness::not_constant;
     /* [expr.const]/5.2: a constexpr constructor's invocation is the
-       evaluator's (S6) */
-    if (entity_table[chosen].constexpr_) {
+       evaluator's (S6), and so is an implicit one's: it is constexpr when
+       its definition would satisfy [dcl.constexpr]'s rules
+       ([class.copy.ctor]/12), which is not decided here */
+    if (entity_table[chosen].constexpr_ || entity_table[chosen].implicit) {
         made.evaluation = constness::unknown;
         result.evaluation = constness::unknown;
         constexpr_calls++;
@@ -854,6 +870,8 @@ analysis_result semantic_analysis::ctor_initializer(syntax_child list,
         } else if (node.child_count == 4) {
             syntax_child init = children[2];
             if (syntax_is(tree, init, syntax_kind::initializer_list)) {
+                if (has_pack_expansion(init))
+                    return not_supported(n, "temp.variadic");
                 if (record.kind != type_kind::class_type)
                     return ill_formed(n,
                                       "if the entity being initialized does "
@@ -1746,6 +1764,14 @@ analysis_result semantic_analysis::class_conversion(node_index n,
                 arguments[0].type.unqualified() != type.unqualified())
                 return not_supported(n, "expr.type.conv");
             r = initialize_with(n, arguments[0], type, true, false, value);
+        } else if (is_aggregate(c) &&
+                   (arguments.size() != 1 ||
+                    arguments[0].type.unqualified() != type.unqualified())) {
+            /* an aggregate's implicit constructors (a default member
+               initializer makes its default constructor non-trivial) do
+               not take these arguments: C++20's parenthesized aggregate
+               initialization ([dcl.init]/17) is not analysed */
+            return not_supported(n, "expr.type.conv");
         } else {
             r = construct(n, type, arguments, 0, value);
         }

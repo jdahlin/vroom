@@ -26,6 +26,10 @@ DIAGNOSTIC(sema_narrowing, EXTENSION_WARNING, ERROR, "c++11-narrowing",
    clang's -Wwritable-strings from C++11 on */
 DIAGNOSTIC(sema_writable_string, EXTENSION_WARNING, WARNING, "writable-strings",
            "a string literal converts to a pointer to const characters: the conversion to char * was removed in C++11 ([diff.lex]/3)")
+/* [dcl.constexpr]/6's "no diagnostic required": clang's
+   -Winvalid-constexpr, an error by default (until C++23) */
+DIAGNOSTIC(sema_constexpr_never_constant, EXTENSION_WARNING, ERROR, "invalid-constexpr",
+           "no invocation of this constexpr function is a constant expression, whatever its arguments ([dcl.constexpr]/6)")
 /* [stmt.return]/2: clang's -Wreturn-mismatch, an error by default */
 DIAGNOSTIC(sema_return_without_value, EXTENSION_WARNING, ERROR, "return-mismatch",
            "a return statement with no operand shall be used only in a function whose return type is cv void ([stmt.return]/2)")

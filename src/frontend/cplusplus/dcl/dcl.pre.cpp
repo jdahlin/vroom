@@ -637,6 +637,107 @@ analysis_result semantic_analysis::empty_declaration(node_index)
 }
 
 /*
+ * [dcl.pre]/6: "In a static_assert-declaration, the constant-expression
+ * shall be a contextually converted constant expression of type bool.  If
+ * the value of the expression when so converted is true, the declaration
+ * has no effect.  Otherwise, the program is ill-formed".
+ *
+ * An expression that is not a constant expression is left unsupported:
+ * analysis takes some expressions for ones that are not (an invocation of
+ * a constexpr function, until the evaluator has its rules).
+ */
+analysis_result semantic_analysis::static_assert_declaration(node_index n)
+{
+    const syntax_node &node = tree[n];
+    const syntax_child *children = tree.children(n);
+    /* static_assert ( constant-expression [, string-literal] ) ; */
+    if (node.child_count < 5)
+        return not_supported(n, "dcl.pre");
+    bool constant = false, value = false;
+    analysis_result r =
+        bool_constant_expression(n, children[2], constant, value);
+    if (r != analysis_result::well_formed)
+        return r;
+    if (!constant)
+        return not_supported(n, "expr.const");
+    if (!value)
+        return ill_formed(n,
+                          "if the value of the expression when so converted "
+                          "is true, the declaration has no effect; "
+                          "otherwise, the program is ill-formed",
+                          "dcl.pre");
+    return analysis_result::well_formed;
+}
+
+/*
+ * [dcl.typedef]/2: "A typedef-name can also be introduced by an
+ * alias-declaration.  The identifier following the using keyword becomes a
+ * typedef-name and the optional attribute-specifier-seq following the
+ * identifier appertains to that typedef-name."  Its defining-type-id
+ * neither defines nor declares a class or enumeration here, and the
+ * alias-declaration has no attributes.
+ */
+analysis_result semantic_analysis::alias_type(node_index n,
+                                              qualified_type &type)
+{
+    const syntax_node &node = tree[n];
+    const syntax_child *c = tree.children(n);
+    /* using identifier = defining-type-id ; */
+    if (node.child_count != 5 ||
+        !syntax_is(tree, c[3], syntax_kind::defining_type_id))
+        return not_supported(n, "dcl.attr");
+    node_index id = c[3].index();
+    const syntax_node &d = tree[id];
+    const syntax_child *dc = tree.children(id);
+    if (!d.child_count || d.child_count > 2 || dc[0].is_token())
+        return not_supported(n, "dcl.typedef");
+    /* (a simple-template-id counts as declares_class too: the
+       class-specifiers and elaborated-type-specifiers are looked for) */
+    for (uint32_t i = 0; i < tree[dc[0].index()].child_count; i++) {
+        syntax_child k = tree.children(dc[0].index())[i];
+        if (syntax_is(tree, k, syntax_kind::class_specifier) ||
+            syntax_is(tree, k, syntax_kind::elaborated_type_specifier) ||
+            syntax_is(tree, k, syntax_kind::enum_specifier) ||
+            syntax_is(tree, k, syntax_kind::elaborated_enum_specifier))
+            return not_supported(n, "dcl.typedef");
+    }
+    specified s;
+    analysis_result r = decl_specifier_seq(dc[0].index(), s, false);
+    if (r != analysis_result::well_formed)
+        return r;
+    if (!s.has_type || s.declares_enumeration || s.typedef_ || s.static_ ||
+        s.extern_ || s.inline_ || s.constexpr_ || s.gnu_flags || s.aligned)
+        return not_supported(n, "dcl.typedef");
+    type = s.type;
+    if (d.child_count == 1)
+        return analysis_result::well_formed;
+    declarator_meaning m;
+    r = declarator(current_declaration, dc[1], type, m);
+    if (r == analysis_result::well_formed && m.has_id)
+        return not_supported(n, "dcl.name");
+    return r;
+}
+
+analysis_result semantic_analysis::alias_declaration(node_index n)
+{
+    if (defining_class)
+        return not_supported(n, "class.mem");
+    qualified_type type;
+    analysis_result r = alias_type(n, type);
+    if (r != analysis_result::well_formed)
+        return r;
+    specified s;
+    s.typedef_ = true;
+    s.type = type;
+    s.has_type = true;
+    entity_index declared = 0;
+    r = declare(n, tree[n].first_token + 1, entity_kind::typedef_name, type, s,
+                false, false, declared);
+    last_declared = declared;
+    return r;
+}
+
+/*
  *     simple-declaration:
  *         decl-specifier-seq init-declarator-list_opt ;
  *         attribute-specifier-seq decl-specifier-seq init-declarator-list ;
@@ -798,6 +899,16 @@ analysis_result semantic_analysis::init_declarators(node_index declaration,
        when declaring a class or enumeration": the decl-specifier-seq has
        neither (it would be unsupported), and clang accepts it with a
        warning */
+    /* [dcl.constexpr]/1: "The constexpr specifier shall be applied only
+       to the definition of a variable or variable template or the
+       declaration of a function or function template" */
+    if (items.empty() && s.constexpr_)
+        return ill_formed(declaration,
+                          "the constexpr specifier shall be applied only to "
+                          "the definition of a variable or variable template "
+                          "or the declaration of a function or function "
+                          "template",
+                          "dcl.constexpr");
     if (items.empty() && s.declares_class) {
         /* [dcl.pre]/5: a class declared: a storage class or other
            specifier with it is [dcl.pre]/5's "ill-formed" or clang's
@@ -954,15 +1065,12 @@ analysis_result semantic_analysis::declare_with_initializer(
         kind = entity_kind::typedef_name;
     else if (type_table[type.unqualified()].kind == type_kind::function)
         kind = entity_kind::function;
-    if (s.constexpr_ && kind == entity_kind::function)
-        /* a constexpr function's rules ([dcl.constexpr]/3) */
-        return not_supported(declaration, "dcl.constexpr");
     /* [ext:gnu_attributes] noreturn on what is no function (a pointer to
        function, a typedef-name): GCC and clang make it part of the
        function type pointed to */
     if ((gnu_flags & gnu_noreturn) && kind != entity_kind::function)
         return not_supported(declaration, "ext.gnu");
-    if (s.constexpr_) {
+    if (s.constexpr_ && kind == entity_kind::variable) {
         /* [dcl.constexpr]/10: "A constexpr specifier used in an object
            declaration declares the object as const.  Such an object shall
            have literal type and shall be initialized." */
@@ -970,10 +1078,20 @@ analysis_result semantic_analysis::declare_with_initializer(
         while (type_table[element.unqualified()].kind == type_kind::array)
             element = type_table[element.unqualified()].operand;
         const struct type record = type_table[element.unqualified()];
-        if (record.kind == type_kind::class_type ||
-            record.kind == type_kind::enumeration ||
+        if (record.kind == type_kind::class_type &&
+            literal_type(element) == constness::not_constant)
+            return ill_formed_at_token(m.id,
+                                       "a constexpr object shall have "
+                                       "literal type",
+                                       "dcl.constexpr");
+        if (record.kind == type_kind::enumeration ||
             record.kind == type_kind::none)
             return not_supported(declaration, "basic.types");
+        /* an object of class type default-initialized: its default
+           constructor ([dcl.init]/7.1), which the evaluator does not run
+           here yet */
+        if (!initialized && record.kind == type_kind::class_type)
+            return not_supported(declaration, "dcl.init");
         if (!initialized)
             return ill_formed_at_token(m.id,
                                        "a constexpr object shall be "
@@ -1149,14 +1267,78 @@ analysis_result semantic_analysis::declare_with_initializer(
     r = initializer(init, type, value);
     if (r != analysis_result::well_formed)
         return r;
+    entity_table[declared_entity].bound_unknown = false;
+    /* [expr.const]/5.16 allows the modification of an object "whose
+       lifetime began within the evaluation of E" (a temporary bound to a
+       member of the object being initialized), which the analysis takes
+       for one that is not a constant expression: the evaluator decides
+       for an object of class type */
+    if (s.constexpr_ && value.node &&
+        value.evaluation == constness::not_constant) {
+        qualified_type element = type;
+        while (type_table[element.unqualified()].kind == type_kind::array)
+            element = type_table[element.unqualified()].operand;
+        if (type_table[element.unqualified()].kind == type_kind::class_type)
+            value.evaluation = constness::unknown;
+    }
     /* [basic.start.static]/2: "Constant initialization is performed if a
        variable or temporary object with static or thread storage duration
-       is constant-initialized": an initializer that invokes a constexpr
-       function or constructor may be one, which the evaluator (S6) decides */
-    if (!entity_table[declared_entity].automatic &&
-        constexpr_calls != calls_before)
-        return not_supported(declaration, "basic.start.static");
-    entity_table[declared_entity].bound_unknown = false;
+       is constant-initialized": whether an initializer that invokes a
+       constexpr function is one is the evaluator's; its value becomes the
+       initializer, which lowering emits as data */
+    if ((s.constexpr_ || (!entity_table[declared_entity].automatic &&
+                          constexpr_calls != calls_before)) &&
+        value.evaluation == constness::unknown) {
+        /* an initializer with no tree (a list of a class's members, ...)
+           the evaluator cannot run */
+        qualified_type element = type;
+        while (type_table[element.unqualified()].kind == type_kind::array)
+            element = type_table[element.unqualified()].operand;
+        bool of_class =
+            type_table[element.unqualified()].kind == type_kind::class_type;
+        if (!value.node) {
+            if (s.constexpr_)
+                return not_supported(declaration, "expr.const");
+        } else if (of_class) {
+            /* an object of class type: the evaluator checks that its
+               initialization is a constant expression, and lowering
+               initializes it as written (a variable that is not constexpr
+               is initialized dynamically, which gives the same value) */
+            if (s.constexpr_) {
+                uint32_t data = 0;
+                constness c = evaluate_variable(type, value.node,
+                                                semantics[value.node].at, data);
+                if (c == constness::unknown)
+                    return not_supported(declaration, "expr.const");
+                if (c == constness::not_constant)
+                    value.evaluation = constness::not_constant;
+                /* [basic.start.static]/2: constant initialization, its
+                   value as data */
+                if (data)
+                    value.node = data;
+            } else if (!entity_table[declared_entity].automatic) {
+                return not_supported(declaration, "basic.start.static");
+            }
+        } else {
+            constant_value v;
+            bool constant = false;
+            r = evaluate_constant(declaration, value.node, v, constant);
+            if (r != analysis_result::well_formed)
+                return r;
+            if (constant) {
+                expression_meaning folded;
+                folded.type = semantics[value.node].type;
+                folded.category = value_category::prvalue;
+                evaluated_meaning(folded, v);
+                value.node = expression_node(semantic_kind::constant, folded,
+                                             semantics[value.node].at);
+                value.evaluation = constness::constant;
+                value.value = folded.value;
+            } else if (s.constexpr_) {
+                value.evaluation = constness::not_constant;
+            }
+        }
+    }
     const struct type record = type_table[type.unqualified()];
     /* [basic.def]/5: "In the definition of an object, the type of that
        object shall not be an incomplete type" */
@@ -1191,8 +1373,6 @@ analysis_result semantic_analysis::declare_with_initializer(
                                        "the initialization shall be a "
                                        "constant expression",
                                        "dcl.constexpr");
-        if (value.evaluation == constness::unknown)
-            return not_supported(declaration, "expr.const");
     }
     /* [expr.const]/3: "A variable is usable in constant expressions after
        its initializing declaration is encountered if it is a constexpr
@@ -1203,6 +1383,11 @@ analysis_result semantic_analysis::declare_with_initializer(
                           record.kind == type_kind::fundamental &&
                           is_integral(type);
     e.usable = constness::not_constant;
+    /* [impl.clang] a weak variable's initializer "is not considered
+       constant because it may be different at runtime" ([ext:gnu_attributes]
+       weak): not usable in constant expressions */
+    if (e.gnu_flags & gnu_weak)
+        integral_const = false;
     if (s.constexpr_ || integral_const) {
         e.usable = value.evaluation;
         e.value = value.value;

@@ -640,9 +640,11 @@ analysis_result semantic_analysis::enum_specifier(node_index n,
                     "integral constant expression",
                     "dcl.enum");
             }
-            if (m.evaluation != constness::constant ||
-                (!b.has(language_feature::list_initialization) &&
-                 m.beyond_integral_constant))
+            bool constant = false;
+            r = integral_constant_expression(n, m, constant);
+            if (r != analysis_result::well_formed)
+                return r;
+            if (!constant)
                 return not_supported(n, "expr.const");
             fundamental_type f = fundamental_of(m.type);
             value = integer_value(b, f, m.value);

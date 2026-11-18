@@ -103,6 +103,9 @@ analysis_result semantic_analysis::member_access(token_index at, entity_index e,
         uint32_t cv = m.type.cv() | x.type.cv();
         expression_meaning result;
         result.type = qualified_type::make(x.type.unqualified(), cv);
+        /* an array's cv-qualifiers are its elements' ([basic.type.qualifier]/3) */
+        if (type_table[x.type.unqualified()].kind == type_kind::array)
+            result.type = add_cv(x.type, m.type.cv());
         result.category = value_category::xvalue;
         if (m.category == value_category::lvalue)
             result.category = value_category::lvalue;
@@ -178,7 +181,31 @@ analysis_result semantic_analysis::member_access(token_index at, entity_index e,
         m = result;
         return analysis_result::well_formed;
     }
-    /* a static member, a type, an enumerator */
+    if ((x.kind == entity_kind::variable || x.kind == entity_kind::function) &&
+        !x.nonstatic_member && !x.next_overload) {
+        /* [expr.ref]/6.1: "If E2 is a static data member and the type of E2
+           is T, then E1.E2 is an lvalue; the expression designates the named
+           member of the class."  /6.3.1: "If it refers to a static member
+           function and the type of E2 is "function of parameter-type-list
+           returning T", then E1.E2 is an lvalue; the expression designates
+           the static member function."  /1: "The postfix expression before
+           the dot or arrow is evaluated", first, as a comma's left operand */
+        uint32_t object = m.node;
+        constness object_evaluation = m.evaluation;
+        expression_meaning result;
+        analysis_result r = named_entity(at, e, result);
+        if (r != analysis_result::well_formed)
+            return r;
+        if (object_evaluation != constness::constant &&
+            result.evaluation != constness::not_constant)
+            result.evaluation = constness::unknown;
+        result.entity = 0;
+        result.node = expression_node(semantic_kind::comma, result, at, object,
+                                      result.node);
+        m = result;
+        return analysis_result::well_formed;
+    }
+    /* a type, an enumerator, an overloaded static member function */
     return not_supported(current_declaration, "expr.ref");
 }
 

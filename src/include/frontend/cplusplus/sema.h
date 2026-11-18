@@ -98,6 +98,18 @@ enum class type_kind : uint8_t {
     class_type,        /* [class], unions included; the entity says which */
     enumeration,       /* [dcl.enum] */
     pointer_to_member, /* [dcl.mptr] */
+    /* [temp.param]/1: a template-parameter's type (a type parameter);
+       made by no analysis yet */
+    template_parameter,
+    /* [temp.dep.type]/9: a type that depends on template parameters
+       without being one */
+    dependent,
+    /* [dcl.spec.auto]/1: auto or decltype(auto) before deduction */
+    placeholder,
+    /* [temp.variadic]/5: a pack expansion whose pattern (operand) names a
+       template parameter pack, the type of a function parameter pack
+       ([dcl.fct]/21) in a template's own declaration */
+    pack_expansion,
 };
 
 struct type {
@@ -145,6 +157,7 @@ class types
                         size_t parameter_count, bool variadic);
     type_index of_entity(type_kind kind, uint32_t entity);
     type_index pointer_to_member(uint32_t class_entity, qualified_type member);
+    type_index pack_expansion_of(qualified_type pattern);
 
     const type &operator[](type_index t) const
     {
@@ -198,6 +211,11 @@ enum class entity_kind : uint8_t {
     template_specialization,
     namespace_entity,
     pack,
+    /* not an entity: [temp.res]/3's typename-specifier with a dependent
+       nested-name-specifier, typename Q::name, a member of a type not
+       known until instantiation; its type is a type_kind::dependent of
+       it, value the qualifier Q (a type_index), name the identifier */
+    dependent_member,
     /* not an entity: a block scope or a function parameter scope
        ([basic.scope.block], [basic.scope.param]), the scope the names
        declared in it are bound in */
@@ -217,6 +235,9 @@ enum class constness : uint8_t { constant, not_constant, unknown };
 
 /* [special]: a member function a class's objects are made and ended by */
 enum class special_member : uint8_t { none, constructor, destructor };
+/* [temp.explicit]/2: "An explicit instantiation definition is an explicit
+   instantiation that does not begin with the extern keyword" */
+enum class instantiation_kind : uint8_t { none, declaration, definition };
 /* [basic.stc.dynamic]/1: operator new, operator new[], operator delete
    and operator delete[] */
 enum class allocation_function : uint8_t {
@@ -268,6 +289,10 @@ struct entity {
        namespace is not known, a using-enum-declaration): a name not found
        in it is not known to be undeclared */
     bool unknown_names = false;
+    /* a name hold_names kept with no entity (kind none) because a
+       template-declaration or explicit-specialization declared it: what
+       it denotes needs [temp]'s rules */
+    bool held_by_template = false;
     /* a scope (a namespace, 0 the global one, or a block): a
        using-directive appears in it ([namespace.udir]; an unnamed or
        inline namespace's implied one in its enclosing namespace) */
@@ -351,6 +376,10 @@ struct entity {
        is not empty is also among the class's non-static data members
        (field) */
     bool base_subobject = false;
+    /* a base subobject of a class template's specialization whose
+       base-specifier depends on a template-parameter: [temp.dep]/3, its
+       class's members are not found by unqualified lookup */
+    bool dependent_base = false;
     /* a class: its alignment; a non-static data member: the alignment
        its aligned attribute asks for, 0 if none ([ext:gnu_attributes]) */
     uint32_t alignment = 0;
@@ -439,6 +468,16 @@ struct entity {
     /* ... and, its underlying type not fixed, the type it promotes to
        ([conv.prom]/4) */
     fundamental_type promoted = fundamental_type::none;
+    /* a function template's specialization ([temp.spec]): its
+       instantiation record (semantic_analysis::instantiations) plus one;
+       a function template (template_entity) or one of its type
+       parameters: its function_template record plus one */
+    uint32_t instantiation = 0;
+    /* a function template's specialization, a member function of a class
+       template's specialization or such a class: the subject of an
+       explicit instantiation ([temp.explicit]/2) declaration (extern) or
+       definition */
+    instantiation_kind explicitly_instantiated = instantiation_kind::none;
     /* a non-static member function: [class.virtual]/2 a virtual function
        (declared virtual, or overriding one), pure ([class.abstract]/2),
        and its slot in the virtual table of its class (the index of its
@@ -649,6 +688,53 @@ struct declared_name {
 
 /* ---- values of constant expressions (expr/expr.const.cpp) ---- */
 
+/* [expr.const]/11: the value a constant expression's evaluation gives, as
+   the evaluator of the semantic tree (expr/expr.const.evaluate.cpp)
+   computes it.  Only integer and double are filled today; the other kinds
+   are the shapes [basic.types] objects have, which the evaluator answers
+   unsupported ([expr.const]) for until it models them. */
+enum class constant_value_kind : uint8_t {
+    none,
+    /* [basic.fundamental]/11, up to 128 bits */
+    integer,
+    /* [basic.fundamental]/12: float and double as binary64; long double
+       as binary128 (softfloat.h), not filled yet */
+    floating,
+    long_double,
+    /* [basic.compound]/3: a null pointer value, or an object's address
+       and an offset in it: designator is the entity, offset bytes */
+    pointer,
+    /* a glvalue: the object it designates, as pointer */
+    lvalue,
+    /* [dcl.array]: elements, [class.mem]: members, [class.union]: the
+       active member: values in constant_evaluation::elements */
+    array,
+    class_object,
+    union_object,
+};
+
+struct constant_value {
+    constant_value_kind kind = constant_value_kind::none;
+    unsigned __int128 integer = 0;
+    double floating = 0;
+    /* pointer and lvalue: the entity designated, 0 for a null pointer;
+       the byte offset in it */
+    entity_index designator = 0;
+    uint64_t offset = 0;
+    /* array, class_object, union_object: the values of the elements or
+       members are elements[first .. first + count); union_object: count 1,
+       member the active member */
+    uint32_t first = 0, count = 0;
+    entity_index member = 0;
+};
+
+/* [implimits]/2's quantities for constant evaluation, the bracketed
+   numbers: "Recursive constexpr function invocations [512]",
+   "Full-expressions evaluated within a core constant expression
+   [1048576]" */
+constexpr uint32_t constexpr_invocation_limit = 512;
+constexpr uint32_t constant_full_expression_limit = 1048576;
+
 /* [basic.fundamental]/2: the integer types; [basic.fundamental]/12: the
    floating-point types (_BitInt and _Float16 are neither here: analysis
    has no rules for them yet) */
@@ -676,6 +762,19 @@ constness combined_constness(constness a, constness b);
 /* a floating-point value as an expression_meaning keeps it */
 double floating_value(uint64_t kept);
 uint64_t floating_kept(double v);
+/* the operators of the arithmetic types on values as expression_meaning
+   keeps them (expr/folding.cpp): constant with the value in out,
+   not_constant where [expr.pre]/4 makes the operation undefined, unknown
+   for what is not folded (long double, 128 bits, a pragma's rounding).
+   fold_binary: operands converted to t, a shift's right operand of type
+   right; fold_unary: + - ~ on an operand promoted to t, ! on a bool */
+constness fold_binary(const implementation_defined_behavior &b,
+                      bool floating_point_pragma, preprocessing_op_or_punc op,
+                      fundamental_type t, fundamental_type right, uint64_t x,
+                      uint64_t y, uint64_t &out);
+constness fold_unary(const implementation_defined_behavior &b,
+                     preprocessing_op_or_punc op, fundamental_type t,
+                     uint64_t x, uint64_t &out);
 
 /* the cv-qualifiers of a type, an array's those of its elements
    ([basic.type.qualifier]/3) */
@@ -877,7 +976,8 @@ enum class semantic_kind : uint8_t {
        initializations ([class.base.init]), a block of expression
        statements, run before a (0: none); c: a destructor's destruction
        of its members and bases ([class.dtor]/13), a block run after a
-       (0: none) */
+       (0: none); evaluation not_constant when the body's analysis was not
+       well-formed (a tree in part, which the evaluator does not run) */
     function_body,
 };
 
@@ -994,6 +1094,11 @@ class semantic_analysis
     void translation_unit();
     /* one declaration of a declaration-seq */
     analysis_result declaration(node_index n);
+    /* for -fcxx-dump=type-claims: the value of each analysed prvalue that
+       analysis did not fold and the evaluator of constant expressions can
+       (expr/expr.const.evaluate.cpp), into its analysed_expression, so that
+       the claims have clang check the evaluator's values too */
+    void evaluate_analysed_expressions();
 
     types type_table;
     entities entity_table;
@@ -1096,10 +1201,20 @@ class semantic_analysis
     /* whether a class is trivially copyable and has a trivial destructor:
        its objects are copied as their bytes, passed in registers */
     bool trivial_class(entity_index c) const;
+    /* the explicit instantiation a function is the subject of, its own or
+       its class's ([temp.explicit]/10) */
+    instantiation_kind explicitly_instantiated(entity_index f) const;
+    /* [basic.types]/10: whether t is a literal type (unknown:
+       analysis cannot tell; basic/basic.types.cpp) */
+    constness literal_type(qualified_type t) const;
+    constness literal_class(entity_index c) const;
     bool trivial_defaulted_default_constructor(entity_index c) const;
     bool copies_bytes(entity_index c) const;
     bool is_copy_constructor(entity_index c, entity_index k) const;
     bool declares_move_constructor(entity_index c) const;
+    /* a user-declared copy constructor whose parameter is an lvalue reference
+       ([class.copy.ctor]/1) */
+    bool declares_copy_constructor(entity_index c) const;
     bool copy_assignment_deleted(entity_index c) const;
     bool default_constructor_deleted(entity_index c) const;
     bool default_constructed(entity_index c, entity_index k) const;
@@ -1152,11 +1267,36 @@ class semantic_analysis
     /* a rule clang enforces only when asked: ill-formed when the
        diagnostic is an error on this command line, else well-formed with
        the warning (or nothing) */
+    /* whether token at comes from a system header (# 1 "f" 3, -isystem) */
+    bool in_system_header(token_index at) const;
     analysis_result extension_used(diagnostic_id id, token_index at,
                                    const char *argument);
 
     /* [dcl.pre] */
     analysis_result empty_declaration(node_index n);
+    analysis_result static_assert_declaration(node_index n);
+    /* [dcl.typedef]/2: an alias-declaration's typedef-name */
+    analysis_result alias_declaration(node_index n);
+    /* ... the type its defining-type-id denotes */
+    analysis_result alias_type(node_index n, qualified_type &type);
+    /* [temp.pre], [temp.expl.spec], [temp.explicit], [temp.deduct.guide]
+       (temp/): the declarations of templates and of their
+       specializations; no rules yet, each answers its subclause */
+    analysis_result template_declaration(node_index n);
+    /* [temp.fct]: a function template defined at namespace scope */
+    analysis_result function_template_definition(node_index n,
+                                                 node_index definition);
+    analysis_result explicit_specialization(node_index n);
+    analysis_result explicit_instantiation(node_index n);
+    analysis_result class_explicit_instantiation(node_index n, node_index id,
+                                                 bool extern_);
+    analysis_result member_explicit_instantiation(node_index n,
+                                                  node_index declaration,
+                                                  bool extern_);
+    /* whether the declarator may have a simple-template-id as its
+       declarator-id */
+    bool declarator_template_id = false;
+    analysis_result deduction_guide(node_index n);
     analysis_result simple_declaration(node_index n);
     analysis_result function_definition(node_index n);
     /* [dcl.link]: extern "C" or extern "C++", and the declarations in it */
@@ -1195,6 +1335,13 @@ class semantic_analysis
     };
     analysis_result decl_specifier_seq(node_index seq, specified &s,
                                        bool parameter);
+    /* [temp.explicit], [temp.expl.spec]: the function template's
+       specialization a declaration of one declarator names (its
+       instantiation record, which an explicit specialization makes);
+       its decl-specifier-seq's meaning in s */
+    analysis_result named_specialization(node_index n, node_index declaration,
+                                         bool specialization, bool extern_,
+                                         specified &s, uint32_t &index);
     /* [dcl.type.simple] Table 14: the type of the simple-type-specifier
        keywords of a decl-specifier-seq */
     struct simple_type_keywords {
@@ -1235,7 +1382,30 @@ class semantic_analysis
         allocation_function allocation = allocation_function::none;
         /* the declarator-id is a literal-operator-id ([over.literal]) */
         bool literal_operator = false;
+        /* the declarator-id is a simple-template-id (declarator_template_id
+           allows it): an explicit specialization's or instantiation's */
+        node_index template_id = 0;
+        /* [dcl.fct]/21: the declarator-id (or the abstract declarator)
+           has an ellipsis: a function parameter pack (pack_declarator
+           allows it) */
+        token_index pack = 0;
     };
+    bool pack_declarator = false;
+    /* a type-id T ... is a pack expansion's pattern T */
+    bool type_id_expansion = false;
+    /* [temp.variadic]/5: whether the parameter-declaration d is a pack
+       expansion of an instantiation's packs: its ellipsis and the packs'
+       length (ellipsis 0: it is not); last: it may be one */
+    analysis_result parameter_pack_expansion(node_index d, bool last,
+                                             uint32_t &elements,
+                                             token_index &ellipsis);
+    bool depends_on_template_parameter(qualified_type t) const;
+    /* whether a type is made of a template-parameter type at position from
+       or after */
+    bool depends_on_parameter_from(qualified_type t, uint64_t from) const;
+    /* the ellipsis of the last parameter-declaration's declarator, if it
+       declares a function parameter pack, else 0 */
+    token_index declared_pack = 0;
     analysis_result declarator(node_index declaration, syntax_child d,
                                qualified_type &type, declarator_meaning &m);
     token_index declarator_id(syntax_child d) const;
@@ -1286,7 +1456,15 @@ class semantic_analysis
            templates, the use of the name is ill-formed";
            [class.member.lookup]/6 for a class */
         bool ambiguous = false;
+        /* unknown: the first name found that analysis kept with no entity
+           (kind none) */
+        entity_index unknown_entity = 0;
     };
+    /* the subclause an unsupported use of the name found as r (not
+       known, kind none) waits for: [temp.names] for a template's name,
+       else otherwise */
+    const char *unknown_name_subclause(entity_index e,
+                                       const char *otherwise) const;
     lookup_result lookup_unqualified(uint32_t name, lookup_filter filter) const;
     /* [namespace.qual]/2: the name looked up in the namespace n (0: the
        global namespace) */
@@ -1309,7 +1487,8 @@ class semantic_analysis
        name that analysis did not follow */
     bool argument_dependent_lookup(uint32_t name,
                                    const owned_array<qualified_type> &arguments,
-                                   owned_array<entity_index> &found) const;
+                                   owned_array<entity_index> &found,
+                                   entity_index known = 0) const;
     /* [basic.lookup.argdep]/2: the associated entities (classes) and
        namespaces of the type t, added to the sets; false if a class of it
        is one analysis did not follow */
@@ -1323,8 +1502,12 @@ class semantic_analysis
        parameters) */
     bool at_block_scope() const
     {
-        return !is_namespace(current_scope);
+        return !is_namespace(current_scope) &&
+               current_scope != template_member_scope;
     }
+    /* define_template_member's scope of the template-parameters' names,
+       which stands for the class template's namespace */
+    entity_index template_member_scope = 0;
     /* whether namespace inner is n or is enclosed by it */
     bool namespace_encloses(entity_index n, entity_index inner) const;
     /* [namespace.udir]/2: "the nearest enclosing namespace which contains
@@ -1436,8 +1619,26 @@ class semantic_analysis
     struct nominated_scope {
         entity_index entity = 0;
         bool global = false;
+        /* [temp.dep.type]/9: the nested-name-specifier names a dependent
+           type (only when the caller allows one; entity is then 0) */
+        type_index dependent = 0;
     };
-    analysis_result nested_name_specifier(node_index n, nominated_scope &scope);
+    analysis_result nested_name_specifier(node_index n, nominated_scope &scope,
+                                          bool dependent_allowed = false);
+    /* whether class c's scope, for unqualified lookup of name, is to be
+       passed over: found only in a dependent base ([temp.dep]/3); unknown
+       when a dependent base and another one both may have it */
+    /* [temp.dep.type]/9: whether a base-specifier's class-or-decltype in
+       class template specialization c's class-specifier names one of the
+       template-parameters (bound in c) */
+    bool dependent_base_specifier(entity_index c, syntax_child name) const;
+    bool in_dependent_base_only(entity_index c, uint32_t name,
+                                bool &unknown) const;
+    /* [temp.res]/3: typename-specifier, as a type */
+    analysis_result typename_type(node_index n, type_index &type, uint32_t &cv);
+    /* the type typename Q::name for a dependent Q, one per Q and name */
+    type_index dependent_member_type(type_index qualifier, uint32_t name);
+    owned_array<entity_index> dependent_members;
     /* a block scope in the current one, made current */
     entity_index open_scope(entity_index conflicts, bool parameters);
     analysis_result pointer_operator(node_index op, qualified_type &type,
@@ -1475,6 +1676,9 @@ class semantic_analysis
            default argument ([dcl.fct.default]/1), none if it has none */
         node_index declaration = 0;
         syntax_child default_argument;
+        /* [temp.variadic]/5: an element of the function parameter pack
+           (an instantiation's) of this name, id 0 */
+        uint32_t pack_name = 0;
     };
     /* [dcl.fct.default]: the default arguments of function_parameters,
        which the declaration n of the function f gives it */
@@ -1501,6 +1705,9 @@ class semantic_analysis
        without one */
     owned_array<uint32_t> default_argument_nodes;
     owned_array<parameter_meaning> function_parameters;
+    /* [temp.variadic]/2: the name of the function parameter pack of no
+       parameters function_parameters has, 0 if none */
+    uint32_t function_empty_pack = 0;
     /* the cv-qualifier-seq of the function declarator analysed last
        ([dcl.fct]/6: only a member function's) */
     uint32_t function_cv = 0;
@@ -1582,6 +1789,8 @@ class semantic_analysis
        token at, with its node */
     expression_meaning integer_constant(fundamental_type type, uint64_t value,
                                         token_index at);
+    /* [ext.gnu] an imaginary constant: a numeric literal suffixed i or j */
+    bool imaginary_literal(token_index t) const;
     /* [expr.prim.id.unqual] */
     analysis_result id_expression(token_index t, expression_meaning &m);
     /* [expr.prim.id.qual] */
@@ -1614,6 +1823,11 @@ class semantic_analysis
                                         expression_meaning &m);
     /* [expr.mul] to [expr.log.or] */
     analysis_result binary(node_index n, expression_meaning &m);
+    analysis_result builtin_binary(node_index n, token_index at,
+                                   preprocessing_op_or_punc op,
+                                   expression_meaning &left,
+                                   expression_meaning &right,
+                                   expression_meaning &m);
     analysis_result binary_built(analysis_result r, token_index at,
                                  preprocessing_op_or_punc op,
                                  const expression_meaning &left,
@@ -1703,6 +1917,164 @@ class semantic_analysis
     /* [conv.bool], [expr.context]/1: contextually converted to bool */
     analysis_result contextual_bool(node_index at, expression_meaning &m);
 
+    /* ---- constant expressions ([expr.const], expr/expr.const.cpp) ----
+       What every construct that requires a constant expression asks,
+       after operand_value: whether m is one (constant), with its value in
+       m as an expression_meaning keeps it.  Unsupported when analysis
+       cannot tell. */
+    /* [expr.const]/11 */
+    analysis_result constant_expression(node_index at, expression_meaning &m,
+                                        bool &constant);
+    /* [expr.const]/8 */
+    analysis_result integral_constant_expression(node_index at,
+                                                 expression_meaning &m,
+                                                 bool &constant);
+    /* [expr.const]/10, of the integer type to: m converted to it */
+    analysis_result converted_constant_expression(node_index at,
+                                                  expression_meaning &m,
+                                                  fundamental_type to,
+                                                  bool &constant);
+    /* [expr.const]/10: a contextually converted constant expression of
+       type bool, from the expression e */
+    analysis_result bool_constant_expression(node_index at, syntax_child e,
+                                             bool &constant, bool &value);
+    /* [expr.const]/5: the evaluation of the semantic tree node as a core
+       constant expression (expr/expr.const.evaluate.cpp): well_formed with
+       its value in v and constant true; constant false if it is not one;
+       unsupported where the evaluator has no rules yet */
+    analysis_result evaluate_constant(node_index at, uint32_t node,
+                                      constant_value &v, bool &constant);
+    /* one evaluation's state: the objects of the evaluation (locals and
+       parameters of the constexpr functions it calls, [expr.const]/5.8:
+       their lifetime began within it), the depth of invocations and the
+       full-expressions evaluated, against [implimits] */
+    struct constant_evaluation {
+        /* the elements of the arrays in objects (an element's value may be
+           an array whose elements are further on), and whether each may
+           not be modified: an element of a variable whose lifetime did not
+           begin within the evaluation ([expr.const]/5.16) */
+        owned_array<constant_value> elements;
+        owned_array<uint8_t> element_read_only;
+        struct object {
+            entity_index entity = 0;
+            /* frame 0: a variable of static storage duration read */
+            uint32_t frame = 0;
+            bool read_only = false;
+            /* a parameter whose value the check of a body for a potential
+               constant expression does not know: a read of it is unknown */
+            bool opaque = false;
+            constant_value value;
+        };
+        owned_array<object> objects;
+        uint32_t depth = 0;
+        uint32_t full_expressions = 0;
+        /* the frame of the invocation being evaluated (0: none) and the
+           frames numbered so far */
+        uint32_t frame = 0, frames = 0;
+        /* a break or continue statement being executed ([stmt.jump]) */
+        uint8_t jump = 0;
+        /* a switch statement's jump to this case or default label
+           ([stmt.switch]/5): the statements before it are passed over */
+        uint32_t seek = 0;
+        /* potential_constant's evaluation: an unknown operand does not stop
+           the evaluation of the operands beside it, nor an unknown
+           condition that of both arms of a conditional */
+        bool potential = false;
+        /* for the claims (evaluate_analysed_expressions): a function whose
+           body begins after this token is not defined yet where the claim
+           is placed ([expr.const]/5.3); 0: every body counts */
+        token_index defined_before = 0;
+    };
+    /* The evaluator's parts (expr/expr.const.evaluate.cpp).  Each answers
+       constant (with the value), not_constant (not a core constant
+       expression), or unknown where the evaluator has no rules (analysis's
+       unsupported [expr.const]).  evaluate_object: the object a glvalue
+       designates among state.objects; evaluate_read: the value a glvalue's
+       lvalue-to-rvalue conversion reads; evaluate_statement: returned is set
+       by a return statement, with its value in result */
+    constness evaluate_node(constant_evaluation &state, uint32_t node,
+                            constant_value &v);
+    constness evaluate_statement(constant_evaluation &state, uint32_t node,
+                                 bool &returned, constant_value &result);
+    constness evaluate_call(constant_evaluation &state, uint32_t node,
+                            constant_value &v);
+    constness evaluate_object(constant_evaluation &state, uint32_t node,
+                              uint32_t &object);
+    constness evaluate_read(constant_evaluation &state, uint32_t node,
+                            constant_value &v);
+    constness evaluate_condition(constant_evaluation &state, uint32_t node,
+                                 constant_value &v);
+    /* the object of type t at place initialized by init (0: none, its
+       value indeterminate), arrays and class objects with their elements
+       in state.elements.  The evaluator's own values: a pointer is
+       kind pointer with the place it points to in first (count 0: a null
+       pointer); a class object is kind class_object, designator its
+       class, its non-static data members' values in elements[first ..
+       first + count) */
+    constness evaluate_initialization(constant_evaluation &state,
+                                      qualified_type t, uint32_t init,
+                                      bool read_only, uint32_t place);
+    /* the class of t when the evaluator models its objects: complete, no
+       base classes, not a union (0: not) */
+    entity_index evaluated_class(qualified_type t) const;
+    /* a copy of v whose elements (an array's, a class object's) are new */
+    constant_value copy_value(constant_evaluation &state,
+                              const constant_value &v, bool read_only);
+    /* [class.ctor]: the constructor call node initializes the object at
+       place */
+    constness evaluate_construct(constant_evaluation &state, uint32_t node,
+                                 uint32_t place);
+    /* the invocation of function f (a pointer to the object for a
+       non-static member function's this, or kind none), the arguments
+       list[first .. first + count) */
+    constness evaluate_invocation(constant_evaluation &state, entity_index f,
+                                  const constant_value &self, uint32_t first,
+                                  uint32_t count, bool &returned,
+                                  constant_value &result);
+    /* [dcl.constexpr]/10 for a constexpr variable of class type: whether
+       its initialization init is a constant expression */
+    constness evaluate_variable(qualified_type t, uint32_t init, token_index at,
+                                uint32_t &value);
+    /* the tree of constant and initializer_list nodes for an evaluated
+       object of type t, which lowering emits as data (0: a value it cannot
+       be, an indeterminate member, a pointer) */
+    uint32_t value_tree(const constant_evaluation &state, qualified_type t,
+                        const constant_value &v, token_index at);
+    /* the case or default label of switch body a jump with the kept value
+       goes to, or 0 ([stmt.switch]/5) */
+    uint32_t switch_target(uint32_t body, uint64_t value, bool &found) const;
+    /* [dcl.constexpr]/6: not_constant when no invocation of the
+       constexpr function whose body is body can be a constant expression,
+       whatever its arguments: the body evaluated with the parameters'
+       values unknown fails before it depends on them */
+    constness potential_constant(uint32_t body);
+    /* an object's place: objects[place], or elements[place & ~element_place]
+       when element_place is set */
+    static constexpr uint32_t element_place = 0x80000000u;
+    constant_value &place_value(constant_evaluation &state, uint32_t place);
+    bool place_read_only(const constant_evaluation &state,
+                         uint32_t place) const;
+    /* the index in state.objects of the entity's object in the current
+       frame, or no_frame_object */
+    static constexpr uint32_t no_frame_object = UINT32_MAX;
+    uint32_t frame_object(const constant_evaluation &state,
+                          entity_index e) const;
+    /* the arithmetic type the evaluator computes in for t (none: one it has
+       no rules for); a conversion and a binary operator on values */
+    fundamental_type evaluated_type(qualified_type t) const;
+    constness evaluate_conversion(constant_value &v, fundamental_type from,
+                                  fundamental_type to);
+    constness evaluate_binary(uint8_t op, fundamental_type t,
+                              fundamental_type right, fundamental_type result,
+                              const constant_value &x, const constant_value &y,
+                              constant_value &out);
+    /* a value of the arithmetic type t as expression_meaning keeps it, and
+       back */
+    uint64_t kept_of(fundamental_type t, const constant_value &v) const;
+    constant_value value_of(fundamental_type t, uint64_t kept) const;
+    /* m's value as expression_meaning keeps it, from the evaluator's */
+    void evaluated_meaning(expression_meaning &m, const constant_value &v);
+
     /* ---- initialization ([dcl.init]) ---- */
     struct initialized_value {
         constness evaluation = constness::unknown;
@@ -1778,6 +2150,9 @@ class semantic_analysis
                                 entity_index &c, token_index &id);
     /* [dcl.type.simple]: nested-name-specifier type-name: the type and,
        for a typedef-name, its cv-qualifiers */
+    analysis_result named_member_type(node_index n, token_index t,
+                                      entity_index e, const char *citation,
+                                      type_index &type, uint32_t &cv);
     analysis_result qualified_type_name(node_index n, type_index &type,
                                         uint32_t &cv);
     /* [dcl.enum]: an enum-specifier, the enumeration's type */
@@ -2006,6 +2381,478 @@ class semantic_analysis
        initializer that has one is the evaluator's to decide
        ([basic.start.static]/2) */
     uint32_t constexpr_calls = 0;
+
+    /* ---- instantiation (sema/instantiation.cpp, doc/PLAN-cxx-sema.md
+       3.5) ----
+       An instantiation's result with its key and everything it read from
+       outside itself, which is what a cache would check before reusing
+       it.  Nothing is instantiated yet. */
+    struct template_argument {
+        /* [temp.arg]/1: a type, a value (an integral one, of type type,
+           sign- or zero-extended as expression_meaning keeps it; or in a
+           template's own declaration a non-type template-parameter,
+           template_entity, whose position value is) or a template */
+        enum class kind_t : uint8_t {
+            type,
+            value,
+            /* [temp.arg.template]/1: a class template, its entity in
+               value; in a template's own declaration a template
+               template-parameter, template_entity (its position value) */
+            template_name,
+            /* [temp.variadic]/1's template parameter pack's argument: its
+               count elements pack_arguments[value .. + count), the same
+               elements always at the same place (make_pack) */
+            pack
+        } kind = kind_t::type;
+        qualified_type type;
+        uint64_t value = 0;
+        entity_index template_entity = 0;
+        uint32_t count = 0;
+        bool operator==(const template_argument &o) const
+        {
+            return kind == o.kind && type == o.type && value == o.value &&
+                   template_entity == o.template_entity && count == o.count;
+        }
+    };
+    struct instantiation_input {
+        /* what the instantiation looked up outside itself: a name in a
+           scope and what it found, an overload set at a call, the
+           specializations of a template visible */
+        enum class kind_t : uint8_t {
+            lookup,
+            overload_set,
+            specializations
+        } kind = kind_t::lookup;
+        entity_index scope = 0;
+        uint32_t name = 0;
+        entity_index found = 0;
+    };
+    struct instantiation_record {
+        /* the key: the template and its arguments
+           (template_arguments[first_argument .. + argument_count)) */
+        entity_index template_entity = 0;
+        uint32_t first_argument = 0, argument_count = 0;
+        /* the specialization made ([temp.inst]) */
+        entity_index specialization = 0;
+        /* inputs[first_input .. + input_count) */
+        uint32_t first_input = 0, input_count = 0;
+        /* a function template's: the scope its template-parameters'
+           names name the arguments in, whether its definition is
+           instantiated, waits (pending_definitions) or is being
+           analysed */
+        entity_index scope = 0;
+        bool defined = false, pending = false, defining = false;
+        /* a class's: the partial or explicit specialization whose
+           class-specifier defines it (function_templates' index plus one;
+           0 the primary template's) and its parameters' arguments
+           (template_arguments[first_deduced ..]) */
+        uint32_t pattern = 0, first_deduced = 0;
+        /* a function template's specialization declared by an explicit
+           specialization ([temp.expl.spec]/1): never instantiated */
+        bool explicit_specialization = false;
+        /* a function template's declaration whose substitution failed
+           while a candidate was considered ([temp.deduct]/8) */
+        bool substitution_failed = false;
+    };
+    /* [temp.fct]/1: a function template: its entity (template_entity,
+       whose type is the function type with the type parameters' types,
+       type_kind::template_parameter), the name hold_names bound for it,
+       its template-declaration and function-definition, and its type
+       parameters (typedef-names of those types, whose value is their
+       position) template_parameter_entities[first_parameter ..
+       + parameter_count); unusable when its name declares more than this
+       template */
+    struct function_template {
+        entity_index entity = 0, name = 0;
+        node_index declaration = 0, definition = 0;
+        /* a function template's function-definition or (declared, not
+           yet defined: definition 0) simple-declaration, whose first two
+           children are its decl-specifier-seq and declarator */
+        node_index declarator = 0;
+        uint32_t first_parameter = 0, parameter_count = 0;
+        bool unusable = false;
+        /* a class template ([temp.class]): definition is its
+           class-specifier */
+        bool is_class = false;
+        /* an alias template ([temp.alias]): definition is its
+           alias-declaration */
+        bool is_alias = false;
+        /* a variable template ([temp.pre]/1): declarator is its
+           simple-declaration */
+        bool is_variable = false;
+        /* a template template-parameter ([temp.param]/1): the class
+           template its name stands for in the template's own
+           declaration, never instantiated (a specialization of it is a
+           dependent type, [temp.dep.type]/9); its entity's value is its
+           position */
+        bool is_parameter = false;
+        /* a class template's partial ([temp.class.spec]) or explicit
+           ([temp.expl.spec]) specialization: its primary template
+           (function_templates' index plus one; no name of its own), the
+           arguments its template-id gives
+           (template_arguments[first_pattern .. + pattern_count), in terms
+           of its own parameters) */
+        uint32_t primary = 0, first_pattern = 0, pattern_count = 0;
+    };
+    owned_array<function_template> function_templates;
+    function_template new_template(uint32_t name, entity_index outer,
+                                   node_index n, uint32_t index, uint32_t first,
+                                   uint32_t count);
+    void hold_template_name(function_template &record, uint32_t name,
+                            entity_index outer);
+    /* [temp.over]/1: "The complete set of candidate functions includes all
+       the synthesized declarations and all of the non-template overloaded
+       functions of the same name": the functions of a scope a function
+       template's name, held, was bound to before the template */
+    struct template_name_function {
+        entity_index name = 0, function = 0;
+    };
+    owned_array<template_name_function> template_name_functions;
+    /* per template-parameter: a type parameter's typedef-name of its
+       template_parameter type, or a non-type parameter's entity (kind
+       none, so that the template's own declarator cannot use its value;
+       its type the parameter's); and its type-parameter or
+       parameter-declaration, for its default template-argument */
+    owned_array<entity_index> template_parameter_entities;
+    owned_array<node_index> template_parameter_nodes;
+    /* the instantiation whose specialization the declaration analysed
+       now declares (its record's index plus one), and how deep
+       instantiations nest ([temp.inst]/16) */
+    uint32_t instantiating = 0;
+    unsigned instantiation_depth = 0;
+    /* the state enter_instantiation saves and leave_instantiation puts
+       back */
+    struct instantiation_context {
+        entity_index scope = 0, defining_class = 0, last_declared = 0,
+                     member_scope = 0;
+        node_index declaration = 0;
+        token_index horizon = 0, callee = 0;
+        uint32_t function_cv = 0, instantiating = 0, class_instantiating = 0,
+                 variable_instantiating = 0;
+        unsigned unevaluated = 0;
+        uint8_t access = 0;
+        bool in_condition = false, claimable = false, expanding = false;
+        function_context function;
+        owned_array<parameter_meaning> parameters;
+        size_t expressions_before = 0, uses_before = 0;
+    };
+    void enter_instantiation(instantiation_context &c, entity_index scope,
+                             node_index declaration);
+    void leave_instantiation(instantiation_context &c);
+    /* an unevaluated operand ([expr.prop]/1) or a default argument is
+       analysed: a specialization named there needs no definition
+       ([temp.inst]/5) */
+    unsigned unevaluated = 0;
+    /* a candidate's declaration is instantiated ([temp.over]/1): an
+       invalid type or expression in it is a deduction failure
+       ([temp.deduct]/8), not an error (its diagnostics are taken back);
+       definitions instantiated meanwhile are outside the immediate
+       context, their failures counted */
+    unsigned substituting = 0;
+    uint32_t definition_failures = 0;
+    /* the specializations whose definitions wait for the end of the
+       translation unit ([temp.point]/7) */
+    owned_array<uint32_t> pending_definitions;
+    /* the definition of instantiations[index]'s specialization */
+    analysis_result instantiate_definition(node_index at, uint32_t index);
+    /* the definitions pending_definitions waits for */
+    void instantiate_pending();
+    /* in an instantiation, the template's first token: a namespace's
+       name declared after it is not the template's to find
+       (lookup_unqualified) */
+    token_index lookup_horizon = 0;
+    /* the function template whose name the held entity is, plus one */
+    uint32_t function_template_of(entity_index held) const;
+    /* the class template the entity names (its held name, or one of its
+       specializations as its injected-class-name), plus one */
+    uint32_t class_template_of(entity_index e) const;
+    /* the alias template the held name e is, plus one */
+    uint32_t alias_template_of(entity_index e) const;
+    uint32_t template_of_form(entity_index e,
+                              bool function_template::*form) const;
+    bool template_id_name(node_index id, lookup_result &x,
+                          entity_index &named) const;
+    /* [temp.alias]/1: an alias template defined at namespace scope */
+    analysis_result alias_template_definition(node_index n, node_index alias);
+    /* [temp.alias]/2: the type a simple-template-id naming the alias
+       template at denotes */
+    analysis_result alias_template_type(node_index id, uint32_t at,
+                                        type_index &type);
+    /* the variable template the held name e is, plus one */
+    uint32_t variable_template_of(entity_index e) const;
+    /* [temp.pre]/1: a variable template defined at namespace scope */
+    analysis_result variable_template_definition(node_index n,
+                                                 node_index declaration);
+    /* [temp.inst]/7: a simple-template-id naming a variable template's
+       specialization, as an id-expression */
+    analysis_result variable_template_id(node_index n, expression_meaning &m);
+    /* ... the specialization, instantiated (or found) */
+    analysis_result instantiate_variable(node_index at, uint32_t vt,
+                                         const template_argument *arguments,
+                                         uint32_t count, entity_index &e);
+    /* the instantiation whose variable the declaration analysed now
+       declares (its record's index plus one) */
+    uint32_t variable_instantiating = 0;
+    /* declare()'s part for it */
+    analysis_result
+    declare_variable_specialization(node_index declaration, qualified_type type,
+                                    const specified &s,
+                                    entity_index &declared_entity);
+    /* [temp.pre]/1: a template-head's parameters */
+    analysis_result
+    template_head_parameters(node_index n, owned_array<node_index> &parameters,
+                             bool packs = false);
+    /* a template-parameter's identifier (after the ellipsis of a pack's) */
+    token_index template_parameter_id(node_index parameter) const;
+    /* [temp.param]/1's template-parameter, as written: a type-parameter
+       (a template template-parameter's with its template-head) or a
+       parameter-declaration, its ellipsis, identifier and default
+       template-argument; false for a form with no rules here (a
+       type-constraint) */
+    struct template_parameter_parts {
+        bool type = false, template_template = false, pack = false;
+        bool named = false, has_default = false, has_declarator = false;
+        token_index id = 0;
+        node_index head = 0;
+        syntax_child default_argument, declarator;
+    };
+    bool template_parameter_form(node_index parameter,
+                                 template_parameter_parts &out) const;
+    bool template_parameter_has_default(node_index parameter) const
+    {
+        template_parameter_parts x;
+        return template_parameter_form(parameter, x) && x.has_default;
+    }
+    /* the type-parameters and parameter-declarations of a template-head */
+    bool template_head_list(node_index head,
+                            owned_array<node_index> &parameters) const;
+    /* [temp.param]: the parameters' entities in scope, for the template
+       function_templates[index] will be; reserved is a name they shall not
+       have ([temp.local]/6) */
+    analysis_result declare_template_parameters(
+        node_index n, const owned_array<node_index> &parameters,
+        entity_index scope, uint32_t &index, uint32_t reserved);
+    analysis_result template_parameter_scope(
+        node_index n, const owned_array<node_index> &parameters,
+        entity_index outer, uint32_t reserved, uint32_t &index,
+        entity_index &scope, uint32_t &first);
+    node_index sole_decl_specifier(node_index declaration) const;
+    bool expansion_list(node_index list, owned_array<syntax_child> &written,
+                        owned_array<bool> &expansion) const;
+    bool
+    default_missing_after_one(const owned_array<node_index> &parameters) const;
+    analysis_result
+    template_id_arguments_in(node_index id, uint32_t ct, entity_index scope,
+                             owned_array<template_argument> &arguments);
+    /* [temp.arg]: the written argument for the template's parameter at
+       position, given the arguments before it */
+    analysis_result template_argument_for(node_index at,
+                                          uint32_t template_index,
+                                          uint32_t position,
+                                          syntax_child written,
+                                          const template_argument *before,
+                                          template_argument &out);
+    /* [temp.param]/6: a non-type template-parameter's type with rules
+       here; one whose arguments are addresses */
+    bool structural_parameter_type(qualified_type t) const;
+    bool address_parameter_type(qualified_type t) const;
+    /* [temp.arg.nontype]/3: an argument for one of those */
+    analysis_result address_argument(node_index at, qualified_type to,
+                                     syntax_child written,
+                                     template_argument &out);
+    /* [temp.arg.template]: the argument for template template-parameter
+       parameter */
+    analysis_result template_template_argument(node_index at,
+                                               entity_index parameter,
+                                               syntax_child written,
+                                               template_argument &out);
+    /* [temp.arg]/4, [temp.param]/12: the arguments not given (set[i]
+       false) from the parameters' default template-arguments */
+    analysis_result
+    default_template_arguments(node_index at, uint32_t template_index,
+                               owned_array<template_argument> &arguments,
+                               const owned_array<bool> &set);
+    /* a template-parameter's name in scope, as the argument: a
+       typedef-name of the type, or a constant of the value */
+    void bind_template_argument(entity_index scope, entity_index parameter,
+                                const template_argument &a);
+    /* [temp.class.spec], [temp.expl.spec]: a class template's partial
+       (parameters) or explicit specialization's definition */
+    analysis_result
+    class_specialization_definition(node_index n, node_index specifier,
+                                    const owned_array<node_index> &parameters);
+    /* the specialization of function_templates[class_template - 1] whose
+       pattern the arguments match (0: the primary), with its parameters'
+       arguments */
+    analysis_result
+    matching_specialization(node_index at, uint32_t class_template,
+                            const template_argument *arguments, uint32_t count,
+                            uint32_t &pattern,
+                            owned_array<template_argument> &deduced);
+    /* [temp.class]: a class template defined at namespace scope */
+    analysis_result class_template_definition(node_index n,
+                                              node_index specifier);
+    /* [temp.names]/1: a simple-template-id's arguments for the class
+       template function_templates[ct - 1], defaults included */
+    analysis_result
+    template_id_arguments(node_index id, uint32_t ct,
+                          owned_array<template_argument> &arguments);
+    /* [temp.class]: a class template declared without a definition
+       (template<class T> struct S;) */
+    analysis_result class_template_declaration(node_index n,
+                                               node_index elaborated);
+    /* whether the template's parameters (template_parameter_entities from
+       first) are another's (from other_first) of the same kinds and
+       types, count of each */
+    bool same_template_parameters(uint32_t first, uint32_t other_first,
+                                  uint32_t count) const;
+    /* [temp.mem.func]/1: a member function of a class template (or of a
+       partial specialization, [temp.class.spec.mfunc]/1) defined outside
+       it: the definition, analysed per specialization of the class
+       (define_template_member) */
+    struct template_member_definition {
+        node_index declaration = 0, definition = 0;
+        /* the class template, and the partial specialization whose member
+           it is (function_templates' index plus one; 0 the primary) */
+        entity_index template_entity = 0;
+        uint32_t pattern = 0;
+    };
+    owned_array<template_member_definition> template_member_definitions;
+    /* the simple-template-id before the declarator-id's :: of a
+       function-definition (box<T>::f), or 0; and the member's name */
+    node_index out_of_class_member(node_index definition,
+                                   token_index *name = nullptr) const;
+    analysis_result member_definition_of_template(node_index n,
+                                                  node_index definition);
+    /* template_member_definitions[member] for the class of
+       instantiations[index]; after the template-declaration was analysed
+       (declarations has it), a failure makes that unsupported */
+    analysis_result define_template_member(uint32_t member, uint32_t index,
+                                           bool recorded);
+    /* instantiate_class's definition of instantiations[index]'s class */
+    /* define_class_instantiation outside a substitution's immediate
+       context (substituting) */
+    analysis_result define_class_outside(node_index at, uint32_t index,
+                                         entity_index &c);
+    analysis_result define_class_instantiation(node_index at, uint32_t index,
+                                               entity_index &c);
+    /* [temp.names]/1: a simple-template-id that names a class template's
+       specialization, as a type; in the scope given (0: unqualified) */
+    analysis_result template_type(node_index id, entity_index scope,
+                                  bool qualified, type_index &type);
+    /* [temp.inst]/2: the class template specialization, instantiated */
+    analysis_result instantiate_class(node_index at, uint32_t class_template,
+                                      const template_argument *arguments,
+                                      uint32_t count, entity_index &c);
+    /* the instantiation whose class the class-specifier analysed now
+       defines (its record's index plus one) */
+    uint32_t class_instantiating = 0;
+    /* a call whose name is a function template's (expr.post.cpp) */
+    analysis_result template_call(node_index n, token_index name,
+                                  uint32_t function_template,
+                                  owned_array<template_argument> &specified,
+                                  bool qualified,
+                                  const owned_array<syntax_child> &arguments,
+                                  owned_array<expression_meaning> &early,
+                                  expression_meaning &f);
+    /* a callee that names a function template: f, f<A...>, N::f or
+       N::f<A...>; its name, the template (plus one, 0 if the callee is no
+       template's name) and the template-arguments given */
+    analysis_result template_callee(syntax_child callee, token_index &name,
+                                    uint32_t &function_template,
+                                    owned_array<template_argument> &specified,
+                                    bool &qualified);
+    analysis_result template_callee_parts(
+        syntax_child callee, token_index &name, uint32_t &function_template,
+        owned_array<template_argument> &specified, bool &qualified);
+    /* declare()'s part for a specialization an instantiation makes */
+    analysis_result declare_specialization(node_index declaration,
+                                           token_index id, qualified_type type,
+                                           const specified &s,
+                                           entity_index &declared_entity);
+    /* [temp.deduct.call]: P against A, the deduced arguments by position
+       (set: deduced or given) */
+    bool deduce_type(qualified_type p, qualified_type a,
+                     owned_array<template_argument> &deduced,
+                     owned_array<bool> &set, bool exact = false);
+    /* t without the cv-qualifiers cv, an array's taken from its elements
+       ([basic.type.qualifier]/3) */
+    qualified_type remove_cv(qualified_type t, uint32_t cv);
+    /* [temp.over]/1: the usable function templates (indices plus one) of
+       a held name, in declaration order */
+    void function_template_overloads(entity_index held,
+                                     owned_array<uint32_t> &out) const;
+    /* [temp.func.order] in a call of the given number of arguments
+       ([temp.deduct.partial]/3.1): 1 when f is more specialized than g,
+       -1 when g is more than f, 0 when neither; unknown set when analysis
+       cannot tell */
+    int function_template_order(uint32_t f, uint32_t g, size_t arguments,
+                                bool &unknown);
+    bool at_least_as_specialized(uint32_t f, uint32_t g, size_t arguments,
+                                 bool &unknown);
+    /* [temp.class.order]: whether partial specialization s (index plus
+       one) is at least as specialized as t */
+    bool class_at_least_as_specialized(uint32_t s, uint32_t t, bool &unknown);
+    owned_array<template_argument> template_arguments;
+    /* [temp.variadic]: the elements of the packs among template arguments
+       (template_argument::kind_t::pack) */
+    owned_array<template_argument> pack_arguments;
+    template_argument make_pack(const template_argument *elements,
+                                uint32_t count);
+    /* a template parameter pack: template_parameter_entities[i]'s */
+    bool template_parameter_is_pack(uint32_t i) const;
+    /* [temp.variadic]/1: an instantiation's packs (entity_kind::pack, the
+       elements pack_elements[value .. + member_count)), and the element
+       their names denote while a pack expansion's pattern is analysed
+       for it (expanding) */
+    owned_array<entity_index> pack_elements;
+    bool expanding = false;
+    uint32_t expansion_element = 0;
+    entity_index make_bound_pack(entity_index scope, uint32_t name,
+                                 const entity_index *elements, uint32_t count);
+    /* the pack an identifier names from the current scope, or 0 */
+    entity_index find_pack(uint32_t name) const;
+    /* [temp.variadic]/5: the number of elements of the packs the pattern
+       [first, end) names (false: none, packs of different lengths, or a
+       pack expansion within it) */
+    bool expansion_count(token_index first, token_index end,
+                         uint32_t &count) const;
+    /* expression(pattern) for the element i of the packs it names */
+    analysis_result expansion_element_expression(syntax_child pattern,
+                                                 uint32_t i,
+                                                 expression_meaning &m);
+    /* [expr.prim.fold] */
+    analysis_result fold(node_index n, expression_meaning &m);
+    /* an initializer-list with a pack expansion (an ellipsis child) */
+    bool has_pack_expansion(syntax_child list) const;
+    owned_array<constant_value> instantiation_values;
+    owned_array<instantiation_input> instantiation_inputs;
+    owned_array<instantiation_record> instantiations;
+    /* the instantiation record of the template's specialization for the
+       arguments, plus one; 0 if there is none yet */
+    uint32_t find_instantiation(entity_index t, const template_argument *a,
+                                uint32_t count) const;
+    /* a new instantiation record of function template ft (its entity the
+       template's) for the arguments, with a block scope in the template's
+       enclosing scope binding the template-parameters' names to them
+       (bind_template_argument); its index */
+    uint32_t record_instantiation(const function_template &ft,
+                                  const template_argument *arguments,
+                                  uint32_t count);
+    /* [temp.inst]/1: the specialization of the template for the
+       arguments, instantiated (or found, if it already was) */
+    analysis_result instantiate(node_index at, entity_index template_entity,
+                                const template_argument *arguments,
+                                uint32_t count, entity_index &specialization);
+    /* [temp.deduct]/1: "When a function template specialization is
+       referenced, all of the template arguments shall have values"; the
+       arguments deduced from a call's ([temp.deduct.call]); on entry
+       those the call specifies ([temp.arg.explicit]) */
+    analysis_result deduce_from_call(node_index at, uint32_t function_template,
+                                     const expression_meaning *arguments,
+                                     uint32_t count,
+                                     owned_array<template_argument> &deduced,
+                                     bool *failed = nullptr);
     /* [class.mem]/6: member function bodies of nested classes, analysed
        at the closing } of the outermost class being defined */
     struct deferred_body {
@@ -2058,6 +2905,69 @@ class semantic_analysis
     analysis_result call(node_index n, expression_meaning &m);
 
     /* ---- overloading ([over]) ---- */
+  public:
+    /* a function template's specialization (entity::instantiation): its
+       template and its arguments, for its name ([abi:mangle.name]) */
+    entity_index specialized_template(entity_index e) const
+    {
+        return instantiations[entity_table[e].instantiation - 1]
+            .template_entity;
+    }
+    uint32_t specialization_argument_count(entity_index e) const
+    {
+        return instantiations[entity_table[e].instantiation - 1].argument_count;
+    }
+    qualified_type specialization_argument(entity_index e, uint32_t i,
+                                           uint32_t element = 0) const
+    {
+        return specialization_template_argument(e, i, element).type;
+    }
+    /* whether argument i is a pack's ([temp.variadic]/1): its number of
+       elements plus one, 0 if not; element k + 1 of the functions here
+       is its k-th */
+    uint32_t specialization_pack(entity_index e, uint32_t i) const
+    {
+        const template_argument &a = specialization_template_argument(e, i);
+        if (a.kind != template_argument::kind_t::pack)
+            return 0;
+        return a.count + 1;
+    }
+    /* whether the argument is a value (non-type, integral): its
+       magnitude, and whether it is negative; or, in a template's own
+       declaration, the non-type template-parameter it names (its position
+       plus one in parameter) */
+    bool specialization_value(entity_index e, uint32_t i, uint64_t &magnitude,
+                              bool &negative, uint32_t &parameter,
+                              uint32_t element = 0) const;
+    /* whether the argument is a template ([temp.arg.template]/1): the
+       class template, or in a template's own declaration the template
+       template-parameter it names (also its position plus one in
+       parameter) */
+    /* whether the argument is an object's or function's address (a
+       pointer parameter's) or the object or function (a reference
+       parameter's) */
+    bool specialization_address(entity_index e, uint32_t i,
+                                entity_index &object, bool &reference,
+                                uint32_t element = 0) const;
+    /* whether entity e is a template template-parameter */
+    bool template_template_parameter(entity_index e) const;
+    bool specialization_template_name(entity_index e, uint32_t i,
+                                      entity_index &named, uint32_t &parameter,
+                                      uint32_t element = 0) const;
+
+  private:
+    const template_argument &
+    specialization_template_argument(entity_index e, uint32_t i,
+                                     uint32_t element = 0) const
+    {
+        const instantiation_record &x =
+            instantiations[entity_table[e].instantiation - 1];
+        const template_argument &a = template_arguments[x.first_argument + i];
+        if (!element)
+            return a;
+        return pack_arguments[a.value + element - 1];
+    }
+
   public:
     /* [over.best.ics]/1: "An implicit conversion sequence is a sequence of
        conversions used to convert an argument in a function call to the
@@ -2123,6 +3033,10 @@ class semantic_analysis
            x != y or y == x), and one synthesized with the order of its two
            parameters reversed */
         bool rewritten = false, reversed = false;
+        /* a function template specialization: its template
+           (function_templates' index plus one), for [over.match.best]/2.4
+           and 2.5 */
+        uint32_t template_index = 0;
     };
 
   private:

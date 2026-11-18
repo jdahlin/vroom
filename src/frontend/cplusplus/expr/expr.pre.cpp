@@ -111,6 +111,10 @@ analysis_result semantic_analysis::expression_kind(syntax_child e,
         return new_expression(n, m);
     case syntax_kind::delete_expression:
         return delete_expression(n, m);
+    case syntax_kind::fold_expression:
+        return fold(n, m);
+    case syntax_kind::simple_template_id:
+        return variable_template_id(n, m);
     default:
         return not_supported(n);
     }

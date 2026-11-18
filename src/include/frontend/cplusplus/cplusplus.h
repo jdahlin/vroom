@@ -618,6 +618,12 @@ class source_files
     preprocessing_token next(entry &e, bool header_name_permitted = false);
 
     const entry *find(source_location location) const;
+    /* whether the source at location is a system header's: its file is
+       one, or a line marker's flag 3 made the lines after it one ([GNU cpp
+       manual 9, Preprocessor Output]) */
+    bool in_system_header(source_location location) const;
+    /* a line marker at location, its flags 3 or not */
+    void mark_system_header(source_location location, bool system);
     entry &operator[](size_t i)
     {
         return files[i];
@@ -647,6 +653,11 @@ class source_files
     owned_objects<entry> files;
     entry conversion; /* an empty file: its lexer converts any file's tokens */
     source_location next_base = 1;
+    struct system_marker {
+        source_location from = 0;
+        bool system = false;
+    };
+    owned_array<system_marker> system_markers;
     void place(entry &e);
 };
 

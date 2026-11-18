@@ -93,6 +93,18 @@ class itanium_mangler
         return pp.identifier_spelling(identifier - 1, length);
     }
     bool encoding(entity_index e);
+    bool specialization_encoding(entity_index e);
+    bool class_template_args(entity_index c);
+    bool template_args(entity_index c);
+    bool template_arg(entity_index c, uint32_t i, uint32_t element);
+    bool template_template_arg(entity_index t, uint32_t parameter);
+    void template_param(uint64_t position)
+    {
+        text("T");
+        if (position)
+            number(position - 1);
+        text("_");
+    }
     bool name(entity_index e);
     bool unscoped_name(entity_index e);
     bool unqualified_name(entity_index e);
@@ -106,6 +118,8 @@ class itanium_mangler
     bool nested_name(entity_index e);
     bool prefix(entity_index scope);
     bool class_enum_type(qualified_type t);
+    bool dependent_member_name(entity_index e);
+    bool dependent_member_prefix(type_index q);
     void discriminator(uint64_t n);
     bool bare_function_type(qualified_type t);
     bool type(qualified_type t);
@@ -171,8 +185,10 @@ bool itanium_mangler::mangled_name(entity_index e)
        linkage with the same function name ... that appear in different
        namespace scopes refer to the same function": its symbol is its
        name in any namespace, and so a variable's */
+    /* (a variable template's specialization is mangled, _Z2piIdE) */
+    bool specialization = x.kind == entity_kind::variable && x.instantiation;
     if (x.c_language_linkage ||
-        (global && !internal_variable &&
+        (global && !internal_variable && !specialization &&
          (x.kind == entity_kind::variable || is_main))) {
         vbuffer_append(out, identifier, length);
         return true;
@@ -192,11 +208,62 @@ bool itanium_mangler::mangled_name(entity_index e)
 bool itanium_mangler::encoding(entity_index e)
 {
     const entity &x = analysis.entity_table[e];
+    if ((x.kind == entity_kind::function || x.kind == entity_kind::variable) &&
+        x.instantiation)
+        return specialization_encoding(e);
     if (!name(e))
         return false;
     if (x.kind == entity_kind::variable)
         return true;
     return bare_function_type(x.type);
+}
+
+/*
+ * A function or variable template's specialization (a variable's has no
+ * type, as above).  [abi:mangle.function-type]: a
+ * template function's return type is encoded: the template's return type,
+ * then its parameter types, as the template declares them (a template
+ * parameter as <template-param>, type()).  [abi:mangle.name]:
+ *
+ *     <name> ::= <unscoped-template-name> <template-args>
+ *     <nested-name> ::= N [<CV-qualifiers>] [<ref-qualifier>] <template-prefix> <template-args> E
+ *     <template-prefix> ::= <prefix> <template unqualified-name>
+ *
+ * The template's name is a substitution candidate after its prefix,
+ * before the arguments.  [abi:mangle.template-arg]:
+ *
+ *     <template-args> ::= I <template-arg>+ E
+ *     <template-arg> ::= <type>
+ */
+bool itanium_mangler::specialization_encoding(entity_index e)
+{
+    const entities &table = analysis.entity_table;
+    entity_index pattern_of = analysis.specialized_template(e);
+    entity_index scope = table[e].enclosing;
+    bool nested = scope && !is_std(scope);
+    if (nested) {
+        if (table[scope].kind != entity_kind::namespace_entity)
+            return false;
+        text("N");
+        if (!prefix(scope))
+            return false;
+    } else if (scope) {
+        text("St");
+    }
+    if (!unqualified_name(e))
+        return false;
+    candidate c;
+    c.scope = pattern_of;
+    candidates.append(c);
+    if (!template_args(e))
+        return false;
+    if (nested)
+        text("E");
+    /* a variable template's specialization: <data name> */
+    if (table[e].kind == entity_kind::variable)
+        return true;
+    qualified_type pattern = table[pattern_of].type;
+    return type(record(pattern).operand) && bare_function_type(pattern);
 }
 
 /*
@@ -288,6 +355,13 @@ bool itanium_mangler::prefix(entity_index scope)
     }
     if (is_class && substitution(c.type))
         return true;
+    if (is_class && c.instantiation &&
+        substitution(analysis.specialized_template(scope))) {
+        if (!template_args(scope))
+            return false;
+        add_candidate(c.type);
+        return true;
+    }
     if (!is_class && substitution(scope))
         return true;
     /* a local class: the function scope (function_scope) came before the
@@ -298,6 +372,8 @@ bool itanium_mangler::prefix(entity_index scope)
     if (c.enclosing && !local && !prefix(c.enclosing))
         return false;
     if (!unqualified_name(scope))
+        return false;
+    if (is_class && !class_template_args(scope))
         return false;
     if (is_class) {
         add_candidate(c.type);
@@ -340,17 +416,130 @@ bool itanium_mangler::in_unnamed_namespace(entity_index e) const
  * A class or an enumeration of namespace or class scope: its name, as an
  * entity's.  One of a block scope (a <local-name>) has no rule yet.
  */
+/*
+ * [abi:mangle.name]:
+ *
+ *     <nested-name> ::= N [<CV-qualifiers>] [<ref-qualifier>] <prefix> <unqualified-name> E
+ *     <prefix> ::= <template-param>
+ *     <prefix> ::= <prefix> <unqualified-name>
+ *
+ * typename Q::name ([temp.res]/3) for a dependent Q: N, the template-param
+ * Q is made of and each name after it, E.  [abi:mangling-compression]:
+ * each prefix is a candidate, the same one as the type it names (Q::a in
+ * Q::a::b, as clang 23); the type as a whole is the one type() adds.
+ */
+bool itanium_mangler::dependent_member_name(entity_index e)
+{
+    text("N");
+    if (!dependent_member_prefix(
+            static_cast<type_index>(analysis.entity_table[e].value)))
+        return false;
+    if (!source_name(analysis.entity_table[e].name))
+        return false;
+    text("E");
+    return true;
+}
+
+bool itanium_mangler::dependent_member_prefix(type_index q)
+{
+    const struct type &r = record(qualified_type::make(q, cv_none));
+    if (r.kind == type_kind::template_parameter)
+        return type(qualified_type::make(q, cv_none));
+    if (r.kind == type_kind::dependent &&
+        analysis.entity_table[r.entity].kind ==
+            entity_kind::template_specialization) {
+        /* a class template's specialization at namespace scope as the
+           prefix, its template-prefix and template-args
+           (only_int<T>::type: N8only_intIT_E4typeE, as clang 23), itself
+           a candidate */
+        qualified_type t = qualified_type::make(q, cv_none);
+        if (substitution(t))
+            return true;
+        if (analysis.entity_table[r.entity].enclosing != 0 ||
+            !class_enum_type(t))
+            return false;
+        add_candidate(t);
+        return true;
+    }
+    if (r.kind != type_kind::dependent ||
+        analysis.entity_table[r.entity].kind != entity_kind::dependent_member)
+        return false;
+    qualified_type t = qualified_type::make(q, cv_none);
+    if (substitution(t))
+        return true;
+    const entity &x = analysis.entity_table[r.entity];
+    if (!dependent_member_prefix(static_cast<type_index>(x.value)))
+        return false;
+    if (!source_name(x.name))
+        return false;
+    add_candidate(t);
+    return true;
+}
+
 bool itanium_mangler::class_enum_type(qualified_type t)
 {
     entity_index c = record(t).entity;
     const entities &table = analysis.entity_table;
     const entity &x = table[c];
-    if (x.kind != entity_kind::class_type && x.kind != entity_kind::enumeration)
+    if (x.kind != entity_kind::class_type &&
+        x.kind != entity_kind::enumeration &&
+        x.kind != entity_kind::template_specialization)
         return false;
     if (!x.name && !x.linkage_name)
         return false;
+    /* [abi:mangling-compression]: a template's name seen before, with its
+       prefix, is a <substitution> before the arguments */
+    if (x.instantiation && substitution(analysis.specialized_template(c)))
+        return template_args(c);
+    if (x.instantiation && analysis.template_template_parameter(
+                               analysis.specialized_template(c))) {
+        /* [abi:mangling-type]: a template template-parameter's
+           specialization,
+
+               <type> ::= <template-template-param> <template-args>
+
+           [abi:mangle.template-param]:
+
+               <template-template-param> ::= <template-param>
+
+           the parameter a candidate */
+        entity_index t = analysis.specialized_template(c);
+        template_param(table[t].value);
+        candidate y;
+        y.scope = t;
+        candidates.append(y);
+        return template_args(c);
+    }
+    if (x.instantiation && is_std(x.enclosing)) {
+        /* [abi:mangling-compression]:
+         *
+         *     <substitution> ::= Sa
+         *     <substitution> ::= Sb
+         *
+         * ::std::allocator and ::std::basic_string, not candidates
+         * themselves; the abbreviations of whole specializations (Ss, Si,
+         * So, Sd) are not made, so those are not mangled */
+        size_t length = 0;
+        const char *identifier = spelling(x.name, &length);
+        uint32_t count = analysis.specialization_argument_count(c);
+        bool string = length == 12 && !memcmp(identifier, "basic_string", 12);
+        if (length == 9 && !memcmp(identifier, "allocator", 9)) {
+            text("Sa");
+            return template_args(c);
+        }
+        if (string && count < 3) {
+            text("Sb");
+            return template_args(c);
+        }
+        bool stream =
+            (length == 13 && (!memcmp(identifier, "basic_istream", 13) ||
+                              !memcmp(identifier, "basic_ostream", 13))) ||
+            (length == 14 && !memcmp(identifier, "basic_iostream", 14));
+        if (string || stream)
+            return false;
+    }
     if (x.enclosing == 0 || is_std(x.enclosing))
-        return unscoped_name(c);
+        return unscoped_name(c) && class_template_args(c);
     if (entity_index local = local_function(c)) {
         /* [abi:mangling-scope]: a local class, or one nested in it */
         if (!function_scope(local))
@@ -367,6 +556,157 @@ bool itanium_mangler::class_enum_type(qualified_type t)
         return false;
     if (!unqualified_name(c))
         return false;
+    if (!class_template_args(c))
+        return false;
+    text("E");
+    return true;
+}
+
+/*
+ * A class template's specialization ([abi:mangle.name]):
+ *
+ *     <unscoped-template-name> ::= <unscoped-name>
+ *     <prefix> ::= <template-prefix> <template-args>
+ *
+ * after the class's name, the template's name as a substitution candidate,
+ * then the arguments; nothing for another class.
+ */
+bool itanium_mangler::class_template_args(entity_index c)
+{
+    const entity &x = analysis.entity_table[c];
+    if ((x.kind != entity_kind::class_type &&
+         x.kind != entity_kind::template_specialization) ||
+        !x.instantiation)
+        return true;
+    candidate t;
+    t.scope = analysis.specialized_template(c);
+    candidates.append(t);
+    return template_args(c);
+}
+
+/*
+ * <template-args> of a template's specialization c.  [abi:mangle.template-arg]:
+ *
+ *     <template-arg> ::= <expr-primary>
+ *
+ * a non-type argument's value; [abi:expressions]:
+ *
+ *     <expr-primary> ::= L <type> <value number> E
+ *
+ * its parameter's type, then the value, n before a negative one's
+ * magnitude; a bool's 0 or 1.
+ */
+bool itanium_mangler::template_args(entity_index c)
+{
+    text("I");
+    uint32_t count = analysis.specialization_argument_count(c);
+    for (uint32_t i = 0; i < count; i++) {
+        uint32_t pack = analysis.specialization_pack(c, i);
+        if (!pack) {
+            if (!template_arg(c, i, 0))
+                return false;
+            continue;
+        }
+        /* [abi:mangle.template-arg]: a template parameter pack's
+           arguments,
+
+               <template-arg> ::= J <template-arg>* E
+        */
+        text("J");
+        for (uint32_t k = 1; k < pack; k++)
+            if (!template_arg(c, i, k))
+                return false;
+        text("E");
+    }
+    text("E");
+    return true;
+}
+
+/*
+ * A template as a template argument ([abi:mangle.template-arg]):
+ *
+ *     <template-arg> ::= <type>
+ *
+ * [impl.clang] the template's name (<unscoped-name>, or a <nested-name> of
+ * its namespace), a candidate as a template prefix is; seen before, its
+ * <substitution>.  In a template's own declaration a template
+ * template-parameter, its <template-param>, a candidate too.
+ */
+bool itanium_mangler::template_template_arg(entity_index t, uint32_t parameter)
+{
+    if (substitution(t))
+        return true;
+    candidate x;
+    x.scope = t;
+    if (parameter) {
+        template_param(parameter - 1);
+        candidates.append(x);
+        return true;
+    }
+    const entities &table = analysis.entity_table;
+    entity_index scope = table[t].enclosing;
+    if (scope && !is_std(scope)) {
+        if (table[scope].kind != entity_kind::namespace_entity)
+            return false;
+        text("N");
+        if (!prefix(scope) || !unqualified_name(t))
+            return false;
+        text("E");
+    } else if (!unscoped_name(t)) {
+        return false;
+    }
+    candidates.append(x);
+    return true;
+}
+
+/* argument i of c's (its element - 1 if element) */
+bool itanium_mangler::template_arg(entity_index c, uint32_t i, uint32_t element)
+{
+    uint64_t v = 0;
+    bool negative = false;
+    uint32_t parameter = 0;
+    entity_index named = 0;
+    if (analysis.specialization_template_name(c, i, named, parameter, element))
+        return template_template_arg(named, parameter);
+    bool reference = false;
+    if (analysis.specialization_address(c, i, named, reference, element)) {
+        /* [abi:expressions]: an object or function,
+
+               <expr-primary> ::= L _Z <encoding> E
+               <expression> ::= <unary operator-name> <expression>
+
+           its address (a pointer's argument) the second, ad
+           ([abi:mangling-operator]'s & as a unary operator) before the
+           first, as X <expression> E ([abi:mangle.template-arg]) */
+        if (!reference)
+            text("Xad");
+        text("L_Z");
+        if (!encoding(named))
+            return false;
+        text("E");
+        if (!reference)
+            text("E");
+        return true;
+    }
+    if (!analysis.specialization_value(c, i, v, negative, parameter, element))
+        return type(analysis.specialization_argument(c, i, element));
+    if (parameter) {
+        /* [abi:mangle.template-arg]: a parameter's name, as an
+           expression:
+
+               <template-arg> ::= X <expression> E
+        */
+        text("X");
+        template_param(parameter - 1);
+        text("E");
+        return true;
+    }
+    text("L");
+    if (!type(analysis.specialization_argument(c, i, element)))
+        return false;
+    if (negative)
+        text("n");
+    number(v);
     text("E");
     return true;
 }
@@ -775,19 +1115,11 @@ bool itanium_mangler::local_name(entity_index e, entity_index function)
     const entity &x = table[e];
     if (x.kind != entity_kind::variable || x.automatic)
         return false;
-    text("Z");
     /* [impl.gnu] [impl.clang] the encoding of a function whose own symbol
        is not mangled (main) is its name alone, without its type:
        _ZZ4mainE1r */
-    const entity &f = table[function];
-    size_t length = 0;
-    const char *identifier = spelling(f.name, &length);
-    if (f.enclosing == 0 && length == 4 && !memcmp(identifier, "main", 4)) {
-        if (!unqualified_name(function))
-            return false;
-    } else if (!encoding(function))
+    if (!function_scope(function))
         return false;
-    text("E");
     if (!unqualified_name(e))
         return false;
     uint64_t earlier = 0;
@@ -900,13 +1232,32 @@ bool itanium_mangler::type(qualified_type t)
     } else if (r.kind == type_kind::rvalue_reference) {
         text("O");
         done = type(r.operand);
+    } else if (r.kind == type_kind::pack_expansion) {
+        /* [abi:mangle.function-type]: a pack expansion,
+
+               <type> ::= Dp <type>
+        */
+        text("Dp");
+        done = type(r.operand);
     } else if (r.kind == type_kind::function)
         done = function_type(t);
     else if (r.kind == type_kind::array)
         done = array_type(t);
+    else if (r.kind == type_kind::dependent &&
+             analysis.entity_table[r.entity].kind ==
+                 entity_kind::dependent_member)
+        done = dependent_member_name(r.entity);
     else if (r.kind == type_kind::class_type ||
-             r.kind == type_kind::enumeration)
+             r.kind == type_kind::enumeration || r.kind == type_kind::dependent)
         done = class_enum_type(t);
+    else if (r.kind == type_kind::template_parameter) {
+        /* [abi:mangle.template-param]:
+               <template-param> ::= T_
+               <template-param> ::= T <parameter-2 non-negative number> _
+           the first parameter T_, the (n+2)-th T n _ */
+        template_param(analysis.entity_table[r.entity].value);
+        done = true;
+    }
     if (!done)
         return false;
     add_candidate(t);

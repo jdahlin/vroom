@@ -307,6 +307,37 @@ inline bool is_closing_bracket(const token &t)
            is_operator(t, preprocessing_op_or_punc::RIGHT_BRACE);
 }
 
+/* [expr.ass]/6: the binary operator of a compound assignment op=, or
+   count for = */
+inline preprocessing_op_or_punc
+compound_assignment_operator(preprocessing_op_or_punc o)
+{
+    switch (o) {
+    case preprocessing_op_or_punc::PLUS_EQUAL:
+        return preprocessing_op_or_punc::PLUS;
+    case preprocessing_op_or_punc::MINUS_EQUAL:
+        return preprocessing_op_or_punc::MINUS;
+    case preprocessing_op_or_punc::STAR_EQUAL:
+        return preprocessing_op_or_punc::STAR;
+    case preprocessing_op_or_punc::SLASH_EQUAL:
+        return preprocessing_op_or_punc::SLASH;
+    case preprocessing_op_or_punc::PERCENT_EQUAL:
+        return preprocessing_op_or_punc::PERCENT;
+    case preprocessing_op_or_punc::LESS_LESS_EQUAL:
+        return preprocessing_op_or_punc::LESS_LESS;
+    case preprocessing_op_or_punc::GREATER_GREATER_EQUAL:
+        return preprocessing_op_or_punc::GREATER_GREATER;
+    case preprocessing_op_or_punc::AMPERSAND_EQUAL:
+        return preprocessing_op_or_punc::AMPERSAND;
+    case preprocessing_op_or_punc::CARET_EQUAL:
+        return preprocessing_op_or_punc::CARET;
+    case preprocessing_op_or_punc::BAR_EQUAL:
+        return preprocessing_op_or_punc::BAR;
+    default:
+        return preprocessing_op_or_punc::count;
+    }
+}
+
 /* [expr.ass]: assignment-operator, one of = *= /= %= += -= >>= <<= &= ^= |= */
 inline bool is_assignment_operator(const token &t)
 {

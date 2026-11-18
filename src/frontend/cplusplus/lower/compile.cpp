@@ -130,8 +130,11 @@ static int compile_translation_unit(const cplusplus_compile_options *o, pp *p,
     }
     semantic_analysis analysis(tree, tokens, parse, diagnostics);
     analysis.translation_unit();
-    if (request.phase() == dump_phase::analysis)
+    if (request.phase() == dump_phase::analysis) {
+        if (request.has(dump_output::type_claims))
+            analysis.evaluate_analysed_expressions();
         dump_analysis(request, analysis, tree, tokens, out);
+    }
 
     int status = 0;
     /* (-fsyntax-only: no code, nothing lowered) */

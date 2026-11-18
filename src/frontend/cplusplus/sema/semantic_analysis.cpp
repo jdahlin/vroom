@@ -82,6 +82,14 @@ analysis_result semantic_analysis::extension_used(diagnostic_id id,
     return analysis_result::well_formed;
 }
 
+bool semantic_analysis::in_system_header(token_index at) const
+{
+    if (!diagnostics.files)
+        return false;
+    return diagnostics.files->in_system_header(tokens.location(at) +
+                                               diagnostics.location_base);
+}
+
 bool semantic_analysis::parsed_completely(node_index n) const
 {
     /* the nodes under n, without recursion: a tree is as deep as its
@@ -143,6 +151,18 @@ analysis_result semantic_analysis::declaration_by_kind(node_index n)
     switch (tree[n].kind) {
     case syntax_kind::empty_declaration:
         return empty_declaration(n);
+    case syntax_kind::static_assert_declaration:
+        return static_assert_declaration(n);
+    case syntax_kind::alias_declaration:
+        return alias_declaration(n);
+    case syntax_kind::template_declaration:
+        return template_declaration(n);
+    case syntax_kind::explicit_specialization:
+        return explicit_specialization(n);
+    case syntax_kind::explicit_instantiation:
+        return explicit_instantiation(n);
+    case syntax_kind::deduction_guide:
+        return deduction_guide(n);
     case syntax_kind::simple_declaration:
         return simple_declaration(n);
     case syntax_kind::function_definition:
@@ -182,6 +202,7 @@ void semantic_analysis::translation_unit()
     tree.declarations(&all);
     for (node_index n : all)
         declaration(n);
+    instantiate_pending();
 }
 
 } // namespace cplusplus

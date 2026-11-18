@@ -90,6 +90,26 @@ node_index parser::primary_expression()
  * [lex.ext], and any other literal is a prvalue."  The lexer found each
  * literal's type ([lex.icon] Table 8, [lex.ccon], [lex.fcon]) and value.
  */
+/*
+ * [ext.gnu] GCC's imaginary constants (1.0i, 2j): a literal with an i or j
+ * suffix has a _Complex type, which the lexer does not record (it types
+ * the literal as without the suffix).  Analysis has no complex types.
+ */
+bool semantic_analysis::imaginary_literal(token_index t) const
+{
+    owned_buffer spelling;
+    tokens.files.spelling(tokens[t].preprocessing, spelling.get());
+    for (size_t i = spelling.size(); i-- > 0;) {
+        char c = spelling.data()[i];
+        if (c == 'i' || c == 'I' || c == 'j' || c == 'J')
+            return true;
+        /* a digit ends the suffix; f, l, u and friends are part of it */
+        if (c >= '0' && c <= '9')
+            return false;
+    }
+    return false;
+}
+
 analysis_result semantic_analysis::literal(token_index t, expression_meaning &m)
 {
     const implementation_defined_behavior &b = tokens.files.behavior;
@@ -100,6 +120,8 @@ analysis_result semantic_analysis::literal(token_index t, expression_meaning &m)
     case literal_kind::character_literal:
         if (!fundamental_type_is_integral(k.type))
             return not_supported(current_declaration, "lex.icon");
+        if (k.literal == literal_kind::integer_literal && imaginary_literal(t))
+            return not_supported(current_declaration, "ext.gnu");
         m.type = qualified_type::make(type_table.fundamental(k.type), cv_none);
         if (!k.value_known)
             return not_supported(current_declaration, "lex.icon");
@@ -111,6 +133,8 @@ analysis_result semantic_analysis::literal(token_index t, expression_meaning &m)
     case literal_kind::floating_point_literal:
         if (!fundamental_type_is_floating(k.type))
             return not_supported(current_declaration, "lex.fcon");
+        if (imaginary_literal(t))
+            return not_supported(current_declaration, "ext.gnu");
         m.type = qualified_type::make(type_table.fundamental(k.type), cv_none);
         m.beyond_integral_constant = true;
         if (!k.value_known || k.type == fundamental_type::long_double)

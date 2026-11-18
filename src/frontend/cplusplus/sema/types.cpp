@@ -183,4 +183,14 @@ type_index types::pointer_to_member(uint32_t class_entity,
     return intern(t, nullptr);
 }
 
+/* [temp.variadic]/5: "A pack expansion consists of a pattern and an
+   ellipsis" */
+type_index types::pack_expansion_of(qualified_type pattern)
+{
+    type t;
+    t.kind = type_kind::pack_expansion;
+    t.operand = pattern;
+    return intern(t, nullptr);
+}
+
 } // namespace cplusplus

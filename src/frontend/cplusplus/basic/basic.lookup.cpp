@@ -84,6 +84,11 @@ entity_index semantic_analysis::declared_in(entity_index scope, uint32_t name,
                                             lookup_filter filter) const
 {
     entity_index e = entity_table.find(scope, name);
+    /* [temp.variadic]/7: in a pack expansion's pattern analysed for one
+       element, a pack's name is that element (temp.variadic.cpp) */
+    if (e && expanding && entity_table[e].kind == entity_kind::pack &&
+        expansion_element < entity_table[e].member_count)
+        e = pack_elements[entity_table[e].value + expansion_element];
     if (!e || filter == lookup_filter::any ||
         entity_table[e].kind == entity_kind::none)
         return e;
@@ -110,11 +115,24 @@ entity_index semantic_analysis::declared_in(entity_index scope, uint32_t name,
     }
 }
 
+const char *
+semantic_analysis::unknown_name_subclause(entity_index e,
+                                          const char *otherwise) const
+{
+    /* [temp.names]/1: "A template specialization ... can be referred to
+       by a template-id" */
+    if (e && entity_table[e].held_by_template)
+        return "temp.names";
+    return otherwise;
+}
+
 void semantic_analysis::found_also(lookup_result &r, entity_index e,
                                    entity_index in) const
 {
     if (entity_table[e].kind == entity_kind::none) {
         r.unknown = true;
+        if (!r.unknown_entity)
+            r.unknown_entity = e;
         return;
     }
     if (!r.entity) {
@@ -251,6 +269,17 @@ semantic_analysis::lookup_unqualified(uint32_t name, lookup_filter filter) const
                bases'; an ambiguous one finds nothing analysis uses */
             bool ambiguous = false;
             entity_index e = class_member_lookup(s, name, ambiguous);
+            bool unknown = false;
+            if ((e || ambiguous) && in_dependent_base_only(s, name, unknown)) {
+                e = 0;
+                ambiguous = false;
+                /* (clang's -fms-compatibility finds a name
+                   of a dependent base that nothing else declares) */
+                if (tokens.files.behavior.microsoft_compatibility)
+                    unknown = true;
+            }
+            if (unknown)
+                r.unknown = true;
             if (ambiguous)
                 r.unknown = true;
             else if (e) {
@@ -273,6 +302,27 @@ semantic_analysis::lookup_unqualified(uint32_t name, lookup_filter filter) const
         if (r.entity || r.unknown || r.ambiguous || !s)
             break;
     }
+    /* [temp.res]/10: "If a name does not depend on a template-parameter
+       (as defined in [temp.dep]), a declaration (or set of declarations)
+       for that name shall be in scope at the point where the name appears
+       in the template definition".  An instantiation analyses the
+       definition again later: a namespace's declaration after the
+       template, which the template's lookup would not find, makes what
+       the name denotes not known (a dependent call's lookup at the point
+       of instantiation, [temp.dep.candidate], is not told apart) */
+    if (lookup_horizon && r.entity && is_namespace(r.found_in))
+        for (entity_index o = r.entity; o; o = entity_table[o].next_overload) {
+            uint32_t d = entity_table[o].first_declaration;
+            if (d && tree[entity_table.declaration(d).node].first_token >
+                         lookup_horizon)
+                r.unknown = true;
+            if (entity_table[o].kind != entity_kind::function)
+                break;
+        }
+    /* a pack named outside a pack expansion's pattern: ill-formed
+       ([temp.variadic]/7) unless it is one analysis has no rules for */
+    if (r.entity && entity_table[r.entity].kind == entity_kind::pack)
+        r.unknown = true;
     if (r.unknown || r.ambiguous)
         r.entity = 0;
     return r;
@@ -535,7 +585,7 @@ bool semantic_analysis::associated_with(
  */
 bool semantic_analysis::argument_dependent_lookup(
     uint32_t name, const owned_array<qualified_type> &arguments,
-    owned_array<entity_index> &found) const
+    owned_array<entity_index> &found, entity_index known) const
 {
     owned_array<entity_index> classes, namespaces;
     for (qualified_type t : arguments)
@@ -564,7 +614,9 @@ bool semantic_analysis::argument_dependent_lookup(
         entity_index e = entity_table.find(n, name);
         if (!e && entity_table[n].unknown_names)
             return false;
-        if (!e)
+        /* (a name analysis holds: the one the caller found already, a
+           function template's, is no other) */
+        if (!e || e == known)
             continue;
         if (entity_table[e].kind == entity_kind::none)
             return false;
@@ -626,11 +678,12 @@ bool semantic_analysis::argument_dependent_lookup(
  * program is ill-formed."  /3: "A name prefixed by the unary scope operator
  * :: is looked up in global scope".  The first name is looked up as an
  * unqualified name, each later one in the scope the names before it
- * nominate.  A decltype-specifier or a simple-template-id has no rules
- * yet.
+ * nominate.  A simple-template-id names its class template's
+ * specialization; a decltype-specifier has no rules yet.
  */
 analysis_result semantic_analysis::nested_name_specifier(node_index n,
-                                                         nominated_scope &scope)
+                                                         nominated_scope &scope,
+                                                         bool dependent_allowed)
 {
     const syntax_node &node = tree[n];
     const syntax_child *parts = tree.children(n);
@@ -645,12 +698,63 @@ analysis_result semantic_analysis::nested_name_specifier(node_index n,
         i = 1;
     }
     for (; i < node.child_count; i += 2) {
+        if (scope.dependent) {
+            /* [temp.dep.type]/6: "A qualified-id in which the
+               nested-name-specifier names a dependent type that is not the
+               current instantiation" is a member of an unknown
+               specialization, a dependent type (/9): Q::name */
+            if (!parts[i].is_token() ||
+                tokens[parts[i].index()].kind != token_kind::identifier ||
+                i + 1 >= node.child_count ||
+                !syntax_is_punctuator(tokens, parts[i + 1],
+                                      preprocessing_op_or_punc::COLON_COLON))
+                return not_supported(n, "temp.res");
+            scope.dependent = dependent_member_type(
+                scope.dependent, tokens.identifier(parts[i].index()));
+            continue;
+        }
+        if (!parts[i].is_token() &&
+            syntax_is(tree, parts[i], syntax_kind::simple_template_id) &&
+            i + 1 < node.child_count &&
+            syntax_is_punctuator(tokens, parts[i + 1],
+                                 preprocessing_op_or_punc::COLON_COLON)) {
+            /* [temp.names]/1: a simple-template-id naming a class template
+               names the specialization ([temp.spec]/4), a class; its
+               members are looked up there ([class.qual]/1) */
+            type_index named = 0;
+            analysis_result r =
+                template_type(parts[i].index(), scope.entity, qualified, named);
+            if (r != analysis_result::well_formed)
+                return r;
+            const struct type &st = type_table[named];
+            if (st.kind == type_kind::dependent && dependent_allowed) {
+                scope.entity = 0;
+                scope.global = false;
+                scope.dependent = named;
+                qualified = true;
+                continue;
+            }
+            if (st.kind != type_kind::class_type)
+                return not_supported(n, "temp.res");
+            const entity &x = entity_table[st.entity];
+            if (!x.size && st.entity != defining_class && !x.defined)
+                return not_supported(n, "basic.lookup.qual");
+            scope.entity = st.entity;
+            scope.global = false;
+            qualified = true;
+            continue;
+        }
         if (!parts[i].is_token() ||
             tokens[parts[i].index()].kind != token_kind::identifier ||
             i + 1 >= node.child_count ||
             !syntax_is_punctuator(tokens, parts[i + 1],
-                                  preprocessing_op_or_punc::COLON_COLON))
+                                  preprocessing_op_or_punc::COLON_COLON)) {
+            /* [temp.names]: template before a simple-template-id */
+            if (!parts[i].is_token() &&
+                syntax_is(tree, parts[i], syntax_kind::simple_template_id))
+                return not_supported(n, "temp.names");
             return not_supported(n, "basic.lookup.qual");
+        }
         token_index t = parts[i].index();
         uint32_t name = tokens.identifier(t);
         lookup_result r;
@@ -674,6 +778,18 @@ analysis_result semantic_analysis::nested_name_specifier(node_index n,
                type" */
             const struct type &named =
                 type_table[entity_table[e].type.unqualified()];
+            /* a template-parameter: a dependent type ([temp.dep.type]/9),
+               whose members are looked up per specialization */
+            if (named.kind == type_kind::template_parameter ||
+                named.kind == type_kind::dependent) {
+                if (!dependent_allowed)
+                    return not_supported(n, "temp.res");
+                scope.entity = 0;
+                scope.global = false;
+                scope.dependent = entity_table[e].type.unqualified();
+                qualified = true;
+                continue;
+            }
             if (named.kind != type_kind::class_type &&
                 named.kind != type_kind::enumeration)
                 return ill_formed_at_token(

@@ -192,33 +192,16 @@ analysis_result semantic_analysis::case_label(node_index n, syntax_child value,
             return not_supported(n, "stmt.switch");
         return ill_formed(n, rule, "stmt.switch");
     }
-    if (m.evaluation == constness::not_constant)
+    bool constant = false;
+    r = integral_constant_expression(n, m, constant);
+    if (r != analysis_result::well_formed)
+        return r;
+    if (!constant)
         return ill_formed(n, rule, "stmt.switch");
-    if (m.evaluation == constness::unknown)
-        return not_supported(n, "expr.const");
-    bool cplusplus11 =
-        tokens.files.behavior.has(language_feature::list_initialization);
-    /* C++03's integral constant-expression ([expr.const]/1 there) */
-    if (!cplusplus11 && m.beyond_integral_constant)
-        return not_supported(n, "expr.const");
-    qualified_type to =
-        qualified_type::make(type_table.fundamental(adjusted), cv_none);
-    if (cplusplus11) {
-        /* [expr.const]/10: no narrowing conversion in a converted constant
-           expression: clang's -Wc++11-narrowing, an error by default */
-        bool narrows = false;
-        r = narrowing(n, m, to, narrows);
-        if (r != analysis_result::well_formed)
-            return r;
-        if (narrows) {
-            r = extension_used(diagnostic_id::sema_narrowing,
-                               tree[n].first_token, nullptr);
-            if (r != analysis_result::well_formed)
-                return r;
-        }
-    }
-    convert_arithmetic(m, adjusted);
-    if (m.evaluation != constness::constant)
+    r = converted_constant_expression(n, m, adjusted, constant);
+    if (r != analysis_result::well_formed)
+        return r;
+    if (!constant)
         return not_supported(n, "expr.const");
     for (size_t i = function_state.switches[innermost].first_value;
          i < function_state.case_values.size(); i++)
