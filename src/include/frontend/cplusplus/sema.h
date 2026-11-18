@@ -401,6 +401,11 @@ struct entity {
     /* a class: its default constructor is declared = default
        ([dcl.fct.def.default]), declared as the implicit one is */
     bool defaulted_default_constructor = false;
+    /* ... and explicit: explicit X() = default ([class.conv.ctor]/2: a
+       copy-initialization does not consider it) */
+    bool explicit_default_constructor = false;
+    /* X& operator=(const X&) = default (defaulted_copy_assignment) */
+    bool defaulted_copy_assignment = false;
     /* [class.default.ctor]/2: the implicit default constructor is deleted
        (a subobject without a usable default constructor) */
     bool implicit_default_deleted = false;
@@ -2764,7 +2769,12 @@ class semantic_analysis
                                        expression_meaning &m);
     analysis_result defaulted_or_deleted_special_member(
         entity_index c, node_index n, syntax_child d, syntax_child body,
-        uint8_t access, bool constexpr_specified, bool virtual_specified);
+        uint8_t access, bool constexpr_specified, bool virtual_specified,
+        bool explicit_specified);
+    analysis_result defaulted_copy_assignment(entity_index c, node_index n,
+                                              syntax_child d,
+                                              const specified &s,
+                                              uint8_t access);
     analysis_result static_member_initializer(node_index declarator,
                                               entity_index e, syntax_child init,
                                               const specified &s);

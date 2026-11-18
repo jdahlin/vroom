@@ -464,8 +464,13 @@ analysis_result semantic_analysis::special_member_declarator(
     if (kind == special_member::destructor) {
         /* [class.virtual]/7: a virtual destructor, declared so or
            overriding a base's ([class.dtor]/13) */
-        virt_override = virt_final = virt_pure = false;
-        return virtual_member(c, e, declaration, m.id, virtual_specified);
+        /* virt_override, virt_final: the destructor's virt-specifier-seq
+           (member_declaration) */
+        virt_pure = false;
+        analysis_result r =
+            virtual_member(c, e, declaration, m.id, virtual_specified);
+        virt_override = virt_final = false;
+        return r;
     }
     return analysis_result::well_formed;
 }
@@ -485,9 +490,12 @@ analysis_result semantic_analysis::special_member_declarator(
  */
 analysis_result semantic_analysis::defaulted_or_deleted_special_member(
     entity_index c, node_index n, syntax_child d, syntax_child body,
-    uint8_t access, bool constexpr_specified, bool virtual_specified)
+    uint8_t access, bool constexpr_specified, bool virtual_specified,
+    bool explicit_specified)
 {
     if (deleted_body(body)) {
+        if (explicit_specified)
+            return not_supported(n, "dcl.fct.def.delete");
         analysis_result r = special_member_declarator(
             c, n, d, access, false, constexpr_specified, virtual_specified);
         if (r != analysis_result::well_formed)
@@ -545,7 +553,7 @@ analysis_result semantic_analysis::defaulted_or_deleted_special_member(
     entity &x = entity_table[c];
     if (m.destructor) {
         /* [class.dtor]/4: as the implicitly-declared destructor */
-        if (x.destructor || f.parameter_count)
+        if (x.destructor || f.parameter_count || explicit_specified)
             return not_supported(n, "dcl.fct.def.default");
         if (!virtual_specified)
             return analysis_result::well_formed;
@@ -561,11 +569,16 @@ analysis_result semantic_analysis::defaulted_or_deleted_special_member(
         if (x.defaulted_default_constructor)
             return not_supported(n, "class.mem");
         x.defaulted_default_constructor = true;
+        x.explicit_default_constructor = explicit_specified;
         return analysis_result::well_formed;
     }
     const qualified_type *parameters =
         type_table.parameters(type.unqualified());
     const struct type &first = type_table[parameters[0].unqualified()];
+    if (explicit_specified)
+        /* an explicit copy constructor: [class.copy.ctor]/7's implicit
+           one is not */
+        return not_supported(n, "dcl.fct.def.default");
     if (f.parameter_count == 1 && first.kind == type_kind::lvalue_reference &&
         first.operand.unqualified() == x.type.unqualified() &&
         first.operand.cv() == cv_const) {
@@ -578,6 +591,67 @@ analysis_result semantic_analysis::defaulted_or_deleted_special_member(
     }
     /* X(X&) = default, a move constructor */
     return not_supported(n, "dcl.fct.def.default");
+}
+
+/*
+ * X& operator=(const X&) = default in class X: [dcl.fct.def.default]/5, not
+ * user-provided; declared as [class.copy.assign]/2's implicit one would be
+ * ("X& X::operator=(const X&)", public, inline), which analysis declares
+ * no entity for (assigned_bitwise looks the operator up and finds none).
+ * Not analysed: another form, access other than public, a cv- or
+ * ref-qualifier, default arguments, the specifiers static, virtual,
+ * constexpr, friend.  Unlike the implicit one it suppresses the implicit
+ * move constructor and move assignment operator ([class.copy.ctor]/8,
+ * [class.copy.assign]/4), which analysis does not declare either.
+ */
+analysis_result semantic_analysis::defaulted_copy_assignment(entity_index c,
+                                                             node_index n,
+                                                             syntax_child d,
+                                                             const specified &s,
+                                                             uint8_t access)
+{
+    if (access || !s.has_type || s.typedef_ || s.static_ || s.extern_ ||
+        s.constexpr_ || s.virtual_ || s.friend_ || s.explicit_ ||
+        s.declares_class || s.aligned)
+        return not_supported(n, "dcl.fct.def.default");
+    qualified_type type = s.type;
+    declarator_meaning m;
+    function_cv = 0;
+    in_member_declarator = true;
+    function_parameters.clear();
+    analysis_result r = declarator(n, d, type, m);
+    in_member_declarator = false;
+    if (r != analysis_result::well_formed)
+        return r;
+    if (!m.has_id || m.qualifier || function_cv || m.aligned ||
+        !m.operator_function ||
+        m.implemented != preprocessing_op_or_punc::EQUAL)
+        return not_supported(n, "dcl.fct.def.default");
+    for (const parameter_meaning &parameter : function_parameters)
+        if (parameter.default_argument.index())
+            return not_supported(n, "dcl.fct.def.default");
+    const struct type &f = type_table[type.unqualified()];
+    if (f.kind != type_kind::function || f.variadic || f.parameter_count != 1)
+        return not_supported(n, "dcl.fct.def.default");
+    const entity &x = entity_table[c];
+    const struct type &result = type_table[f.operand.unqualified()];
+    const struct type &first =
+        type_table[type_table.parameters(type.unqualified())[0].unqualified()];
+    if (f.operand.cv() || result.kind != type_kind::lvalue_reference ||
+        !(result.operand ==
+          qualified_type::make(x.type.unqualified(), cv_none)) ||
+        first.kind != type_kind::lvalue_reference ||
+        !(first.operand ==
+          qualified_type::make(x.type.unqualified(), cv_const)))
+        return not_supported(n, "dcl.fct.def.default");
+    /* a second one, or beside a user-declared copy assignment operator */
+    lookup_result found = lookup_qualified(
+        c, operator_name(preprocessing_op_or_punc::EQUAL), lookup_filter::any);
+    if (found.entity || found.unknown || found.ambiguous ||
+        x.defaulted_copy_assignment)
+        return not_supported(n, "class.mem");
+    entity_table[c].defaulted_copy_assignment = true;
+    return analysis_result::well_formed;
 }
 
 /* the expressions of an expression-list (an initializer_list node, or one
@@ -1484,6 +1558,9 @@ void semantic_analysis::declare_implicit(entity_index c, special_member kind,
     f.defined = true;
     f.implicit = true;
     f.linkage_of_name = entity_table[c].linkage_of_name;
+    /* explicit X() = default */
+    f.explicit_ = kind == special_member::constructor && !copy &&
+                  entity_table[c].explicit_default_constructor;
     if (kind == special_member::destructor) {
         entity_table[c].destructor = e;
         return;
