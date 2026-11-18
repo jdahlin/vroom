@@ -1095,12 +1095,19 @@ analysis_result semantic_analysis::declare_with_initializer(
             entity_table[record.entity].kind == entity_kind::class_type &&
             entity_table[record.entity].first_constructor &&
             !trivial_defaulted_default_constructor(record.entity)) {
-            if (!(object == type))
-                /* [dcl.init]/7.2: each element default-initialized */
+            /* [dcl.init]/7.2: "If T is an array type, each element is
+               default-initialized": one element's construction, which the
+               lowering repeats for each, first to last, in an automatic
+               array of one dimension */
+            const struct type &array = type_table[type.unqualified()];
+            if (!(object == type) &&
+                (!entity_table[declared_entity].automatic ||
+                 !(array.operand == object) || !array.bound_known ||
+                 !array.bound))
                 return not_supported(declaration, "dcl.init");
             owned_array<expression_meaning> none;
             initialized_value value;
-            r = construct(declaration, type, none, 0, value);
+            r = construct(declaration, object, none, 0, value);
             if (r != analysis_result::well_formed)
                 return r;
             entity_table[declared_entity].definition = value.node;

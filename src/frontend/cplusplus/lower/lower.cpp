@@ -108,8 +108,17 @@ class c_lowering
         uint32_t symbol = 0;
         ast_qualified_type type = 0;
         entity_index destructor = 0;
+        /* an array's: its element type and bound (0: not an array) */
+        ast_qualified_type element = 0;
+        uint64_t bound = 0;
     };
     owned_array<scope_record> live;
+    /* for each element of the array in symbol s (type array, elements of
+       type element), first to last or last to first: a call of special
+       member e on its address */
+    uint32_t each_element(uint32_t s, ast_qualified_type array,
+                          ast_qualified_type element, uint64_t bound,
+                          bool reverse, entity_index e, token_index at);
 
     uint32_t fail(const char *what, token_index at)
     {
@@ -847,6 +856,15 @@ void c_lowering::destroy(size_t mark, owned_array<uint32_t> &out,
         }
         if (r.kind != scope_record::object)
             continue;
+        if (r.bound) {
+            /* [class.dtor]/13: "the elements of an array are destroyed in
+               reverse order of their construction" */
+            uint32_t loop = each_element(r.symbol, r.type, r.element, r.bound,
+                                         true, r.destructor, at);
+            if (loop)
+                out.append(loop);
+            continue;
+        }
         uint32_t object = make(AST_NODE_VARIABLE, r.type, r.symbol, 0, 0, 0,
                                AST_NODE_FLAG_LVALUE);
         uint32_t call = special_call(
@@ -856,6 +874,60 @@ void c_lowering::destroy(size_t mark, owned_array<uint32_t> &out,
         out.append(
             ast_builder_node(c, AST_NODE_EXPRESSION, v, call, 0, 0, 0, 0));
     }
+}
+
+uint32_t c_lowering::each_element(uint32_t s, ast_qualified_type array,
+                                  ast_qualified_type element, uint64_t bound,
+                                  bool reverse, entity_index e, token_index at)
+{
+    ast_qualified_type v = ast_builder_type_basic(AST_TYPE_VOID);
+    ast_qualified_type index_type = ast_builder_type_basic(AST_TYPE_LONG);
+    ast_qualified_type truth = ast_builder_type_basic(AST_TYPE_INT);
+    uint32_t i = ast_builder_symbol(c, AST_SYMBOL_VARIABLE, "", 0, index_type,
+                                    AST_STORAGE_AUTO, 0, 1);
+    auto index = [&] {
+        return make(AST_NODE_VARIABLE, index_type, i, 0, 0, 0,
+                    AST_NODE_FLAG_LVALUE);
+    };
+    auto constant = [&](uint64_t value) {
+        return ast_builder_integer(c, index_type, static_cast<int64_t>(value));
+    };
+    ast_qualified_type pointer = ast_builder_type_pointer(c, element);
+    uint32_t first =
+        cast(make(AST_NODE_VARIABLE, array, s, 0, 0, 0, AST_NODE_FLAG_LVALUE),
+             pointer, AST_CAST_ARRAY_DECAY);
+    uint32_t object = make(AST_NODE_INDEX, element, first, index(), 0, 0,
+                           AST_NODE_FLAG_LVALUE);
+    uint32_t call =
+        special_call(e, address_of(object, pointer), nullptr, 0, at);
+    if (!call)
+        return 0;
+    uint32_t body =
+        ast_builder_node(c, AST_NODE_EXPRESSION, v, call, 0, 0, 0, 0);
+    uint32_t init, cond, step = 0;
+    if (reverse) {
+        /* for (i = bound; i-- > 0;) */
+        init = make(AST_NODE_ASSIGN, index_type, index(), constant(bound), 0, 0,
+                    0);
+        cond =
+            make(AST_NODE_BINARY, truth,
+                 make(AST_NODE_POST_DECREMENT, index_type, index(), 0, 0, 0, 0),
+                 constant(0), 0, LEX_TOKEN_GREATER, 0);
+    } else {
+        /* for (i = 0; i < bound; i++) */
+        init = make(AST_NODE_ASSIGN, index_type, index(), constant(0), 0, 0, 0);
+        cond = make(AST_NODE_BINARY, truth, index(), constant(bound), 0,
+                    LEX_TOKEN_LESS, 0);
+        step = make(AST_NODE_POST_INCREMENT, index_type, index(), 0, 0, 0, 0);
+    }
+    uint32_t step_body[2] = {step, body};
+    uint32_t items[2] = {
+        ast_builder_node(c, AST_NODE_DECLARATION, v, i, 0, 0, 0, 0),
+        ast_builder_node(
+            c, AST_NODE_FOR, v,
+            ast_builder_node(c, AST_NODE_EXPRESSION, v, init, 0, 0, 0, 0), cond,
+            ast_builder_list(c, step_body, 2), 0, 0)};
+    return block(items, 2);
 }
 
 bool c_lowering::leaving_objects() const
@@ -2197,8 +2269,14 @@ void c_lowering::initialized_declaration(const semantic_node &n,
     entity_index destructor = 0;
     if (record(object).kind == type_kind::class_type)
         destructor = analysis.entity_table[record(object).entity].destructor;
-    if (destructor && (!x.automatic || !(object == x.type))) {
-        /* [basic.start.term], an array's elements */
+    uint64_t bound = 0;
+    if (!(object == x.type)) {
+        const struct type &array = record(x.type);
+        if (array.operand == object && array.bound_known)
+            bound = array.bound;
+    }
+    if (destructor && (!x.automatic || (!(object == x.type) && !bound))) {
+        /* [basic.start.term], an array of more than one dimension */
         fail("a static object or array with a destructor", n.at);
         return;
     }
@@ -2221,15 +2299,26 @@ void c_lowering::initialized_declaration(const semantic_node &n,
         ast_qualified_type v = ast_builder_type_basic(AST_TYPE_VOID);
         ast_qualified_type t = type(x.type, n.at);
         out.append(ast_builder_node(c, AST_NODE_DECLARATION, v, s, 0, 0, 0, 0));
+        if (bound) {
+            /* [dcl.init]/7.2: each element, first to last */
+            uint32_t loop = each_element(s, t, type(object, n.at), bound, false,
+                                         init.b, n.at);
+            if (!loop)
+                return;
+            out.append(loop);
+        }
         uint32_t variable =
             make(AST_NODE_VARIABLE, t, s, 0, 0, 0, AST_NODE_FLAG_LVALUE);
-        uint32_t call = special_call(
-            init.b, address_of(variable, ast_builder_type_pointer(c, t)),
-            arguments.data(), init.count, n.at);
-        if (!call)
+        uint32_t call = 0;
+        if (!bound)
+            call = special_call(
+                init.b, address_of(variable, ast_builder_type_pointer(c, t)),
+                arguments.data(), init.count, n.at);
+        if (call)
+            out.append(
+                ast_builder_node(c, AST_NODE_EXPRESSION, v, call, 0, 0, 0, 0));
+        else if (!bound)
             return;
-        out.append(
-            ast_builder_node(c, AST_NODE_EXPRESSION, v, call, 0, 0, 0, 0));
     }
     if (destructor && e != named_return) {
         scope_record r;
@@ -2237,6 +2326,10 @@ void c_lowering::initialized_declaration(const semantic_node &n,
         r.symbol = symbol(e, n.at);
         r.type = type(x.type, n.at);
         r.destructor = destructor;
+        if (bound) {
+            r.element = type(object, n.at);
+            r.bound = bound;
+        }
         live.append(r);
     }
 }
