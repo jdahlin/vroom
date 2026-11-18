@@ -722,7 +722,7 @@ enum class dynamic_macro : uint8_t {
    and which parameter it names (-1: none) */
 struct replacement_element {
     preprocessing_token token;
-    int16_t parameter;
+    int32_t parameter;
 };
 
 /* [cpp.import]/5: "Each #define directive encountered when preprocessing
@@ -734,8 +734,7 @@ struct macro_definition {
     /* the replacement list: elements [first_element, first_element + length) */
     uint32_t first_element = 0, length = 0;
     /* the identifier-list's identifiers */
-    uint32_t first_parameter = 0;
-    uint16_t parameter_count = 0;
+    uint32_t first_parameter = 0, parameter_count = 0;
     bool function_like = false;
     /* [cpp.replace]/15: "If there is a ... immediately preceding the )" */
     bool variadic = false;

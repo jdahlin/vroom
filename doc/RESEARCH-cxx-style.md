@@ -211,10 +211,13 @@ passes none of them.
 | 3 (2) | `-Wshorten-64-to-32` |
 | 2 (1) | `bugprone-too-small-loop-variable` |
 
-**Two of these are defects.**  `cpp/cpp.replace.cpp:373` and `:448` loop
-with a `uint16_t` counter up to a `size_t` count: a macro with 65,537
-parameters ends `vpp -x c++` with SIGBUS (checked).  `ext/clang/embed.cpp:320`
-reads `size` unset when `embedded_size` fails.  Two defects in 37,794
+**Two of these are defects**, both fixed on 2026-11-18.
+`cpp/cpp.replace.cpp:373` and `:448` loop with a `uint16_t` counter up to a
+`size_t` count, and a parameter's index was kept in 16 bits: a macro with
+more than 32,767 parameters left the later ones unreplaced, and one with
+65,536 or more ended `vpp -x c++` with SIGBUS, where clang handles 140,000
+(`bench/cxx-run.py` now generates such a program).  `ext/clang/embed.cpp:320`
+read `size` unset when `embedded_size` failed.  Two defects in 37,794
 findings is the argument for a short curated list and against "enable a
 group and suppress".
 

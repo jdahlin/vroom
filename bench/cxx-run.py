@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """cxx-run.py: the C++ front end's code against clang's (doc/PLAN-cxx-sema.md S1d).
 
-Each program of src/test/cxx/run is compiled twice for Linux arm64: by
+Each program of src/test/cxx/run, and each generated one (GENERATED below:
+too large to keep as a file), is compiled twice for Linux arm64: by
 clang++ -O2, and by vcc's driver (vpp -c: frontend/cplusplus, lowered to
 C's AST, C's code generator and object writer; S1e) at each -O level asked
 for, with the same flags.  Both are linked with the C suites' run time (src/test/rt) and run
@@ -60,11 +61,31 @@ def run(objs, elf):
     return ct.qemu(elf), None
 
 
+def macro_parameters():
+    """[cpp.replace]: a function-like macro with 70,000 parameters whose
+    replacement list names parameters past 32,767 and 65,535 (the front end
+    once kept a parameter's index in 16 bits), also as the operand of #"""
+    n = 70000
+    parameters = ','.join(f'p{i}' for i in range(n))
+    arguments = ','.join(str(i % 7) for i in range(n))
+    return (f'#define M({parameters}) \\\n'
+            f'    (p1 + p32768 * 2 + p40001 * 3 + p65536 * 5 + p{n - 1} * 7 + \\\n'
+            f'     (int)sizeof(#p65540 #p{n - 2}))\n'
+            f'int main() {{\n    return (M({arguments})) & 255;\n}}\n')
+
+
+GENERATED = {'generated-macro-parameters': macro_parameters}
+
+
 def one(job):
     name, levels = job
     src = f'{TESTS}/{name}.cpp'
     wd = f'{OUT}/{name}'
     os.makedirs(wd, exist_ok=True)
+    if name in GENERATED:
+        src = f'{wd}/{name}.cpp'
+        with open(src, 'w') as f:
+            f.write(GENERATED[name]())
     results = []
     rc, _, err = ct.sh([ct.CL] + CXX + ['-O2', '-c', src, '-o', f'{wd}/ref.o'])
     if rc:
@@ -116,8 +137,9 @@ def main():
     if not os.path.exists(VPP):
         sys.exit(f'cxx-run: no {VPP} (make -C src vcc)')
     ct.build_rt()
-    names = sorted(f[:-4] for f in os.listdir(TESTS)
-                   if f.endswith('.cpp') and re.search(pattern, f))
+    names = sorted([f[:-4] for f in os.listdir(TESTS)
+                    if f.endswith('.cpp') and re.search(pattern, f)] +
+                   [n for n in GENERATED if re.search(pattern, n + '.cpp')])
     passed = failed = 0
     with Pool(jobs) as pool:
         for name, results in pool.imap(one, [(n, levels) for n in names]):

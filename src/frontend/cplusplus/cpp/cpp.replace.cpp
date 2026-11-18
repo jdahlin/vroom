@@ -275,7 +275,7 @@ bool preprocessor::identical_definitions(const macro_definition &a,
     if (a.function_like != b.function_like || a.variadic != b.variadic ||
         a.parameter_count != b.parameter_count || a.length != b.length)
         return false;
-    for (uint16_t i = 0; i < a.parameter_count; i++)
+    for (uint32_t i = 0; i < a.parameter_count; i++)
         if (parameters[a.first_parameter + i] !=
             parameters[b.first_parameter + i])
             return false;
@@ -370,9 +370,9 @@ void preprocessor::directive_define(const preprocessing_token &directive)
         e.token.at_start_of_line = false;
         if (is_identifier(t)) {
             uint32_t id = identifier(t);
-            for (uint16_t i = 0; i < names.size(); i++)
+            for (uint32_t i = 0; i < names.size(); i++)
                 if (names[i] == id)
-                    e.parameter = (int16_t)i;
+                    e.parameter = (int32_t)i;
             /* [cpp.replace]/6: "The identifiers __VA_ARGS__ and __VA_OPT__
                shall occur only in the replacement-list of a function-like
                macro that uses the ellipsis notation in the parameters" */
@@ -441,13 +441,13 @@ void preprocessor::directive_define(const preprocessing_token &directive)
         if (m.function_like && is_operator(t, preprocessing_op_or_punc::HASH)) {
             elements.append(e);
             t = directive_token();
-            int16_t parameter = -1;
+            int32_t parameter = -1;
             bool is_va_opt = false;
             if (is_identifier(t)) {
                 uint32_t id = identifier(t);
-                for (uint16_t i = 0; i < names.size(); i++)
+                for (uint32_t i = 0; i < names.size(); i++)
                     if (names[i] == id)
-                        parameter = (int16_t)i;
+                        parameter = (int32_t)i;
                 is_va_opt = id == va_opt && m.variadic && !m.named_variadic;
             }
             if (parameter < 0 && !is_va_opt) {
@@ -492,7 +492,7 @@ void preprocessor::directive_define(const preprocessing_token &directive)
     }
     m.length = (uint32_t)(elements.size() - m.first_element);
     m.first_parameter = (uint32_t)parameters.size();
-    m.parameter_count = (uint16_t)names.size();
+    m.parameter_count = (uint32_t)names.size();
     for (uint32_t id : names)
         parameters.append(id);
 

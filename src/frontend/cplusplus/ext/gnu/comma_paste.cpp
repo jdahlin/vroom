@@ -20,19 +20,20 @@ uint32_t preprocessor::gnu_comma_paste(substitution &s, uint32_t at,
                                        owned_array<preprocessing_token> &out)
 {
     const macro_definition &m = s.m;
+    /* the variable arguments' parameter is the last one (-1: no parameter) */
+    int32_t variable = (int32_t)m.parameter_count - 1;
     /* x ## , ## __VA_ARGS__ with the variable arguments left out: x alone
        ([impl.clang]: the comma and both ## go) */
     if (m.variadic && s.variadic_elided && at + 3 < s.end &&
         is_operator(elements[at + 1].token, preprocessing_op_or_punc::COMMA) &&
         is_operator(elements[at + 2].token,
                     preprocessing_op_or_punc::HASH_HASH) &&
-        elements[at + 3].parameter == m.parameter_count - 1 &&
-        s.arguments[m.parameter_count - 1].begin ==
-            s.arguments[m.parameter_count - 1].end)
+        elements[at + 3].parameter == variable &&
+        s.arguments[variable].begin == s.arguments[variable].end)
         return 4;
     const replacement_element &paste = elements[at];
     const replacement_element &next = elements[at + 1];
-    if (!m.variadic || next.parameter != m.parameter_count - 1 || out.empty() ||
+    if (!m.variadic || next.parameter != variable || out.empty() ||
         !is_operator(out.back(), preprocessing_op_or_punc::COMMA))
         return 0;
     const argument &a = s.arguments[next.parameter];
