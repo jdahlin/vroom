@@ -7,6 +7,7 @@
  *         noexcept
  */
 #include "../cplusplus-internal.h"
+#include "frontend/cplusplus/sema.h"
 
 namespace cplusplus
 {
@@ -95,6 +96,58 @@ node_index parser::dynamic_exception_specification()
                         "except.spec");
     return finish_node(syntax_kind::dynamic_exception_specification, mark,
                        first);
+}
+
+} // namespace cplusplus
+
+namespace cplusplus
+{
+
+/*
+ * [except.spec]/2: "The exception specification is either defined
+ * implicitly, or defined explicitly by using a noexcept-specifier as a
+ * suffix of a function declarator.  In a noexcept-specifier, the
+ * constant-expression, if supplied, shall be a contextually converted
+ * constant expression of type bool ([expr.const]); that constant
+ * expression is the exception specification of the function type in which
+ * the noexcept-specifier appears.  A ( token that follows noexcept is part
+ * of the noexcept-specifier and does not commence an initializer.  The
+ * noexcept-specifier noexcept without a constant-expression is equivalent
+ * to the noexcept-specifier noexcept(true)."  [except.spec]/3, C++17's
+ * [except.spec]/2: "The noexcept-specifier throw() is equivalent to
+ * noexcept(true)"; it is one here (parser::dynamic_exception_specification).
+ * /5: noexcept(true) is a non-throwing exception specification, and with
+ * -fno-exceptions nothing analysis generates depends on it but the type.
+ */
+analysis_result semantic_analysis::noexcept_specifier(node_index n, bool member,
+                                                      bool &non_throwing)
+{
+    const syntax_node &node = tree[n];
+    const syntax_child *children = tree.children(n);
+    non_throwing = true;
+    if (node.child_count == 1 || node.child_count == 3)
+        /* noexcept, throw ( ) */
+        return analysis_result::well_formed;
+    if (node.child_count != 4)
+        return not_supported(n, "except.spec");
+    if (member)
+        /* [class.mem]/6: a member function's noexcept-specifier is a
+           complete-class context, analysed with the class complete: not
+           deferred yet */
+        return not_supported(n, "except.spec");
+    bool constant = false, value = false;
+    analysis_result r =
+        bool_constant_expression(n, children[2], constant, value);
+    if (r != analysis_result::well_formed)
+        return r;
+    if (!constant)
+        return ill_formed(n,
+                          "in a noexcept-specifier, the constant-expression "
+                          "shall be a contextually converted constant "
+                          "expression of type bool",
+                          "except.spec");
+    non_throwing = value;
+    return analysis_result::well_formed;
 }
 
 } // namespace cplusplus

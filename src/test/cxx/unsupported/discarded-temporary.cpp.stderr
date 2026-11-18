@@ -1,0 +1,2 @@
+discarded-temporary.cpp:13:5: error: the rules of [class.temporary] are not implemented yet
+discarded-temporary.cpp:13:5: note: refused by vcc's frontend/cplusplus/expr/expr.compound.cpp:N (comma)

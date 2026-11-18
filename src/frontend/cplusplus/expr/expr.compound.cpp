@@ -849,6 +849,9 @@ analysis_result semantic_analysis::comma(node_index n, expression_meaning &m)
                 continue;
             }
         }
+        if (any && destroyed_temporary(m))
+            /* the discarded left operand's temporary */
+            return not_supported(n, "class.temporary");
         uint32_t previous = m.node;
         if (any)
             so_far = combined_constness(so_far, m.evaluation);

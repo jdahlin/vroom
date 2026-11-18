@@ -86,6 +86,8 @@ LANGUAGE_FEATURE(dynamic_exception_specifications, cplusplus_98, cplusplus_17,
                  "[diff.cpp14.except]/1: Remove dynamic exception specifications")
 LANGUAGE_FEATURE(empty_throw_exception_specification, cplusplus_98, cplusplus_20,
                  "[diff.cpp17.except]/1: Remove throw() exception specification")
+LANGUAGE_FEATURE(exception_specification_in_type, cplusplus_17, never,
+                 "P0012R1: exception specifications part of the type system")
 /* [temp.names] */
 LANGUAGE_FEATURE(function_names_before_less, cplusplus_20, never,
                  "P0846R0: an unqualified-id that names functions before < is a template-name")

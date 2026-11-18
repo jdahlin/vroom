@@ -98,6 +98,8 @@ static bool write_type_claim_unqualified(const types &table, type_index t,
         else if (record.variadic)
             vbuffer_string_append(out, "...");
         vbuffer_string_append(out, ")");
+        if (record.non_throwing)
+            vbuffer_string_append(out, " noexcept");
     }
     vbuffer_string_append(out, ">");
     return true;

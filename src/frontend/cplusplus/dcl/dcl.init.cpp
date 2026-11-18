@@ -483,7 +483,8 @@ analysis_result semantic_analysis::reference_binding(node_index at,
     qualified_type p2 =
         qualified_type::make(type_table.pointer_to(t2), cv_none);
     bool compatible = p1.unqualified() == p2.unqualified() ||
-                      qualification_convertible(p2, p1);
+                      qualification_convertible(p2, p1) ||
+                      function_pointer_convertible(p2, p1);
     bool related = similar(qualified_type::make(t1.unqualified(), cv_none),
                            qualified_type::make(t2.unqualified(), cv_none));
     bool function_lvalue =

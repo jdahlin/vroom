@@ -28,7 +28,8 @@ uint32_t types::hash(const type &t, const qualified_type *parameters) const
     /* the record's members as words: its padding is not part of the type */
     uint32_t key[8] = {static_cast<uint32_t>(t.kind),
                        static_cast<uint32_t>(t.fundamental),
-                       static_cast<uint32_t>(t.variadic) << 1 |
+                       static_cast<uint32_t>(t.non_throwing) << 2 |
+                           static_cast<uint32_t>(t.variadic) << 1 |
                            static_cast<uint32_t>(t.bound_known),
                        t.operand.bits,
                        t.entity,
@@ -47,9 +48,10 @@ bool types::same(const type &a, const qualified_type *a_parameters,
 {
     const type &other = records[b];
     if (a.kind != other.kind || a.fundamental != other.fundamental ||
-        a.variadic != other.variadic || a.bound_known != other.bound_known ||
-        !(a.operand == other.operand) || a.entity != other.entity ||
-        a.bound != other.bound || a.parameter_count != other.parameter_count)
+        a.variadic != other.variadic || a.non_throwing != other.non_throwing ||
+        a.bound_known != other.bound_known || !(a.operand == other.operand) ||
+        a.entity != other.entity || a.bound != other.bound ||
+        a.parameter_count != other.parameter_count)
         return false;
     const qualified_type *b_parameters = parameters(b);
     for (uint32_t i = 0; i < a.parameter_count; i++)
@@ -152,12 +154,14 @@ type_index types::array_of_unknown_bound_of(qualified_type element)
 /* [dcl.fct]/1: "function of parameter-type-list returning T" */
 type_index types::function(qualified_type result,
                            const qualified_type *parameters,
-                           size_t parameter_count, bool variadic)
+                           size_t parameter_count, bool variadic,
+                           bool non_throwing)
 {
     type t;
     t.kind = type_kind::function;
     t.operand = result;
     t.variadic = variadic;
+    t.non_throwing = non_throwing;
     t.parameter_count = static_cast<uint32_t>(parameter_count);
     return intern(t, parameters);
 }

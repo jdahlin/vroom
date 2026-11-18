@@ -900,7 +900,33 @@ analysis_result semantic_analysis::declarator(node_index declaration,
     current_scope = scope_before;
     if (!has_head)
         return analysis_result::well_formed;
-    return declarator(declaration, head, type, m);
+    analysis_result r = declarator(declaration, head, type, m);
+    if (r != analysis_result::well_formed)
+        return r;
+    /* [except.spec]/8: "The exception specification for an implicitly-
+       declared destructor, or a destructor without a noexcept-specifier,
+       is potentially-throwing if and only if any of the destructors for
+       any of its potentially constructed subobjects is potentially-
+       throwing" (none is, of the classes analysed); /12: "A deallocation
+       function with no explicit noexcept-specifier has a non-throwing
+       exception specification." */
+    const struct type &f = type_table[type.unqualified()];
+    bool deallocation = m.allocation == allocation_function::delete_ ||
+                        m.allocation == allocation_function::delete_array;
+    if (f.kind == type_kind::function && !f.non_throwing &&
+        !function_exceptions_specified && (deallocation || m.destructor) &&
+        tokens.files.behavior.has(
+            language_feature::exception_specification_in_type)) {
+        owned_array<qualified_type> parameters;
+        const qualified_type *list = type_table.parameters(type.unqualified());
+        for (uint32_t i = 0; i < f.parameter_count; i++)
+            parameters.append(list[i]);
+        type = qualified_type::make(
+            type_table.function(f.operand, parameters.data(), parameters.size(),
+                                f.variadic, true),
+            type.cv());
+    }
+    return r;
 }
 
 } // namespace cplusplus

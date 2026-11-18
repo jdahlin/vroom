@@ -547,6 +547,61 @@ bool semantic_analysis::similar(qualified_type a, qualified_type b) const
  * cv1_j or P1_j, then const is added to every cv3_k for 0 < k < j".  An
  * array's cv-qualifiers are its elements' ([basic.type.qualifier]/3).
  */
+bool semantic_analysis::destroyed_temporary(const expression_meaning &m) const
+{
+    const struct type t = type_table[m.type.unqualified()];
+    /* (a call's result is destroyed by lowering: its temporary is the
+       call's own) */
+    if (m.node && semantics[m.node].kind == semantic_kind::call)
+        return false;
+    return m.category == value_category::prvalue &&
+           t.kind == type_kind::class_type &&
+           entity_table[t.entity].kind == entity_kind::class_type &&
+           entity_table[t.entity].destructor;
+}
+
+bool semantic_analysis::differ_in_exceptions(qualified_type a,
+                                             qualified_type b) const
+{
+    const struct type x = type_table[a.unqualified()];
+    const struct type y = type_table[b.unqualified()];
+    if (x.kind != type_kind::function || y.kind != type_kind::function ||
+        x.non_throwing == y.non_throwing || !(x.operand == y.operand) ||
+        x.variadic != y.variadic || x.parameter_count != y.parameter_count ||
+        a.cv() != b.cv())
+        return false;
+    const qualified_type *xp = type_table.parameters(a.unqualified());
+    const qualified_type *yp = type_table.parameters(b.unqualified());
+    for (uint32_t i = 0; i < x.parameter_count; i++)
+        if (!(xp[i] == yp[i]))
+            return false;
+    return true;
+}
+
+bool semantic_analysis::function_pointer_convertible(qualified_type from,
+                                                     qualified_type to) const
+{
+    /* [conv.fctptr]/1: "A prvalue of type "pointer to noexcept function"
+       can be converted to a prvalue of type "pointer to function".  The
+       result is a pointer to the function." */
+    const struct type f0 = type_table[from.unqualified()];
+    const struct type t0 = type_table[to.unqualified()];
+    if (f0.kind != type_kind::pointer || t0.kind != type_kind::pointer)
+        return false;
+    const struct type f = type_table[f0.operand.unqualified()];
+    const struct type t = type_table[t0.operand.unqualified()];
+    if (f.kind != type_kind::function || t.kind != type_kind::function ||
+        !f.non_throwing || t.non_throwing || !(f.operand == t.operand) ||
+        f.variadic != t.variadic || f.parameter_count != t.parameter_count)
+        return false;
+    const qualified_type *fp = type_table.parameters(f0.operand.unqualified());
+    const qualified_type *tp = type_table.parameters(t0.operand.unqualified());
+    for (uint32_t i = 0; i < f.parameter_count; i++)
+        if (!(fp[i] == tp[i]))
+            return false;
+    return true;
+}
+
 bool semantic_analysis::qualification_convertible(qualified_type from,
                                                   qualified_type to) const
 {
@@ -721,7 +776,8 @@ analysis_result semantic_analysis::implicit_conversion(node_index at,
         qualified_type pointee = type_table[m.type.unqualified()].operand;
         qualified_type target_pointee = target.operand;
         bool converts = m.type.unqualified() == to.unqualified() ||
-                        qualification_convertible(m.type, to);
+                        qualification_convertible(m.type, to) ||
+                        function_pointer_convertible(m.type, to);
         /* [conv.ptr]/2: "A prvalue of type "pointer to cv T", where T is
            an object type, can be converted to a prvalue of type "pointer
            to cv void"", then a qualification conversion */

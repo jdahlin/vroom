@@ -119,6 +119,10 @@ struct type {
     /* function: [dcl.fct]/2 "the parameter-declaration-clause terminates
        with an ellipsis" */
     bool variadic = false;
+    /* function: [dcl.fct]/1 "noexcept_opt function of ...": a non-throwing
+       exception specification is part of the type since C++17
+       ([except.spec]/2, [diff.cpp14.except]/1) */
+    bool non_throwing = false;
     /* array: [dcl.array]/1 whether the constant-expression is present (if
        not, an "array of unknown bound of T") */
     bool bound_known = false;
@@ -154,7 +158,8 @@ class types
     type_index array_of(qualified_type element, uint64_t bound);
     type_index array_of_unknown_bound_of(qualified_type element);
     type_index function(qualified_type result, const qualified_type *parameters,
-                        size_t parameter_count, bool variadic);
+                        size_t parameter_count, bool variadic,
+                        bool non_throwing = false);
     type_index of_entity(type_kind kind, uint32_t entity);
     type_index pointer_to_member(uint32_t class_entity, qualified_type member);
     type_index pack_expansion_of(qualified_type pattern);
@@ -1793,6 +1798,8 @@ class semantic_analysis
     /* the cv-qualifier-seq of the function declarator analysed last
        ([dcl.fct]/6: only a member function's) */
     uint32_t function_cv = 0;
+    /* ... and whether it had a noexcept-specifier ([except.spec]/2) */
+    bool function_exceptions_specified = false;
     /* a declarator analysed now may have a cv-qualifier-seq: a member
        declarator, or one whose declarator-id is a qualified-id */
     bool in_member_declarator = false;
@@ -2075,6 +2082,17 @@ class semantic_analysis
        a qualification conversion */
     bool qualification_convertible(qualified_type from,
                                    qualified_type to) const;
+    /* [conv.fctptr]/1: whether a prvalue of type from (pointer to noexcept
+       function) converts to type to (pointer to function) */
+    bool function_pointer_convertible(qualified_type from,
+                                      qualified_type to) const;
+    /* whether the function types a and b differ in their exception
+       specification only */
+    bool differ_in_exceptions(qualified_type a, qualified_type b) const;
+    /* [class.temporary]/4: whether m is a prvalue of a class with a
+       destructor, whose temporary a discarded-value expression would have
+       to destroy (not analysed) */
+    bool destroyed_temporary(const expression_meaning &m) const;
     /* [dcl.init]/17.9: the standard conversion sequence of an implicit
        conversion of the prvalue m to to (cv-unqualified); ill-formed
        without one */
@@ -2104,6 +2122,10 @@ class semantic_analysis
        type bool, from the expression e */
     analysis_result bool_constant_expression(node_index at, syntax_child e,
                                              bool &constant, bool &value);
+    /* [except.spec]/2: whether the noexcept-specifier n makes the exception
+       specification non-throwing */
+    analysis_result noexcept_specifier(node_index n, bool member,
+                                       bool &non_throwing);
     /* [expr.const]/5: the evaluation of the semantic tree node as a core
        constant expression (expr/expr.const.evaluate.cpp): well_formed with
        its value in v and constant true; constant false if it is not one;

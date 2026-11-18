@@ -1380,8 +1380,15 @@ void semantic_analysis::declare_implicit(entity_index c, special_member kind,
             cv_none);
         count = 1;
     }
+    /* [except.spec]/8: an implicitly-declared destructor is non-throwing
+       when its subobjects' are (all of the classes analysed); part of the
+       type since C++17 */
+    bool non_throwing = kind == special_member::destructor &&
+                        tokens.files.behavior.has(
+                            language_feature::exception_specification_in_type);
     qualified_type type = qualified_type::make(
-        type_table.function(v, &parameter, count, false), cv_none);
+        type_table.function(v, &parameter, count, false, non_throwing),
+        cv_none);
     entity_index e =
         entity_table.make(entity_kind::function, entity_table[c].name, c);
     entity &f = entity_table[e];

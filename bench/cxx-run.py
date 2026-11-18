@@ -16,7 +16,7 @@ local, weak).
 -O takes the levels as one argument (default 0123).  A program that vcc
 does not compile is a failure with its reason.
 """
-import importlib.util, os, re, subprocess, sys
+import importlib.util, os, re, shlex, subprocess, sys
 from multiprocessing import Pool
 
 B = os.path.dirname(os.path.abspath(__file__))
@@ -87,17 +87,22 @@ def one(job):
         with open(src, 'w') as f:
             f.write(GENERATED[name]())
     results = []
-    rc, _, err = ct.sh([ct.CL] + CXX + ['-O2', '-c', src, '-o', f'{wd}/ref.o'])
+    # /* cxx-run-flags: ... */ in the test: flags for both compilers, after
+    # the common ones (-std=c++17 replaces -std=c++20)
+    with open(src, errors='replace') as f:
+        found = re.search(r'cxx-run-flags:(.*?)\*/', f.read(2000))
+    cxx = CXX + (shlex.split(found.group(1)) if found else [])
+    rc, _, err = ct.sh([ct.CL] + cxx + ['-O2', '-c', src, '-o', f'{wd}/ref.o'])
     if rc:
         return name, [('ref', 'oracle: ' + ct.first_err(err.decode()))]
     expected, why = run([f'{wd}/ref.o'], f'{wd}/ref.elf')
     if why:
         return name, [('ref', 'oracle ' + why)]
-    rc, _, err = ct.sh([ct.CL] + CXX + ['-O0', '-c', src, '-o', f'{wd}/ref0.o'])
+    rc, _, err = ct.sh([ct.CL] + cxx + ['-O0', '-c', src, '-o', f'{wd}/ref0.o'])
     symbols = defined(f'{wd}/ref0.o') if not rc else None
     for level in levels:
         o, elf = f'{wd}/O{level}.o', f'{wd}/O{level}.elf'
-        rc, _, err = ct.sh([VPP] + CXX + [f'-O{level}', '-c', src, '-o', o])
+        rc, _, err = ct.sh([VPP] + cxx + [f'-O{level}', '-c', src, '-o', o])
         if rc:
             results.append((level, 'vcc: ' + (err.decode().strip().splitlines() or ['exit %s' % rc])[-1]))
             continue

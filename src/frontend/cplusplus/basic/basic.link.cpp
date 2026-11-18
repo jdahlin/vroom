@@ -556,6 +556,36 @@ analysis_result semantic_analysis::declare(node_index declaration,
                                            "dcl.typedef");
         } else if (kind == entity_kind::function) {
             /* (a function of the same parameters: overloads above) */
+            if (!(e.type == type) && differ_in_exceptions(e.type, type)) {
+                /* [except.spec]/4: "If any declaration of a function has an
+                   exception specification that is not a noexcept-
+                   specification allowing all exceptions, all declarations
+                   ... shall have a compatible exception specification."
+                   [impl.clang] a redeclaration without a
+                   noexcept-specifier keeps the first one's
+                   (-Wmissing-exception-spec), as one in a system header or
+                   with Microsoft's extensions does */
+                bool missing = type_table[e.type.unqualified()].non_throwing &&
+                               !function_exceptions_specified;
+                if (missing) {
+                    type = e.type;
+                } else {
+                    /* [ext:gnu_attributes] nothrow: a non-throwing
+                       exception specification of its own, clang's
+                       compatible with noexcept */
+                    bool nothrow = ((e.gnu_flags | s.gnu_flags) & gnu_nothrow);
+                    if (!nothrow && !in_system_header(id) &&
+                        !tokens.files.behavior.microsoft_extensions)
+                        return ill_formed_at_token(id,
+                                                   "all declarations of a "
+                                                   "function shall have a "
+                                                   "compatible exception "
+                                                   "specification",
+                                                   "except.spec");
+                    /* the later declaration's, as clang's */
+                    e.type = type;
+                }
+            }
             /* [over.load]/2: "Function declarations that differ only in the
                return type, the exception specification, or both cannot be
                overloaded." */

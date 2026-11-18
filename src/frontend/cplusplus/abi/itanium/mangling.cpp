@@ -1415,6 +1415,9 @@ bool itanium_mangler::qualified(qualified_type t)
  */
 bool itanium_mangler::function_type(qualified_type t)
 {
+    /* "<exception-spec> ::= Do # non-throwing exception specification" */
+    if (record(t).non_throwing)
+        text("Do");
     text("F");
     if (!type(record(t).operand))
         return false;

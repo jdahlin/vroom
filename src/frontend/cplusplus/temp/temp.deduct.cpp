@@ -160,7 +160,7 @@ bool semantic_analysis::deduce_type(qualified_type p, qualified_type a,
             return false;
         return deduce_type(pr.operand, ar.operand, deduced, set, exact);
     case type_kind::function: {
-        if (pr.variadic != ar.variadic ||
+        if (pr.variadic != ar.variadic || pr.non_throwing != ar.non_throwing ||
             pr.parameter_count != ar.parameter_count)
             return false;
         if (!deduce_type(pr.operand, ar.operand, deduced, set, exact))
