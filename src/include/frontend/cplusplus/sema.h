@@ -1249,6 +1249,13 @@ class semantic_analysis
     analysis_result expression_kind(syntax_child e, expression_meaning &m);
     /* [expr.prim.literal], [lex.literal] */
     analysis_result literal(token_index t, expression_meaning &m);
+    /* [lex.string]: the string literal token t (its suffix, if any, not
+       counted), false if its element type is none analysis has */
+    bool string_literal_meaning(token_index t, expression_meaning &m);
+    /* a constant prvalue of the fundamental type with the value, at the
+       token at, with its node */
+    expression_meaning integer_constant(fundamental_type type, uint64_t value,
+                                        token_index at);
     /* [expr.prim.id.unqual] */
     analysis_result id_expression(token_index t, expression_meaning &m);
     /* [expr.prim.id.qual] */
@@ -1815,6 +1822,9 @@ class semantic_analysis
     /* the name of the operator function of op, as an identifier number
        (operator+ for both forms of +, [over.unary]/2) */
     uint32_t operator_name(preprocessing_op_or_punc op);
+    /* operator followed by the spelling rest, as an identifier number (no
+       identifier is spelt so) */
+    uint32_t operator_identifier(const char *rest, size_t length);
     /* the operator-function-id node id as a declarator-id */
     analysis_result operator_function_id(node_index id, declarator_meaning &m);
     /* [over.oper]/7-10: the rules of the declaration n of operator
@@ -1851,6 +1861,19 @@ class semantic_analysis
                         const owned_array<syntax_child> &syntax,
                         owned_array<expression_meaning> &operands,
                         bool &handled, expression_meaning &m);
+    /* ... of one operand (its syntax s): the operand becomes the operator
+       function's call when one is chosen (handled) */
+    analysis_result unary_operator_function(node_index n, token_index at,
+                                            preprocessing_op_or_punc op,
+                                            bool postfix, syntax_child s,
+                                            expression_meaning &operand,
+                                            bool &handled);
+    /* ... of two: m the call when one is chosen (handled) */
+    analysis_result binary_operator_function(
+        node_index n, token_index at, preprocessing_op_or_punc op,
+        syntax_child left_syntax, const expression_meaning &left,
+        syntax_child right_syntax, const expression_meaning &right,
+        bool &handled, expression_meaning &m);
     /* the initialization of type from the analysed expression m */
     analysis_result initialize_with(node_index at, expression_meaning &m,
                                     qualified_type type, bool direct, bool list,

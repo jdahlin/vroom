@@ -123,20 +123,12 @@ analysis_result semantic_analysis::assignment(node_index n,
         r = expression(children[2], right);
     if (r != analysis_result::well_formed)
         return r;
-    {
-        /* [over.match.oper]/2: an operand of class or enumeration type */
-        owned_array<syntax_child> syntax;
-        owned_array<expression_meaning> operands;
-        syntax.append(children[0]);
-        operands.append(left);
-        syntax.append(children[2]);
-        operands.append(right);
-        bool handled = false;
-        r = overloaded_operator(n, children[1].index(), op, false, syntax,
-                                operands, handled, m);
-        if (r != analysis_result::well_formed || handled)
-            return r;
-    }
+    /* [over.match.oper]/2: an operand of class or enumeration type */
+    bool handled = false;
+    r = binary_operator_function(n, children[1].index(), op, children[0], left,
+                                 children[2], right, handled, m);
+    if (r != analysis_result::well_formed || handled)
+        return r;
     const struct type record = type_table[left.type.unqualified()];
     if (record.kind == type_kind::class_type)
         return class_assignment(n, op, left, right, m);

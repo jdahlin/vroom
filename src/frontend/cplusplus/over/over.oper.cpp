@@ -173,16 +173,20 @@ node_index parser::operator_unqualified_id()
 
 uint32_t semantic_analysis::operator_name(preprocessing_op_or_punc op)
 {
+    const char *rest = preprocessing_op_or_punc_spelling(op);
+    if (op == preprocessing_op_or_punc::LEFT_PARENTHESIS)
+        rest = "()";
+    else if (op == preprocessing_op_or_punc::LEFT_BRACKET)
+        rest = "[]";
+    return operator_identifier(rest, strlen(rest));
+}
+
+uint32_t semantic_analysis::operator_identifier(const char *rest, size_t length)
+{
     /* the spelling operator@, which no identifier has */
     owned_buffer spelling;
     vbuffer_string_append(spelling.get(), "operator");
-    if (op == preprocessing_op_or_punc::LEFT_PARENTHESIS)
-        vbuffer_string_append(spelling.get(), "()");
-    else if (op == preprocessing_op_or_punc::LEFT_BRACKET)
-        vbuffer_string_append(spelling.get(), "[]");
-    else
-        vbuffer_string_append(spelling.get(),
-                              preprocessing_op_or_punc_spelling(op));
+    vbuffer_append(spelling.get(), rest, length);
     return tokens.pp.identifier(spelling.data(), spelling.size()) + 1;
 }
 
@@ -405,26 +409,16 @@ bool semantic_analysis::copy_assignment_operator(entity_index f,
 
 bool semantic_analysis::assigned_bitwise(entity_index c)
 {
-    const entity &x = entity_table[c];
     lookup_result found = lookup_qualified(
         c, operator_name(preprocessing_op_or_punc::EQUAL), lookup_filter::any);
     if (found.entity || found.unknown || found.ambiguous)
         return false;
-    for (uint32_t i = 0; i < x.base_count + x.member_count; i++) {
-        entity_index e = 0;
-        if (i < x.base_count)
-            e = class_bases[x.first_base + i];
-        else
-            e = class_members[x.first_member + i - x.base_count];
-        qualified_type t = entity_table[e].type;
-        while (type_table[t.unqualified()].kind == type_kind::array)
-            t = type_table[t.unqualified()].operand;
-        const struct type &k = type_table[t.unqualified()];
-        if (k.kind == type_kind::class_type &&
-            entity_table[k.entity].kind == entity_kind::class_type &&
-            !assigned_bitwise(k.entity))
+    owned_array<entity_index> classes;
+    subobject_classes(c, classes);
+    for (entity_index k : classes)
+        if (entity_table[k].kind == entity_kind::class_type &&
+            !assigned_bitwise(k))
             return false;
-    }
     return true;
 }
 

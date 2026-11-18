@@ -34,10 +34,10 @@ void suffix_after_quote(const owned_buffer &spelling, owned_buffer &suffix)
 uint32_t semantic_analysis::literal_operator_name(const char *suffix,
                                                   size_t length)
 {
-    owned_buffer spelling;
-    vbuffer_string_append(spelling.get(), "operator\"\"");
-    vbuffer_append(spelling.get(), suffix, length);
-    return tokens.pp.identifier(spelling.data(), spelling.size()) + 1;
+    owned_buffer rest;
+    vbuffer_string_append(rest.get(), "\"\"");
+    vbuffer_append(rest.get(), suffix, length);
+    return operator_identifier(rest.data(), rest.size());
 }
 
 /*
@@ -223,15 +223,6 @@ analysis_result semantic_analysis::user_defined_literal(token_index t,
         }
         return entity_index(0);
     };
-    auto constant = [&](fundamental_type type, uint64_t value) {
-        expression_meaning c;
-        c.type = qualified_type::make(type_table.fundamental(type), cv_none);
-        c.category = value_category::prvalue;
-        c.evaluation = constness::constant;
-        c.value = value;
-        c.node = expression_node(semantic_kind::constant, c, t);
-        return c;
-    };
     if (numeric) {
         /* [lex.ext]/3: "If L is a user-defined-integer-literal, let n be the
            literal without its ud-suffix.  If S contains a literal operator
@@ -275,8 +266,9 @@ analysis_result semantic_analysis::user_defined_literal(token_index t,
             /* a raw literal operator or a numeric literal operator
                template: "operator "" X("n")" */
             return not_supported(current_declaration, "lex.ext");
-        arguments.append(constant(fundamental_type::unsigned_long_long_int,
-                                  static_cast<uint64_t>(value)));
+        arguments.append(
+            integer_constant(fundamental_type::unsigned_long_long_int,
+                             static_cast<uint64_t>(value), t));
     } else if (k.preprocessing.kind ==
                preprocessing_token_kind::user_defined_character_literal) {
         /* /6: "S shall contain a literal operator ([over.literal]) whose
@@ -291,32 +283,20 @@ analysis_result semantic_analysis::user_defined_literal(token_index t,
                                        "whose only parameter has the type of "
                                        "the character literal",
                                        "lex.ext");
-        arguments.append(constant(
-            k.type, integer_wrap(tokens.files.behavior, k.type, k.value)));
+        arguments.append(integer_constant(
+            k.type, integer_wrap(tokens.files.behavior, k.type, k.value), t));
     } else {
         /* /5: "let str be the literal without its ud-suffix and let len be
            the number of code units in str (i.e., its length excluding the
            terminating null character). ... Otherwise, the literal L is
            treated as a call of the form operator "" X(str, len)" */
-        fundamental_type element = k.type;
-        if (!k.value_known || (element != fundamental_type::char_ &&
-                               element != fundamental_type::char8_t_ &&
-                               element != fundamental_type::char16_t_ &&
-                               element != fundamental_type::char32_t_ &&
-                               element != fundamental_type::wchar_t_))
-            return not_supported(current_declaration, "lex.ext");
         expression_meaning str;
-        qualified_type e =
-            qualified_type::make(type_table.fundamental(element), cv_const);
-        str.type = qualified_type::make(
-            type_table.array_of(e, uint64_t(k.string_length) + 1), cv_none);
-        str.category = value_category::lvalue;
-        str.evaluation = constness::constant;
-        str.string_literal = t;
+        if (!k.value_known || !string_literal_meaning(t, str))
+            return not_supported(current_declaration, "lex.ext");
         str.node = expression_node(semantic_kind::string_literal, str, t);
         arguments.append(str);
-        arguments.append(
-            constant(fundamental_type::unsigned_long_int, k.string_length));
+        arguments.append(integer_constant(fundamental_type::unsigned_long_int,
+                                          k.string_length, t));
         owned_array<overload_candidate> candidates;
         for (entity_index f : set) {
             overload_candidate c;

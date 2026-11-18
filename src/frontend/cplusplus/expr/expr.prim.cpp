@@ -146,20 +146,8 @@ analysis_result semantic_analysis::literal(token_index t, expression_meaning &m)
            const char" where n is the size of the string", and so on for
            u8, u, U and L ([lex.string]/6-10); /12: the size counts the
            terminating '\0' */
-        fundamental_type element = k.type;
-        if (element != fundamental_type::char_ &&
-            element != fundamental_type::char8_t_ &&
-            element != fundamental_type::char16_t_ &&
-            element != fundamental_type::char32_t_ &&
-            element != fundamental_type::wchar_t_)
+        if (!string_literal_meaning(t, m))
             return not_supported(current_declaration, "lex.string");
-        qualified_type e =
-            qualified_type::make(type_table.fundamental(element), cv_const);
-        m.type = qualified_type::make(
-            type_table.array_of(e, uint64_t(k.string_length) + 1), cv_none);
-        m.category = value_category::lvalue;
-        m.evaluation = constness::constant;
-        m.string_literal = t;
         return analysis_result::well_formed;
     }
     default:
@@ -182,6 +170,40 @@ analysis_result semantic_analysis::parenthesized(node_index n,
                               preprocessing_op_or_punc::LEFT_PARENTHESIS))
         return not_supported(n, "expr.prim");
     return expression(children[1], m);
+}
+
+bool semantic_analysis::string_literal_meaning(token_index t,
+                                               expression_meaning &m)
+{
+    const token &k = tokens[t];
+    fundamental_type element = k.type;
+    if (element != fundamental_type::char_ &&
+        element != fundamental_type::char8_t_ &&
+        element != fundamental_type::char16_t_ &&
+        element != fundamental_type::char32_t_ &&
+        element != fundamental_type::wchar_t_)
+        return false;
+    qualified_type e =
+        qualified_type::make(type_table.fundamental(element), cv_const);
+    m.type = qualified_type::make(
+        type_table.array_of(e, uint64_t(k.string_length) + 1), cv_none);
+    m.category = value_category::lvalue;
+    m.evaluation = constness::constant;
+    m.string_literal = t;
+    return true;
+}
+
+expression_meaning semantic_analysis::integer_constant(fundamental_type type,
+                                                       uint64_t value,
+                                                       token_index at)
+{
+    expression_meaning c;
+    c.type = qualified_type::make(type_table.fundamental(type), cv_none);
+    c.category = value_category::prvalue;
+    c.evaluation = constness::constant;
+    c.value = value;
+    c.node = expression_node(semantic_kind::constant, c, at);
+    return c;
 }
 
 } // namespace cplusplus

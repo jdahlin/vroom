@@ -236,20 +236,14 @@ analysis_result semantic_analysis::member_reference(node_index n,
         if (depth == 16)
             /* a chain of operator-> this long, or a cycle */
             return not_supported(n, "over.ref");
-        owned_array<syntax_child> syntax;
-        owned_array<expression_meaning> operands;
-        syntax.append(children[0]);
-        operands.append(m);
         bool handled = false;
-        expression_meaning result;
-        r = overloaded_operator(n, children[1].index(),
-                                preprocessing_op_or_punc::ARROW, false, syntax,
-                                operands, handled, result);
+        r = unary_operator_function(n, children[1].index(),
+                                    preprocessing_op_or_punc::ARROW, false,
+                                    children[0], m, handled);
         if (r != analysis_result::well_formed)
             return r;
         if (!handled)
             break;
-        m = result;
     }
     if (arrow) {
         r = operand_value(n, m);

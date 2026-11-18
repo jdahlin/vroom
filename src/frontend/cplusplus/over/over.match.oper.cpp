@@ -246,13 +246,8 @@ analysis_result semantic_analysis::overloaded_operator(
         argument_syntax.append(syntax[i]);
     }
     if (postfix) {
-        expression_meaning zero;
-        zero.type = qualified_type::make(
-            type_table.fundamental(fundamental_type::int_), cv_none);
-        zero.category = value_category::prvalue;
-        zero.evaluation = constness::constant;
-        zero.value = 0;
-        zero.node = expression_node(semantic_kind::constant, zero, at);
+        expression_meaning zero =
+            integer_constant(fundamental_type::int_, 0, at);
         arguments.append(zero);
         argument_syntax.append(syntax_child{});
     }
@@ -396,14 +391,9 @@ analysis_result semantic_analysis::overloaded_operator(
         if (fundamental_of(m.type) == fundamental_type::none)
             /* a comparison category type of <compare> */
             return not_supported(n, "over.match.oper");
-        expression_meaning zero;
-        zero.type = qualified_type::make(
-            type_table.fundamental(fundamental_type::int_), cv_none);
-        zero.category = value_category::prvalue;
-        zero.evaluation = constness::constant;
-        zero.value = 0;
+        expression_meaning zero =
+            integer_constant(fundamental_type::int_, 0, at);
         zero.zero_literal = true;
-        zero.node = expression_node(semantic_kind::constant, zero, at);
         expression_meaning three = m;
         expression_meaning *left = &three, *right = &zero;
         if (c.reversed) {
@@ -433,6 +423,37 @@ analysis_result semantic_analysis::overloaded_operator(
     }
     handled = true;
     return analysis_result::well_formed;
+}
+
+analysis_result semantic_analysis::unary_operator_function(
+    node_index n, token_index at, preprocessing_op_or_punc op, bool postfix,
+    syntax_child s, expression_meaning &operand, bool &handled)
+{
+    owned_array<syntax_child> syntax;
+    owned_array<expression_meaning> operands;
+    syntax.append(s);
+    operands.append(operand);
+    expression_meaning result;
+    analysis_result r = overloaded_operator(n, at, op, postfix, syntax,
+                                            operands, handled, result);
+    if (r == analysis_result::well_formed && handled)
+        operand = result;
+    return r;
+}
+
+analysis_result semantic_analysis::binary_operator_function(
+    node_index n, token_index at, preprocessing_op_or_punc op,
+    syntax_child left_syntax, const expression_meaning &left,
+    syntax_child right_syntax, const expression_meaning &right, bool &handled,
+    expression_meaning &m)
+{
+    owned_array<syntax_child> syntax;
+    owned_array<expression_meaning> operands;
+    syntax.append(left_syntax);
+    operands.append(left);
+    syntax.append(right_syntax);
+    operands.append(right);
+    return overloaded_operator(n, at, op, false, syntax, operands, handled, m);
 }
 
 } // namespace cplusplus

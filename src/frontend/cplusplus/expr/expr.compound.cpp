@@ -701,21 +701,14 @@ analysis_result semantic_analysis::binary(node_index n, expression_meaning &m)
     r = expression(children[2], right);
     if (r != analysis_result::well_formed)
         return r;
-    {
-        /* [over.match.oper]/2: an operand of class or enumeration type */
-        owned_array<syntax_child> syntax;
-        owned_array<expression_meaning> operands;
-        syntax.append(children[0]);
-        operands.append(left);
-        syntax.append(children[2]);
-        operands.append(right);
-        bool handled = false;
-        if (op != preprocessing_op_or_punc::DOT_STAR)
-            r = overloaded_operator(n, at, op, false, syntax, operands, handled,
-                                    m);
-        if (r != analysis_result::well_formed || handled)
-            return r;
-    }
+    /* [over.match.oper]/2: an operand of class or enumeration type (.*
+       is not overloadable) */
+    bool handled = false;
+    if (op != preprocessing_op_or_punc::DOT_STAR)
+        r = binary_operator_function(n, at, op, children[0], left, children[2],
+                                     right, handled, m);
+    if (r != analysis_result::well_formed || handled)
+        return r;
     if (op == preprocessing_op_or_punc::SPACESHIP)
         /* [expr.spaceship]: the built-in three-way comparison, whose
            result is of a type of <compare> */
@@ -1012,19 +1005,14 @@ analysis_result semantic_analysis::comma(node_index n, expression_meaning &m)
         if (any) {
             /* [over.match.oper]/2: an operand of class or enumeration type;
                the left operand is the comma expression before ((a, b), c) */
-            owned_array<syntax_child> syntax;
-            owned_array<expression_meaning> operands;
-            syntax.append(syntax_child{});
+            syntax_child left = {};
             if (i == 2)
-                syntax[0] = children[0];
-            operands.append(m);
-            syntax.append(children[i]);
-            operands.append(e);
+                left = children[0];
             bool handled = false;
             expression_meaning result;
-            r = overloaded_operator(n, children[i - 1].index(),
-                                    preprocessing_op_or_punc::COMMA, false,
-                                    syntax, operands, handled, result);
+            r = binary_operator_function(n, children[i - 1].index(),
+                                         preprocessing_op_or_punc::COMMA, left,
+                                         m, children[i], e, handled, result);
             if (r != analysis_result::well_formed)
                 return r;
             if (handled) {

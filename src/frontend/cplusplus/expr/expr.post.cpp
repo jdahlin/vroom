@@ -462,22 +462,14 @@ analysis_result semantic_analysis::postfix(node_index n, expression_meaning &m)
             r = expression(children[2], i);
         if (r != analysis_result::well_formed)
             return r;
-        {
-            /* [over.sub]/1: "the operator function is selected by overload
-               resolution ([over.match.oper])" */
-            owned_array<syntax_child> syntax;
-            owned_array<expression_meaning> operands;
-            syntax.append(children[0]);
-            operands.append(a);
-            syntax.append(children[2]);
-            operands.append(i);
-            bool handled = false;
-            r = overloaded_operator(n, children[1].index(),
-                                    preprocessing_op_or_punc::LEFT_BRACKET,
-                                    false, syntax, operands, handled, m);
-            if (r != analysis_result::well_formed || handled)
-                return r;
-        }
+        /* [over.sub]/1: "the operator function is selected by overload
+           resolution ([over.match.oper])" */
+        bool handled = false;
+        r = binary_operator_function(
+            n, children[1].index(), preprocessing_op_or_punc::LEFT_BRACKET,
+            children[0], a, children[2], i, handled, m);
+        if (r != analysis_result::well_formed || handled)
+            return r;
         expression_meaning *base = &a, *index = &i;
         auto is_array = [&](const expression_meaning &x) {
             return type_table[x.type.unqualified()].kind == type_kind::array;
