@@ -2389,6 +2389,9 @@ class semantic_analysis
         enum class kind_t : uint8_t {
             type,
             value,
+            /* [temp.arg.template]/1: a class template, its entity in
+               value; in a template's own declaration a template
+               template-parameter, template_entity (its position value) */
             template_name,
             /* [temp.variadic]/1's template parameter pack's argument: its
                count elements pack_arguments[value .. + count), the same
@@ -2471,6 +2474,12 @@ class semantic_analysis
         /* a variable template ([temp.pre]/1): declarator is its
            simple-declaration */
         bool is_variable = false;
+        /* a template template-parameter ([temp.param]/1): the class
+           template its name stands for in the template's own
+           declaration, never instantiated (a specialization of it is a
+           dependent type, [temp.dep.type]/9); its entity's value is its
+           position */
+        bool is_parameter = false;
         /* a class template's partial ([temp.class.spec]) or explicit
            ([temp.expl.spec]) specialization: its primary template
            (function_templates' index plus one; no name of its own), the
@@ -2561,12 +2570,34 @@ class semantic_analysis
                              bool packs = false);
     /* a template-parameter's identifier (after the ellipsis of a pack's) */
     token_index template_parameter_id(node_index parameter) const;
+    /* [temp.param]/1's template-parameter, as written: a type-parameter
+       (a template template-parameter's with its template-head) or a
+       parameter-declaration, its ellipsis, identifier and default
+       template-argument; false for a form with no rules here (a
+       type-constraint) */
+    struct template_parameter_parts {
+        bool type = false, template_template = false, pack = false;
+        bool named = false, has_default = false, has_declarator = false;
+        token_index id = 0;
+        node_index head = 0;
+        syntax_child default_argument, declarator;
+    };
+    bool template_parameter_form(node_index parameter,
+                                 template_parameter_parts &out) const;
+    bool template_parameter_has_default(node_index parameter) const
+    {
+        template_parameter_parts x;
+        return template_parameter_form(parameter, x) && x.has_default;
+    }
+    /* the type-parameters and parameter-declarations of a template-head */
+    bool template_head_list(node_index head,
+                            owned_array<node_index> &parameters) const;
     /* [temp.param]: the parameters' entities in scope, for the template
        function_templates[index] will be; reserved is a name they shall not
        have ([temp.local]/6) */
     analysis_result declare_template_parameters(
         node_index n, const owned_array<node_index> &parameters,
-        entity_index scope, uint32_t index, uint32_t reserved);
+        entity_index scope, uint32_t &index, uint32_t reserved);
     /* [temp.arg]: the written argument for the template's parameter at
        position, given the arguments before it */
     analysis_result template_argument_for(node_index at,
@@ -2575,6 +2606,20 @@ class semantic_analysis
                                           syntax_child written,
                                           const template_argument *before,
                                           template_argument &out);
+    /* [temp.param]/6: a non-type template-parameter's type with rules
+       here; one whose arguments are addresses */
+    bool structural_parameter_type(qualified_type t) const;
+    bool address_parameter_type(qualified_type t) const;
+    /* [temp.arg.nontype]/3: an argument for one of those */
+    analysis_result address_argument(node_index at, qualified_type to,
+                                     syntax_child written,
+                                     template_argument &out);
+    /* [temp.arg.template]: the argument for template template-parameter
+       parameter */
+    analysis_result template_template_argument(node_index at,
+                                               entity_index parameter,
+                                               syntax_child written,
+                                               template_argument &out);
     /* [temp.arg]/4, [temp.param]/12: the arguments not given (set[i]
        false) from the parameters' default template-arguments */
     analysis_result
@@ -2832,6 +2877,21 @@ class semantic_analysis
     bool specialization_value(entity_index e, uint32_t i, uint64_t &magnitude,
                               bool &negative, uint32_t &parameter,
                               uint32_t element = 0) const;
+    /* whether the argument is a template ([temp.arg.template]/1): the
+       class template, or in a template's own declaration the template
+       template-parameter it names (also its position plus one in
+       parameter) */
+    /* whether the argument is an object's or function's address (a
+       pointer parameter's) or the object or function (a reference
+       parameter's) */
+    bool specialization_address(entity_index e, uint32_t i,
+                                entity_index &object, bool &reference,
+                                uint32_t element = 0) const;
+    /* whether entity e is a template template-parameter */
+    bool template_template_parameter(entity_index e) const;
+    bool specialization_template_name(entity_index e, uint32_t i,
+                                      entity_index &named, uint32_t &parameter,
+                                      uint32_t element = 0) const;
 
   private:
     const template_argument &

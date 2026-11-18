@@ -1818,6 +1818,51 @@ lines:
   cxx-run 240/240 (template-aliases.cpp, variable-templates.cpp);
   cxx-c-suites 2214 pass, 0 wrong.
 
+  Then template template-parameters, unnamed template-parameters and
+  non-type parameters of other types ([temp.param]/1, /6, /7,
+  [temp.arg.template], [temp.arg.nontype]).  A template-parameter's form
+  is read once (`template_parameter_form`, temp.variadic.cpp: key or
+  template-head, ellipsis, identifier or declarator, default), so an
+  unnamed one (`template<class, int = 3>`) is a parameter like the
+  others whose name is not bound.  `template<class> class C` is an
+  entity of kind template_entity with a function_template record of its
+  own (`is_parameter`, `is_class`, its own parameters in a scope of
+  theirs, made after the template's: declare_template_parameters moves
+  the template's index past them); `C<int>` in the template's own
+  declaration is a dependent type ([temp.dep.type]/9), and in an
+  instantiation `C` names the argument's class template.  An argument
+  (`template_template_argument`) is a class template's name, qualified
+  or not (a template_argument of kind template_name, the template's
+  entity in value), or the template's own template template-parameter
+  (template_entity); its parameters must be the same as the parameter's
+  ([temp.arg.template]/3's matching beyond that, P0522's included, is
+  unsupported), and a default is an id-expression.  [temp.deduct.type]/8's
+  `TT<T>` deduces TT from A's primary template under the same rule.
+  Non-type parameters may now be of enumeration type (an argument of
+  that enumeration, [expr.const]/10), std::nullptr_t (nullptr), a
+  pointer to an object or function or an lvalue reference to one (`&x`,
+  `x` for an array, a function, or a reference's object: a variable or
+  function of namespace scope of exactly the type referred to; the
+  argument's value is the entity, 0 for a null pointer).  In an
+  instantiation such a parameter's name is an entity without rules for
+  its uses but as another template-argument.  Mangling as clang 23: a
+  template argument `3box` / `N1N3bagE` (the template a candidate),
+  `T_` for a template template-parameter (a candidate), its
+  specialization `T_IiE`, an address `XadL_Z1gEE`, a reference `L_Z1gE`,
+  a null pointer `LPi0E`, an enumerator `L1E5E`.  Not yet: `auto` and
+  class-type parameters ([dcl.spec.auto], structural classes), packs of
+  template template-parameters or non-type parameters, a template
+  template-parameter's own default arguments or nested template
+  template-parameters, alias templates as arguments, partial ordering of
+  function templates with template template-parameters, the use of a
+  pointer or reference parameter's value in an expression, an
+  integral argument for an enumeration parameter (and the reverse).
+  cxx-sema: declarations as clang 43376 -> 45710, 0 we reject and clang
+  accepts, 0 refuted (types 44005 -> 44343, constants 17851 -> 17931,
+  lookup 15323 -> 15354, symbols 1926 -> 1942, layouts 10291 -> 10320,
+  lowering 302 -> 308); cxx-run 244/244
+  (template-template-parameters.cpp); cxx-c-suites 2214 pass, 0 wrong.
+
 ### S7. Exceptions and RTTI
 
 - Front end: [except.throw], [except.handle], [except.ctor], [except.spec],

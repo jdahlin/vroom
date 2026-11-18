@@ -619,4 +619,41 @@ bool semantic_analysis::specialization_value(entity_index e, uint32_t i,
     return true;
 }
 
+bool semantic_analysis::specialization_template_name(entity_index e, uint32_t i,
+                                                     entity_index &named,
+                                                     uint32_t &parameter,
+                                                     uint32_t element) const
+{
+    const template_argument &a =
+        specialization_template_argument(e, i, element);
+    named = 0;
+    parameter = 0;
+    if (a.kind != template_argument::kind_t::template_name)
+        return false;
+    named = static_cast<entity_index>(a.value);
+    if (a.template_entity) {
+        named = a.template_entity;
+        parameter = static_cast<uint32_t>(a.value) + 1;
+    }
+    return true;
+}
+
+bool semantic_analysis::specialization_address(entity_index e, uint32_t i,
+                                               entity_index &object,
+                                               bool &reference,
+                                               uint32_t element) const
+{
+    const template_argument &a =
+        specialization_template_argument(e, i, element);
+    object = 0;
+    reference = false;
+    if (a.kind != template_argument::kind_t::value || a.template_entity ||
+        !a.value || !address_parameter_type(a.type))
+        return false;
+    object = static_cast<entity_index>(a.value);
+    reference =
+        type_table[a.type.unqualified()].kind == type_kind::lvalue_reference;
+    return true;
+}
+
 } // namespace cplusplus

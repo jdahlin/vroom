@@ -97,6 +97,7 @@ class itanium_mangler
     bool class_template_args(entity_index c);
     bool template_args(entity_index c);
     bool template_arg(entity_index c, uint32_t i, uint32_t element);
+    bool template_template_arg(entity_index t, uint32_t parameter);
     void template_param(uint64_t position)
     {
         text("T");
@@ -490,6 +491,25 @@ bool itanium_mangler::class_enum_type(qualified_type t)
        prefix, is a <substitution> before the arguments */
     if (x.instantiation && substitution(analysis.specialized_template(c)))
         return template_args(c);
+    if (x.instantiation && analysis.template_template_parameter(
+                               analysis.specialized_template(c))) {
+        /* [abi:mangling-type]: a template template-parameter's
+           specialization,
+
+               <type> ::= <template-template-param> <template-args>
+
+           [abi:mangle.template-param]:
+
+               <template-template-param> ::= <template-param>
+
+           the parameter a candidate */
+        entity_index t = analysis.specialized_template(c);
+        template_param(table[t].value);
+        candidate y;
+        y.scope = t;
+        candidates.append(y);
+        return template_args(c);
+    }
     if (x.instantiation && is_std(x.enclosing)) {
         /* [abi:mangling-compression]:
          *
@@ -602,12 +622,72 @@ bool itanium_mangler::template_args(entity_index c)
     return true;
 }
 
+/*
+ * A template as a template argument ([abi:mangle.template-arg]):
+ *
+ *     <template-arg> ::= <type>
+ *
+ * [impl.clang] the template's name (<unscoped-name>, or a <nested-name> of
+ * its namespace), a candidate as a template prefix is; seen before, its
+ * <substitution>.  In a template's own declaration a template
+ * template-parameter, its <template-param>, a candidate too.
+ */
+bool itanium_mangler::template_template_arg(entity_index t, uint32_t parameter)
+{
+    if (substitution(t))
+        return true;
+    candidate x;
+    x.scope = t;
+    if (parameter) {
+        template_param(parameter - 1);
+        candidates.append(x);
+        return true;
+    }
+    const entities &table = analysis.entity_table;
+    entity_index scope = table[t].enclosing;
+    if (scope && !is_std(scope)) {
+        if (table[scope].kind != entity_kind::namespace_entity)
+            return false;
+        text("N");
+        if (!prefix(scope) || !unqualified_name(t))
+            return false;
+        text("E");
+    } else if (!unscoped_name(t)) {
+        return false;
+    }
+    candidates.append(x);
+    return true;
+}
+
 /* argument i of c's (its element - 1 if element) */
 bool itanium_mangler::template_arg(entity_index c, uint32_t i, uint32_t element)
 {
     uint64_t v = 0;
     bool negative = false;
     uint32_t parameter = 0;
+    entity_index named = 0;
+    if (analysis.specialization_template_name(c, i, named, parameter, element))
+        return template_template_arg(named, parameter);
+    bool reference = false;
+    if (analysis.specialization_address(c, i, named, reference, element)) {
+        /* [abi:expressions]: an object or function,
+
+               <expr-primary> ::= L _Z <encoding> E
+               <expression> ::= <unary operator-name> <expression>
+
+           its address (a pointer's argument) the second, ad
+           ([abi:mangling-operator]'s & as a unary operator) before the
+           first, as X <expression> E ([abi:mangle.template-arg]) */
+        if (!reference)
+            text("Xad");
+        text("L_Z");
+        if (!encoding(named))
+            return false;
+        text("E");
+        if (!reference)
+            text("E");
+        return true;
+    }
     if (!analysis.specialization_value(c, i, v, negative, parameter, element))
         return type(analysis.specialization_argument(c, i, element));
     if (parameter) {

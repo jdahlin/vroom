@@ -27,11 +27,97 @@ namespace cplusplus
 
 token_index semantic_analysis::template_parameter_id(node_index p) const
 {
+    template_parameter_parts x;
+    template_parameter_form(p, x);
+    return x.id;
+}
+
+/* type-parameter: type-parameter-key ..._opt identifier_opt (= type-id)_opt
+   or template-head type-parameter-key ..._opt identifier_opt (=
+   id-expression)_opt; parameter-declaration: decl-specifier-seq,
+   identifier or declarator_opt, (= initializer-clause)_opt */
+bool semantic_analysis::template_parameter_form(
+    node_index p, template_parameter_parts &out) const
+{
+    out = template_parameter_parts();
+    const syntax_node &x = tree[p];
     const syntax_child *c = tree.children(p);
-    if (tree[p].child_count == 3 &&
-        syntax_is_punctuator(tokens, c[1], preprocessing_op_or_punc::ELLIPSIS))
-        return c[2].index();
-    return c[1].index();
+    if (!x.child_count)
+        return false;
+    uint32_t k = 1;
+    out.type =
+        syntax_is(tree, syntax_child::node(p), syntax_kind::type_parameter);
+    if (out.type) {
+        if (!c[0].is_token()) {
+            if (!syntax_is(tree, c[0], syntax_kind::template_head) ||
+                x.child_count < 2 || !c[1].is_token())
+                return false;
+            out.template_template = true;
+            out.head = c[0].index();
+            k = 2;
+        }
+    } else if (!syntax_is(tree, c[0], syntax_kind::decl_specifier_seq)) {
+        return false;
+    }
+    if (k < x.child_count &&
+        syntax_is_punctuator(tokens, c[k],
+                             preprocessing_op_or_punc::ELLIPSIS)) {
+        out.pack = true;
+        k++;
+    }
+    if (k < x.child_count && c[k].is_token() &&
+        tokens[c[k].index()].kind == token_kind::identifier) {
+        out.named = true;
+        out.id = c[k].index();
+        k++;
+    } else if (!out.type && k < x.child_count && !c[k].is_token()) {
+        out.has_declarator = true;
+        out.declarator = c[k];
+        out.id = declarator_id(c[k]);
+        out.named = out.id != 0;
+        k++;
+    }
+    if (k + 2 == x.child_count &&
+        syntax_is_punctuator(tokens, c[k], preprocessing_op_or_punc::EQUAL)) {
+        out.has_default = true;
+        out.default_argument = c[k + 1];
+        k += 2;
+    }
+    return k == x.child_count;
+}
+
+bool semantic_analysis::template_head_list(
+    node_index head, owned_array<node_index> &parameters) const
+{
+    for (uint32_t i = 0; i < tree[head].child_count; i++) {
+        syntax_child c = tree.children(head)[i];
+        if (c.is_token())
+            continue;
+        if (syntax_is(tree, c, syntax_kind::type_parameter) ||
+            syntax_is(tree, c, syntax_kind::parameter_declaration)) {
+            parameters.append(c.index());
+            continue;
+        }
+        if (!syntax_is(tree, c, syntax_kind::template_parameter_list))
+            return false;
+        for (uint32_t k = 0; k < tree[c.index()].child_count; k++) {
+            syntax_child p = tree.children(c.index())[k];
+            if (p.is_token())
+                continue;
+            if (!syntax_is(tree, p, syntax_kind::type_parameter) &&
+                !syntax_is(tree, p, syntax_kind::parameter_declaration))
+                return false;
+            parameters.append(p.index());
+        }
+    }
+    return true;
+}
+
+bool semantic_analysis::template_template_parameter(entity_index e) const
+{
+    const entity &x = entity_table[e];
+    return x.kind == entity_kind::template_entity && x.instantiation &&
+           function_templates[x.instantiation - 1].is_parameter;
 }
 
 /* [temp.param]/18: "If a template-parameter is a type-parameter with an
@@ -39,12 +125,8 @@ token_index semantic_analysis::template_parameter_id(node_index p) const
    a template parameter pack" */
 bool semantic_analysis::template_parameter_is_pack(uint32_t i) const
 {
-    node_index p = template_parameter_nodes[i];
-    return syntax_is(tree, syntax_child::node(p),
-                     syntax_kind::type_parameter) &&
-           tree[p].child_count == 3 &&
-           syntax_is_punctuator(tokens, tree.children(p)[1],
-                                preprocessing_op_or_punc::ELLIPSIS);
+    template_parameter_parts x;
+    return template_parameter_form(template_parameter_nodes[i], x) && x.pack;
 }
 
 /* a pack's argument: its elements stored once, so that two packs of the
