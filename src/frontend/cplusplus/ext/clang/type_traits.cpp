@@ -225,21 +225,383 @@ semantic_analysis::clang_type_transformation(node_index n, qualified_type &type)
                                         cv_none);
         break;
     case transformation::decay:
-        type = t;
-        if (reference)
-            type = k->operand;
-        k = &type_table[type.unqualified()];
-        if (k->kind == type_kind::array)
-            type = qualified_type::make(type_table.pointer_to(k->operand),
-                                        cv_none);
-        else if (k->kind == type_kind::function)
-            type = qualified_type::make(type_table.pointer_to(type), cv_none);
-        else
-            type = qualified_type::make(type.unqualified(), cv_none);
+        type = decayed(t);
         break;
     case transformation::none:
         break;
     }
+    return analysis_result::well_formed;
+}
+
+/* [meta.trans.other] decay_t<T>: the type of a T passed by value */
+qualified_type semantic_analysis::decayed(qualified_type t)
+{
+    const struct type *k = &type_table[t.unqualified()];
+    if (k->kind == type_kind::lvalue_reference ||
+        k->kind == type_kind::rvalue_reference)
+        t = k->operand;
+    k = &type_table[t.unqualified()];
+    if (k->kind == type_kind::array)
+        return qualified_type::make(type_table.pointer_to(k->operand), cv_none);
+    if (k->kind == type_kind::function)
+        return qualified_type::make(type_table.pointer_to(t), cv_none);
+    return qualified_type::make(t.unqualified(), cv_none);
+}
+
+/*
+ * [ext:clang_builtin_templates] (clang's BuiltinTemplates.td):
+ *
+ *     __builtin_common_type<Template, TypeIdentity, Empty, T...>
+ *
+ * is TypeIdentity<C> when the types T have the common type C of
+ * [meta.trans.other]/3 (common_type's rules, the user's specializations
+ * of it reached through Template<T1, T2>), Empty when they have none.
+ * libc++'s common_type derives from it with
+ * Template = __common_type_t (common_type<T...>::type) when __has_builtin
+ * says it exists.  Template and TypeIdentity are written as names of
+ * templates; T... may expand an instantiation's pack.
+ */
+bool semantic_analysis::is_builtin_common_type(uint32_t name) const
+{
+    static const char spelled[] = "__builtin_common_type";
+    return name == tokens.pp.identifier(spelled, sizeof spelled - 1) + 1;
+}
+
+analysis_result semantic_analysis::builtin_common_type(node_index id,
+                                                       type_index &type)
+{
+    const syntax_child *parts = tree.children(id);
+    owned_array<syntax_child> written;
+    owned_array<bool> expansion;
+    for (uint32_t i = 2; i + 1 < tree[id].child_count; i++) {
+        if (syntax_is_punctuator(tokens, parts[i],
+                                 preprocessing_op_or_punc::ELLIPSIS)) {
+            if (written.empty() || expansion.back())
+                return not_supported(id, "temp.variadic");
+            expansion.back() = true;
+            continue;
+        }
+        if (syntax_is(tree, parts[i], syntax_kind::template_argument_list)) {
+            if (!expansion_list(parts[i].index(), written, expansion))
+                return not_supported(id, "temp.variadic");
+        } else {
+            written.append(parts[i]);
+            expansion.append(false);
+        }
+    }
+    for (size_t w = 0; w < written.size(); w++)
+        if (syntax_is(tree, written[w], syntax_kind::type_id) &&
+            tree[written[w].index()].child_count == 2 &&
+            syntax_is_punctuator(tokens, tree.children(written[w].index())[1],
+                                 preprocessing_op_or_punc::ELLIPSIS))
+            expansion[w] = true;
+    if (written.size() < 3 || expansion[0] || expansion[1] || expansion[2])
+        return not_supported(id, "ext.clang");
+    /* the two templates, by name */
+    entity_index templates[2] = {0, 0};
+    for (uint32_t i = 0; i < 2; i++) {
+        syntax_child a = written[i];
+        token_index first = first_token(a);
+        token_index end = first + 1;
+        if (!a.is_token())
+            end = tree[a.index()].end_token;
+        if (end != first + 1 || tokens[first].kind != token_kind::identifier)
+            return not_supported(id, "ext.clang");
+        lookup_result x =
+            lookup_unqualified(tokens.identifier(first), lookup_filter::any);
+        entity_index e = x.entity;
+        if (!e)
+            e = x.unknown_entity;
+        uint32_t t = class_template_of(e);
+        if (!t)
+            t = alias_template_of(e);
+        if (!t || function_templates[t - 1].is_parameter ||
+            function_templates[t - 1].primary)
+            return not_supported(id, "ext.clang");
+        templates[i] = e;
+    }
+    qualified_type empty;
+    if (!syntax_is(tree, written[2], syntax_kind::type_id))
+        return not_supported(id, "ext.clang");
+    analysis_result r = type_id(written[2].index(), empty);
+    if (r != analysis_result::well_formed)
+        return r;
+    /* T...: each type, a pack expansion's once per element */
+    owned_array<qualified_type> types;
+    bool dependent = depends_on_template_parameter(empty);
+    for (size_t w = 3; w < written.size(); w++) {
+        syntax_child a = written[w];
+        if (!syntax_is(tree, a, syntax_kind::type_id))
+            return not_supported(id, "ext.clang");
+        uint32_t times = 1;
+        if (expansion[w]) {
+            token_index first = first_token(a);
+            token_index end = tree[a.index()].end_token;
+            if (end > first + 1 &&
+                syntax_is_punctuator(tokens, syntax_child::token(end - 1),
+                                     preprocessing_op_or_punc::ELLIPSIS))
+                end--;
+            /* a template's own pack, not bound to elements: a dependent
+               template-id */
+            if (!expansion_count(first, end, times)) {
+                dependent = true;
+                continue;
+            }
+        }
+        for (uint32_t k = 0; k < times; k++) {
+            bool saved = expanding;
+            uint32_t saved_element = expansion_element;
+            if (expansion[w]) {
+                expanding = true;
+                expansion_element = k;
+                type_id_expansion = true;
+            }
+            qualified_type t;
+            r = type_id(a.index(), t);
+            type_id_expansion = false;
+            expanding = saved;
+            expansion_element = saved_element;
+            if (r != analysis_result::well_formed)
+                return r;
+            if (depends_on_template_parameter(t))
+                dependent = true;
+            types.append(t);
+        }
+    }
+    if (dependent) {
+        /* [temp.dep.type]/9: a template-id of dependent arguments */
+        type = dependent_written_type(id);
+        return analysis_result::well_formed;
+    }
+    common_found found = common_found::none;
+    qualified_type c;
+    r = common_type_of(id, templates[0], types.data(),
+                       static_cast<uint32_t>(types.size()), found, c);
+    if (r != analysis_result::well_formed)
+        return r;
+    if (found == common_found::none) {
+        if (empty.cv())
+            return not_supported(id, "ext.clang");
+        type = empty.unqualified();
+        return analysis_result::well_formed;
+    }
+    return template_with_types(id, templates[1], &c, 1, type);
+}
+
+/* [meta.trans.other]/3: the common type of count types */
+analysis_result
+semantic_analysis::common_type_of(node_index id, entity_index base,
+                                  const qualified_type *types, uint32_t count,
+                                  common_found &found, qualified_type &out)
+{
+    found = common_found::none;
+    /* /3.1: "If sizeof...(T) is zero, there shall be no member type." */
+    if (!count)
+        return analysis_result::well_formed;
+    /* /3.2: "If sizeof...(T) is one, ... common_type_t<T0, T0>" */
+    if (count == 1)
+        return common_type_pair(id, base, types[0], types[0], found, out);
+    /* /3.4: "If sizeof...(T) is greater than two, ... Let C denote the
+       same type, if any, as common_type_t<T1, T2>. If there is such a
+       type C, the member typedef-name type shall denote the same type, if
+       any, as common_type_t<C, R...>." (each through Template, which
+       reaches the user's specializations) */
+    qualified_type c = types[0];
+    for (uint32_t i = 1; i < count; i++) {
+        qualified_type two[2] = {c, types[i]};
+        if (count == 2)
+            return common_type_pair(id, base, two[0], two[1], found, out);
+        type_index t = 0;
+        {
+            substitution_mark mark = mark_substitution();
+            substituting++;
+            analysis_result r = template_with_types(id, base, two, 2, t);
+            substituting--;
+            if (r == analysis_result::ill_formed && undo_substitution(mark))
+                return analysis_result::well_formed;
+            if (r != analysis_result::well_formed)
+                return r;
+        }
+        c = qualified_type::make(t, cv_none);
+    }
+    found = common_found::found;
+    out = c;
+    return analysis_result::well_formed;
+}
+
+/* [meta.trans.other]/3.3: the common type of two types */
+analysis_result
+semantic_analysis::common_type_pair(node_index id, entity_index base,
+                                    qualified_type a, qualified_type b,
+                                    common_found &found, qualified_type &out)
+{
+    found = common_found::none;
+    qualified_type d1 = decayed(a), d2 = decayed(b);
+    /* /3.3.1: "If is_same_v<T1, D1> is false or is_same_v<T2, D2> is
+       false, let C denote the same type, if any, as
+       common_type_t<D1, D2>." */
+    if (!(d1 == a) || !(d2 == b)) {
+        qualified_type two[2] = {d1, d2};
+        type_index t = 0;
+        substitution_mark mark = mark_substitution();
+        substituting++;
+        analysis_result r = template_with_types(id, base, two, 2, t);
+        substituting--;
+        if (r == analysis_result::ill_formed && undo_substitution(mark))
+            return analysis_result::well_formed;
+        if (r != analysis_result::well_formed)
+            return r;
+        found = common_found::found;
+        out = qualified_type::make(t, cv_none);
+        return analysis_result::well_formed;
+    }
+    /* /3.3.3: "if decay_t<decltype(false ? declval<D1>() :
+       declval<D2>())> denotes a valid type, let C denote that type" */
+    qualified_type c;
+    analysis_result r = common_conditional(id, d1, d2, found, c);
+    if (r != analysis_result::well_formed || found == common_found::found) {
+        out = decayed(c);
+        return r;
+    }
+    /* /3.3.4: "if COND-RES(CREF(D1), CREF(D2)) denotes a type, let C
+       denote the type decay_t<COND-RES(CREF(D1), CREF(D2))>" (C++20) */
+    if (tokens.files.behavior.edition < standard_edition::cplusplus_20)
+        return analysis_result::well_formed;
+    qualified_type r1 = qualified_type::make(
+        type_table.lvalue_reference_to(
+            qualified_type::make(d1.unqualified(), d1.cv() | cv_const)),
+        cv_none);
+    qualified_type r2 = qualified_type::make(
+        type_table.lvalue_reference_to(
+            qualified_type::make(d2.unqualified(), d2.cv() | cv_const)),
+        cv_none);
+    r = common_conditional(id, r1, r2, found, c);
+    if (r == analysis_result::well_formed && found == common_found::found)
+        out = decayed(c);
+    return r;
+}
+
+/* decltype(false ? declval<A>() : declval<B>()), if it is a type */
+analysis_result semantic_analysis::common_conditional(node_index id,
+                                                      qualified_type a,
+                                                      qualified_type b,
+                                                      common_found &found,
+                                                      qualified_type &out)
+{
+    found = common_found::none;
+    /* declval<T>(): add_rvalue_reference_t<T>'s call, an lvalue of a
+       function or of what an lvalue reference refers to, an xvalue of an
+       object type, a prvalue of void */
+    expression_meaning e[2];
+    qualified_type given[2] = {a, b};
+    for (uint32_t i = 0; i < 2; i++) {
+        qualified_type t = given[i];
+        const struct type &k = type_table[t.unqualified()];
+        value_category c = value_category::xvalue;
+        if (k.kind == type_kind::lvalue_reference) {
+            t = k.operand;
+            c = value_category::lvalue;
+        } else if (k.kind == type_kind::rvalue_reference) {
+            t = k.operand;
+        }
+        if (type_table[t.unqualified()].kind == type_kind::function)
+            c = value_category::lvalue;
+        if (fundamental_of(t) == fundamental_type::void_)
+            c = value_category::prvalue;
+        e[i].type = t;
+        e[i].category = c;
+        e[i].evaluation = constness::not_constant;
+    }
+    /* [expr.cond]/2: both void: void; one: ill-formed (no throw) */
+    bool v0 = fundamental_of(e[0].type) == fundamental_type::void_;
+    bool v1 = fundamental_of(e[1].type) == fundamental_type::void_;
+    if (v0 || v1) {
+        if (v0 && v1) {
+            found = common_found::found;
+            out = qualified_type::make(e[0].type.unqualified(), cv_none);
+        }
+        return analysis_result::well_formed;
+    }
+    expression_meaning condition;
+    condition.type = qualified_type::make(
+        type_table.fundamental(fundamental_type::bool_), cv_none);
+    condition.evaluation = constness::constant;
+    expression_meaning m;
+    substitution_mark mark = mark_substitution();
+    substituting++;
+    unevaluated++;
+    analysis_result r = conditional_operands(id, condition, e[0], e[1], m);
+    unevaluated--;
+    substituting--;
+    if (r == analysis_result::ill_formed && undo_substitution(mark))
+        return analysis_result::well_formed;
+    if (r != analysis_result::well_formed)
+        return r;
+    /* [dcl.type.decltype]/1.3-1.5 */
+    found = common_found::found;
+    out = m.type;
+    if (m.category == value_category::lvalue)
+        out = qualified_type::make(type_table.lvalue_reference_to(m.type),
+                                   cv_none);
+    else if (m.category == value_category::xvalue)
+        out = qualified_type::make(type_table.rvalue_reference_to(m.type),
+                                   cv_none);
+    return analysis_result::well_formed;
+}
+
+/* the type the template named (a class or alias template) denotes with
+   type arguments, its last parameter a pack taking the rest */
+analysis_result
+semantic_analysis::template_with_types(node_index id, entity_index named,
+                                       const qualified_type *types,
+                                       uint32_t count, type_index &type)
+{
+    uint32_t t = class_template_of(named);
+    bool alias = false;
+    if (!t) {
+        t = alias_template_of(named);
+        alias = true;
+    }
+    const function_template ft = function_templates[t - 1];
+    uint32_t parameters = ft.parameter_count;
+    bool pack = parameters &&
+                template_parameter_is_pack(ft.first_parameter + parameters - 1);
+    uint32_t fixed = parameters;
+    if (pack)
+        fixed--;
+    if (count < fixed || (!pack && count != fixed))
+        return not_supported(id, "ext.clang");
+    owned_array<template_argument> arguments;
+    for (uint32_t i = 0; i < fixed; i++) {
+        if (entity_table[template_parameter_entities[ft.first_parameter + i]]
+                .kind != entity_kind::typedef_name)
+            return not_supported(id, "ext.clang");
+        template_argument a;
+        a.type = types[i];
+        arguments.append(a);
+    }
+    if (pack) {
+        if (entity_table[template_parameter_entities[ft.first_parameter +
+                                                     fixed]]
+                .kind != entity_kind::typedef_name)
+            return not_supported(id, "ext.clang");
+        owned_array<template_argument> elements;
+        for (uint32_t i = fixed; i < count; i++) {
+            template_argument a;
+            a.type = types[i];
+            elements.append(a);
+        }
+        arguments.append(
+            make_pack(elements.data(), static_cast<uint32_t>(elements.size())));
+    }
+    if (alias)
+        return alias_template_specialization(id, t, arguments, type);
+    entity_index c = 0;
+    analysis_result r = instantiate_class(
+        id, t, arguments.data(), static_cast<uint32_t>(arguments.size()), c);
+    if (r != analysis_result::well_formed)
+        return r;
+    type = entity_table[c].type.unqualified();
     return analysis_result::well_formed;
 }
 

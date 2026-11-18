@@ -730,6 +730,16 @@ analysis_result semantic_analysis::conditional(node_index n,
         r = expression(children[4], e3);
     if (r != analysis_result::well_formed)
         return r;
+    return conditional_operands(n, c, e2, e3, m);
+}
+
+/* [expr.cond]/2-7: the conditional expression of condition c (converted
+   to bool) and operands e2 and e3, analysed */
+analysis_result semantic_analysis::conditional_operands(
+    node_index n, const expression_meaning &c, expression_meaning e2,
+    expression_meaning e3, expression_meaning &m)
+{
+    analysis_result r = analysis_result::well_formed;
     if (fundamental_of(e2.type) == fundamental_type::void_ ||
         fundamental_of(e3.type) == fundamental_type::void_)
         return not_supported(n, "expr.cond");

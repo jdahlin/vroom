@@ -1062,11 +1062,21 @@ analysis_result semantic_analysis::alias_template_type(node_index id,
                                                        uint32_t at,
                                                        type_index &type)
 {
-    const function_template ft = function_templates[at - 1];
     owned_array<template_argument> arguments;
     analysis_result r = template_id_arguments(id, at, arguments);
     if (r != analysis_result::well_formed)
         return r;
+    return alias_template_specialization(id, at, arguments, type);
+}
+
+/* the type alias template function_templates[at - 1] denotes with
+   arguments (one per parameter, a pack's as one) */
+analysis_result semantic_analysis::alias_template_specialization(
+    node_index id, uint32_t at, const owned_array<template_argument> &arguments,
+    type_index &type)
+{
+    const function_template ft = function_templates[at - 1];
+    analysis_result r = analysis_result::well_formed;
     /* an enclosing template's own pack expanded into the alias's pack
        (Numbers... unbound): its elements are not known */
     for (const template_argument &a : arguments)
@@ -1761,6 +1771,8 @@ analysis_result semantic_analysis::template_type(node_index id,
     entity_index named = x.entity;
     if (!named)
         named = x.unknown_entity;
+    if (!named && !qualified && is_builtin_common_type(name))
+        return builtin_common_type(id, type);
     uint32_t ct = class_template_of(named);
     if (!ct) {
         uint32_t at = alias_template_of(named);

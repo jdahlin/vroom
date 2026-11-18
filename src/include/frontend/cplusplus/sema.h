@@ -236,12 +236,14 @@ enum class entity_kind : uint8_t {
        negated), one entity for the same three ([temp.over.link]); else
        value 0, an entity of its own */
     dependent_value,
-    /* not an entity: [temp.dep.type]/10.3 decltype(expression) of a
-       type-dependent expression in a template's own declaration; its
-       type is a type_kind::dependent of it, value the decltype-specifier
-       (a node), one for operands of the same tokens ([temp.over.link]/5:
-       equivalent expressions).  An instantiation analyses it again */
-    dependent_decltype,
+    /* not an entity: a dependent type in a template's own declaration
+       known only by how it is written: [temp.dep.type]/10.3
+       decltype(expression) of a type-dependent expression, a builtin
+       template's dependent template-id; its type is a type_kind::dependent
+       of it, value the syntax node, one for nodes of the same tokens
+       ([temp.over.link]/5: equivalent expressions).  An instantiation
+       analyses it again */
+    dependent_written,
     /* not an entity: a block scope or a function parameter scope
        ([basic.scope.block], [basic.scope.param]), the scope the names
        declared in it are bound in */
@@ -1790,9 +1792,9 @@ class semantic_analysis
                               uint32_t name, uint64_t value);
     /* the type typename Q::name for a dependent Q, one per Q and name */
     type_index dependent_member_type(type_index qualifier, uint32_t name);
-    type_index dependent_decltype_type(node_index n);
+    type_index dependent_written_type(node_index n);
     owned_array<entity_index> dependent_members;
-    owned_array<entity_index> dependent_decltypes;
+    owned_array<entity_index> dependent_written_types;
     /* a block scope in the current one, made current */
     entity_index open_scope(entity_index conflicts, bool parameters);
     analysis_result pointer_operator(node_index op, qualified_type &type,
@@ -2104,6 +2106,11 @@ class semantic_analysis
                                            expression_meaning &b);
     /* [expr.cond] */
     analysis_result conditional(node_index n, expression_meaning &m);
+    analysis_result conditional_operands(node_index n,
+                                         const expression_meaning &c,
+                                         expression_meaning e2,
+                                         expression_meaning e3,
+                                         expression_meaning &m);
     /* [expr.ass] */
     analysis_result assignment(node_index n, expression_meaning &m);
     /* [expr.ass]/4: = of a class */
@@ -2934,6 +2941,27 @@ class semantic_analysis
     analysis_result alias_template_definition(node_index n, node_index alias);
     /* [temp.alias]/2: the type a simple-template-id naming the alias
        template at denotes */
+    /* [ext:clang_builtin_templates] __builtin_common_type<Template,
+       TypeIdentity, Empty, T...> (type_traits.cpp) */
+    bool is_builtin_common_type(uint32_t name) const;
+    analysis_result builtin_common_type(node_index id, type_index &type);
+    enum class common_found : uint8_t { none, found };
+    analysis_result common_type_of(node_index id, entity_index base,
+                                   const qualified_type *types, uint32_t count,
+                                   common_found &found, qualified_type &out);
+    analysis_result common_type_pair(node_index id, entity_index base,
+                                     qualified_type a, qualified_type b,
+                                     common_found &found, qualified_type &out);
+    analysis_result common_conditional(node_index id, qualified_type a,
+                                       qualified_type b, common_found &found,
+                                       qualified_type &out);
+    analysis_result template_with_types(node_index id, entity_index named,
+                                        const qualified_type *types,
+                                        uint32_t count, type_index &type);
+    qualified_type decayed(qualified_type t);
+    analysis_result alias_template_specialization(
+        node_index id, uint32_t at,
+        const owned_array<template_argument> &arguments, type_index &type);
     analysis_result alias_template_type(node_index id, uint32_t at,
                                         type_index &type);
     node_index variable_specialization_id(node_index d) const;
