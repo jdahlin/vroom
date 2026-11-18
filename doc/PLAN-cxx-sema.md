@@ -1471,6 +1471,39 @@ lines:
   now rejected as clang rejects them carry no claims); lowering 435 ->
   437 files.  cxx-run 468/468 (117 programs); quality unchanged.
 
+- Status (2026-11-18, step 7: structured bindings): `dcl.struct.bind.cpp`
+  (`structured_binding_declaration`, called from `init_declarators` and
+  `for_range_declaration`): the bindings' names bound before the
+  initializer (/2: naming one there is ill-formed), e declared by
+  `binding_variable` (step 1's `deduced_initialization`; an array with
+  no ref-qualifier copied element by element from an unnamed reference),
+  then /3 arrays, /4 tuple-like types (`std::tuple_size<E>` instantiated,
+  `value`; `get<i>` in E's associated namespaces, every template of the
+  name a candidate with i as explicit argument through
+  `template_candidates`' new `specified`; `std::tuple_element<i,
+  E>::type`; r_i of type Ti& or Ti&&) and /5 classes (direct members or
+  one base's, access checked at the declaration).  A binding named
+  (`structured_binding_use`) is rebuilt as `*(e + i)`, `r_i` or `e.m_i`;
+  decltype of it is the referenced type ([dcl.type.decltype]/1.1).  e of
+  static storage duration (static, namespace scope) mangled `DC
+  <source-name>+ E` ([abi:mangle.name]; `_ZDC1a1bE`, `_ZN1nDC1g1hEE`,
+  `_ZZ3usevEDC1m1oE`, clang's symbols).  Lowering: a const object of
+  static storage duration initialized dynamically is no longer emitted
+  read-only (`const P q = p;` faulted).  Tests `structured-bindings.cpp`,
+  `structured-bindings-tuple.cpp`, `structured-bindings-static.cpp`.
+  Not supported: capturing a binding in a lambda; thread_local; C++26
+  constexpr bindings; with static storage duration an array copy, /4 and
+  /5 members of a base or not public; a member `get` (member templates,
+  [temp.mem]) or one only a hidden friend declares; an incomplete
+  `std::tuple_size<E>` when a declaration naming tuple_size was not
+  analysed; anonymous union members, virtual bases.
+  `bench/cxx-sema.py`: declarations 55935 -> 56000 as clang, 12 we reject
+  and clang accepts (the same), 2464 we accept and clang rejects (the
+  same), all 0 refuted; types 69145 -> 69364, constants 27975 -> 28001,
+  lookup 21395 -> 21465, symbols 2483 -> 2496, layout 15020 -> 15025,
+  lowering 437 -> 439 files.  cxx-run 480/480 (120 programs);
+  cxx-c-suites 0 wrong; quality unchanged.
+
 ### S6. Constant evaluation and templates
 
 - S6a [expr.const], [dcl.constexpr], constant initialization: an
