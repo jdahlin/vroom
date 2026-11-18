@@ -150,8 +150,9 @@ uint64_t floating_kept(double v)
  * through a pointer, a class value) is unsupported here, and is where the
  * evaluator of the semantic tree is to be asked.
  */
-analysis_result semantic_analysis::constant_expression(
-    node_index at, const expression_meaning &m, bool &constant)
+analysis_result semantic_analysis::constant_expression(node_index at,
+                                                       expression_meaning &m,
+                                                       bool &constant)
 {
     constant = false;
     if (m.evaluation == constness::unknown) {
@@ -159,7 +160,10 @@ analysis_result semantic_analysis::constant_expression(
         if (!m.node)
             return not_supported(at, "expr.const");
         constant_value v;
-        return evaluate_constant(at, m.node, v, constant);
+        analysis_result r = evaluate_constant(at, m.node, v, constant);
+        if (r == analysis_result::well_formed && constant)
+            evaluated_meaning(m, v);
+        return r;
     }
     constant = m.evaluation == constness::constant;
     return analysis_result::well_formed;
@@ -172,7 +176,7 @@ analysis_result semantic_analysis::constant_expression(
  * caller has checked the type.
  */
 analysis_result semantic_analysis::integral_constant_expression(
-    node_index at, const expression_meaning &m, bool &constant)
+    node_index at, expression_meaning &m, bool &constant)
 {
     analysis_result r = constant_expression(at, m, constant);
     if (r != analysis_result::well_formed || !constant)

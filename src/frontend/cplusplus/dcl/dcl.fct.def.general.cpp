@@ -318,6 +318,9 @@ analysis_result semantic_analysis::function_body(node_index definition,
             static_cast<uint32_t>(parameter_entities.size());
     }
     entity_table[f].definition = body;
+    /* a body analysed in part has a tree the evaluator cannot run */
+    if (result != analysis_result::well_formed)
+        semantics[body].evaluation = constness::not_constant;
     definition_record record;
     record.declaration = current_declaration;
     record.entity = f;

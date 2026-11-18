@@ -1190,18 +1190,32 @@ analysis_result semantic_analysis::declare_with_initializer(
     /* [basic.start.static]/2: "Constant initialization is performed if a
        variable or temporary object with static or thread storage duration
        is constant-initialized": whether an initializer that invokes a
-       constexpr function is one is the evaluator's, which cannot tell yet
-       (lowering would initialize it dynamically, as clang does not) */
-    if (!entity_table[declared_entity].automatic &&
-        constexpr_calls != calls_before &&
-        value.evaluation == constness::unknown) {
+       constexpr function is one is the evaluator's; its value becomes the
+       initializer, which lowering emits as data */
+    if ((s.constexpr_ || (!entity_table[declared_entity].automatic &&
+                          constexpr_calls != calls_before)) &&
+        value.evaluation == constness::unknown && value.node) {
         constant_value v;
         bool constant = false;
         r = evaluate_constant(declaration, value.node, v, constant);
         if (r != analysis_result::well_formed)
             return r;
-        if (constant)
-            return not_supported(declaration, "basic.start.static");
+        if (constant) {
+            expression_meaning folded;
+            folded.type = semantics[value.node].type;
+            evaluated_meaning(folded, v);
+            semantic_node c;
+            c.kind = semantic_kind::constant;
+            c.type = folded.type;
+            c.evaluation = constness::constant;
+            c.value = folded.value;
+            c.at = semantics[value.node].at;
+            value.node = semantics.add(c);
+            value.evaluation = constness::constant;
+            value.value = folded.value;
+        } else if (s.constexpr_) {
+            value.evaluation = constness::not_constant;
+        }
     }
     const struct type record = type_table[type.unqualified()];
     /* [basic.def]/5: "In the definition of an object, the type of that
@@ -1237,26 +1251,6 @@ analysis_result semantic_analysis::declare_with_initializer(
                                        "the initialization shall be a "
                                        "constant expression",
                                        "dcl.constexpr");
-        if (value.evaluation == constness::unknown) {
-            /* what analysis did not fold: the evaluator's, which has no
-               value to give yet: an initializer it evaluates is
-               unsupported until lowering takes the value as static data
-               (lowering emits a call as a call) */
-            constant_value v;
-            bool constant = false;
-            analysis_result r =
-                evaluate_constant(declaration, value.node, v, constant);
-            if (r != analysis_result::well_formed)
-                return r;
-            if (!constant)
-                return ill_formed_at_token(m.id,
-                                           "in any constexpr variable "
-                                           "declaration, the full-expression "
-                                           "of the initialization shall be a "
-                                           "constant expression",
-                                           "dcl.constexpr");
-            return not_supported(declaration, "expr.const");
-        }
     }
     /* [expr.const]/3: "A variable is usable in constant expressions after
        its initializing declaration is encountered if it is a constexpr

@@ -1315,6 +1315,32 @@ lines:
   accepts, 0 refuted (types 39708 -> 47474, constants 15419 -> 18879,
   lookup 11524 -> 12628 verified); [expr.const] is out of the first ten
   (static_assert's 11002); cxx-run 132/132; cxx-c-suites unchanged.
+  The evaluator (S6a), on 9cc43621: `expr/expr.const.evaluate.cpp` runs
+  non-member constexpr functions on values of the integer types to 64
+  bits, bool, enumerations, float and double: parameters and locals in one
+  frame per invocation, reads of variables usable in constant expressions,
+  conversions (through `arithmetic_value`), the unary, binary, logical,
+  conditional and comma operators with [expr.pre]/4's undefined cases not
+  constant (overflow, division by zero, a shift out of range), assignment,
+  compound assignment and increment on the frame's objects; block, if, while,
+  do, for, break, continue, return, within [implimits]/2's limits.  Not
+  modelled, unsupported [expr.const]: pointers, references, arrays,
+  classes, member functions, switch, goto, static locals, long double and
+  128-bit integers, a signed left shift of a negative value (the rule
+  changed in C++20).  Inside an evaluation analysis's `not_constant` does
+  not decide ([expr.const]/5.8, /5.16), only at the outermost node.  A body
+  analysed in part is marked on its `function_body` node and not run.
+  The value goes back: `constant_expression` sets the meaning's value
+  (array bounds, enumerators, case labels, static_assert), and a constexpr
+  variable or a variable of static storage duration whose initializer
+  invokes a constexpr function gets a `constant` node in its place, which
+  lowering emits as data ([basic.start.static]/2: `int g = square(7);` has
+  no dynamic initializer).  The folds are the evaluator's own, written
+  apart from `arithmetic()` (expr.compound.cpp is S3's while it works
+  there); sharing them is for after S3.  cxx-sema: declarations as clang
+  27704 -> 27826, 0 we reject and clang accepts, 0 refuted (types 47348,
+  constants 18837, lookup 12628 verified); cxx-run 132/132 with
+  constexpr-functions.cpp's constant uses; cxx-c-suites unchanged.
 
 ### S7. Exceptions and RTTI
 

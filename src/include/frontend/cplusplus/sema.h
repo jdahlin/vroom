@@ -936,7 +936,8 @@ enum class semantic_kind : uint8_t {
        initializations ([class.base.init]), a block of expression
        statements, run before a (0: none); c: a destructor's destruction
        of its members and bases ([class.dtor]/13), a block run after a
-       (0: none) */
+       (0: none); evaluation not_constant when the body's analysis was not
+       well-formed (a tree in part, which the evaluator does not run) */
     function_body,
 };
 
@@ -1781,12 +1782,11 @@ class semantic_analysis
        m as an expression_meaning keeps it.  Unsupported when analysis
        cannot tell. */
     /* [expr.const]/11 */
-    analysis_result constant_expression(node_index at,
-                                        const expression_meaning &m,
+    analysis_result constant_expression(node_index at, expression_meaning &m,
                                         bool &constant);
     /* [expr.const]/8 */
     analysis_result integral_constant_expression(node_index at,
-                                                 const expression_meaning &m,
+                                                 expression_meaning &m,
                                                  bool &constant);
     /* [expr.const]/10, of the integer type to: m converted to it */
     analysis_result converted_constant_expression(node_index at,
@@ -1817,6 +1817,11 @@ class semantic_analysis
         owned_array<object> objects;
         uint32_t depth = 0;
         uint32_t full_expressions = 0;
+        /* the frame of the invocation being evaluated (0: none) and the
+           frames numbered so far */
+        uint32_t frame = 0, frames = 0;
+        /* a break or continue statement being executed ([stmt.jump]) */
+        uint8_t jump = 0;
     };
     analysis_result evaluate_node(constant_evaluation &state, uint32_t node,
                                   constant_value &v, bool &constant);
@@ -1825,6 +1830,29 @@ class semantic_analysis
                                        bool &returned, constant_value &result);
     analysis_result evaluate_call(constant_evaluation &state, uint32_t node,
                                   constant_value &v, bool &constant);
+    /* the evaluator's parts (expr/expr.const.evaluate.cpp): the object
+       a glvalue designates among state.objects; the value a glvalue's
+       lvalue-to-rvalue conversion reads; a condition; the arithmetic
+       type the evaluator computes in for t (none: one it has no rules
+       for); a conversion and a binary operator on values */
+    analysis_result evaluate_object(constant_evaluation &state, uint32_t node,
+                                    uint32_t &object, bool &constant);
+    analysis_result evaluate_read(constant_evaluation &state, uint32_t node,
+                                  constant_value &v, bool &constant);
+    analysis_result evaluate_condition(constant_evaluation &state,
+                                       uint32_t node, bool &value,
+                                       bool &constant);
+    fundamental_type evaluated_type(qualified_type t) const;
+    analysis_result evaluate_conversion(constant_value &v,
+                                        fundamental_type from,
+                                        fundamental_type to, bool &constant);
+    analysis_result evaluate_binary(uint8_t op, fundamental_type t,
+                                    fundamental_type right,
+                                    const constant_value &x,
+                                    const constant_value &y,
+                                    constant_value &out, bool &constant);
+    /* m's value as expression_meaning keeps it, from the evaluator's */
+    void evaluated_meaning(expression_meaning &m, const constant_value &v);
 
     /* ---- initialization ([dcl.init]) ---- */
     struct initialized_value {
