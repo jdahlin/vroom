@@ -441,6 +441,10 @@ struct token {
     fundamental_type type = fundamental_type::none; /* of a literal */
     preprocessing_op_or_punc op_or_punc = preprocessing_op_or_punc::count;
     int16_t keyword = -1; /* index in the keyword table ([lex.key]) */
+    /* N of _BitInt(N) */
+    uint16_t bit_precise_width = 0;
+    /* value, or floating_bits_low and _high, is the literal's value */
+    bool value_known = false;
     preprocessing_token
         preprocessing; /* the preprocessing token it came from */
     /* a string literal: its code units in lexer::string_code_units(),
@@ -449,12 +453,12 @@ struct token {
     /* the bits of a floating-point literal's value in its format
        (binary16/32/64/128), when value_known */
     uint64_t floating_bits_low = 0, floating_bits_high = 0;
-    /* N of _BitInt(N) */
-    uint16_t bit_precise_width = 0;
     /* the value of an integer or boolean literal, when value_known */
     uint64_t value = 0;
-    bool value_known = false;
 };
+/* one per token of the translation unit: the members are in this order so
+   that none is padded apart from its neighbour (it was 80 bytes) */
+static_assert(sizeof(token) == 72, "token changed size");
 
 /* [lex.phases]/1.3: decomposes a source file into preprocessing tokens */
 class lexer

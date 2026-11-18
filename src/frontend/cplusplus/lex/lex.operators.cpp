@@ -125,22 +125,27 @@ uint32_t lexer::scan_preprocessing_op_or_punc(uint32_t at,
                                               preprocessing_op_or_punc *op,
                                               bool *spelling_differs)
 {
-    /* the first character decides the candidates: read it alone, since
-       most characters start no operator or punctuator */
-    translation_character first = peek(at);
-    if (!first.extent || first.character >= 128)
+    /* the first character decides the candidates; most characters start
+       no operator or punctuator, and most that do start only one */
+    translation_character t = peek(at);
+    if (!t.extent || t.character >= 128)
         return 0;
     const op_or_punc_candidates &candidates =
-        op_or_punc_by_first_character.starting_with[first.character];
+        op_or_punc_by_first_character.starting_with[t.character];
     if (!candidates.count)
         return 0;
 
-    unsigned char c[op_or_punc_lookahead];
-    uint32_t end[op_or_punc_lookahead];
+    /* the characters a candidate could need, and where each ends; after <:
+       the exception of [lex.pptoken]/3.2 looks at two more */
+    int needed = candidates.length[0];
+    if (t.character == '<')
+        needed = op_or_punc_lookahead;
+    unsigned char c[op_or_punc_lookahead] = {};
+    uint32_t end[op_or_punc_lookahead] = {};
     uint32_t q = at;
-    for (int i = 0; i < op_or_punc_lookahead; i++) {
-        translation_character t = peek(q);
-        c[i] = 0;
+    for (int i = 0; i < needed; i++) {
+        if (i > 0)
+            t = peek(q);
         if (t.extent)
             c[i] = t.character;
         q += t.extent;
@@ -149,7 +154,7 @@ uint32_t lexer::scan_preprocessing_op_or_punc(uint32_t at,
 
     int best = -1;
     size_t best_length = 0;
-    for (uint8_t k = 0; k < candidates.count && best < 0; k++) {
+    for (uint8_t k = 0; k < candidates.count; k++) {
         int i = candidates.row[k];
         size_t n = candidates.length[k];
         const char *s = op_or_punc_descriptions[i].spelling;
@@ -166,6 +171,7 @@ uint32_t lexer::scan_preprocessing_op_or_punc(uint32_t at,
         /* .* and ->* are operators, but clang's raw lexer forms them too */
         best = i;
         best_length = n;
+        break;
     }
     if (best < 0)
         return 0;

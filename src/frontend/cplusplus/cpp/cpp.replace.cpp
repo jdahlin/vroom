@@ -363,6 +363,14 @@ void preprocessor::directive_define(const preprocessing_token &directive)
     int va_opt_depth = -1; /* parentheses inside __VA_OPT__ ( ... ) */
     size_t va_opt_start = 0;
     bool first = true;
+    /* which parameter an identifier names: its index, -1 for none */
+    auto parameter_named = [&](uint32_t id) {
+        int32_t found = -1;
+        for (uint32_t i = 0; i < names.size(); i++)
+            if (names[i] == id)
+                found = (int32_t)i;
+        return found;
+    };
     for (; !is_end(t); t = directive_token(), first = false) {
         replacement_element e{t, -1};
         if (first)
@@ -370,9 +378,7 @@ void preprocessor::directive_define(const preprocessing_token &directive)
         e.token.at_start_of_line = false;
         if (is_identifier(t)) {
             uint32_t id = identifier(t);
-            for (uint32_t i = 0; i < names.size(); i++)
-                if (names[i] == id)
-                    e.parameter = (int32_t)i;
+            e.parameter = parameter_named(id);
             /* [cpp.replace]/6: "The identifiers __VA_ARGS__ and __VA_OPT__
                shall occur only in the replacement-list of a function-like
                macro that uses the ellipsis notation in the parameters" */
@@ -445,9 +451,7 @@ void preprocessor::directive_define(const preprocessing_token &directive)
             bool is_va_opt = false;
             if (is_identifier(t)) {
                 uint32_t id = identifier(t);
-                for (uint32_t i = 0; i < names.size(); i++)
-                    if (names[i] == id)
-                        parameter = (int32_t)i;
+                parameter = parameter_named(id);
                 is_va_opt = id == va_opt && m.variadic && !m.named_variadic;
             }
             if (parameter < 0 && !is_va_opt) {

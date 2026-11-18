@@ -137,6 +137,32 @@ which is right for lifetime and silent about cost.
 Findings 2 and 3 are not tuning.  They are how 139 functions are written,
 and the count grows with each subclause implemented.
 
+**What a review of the first fix changed** (same day).  Giving
+`lexer::convert` a scratch buffer of its own removed 9 % of the heap calls
+for the four headers: the other 4 KB requests come from `skip_group`,
+`condition_word`, `execute_directive`, `check_macro_name`, `spelled_as`, each
+with its own local buffer.  So the fix went into the type instead of the
+sites: an `owned_buffer` starts in 128 bytes of its own
+(`VBUFFER_INLINE`, `common/buffer.h`) and takes the heap only when it
+outgrows them.  The peak showed two more things: every source file was read
+into chunks of 64 KB (735 blocks, 48 MB, for the unity TU), and `token` was
+80 bytes with 15 of padding.  A file is now read into a buffer of its size,
+and `token` is 72 bytes, asserted.
+
+| `-fsyntax-only` | Instructions | Heap calls | Bytes requested | Peak heap | Footprint |
+|---|---|---|---|---|---|
+| four C headers | 328 M to 307 M | 58,614 to 9,521 | 227 MB to 14 MB | 17 MB to 7 MB | 16 MB to 13 MB |
+| `expand.cpp` | 678 M to 639 M | 115,948 to 23,518 | 443 MB to 37 MB | 42 MB to 16 MB | 30 MB to 23 MB |
+| `verify.cpp` | 604 M to 566 M | 103,405 to 20,685 | 398 MB to 36 MB | 38 MB to 16 MB | 28 MB to 21 MB |
+| the unity TU | 2,458 M to 2,345 M | 325,734 to 67,284 | 1,296 MB to 181 MB | 139 MB to 93 MB | 92 MB to 75 MB |
+
+Heap calls are down by about 80 %, memory by about a fifth to a half, and
+instructions by 5 to 6 %: the allocator was not where the time went, which
+the profile had said.  Parsing the unity TU takes 0.19 s (0.40 s at the
+start of the day).  Per token, without start-up, the front end is at about
+15,000 to 16,000 instructions.  What is left of finding 3, the local
+`owned_array`s, is 0.2 heap calls per token.
+
 **Not findings.**  No record type larger than 16 bytes is passed by value
 (0 parameters; 5 functions return one); 16 range-`for` loops copy a record
 per element, 11 of them one of the larger types; one function has a stack
@@ -241,8 +267,8 @@ N names, Y types and layout); B the benchmark gate; R review only.
 
 | # | Rule | Today | Check |
 |---|---|---|---|
-| P1 | A type stored once per token, node, type or entity asserts its size next to its definition: `static_assert(sizeof(token) == 80)`.  Changing the number is a decision, visible in the diff | no such assertion | C; L (N): every element type of a translation unit's tables has one |
-| P2 | No padding in such a type: members ordered by alignment | `token` 15 of 80 bytes, `entity` 47 of 216 | L (Y), with the front end's own layout; reference: the analyzer's Padding checker |
+| P1 | A type stored once per token, node, type or entity asserts its size next to its definition: `static_assert(sizeof(token) == 72)`.  Changing the number is a decision, visible in the diff | `token` has one; the others do not | C; L (N): every element type of a translation unit's tables has one |
+| P2 | No padding in such a type: members ordered by alignment | `entity` 47 of 216 bytes (`token` is done: 80 to 72) | L (Y), with the front end's own layout; reference: the analyzer's Padding checker |
 | P3 | An enumeration has the smallest underlying type that holds it | 11 do not | L (S); reference `performance-enum-size` |
 | P4 | Tables and 32-bit indexes, not pointers between nodes | holds | C once indexes are distinct types (style rule 23) |
 | P5 | What the common path reads per element is one array; what few elements have is a side table | `token` carries its literal's value; `entity` is one 216-byte record | R |
@@ -252,7 +278,7 @@ N names, Y types and layout); B the benchmark gate; R review only.
 | # | Rule | Today | Check |
 |---|---|---|---|
 | P6 | Code on the per-token path constructs no owner and grows none.  Scratch storage is a member reused across calls, or comes from a region released as a whole | 253 local owners in 139 functions; 2.5 heap calls per token | C: `[[clang::nonallocating]]` on the per-token functions with `-Werror=function-effects`; B: heap calls per token |
-| P7 | A buffer's first allocation fits what it usually holds; short strings need none | `vbuffer` starts at 4,096 bytes | B: bytes requested per token |
+| P7 | A buffer's first allocation fits what it usually holds; short strings need none | done for `owned_buffer`: 128 bytes of its own first | B: bytes requested per token |
 | P8 | What lives as long as the translation unit is allocated from its region and never freed singly | the tables are `owned_array`s, each a `realloc` chain | R |
 
 ### Dispatch and tables
@@ -326,9 +352,10 @@ the test suite compiles.
 1. Change `scan_preprocessing_op_or_punc` now (finding 1), outside the
    "compliance first" order?  Decided and done, 2026-11-18.
 2. Adopt P6 and P7 as how new front-end code is written, before any lint
-   exists?  Recommended: yes, and mark the lexer's and preprocessor's
-   per-token functions `[[clang::nonallocating]]` as each is cleaned, so
-   that the compiler keeps it so.
+   exists?  P7 is done in `owned_buffer`.  Recommended for P6: yes, and
+   mark the lexer's and preprocessor's per-token functions
+   `[[clang::nonallocating]]` as each is cleaned, so that the compiler
+   keeps it so.
 3. Add a C++ mode to `bench/vbench.py` that records and does not gate
    (P15)?  Recommended: yes.
 4. Size assertions (P1) on `preprocessing_token`, `token`, `syntax_node`,
