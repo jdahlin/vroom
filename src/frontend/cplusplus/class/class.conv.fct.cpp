@@ -17,8 +17,20 @@
  * type-specifier-seq is the conversion-declarator's (operator int*() is
  * operator (int*) ()), and a '(' or '[' after it is not.  The
  * conversion-function-id itself is made by over.oper.cpp.
+ *
+ * Analysed: a conversion function declared or defined in its class (/1;
+ * explicit, /2), one name for all of them told apart by type; the choice
+ * of one by [over.match.conv] for an initialization of an object of
+ * non-class type ([dcl.init]/17.7), a reference to one
+ * ([dcl.init.ref]/5), a contextual conversion to bool and an implicit
+ * conversion sequence of overload resolution ([over.ics.user]).  Not
+ * analysed: a definition outside the class, a virtual one, conversion
+ * function templates, inherited ones (/4), [over.match.copy]'s and
+ * [over.match.ref]'s candidate sets where they differ, and built-in
+ * operator candidates ([over.built]) for an operand of such a class.
  */
 #include "../cplusplus-internal.h"
+#include "frontend/cplusplus/sema.h"
 
 namespace cplusplus
 {
@@ -64,6 +76,356 @@ node_index parser::conversion_type_id()
     if (!operators && pending.size() == mark + 1)
         return 0; /* a type-specifier-seq alone passes through */
     return finish_node(syntax_kind::conversion_type_id, mark, first);
+}
+
+using sequence = semantic_analysis::conversion_sequence;
+
+/* the spelling operator <conversion>, which no identifier has: the name
+   of every conversion function, told apart by its type */
+uint32_t semantic_analysis::conversion_function_name()
+{
+    static const char rest[] = " <conversion>";
+    return operator_identifier(rest, sizeof rest - 1);
+}
+
+/*
+ * The type of the conversion-type-id of the conversion-function-id id: its
+ * type-specifier-seq, then each ptr-operator of the conversion-declarator,
+ * first to last.
+ */
+analysis_result semantic_analysis::conversion_type(node_index id,
+                                                   qualified_type &type)
+{
+    const syntax_node &node = tree[id];
+    if (node.child_count != 2 || tree.children(id)[1].is_token())
+        return not_supported(id, "class.conv.fct");
+    node_index t = tree.children(id)[1].index();
+    node_index seq = t;
+    if (tree[t].kind == syntax_kind::conversion_type_id)
+        seq = tree.children(t)[0].index();
+    specified s;
+    analysis_result r = decl_specifier_seq(seq, s, false);
+    if (r != analysis_result::well_formed)
+        return r;
+    if (!s.has_type || s.typedef_ || s.static_ || s.extern_ || s.inline_ ||
+        s.constexpr_ || s.virtual_ || s.friend_ || s.gnu_flags || s.aligned)
+        return not_supported(seq, "class.conv.fct");
+    type = s.type;
+    if (t == seq)
+        return analysis_result::well_formed;
+    /* the ptr-operators, in source order (a conversion-declarator nests
+       the rest after its first) */
+    owned_array<node_index> work;
+    for (uint32_t i = tree[t].child_count; i-- > 1;)
+        if (!tree.children(t)[i].is_token())
+            work.append(tree.children(t)[i].index());
+    while (!work.empty()) {
+        node_index k = work.back();
+        work.resize(work.size() - 1);
+        if (tree[k].kind == syntax_kind::conversion_declarator) {
+            for (uint32_t i = tree[k].child_count; i-- > 0;)
+                if (!tree.children(k)[i].is_token())
+                    work.append(tree.children(k)[i].index());
+            continue;
+        }
+        if (tree[k].kind != syntax_kind::ptr_operator)
+            return not_supported(k, "class.conv.fct");
+        declarator_meaning m;
+        r = pointer_operator(k, type, m);
+        if (r != analysis_result::well_formed)
+            return r;
+    }
+    return analysis_result::well_formed;
+}
+
+/*
+ * [class.conv.fct]/1: "A declaration whose declarator-id has an
+ * unqualified-id that is a conversion-function-id declares a conversion
+ * function; its declarator shall be a function declarator ([dcl.fct]) of
+ * the form
+ *     noptr-declarator parameters-and-qualifiers
+ * ... A conversion function shall have no non-object parameters and shall
+ * be a non-static member function of a class or class template X; its
+ * declared return type is the conversion-type-id"; "No return type can be
+ * specified" ([class.conv.fct]/1, [dcl.fct]/12: the decl-specifier-seq has
+ * no defining-type-specifier).  The declarators are the member's
+ * (member_declarators), with the conversion-type-id's type as the
+ * decl-specifier-seq's.
+ */
+analysis_result
+semantic_analysis::conversion_function_member(entity_index c, node_index n,
+                                              node_index id, uint8_t access,
+                                              owned_array<node_index> &bodies)
+{
+    const syntax_node &node = tree[n];
+    const syntax_child *children = tree.children(n);
+    specified s;
+    uint32_t first = 0;
+    /* [ext:gnu_attributes] attributes before the declaration */
+    while (first < node.child_count &&
+           syntax_is(tree, children[first],
+                     syntax_kind::gnu_attribute_specifier)) {
+        analysis_result r = gnu_attribute_specifier(children[first].index(), s);
+        if (r != analysis_result::well_formed)
+            return r;
+        first++;
+    }
+    if (first < node.child_count &&
+        syntax_is(tree, children[first], syntax_kind::decl_specifier_seq)) {
+        node_index seq = children[first].index();
+        first++;
+        bool outer_virtual = virtual_allowed, outer_explicit = explicit_allowed;
+        virtual_allowed = explicit_allowed = true;
+        declaration_access = access;
+        analysis_result r = decl_specifier_seq(seq, s, false);
+        virtual_allowed = outer_virtual;
+        explicit_allowed = outer_explicit;
+        declaration_access = 0;
+        if (r != analysis_result::well_formed)
+            return r;
+        if (s.has_type)
+            return ill_formed(seq,
+                              "no return type can be specified for a "
+                              "conversion function",
+                              "class.conv.fct");
+        if (s.static_)
+            return ill_formed(n,
+                              "a conversion function shall be a non-static "
+                              "member function",
+                              "class.conv.fct");
+        if (s.typedef_ || s.extern_)
+            return not_supported(n, "class.conv.fct");
+        if (s.virtual_)
+            /* [class.virtual]/2: an overrider is the conversion function
+               to the same type, which virtual_member does not tell yet */
+            return not_supported(n, "class.conv.fct");
+    }
+    qualified_type type;
+    analysis_result r = conversion_type(id, type);
+    if (r != analysis_result::well_formed)
+        return r;
+    s.type = type;
+    s.has_type = true;
+    return member_declarators(c, n, s, access, first, bodies);
+}
+
+/* [class.conv.fct]/1: the declarator-id is found in the declarator, not
+   in the decl-specifier-seq, the parameters or the body */
+node_index semantic_analysis::conversion_function_id_of(node_index n) const
+{
+    owned_array<node_index> work;
+    for (uint32_t i = 0; i < tree[n].child_count; i++) {
+        syntax_child x = tree.children(n)[i];
+        if (!x.is_token() &&
+            !syntax_is(tree, x, syntax_kind::decl_specifier_seq) &&
+            !syntax_is(tree, x, syntax_kind::function_body))
+            work.append(x.index());
+    }
+    while (!work.empty()) {
+        node_index k = work.back();
+        work.resize(work.size() - 1);
+        syntax_kind kind = tree[k].kind;
+        if (kind == syntax_kind::conversion_function_id)
+            return k;
+        if (kind == syntax_kind::parameters_and_qualifiers ||
+            kind == syntax_kind::brace_or_equal_initializer ||
+            kind == syntax_kind::braced_init_list)
+            continue;
+        for (uint32_t i = 0; i < tree[k].child_count; i++)
+            if (!tree.children(k)[i].is_token())
+                work.append(tree.children(k)[i].index());
+    }
+    return 0;
+}
+
+entity_index
+semantic_analysis::conversion_function_declared_by(entity_index c,
+                                                   node_index definition)
+{
+    for (entity_index f = entity_table.find(c, conversion_function_name()); f;
+         f = entity_table[f].next_overload)
+        if (declared_by(f, definition))
+            return f;
+    return 0;
+}
+
+bool semantic_analysis::has_conversion_functions(entity_index c) const
+{
+    const entity &x = entity_table[c];
+    if (x.kind != entity_kind::class_type ||
+        entity_table.find(
+            c,
+            const_cast<semantic_analysis *>(this)->conversion_function_name()))
+        return true;
+    for (uint32_t i = 0; i < x.base_count; i++)
+        if (has_conversion_functions(
+                type_table[entity_table[class_bases[x.first_base + i]]
+                               .type.unqualified()]
+                    .entity))
+            return true;
+    return false;
+}
+
+/*
+ * [over.match.conv]/1: "Under the conditions specified in [dcl.init], as
+ * part of an initialization of an object of non-class type, a conversion
+ * function can be invoked to convert an initializer expression of class
+ * type to the type of the object being initialized. ... The permissible
+ * types for non-explicit conversion functions are those that can be
+ * converted to type T via a standard conversion sequence.  For
+ * direct-initialization, the permissible types for explicit conversion
+ * functions are those that can be converted to type T with a (possibly
+ * trivial) qualification conversion" (the type itself, here); /2: "The
+ * argument list has one argument, which is the initializer expression.
+ * [Note: This argument will be compared against the implicit object
+ * parameter of the conversion functions.]"  [over.match.best]/2.2: then
+ * "the context is an initialization by user-defined conversion ... and the
+ * standard conversion sequence from the return type of F1 to the
+ * destination type ... is a better conversion sequence than the standard
+ * conversion sequence from the return type of F2".  Only the class's own
+ * conversion functions: one with base classes is not analysed.
+ */
+entity_index
+semantic_analysis::conversion_function_for(const expression_meaning &m,
+                                           qualified_type to, bool direct,
+                                           bool &ambiguous, bool &unknown)
+{
+    ambiguous = unknown = false;
+    entity_index c = type_table[m.type.unqualified()].entity;
+    if (entity_table[c].kind != entity_kind::class_type) {
+        unknown = true;
+        return 0;
+    }
+    uint32_t name = conversion_function_name();
+    entity_index first = entity_table.find(c, name);
+    /* a base class's conversion functions (inherited by
+       [class.conv.fct]/4) are not analysed: a class with them is
+       unknown */
+    const entity &x = entity_table[c];
+    for (uint32_t i = 0; i < x.base_count; i++)
+        if (has_conversion_functions(
+                type_table[entity_table[class_bases[x.first_base + i]]
+                               .type.unqualified()]
+                    .entity)) {
+            unknown = true;
+            return 0;
+        }
+    entity_index best = 0;
+    sequence best_object, best_second;
+    for (entity_index f = first; f; f = entity_table[f].next_overload) {
+        const entity &x = entity_table[f];
+        if (!x.conversion_function)
+            continue;
+        qualified_type result = type_table[x.type.unqualified()].operand;
+        expression_meaning value;
+        value.type = result;
+        value.category = value_category::prvalue;
+        const struct type r = type_table[result.unqualified()];
+        if (r.kind == type_kind::lvalue_reference ||
+            r.kind == type_kind::rvalue_reference) {
+            value.type = r.operand;
+            value.category = value_category::lvalue;
+        }
+        if (x.explicit_ &&
+            (!direct || value.type.unqualified() != to.unqualified()))
+            continue;
+        sequence object = object_sequence(m, f);
+        if (object.kind != sequence::form::standard)
+            continue;
+        sequence second = implicit_conversion_sequence(value, to, false);
+        if (second.kind == sequence::form::unknown) {
+            unknown = true;
+            return 0;
+        }
+        if (second.kind != sequence::form::standard)
+            continue;
+        if (!best) {
+            best = f;
+            best_object = object;
+            best_second = second;
+            ambiguous = false;
+            continue;
+        }
+        int o = compare_conversions(object, best_object);
+        int s = compare_conversions(second, best_second);
+        if (o < 0 || (o == 0 && s < 0)) {
+            best = f;
+            best_object = object;
+            best_second = second;
+            ambiguous = false;
+        } else if (!(o > 0 || (o == 0 && s > 0))) {
+            ambiguous = true;
+        }
+    }
+    if (ambiguous)
+        return 0;
+    return best;
+}
+
+/*
+ * [dcl.init]/17.7: "Otherwise, if the source type is a (possibly
+ * cv-qualified) class type, conversion functions are considered.  The
+ * applicable conversion functions are enumerated ([over.match.conv]), and
+ * the best one is chosen through overload resolution.  The user-defined
+ * conversion so selected is called to convert the initializer expression
+ * into the object being initialized."  converted is false when the class
+ * has none that does; m is then unchanged.
+ */
+analysis_result semantic_analysis::conversion_function_call(
+    node_index at, expression_meaning &m, qualified_type to, bool direct,
+    bool &converted)
+{
+    converted = false;
+    bool ambiguous = false, unknown = false;
+    entity_index f = conversion_function_for(m, to, direct, ambiguous, unknown);
+    if (unknown)
+        return not_supported(at, "over.match.conv");
+    if (ambiguous)
+        /* two conversion functions whose second standard conversion
+           sequences [over.ics.rank]/3.2.1 may tell apart (a proper
+           subsequence to another type), which compare_conversions does
+           not: clang's ambiguity is not claimed */
+        return not_supported(at, "over.ics.rank");
+    if (!f)
+        return analysis_result::well_formed;
+    entity_index c = type_table[m.type.unqualified()].entity;
+    if (!accessible(f, c))
+        /* [class.access]/4 */
+        return ill_formed(at,
+                          "a private or protected member's name can be used "
+                          "only by members and friends of the class in which "
+                          "it is declared",
+                          "class.access");
+    token_index t = tree[at].first_token;
+    analysis_result r = deleted_use(t, f);
+    if (r != analysis_result::well_formed)
+        return r;
+    if (aggregate_prvalue(m) ||
+        (m.category == value_category::prvalue && entity_table[c].destructor))
+        /* the temporary's destruction ([class.temporary]/4), an aggregate's
+           temporary (aggregate_prvalue) */
+        return not_supported(at, "class.temporary");
+    const entity &x = entity_table[f];
+    expression_meaning address;
+    address.type = qualified_type::make(type_table.pointer_to(m.type), cv_none);
+    address.category = value_category::prvalue;
+    address.evaluation = constness::not_constant;
+    address.node = expression_node(semantic_kind::address, address, t, m.node);
+    expression_meaning callee;
+    callee.type = x.type;
+    callee.category = value_category::lvalue;
+    callee.evaluation = constness::constant;
+    callee.entity = f;
+    owned_array<syntax_child> syntax;
+    owned_array<expression_meaning> arguments;
+    expression_meaning result;
+    r = call_with(at, callee, x.type, address.node, f, syntax, arguments,
+                  result);
+    if (r != analysis_result::well_formed)
+        return r;
+    m = result;
+    converted = true;
+    return analysis_result::well_formed;
 }
 
 } // namespace cplusplus

@@ -684,6 +684,14 @@ analysis_result semantic_analysis::declarator(node_index declaration,
         return operator_function_id(n, m);
     case syntax_kind::literal_operator_id:
         return literal_operator_id(n, m);
+    case syntax_kind::conversion_function_id:
+        /* [class.conv.fct]/1: the type is the declaration's
+           (conversion_function_member) */
+        m.has_id = true;
+        m.id = children[0].index();
+        m.conversion_function = true;
+        tokens.name_token(m.id, conversion_function_name());
+        return analysis_result::well_formed;
     default:
         return not_supported(n);
     }
@@ -742,7 +750,9 @@ analysis_result semantic_analysis::declarator(node_index declaration,
                (syntax_is(tree, children[0],
                           syntax_kind::operator_function_id) ||
                 syntax_is(tree, children[0],
-                          syntax_kind::literal_operator_id))) {
+                          syntax_kind::literal_operator_id) ||
+                syntax_is(tree, children[0],
+                          syntax_kind::conversion_function_id))) {
         /* [over.oper]/1, [over.literal]/1: an operator function's name */
         has_head = true;
         head = children[0];

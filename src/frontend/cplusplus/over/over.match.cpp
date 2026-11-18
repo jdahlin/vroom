@@ -239,12 +239,13 @@ analysis_result semantic_analysis::best_viable_function(
             if (ics[w * width + k].kind ==
                     conversion_sequence::form::user_defined &&
                 ics[i * width + k].kind ==
-                    conversion_sequence::form::user_defined)
+                    conversion_sequence::form::user_defined &&
+                ics[w * width + k].function != ics[i * width + k].function)
                 user_defined = true;
         if (!better(w, i) && user_defined)
-            /* /3.3: two user-defined conversion sequences of one
-               constructor, told apart by their second standard conversion
-               sequences (a reference binding's, /3.2.3): not analysed */
+            /* /3.3: two user-defined conversion sequences of different
+               functions are indistinguishable; clang's ambiguity is not
+               claimed */
             return not_supported(at, "over.ics.rank");
         if (!better(w, i))
             return ill_formed(at,
