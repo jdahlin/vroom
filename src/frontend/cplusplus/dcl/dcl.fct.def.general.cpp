@@ -283,6 +283,7 @@ analysis_result semantic_analysis::function_body(node_index definition,
         type_table[entity_table[f].type.unqualified()].operand;
     function_state.active = true;
     function_state.returns = returns;
+    begin_return_deduction(returns);
     function_state.loops = 0;
     function_state.breakable = 0;
     function_state.labels.clear();
@@ -394,6 +395,7 @@ analysis_result semantic_analysis::function_body(node_index definition,
     open_scope(parameters, false);
     uint32_t block = 0;
     result = worse(result, block_items(compound.index(), block));
+    result = finish_return_deduction(definition, result, returns);
     uint32_t destructions = 0;
     if (entity_table[f].special == special_member::destructor)
         destructions = subobject_destructions(entity_table[f].enclosing,

@@ -631,4 +631,22 @@ void semantic_analysis::declaration_seq_in(node_index container)
     }
 }
 
+/* [namespace.std]/1: "the namespace std" of the global namespace */
+bool semantic_analysis::std_namespace(entity_index scope) const
+{
+    const entity &n = entity_table[scope];
+    return scope && n.kind == entity_kind::namespace_entity && !n.enclosing &&
+           named(scope, "std");
+}
+
+bool semantic_analysis::named(entity_index e, const char *text) const
+{
+    if (!entity_table[e].name)
+        return false;
+    size_t length = 0;
+    const char *spelling =
+        tokens.pp.identifier_spelling(entity_table[e].name - 1, &length);
+    return length == strlen(text) && !memcmp(spelling, text, length);
+}
+
 } // namespace cplusplus

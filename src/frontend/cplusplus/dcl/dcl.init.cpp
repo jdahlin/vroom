@@ -979,6 +979,12 @@ analysis_result semantic_analysis::class_list_initialization(
     entity_index c = type_table[type.unqualified()].entity;
     if (entity_table[c].kind != entity_kind::class_type)
         return not_supported(list, "class.pre");
+    /* [dcl.init.list]/3.6: "Otherwise, if T is a specialization of
+       std::initializer_list<E>, the object is constructed as described
+       below": not analysed */
+    if (named(c, "initializer_list") &&
+        std_namespace(entity_table[c].enclosing))
+        return not_supported(list, "dcl.init.list");
     if (!entity_table[c].size)
         /* [dcl.init.list]/3: list-initialization of an incomplete class:
            clang's "incomplete type" error */

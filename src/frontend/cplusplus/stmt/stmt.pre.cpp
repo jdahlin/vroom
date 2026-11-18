@@ -622,6 +622,10 @@ analysis_result semantic_analysis::condition(syntax_child c, bool for_switch,
             !syntax_is(tree, children[0], syntax_kind::decl_specifier_seq))
             return not_supported(at, "dcl.attr");
         specified s;
+        placeholder_allowed = true;
+        scoped_value<qualified_type> deduced(declaration_deduced,
+                                             qualified_type());
+        scoped_value<bool> group(placeholder_group, false);
         r = decl_specifier_seq(children[0].index(), s, false);
         if (r == analysis_result::well_formed &&
             (s.typedef_ || s.static_ || s.extern_ || s.inline_))

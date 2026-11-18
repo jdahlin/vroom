@@ -624,6 +624,12 @@ ast_qualified_type c_lowering::type(qualified_type t, token_index at)
         made = fundamental(u, at);
         break;
     }
+    case type_kind::placeholder:
+        /* [dcl.spec.auto]/11: a name of an entity whose type has an
+           undeduced placeholder is in no expression, so the analysis
+           leaves none for code */
+        fail("a type with an undeduced placeholder", at);
+        return ast_builder_type_basic(AST_TYPE_INT);
     default:
         fail("a pointer to member type", at);
         return ast_builder_type_basic(AST_TYPE_INT);
@@ -5399,6 +5405,12 @@ bool c_lowering::translation_unit()
         if (x.kind != entity_kind::function && x.kind != entity_kind::variable)
             continue;
         if (x.automatic || enclosing_function(d.entity))
+            continue;
+        /* a function with a placeholder return type never defined: its
+           name is in no expression ([dcl.spec.auto]/11), so it needs no
+           symbol (clang emits none) */
+        if (x.kind == entity_kind::function && x.placeholder_return &&
+            !x.defined)
             continue;
         if (!symbol(d.entity, 0))
             return false;

@@ -511,6 +511,9 @@ struct entity {
        without virtual bases nvsize is its data size */
     uint64_t nv_size = 0;
     uint32_t nv_alignment = 0;
+    /* a function declared with a return type that has a placeholder
+       ([dcl.spec.auto]/3), deduced or not */
+    bool placeholder_return = false;
 };
 
 /* [class.virtual], [abi:vtable-components]: what a dynamic class adds to
@@ -1206,6 +1209,11 @@ class semantic_analysis
         return r.entity;
     }
     /* whether entity k is a class (not a union or an enumeration) */
+    /* [namespace.std]: whether scope is ::std, the namespace std of the
+       global namespace */
+    bool std_namespace(entity_index scope) const;
+    /* whether entity e has a name and it is spelled text */
+    bool named(entity_index e, const char *text) const;
     bool is_class_entity(entity_index k) const
     {
         return k && entity_table[k].kind == entity_kind::class_type;
@@ -1424,6 +1432,11 @@ class semantic_analysis
            allows it) */
         token_index pack = 0;
     };
+    /* [dcl.fct]/2: noptr-declarator parameters-and-qualifiers
+       trailing-return-type (dcl.spec.auto.cpp) */
+    analysis_result trailing_return(node_index declaration, node_index n,
+                                    qualified_type &type,
+                                    declarator_meaning &m);
     bool pack_declarator = false;
     /* a type-id T ... is a pack expansion's pattern T */
     bool type_id_expansion = false;
@@ -1620,6 +1633,9 @@ class semantic_analysis
     /* whether the type is, or is made of, a class or enumeration whose
        name has no external linkage */
     bool type_without_external_linkage(qualified_type t) const;
+    /* [basic.link]/4.3: whether t is (an array of) an unnamed class
+       without a typedef name for linkage purposes */
+    bool unnamed_class_object(qualified_type t) const;
     /* [basic.link]/4: whether the namespace n is an unnamed namespace or
        declared directly or indirectly within one */
     bool within_unnamed_namespace(entity_index n) const;
@@ -1681,6 +1697,13 @@ class semantic_analysis
                           qualified_type &type);
     analysis_result reference(node_index at, bool rvalue, qualified_type &type,
                               declarator_meaning &m);
+    /* [dcl.ref]/6: the type lvalue (rvalue) reference to type, a reference
+       type collapsing; type is not cv void */
+    qualified_type reference_to(qualified_type type, bool rvalue);
+    /* the array type array (a record of type_kind::array) is with its
+       element type replaced by element (its bound kept) */
+    type_index array_with_element(const struct type &array,
+                                  qualified_type element);
     /* [dcl.fct] */
     analysis_result function(node_index parameters, qualified_type &type);
     /* [ext:gnu_attributes] the attributes of a gnu-attribute-specifier
@@ -1758,6 +1781,74 @@ class semantic_analysis
     /* [class.friend]: friend is analysed on a friend declaration's
        decl-specifier-seq only */
     bool friend_allowed = false;
+    /* ---- placeholder types and decltype (dcl/dcl.spec.auto.cpp,
+       dcl/dcl.type.decltype.cpp) ---- */
+    /* [dcl.spec.auto]/4: the decl-specifier-seq analysed next may have a
+       placeholder-type-specifier (a variable's or function's declaration);
+       decl_specifier_seq clears it */
+    bool placeholder_allowed = false;
+    /* a declarator's declaration whose type has a placeholder (placeholder),
+       or a function's: what [dcl.spec.auto] allows of it */
+    analysis_result placeholder_declaration(node_index declaration,
+                                            const declarator_meaning &m,
+                                            qualified_type type,
+                                            entity_kind kind, bool placeholder,
+                                            bool initialized);
+    /* [dcl.spec.auto]/1: the placeholder type of auto or decltype(auto) */
+    qualified_type placeholder_type(bool decltype_auto);
+    /* whether t is or contains (through pointers, references, arrays and
+       a function's return type) a placeholder type, and which */
+    bool contains_placeholder(qualified_type t,
+                              bool *decltype_auto = nullptr) const;
+    /* [dcl.type.decltype]/1: the type decltype ( expression ) denotes */
+    analysis_result decltype_type(node_index n, qualified_type &type);
+    /* the type decltype(E) denotes for E analysed as m, E unparenthesized
+       id-expression or class member access when named; false when the
+       entity it names is not known */
+    bool decltype_of(const expression_meaning &m, bool named,
+                     qualified_type &type);
+    /* whether operand (an expression's syntax) is an unparenthesized
+       id-expression or class member access */
+    bool names_entity(syntax_child operand) const;
+    /* [dcl.type.auto.deduct]: the type replacing declared (which contains a
+       placeholder) for the initializer E analysed as e (named:
+       names_entity of it), and what replaced the placeholder in it */
+    analysis_result deduce_placeholder(node_index at, qualified_type declared,
+                                       const expression_meaning &e, bool named,
+                                       qualified_type &deduced,
+                                       qualified_type &replacement);
+    /* [dcl.type.auto.deduct]/4: the invented type template parameter U
+       (its typedef-name entity, made once) */
+    entity_index invented_parameter = 0;
+    /* t with its placeholder replaced by by */
+    qualified_type replace_placeholder(qualified_type t, qualified_type by);
+    /* the function type f with its return type replaced by returns */
+    qualified_type function_returning(qualified_type f, qualified_type returns);
+    /* a deduced type the analysis does not take (array, function, void) */
+    analysis_result deduced_type_supported(node_index at, qualified_type t);
+    /* [dcl.spec.auto]/7: the type the init-declarators of the declaration
+       analysed now deduced for the placeholder (none before the first);
+       init_declarators and condition save and restore it */
+    qualified_type declaration_deduced;
+    /* [dcl.spec.auto]/7: the declaration analysed now has a placeholder in
+       its decl-specifier-seq and more than one init-declarator */
+    bool placeholder_group = false;
+    /* the variable whose initializer deduces its type now (saved and
+       restored around the deduction) */
+    entity_index deducing_variable = 0;
+    /* [dcl.spec.auto]/11: a use of e, whose type may have an undeduced
+       placeholder */
+    analysis_result undeduced_use(token_index t, entity_index e);
+    /* [dcl.spec.auto]/8-9: a return statement's operand (or none) in a
+       function whose declared return type has a placeholder */
+    analysis_result deduce_return(node_index at, const expression_meaning *e,
+                                  bool named);
+    /* a function body's analysis begins and ends: its declared return
+       type's deduction ([dcl.spec.auto]/3, /9), its return type after */
+    void begin_return_deduction(qualified_type returns);
+    analysis_result finish_return_deduction(node_index definition,
+                                            analysis_result result,
+                                            qualified_type &returns);
     /* construct() is called for a base class subobject, which may be of an
        abstract class ([class.abstract]/2) */
     bool constructing_base = false;
@@ -2119,6 +2210,11 @@ class semantic_analysis
         /* the initialization in the semantic tree */
         uint32_t node = 0;
     };
+    /* a variable declared with a placeholder type: its initializer
+       analysed, the type deduced, the variable's type made it */
+    analysis_result deduced_initializer(syntax_child init, entity_index e,
+                                        qualified_type &type,
+                                        initialized_value &value);
     /* the object or reference of type type (an array of unknown bound gets
        its bound) initialized by the initializer node (a
        brace-or-equal-initializer, initializer or braced-init-list) */
@@ -2192,9 +2288,6 @@ class semantic_analysis
                                       type_index &type, uint32_t &cv);
     analysis_result qualified_type_name(node_index n, type_index &type,
                                         uint32_t &cv);
-    /* [dcl.type.decltype]: decltype ( expression ), the type and its
-       cv-qualifiers */
-    analysis_result decltype_type(node_index n, type_index &type, uint32_t &cv);
     /* [dcl.enum]: an enum-specifier, the enumeration's type */
     analysis_result enum_specifier(node_index n, type_index &type);
     analysis_result enum_specifier_rules(node_index n, type_index &type);
@@ -2409,6 +2502,11 @@ class semantic_analysis
     struct function_context {
         bool active = false;
         qualified_type returns;
+        /* [dcl.spec.auto]/3: the declared return type has a placeholder
+           (declared_returns), and the type deduced from the first return
+           statement replaced it in returns (deduced) */
+        qualified_type declared_returns;
+        bool deducing = false, deduced = false;
         unsigned loops = 0, breakable = 0;
         owned_array<label_record> labels;
         owned_array<goto_record> gotos;
@@ -2822,6 +2920,10 @@ class semantic_analysis
                                            entity_index &declared_entity);
     /* [temp.deduct.call]: P against A, the deduced arguments by position
        (set: deduced or given) */
+    /* [temp.deduct.call]/2-3: P and A of a parameter and its argument
+       (of value category c) adjusted for deduce_type */
+    void adjust_call_deduction(qualified_type &p, qualified_type &a,
+                               value_category c);
     bool deduce_type(qualified_type p, qualified_type a,
                      owned_array<template_argument> &deduced,
                      owned_array<bool> &set, bool exact = false);

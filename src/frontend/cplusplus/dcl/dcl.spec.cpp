@@ -988,6 +988,11 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
                                                       bool parameter)
 {
     const syntax_node &node = tree[seq];
+    /* [dcl.spec.auto]/6: "A program that uses a placeholder type in a
+       context not explicitly allowed in this subclause is ill-formed": the
+       contexts analysed allow it (placeholder_allowed) */
+    bool allow_placeholder = placeholder_allowed && !parameter;
+    placeholder_allowed = false;
     simple_type_keywords k;
     uint32_t cv = cv_none;
     unsigned const_ = 0, volatile_ = 0, typedef_ = 0, static_ = 0, extern_ = 0,
@@ -1012,8 +1017,9 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
             syntax_is(tree, c, syntax_kind::elaborated_enum_specifier) ||
             syntax_is(tree, c, syntax_kind::simple_type_specifier) ||
             syntax_is(tree, c, syntax_kind::typename_specifier) ||
+            syntax_is(tree, c, syntax_kind::simple_template_id) ||
             syntax_is(tree, c, syntax_kind::decltype_specifier) ||
-            syntax_is(tree, c, syntax_kind::simple_template_id))
+            syntax_is(tree, c, syntax_kind::placeholder_type_specifier))
             continue;
         /* an attribute specifier has rules unless a class-specifier is
            among the specifiers */
@@ -1092,9 +1098,25 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
                 r = typename_type(c.index(), class_type, named_cv);
                 cv |= named_cv;
             } else if (syntax_is(tree, c, syntax_kind::decltype_specifier)) {
-                uint32_t named_cv = 0;
-                r = decltype_type(c.index(), class_type, named_cv);
-                cv |= named_cv;
+                /* [dcl.type.decltype] */
+                qualified_type denoted;
+                r = decltype_type(c.index(), denoted);
+                class_type = denoted.unqualified();
+                cv |= denoted.cv();
+            } else if (syntax_is(tree, c,
+                                 syntax_kind::placeholder_type_specifier)) {
+                /* [dcl.spec.auto]: decltype(auto); a type-constraint is
+                   [temp.param]'s */
+                const syntax_child *parts = tree.children(c.index());
+                if (!allow_placeholder ||
+                    !tokens.files.behavior.has(
+                        language_feature::return_type_deduction) ||
+                    !parts[0].is_token() ||
+                    p.keyword_of(tokens[parts[0].index()]) !=
+                        standard_keyword::decltype_)
+                    return not_supported(seq, "dcl.spec.auto");
+                class_type = placeholder_type(true).unqualified();
+                r = analysis_result::well_formed;
             } else if (syntax_is(tree, c,
                                  syntax_kind::gnu_attribute_specifier)) {
                 /* [ext:gnu_attributes] a decl-specifier: it applies to
@@ -1114,7 +1136,9 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
             named = class_type;
             named_at = tree[c.index()].first_token;
             if (!syntax_is(tree, c, syntax_kind::simple_type_specifier) &&
-                !syntax_is(tree, c, syntax_kind::typename_specifier))
+                !syntax_is(tree, c, syntax_kind::typename_specifier) &&
+                !syntax_is(tree, c, syntax_kind::decltype_specifier) &&
+                !syntax_is(tree, c, syntax_kind::placeholder_type_specifier))
                 declares_class = true;
             continue;
         }
@@ -1264,6 +1288,17 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
                 return not_supported(seq, specifier_subclause(kw));
             count(virtual_, t, "virtual");
             break;
+        case standard_keyword::auto_:
+            /* [dcl.spec.auto]/1: a placeholder-type-specifier */
+            if (!allow_placeholder ||
+                !tokens.files.behavior.has(
+                    language_feature::auto_type_specifier))
+                return not_supported(seq, specifier_subclause(kw));
+            if (named)
+                k.alone++;
+            named = placeholder_type(false).unqualified();
+            named_at = t;
+            break;
         case standard_keyword::friend_:
             if (!friend_allowed)
                 return not_supported(seq, specifier_subclause(kw));
@@ -1371,86 +1406,6 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
  * ([namespace.qual]) or of a class that is a type, a nested class or
  * enumeration or a member typedef-name ([class.nest]/1, [class.mem]/3).
  */
-/*
- * [dcl.type.decltype]/1: "For an expression E, the type denoted by
- * decltype(E) is defined as follows:
- * - if E is an unparenthesized id-expression naming a structured binding
- *   ([dcl.struct.bind]), decltype(E) is the referenced type ...;
- * - otherwise, if E is an unparenthesized id-expression naming a
- *   non-type template-parameter ...;
- * - otherwise, if E is an unparenthesized id-expression or an
- *   unparenthesized class member access ([expr.ref]), decltype(E) is the
- *   type of the entity named by E.  If there is no such entity, the program
- *   is ill-formed;
- * - otherwise, if E is an xvalue, decltype(E) is T&&, where T is the type
- *   of E;
- * - otherwise, if E is an lvalue, decltype(E) is T&, where T is the type
- *   of E;
- * - otherwise, decltype(E) is the type of E."
- * /1: "The operand of the decltype specifier is an unevaluated operand."
- * An id-expression naming a variable or function has rules; a class member
- * access, a structured binding or a template parameter not yet.
- */
-analysis_result semantic_analysis::decltype_type(node_index n, type_index &type,
-                                                 uint32_t &cv)
-{
-    const syntax_node &node = tree[n];
-    const syntax_child *children = tree.children(n);
-    if (node.child_count != 4)
-        return not_supported(n, "dcl.type.decltype");
-    syntax_child operand = children[2];
-    expression_meaning e;
-    unevaluated++;
-    analysis_result r = expression(operand, e);
-    unevaluated--;
-    if (r != analysis_result::well_formed)
-        return r;
-    bool id_expression =
-        (operand.is_token() &&
-         tokens[operand.index()].kind == token_kind::identifier) ||
-        syntax_is(tree, operand, syntax_kind::unqualified_id) ||
-        syntax_is(tree, operand, syntax_kind::qualified_id);
-    bool member_access =
-        syntax_is(tree, operand, syntax_kind::postfix_expression) &&
-        tree[operand.index()].child_count == 3 &&
-        (syntax_is_punctuator(tokens, tree.children(operand.index())[1],
-                              preprocessing_op_or_punc::DOT) ||
-         syntax_is_punctuator(tokens, tree.children(operand.index())[1],
-                              preprocessing_op_or_punc::ARROW));
-    if (member_access)
-        return not_supported(n, "dcl.type.decltype");
-    qualified_type result = e.type;
-    /* a reference's id-expression: the expression has the referred type
-       ([expr.type]/1), its node still names the variable */
-    entity_index named = e.entity;
-    if (id_expression && !named && e.node &&
-        semantics[e.node].kind == semantic_kind::entity)
-        named = semantics[e.node].a;
-    if (id_expression) {
-        if (!named)
-            /* an enumerator: a prvalue of its type; anything else named
-               (a template parameter, a structured binding) has no rules */
-            if (e.category != value_category::prvalue)
-                return not_supported(n, "dcl.type.decltype");
-        if (named) {
-            entity_kind k = entity_table[named].kind;
-            if (k != entity_kind::variable && k != entity_kind::function)
-                return not_supported(n, "dcl.type.decltype");
-            /* the declared type: a reference stays one */
-            result = entity_table[named].type;
-        }
-    } else if (e.category == value_category::xvalue) {
-        result = qualified_type::make(type_table.rvalue_reference_to(e.type),
-                                      cv_none);
-    } else if (e.category == value_category::lvalue) {
-        result = qualified_type::make(type_table.lvalue_reference_to(e.type),
-                                      cv_none);
-    }
-    type = result.unqualified();
-    cv = result.cv();
-    return analysis_result::well_formed;
-}
-
 analysis_result semantic_analysis::qualified_type_name(node_index n,
                                                        type_index &type,
                                                        uint32_t &cv)
