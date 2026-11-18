@@ -1697,8 +1697,7 @@ lines:
   for `&&` and `||` of an empty pack ([temp.variadic]/10).  Mangling: `J
   ... E` for a pack's arguments and `Dp <type>` for the expansion
   (`_Z5countIJidcEEiDpT_`, as clang).  Not yet: packs of class templates
-  (`box<Ts...>`, partial specializations with packs, bases), non-type
-  packs (`int... Ns`), explicit arguments for a pack, packs not last,
+  (below), non-type packs (`int... Ns`), explicit arguments for a pack, packs not last,
   overloaded function templates (so no head/tail recursion), pack
   expansions in braced or parenthesized initializers, template-argument
   lists and other contexts, folds over assignment operators, `.*`,
@@ -1707,6 +1706,18 @@ lines:
   accepts, 0 refuted (types 43363, lookup 15142, symbols 1905, layouts
   10241, lowering 295); cxx-run 224/224 (variadic-templates.cpp);
   cxx-c-suites unchanged.
+  Then class templates with a type parameter pack (the last parameter;
+  [temp.arg]/1: the arguments from its position on are its elements, an
+  empty pack when none) and pack expansions in a template-argument-list
+  (`box<int, Ts...>`, the ellipsis after a type-id or as the list's
+  child; `type_id_expansion` analyses the pattern), in an instantiation
+  only: a template's own declaration naming a pack of dependent
+  arguments is unsupported, as are partial specializations of a variadic
+  primary or with a pack.  Member functions of such a class may have a
+  function parameter pack of the class's pack and use `sizeof...`.
+  cxx-sema: declarations as clang 41733 -> 42029, 0 we reject and clang
+  accepts, 0 refuted (types 43369, lookup 15144, symbols 1905, layouts
+  10243); cxx-run 224/224; cxx-c-suites unchanged.
 
 ### S7. Exceptions and RTTI
 

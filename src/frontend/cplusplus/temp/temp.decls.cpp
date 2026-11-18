@@ -1215,7 +1215,7 @@ semantic_analysis::class_template_definition(node_index n, node_index specifier)
 {
     entity_index outer = current_scope;
     owned_array<node_index> parameters;
-    analysis_result r = template_head_parameters(n, parameters);
+    analysis_result r = template_head_parameters(n, parameters, true);
     if (r != analysis_result::well_formed)
         return r;
     /* class-head: class-key identifier base-clause_opt */
@@ -1226,8 +1226,16 @@ semantic_analysis::class_template_definition(node_index n, node_index specifier)
     node_index head = tree.children(specifier)[0].index();
     if (tree[head].child_count >= 2 &&
         syntax_is(tree, tree.children(head)[1],
-                  syntax_kind::simple_template_id))
+                  syntax_kind::simple_template_id)) {
+        /* a partial specialization's pack (its arguments' pack
+           expansions) */
+        for (node_index p : parameters)
+            if (tree[p].child_count == 3 &&
+                syntax_is_punctuator(tokens, tree.children(p)[1],
+                                     preprocessing_op_or_punc::ELLIPSIS))
+                return not_supported(n, "temp.variadic");
         return class_specialization_definition(n, specifier, parameters);
+    }
     if (tree[head].child_count < 2 || !tree.children(head)[1].is_token() ||
         tokens[tree.children(head)[1].index()].kind != token_kind::identifier)
         return not_supported(n, "temp.class");
@@ -1301,7 +1309,8 @@ semantic_analysis::class_template_definition(node_index n, node_index specifier)
        template parameter pack" */
     for (size_t i = 1; i < parameters.size(); i++)
         if (tree[parameters[i - 1]].child_count == 4 &&
-            tree[parameters[i]].child_count != 4)
+            tree[parameters[i]].child_count != 4 &&
+            !template_parameter_is_pack(first + static_cast<uint32_t>(i)))
             return ill_formed(parameters[i],
                               "each template-parameter after one with a "
                               "default template-argument shall have one",
@@ -1383,6 +1392,12 @@ analysis_result semantic_analysis::class_specialization_definition(
         entity_table[function_templates[ct - 1].entity].enclosing != outer)
         return not_supported(n, rule);
     const function_template primary = function_templates[ct - 1];
+    /* a variadic primary's: its arguments' packs are matched exactly, not
+       deduced ([temp.class.spec.match]/2 with [temp.deduct.type]/9) */
+    if (!parameters.empty() &&
+        template_parameter_is_pack(primary.first_parameter +
+                                   primary.parameter_count - 1))
+        return not_supported(n, "temp.variadic");
     /* [temp.expl.spec]/7, [temp.class.spec]/1: one declared after a
        specialization it would be used for was instantiated makes the
        program ill-formed (no diagnostic required); any instantiation
@@ -1559,9 +1574,17 @@ analysis_result semantic_analysis::template_type(node_index id,
     if (filled != analysis_result::well_formed)
         return filled;
     bool dependent = false;
-    for (const template_argument &a : arguments)
+    for (const template_argument &a : arguments) {
         if (depends(type_table, a.type) || a.template_entity)
             dependent = true;
+        /* a pack of dependent arguments: deduction from it
+           ([temp.deduct.type]/9) is not analysed */
+        if (a.kind == template_argument::kind_t::pack)
+            for (uint32_t k = 0; k < a.count; k++)
+                if (depends(type_table, pack_arguments[a.value + k].type) ||
+                    pack_arguments[a.value + k].template_entity)
+                    return not_supported(id, "temp.variadic");
+    }
     if (dependent) {
         /* [temp.dep.type]/9: "A type is dependent if it is ... a
            simple-template-id in which either the template name is a
@@ -1890,30 +1913,104 @@ analysis_result semantic_analysis::template_id_arguments(
     node_index id, uint32_t ct, owned_array<template_argument> &arguments)
 {
     const syntax_child *parts = tree.children(id);
-    uint32_t count = function_templates[ct - 1].parameter_count;
+    const function_template ft = function_templates[ct - 1];
+    uint32_t count = ft.parameter_count;
+    /* [temp.arg]/1: "When the parameter declared by the template is a
+       template parameter pack, it will correspond to zero or more
+       template-arguments": the last parameter's, the arguments from its
+       position on */
+    uint32_t pack = count;
+    if (count && template_parameter_is_pack(ft.first_parameter + count - 1))
+        pack = count - 1;
+    owned_array<template_argument> elements;
+    owned_array<syntax_child> written;
+    owned_array<bool> expansion;
     for (uint32_t i = 2; i + 1 < tree[id].child_count; i++) {
-        owned_array<syntax_child> written;
+        if (syntax_is_punctuator(tokens, parts[i],
+                                 preprocessing_op_or_punc::ELLIPSIS)) {
+            if (written.empty() || expansion.back())
+                return not_supported(id, "temp.variadic");
+            expansion.back() = true;
+            continue;
+        }
         if (syntax_is(tree, parts[i], syntax_kind::template_argument_list)) {
             for (uint32_t k = 0; k < tree[parts[i].index()].child_count; k++) {
                 syntax_child a = tree.children(parts[i].index())[k];
-                if (!syntax_is_punctuator(tokens, a,
-                                          preprocessing_op_or_punc::COMMA))
-                    written.append(a);
+                if (syntax_is_punctuator(tokens, a,
+                                         preprocessing_op_or_punc::COMMA))
+                    continue;
+                if (syntax_is_punctuator(tokens, a,
+                                         preprocessing_op_or_punc::ELLIPSIS)) {
+                    if (written.empty() || expansion.back())
+                        return not_supported(id, "temp.variadic");
+                    expansion.back() = true;
+                    continue;
+                }
+                written.append(a);
+                expansion.append(false);
             }
         } else {
             written.append(parts[i]);
+            expansion.append(false);
         }
-        for (syntax_child a : written) {
-            uint32_t position = static_cast<uint32_t>(arguments.size());
-            /* too many: clang's "too many template arguments" */
-            if (position >= count)
-                return not_supported(id, "temp.arg");
-            template_argument v;
-            analysis_result r =
-                template_argument_for(id, ct, position, a, arguments.data(), v);
-            if (r != analysis_result::well_formed)
-                return r;
-            arguments.append(v);
+    }
+    /* a type-id that ends in the ellipsis: its pattern the type-id before
+       it */
+    for (size_t w = 0; w < written.size(); w++)
+        if (syntax_is(tree, written[w], syntax_kind::type_id) &&
+            tree[written[w].index()].child_count == 2 &&
+            syntax_is_punctuator(tokens, tree.children(written[w].index())[1],
+                                 preprocessing_op_or_punc::ELLIPSIS)) {
+            if (expansion[w])
+                return not_supported(id, "temp.variadic");
+            expansion[w] = true;
+        }
+    {
+        for (size_t w = 0; w < written.size(); w++) {
+            syntax_child a = written[w];
+            /* [temp.variadic]/5: a pack expansion's pattern, once per
+               element of an instantiation's packs (a template's own
+               pack expansion is not analysed) */
+            uint32_t times = 1;
+            if (expansion[w]) {
+                token_index first = first_token(a);
+                token_index end = first + 1;
+                if (!a.is_token())
+                    end = tree[a.index()].end_token;
+                if (end > first + 1 &&
+                    syntax_is_punctuator(tokens, syntax_child::token(end - 1),
+                                         preprocessing_op_or_punc::ELLIPSIS))
+                    end--;
+                if (!expansion_count(first, end, times))
+                    return not_supported(id, "temp.variadic");
+            }
+            for (uint32_t k = 0; k < times; k++) {
+                uint32_t position = static_cast<uint32_t>(arguments.size());
+                if (position > pack)
+                    position = pack;
+                /* too many: clang's "too many template arguments" */
+                if (position >= count)
+                    return not_supported(id, "temp.arg");
+                template_argument v;
+                bool saved = expanding;
+                uint32_t saved_element = expansion_element;
+                if (expansion[w]) {
+                    expanding = true;
+                    expansion_element = k;
+                    type_id_expansion = true;
+                }
+                analysis_result r = template_argument_for(id, ct, position, a,
+                                                          arguments.data(), v);
+                type_id_expansion = false;
+                expanding = saved;
+                expansion_element = saved_element;
+                if (r != analysis_result::well_formed)
+                    return r;
+                if (position == pack)
+                    elements.append(v);
+                else
+                    arguments.append(v);
+            }
         }
     }
     /* [temp.arg]/4: the parameters after those given take their default
@@ -1921,9 +2018,12 @@ analysis_result semantic_analysis::template_id_arguments(
        arguments" */
     owned_array<bool> set;
     for (uint32_t i = 0; i < count; i++)
-        set.append(i < arguments.size());
+        set.append(i < arguments.size() || i == pack);
     while (arguments.size() < count)
         arguments.append(template_argument());
+    if (pack < count)
+        arguments[pack] =
+            make_pack(elements.data(), static_cast<uint32_t>(elements.size()));
     /* a default the arguments make ill-formed: clang reports it at the
        default, "in instantiation of default argument" the use; neither
        declaration is judged */

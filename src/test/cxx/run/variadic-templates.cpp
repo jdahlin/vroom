@@ -1,9 +1,11 @@
-/* Variadic function templates: a template parameter pack deduced from a
+/* Variadic templates: a template parameter pack deduced from a
    call's trailing arguments (none, some, of different types, through a
    reference pattern), sizeof... of both packs, pack expansions in a call's
    arguments (the pack alone, a call per element), unary and binary folds
-   left and right (with the empty pack's values), a constexpr fold in a constant expression ([temp.variadic],
-   [temp.deduct.call]/1, [expr.sizeof]/5, [expr.prim.fold]). */
+   left and right (with the empty pack's values), a constexpr fold in a
+   constant expression, class templates with a pack (named with arguments
+   and with a pack expansion) ([temp.variadic], [temp.arg]/1,
+   [temp.deduct.call]/1, [expr.sizeof]/4, [expr.prim.fold]). */
 #include <stdio.h>
 
 template <class... Ts> int count(Ts... args)
@@ -53,6 +55,23 @@ template <class... Ts> int by_reference(Ts &...a)
     return sizeof...(a);
 }
 
+template <class T, class... Ts> struct box {
+    T head;
+    int size() { return sizeof...(Ts); }
+    T sum(T a, Ts... b) { return (a + ... + b); }
+};
+
+template <class... Ts> int boxed(Ts... a)
+{
+    box<int, Ts...> b;
+    b.head = 4;
+    return b.size() * 100 + b.sum(b.head, a...);
+}
+
+template <class... Ts> struct counter {
+    int n() { return sizeof...(Ts); }
+};
+
 int main(void)
 {
     int failures = 0;
@@ -83,6 +102,19 @@ int main(void)
     int x = 1, y = 2;
     if (by_reference(x, y) != 2 || x != 2 || y != 3)
         failures |= 1 << 12;
+    box<int> one;
+    box<long, char, short> three;
+    one.head = 1;
+    three.head = 2;
+    if (one.size() != 0 || three.size() != 2 || one.sum(5) != 5 ||
+        three.sum(1, 2, 3) != 6)
+        failures |= 1 << 13;
+    if (boxed(1, 2) != 207 || boxed() != 4)
+        failures |= 1 << 14;
+    counter<> none;
+    counter<int, int, char> some;
+    if (none.n() != 0 || some.n() != 3)
+        failures |= 1 << 15;
     printf("%d\n", failures);
     return failures;
 }

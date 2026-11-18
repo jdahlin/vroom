@@ -61,6 +61,15 @@ analysis_result semantic_analysis::type_id(node_index n, qualified_type &type)
         !syntax_is(tree, children[0], syntax_kind::type_specifier_seq) ||
         node.child_count > 2)
         return not_supported(n, "dcl.name");
+    /* [temp.variadic]/5: a template-argument's pack expansion, T ...
+       (type_id_expansion: its pattern analysed) */
+    uint32_t count = node.child_count;
+    bool expansion = type_id_expansion;
+    type_id_expansion = false;
+    if (expansion && count == 2 &&
+        syntax_is_punctuator(tokens, children[1],
+                             preprocessing_op_or_punc::ELLIPSIS))
+        count = 1;
     specified s;
     analysis_result r = decl_specifier_seq(children[0].index(), s, false);
     if (r != analysis_result::well_formed)
@@ -68,7 +77,7 @@ analysis_result semantic_analysis::type_id(node_index n, qualified_type &type)
     if (!s.has_type)
         return not_supported(n, "dcl.name");
     type = s.type;
-    if (node.child_count == 1)
+    if (count == 1)
         return analysis_result::well_formed;
     declarator_meaning m;
     r = declarator(current_declaration, children[1], type, m);

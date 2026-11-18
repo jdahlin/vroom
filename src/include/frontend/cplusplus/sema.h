@@ -1382,6 +1382,8 @@ class semantic_analysis
         token_index pack = 0;
     };
     bool pack_declarator = false;
+    /* a type-id T ... is a pack expansion's pattern T */
+    bool type_id_expansion = false;
     /* [temp.variadic]/5: whether the parameter-declaration d is a pack
        expansion of an instantiation's packs: its ellipsis and the packs'
        length (ellipsis 0: it is not); last: it may be one */

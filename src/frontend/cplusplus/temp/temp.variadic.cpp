@@ -90,7 +90,11 @@ entity_index semantic_analysis::make_bound_pack(entity_index scope,
 
 entity_index semantic_analysis::find_pack(uint32_t name) const
 {
-    for (entity_index s = current_scope;; s = entity_table[s].enclosing) {
+    /* (as lookup_unqualified: a member-specification's names first) */
+    entity_index start = current_scope;
+    if (is_namespace(start) && defining_class)
+        start = defining_class;
+    for (entity_index s = start;; s = entity_table[s].enclosing) {
         entity_index e = entity_table.find(s, name);
         if (e) {
             if (entity_table[e].kind == entity_kind::pack)
