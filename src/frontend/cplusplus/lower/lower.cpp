@@ -140,6 +140,7 @@ class c_lowering
     bool is_reference(qualified_type t) const;
     bool without_linkage(qualified_type t) const;
     entity_index enclosing_function(entity_index e) const;
+    entity_index local_class_function(entity_index e) const;
     uint32_t symbol(entity_index e, token_index at, int variant = 2);
     void gnu_attributes(entity_index e, uint32_t s);
     void spelling(entity_index e, owned_buffer &out);
@@ -652,6 +653,19 @@ entity_index c_lowering::enclosing_function(entity_index e) const
     return 0;
 }
 
+/* the function a member of a local class (or of a class nested in one)
+   is in, 0 for any other entity */
+entity_index c_lowering::local_class_function(entity_index e) const
+{
+    const entities &table = analysis.entity_table;
+    entity_index c = table[e].enclosing;
+    if (!c || table[c].kind != entity_kind::class_type)
+        return 0;
+    while (table[table[c].enclosing].kind == entity_kind::class_type)
+        c = table[c].enclosing;
+    return enclosing_function(c);
+}
+
 void c_lowering::spelling(entity_index e, owned_buffer &out)
 {
     uint32_t id = analysis.entity_table[e].name;
@@ -727,6 +741,14 @@ uint32_t c_lowering::symbol(entity_index e, token_index at, int variant)
        COMDAT group too, which C's code generator does not make yet) */
     if (x.inline_)
         flags |= AST_SYMBOL_FLAG_LINKONCE | AST_SYMBOL_FLAG_WEAK;
+    /* [class.local]: a member of a local class has no linkage
+       ([basic.link]/8); [impl.clang] its symbol is local unless the
+       function the class is in is inline (then its copies link as one) */
+    entity_index local = local_class_function(e);
+    if (local && !analysis.entity_table[local].inline_) {
+        storage = AST_STORAGE_STATIC;
+        flags = AST_SYMBOL_FLAG_GLOBAL;
+    }
     s = ast_builder_symbol(c, kind, name.data(), name.size(), t, storage, flags,
                            0);
     *slot = s;

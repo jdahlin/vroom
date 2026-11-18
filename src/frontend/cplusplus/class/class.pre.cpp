@@ -501,6 +501,15 @@ analysis_result semantic_analysis::class_definition(node_index n,
        body ... within the member-specification of the class": the bodies
        are analysed with the class complete */
     node_index outer_declaration = current_declaration;
+    /* [class.local]: a local class's member functions are analysed inside
+       the enclosing function's body, whose state is kept aside meanwhile */
+    function_context enclosing_function =
+        static_cast<function_context &&>(function_state);
+    function_state = function_context();
+    owned_array<entity_index> enclosing_block_variables =
+        static_cast<owned_array<entity_index> &&>(block_variables);
+    block_variables = owned_array<entity_index>();
+    entity_index enclosing_scope = current_scope;
     result = worse(result, member_default_arguments(c));
     current_declaration = outer_declaration;
     if (outer && entity_table[outer].kind == entity_kind::class_type) {
@@ -525,6 +534,10 @@ analysis_result semantic_analysis::class_definition(node_index n,
     if (result == analysis_result::well_formed)
         result = implicit_definitions(c, n);
     current_declaration = outer_declaration;
+    function_state = static_cast<function_context &&>(enclosing_function);
+    block_variables =
+        static_cast<owned_array<entity_index> &&>(enclosing_block_variables);
+    current_scope = enclosing_scope;
     if (result != analysis_result::well_formed) {
         entity_table[c].kind = entity_kind::none;
         entity_table[c].size = 0;
@@ -882,9 +895,7 @@ semantic_analysis::member_declaration(entity_index c, syntax_child member,
     if (node.kind != syntax_kind::member_declaration &&
         node.kind != syntax_kind::function_definition)
         return not_supported(n);
-    const char *nested_rule = local_class_rule(c);
-    if (nested_rule && node.kind == syntax_kind::function_definition)
-        return not_supported(n, nested_rule);
+
     /* a constructor or destructor: no decl-specifier-seq, or one of
        function-specifiers alone ([class.ctor]/1: "Each decl-specifier in
        the decl-specifier-seq of a constructor declaration (if any) shall
@@ -903,8 +914,6 @@ semantic_analysis::member_declaration(entity_index c, syntax_child member,
            only" */
         if (!node.child_count || !declares_special_member(c, children[at]))
             return not_supported(n, "class.ctor");
-        if (nested_rule)
-            return not_supported(n, nested_rule);
         if (node.kind == syntax_kind::member_declaration) {
             if (node.child_count != at + 2 ||
                 !syntax_is_punctuator(tokens, children[at + 1],
@@ -1209,8 +1218,6 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
                                    "class.mem");
     }
     entity_index e = 0;
-    if (is_function && local_class_rule(c))
-        return not_supported(declaration, local_class_rule(c));
     if (is_function) {
         /* [class.static.mfct]/2: "A static member function shall not be
            virtual ... A static member function shall not be declared
