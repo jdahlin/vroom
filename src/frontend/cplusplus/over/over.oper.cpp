@@ -181,7 +181,8 @@ uint32_t semantic_analysis::operator_name(preprocessing_op_or_punc op)
     return operator_identifier(rest, strlen(rest));
 }
 
-uint32_t semantic_analysis::operator_identifier(const char *rest, size_t length)
+uint32_t semantic_analysis::operator_identifier(const char *rest,
+                                                size_t length) const
 {
     /* the spelling operator@, which no identifier has */
     owned_buffer spelling;

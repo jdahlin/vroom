@@ -1030,16 +1030,20 @@ semantic_analysis::member_declaration(entity_index c, syntax_child member,
         }
     }
 
+    if (node_index id = conversion_function_id_of(n))
+        return conversion_function_member(c, n, id, access, bodies);
+
     /* a constructor or destructor: no decl-specifier-seq, or one of
        function-specifiers alone ([class.ctor]/1: "Each decl-specifier in
        the decl-specifier-seq of a constructor declaration (if any) shall
        be friend, inline, constexpr, or an explicit-specifier") */
     uint32_t at = 0;
-    bool constexpr_specified = false, virtual_specified = false;
+    bool constexpr_specified = false, virtual_specified = false,
+         explicit_specified = false;
     if (node.child_count > 1 &&
         syntax_is(tree, children[0], syntax_kind::decl_specifier_seq) &&
         function_specifiers_only(children[0].index(), constexpr_specified,
-                                 &virtual_specified) &&
+                                 &virtual_specified, &explicit_specified) &&
         declares_special_member(c, children[1]))
         at = 1;
     if (!node.child_count || at ||
@@ -1072,9 +1076,9 @@ semantic_analysis::member_declaration(entity_index c, syntax_child member,
                                       preprocessing_op_or_punc::SEMICOLON))
                 /* = default, = delete, a pure-specifier */
                 return not_supported(n, "dcl.fct.def");
-            return special_member_declarator(c, n, children[at], access, false,
-                                             constexpr_specified,
-                                             virtual_specified);
+            return special_member_declarator(
+                c, n, children[at], access, false, constexpr_specified,
+                virtual_specified, explicit_specified);
         }
         if (node.child_count != at + 2 ||
             !syntax_is(tree, children[at + 1], syntax_kind::function_body))
@@ -1083,16 +1087,21 @@ semantic_analysis::member_declaration(entity_index c, syntax_child member,
         if (b.child_count &&
             syntax_is_punctuator(tokens,
                                  tree.children(children[at + 1].index())[0],
-                                 preprocessing_op_or_punc::EQUAL))
+                                 preprocessing_op_or_punc::EQUAL)) {
+            /* an explicit one is declared as the implicit one would be,
+               which is not */
+            if (explicit_specified)
+                return not_supported(n, "dcl.fct.def.default");
             /* = default, = delete: no user-provided function
                ([dcl.fct.def.default]/5), which the layout ([abi:pod]) and
                triviality need to know before the class is complete */
             return defaulted_or_deleted_special_member(
                 c, n, children[at], children[at + 1], access,
                 constexpr_specified, virtual_specified);
-        analysis_result r =
-            special_member_declarator(c, n, children[at], access, true,
-                                      constexpr_specified, virtual_specified);
+        }
+        analysis_result r = special_member_declarator(
+            c, n, children[at], access, true, constexpr_specified,
+            virtual_specified, explicit_specified);
         if (r == analysis_result::well_formed)
             bodies.append(n);
         return r;
@@ -1117,10 +1126,24 @@ semantic_analysis::member_declaration(entity_index c, syntax_child member,
     declaration_access = 0;
     if (r != analysis_result::well_formed)
         return r;
+    return member_declarators(c, n, s, access, 1, bodies);
+}
+
+/*
+ * The declarators of the member-declaration (or function-definition) n of
+ * class c from children[first] on, after its decl-specifier-seq s.
+ */
+analysis_result semantic_analysis::member_declarators(
+    entity_index c, node_index n, const specified &s, uint8_t access,
+    uint32_t first, owned_array<node_index> &bodies)
+{
+    const syntax_node &node = tree[n];
+    const syntax_child *children = tree.children(n);
+    analysis_result r = analysis_result::well_formed;
     if (node.kind == syntax_kind::function_definition) {
         /* [dcl.fct.def.general]/1: declarator virt-specifier-seq_opt
            function-body */
-        uint32_t body_at = 2;
+        uint32_t body_at = first + 1;
         bool override_ = false, final_ = false;
         while (body_at < node.child_count &&
                virt_specifier(children[body_at], override_, final_))
@@ -1138,14 +1161,14 @@ semantic_analysis::member_declaration(entity_index c, syntax_child member,
         virt_override = override_;
         virt_final = final_;
         virt_pure = false;
-        r = member_declarator(c, n, children[1], s, access, true);
+        r = member_declarator(c, n, children[first], s, access, true);
         virt_override = virt_final = false;
         if (r == analysis_result::well_formed)
             bodies.append(n);
         return r;
     }
     owned_array<syntax_child> declarators;
-    for (uint32_t i = 1; i < node.child_count; i++) {
+    for (uint32_t i = first; i < node.child_count; i++) {
         syntax_child d = children[i];
         if (syntax_is_punctuator(tokens, d,
                                  preprocessing_op_or_punc::SEMICOLON))
@@ -1378,6 +1401,10 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
             if (!same_parameters(type_table, x.type.unqualified(),
                                  type.unqualified()))
                 continue;
+            /* conversion functions to different types have different
+               names ([class.conv.fct]/1), here one */
+            if (m.conversion_function && x.type != type)
+                continue;
             if (x.member_cv == function_cv &&
                 x.nonstatic_member == !s.static_ && x.type == type)
                 /* [class.mem]/5 */
@@ -1464,6 +1491,18 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
             if (copy_assignment_operator(e, entity_table[e].enclosing))
                 entity_table[entity_table[e].enclosing].user_copy_assignment =
                     true;
+        }
+        if (m.conversion_function) {
+            /* [class.conv.fct]/1: "A conversion function shall have no
+               non-object parameters" */
+            const struct type &f = type_table[type.unqualified()];
+            if (f.parameter_count || f.variadic)
+                return ill_formed_at_token(m.id,
+                                           "a conversion function shall have "
+                                           "no non-object parameters",
+                                           "class.conv.fct");
+            entity_table[e].conversion_function = true;
+            entity_table[e].explicit_ = s.explicit_;
         }
         if (m.literal_operator) {
             analysis_result checked =
@@ -1649,126 +1688,6 @@ analysis_result semantic_analysis::member_typedef(
 }
 
 /*
- * [class.bit]/1: "A member-declarator of the form
- *     identifier_opt attribute-specifier-seq_opt : constant-expression brace-or-equal-initializer_opt
- * specifies a bit-field.  The optional attribute-specifier-seq appertains
- * to the entity being declared.  A bit-field shall not be a static member.
- * A bit-field shall have integral or enumeration type ...  The
- * constant-expression shall be an integral constant expression with a
- * value greater than or equal to zero and is called the width of the
- * bit-field.  If the width of a bit-field is larger than the width of the
- * bit-field's type (or, in case of an enumeration type, of its underlying
- * type), the extra bits are padding bits.  Allocation of bit-fields within
- * a class object is implementation-defined."  /2: "A declaration for a
- * bit-field that omits the identifier declares an unnamed bit-field.
- * Unnamed bit-fields are not members and cannot be initialized. ... As a
- * special case, an unnamed bit-field with a width of zero specifies
- * alignment of the next bit-field at an allocation unit boundary.  Only
- * when declaring an unnamed bit-field may the width be zero."
- *
- * The allocation is the layout's, at the closing } (abi/itanium/layout.cpp:
- * clang's for aarch64 Linux).  Bit-fields with
- * padding bits, with an initializer or attributes are not
- * analysed yet.
- */
-analysis_result semantic_analysis::member_bit_field(entity_index c,
-                                                    node_index declaration,
-                                                    syntax_child d,
-                                                    const specified &s,
-                                                    uint8_t access)
-{
-    const syntax_node &node = tree[d.index()];
-    const syntax_child *children = tree.children(d.index());
-    token_index id = 0;
-    uint32_t k = 0;
-    if (k < node.child_count && children[k].is_token() &&
-        tokens[children[k].index()].kind == token_kind::identifier)
-        id = children[k++].index();
-    if (k + 2 != node.child_count ||
-        !syntax_is_punctuator(tokens, children[k],
-                              preprocessing_op_or_punc::COLON))
-        /* attributes, a brace-or-equal-initializer */
-        return not_supported(d.index(), "class.bit");
-    syntax_child width_expression = children[k + 1];
-    if (!s.has_type || s.typedef_ || s.static_ || s.extern_ || s.inline_ ||
-        s.constexpr_ || s.aligned || s.gnu_flags)
-        return not_supported(declaration, "class.bit");
-    qualified_type type = s.type;
-    const struct type record = type_table[type.unqualified()];
-    /* [class.bit]/1: "A bit-field shall have integral or enumeration
-       type"; an enumeration whose underlying type is not fixed yet (an
-       incomplete one) has no size */
-    bool enumeration = record.kind == type_kind::enumeration;
-    if (enumeration && !size_of_type(type))
-        return not_supported(declaration, "class.bit");
-    if (!enumeration && (record.kind != type_kind::fundamental ||
-                         !fundamental_type_is_integral(record.fundamental)))
-        return ill_formed(declaration,
-                          "a bit-field shall have integral or enumeration "
-                          "type",
-                          "class.bit");
-    expression_meaning w;
-    analysis_result r = expression(width_expression, w);
-    if (r != analysis_result::well_formed)
-        return r;
-    r = operand_value(declaration, w);
-    if (r != analysis_result::well_formed)
-        return r;
-    promote_enumeration(w);
-    if (!is_integral(w.type))
-        return not_supported(declaration, "class.bit");
-    /* [class.bit]/1: "The constant-expression shall be an integral
-       constant expression with a value greater than or equal to zero and
-       is called the width of the bit-field." */
-    bool constant_width = false;
-    r = integral_constant_expression(declaration, w, constant_width);
-    if (r != analysis_result::well_formed)
-        return r;
-    if (!constant_width)
-        return not_supported(declaration, "class.bit");
-    __int128 width_value =
-        integer_value(tokens.files.behavior, fundamental_of(w.type), w.value);
-    if (width_value < 0)
-        return ill_formed(declaration,
-                          "the width of a bit-field shall be greater than or "
-                          "equal to zero",
-                          "class.bit");
-    if (width_value == 0 && id)
-        return ill_formed(declaration,
-                          "only when declaring an unnamed bit-field may the "
-                          "width be zero",
-                          "class.bit");
-    uint64_t unit = size_of_type(type) * 8;
-    uint64_t alignment = alignment_of_type(type);
-    if (static_cast<unsigned __int128>(width_value) > unit || !alignment)
-        /* padding bits (clang's warning) */
-        return not_supported(declaration, "class.bit");
-    uint64_t width = static_cast<uint64_t>(width_value);
-    uint32_t name = 0;
-    if (id) {
-        name = tokens.identifier(id);
-        if (entity_table.find(c, name))
-            return not_supported(declaration, "class.mem");
-    }
-    entity_index e = entity_table.make(entity_kind::variable, name, c);
-    entity_table[e].type = type;
-    entity_table[e].nonstatic_member = true;
-    entity_table[e].defined = true;
-    entity_table[e].field = entity_table[c].member_count;
-    entity_table[e].bit_field = true;
-    entity_table[e].bit_width = static_cast<uint16_t>(width);
-    entity_table[e].linkage_of_name = entity_table[c].linkage_of_name;
-    entity_table[e].access = access;
-    class_members.append(e);
-    entity_table[c].member_count++;
-    entity_table.add_declaration(e, declaration);
-    if (name)
-        entity_table.bind(c, name, e);
-    last_declared = e;
-    return analysis_result::well_formed;
-}
-
-/*
  * [class.mfct]/1: the body of a member function defined in its class,
  * analysed as the definition's own: its declarator again, for the
  * parameters (function_body reads them), then the body.
@@ -1790,12 +1709,27 @@ analysis_result semantic_analysis::member_function_body(entity_index c,
 analysis_result semantic_analysis::member_function_definition(
     entity_index c, node_index definition, const syntax_child *children)
 {
-    bool constexpr_specified = false, body_virtual = false;
+    /* a conversion function ([class.conv.fct]): no parameters for the
+       declarator to bind, its body the function-body */
+    if (entity_index f = conversion_function_declared_by(c, definition)) {
+        last_declared = f;
+        syntax_child body = children[tree[definition].child_count - 1];
+        if (deleted_body(body))
+            return deleted_definition(definition, f);
+        entity_index saved_class = defining_class;
+        defining_class = c;
+        analysis_result r =
+            function_body(definition, tree.children(body.index())[0]);
+        defining_class = saved_class;
+        return r;
+    }
+    bool constexpr_specified = false, body_virtual = false,
+         body_explicit = false;
     uint32_t at = 0;
     if (tree[definition].child_count > 2 &&
         syntax_is(tree, children[0], syntax_kind::decl_specifier_seq) &&
         function_specifiers_only(children[0].index(), constexpr_specified,
-                                 &body_virtual) &&
+                                 &body_virtual, &body_explicit) &&
         declares_special_member(c, children[1]))
         at = 1;
     if (at || !syntax_is(tree, children[0], syntax_kind::decl_specifier_seq)) {

@@ -15,11 +15,10 @@
  * the standard conversion sequence consisting of the identity conversion".
  *
  * These only classify: the conversion of the chosen function's arguments is
- * initialize_with's, as for one candidate.  A class analysis followed has
- * every member known, so no conversion function and no explicit
- * constructor ([class.conv.fct] and [class.conv.ctor]'s explicit are not
- * analysed: such a class is not followed); a class it did not follow gives
- * a sequence it cannot tell (form::unknown).
+ * initialize_with's, as for one candidate.  A conversion function makes
+ * a sequence to a type that is no class (class.conv.fct.cpp); to a class
+ * or a reference to one it is not analysed (form::unknown), nor is a
+ * class analysis did not follow.
  */
 #include "../cplusplus-internal.h"
 #include "frontend/cplusplus/sema.h"
@@ -277,6 +276,11 @@ semantic_analysis::class_sequence(const expression_meaning &a,
     } else if (y.kind == type_kind::none) {
         return of_form(sequence::form::unknown);
     }
+    /* [over.match.copy]/1.2: the conversion functions of the argument's
+       class are candidates too: not analysed */
+    if (y.kind == type_kind::class_type && user_defined &&
+        has_conversion_functions(y.entity))
+        return of_form(sequence::form::unknown);
     if (!user_defined)
         return of_form(sequence::form::bad);
     /* the converting constructors of c1 with one parameter to take the
@@ -286,6 +290,9 @@ semantic_analysis::class_sequence(const expression_meaning &a,
     for (entity_index k = entity_table[c1].first_constructor; k;
          k = entity_table[k].next_constructor) {
         const struct type &f = type_table[entity_table[k].type.unqualified()];
+        /* [over.match.copy]/1.1: "the converting constructors of T" */
+        if (entity_table[k].explicit_)
+            continue;
         if (f.parameter_count == 0 ||
             f.parameter_count - entity_table[k].default_arguments > 1)
             continue;
@@ -400,6 +407,10 @@ semantic_analysis::conversion_sequence semantic_analysis::reference_sequence(
                object of type "cv1 T1" by user-defined conversion": the
                converting constructors of T1, a temporary (no conversion
                functions: see above) */
+            /* [dcl.init.ref]/5.1.2, /5.3.2 ([over.match.ref]): a
+               conversion function of T2's: not analysed */
+            if (c2 && user_defined && has_conversion_functions(c2))
+                return of_form(sequence::form::unknown);
             if (!c1 || !binds_rvalues || !user_defined)
                 return of_form(sequence::form::bad);
             s = class_sequence(
@@ -467,10 +478,33 @@ semantic_analysis::implicit_conversion_sequence(const expression_meaning &a,
     const struct type y = type_table[a.type.unqualified()];
     if (y.kind == type_kind::class_type) {
         /* to a type that is no class: by a conversion function of the
-           argument's class, which a class analysis followed has none of */
-        if (entity_table[y.entity].kind != entity_kind::class_type)
+           argument's class ([over.ics.user]/2: "The second standard
+           conversion sequence converts the result of the user-defined
+           conversion to the target type") */
+        if (!user_defined)
+            return of_form(sequence::form::bad);
+        bool ambiguous = false, unknown = false;
+        entity_index f =
+            conversion_function_for(a, parameter, false, ambiguous, unknown);
+        if (unknown)
             return of_form(sequence::form::unknown);
-        return of_form(sequence::form::bad);
+        if (ambiguous) {
+            sequence s = of_form(sequence::form::user_defined);
+            s.ambiguous = true;
+            s.target = qualified_type::make(parameter.unqualified(), cv_none);
+            return s;
+        }
+        if (!f)
+            return of_form(sequence::form::bad);
+        /* the second standard conversion sequence, kept in the sequence
+           for [over.ics.rank]/3.3 */
+        expression_meaning value = conversion_function_result(f);
+        sequence s = standard_conversion_sequence(value, parameter);
+        if (s.kind != sequence::form::standard)
+            return of_form(sequence::form::unknown);
+        s.kind = sequence::form::user_defined;
+        s.function = f;
+        return s;
     }
     return standard_conversion_sequence(a, parameter);
 }

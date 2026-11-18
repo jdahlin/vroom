@@ -1223,6 +1223,45 @@ lines:
   one more `tree` problem (p4-cxx0x.cpp's decltype(static_cast<int&&>(i)),
   the static_cast to an rvalue reference that already has it elsewhere).
   cxx-run 376/376 (94 programs).
+- Status (2026-11-18, step 2: conversion functions and explicit):
+  `class/class.conv.fct.cpp` declares conversion functions in their class
+  ([class.conv.fct]/1, /2; declared or defined there, `explicit` too,
+  constexpr, cv-qualified), all named `operator <conversion>` and told
+  apart by type, mangled `cv<type>`; `conversion_function_for` is
+  [over.match.conv] (non-explicit ones, explicit ones in a
+  direct-initialization to the type itself; best by implicit object
+  sequence, then the second standard conversion sequence,
+  [over.match.best]/2.2), used by [dcl.init]/17.7 (`initialize_with`),
+  [dcl.init.ref]/5 to a non-class type (one conversion function where
+  [over.match.ref]'s candidates differ), `contextual_bool` and
+  `implicit_conversion_sequence` (a user-defined sequence that keeps its
+  second standard conversion sequence; [over.ics.rank]/3.3 compares two of
+  one function, a converting constructor's too).  [class.conv.ctor],
+  [over.match.ctor]/1: explicit constructors (the keyword) are no
+  candidates in copy-initialization (`construct`'s `copy`) nor in
+  [over.match.copy]'s converting constructors.  [class.bit] moved to
+  `class/class.bit.cpp` (class.pre.cpp under 2000 lines).  The type-claims
+  dump no longer stops at a member function's body (claims after it were
+  lost).  Started from another session's uncommitted patch (declarations,
+  explicit-specifier, mangling, the [dcl.init] uses).  Tests:
+  `src/test/cxx/run/conversion-functions.cpp`,
+  `explicit-constructors.cpp`.  Not analysed: definitions outside the
+  class and explicit calls (`x.operator int()`), virtual conversion
+  functions and templates, inherited ones ([class.conv.fct]/4), a class
+  source to a class target or reference ([over.match.copy],
+  [over.match.ref]), built-in operator candidates ([over.built]) for an
+  operand of a class with conversion functions (`!`, `&&`, `||` without an
+  operator function are), `explicit(bool)`, an explicit constructor that
+  is defaulted or chosen in list-initialization ([over.match.list]), two
+  conversion functions [over.ics.rank]/3.2.1 would tell apart by a proper
+  subsequence to another type, and casts (step 3).  `bench/cxx-sema.py`:
+  declarations 50913 -> 52255 as clang, 0 we reject and clang accepts,
+  2305 -> 2322 we accept and clang rejects, unsupported 71971 -> 70612;
+  declared types 26684 -> 26768, types 44815 -> 65306, constants 18333 ->
+  27062 (most from the dump fix), lookup 18983 -> 19436, symbols 2215 ->
+  2221, layout 13283 -> 14283, all 0 refuted; lowering 362 -> 363 files, 0
+  refuted; `tree` problems 42 -> 34 (the remaining conditional of two class
+  prvalues with destructors is old).  cxx-run 384/384 (96 programs).
 
 ### S6. Constant evaluation and templates
 

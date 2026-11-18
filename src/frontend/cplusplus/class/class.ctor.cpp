@@ -27,8 +27,9 @@
  *
  * What analysis has: user-declared constructors and a destructor of a class
  * whose non-virtual bases and members they construct and destroy
- * ([class.base.init], [class.dtor]/13); no explicit, defaulted, deleted, constexpr or virtual ones, no
- * default arguments, no delegating constructor.
+ * ([class.base.init], [class.dtor]/13), explicit ones among them (not
+ * defaulted); no defaulted, deleted, constexpr or virtual ones, no default
+ * arguments, no delegating constructor.
  */
 #include "../cplusplus-internal.h"
 #include "frontend/cplusplus/sema.h"
@@ -187,10 +188,13 @@ bool semantic_analysis::copies_bytes(entity_index c) const
  */
 bool semantic_analysis::function_specifiers_only(node_index seq,
                                                  bool &constexpr_specified,
-                                                 bool *virtual_specified) const
+                                                 bool *virtual_specified,
+                                                 bool *explicit_specified) const
 {
     constexpr_specified = false;
-    bool virtual_seen = false;
+    bool virtual_seen = false, explicit_seen = false;
+    if (explicit_specified)
+        *explicit_specified = false;
     if (virtual_specified)
         *virtual_specified = false;
     for (uint32_t i = 0; i < tree[seq].child_count; i++) {
@@ -209,11 +213,19 @@ bool semantic_analysis::function_specifiers_only(node_index seq,
             virtual_seen = true;
             *virtual_specified = true;
             break;
+        case standard_keyword::explicit_:
+            /* [class.ctor]/1: "an explicit-specifier" (the keyword alone;
+               explicit ( constant-expression ) is a node) */
+            if (!explicit_specified || explicit_seen)
+                return false;
+            explicit_seen = true;
+            *explicit_specified = true;
+            break;
         default:
             return false;
         }
     }
-    return constexpr_specified || virtual_seen;
+    return constexpr_specified || virtual_seen || explicit_seen;
 }
 
 /*
@@ -227,7 +239,8 @@ bool semantic_analysis::function_specifiers_only(node_index seq,
  */
 analysis_result semantic_analysis::special_member_declarator(
     entity_index c, node_index declaration, syntax_child d, uint8_t access,
-    bool definition, bool constexpr_specified, bool virtual_specified)
+    bool definition, bool constexpr_specified, bool virtual_specified,
+    bool explicit_specified)
 {
     qualified_type type = qualified_type::make(
         type_table.fundamental(fundamental_type::void_), cv_none);
@@ -269,6 +282,11 @@ analysis_result semantic_analysis::special_member_declarator(
     if (m.destructor && constexpr_specified)
         /* C++20's constexpr destructors ([dcl.constexpr]/3) */
         return not_supported(declaration, "dcl.constexpr");
+    if (explicit_specified && m.destructor)
+        /* [dcl.fct.spec]/3: "An explicit-specifier shall be used only in
+           the declaration of a constructor or conversion function within
+           its class definition" (clang's error) */
+        return not_supported(declaration, "dcl.fct.spec");
     if (virtual_specified && !m.destructor)
         /* [class.ctor]/1 lists no virtual: clang's "constructor cannot be
            declared 'virtual'" */
@@ -343,6 +361,7 @@ analysis_result semantic_analysis::special_member_declarator(
     x.type = type;
     x.nonstatic_member = true;
     x.special = kind;
+    x.explicit_ = explicit_specified;
     /* [class.mfct]/1: defined in its class, an inline member function;
        [dcl.constexpr]/1: "A function or static data member declared with
        the constexpr or consteval specifier is implicitly an inline
@@ -530,7 +549,8 @@ analysis_result semantic_analysis::expression_list_meanings(
 analysis_result
 semantic_analysis::construct(node_index at, qualified_type type,
                              owned_array<expression_meaning> &arguments,
-                             uint32_t object, initialized_value &result)
+                             uint32_t object, initialized_value &result,
+                             bool copy)
 {
     entity_index c = type_table[type.unqualified()].entity;
     const entity &x = entity_table[c];
@@ -549,6 +569,12 @@ semantic_analysis::construct(node_index at, qualified_type type,
     owned_array<overload_candidate> candidates;
     for (entity_index k = x.first_constructor; k;
          k = entity_table[k].next_constructor) {
+        /* [over.match.ctor]/1: "For copy-initialization (including
+           default initialization in the context of copy-initialization),
+           the candidate functions are all the converting constructors
+           ([class.conv.ctor]) of that class" */
+        if (copy && entity_table[k].explicit_)
+            continue;
         overload_candidate one;
         one.function = k;
         one.type = entity_table[k].type;

@@ -751,6 +751,11 @@ bool itanium_mangler::unqualified_name(entity_index e)
         return ctor_dtor_name(x.special);
     if (x.operator_function)
         return operator_name(x);
+    if (x.conversion_function) {
+        /* [abi:mangling-operator]: "<operator-name> ::= cv <type> # (cast)" */
+        text("cv");
+        return type(analysis.type_table[x.type.unqualified()].operand);
+    }
     if (x.kind == entity_kind::function && x.name) {
         /* [abi:mangling-operator]: "<operator-name> ::= li <source-name>
            # operator \"\"": a literal operator, named operator""X */

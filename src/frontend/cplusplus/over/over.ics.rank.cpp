@@ -69,8 +69,12 @@ int semantic_analysis::compare_conversions(const conversion_sequence &a,
            contain the same user-defined conversion function or constructor
            ... and the second standard conversion sequence of U1 is better
            than the second standard conversion sequence of U2."  The second
-           of a converting constructor's is the identity */
-        return 0;
+           of a converting constructor's is the identity (a reference
+           binding's, reference_sequence's) */
+        if (!a.function || a.function != b.function || a.ambiguous ||
+            b.ambiguous)
+            return 0;
+        return compare_standard_conversions(a, b);
     }
     if (a.kind != sequence::form::standard)
         return 0;

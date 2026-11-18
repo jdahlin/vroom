@@ -795,7 +795,20 @@ analysis_result semantic_analysis::implicit_conversion(node_index at,
 analysis_result semantic_analysis::contextual_bool(node_index at,
                                                    expression_meaning &m)
 {
-    analysis_result r = operand_value(at, m);
+    analysis_result r = analysis_result::well_formed;
+    if (type_table[m.type.unqualified()].kind == type_kind::class_type) {
+        /* bool t(E): direct-initialization, by a conversion function
+           ([dcl.init]/17.7) */
+        bool converted = false;
+        r = conversion_function_call(
+            at, m,
+            qualified_type::make(
+                type_table.fundamental(fundamental_type::bool_), cv_none),
+            true, converted);
+        if (r != analysis_result::well_formed)
+            return r;
+    }
+    r = operand_value(at, m);
     if (r != analysis_result::well_formed)
         return r;
     return implicit_conversion(

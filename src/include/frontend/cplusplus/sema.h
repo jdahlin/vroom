@@ -429,6 +429,10 @@ struct entity {
     /* ... or one of the allocation and deallocation functions
        ([basic.stc.dynamic]/1) */
     allocation_function allocation = allocation_function::none;
+    /* ... or a conversion function ([class.conv.fct]): its name is
+       conversion_function_name's, shared by all; explicit_ when declared
+       explicit ([class.conv.fct]/2) */
+    bool conversion_function = false, explicit_ = false;
     /* a class: it declares a copy assignment operator
        ([class.copy.assign]/1) */
     bool user_copy_assignment = false;
@@ -1363,6 +1367,8 @@ class semantic_analysis
              inline_ = false, constexpr_ = false, virtual_ = false;
         /* [class.friend]: the friend specifier (only where friend_allowed) */
         bool friend_ = false;
+        /* [class.conv.fct]/2: explicit (only where explicit_allowed) */
+        bool explicit_ = false;
         /* a class-specifier or elaborated-type-specifier was there: a
            declaration with no declarator declares the class
            ([dcl.pre]/5) */
@@ -1424,6 +1430,8 @@ class semantic_analysis
         allocation_function allocation = allocation_function::none;
         /* the declarator-id is a literal-operator-id ([over.literal]) */
         bool literal_operator = false;
+        /* ... or a conversion-function-id ([class.conv.fct]) */
+        bool conversion_function = false;
         /* the declarator-id is a simple-template-id (declarator_template_id
            allows it): an explicit specialization's or instantiation's */
         node_index template_id = 0;
@@ -1849,6 +1857,9 @@ class semantic_analysis
     analysis_result finish_return_deduction(node_index definition,
                                             analysis_result result,
                                             qualified_type &returns);
+    /* [dcl.fct.spec]/3: explicit is analysed on a conversion function's
+       decl-specifier-seq only */
+    bool explicit_allowed = false;
     /* construct() is called for a base class subobject, which may be of an
        abstract class ([class.abstract]/2) */
     bool constructing_base = false;
@@ -2302,6 +2313,10 @@ class semantic_analysis
     analysis_result member_declaration(entity_index c, syntax_child n,
                                        uint8_t access,
                                        owned_array<node_index> &bodies);
+    analysis_result member_declarators(entity_index c, node_index n,
+                                       const specified &s, uint8_t access,
+                                       uint32_t first,
+                                       owned_array<node_index> &bodies);
     analysis_result member_declarator(entity_index c, node_index declaration,
                                       syntax_child d, const specified &s,
                                       uint8_t access, bool definition);
@@ -2410,15 +2425,14 @@ class semantic_analysis
                                          const specified &s, bool definition);
     /* [class.ctor], [class.dtor]: a member-declaration without a
        decl-specifier-seq: a constructor or destructor of c */
-    analysis_result special_member_declarator(entity_index c,
-                                              node_index declaration,
-                                              syntax_child d, uint8_t access,
-                                              bool definition,
-                                              bool constexpr_specified = false,
-                                              bool virtual_specified = false);
+    analysis_result special_member_declarator(
+        entity_index c, node_index declaration, syntax_child d, uint8_t access,
+        bool definition, bool constexpr_specified = false,
+        bool virtual_specified = false, bool explicit_specified = false);
     /* virtual_specified: in a class, where virtual is one of them */
     bool function_specifiers_only(node_index seq, bool &constexpr_specified,
-                                  bool *virtual_specified = nullptr) const;
+                                  bool *virtual_specified = nullptr,
+                                  bool *explicit_specified = nullptr) const;
     /* the function-body of a constructor or destructor definition
        (last_declared): ctor-initializer_opt compound-statement */
     analysis_result special_member_body(node_index definition,
@@ -2438,7 +2452,8 @@ class semantic_analysis
        object a) */
     analysis_result construct(node_index at, qualified_type type,
                               owned_array<expression_meaning> &arguments,
-                              uint32_t object, initialized_value &result);
+                              uint32_t object, initialized_value &result,
+                              bool copy = false);
     /* [expr.type.conv]: C(expression-list) or C{} of the class c */
     analysis_result class_conversion(node_index n, entity_index c,
                                      expression_meaning &m);
@@ -3210,6 +3225,31 @@ class semantic_analysis
        parameter of the member function f */
     conversion_sequence object_sequence(const expression_meaning &object,
                                         entity_index f) const;
+    /* whether class c or a base class of it declares a conversion
+       function ([class.conv.fct]/4: "Conversion functions are
+       inherited") */
+    bool has_conversion_functions(entity_index c) const;
+    /* ... a base class of c does */
+    bool base_has_conversion_functions(entity_index c) const;
+    /* the first conversion function class c itself declares (the others
+       follow by next_overload), 0 if none */
+    entity_index own_conversion_functions(entity_index c) const;
+    /* the value a call of the conversion function f gives: its type and
+       value category ([expr.call]/14) */
+    expression_meaning conversion_function_result(entity_index f) const;
+    /* the conversion-function-id that is the declarator-id of the
+       member-declaration or function-definition n, 0 if none */
+    node_index conversion_function_id_of(node_index n) const;
+    /* the conversion function of class c the definition declared, 0 if
+       none */
+    entity_index conversion_function_declared_by(entity_index c,
+                                                 node_index definition);
+    /* [over.match.conv]: the conversion function that converts the object
+       m (of class type) to the type to, a type that is no class; 0 when
+       none does, with ambiguous or unknown (analysis cannot tell) set */
+    entity_index conversion_function_for(const expression_meaning &m,
+                                         qualified_type to, bool direct,
+                                         bool &ambiguous, bool &unknown);
     /* [over.ics.rank]: less than 0 when a is the better conversion
        sequence, more than 0 when b is, 0 when neither is */
     int compare_conversions(const conversion_sequence &a,
@@ -3283,7 +3323,22 @@ class semantic_analysis
     uint32_t operator_name(preprocessing_op_or_punc op);
     /* operator followed by the spelling rest, as an identifier number (no
        identifier is spelt so) */
-    uint32_t operator_identifier(const char *rest, size_t length);
+    uint32_t operator_identifier(const char *rest, size_t length) const;
+    /* [class.conv.fct]: the name every conversion function has here (its
+       type tells them apart), and the conversion-type-id's type */
+    uint32_t conversion_function_name() const;
+    analysis_result conversion_type(node_index id, qualified_type &type);
+    /* [class.conv.fct]: a member-declaration whose declarator-id is a
+       conversion-function-id, in class c */
+    analysis_result conversion_function_member(entity_index c, node_index n,
+                                               node_index id, uint8_t access,
+                                               owned_array<node_index> &bodies);
+    /* [over.match.conv]: the conversion function of m's class that converts
+       it to to (0 when none does); the call in m */
+    analysis_result conversion_function_call(node_index at,
+                                             expression_meaning &m,
+                                             qualified_type to, bool direct,
+                                             bool &converted);
     /* the operator-function-id node id as a declarator-id */
     analysis_result operator_function_id(node_index id, declarator_meaning &m);
     /* [over.oper]/7-10: the rules of the declaration n of operator

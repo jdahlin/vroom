@@ -443,6 +443,37 @@ analysis_result semantic_analysis::reference_binding(node_index at,
     const struct type y = type_table[t2.unqualified()];
     if (x.kind == type_kind::class_type && y.kind == type_kind::class_type)
         return class_reference_binding(at, m, reference);
+    if (y.kind == type_kind::class_type &&
+        (x.kind == type_kind::fundamental || x.kind == type_kind::pointer)) {
+        /* [dcl.init.ref]/5.1.2, /5.3.2, /5.4.1: "has a class type (i.e., T2
+           is a class type), where T1 is not reference-related to T2, and can
+           be converted to an lvalue [or rvalue] of type "cv3 T3", where "cv1
+           T1" is reference-compatible with "cv3 T3" (this conversion is
+           selected by enumerating the applicable conversion functions
+           ([over.match.ref]) and choosing the best one through overload
+           resolution)": the conversion function that converts to T1 (a
+           candidate set of [over.match.conv]'s), then the binding to its
+           result.  [over.match.ref]/1 has other candidates than
+           [over.match.conv] for a reference that is no const lvalue
+           reference: analysed when the class has one conversion function,
+           the candidate of both */
+        bool const_lvalue = !rvalue_reference && (t1.cv() & cv_const) &&
+                            !(t1.cv() & cv_volatile);
+        if (!const_lvalue) {
+            entity_index f = own_conversion_functions(y.entity);
+            if (f && entity_table[f].next_overload)
+                return not_supported(at, "over.match.ref");
+        }
+        bool converted = false;
+        analysis_result c = conversion_function_call(
+            at, m, qualified_type::make(t1.unqualified(), cv_none), false,
+            converted);
+        if (c != analysis_result::well_formed)
+            return c;
+        if (!converted)
+            return not_supported(at, "dcl.init.ref");
+        return reference_binding(at, m, reference);
+    }
     if (x.kind == type_kind::class_type || x.kind == type_kind::enumeration ||
         y.kind == type_kind::class_type || y.kind == type_kind::enumeration ||
         x.kind == type_kind::none || y.kind == type_kind::none)
@@ -664,6 +695,19 @@ analysis_result semantic_analysis::initialize_with(node_index at,
         if (entity_table[target.entity].kind != entity_kind::class_type)
             return not_supported(at, "dcl.init");
         bool same = m.type.unqualified() == type.unqualified();
+        const struct type &source = type_table[m.type.unqualified()];
+        bool related = false;
+        if (source.kind == type_kind::class_type && !same) {
+            bool ambiguous = false;
+            related = base_step(source.entity, target.entity, ambiguous) != 0;
+        }
+        if (source.kind == type_kind::class_type && !same && !related &&
+            has_conversion_functions(source.entity))
+            /* [dcl.init]/17.6.3, [over.match.copy]/1.2: the conversion
+               functions of the source class are candidates too, and in a
+               direct-initialization ([over.match.ctor]) a constructor's
+               parameter may be initialized by one: not analysed */
+            return not_supported(at, "over.match.copy");
         if (!(same && m.category == value_category::prvalue) &&
             entity_table[target.entity].first_constructor) {
             /* /17.6.2 by [over.match.ctor]; /17.6.3: a user-defined
@@ -671,7 +715,7 @@ analysis_result semantic_analysis::initialize_with(node_index at,
                whose result initializes the object (the copy elided) */
             owned_array<expression_meaning> arguments;
             arguments.append(m);
-            return construct(at, type, arguments, 0, result);
+            return construct(at, type, arguments, 0, result, !direct);
         }
         bool ambiguous = false;
         if (!same &&
@@ -700,6 +744,13 @@ analysis_result semantic_analysis::initialize_with(node_index at,
     if (target.kind != type_kind::fundamental &&
         target.kind != type_kind::pointer && !enumeration_of(type))
         return not_supported(at, "dcl.init");
+    if (type_table[m.type.unqualified()].kind == type_kind::class_type) {
+        /* [dcl.init]/17.7: by a conversion function */
+        bool converted = false;
+        r = conversion_function_call(at, m, type, direct, converted);
+        if (r != analysis_result::well_formed)
+            return r;
+    }
     if (target.kind == type_kind::fundamental &&
         target.fundamental == fundamental_type::void_)
         return not_supported(at, "dcl.init");
@@ -997,7 +1048,14 @@ analysis_result semantic_analysis::class_list_initialization(
            constructor, then the object is default-initialized" */
         if (clauses.empty() && entity_table[c].first_constructor) {
             owned_array<expression_meaning> none;
-            return construct(list, type, none, 0, result);
+            analysis_result r = construct(list, type, none, 0, result);
+            /* [over.match.list]/1: an explicit default constructor in
+               copy-list-initialization is ill-formed: not told apart */
+            if (r == analysis_result::well_formed &&
+                semantics[result.node].kind == semantic_kind::construct &&
+                entity_table[semantics[result.node].b].explicit_)
+                return not_supported(list, "over.match.list");
+            return r;
         }
         if (clauses.empty() || !entity_table[c].first_constructor)
             return not_supported(list, "over.match.list");
@@ -1080,6 +1138,11 @@ analysis_result semantic_analysis::constructor_list_initialization(
         return r;
     entity_index chosen = semantics[result.node].b;
     if (!chosen || semantics[result.node].kind != semantic_kind::construct)
+        return not_supported(list, "over.match.list");
+    /* [over.match.list]/1: "In copy-list-initialization, if an explicit
+       constructor is chosen, the initialization is ill-formed": whether
+       this one is copy-list-initialization is not kept here */
+    if (entity_table[chosen].explicit_)
         return not_supported(list, "over.match.list");
     const qualified_type *parameters =
         type_table.parameters(entity_table[chosen].type.unqualified());

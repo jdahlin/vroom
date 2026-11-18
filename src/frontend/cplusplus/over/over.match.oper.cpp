@@ -11,8 +11,11 @@
  * case, overload resolution is used to determine which operator function or
  * built-in operator is to be invoked to implement the operator."
  *
- * The classes analysis has have no conversion functions, so no built-in
- * candidate ([over.built]) is viable for an operand of class type; for an
+ * Built-in candidates ([over.built]) for an operand of a class with
+ * conversion functions are not formed: such an operand is not supported,
+ * but for ! && || when no operator function is a candidate (their
+ * operands are then contextually converted to bool, not analysed here);
+ * for an operand of another class none is viable; for an
  * operand of enumeration type one may be, and an operator function is
  * chosen only where it is better than every built-in candidate could be.
  * C++20's rewritten candidates (/3.4) are those of operator== and
@@ -63,6 +66,25 @@ analysis_result semantic_analysis::overloaded_operator(
     }
     if (!any_class && !any_enumeration)
         return analysis_result::well_formed;
+    /* an operand of a class with conversion functions: built-in candidates
+       ([over.built]) may be viable, which are not formed.  ! && || go on
+       here only to find whether an operator function is a candidate:
+       with one, not supported (below); with none, their operands are
+       contextually converted to bool ([over.match.oper]/7,
+       [expr.unary.op]/9, [expr.log.and]/1, [expr.log.or]/1) by the
+       built-in operator, not by this function */
+    bool converts = false;
+    for (const expression_meaning &e : operands) {
+        const struct type &t = type_table[e.type.unqualified()];
+        if (t.kind == type_kind::class_type &&
+            has_conversion_functions(t.entity))
+            converts = true;
+    }
+    bool logical = op == preprocessing_op_or_punc::EXCLAMATION ||
+                   op == preprocessing_op_or_punc::AMPERSAND_AMPERSAND ||
+                   op == preprocessing_op_or_punc::BAR_BAR;
+    if (converts && !logical)
+        return not_supported(n, "over.built");
     /* [over.match.oper], Table 15: a=b, a[b] and (by [over.call.object]) a(b)
        have member candidates alone: a of class type */
     bool member_only = op == preprocessing_op_or_punc::EQUAL ||
@@ -225,6 +247,8 @@ analysis_result semantic_analysis::overloaded_operator(
         return r;
     if (candidates.empty())
         return analysis_result::well_formed;
+    if (converts)
+        return not_supported(n, "over.built");
     if (op == preprocessing_op_or_punc::EQUAL) {
         /* [class.copy.assign]/2: "If the class definition does not
            explicitly declare a copy assignment operator, one is declared
