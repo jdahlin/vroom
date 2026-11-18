@@ -831,6 +831,16 @@ analysis_result semantic_analysis::init_declarators(node_index declaration,
        when declaring a class or enumeration": the decl-specifier-seq has
        neither (it would be unsupported), and clang accepts it with a
        warning */
+    /* [dcl.constexpr]/1: "The constexpr specifier shall be applied only
+       to the definition of a variable or variable template or the
+       declaration of a function or function template" */
+    if (items.empty() && s.constexpr_)
+        return ill_formed(declaration,
+                          "the constexpr specifier shall be applied only to "
+                          "the definition of a variable or variable template "
+                          "or the declaration of a function or function "
+                          "template",
+                          "dcl.constexpr");
     if (items.empty() && s.declares_class) {
         /* [dcl.pre]/5: a class declared: a storage class or other
            specifier with it is [dcl.pre]/5's "ill-formed" or clang's

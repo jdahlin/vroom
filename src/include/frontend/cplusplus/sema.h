@@ -1837,6 +1837,9 @@ class semantic_analysis
             /* frame 0: a variable of static storage duration read */
             uint32_t frame = 0;
             bool read_only = false;
+            /* a parameter whose value the check of a body for a potential
+               constant expression does not know: a read of it is unknown */
+            bool opaque = false;
             constant_value value;
         };
         owned_array<object> objects;
@@ -1850,6 +1853,10 @@ class semantic_analysis
         /* a switch statement's jump to this case or default label
            ([stmt.switch]/5): the statements before it are passed over */
         uint32_t seek = 0;
+        /* potential_constant's evaluation: an unknown operand does not stop
+           the evaluation of the operands beside it, nor an unknown
+           condition that of both arms of a conditional */
+        bool potential = false;
         /* for the claims (evaluate_analysed_expressions): a function whose
            body begins after this token is not defined yet where the claim
            is placed ([expr.const]/5.3); 0: every body counts */
@@ -1882,6 +1889,11 @@ class semantic_analysis
     /* the case or default label of switch body a jump with the kept value
        goes to, or 0 ([stmt.switch]/5) */
     uint32_t switch_target(uint32_t body, uint64_t value, bool &found) const;
+    /* [dcl.constexpr]/6: not_constant when no invocation of the
+       constexpr function whose body is body can be a constant expression,
+       whatever its arguments: the body evaluated with the parameters'
+       values unknown fails before it depends on them */
+    constness potential_constant(uint32_t body);
     /* an object's place: objects[place], or elements[place & ~element_place]
        when element_place is set */
     static constexpr uint32_t element_place = 0x80000000u;

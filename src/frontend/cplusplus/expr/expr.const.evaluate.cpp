@@ -47,6 +47,16 @@ bool is_value(const constant_value &v)
    gives: zero-initialized */
 constexpr uint32_t zero_initializer = UINT32_MAX;
 
+/* a read of an indeterminate value ([basic.indet]/2) or of a volatile
+   object ([expr.const]/5.8): not constant, but the check of a body for a
+   potential constant expression does not count it, as clang does not */
+template <class state_type> constness undefined_value(const state_type &state)
+{
+    if (state.potential)
+        return constness::unknown;
+    return constness::not_constant;
+}
+
 template <class state_type>
 void restore(state_type &state, size_t objects, size_t elements)
 {
@@ -396,9 +406,11 @@ constness semantic_analysis::evaluate_object(constant_evaluation &state,
                 computation == fundamental_type::none ||
                 right == fundamental_type::none)
                 return constness::unknown;
+            if (!(target & element_place) && state.objects[target].opaque)
+                return constness::unknown;
             constant_value old = place_value(state, target);
             if (old.kind == constant_value_kind::none)
-                return constness::not_constant;
+                return undefined_value(state);
             c = evaluate_conversion(old, t, computation);
             if (c != constness::constant)
                 return c;
@@ -458,7 +470,7 @@ constness semantic_analysis::evaluate_read(constant_evaluation &state,
     const semantic_node &x = semantics[node];
     if (x.type.cv() & cv_volatile)
         /* [expr.const]/5.8: "a non-volatile glvalue" */
-        return constness::not_constant;
+        return undefined_value(state);
     if (evaluated_type(x.type) == fundamental_type::none)
         return constness::unknown;
     if (x.kind == semantic_kind::entity &&
@@ -489,11 +501,13 @@ constness semantic_analysis::evaluate_read(constant_evaluation &state,
     constness c = evaluate_object(state, node, object);
     if (c != constness::constant)
         return c;
+    if (!(object & element_place) && state.objects[object].opaque)
+        return constness::unknown;
     v = place_value(state, object);
     /* [expr.const]/5.8: the object's value must be one it was given; an
        indeterminate value is undefined behavior ([basic.indet]/2) */
     if (v.kind == constant_value_kind::none)
-        return constness::not_constant;
+        return undefined_value(state);
     return constness::constant;
 }
 
@@ -574,6 +588,9 @@ constness semantic_analysis::evaluate_node(constant_evaluation &state,
             return constness::unknown;
         constant_value p, q;
         c = evaluate_node(state, x.a, p);
+        if (c == constness::unknown && state.potential &&
+            evaluate_node(state, x.b, q) == constness::not_constant)
+            return constness::not_constant;
         if (c != constness::constant)
             return c;
         c = evaluate_node(state, x.b, q);
@@ -598,6 +615,13 @@ constness semantic_analysis::evaluate_node(constant_evaluation &state,
        evaluated" */
     case semantic_kind::conditional: {
         c = evaluate_node(state, x.a, v);
+        if (c == constness::unknown && state.potential) {
+            constant_value arm;
+            if (evaluate_node(state, x.b, arm) == constness::not_constant &&
+                evaluate_node(state, x.c, arm) == constness::not_constant)
+                return constness::not_constant;
+            return c;
+        }
         if (c != constness::constant)
             return c;
         if (v.integer != 0)
@@ -625,9 +649,11 @@ constness semantic_analysis::evaluate_node(constant_evaluation &state,
             return c;
         if (place_read_only(state, object))
             return constness::not_constant;
+        if (!(object & element_place) && state.objects[object].opaque)
+            return constness::unknown;
         constant_value old = place_value(state, object);
         if (old.kind == constant_value_kind::none)
-            return constness::not_constant;
+            return undefined_value(state);
         increment_kind k = static_cast<increment_kind>(x.op);
         bool up = k == increment_kind::pre_increment ||
                   k == increment_kind::post_increment;
@@ -718,8 +744,13 @@ constness semantic_analysis::evaluate_call(constant_evaluation &state,
     const entity &e = entity_table[f];
     if (e.kind != entity_kind::function)
         return constness::unknown;
-    if (!e.constexpr_)
+    if (!e.constexpr_) {
+        /* (a library builtin, declared with C language linkage, may be
+           one the evaluator does not know clang evaluates) */
+        if (state.potential && e.c_language_linkage)
+            return constness::unknown;
         return constness::not_constant;
+    }
     uint32_t body = e.definition;
     if (!body || semantics[body].kind != semantic_kind::function_body ||
         semantics[body].evaluation == constness::not_constant ||
@@ -737,9 +768,14 @@ constness semantic_analysis::evaluate_call(constant_evaluation &state,
     uint32_t frame = state.frames + 1;
     const uint32_t *items = semantics.items(x.first);
     const uint32_t *parameters = semantics.items(semantics[body].first);
+    constness arguments = constness::constant;
     for (uint32_t i = 0; i < x.count; i++) {
         constant_evaluation::object o;
         constness c = evaluate_node(state, items[i], o.value);
+        if (c == constness::unknown && state.potential) {
+            arguments = c;
+            continue;
+        }
         if (c != constness::constant) {
             restore(state, saved, saved_elements);
             return c;
@@ -747,6 +783,10 @@ constness semantic_analysis::evaluate_call(constant_evaluation &state,
         o.entity = parameters[i];
         o.frame = frame;
         state.objects.append(o);
+    }
+    if (arguments != constness::constant) {
+        restore(state, saved, saved_elements);
+        return arguments;
     }
     uint32_t caller = state.frame;
     state.frames = frame;
@@ -912,8 +952,15 @@ constness semantic_analysis::evaluate_statement(constant_evaluation &state,
         /* [dcl.constexpr]/3.5.3: "a definition of a variable of non-literal
            type or of static or thread storage duration" may not be in the
            body; references and objects of other types: not modelled */
-        if (!e.automatic)
+        /* [expr.const]/5.2 (C++23): "control flow that passes through a
+           declaration of a block variable with static or thread storage
+           duration, unless that variable is usable in constant
+           expressions" */
+        if (!e.automatic) {
+            if (!e.constexpr_ && !(e.type.cv() & cv_const))
+                return constness::not_constant;
             return constness::unknown;
+        }
         /* [basic.scope.pdecl]/1: the variable is in scope in its own
            initializer */
         constant_evaluation::object o;
@@ -1058,6 +1105,28 @@ constness semantic_analysis::evaluate_statement(constant_evaluation &state,
     default:
         return constness::unknown;
     }
+}
+
+constness semantic_analysis::potential_constant(uint32_t body)
+{
+    const semantic_node &b = semantics[body];
+    if (b.kind != semantic_kind::function_body || b.b || b.c)
+        return constness::unknown;
+    constant_evaluation state;
+    state.potential = true;
+    state.frame = state.frames = 1;
+    state.depth = 1;
+    const uint32_t *parameters = semantics.items(b.first);
+    for (uint32_t i = 0; i < b.count; i++) {
+        constant_evaluation::object o;
+        o.entity = parameters[i];
+        o.frame = state.frame;
+        o.opaque = true;
+        state.objects.append(o);
+    }
+    bool returned = false;
+    constant_value result;
+    return evaluate_statement(state, b.a, returned, result);
 }
 
 } // namespace cplusplus

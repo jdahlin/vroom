@@ -432,6 +432,15 @@ analysis_result semantic_analysis::function_body(node_index definition,
                                           "(no invocation of it is a constant "
                                           "expression)",
                                           "dcl.constexpr"));
+        /* the same rule for every argument value: the body evaluated with
+           the parameters unknown fails before it reads one (clang's
+           "constexpr function never produces a constant expression") */
+        else if (!b.has(language_feature::constexpr_without_constant_result) &&
+                 potential_constant(body) == constness::not_constant)
+            result = worse(
+                result,
+                extension_used(diagnostic_id::sema_constexpr_never_constant,
+                               first_token(compound), nullptr));
     }
     definition_record record;
     record.declaration = current_declaration;

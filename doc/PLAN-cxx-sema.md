@@ -1391,6 +1391,25 @@ lines:
   cxx-sema: declarations as clang 29354 -> 29407, 0 we reject and clang
   accepts, 0 refuted (constants 19550 -> 19634); cxx-run 176/176;
   cxx-c-suites unchanged.
+  Then [dcl.constexpr]'s remaining rules but one.  /1: a declaration
+  with constexpr and no declarator is ill-formed (`constexpr int;`).  /6,
+  clang's "never produces a constant expression" (-Winvalid-constexpr, an
+  error by default until C++23, `sema_constexpr_never_constant`):
+  `potential_constant` evaluates the body once with the parameters
+  opaque, a read of one unknown.  What fails before depending on them
+  fails for every argument; an unknown operand does not stop the operands
+  beside it (a binary operator's, a call's arguments) nor an unknown
+  condition both arms of a conditional, as clang's evaluation goes on.
+  Reads of indeterminate or volatile objects do not count there (clang
+  does not), and a call of a function with C language linkage is unknown
+  (a library builtin clang may evaluate).  The evaluator also gained
+  [expr.const]/5.2 (C++23)'s passing through a static or thread_local
+  local that is not usable in constant expressions.  Not yet: /3.5.3's
+  variable of non-literal type (no literal-type test), and what /6
+  catches through classes, pointers, references and new/delete.
+  cxx-sema: declarations as clang 29407 -> 29470, 0 we reject and clang
+  accepts, we accept and clang rejects 500 -> 477, 0 refuted; cxx-run
+  176/176; cxx-c-suites unchanged.
 
 ### S7. Exceptions and RTTI
 
