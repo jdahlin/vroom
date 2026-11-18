@@ -77,10 +77,12 @@ template <typename T> class owned_array
         elements = p;
         capacity = grown;
     }
+    /* value may be an element of this array, which reserve() moves */
     T &append(const T &value)
     {
+        T copy = value;
         reserve(count + 1);
-        elements[count] = value;
+        elements[count] = copy;
         return elements[count++];
     }
     /* n elements more, their bytes unset; returns the first */

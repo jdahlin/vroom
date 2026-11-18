@@ -186,6 +186,8 @@ asan)
 	step bitint-replay python3 bench/vcc-bitint-replay.py --bin-dir "$B" --output "$LOGS/bitint-replay-asan"
 	step diag         python3 bench/vcc-diag.py -j "$J" --bin-dir "$B"
 	step field-uses   python3 bench/vcc-field-uses.py -j "$J" --bin-dir "$B"
+	# the C++ front end compiling its run tests: its own memory errors
+	step cxx-run      env VCC_BIN="$B" python3 bench/cxx-run.py -j "$J"
 	step stress       python3 bench/vcc-stress.py --bin-dir "$B"
 	step vccd         python3 bench/vccd-test.py --bin-dir "$B"
 	step vlink-bad    python3 bench/vlink-bad.py --bin-dir "$B"
