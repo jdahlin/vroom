@@ -350,6 +350,7 @@ analysis_result semantic_analysis::class_definition(node_index n,
         hider = c;
         c = entity_table[c].hidden_type;
     }
+    bool redeclared = false;
     if (unnamed) {
         /* [basic.link]/4: an unnamed class has no linkage until a typedef
            names it for linkage purposes (declare) */
@@ -357,6 +358,7 @@ analysis_result semantic_analysis::class_definition(node_index n,
         entity_table[c].type = qualified_type::make(
             type_table.of_entity(type_kind::class_type, c), cv_none);
     } else if (c) {
+        redeclared = true;
         entity &prior = entity_table[c];
         if (prior.kind == entity_kind::none)
             return not_supported(n, "basic.scope.declarative");
@@ -402,8 +404,20 @@ analysis_result semantic_analysis::class_definition(node_index n,
         else
             entity_table.bind(scope, name, c);
     }
-    if (outer)
+    if (outer) {
+        /* [class.access.spec]/4: "When a member is redeclared within its
+           class definition, the access specified at its redeclaration
+           shall be the same as at its initial declaration." */
+        if (redeclared && entity_table[c].enclosing == outer &&
+            entity_table[c].access != declaration_access)
+            return ill_formed_at_token(id,
+                                       "the access of a member's "
+                                       "redeclaration within its class shall "
+                                       "be the same as at its initial "
+                                       "declaration",
+                                       "class.access.spec");
         entity_table[c].access = declaration_access;
+    }
     entity_table.add_declaration(c, current_declaration);
     entity_table[c].defined = true;
     entity_table[c].union_ = key == standard_keyword::union_;
