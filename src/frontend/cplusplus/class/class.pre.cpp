@@ -37,6 +37,19 @@ const char *semantic_analysis::inner_class_rule(entity_index scope) const
     return "class.local";
 }
 
+/* "class.local" for a class within a block scope, directly or as a class
+   nested in such a class ([class.local]: its members have <local-name>
+   symbols, which have no rules yet); none for a class of namespace scope or
+   nested in one */
+const char *semantic_analysis::local_class_rule(entity_index c) const
+{
+    for (entity_index s = entity_table[c].enclosing; s;
+         s = entity_table[s].enclosing)
+        if (!is_namespace(s) && entity_table[s].kind != entity_kind::class_type)
+            return "class.local";
+    return nullptr;
+}
+
 /*
  * [class.pre]/1: "A class is a type.  Its name becomes a class-name
  * ([class.name]) within its scope."  [class.name]/2: "A class declaration
@@ -435,6 +448,7 @@ analysis_result semantic_analysis::class_definition(node_index n,
         return result;
     }
     owned_array<node_index> bodies;
+    size_t nested_start = nested_bodies.size();
     for (uint32_t i = 1; i < node.child_count; i++) {
         syntax_child part = children[i];
         if (!syntax_is(tree, part, syntax_kind::member_specification))
@@ -489,9 +503,24 @@ analysis_result semantic_analysis::class_definition(node_index n,
     node_index outer_declaration = current_declaration;
     result = worse(result, member_default_arguments(c));
     current_declaration = outer_declaration;
-    for (node_index body : bodies) {
-        result = worse(result, member_function_body(c, body));
-        current_declaration = outer_declaration;
+    if (outer && entity_table[outer].kind == entity_kind::class_type) {
+        /* [class.mem]/6: a nested class's member function bodies are in
+           the complete-class context of the enclosing class too: analysed
+           at its closing } */
+        for (node_index body : bodies)
+            nested_bodies.append(deferred_body{c, body});
+    } else {
+        size_t nested_end = nested_bodies.size();
+        for (node_index body : bodies) {
+            result = worse(result, member_function_body(c, body));
+            current_declaration = outer_declaration;
+        }
+        for (size_t i = nested_start; i < nested_end; i++) {
+            result = worse(result, member_function_body(nested_bodies[i].c,
+                                                        nested_bodies[i].body));
+            current_declaration = outer_declaration;
+        }
+        nested_bodies.resize(nested_start);
     }
     if (result == analysis_result::well_formed)
         result = implicit_definitions(c, n);
@@ -853,8 +882,7 @@ semantic_analysis::member_declaration(entity_index c, syntax_child member,
     if (node.kind != syntax_kind::member_declaration &&
         node.kind != syntax_kind::function_definition)
         return not_supported(n);
-    entity_index enclosing = entity_table[c].enclosing;
-    const char *nested_rule = inner_class_rule(enclosing);
+    const char *nested_rule = local_class_rule(c);
     if (nested_rule && node.kind == syntax_kind::function_definition)
         return not_supported(n, nested_rule);
     /* a constructor or destructor: no decl-specifier-seq, or one of
@@ -888,6 +916,15 @@ semantic_analysis::member_declaration(entity_index c, syntax_child member,
         }
         if (node.child_count != at + 2 ||
             !syntax_is(tree, children[at + 1], syntax_kind::function_body))
+            return not_supported(n, "dcl.fct.def.general");
+        const syntax_node &b = tree[children[at + 1].index()];
+        if (b.child_count &&
+            syntax_is_punctuator(tokens,
+                                 tree.children(children[at + 1].index())[0],
+                                 preprocessing_op_or_punc::EQUAL))
+            /* = default, = delete: such a constructor is not user-provided
+               ([dcl.fct.def.default]/5), which the layout ([abi:pod]) and
+               triviality need to know before the class is complete */
             return not_supported(n, "dcl.fct.def.general");
         analysis_result r = special_member_declarator(
             c, n, children[at], access, true, constexpr_specified);
@@ -1144,9 +1181,8 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
                                    "class.mem");
     }
     entity_index e = 0;
-    if (is_function && !is_namespace(entity_table[c].enclosing))
-        return not_supported(declaration,
-                             inner_class_rule(entity_table[c].enclosing));
+    if (is_function && local_class_rule(c))
+        return not_supported(declaration, local_class_rule(c));
     if (is_function) {
         /* [class.static.mfct]/2: "A static member function shall not be
            virtual ... A static member function shall not be declared
@@ -1430,6 +1466,18 @@ analysis_result semantic_analysis::member_function_body(entity_index c,
 {
     const syntax_child *children = tree.children(definition);
     current_declaration = definition;
+    /* [basic.scope.class]/1: the declaration is in the class's scope, its
+       names (a member type as the return type) found there */
+    entity_index scope = current_scope;
+    current_scope = c;
+    analysis_result r = member_function_definition(c, definition, children);
+    current_scope = scope;
+    return r;
+}
+
+analysis_result semantic_analysis::member_function_definition(
+    entity_index c, node_index definition, const syntax_child *children)
+{
     bool constexpr_specified = false;
     uint32_t at = 0;
     if (tree[definition].child_count > 2 &&

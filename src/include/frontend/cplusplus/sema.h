@@ -1484,6 +1484,7 @@ class semantic_analysis
     analysis_result class_definition(node_index n, type_index &type);
     /* "class.nest" or "class.local" for a class declared in scope */
     const char *inner_class_rule(entity_index scope) const;
+    const char *local_class_rule(entity_index c) const;
     /* [class.static.data]: the definition of a static data member */
     analysis_result
     static_member_definition(node_index declaration, token_index id,
@@ -1518,6 +1519,9 @@ class semantic_analysis
     /* the body of a member function defined in its class, analysed at the
        end of the class ([class.mem]/6: a complete-class context) */
     analysis_result member_function_body(entity_index c, node_index definition);
+    analysis_result member_function_definition(entity_index c,
+                                               node_index definition,
+                                               const syntax_child *children);
     /* [expr.ref]: the member e of the object m (a glvalue of class type) */
     analysis_result member_access(token_index at, entity_index e,
                                   expression_meaning &m);
@@ -1694,6 +1698,13 @@ class semantic_analysis
        initializer that has one is the evaluator's to decide
        ([basic.start.static]/2) */
     uint32_t constexpr_calls = 0;
+    /* [class.mem]/6: member function bodies of nested classes, analysed
+       at the closing } of the outermost class being defined */
+    struct deferred_body {
+        entity_index c;
+        node_index body;
+    };
+    owned_array<deferred_body> nested_bodies;
     analysis_result function_body(node_index definition, syntax_child compound,
                                   syntax_child ctor_initializer = {});
     /* [class.base.init]: a constructor's member initializations, the
