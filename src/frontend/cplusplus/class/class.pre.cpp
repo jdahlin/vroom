@@ -349,17 +349,10 @@ analysis_result semantic_analysis::class_definition(node_index n,
         entity_table.bind(c, name, c);
         const function_template &ft = function_templates
             [entity_table[record.template_entity].instantiation - 1];
-        for (uint32_t i = 0; i < ft.parameter_count; i++) {
-            uint32_t p =
-                entity_table[template_parameter_entities[ft.first_parameter +
-                                                         i]]
-                    .name;
-            entity_index e = entity_table.make(entity_kind::typedef_name, p, c);
-            entity_table[e].type =
-                template_arguments[record.first_argument + i].type;
-            entity_table[e].defined = true;
-            entity_table.bind(c, p, e);
-        }
+        for (uint32_t i = 0; i < ft.parameter_count; i++)
+            bind_template_argument(
+                c, template_parameter_entities[ft.first_parameter + i],
+                template_arguments[record.first_argument + i]);
     } else if (!unnamed) {
         id = head_name;
         name = tokens.identifier(id);

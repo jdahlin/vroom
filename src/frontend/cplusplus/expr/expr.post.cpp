@@ -866,13 +866,17 @@ analysis_result semantic_analysis::template_callee_parts(
             return not_supported(id.index(), "temp.names");
         return analysis_result::well_formed;
     }
-    /* [temp.arg.type]/1: "A template-argument for a template-parameter
-       which is a type shall be a type-id." */
+    /* [temp.arg.explicit]/6: "The template argument list shall not
+       specify more template-arguments than there are corresponding
+       template-parameters" (clang: no candidate) */
     for (syntax_child a : written) {
-        if (!syntax_is(tree, a, syntax_kind::type_id))
-            return not_supported(id.index(), "temp.arg");
+        uint32_t position = static_cast<uint32_t>(specified.size());
+        if (position >=
+            function_templates[function_template - 1].parameter_count)
+            return not_supported(id.index(), "temp.arg.explicit");
         template_argument x;
-        analysis_result r = type_id(a.index(), x.type);
+        analysis_result r = template_argument_for(
+            id.index(), function_template, position, a, specified.data(), x);
         if (r != analysis_result::well_formed)
             return r;
         specified.append(x);

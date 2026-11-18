@@ -1521,6 +1521,28 @@ lines:
   declarations as clang 36772, 0 we reject and clang accepts, 0 refuted
   (types 41066, lookup 14639, symbols 1743, layouts 10142); we accept and
   clang rejects 1862; cxx-run 196/196; cxx-c-suites unchanged.
+  Then default template-arguments and non-type parameters of integral
+  type, for class and function templates (`declare_template_parameters`,
+  `template_argument_for`, `default_template_arguments`, temp.decls.cpp).
+  A non-type argument is a converted constant expression
+  ([temp.arg.nontype]/2); in an instantiation the parameter's name is a
+  constant, as an enumerator (`bind_template_argument`); in the template's
+  own declaration it is an entity without a value, so only a template-id
+  argument may name it (a value-dependent argument, deduced as
+  [temp.deduct.type]/8's `TT<i>`).  Defaults are analysed with the
+  arguments before them bound ([temp.param]/12; [temp.deduct]/5 for a
+  function template's undeduced parameter), and [temp.param]/14 holds for
+  class templates.  Mangling: `L <type> <value> E`, `n` for a negative
+  value, `X T_ E` for a parameter.  Not yet: non-type parameters of other
+  types (pointers, enumerations, class types), a parameter used in a
+  function template's own declarator other than as a template-id argument
+  (an array bound), defaults across redeclarations ([temp.param]/13).  The
+  evaluator's object of a member call that is a variable from outside the
+  evaluation is now unknown rather than not constant ([expr.const]/5.8
+  forbids reading it, not naming it).  cxx-sema: declarations as clang
+  37781, 0 we reject and clang accepts, 0 refuted (types 41644, lookup
+  14684, symbols 1772, layouts 10166); cxx-run 200/200; cxx-c-suites
+  unchanged.
 
 ### S7. Exceptions and RTTI
 

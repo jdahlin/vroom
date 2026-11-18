@@ -55,8 +55,7 @@ semantic_analysis::instantiate(node_index at, entity_index template_entity,
             continue;
         bool same = true;
         for (uint32_t i = 0; i < count && same; i++)
-            same = template_arguments[x.first_argument + i].type ==
-                   arguments[i].type;
+            same = template_arguments[x.first_argument + i] == arguments[i];
         if (same) {
             index = k;
             found = true;
@@ -70,19 +69,15 @@ semantic_analysis::instantiate(node_index at, entity_index template_entity,
         record.argument_count = count;
         for (uint32_t i = 0; i < count; i++)
             template_arguments.append(arguments[i]);
-        /* the template-parameters' names, each a typedef-name of its
-           argument ([temp.arg.type]) */
+        /* the template-parameters' names, each its argument
+           (bind_template_argument) */
         record.scope =
             entity_table.make(entity_kind::block_scope, 0, t.enclosing);
-        for (uint32_t i = 0; i < count; i++) {
-            entity_index p =
-                template_parameter_entities[ft.first_parameter + i];
-            entity_index e = entity_table.make(
-                entity_kind::typedef_name, entity_table[p].name, record.scope);
-            entity_table[e].type = arguments[i].type;
-            entity_table[e].defined = true;
-            entity_table.bind(record.scope, entity_table[p].name, e);
-        }
+        for (uint32_t i = 0; i < count; i++)
+            bind_template_argument(
+                record.scope,
+                template_parameter_entities[ft.first_parameter + i],
+                arguments[i]);
         index = static_cast<uint32_t>(instantiations.size());
         instantiations.append(record);
         /* the declaration: the declarator, where its types are the
@@ -248,8 +243,7 @@ semantic_analysis::instantiate_class(node_index at, uint32_t class_template,
             continue;
         bool same = true;
         for (uint32_t i = 0; i < count && same; i++)
-            same = template_arguments[x.first_argument + i].type ==
-                   arguments[i].type;
+            same = template_arguments[x.first_argument + i] == arguments[i];
         if (!same)
             continue;
         c = x.specialization;
@@ -425,6 +419,30 @@ analysis_result semantic_analysis::declare_specialization(
     declared.append(d);
     declared_entity = e;
     return analysis_result::well_formed;
+}
+
+bool semantic_analysis::specialization_value(entity_index e, uint32_t i,
+                                             uint64_t &magnitude,
+                                             bool &negative,
+                                             uint32_t &parameter) const
+{
+    const template_argument &a = specialization_template_argument(e, i);
+    magnitude = a.value;
+    negative = false;
+    parameter = 0;
+    if (a.kind != template_argument::kind_t::value)
+        return false;
+    if (a.template_entity) {
+        parameter = static_cast<uint32_t>(a.value) + 1;
+        return true;
+    }
+    if (fundamental_type_is_signed(tokens.files.behavior,
+                                   fundamental_of(a.type)) &&
+        static_cast<int64_t>(a.value) < 0) {
+        negative = true;
+        magnitude = 0 - a.value;
+    }
+    return true;
 }
 
 } // namespace cplusplus

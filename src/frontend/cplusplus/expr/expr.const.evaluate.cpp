@@ -455,10 +455,11 @@ constness semantic_analysis::evaluate_object(constant_evaluation &state,
             return c;
         }
         /* an automatic variable whose lifetime did not begin within the
-           evaluation: [expr.const]/5.8; a variable of static storage
+           evaluation: [expr.const]/5.8 forbids an lvalue-to-rvalue
+           conversion of it, not designating it (the object expression of
+           a member call that reads nothing, as clang accepts), which the
+           evaluation has no object for; a variable of static storage
            duration may not be modified (/5.16) */
-        if (entity_table[x.a].automatic && x.a)
-            return constness::not_constant;
         return constness::unknown;
     }
     /* [expr.unary.op]/1: "the result is an lvalue referring to the object

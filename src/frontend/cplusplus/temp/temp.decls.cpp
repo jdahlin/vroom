@@ -121,7 +121,8 @@ semantic_analysis::template_head_parameters(node_index n,
         syntax_child c = tree.children(head)[i];
         if (c.is_token())
             continue;
-        if (syntax_is(tree, c, syntax_kind::type_parameter)) {
+        if (syntax_is(tree, c, syntax_kind::type_parameter) ||
+            syntax_is(tree, c, syntax_kind::parameter_declaration)) {
             parameters.append(c.index());
             continue;
         }
@@ -131,18 +132,27 @@ semantic_analysis::template_head_parameters(node_index n,
             syntax_child p = tree.children(c.index())[k];
             if (p.is_token())
                 continue;
-            if (!syntax_is(tree, p, syntax_kind::type_parameter))
+            if (!syntax_is(tree, p, syntax_kind::type_parameter) &&
+                !syntax_is(tree, p, syntax_kind::parameter_declaration))
                 return not_supported(p.index(), "temp.param");
             parameters.append(p.index());
         }
     }
-    /* a type-parameter of the form class identifier: a default, a pack
-       or a type-constraint is a rule of its own */
+    /* a type-parameter class identifier, a parameter-declaration
+       decl-specifier-seq identifier, each with = and a default
+       template-argument or not: a pack, a type-constraint, an unnamed
+       parameter or another declarator is a rule of its own */
     for (node_index p : parameters) {
         const syntax_node &x = tree[p];
-        if (x.child_count != 2 || !tree.children(p)[0].is_token() ||
-            !tree.children(p)[1].is_token() ||
-            tokens[tree.children(p)[1].index()].kind != token_kind::identifier)
+        const syntax_child *c = tree.children(p);
+        bool type =
+            syntax_is(tree, syntax_child::node(p), syntax_kind::type_parameter);
+        if (type != c[0].is_token() ||
+            (x.child_count != 2 && x.child_count != 4) || !c[1].is_token() ||
+            tokens[c[1].index()].kind != token_kind::identifier ||
+            (x.child_count == 4 &&
+             !syntax_is_punctuator(tokens, c[2],
+                                   preprocessing_op_or_punc::EQUAL)))
             return not_supported(p, "temp.param");
     }
     if (parameters.empty())
@@ -183,27 +193,10 @@ semantic_analysis::function_template_definition(node_index n,
     /* the scope of the template-parameters ([basic.scope.temp]) */
     entity_index scope = entity_table.make(entity_kind::block_scope, 0, outer);
     uint32_t first = static_cast<uint32_t>(template_parameter_entities.size());
-    for (size_t i = 0; i < parameters.size(); i++) {
-        token_index id = tree.children(parameters[i])[1].index();
-        uint32_t name = tokens.identifier(id);
-        /* [temp.local]/6: "The name of a template-parameter shall not be
-           redeclared within its scope (including nested scopes)." */
-        if (entity_table.find(scope, name))
-            return ill_formed_at_token(id,
-                                       "the name of a template-parameter "
-                                       "shall not be redeclared within its "
-                                       "scope",
-                                       "temp.local");
-        entity_index e =
-            entity_table.make(entity_kind::typedef_name, name, scope);
-        entity_table[e].type = qualified_type::make(
-            type_table.of_entity(type_kind::template_parameter, e), cv_none);
-        entity_table[e].value = i;
-        entity_table[e].defined = true;
-        entity_table[e].instantiation = index + 1;
-        entity_table.bind(scope, name, e);
-        template_parameter_entities.append(e);
-    }
+    analysis_result declared =
+        declare_template_parameters(n, parameters, scope, index, 0);
+    if (declared != analysis_result::well_formed)
+        return declared;
     /* the declarator, in the template-parameters' scope; what it records
        for claims is the template's, which clang has no claim for */
     size_t expressions_before = expressions.size();
@@ -277,6 +270,203 @@ semantic_analysis::function_template_definition(node_index n,
     return analysis_result::well_formed;
 }
 
+static bool depends(const types &table, qualified_type t,
+                    const entities *parameters = nullptr, uint64_t from = 0);
+
+/*
+ * [temp.param]/2: "There is no semantic difference between class and
+ * typename in a type-parameter-key."  A type parameter's name is a
+ * typedef-name of its template_parameter type; a non-type parameter's
+ * (/4: of integral type here) names a value the template's own
+ * declarator does not know: an entity of kind none with the parameter's
+ * type, which an instantiation binds to a constant.
+ */
+analysis_result semantic_analysis::declare_template_parameters(
+    node_index n, const owned_array<node_index> &parameters, entity_index scope,
+    uint32_t index, uint32_t reserved)
+{
+    (void)n;
+    for (size_t i = 0; i < parameters.size(); i++) {
+        node_index node = parameters[i];
+        token_index id = tree.children(node)[1].index();
+        uint32_t name = tokens.identifier(id);
+        /* [temp.local]/6: "The name of a template-parameter shall not be
+           redeclared within its scope (including nested scopes)." */
+        if (entity_table.find(scope, name) || name == reserved)
+            return ill_formed_at_token(id,
+                                       "the name of a template-parameter "
+                                       "shall not be redeclared within its "
+                                       "scope",
+                                       "temp.local");
+        entity_index e = 0;
+        if (syntax_is(tree, syntax_child::node(node),
+                      syntax_kind::type_parameter)) {
+            e = entity_table.make(entity_kind::typedef_name, name, scope);
+            entity_table[e].type = qualified_type::make(
+                type_table.of_entity(type_kind::template_parameter, e),
+                cv_none);
+        } else {
+            /* the parameter's type, in the scope of those before it */
+            entity_index saved = current_scope;
+            current_scope = scope;
+            specified sp;
+            analysis_result r =
+                decl_specifier_seq(tree.children(node)[0].index(), sp, false);
+            current_scope = saved;
+            if (r != analysis_result::well_formed)
+                return r;
+            if (!is_integral(sp.type) || depends(type_table, sp.type) ||
+                sp.typedef_ || sp.static_ || sp.extern_ || sp.constexpr_ ||
+                sp.inline_)
+                return not_supported(node, "temp.param");
+            e = entity_table.make(entity_kind::none, name, scope);
+            /* /6: "the top-level cv-qualifiers on the template-parameter
+               are ignored when determining its type" */
+            entity_table[e].type =
+                qualified_type::make(sp.type.unqualified(), cv_none);
+        }
+        entity_table[e].value = i;
+        entity_table[e].defined = true;
+        entity_table[e].instantiation = index + 1;
+        entity_table.bind(scope, name, e);
+        template_parameter_entities.append(e);
+        template_parameter_nodes.append(node);
+    }
+    return analysis_result::well_formed;
+}
+
+/* the parameter's name in scope as its argument: [temp.arg.type]'s type,
+   or [temp.arg.nontype]'s value, a prvalue ([temp.param]/8) that
+   enumerator_value gives as an enumerator's */
+void semantic_analysis::bind_template_argument(entity_index scope,
+                                               entity_index parameter,
+                                               const template_argument &a)
+{
+    uint32_t name = entity_table[parameter].name;
+    entity_index e = 0;
+    if (a.kind == template_argument::kind_t::value) {
+        e = entity_table.make(entity_kind::enumerator, name, scope);
+        entity_table[e].value = a.value;
+    } else {
+        e = entity_table.make(entity_kind::typedef_name, name, scope);
+    }
+    entity_table[e].type = a.type;
+    entity_table[e].defined = true;
+    entity_table.bind(scope, name, e);
+}
+
+/*
+ * [temp.arg.type]/1: "A template-argument for a template-parameter which
+ * is a type shall be a type-id."  [temp.arg.nontype]/2: "A template-argument
+ * for a non-type template-parameter shall be a converted constant
+ * expression of the type of the template-parameter" (integral here).
+ */
+analysis_result semantic_analysis::template_argument_for(
+    node_index at, uint32_t template_index, uint32_t position,
+    syntax_child written, const template_argument *before,
+    template_argument &out)
+{
+    (void)before;
+    const function_template ft = function_templates[template_index - 1];
+    entity_index p = template_parameter_entities[ft.first_parameter + position];
+    out = template_argument();
+    if (entity_table[p].kind == entity_kind::typedef_name) {
+        if (!syntax_is(tree, written, syntax_kind::type_id))
+            return not_supported(at, "temp.arg");
+        return type_id(written.index(), out.type);
+    }
+    if (syntax_is(tree, written, syntax_kind::type_id))
+        return not_supported(at, "temp.arg");
+    qualified_type to = entity_table[p].type;
+    /* in a template's own declaration, a non-type template-parameter's
+       name: a value dependent argument ([temp.dep.constexpr]/2), of a
+       parameter of the same type */
+    token_index first = written.index();
+    token_index end = first + 1;
+    if (!written.is_token()) {
+        first = tree[written.index()].first_token;
+        end = tree[written.index()].end_token;
+    }
+    if (end == first + 1 && tokens[first].kind == token_kind::identifier) {
+        lookup_result x =
+            lookup_unqualified(tokens.identifier(first), lookup_filter::any);
+        entity_index named = x.entity;
+        if (!named)
+            named = x.unknown_entity;
+        if (named && entity_table[named].kind == entity_kind::none &&
+            entity_table[named].instantiation &&
+            !entity_table[named].held_by_template) {
+            if (!(entity_table[named].type == to))
+                return not_supported(at, "temp.arg.nontype");
+            out.kind = template_argument::kind_t::value;
+            out.type = to;
+            out.template_entity = named;
+            out.value = entity_table[named].value;
+            return analysis_result::well_formed;
+        }
+    }
+    expression_meaning m;
+    analysis_result r = expression(written, m);
+    if (r == analysis_result::well_formed)
+        r = operand_value(at, m);
+    if (r != analysis_result::well_formed)
+        return r;
+    if (!is_integral(m.type))
+        return not_supported(at, "temp.arg.nontype");
+    bool constant = false;
+    r = integral_constant_expression(at, m, constant);
+    if (r == analysis_result::well_formed && constant)
+        r = converted_constant_expression(at, m, fundamental_of(to), constant);
+    if (r != analysis_result::well_formed)
+        return r;
+    if (!constant)
+        return not_supported(at, "temp.arg.nontype");
+    out.kind = template_argument::kind_t::value;
+    out.type = to;
+    out.value = m.value;
+    return analysis_result::well_formed;
+}
+
+/*
+ * [temp.arg]/4: "When default template-arguments are used, a template
+ * argument list can be empty."  [temp.param]/12: each default
+ * template-argument is analysed where the arguments before it name the
+ * parameters before it.
+ */
+analysis_result semantic_analysis::default_template_arguments(
+    node_index at, uint32_t template_index,
+    owned_array<template_argument> &arguments, const owned_array<bool> &set)
+{
+    const function_template ft = function_templates[template_index - 1];
+    entity_index t = ft.entity;
+    entity_index saved = current_scope;
+    token_index saved_horizon = lookup_horizon;
+    for (uint32_t i = 0; i < ft.parameter_count; i++) {
+        if (set[i])
+            continue;
+        node_index node = template_parameter_nodes[ft.first_parameter + i];
+        if (tree[node].child_count != 4)
+            return not_supported(at, "temp.arg");
+        entity_index scope = entity_table.make(entity_kind::block_scope, 0,
+                                               entity_table[t].enclosing);
+        for (uint32_t k = 0; k < i; k++)
+            bind_template_argument(
+                scope, template_parameter_entities[ft.first_parameter + k],
+                arguments[k]);
+        current_scope = scope;
+        lookup_horizon = tree[ft.declaration].first_token;
+        template_argument a;
+        analysis_result r = template_argument_for(
+            at, template_index, i, tree.children(node)[3], arguments.data(), a);
+        current_scope = saved;
+        lookup_horizon = saved_horizon;
+        if (r != analysis_result::well_formed)
+            return r;
+        arguments[i] = a;
+    }
+    return analysis_result::well_formed;
+}
+
 /* the usable function template whose name the held entity is, plus one */
 uint32_t semantic_analysis::function_template_of(entity_index held) const
 {
@@ -308,7 +498,7 @@ uint32_t semantic_analysis::class_template_of(entity_index e) const
 /* whether a type is made of a template-parameter type, of one at
    position from or after if from is given */
 static bool depends(const types &table, qualified_type t,
-                    const entities *parameters = nullptr, uint64_t from = 0)
+                    const entities *parameters, uint64_t from)
 {
     const struct type &r = table[t.unqualified()];
     switch (r.kind) {
@@ -370,25 +560,20 @@ semantic_analysis::class_template_definition(node_index n, node_index specifier)
     uint32_t index = static_cast<uint32_t>(function_templates.size());
     entity_index scope = entity_table.make(entity_kind::block_scope, 0, outer);
     uint32_t first = static_cast<uint32_t>(template_parameter_entities.size());
-    for (size_t i = 0; i < parameters.size(); i++) {
-        token_index id = tree.children(parameters[i])[1].index();
-        uint32_t p = tokens.identifier(id);
-        /* [temp.local]/6 */
-        if (entity_table.find(scope, p) || p == name)
-            return ill_formed_at_token(id,
-                                       "the name of a template-parameter "
-                                       "shall not be redeclared within its "
-                                       "scope",
-                                       "temp.local");
-        entity_index e = entity_table.make(entity_kind::typedef_name, p, scope);
-        entity_table[e].type = qualified_type::make(
-            type_table.of_entity(type_kind::template_parameter, e), cv_none);
-        entity_table[e].value = i;
-        entity_table[e].defined = true;
-        entity_table[e].instantiation = index + 1;
-        entity_table.bind(scope, p, e);
-        template_parameter_entities.append(e);
-    }
+    r = declare_template_parameters(n, parameters, scope, index, name);
+    if (r != analysis_result::well_formed)
+        return r;
+    /* [temp.param]/14: "If a template-parameter of a class template ...
+       has a default template-argument, each subsequent template-parameter
+       shall either have a default template-argument supplied or be a
+       template parameter pack" */
+    for (size_t i = 1; i < parameters.size(); i++)
+        if (tree[parameters[i - 1]].child_count == 4 &&
+            tree[parameters[i]].child_count != 4)
+            return ill_formed(parameters[i],
+                              "each template-parameter after one with a "
+                              "default template-argument shall have one",
+                              "temp.param");
     entity_index t =
         entity_table.make(entity_kind::template_entity, name, outer);
     entity_table[t].defined = true;
@@ -465,22 +650,32 @@ analysis_result semantic_analysis::template_type(node_index id,
             written.append(parts[i]);
         }
         for (syntax_child a : written) {
-            if (!syntax_is(tree, a, syntax_kind::type_id))
+            uint32_t position = static_cast<uint32_t>(arguments.size());
+            /* too many: clang's "too many template arguments" */
+            if (position >= function_templates[ct - 1].parameter_count)
                 return not_supported(id, "temp.arg");
             template_argument v;
-            analysis_result r = type_id(a.index(), v.type);
+            analysis_result r =
+                template_argument_for(id, ct, position, a, arguments.data(), v);
             if (r != analysis_result::well_formed)
                 return r;
             arguments.append(v);
         }
     }
-    /* [temp.arg]/4 (no default template-arguments): one argument per
-       parameter, else clang's "too few/many template arguments" */
-    if (arguments.size() != function_templates[ct - 1].parameter_count)
-        return not_supported(id, "temp.arg");
+    /* [temp.arg]/4: the parameters after those given take their default
+       template-arguments; one without is clang's "too few template
+       arguments" */
+    owned_array<bool> set;
+    for (uint32_t i = 0; i < function_templates[ct - 1].parameter_count; i++)
+        set.append(i < arguments.size());
+    while (arguments.size() < function_templates[ct - 1].parameter_count)
+        arguments.append(template_argument());
+    analysis_result filled = default_template_arguments(id, ct, arguments, set);
+    if (filled != analysis_result::well_formed)
+        return filled;
     bool dependent = false;
     for (const template_argument &a : arguments)
-        if (depends(type_table, a.type))
+        if (depends(type_table, a.type) || a.template_entity)
             dependent = true;
     if (dependent) {
         /* [temp.dep.type]/9: "A type is dependent if it is ... a
@@ -494,8 +689,7 @@ analysis_result semantic_analysis::template_type(node_index id,
                 continue;
             bool same = true;
             for (uint32_t i = 0; i < x.argument_count && same; i++)
-                same = template_arguments[x.first_argument + i].type ==
-                       arguments[i].type;
+                same = template_arguments[x.first_argument + i] == arguments[i];
             if (same) {
                 type = entity_table[x.specialization].type.unqualified();
                 return analysis_result::well_formed;
@@ -541,7 +735,8 @@ analysis_result semantic_analysis::template_type(node_index id,
  * conflict.
  */
 bool semantic_analysis::deduce_type(qualified_type p, qualified_type a,
-                                    owned_array<qualified_type> &deduced) const
+                                    owned_array<template_argument> &deduced,
+                                    owned_array<bool> &set) const
 {
     const struct type &pr = type_table[p.unqualified()];
     if (pr.kind == type_kind::template_parameter) {
@@ -553,9 +748,10 @@ bool semantic_analysis::deduce_type(qualified_type p, qualified_type a,
         uint64_t i = entity_table[pr.entity].value;
         if (i >= deduced.size())
             return false;
-        if (deduced[i].unqualified() && !(deduced[i] == value))
+        if (set[i] && !(deduced[i].type == value))
             return false;
-        deduced[i] = value;
+        deduced[i].type = value;
+        set[i] = true;
         return true;
     }
     if (!depends(type_table, p))
@@ -565,15 +761,37 @@ bool semantic_analysis::deduce_type(qualified_type p, qualified_type a,
            whose arguments are deduced from those of A's, a
            specialization of the same template */
         const struct type &ar = type_table[a.unqualified()];
-        if (ar.kind != type_kind::class_type || p.cv() != a.cv() ||
+        /* ([temp.deduct.call]/4.1: P may be more cv-qualified) */
+        if (ar.kind != type_kind::class_type || (a.cv() & ~p.cv()) ||
             !entity_table[ar.entity].instantiation ||
             specialized_template(ar.entity) != specialized_template(pr.entity))
             return false;
         uint32_t count = specialization_argument_count(pr.entity);
-        for (uint32_t i = 0; i < count; i++)
-            if (!deduce_type(specialization_argument(pr.entity, i),
-                             specialization_argument(ar.entity, i), deduced))
+        for (uint32_t i = 0; i < count; i++) {
+            const template_argument &x =
+                specialization_template_argument(pr.entity, i);
+            const template_argument &y =
+                specialization_template_argument(ar.entity, i);
+            if (x.kind == template_argument::kind_t::type) {
+                if (!deduce_type(x.type, y.type, deduced, set))
+                    return false;
+                continue;
+            }
+            if (!x.template_entity) {
+                if (!(x == y))
+                    return false;
+                continue;
+            }
+            /* /8's TT<i>: a non-type parameter's value from A's (of the
+               parameter's type: the template's parameter is the same) */
+            uint64_t k = x.value;
+            if (k >= deduced.size() || y.kind != x.kind)
                 return false;
+            if (set[k] && !(deduced[k] == y))
+                return false;
+            deduced[k] = y;
+            set[k] = true;
+        }
         return true;
     }
     const struct type &ar = type_table[a.unqualified()];
@@ -583,21 +801,21 @@ bool semantic_analysis::deduce_type(qualified_type p, qualified_type a,
     case type_kind::pointer:
     case type_kind::lvalue_reference:
     case type_kind::rvalue_reference:
-        return deduce_type(pr.operand, ar.operand, deduced);
+        return deduce_type(pr.operand, ar.operand, deduced, set);
     case type_kind::array:
         if (pr.bound_known != ar.bound_known || pr.bound != ar.bound)
             return false;
-        return deduce_type(pr.operand, ar.operand, deduced);
+        return deduce_type(pr.operand, ar.operand, deduced, set);
     case type_kind::function: {
         if (pr.variadic != ar.variadic ||
             pr.parameter_count != ar.parameter_count)
             return false;
-        if (!deduce_type(pr.operand, ar.operand, deduced))
+        if (!deduce_type(pr.operand, ar.operand, deduced, set))
             return false;
         const qualified_type *pp = type_table.parameters(p.unqualified());
         const qualified_type *ap = type_table.parameters(a.unqualified());
         for (uint32_t i = 0; i < pr.parameter_count; i++)
-            if (!deduce_type(pp[i], ap[i], deduced))
+            if (!deduce_type(pp[i], ap[i], deduced, set))
                 return false;
         return true;
     }
@@ -635,12 +853,14 @@ semantic_analysis::deduce_from_call(node_index at, uint32_t function_template,
     uint32_t specified = static_cast<uint32_t>(deduced.size());
     if (specified > ft.parameter_count)
         return not_supported(at, "temp.arg.explicit");
-    owned_array<qualified_type> values;
+    owned_array<template_argument> values;
+    owned_array<bool> set;
     for (uint32_t i = 0; i < ft.parameter_count; i++) {
-        qualified_type v;
+        template_argument v;
         if (i < specified)
-            v = deduced[i].type;
+            v = deduced[i];
         values.append(v);
+        set.append(i < specified);
     }
     for (uint32_t i = 0; i < count; i++) {
         qualified_type p = parameters[i];
@@ -698,19 +918,22 @@ semantic_analysis::deduce_from_call(node_index at, uint32_t function_template,
         /* a parameter that does not match: deduction fails, which
            overload resolution of the function templates of the name and
            its other functions decides; neither is analysed yet */
-        if (!deduce_type(p, a, values))
+        if (!deduce_type(p, a, values, set))
             return not_supported(at, "temp.deduct.call");
     }
+    /* [temp.deduct]/5: "If a template argument has not been deduced and
+       its corresponding template parameter has a default argument, the
+       template argument is determined by substituting the template
+       arguments determined for preceding template parameters into the
+       default argument"; /1's "all of the template arguments shall have
+       values" otherwise */
+    analysis_result r =
+        default_template_arguments(at, function_template, values, set);
+    if (r != analysis_result::well_formed)
+        return r;
     deduced.clear();
-    for (const qualified_type &v : values) {
-        /* [temp.deduct]/1's "all of the template arguments shall have
-           values": one deduced from no argument */
-        if (!v.unqualified())
-            return not_supported(at, "temp.deduct.call");
-        template_argument x;
-        x.type = v;
+    for (const template_argument &x : values)
         deduced.append(x);
-    }
     return analysis_result::well_formed;
 }
 

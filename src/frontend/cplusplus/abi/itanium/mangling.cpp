@@ -96,6 +96,13 @@ class itanium_mangler
     bool specialization_encoding(entity_index e);
     bool class_template_args(entity_index c);
     bool template_args(entity_index c);
+    void template_param(uint64_t position)
+    {
+        text("T");
+        if (position)
+            number(position - 1);
+        text("_");
+    }
     bool name(entity_index e);
     bool unscoped_name(entity_index e);
     bool unqualified_name(entity_index e);
@@ -240,12 +247,8 @@ bool itanium_mangler::specialization_encoding(entity_index e)
     candidate c;
     c.scope = pattern_of;
     candidates.append(c);
-    text("I");
-    uint32_t count = analysis.specialization_argument_count(e);
-    for (uint32_t i = 0; i < count; i++)
-        if (!type(analysis.specialization_argument(e, i)))
-            return false;
-    text("E");
+    if (!template_args(e))
+        return false;
     if (nested)
         text("E");
     qualified_type pattern = table[pattern_of].type;
@@ -491,14 +494,50 @@ bool itanium_mangler::class_template_args(entity_index c)
     return template_args(c);
 }
 
-/* <template-args> of a class template's specialization c */
+/*
+ * <template-args> of a template's specialization c.  [abi:mangle.template-arg]:
+ *
+ *     <template-arg> ::= <expr-primary>
+ *
+ * a non-type argument's value; [abi:expressions]:
+ *
+ *     <expr-primary> ::= L <type> <value number> E
+ *
+ * its parameter's type, then the value, n before a negative one's
+ * magnitude; a bool's 0 or 1.
+ */
 bool itanium_mangler::template_args(entity_index c)
 {
     text("I");
     uint32_t count = analysis.specialization_argument_count(c);
-    for (uint32_t i = 0; i < count; i++)
+    for (uint32_t i = 0; i < count; i++) {
+        uint64_t v = 0;
+        bool negative = false;
+        uint32_t parameter = 0;
+        if (!analysis.specialization_value(c, i, v, negative, parameter)) {
+            if (!type(analysis.specialization_argument(c, i)))
+                return false;
+            continue;
+        }
+        if (parameter) {
+            /* [abi:mangle.template-arg]: a parameter's name, as an
+               expression:
+
+                   <template-arg> ::= X <expression> E
+            */
+            text("X");
+            template_param(parameter - 1);
+            text("E");
+            continue;
+        }
+        text("L");
         if (!type(analysis.specialization_argument(c, i)))
             return false;
+        if (negative)
+            text("n");
+        number(v);
+        text("E");
+    }
     text("E");
     return true;
 }
@@ -1044,11 +1083,7 @@ bool itanium_mangler::type(qualified_type t)
                <template-param> ::= T_
                <template-param> ::= T <parameter-2 non-negative number> _
            the first parameter T_, the (n+2)-th T n _ */
-        uint64_t position = analysis.entity_table[r.entity].value;
-        text("T");
-        if (position)
-            number(position - 1);
-        text("_");
+        template_param(analysis.entity_table[r.entity].value);
         done = true;
     }
     if (!done)

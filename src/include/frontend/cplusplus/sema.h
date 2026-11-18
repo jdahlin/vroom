@@ -2285,16 +2285,23 @@ class semantic_analysis
        outside itself, which is what a cache would check before reusing
        it.  Nothing is instantiated yet. */
     struct template_argument {
-        /* [temp.arg]/1: a type, a value (a constant_value index into
-           instantiation_values) or a template */
+        /* [temp.arg]/1: a type, a value (an integral one, of type type,
+           sign- or zero-extended as expression_meaning keeps it; or in a
+           template's own declaration a non-type template-parameter,
+           template_entity, whose position value is) or a template */
         enum class kind_t : uint8_t {
             type,
             value,
             template_name
         } kind = kind_t::type;
         qualified_type type;
-        uint32_t value = 0;
+        uint64_t value = 0;
         entity_index template_entity = 0;
+        bool operator==(const template_argument &o) const
+        {
+            return kind == o.kind && type == o.type && value == o.value &&
+                   template_entity == o.template_entity;
+        }
     };
     struct instantiation_input {
         /* what the instantiation looked up outside itself: a name in a
@@ -2343,7 +2350,13 @@ class semantic_analysis
         bool is_class = false;
     };
     owned_array<function_template> function_templates;
+    /* per template-parameter: a type parameter's typedef-name of its
+       template_parameter type, or a non-type parameter's entity (kind
+       none, so that the template's own declarator cannot use its value;
+       its type the parameter's); and its type-parameter or
+       parameter-declaration, for its default template-argument */
     owned_array<entity_index> template_parameter_entities;
+    owned_array<node_index> template_parameter_nodes;
     /* the instantiation whose specialization the declaration analysed
        now declares (its record's index plus one), and how deep
        instantiations nest ([temp.inst]/16) */
@@ -2369,9 +2382,33 @@ class semantic_analysis
     /* the class template the entity names (its held name, or one of its
        specializations as its injected-class-name), plus one */
     uint32_t class_template_of(entity_index e) const;
-    /* [temp.pre]/1: a template-head's type parameters */
+    /* [temp.pre]/1: a template-head's parameters */
     analysis_result
     template_head_parameters(node_index n, owned_array<node_index> &parameters);
+    /* [temp.param]: the parameters' entities in scope, for the template
+       function_templates[index] will be; reserved is a name they shall not
+       have ([temp.local]/6) */
+    analysis_result declare_template_parameters(
+        node_index n, const owned_array<node_index> &parameters,
+        entity_index scope, uint32_t index, uint32_t reserved);
+    /* [temp.arg]: the written argument for the template's parameter at
+       position, given the arguments before it */
+    analysis_result template_argument_for(node_index at,
+                                          uint32_t template_index,
+                                          uint32_t position,
+                                          syntax_child written,
+                                          const template_argument *before,
+                                          template_argument &out);
+    /* [temp.arg]/4, [temp.param]/12: the arguments not given (set[i]
+       false) from the parameters' default template-arguments */
+    analysis_result
+    default_template_arguments(node_index at, uint32_t template_index,
+                               owned_array<template_argument> &arguments,
+                               const owned_array<bool> &set);
+    /* a template-parameter's name in scope, as the argument: a
+       typedef-name of the type, or a constant of the value */
+    void bind_template_argument(entity_index scope, entity_index parameter,
+                                const template_argument &a);
     /* [temp.class]: a class template defined at namespace scope */
     analysis_result class_template_definition(node_index n,
                                               node_index specifier);
@@ -2410,9 +2447,10 @@ class semantic_analysis
                                            const specified &s,
                                            entity_index &declared_entity);
     /* [temp.deduct.call]: P against A, the deduced arguments by position
-       (an empty type: none yet) */
+       (set: deduced or given) */
     bool deduce_type(qualified_type p, qualified_type a,
-                     owned_array<qualified_type> &deduced) const;
+                     owned_array<template_argument> &deduced,
+                     owned_array<bool> &set) const;
     owned_array<template_argument> template_arguments;
     owned_array<constant_value> instantiation_values;
     owned_array<instantiation_input> instantiation_inputs;
@@ -2489,10 +2527,25 @@ class semantic_analysis
     }
     qualified_type specialization_argument(entity_index e, uint32_t i) const
     {
+        return specialization_template_argument(e, i).type;
+    }
+    /* whether the argument is a value (non-type, integral): its
+       magnitude, and whether it is negative; or, in a template's own
+       declaration, the non-type template-parameter it names (its position
+       plus one in parameter) */
+    bool specialization_value(entity_index e, uint32_t i, uint64_t &magnitude,
+                              bool &negative, uint32_t &parameter) const;
+
+  private:
+    const template_argument &specialization_template_argument(entity_index e,
+                                                              uint32_t i) const
+    {
         const instantiation_record &x =
             instantiations[entity_table[e].instantiation - 1];
-        return template_arguments[x.first_argument + i].type;
+        return template_arguments[x.first_argument + i];
     }
+
+  public:
     /* [over.best.ics]/1: "An implicit conversion sequence is a sequence of
        conversions used to convert an argument in a function call to the
        type of the corresponding parameter of the function being called":
