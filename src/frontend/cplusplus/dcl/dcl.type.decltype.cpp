@@ -2,8 +2,8 @@
  * dcl.type.decltype.cpp: [dcl.type.decltype] Decltype specifiers: the type
  * a decltype-specifier denotes (/1).  The grammar is in dcl.spec.cpp.
  *
- * Not analysed: an operand naming a structured binding or a non-type
- * template-parameter (/1's first two cases, which have no rules yet), and
+ * Not analysed: an operand naming a non-type template-parameter (/1's
+ * second case, which has no rules yet), and
  * /2's prvalue of incomplete or abstract class type.
  */
 #include "../cplusplus-internal.h"
@@ -42,6 +42,14 @@ bool semantic_analysis::decltype_of(const expression_meaning &m, bool named,
     if (named) {
         if (!m.node)
             return false;
+        /* "if E is an unparenthesized id-expression naming a structured
+           binding ([dcl.struct.bind]), decltype(E) is the referenced type
+           as given in the specification of the structured binding
+           declaration" */
+        if (m.node == last_binding_node) {
+            type = entity_table[last_binding].type;
+            return true;
+        }
         const semantic_node &n = semantics[m.node];
         if (n.kind == semantic_kind::entity && n.a) {
             type = entity_table[n.a].type;

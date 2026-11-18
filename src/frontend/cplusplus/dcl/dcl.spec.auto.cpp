@@ -249,27 +249,19 @@ analysis_result semantic_analysis::deduce_placeholder(
     return analysis_result::well_formed;
 }
 
-/*
- * [dcl.type.auto.deduct]/2: "for a variable declared with a type that
- * contains a placeholder type, T is the declared type of the variable and E
- * is the initializer.  If the initialization is direct-list-initialization,
- * the initializer shall be a braced-init-list containing only a single
- * assignment-expression and E is the assignment-expression".
- * [dcl.spec.auto]/4: "In an initializer of the form ( expression-list ) the
- * expression-list shall be a single assignment-expression."
- */
-analysis_result semantic_analysis::deduced_initializer(syntax_child init,
-                                                       entity_index e,
-                                                       qualified_type &type,
-                                                       initialized_value &value)
+/* the assignment-expression of an initializer "= E", "( E )" or "{ E }"
+   (direct: not the first; list: the last), false for another form */
+bool semantic_analysis::initializer_form(syntax_child init,
+                                         syntax_child &clause, bool &direct,
+                                         bool &list) const
 {
     if (init.is_token())
-        return not_supported(current_declaration, "dcl.init");
+        return false;
     node_index n = init.index();
     const syntax_node &node = tree[n];
     const syntax_child *children = tree.children(n);
-    syntax_child clause;
-    bool direct = false, list = false;
+    direct = false;
+    list = false;
     if (node.kind == syntax_kind::brace_or_equal_initializer &&
         node.child_count == 2 &&
         !syntax_is(tree, children[1], syntax_kind::braced_init_list)) {
@@ -289,17 +281,40 @@ analysis_result semantic_analysis::deduced_initializer(syntax_child init,
         direct = true;
         list = true;
     } else {
+        return false;
+    }
+    return true;
+}
+
+/*
+ * [dcl.type.auto.deduct]/2: "for a variable declared with a type that
+ * contains a placeholder type, T is the declared type of the variable and E
+ * is the initializer.  If the initialization is direct-list-initialization,
+ * the initializer shall be a braced-init-list containing only a single
+ * assignment-expression and E is the assignment-expression".
+ * [dcl.spec.auto]/4: "In an initializer of the form ( expression-list ) the
+ * expression-list shall be a single assignment-expression."
+ */
+analysis_result semantic_analysis::deduced_initializer(syntax_child init,
+                                                       entity_index e,
+                                                       qualified_type &type,
+                                                       initialized_value &value)
+{
+    if (init.is_token())
+        return not_supported(current_declaration, "dcl.init");
+    syntax_child clause;
+    bool direct = false, list = false;
+    if (!initializer_form(init, clause, direct, list))
         /* copy-list-initialization (std::initializer_list<U>), an
            expression-list or braced-init-list of other than one
            expression */
-        return not_supported(n, "dcl.type.auto.deduct");
-    }
+        return not_supported(init.index(), "dcl.type.auto.deduct");
     expression_meaning m;
     analysis_result r = expression(clause, m);
     if (r != analysis_result::well_formed)
         return r;
-    return deduced_initialization(n, m, names_entity(clause), direct, list, e,
-                                  type, value);
+    return deduced_initialization(init.index(), m, names_entity(clause), direct,
+                                  list, e, type, value);
 }
 
 /* ... the initializer's expression analysed as m (named: names_entity of

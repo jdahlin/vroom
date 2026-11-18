@@ -201,7 +201,10 @@ bool itanium_mangler::mangled_name(entity_index e)
         return false;
     /* (a closure type's constructor or destructor has its class's name:
        none) */
-    if (!x.name && x.special == special_member::none)
+    /* (a structured binding declaration's variable e: its bindings'
+       names, unqualified_name_untagged) */
+    bool binding = x.kind == entity_kind::variable && x.binding_count;
+    if (!x.name && x.special == special_member::none && !binding)
         return false;
     size_t length = 0;
     const char *identifier = "";
@@ -227,7 +230,7 @@ bool itanium_mangler::mangled_name(entity_index e)
     /* (a variable template's specialization is mangled, _Z2piIdE) */
     bool specialization = x.kind == entity_kind::variable && x.instantiation;
     if (x.c_language_linkage ||
-        (global && !internal_variable && !specialization &&
+        (global && !internal_variable && !specialization && !binding &&
          (x.kind == entity_kind::variable || is_main))) {
         vbuffer_append(out, identifier, length);
         return true;
@@ -941,6 +944,18 @@ bool itanium_mangler::unqualified_name_untagged(entity_index e)
     const entity &x = table[e];
     if (x.kind == entity_kind::namespace_entity && !x.name) {
         text("12_GLOBAL__N_1");
+        return true;
+    }
+    if (x.kind == entity_kind::variable && x.binding_count) {
+        /* [abi:mangle.name] "<unqualified-name> ::= DC <source-name>+ E":
+           a structured binding declaration's variable e ([dcl.struct.bind]/1),
+           by its structured bindings' names; [impl.clang] without L for
+           internal linkage */
+        text("DC");
+        for (uint32_t k = 0; k < x.binding_count; k++)
+            if (!source_name(table[x.first_binding + k].name))
+                return false;
+        text("E");
         return true;
     }
     bool namespace_scope =

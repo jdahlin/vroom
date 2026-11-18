@@ -19,8 +19,8 @@
  * ';' (scan_parenthesized).  The range-based for statement is N2930's
  * (C++11), its init-statement P0614R1's (C++20); before them they are
  * [ext.clang] clang's extensions, P9's.  The structured binding of the
- * second for-range-declaration is P5's; for-range-initializer passes its
- * operand on.
+ * second for-range-declaration is P5's (dcl.struct.bind.cpp analyses it);
+ * for-range-initializer passes its operand on.
  */
 #include "frontend/cplusplus/sema.h"
 #include "stmt.ambig.h"
@@ -538,11 +538,19 @@ analysis_result semantic_analysis::for_range_declaration(
     node_index at = node_of(d);
     const syntax_node &node = tree[at];
     const syntax_child *children = tree.children(at);
-    if (node.child_count != 2 ||
+    /* the second form: a structured binding ([dcl.struct.bind]) */
+    bool binding =
+        node.child_count > 2 &&
+        (syntax_is_punctuator(tokens, children[1],
+                              preprocessing_op_or_punc::LEFT_BRACKET) ||
+         syntax_is_punctuator(tokens, children[1],
+                              preprocessing_op_or_punc::AMPERSAND) ||
+         syntax_is_punctuator(tokens, children[1],
+                              preprocessing_op_or_punc::AMPERSAND_AMPERSAND));
+    if ((node.child_count != 2 && !binding) ||
         !syntax_is(tree, children[0], syntax_kind::decl_specifier_seq) ||
         tree[at].first_token != first_token(children[0]))
-        /* an attribute-specifier-seq, or a structured binding
-           ([dcl.struct.bind]) */
+        /* an attribute-specifier-seq */
         return not_supported(at, "stmt.ranged");
     specified s;
     placeholder_allowed = true;
@@ -578,8 +586,11 @@ analysis_result semantic_analysis::for_range_declaration(
     size_t first = block_variables.size();
     bool claimable = declarations_claimable;
     declarations_claimable = false;
-    r = declare_with_initializer(at, children[1], syntax_child(), true, s,
-                                 false, &element);
+    if (binding)
+        r = structured_binding_declaration(at, 1, s, &element);
+    else
+        r = declare_with_initializer(at, children[1], syntax_child(), true, s,
+                                     false, &element);
     declarations_claimable = claimable;
     if (r != analysis_result::well_formed) {
         block_variables.resize(first);

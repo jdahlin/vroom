@@ -927,7 +927,7 @@ analysis_result semantic_analysis::init_declarators(node_index declaration,
                                  preprocessing_op_or_punc::AMPERSAND) ||
             syntax_is_punctuator(tokens, c,
                                  preprocessing_op_or_punc::AMPERSAND_AMPERSAND))
-            return not_supported(declaration, "dcl.struct.bind");
+            return structured_binding_declaration(declaration, i, s, nullptr);
         /* a declarator that is only its identifier is the token */
         if (c.is_token()) {
             if (tokens[c.index()].kind != token_kind::identifier)

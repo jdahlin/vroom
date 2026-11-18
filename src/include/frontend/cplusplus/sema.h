@@ -574,6 +574,15 @@ struct entity {
     /* an init-capture's name ([expr.prim.lambda.capture]/6): the variable
        is the closure's non-static data member this names */
     entity_index capture_member = 0;
+    /* a structured binding ([dcl.struct.bind]): the variable e of its
+       declaration (0 while its initializer is analysed, /2) and what it
+       names: e's member m_i (/5), the variable r_i (/4), or 0 for e's
+       element field (/3); its type is the referenced type */
+    entity_index binding_object = 0, binding_target = 0;
+    /* the variable e: its structured bindings, first_binding ..
+       first_binding + binding_count, which name it ([abi:mangle.name]) */
+    entity_index first_binding = 0;
+    uint32_t binding_count = 0;
 };
 
 /* [class.virtual], [abi:vtable-components]: what a dynamic class adds to
@@ -2533,6 +2542,11 @@ class semantic_analysis
     };
     /* a variable declared with a placeholder type: its initializer
        analysed, the type deduced, the variable's type made it */
+    /* the assignment-expression of an initializer "= E", "( E )" or
+       "{ E }" (direct: not the first; list: the last); false for another
+       form */
+    bool initializer_form(syntax_child init, syntax_child &clause, bool &direct,
+                          bool &list) const;
     analysis_result deduced_initializer(syntax_child init, entity_index e,
                                         qualified_type &type,
                                         initialized_value &value);
@@ -3552,6 +3566,52 @@ class semantic_analysis
     analysis_result for_range_declaration(syntax_child d,
                                           const expression_meaning &element,
                                           uint32_t &built);
+    /* ---- [dcl.struct.bind] structured bindings (dcl.struct.bind.cpp) ---- */
+    /* the structured binding declaration whose ref-qualifier_opt [
+       identifier-list ] starts at child first of declaration, its
+       decl-specifier-seq's meaning s; supplied: its initializer, analysed
+       ("= E", [stmt.ranged]/1), else its last children's.  Its variables
+       go to block_variables */
+    analysis_result
+    structured_binding_declaration(node_index declaration, uint32_t first,
+                                   const specified &s,
+                                   const expression_meaning *supplied);
+    /* the expression the structured binding b names, at t */
+    analysis_result structured_binding_use(token_index t, entity_index b,
+                                           expression_meaning &m);
+    /* an unnamed variable of the declaration (e, r_i, the array e's
+       elements are copied from) of type type, initialized by m */
+    analysis_result binding_variable(node_index n, expression_meaning &m,
+                                     qualified_type type, bool named,
+                                     bool direct, bool list, entity_index &v);
+    analysis_result array_binding_object(node_index n, token_index at,
+                                         expression_meaning &m,
+                                         const specified &s, bool direct,
+                                         entity_index &e);
+    analysis_result tuple_size_of(node_index n, qualified_type type,
+                                  bool &found, uint64_t &value);
+    analysis_result tuple_element_of(node_index n, uint32_t i,
+                                     qualified_type type,
+                                     qualified_type &element);
+    analysis_result binding_get_call(node_index n, token_index at, uint32_t i,
+                                     entity_index e, qualified_type type,
+                                     expression_meaning &m);
+    analysis_result index_argument(node_index n, uint32_t template_index,
+                                   uint32_t i, template_argument &out);
+    analysis_result binding_members_class(node_index n, entity_index c,
+                                          entity_index &holder);
+    uint32_t binding_member_count(entity_index c) const;
+    /* the class template std::NAME, plus one (0: none declared) */
+    uint32_t std_class_template(const char *name);
+    /* the last expression a structured binding's name gave and that
+       binding: decltype of it is the referenced type
+       ([dcl.type.decltype]/1.1) */
+    uint32_t last_binding_node = 0;
+    entity_index last_binding = 0;
+    /* the variables binding_variable makes: linkage::none automatic,
+       else of static storage duration with this linkage (at namespace
+       scope) */
+    linkage binding_storage = linkage::none;
     analysis_result jump_statement(node_index n, uint32_t &built);
     analysis_result labeled_statement(node_index n, uint32_t &built);
     analysis_result case_label(node_index n, syntax_child value,
@@ -3762,14 +3822,17 @@ class semantic_analysis
        whose deduction from the call's arguments succeeds, appended to
        candidates; with first_arguments, where each one's deduced
        arguments start in all */
-    analysis_result
-    template_candidates(node_index n, const owned_array<uint32_t> &group,
-                        const expression_meaning *meanings, uint32_t count,
-                        owned_array<overload_candidate> &candidates,
-                        owned_array<uint32_t> *first_arguments = nullptr,
-                        owned_array<template_argument> *all = nullptr,
-                        const owned_array<syntax_child> *written = nullptr,
-                        node_index written_at = 0);
+    /* specified: template arguments already analysed, put before what
+       is deduced (as written's are) */
+    analysis_result template_candidates(
+        node_index n, const owned_array<uint32_t> &group,
+        const expression_meaning *meanings, uint32_t count,
+        owned_array<overload_candidate> &candidates,
+        owned_array<uint32_t> *first_arguments = nullptr,
+        owned_array<template_argument> *all = nullptr,
+        const owned_array<syntax_child> *written = nullptr,
+        node_index written_at = 0,
+        const owned_array<template_argument> *specified = nullptr);
     /* a call's template-id naming several function templates: its
        template-arguments as written, checked against each template by
        template_candidates ([temp.over]/1), from template_callee_parts to
