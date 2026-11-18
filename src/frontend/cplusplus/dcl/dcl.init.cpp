@@ -615,7 +615,8 @@ analysis_result semantic_analysis::initialize_from(node_index at,
                           "characters",
                           "dcl.init");
     }
-    analysis_result r = expression(clause, m);
+    /* [over.over]/1: "an object or reference being initialized" */
+    analysis_result r = target_expression(clause, type, m);
     if (r != analysis_result::well_formed)
         return r;
     return initialize_with(at, m, type, direct, list, result);

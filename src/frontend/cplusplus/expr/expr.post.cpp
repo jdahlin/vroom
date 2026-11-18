@@ -586,7 +586,19 @@ analysis_result semantic_analysis::call(node_index n, expression_meaning &m)
             owned_array<qualified_type> types;
             for (syntax_child a : arguments) {
                 expression_meaning e;
-                if (!syntax_is(tree, a, syntax_kind::braced_init_list)) {
+                token_index name = 0;
+                if (entity_index named = named_overload_set(a, name)) {
+                    /* [basic.lookup.argdep]/2: "If an argument is the name
+                       or address of an overload set, its associated
+                       entities and namespaces are the union of those
+                       associated with each of the members of the set";
+                       the argument is analysed for its parameter
+                       ([over.over], call_with) */
+                    owned_array<entity_index> members;
+                    overload_set(named, members);
+                    for (entity_index f : members)
+                        types.append(entity_table[f].type);
+                } else if (!syntax_is(tree, a, syntax_kind::braced_init_list)) {
                     r = expression(a, e);
                     if (r != analysis_result::well_formed)
                         return r;
@@ -727,10 +739,11 @@ analysis_result semantic_analysis::call_with(
                 r = list_initialization(a.index(), parameter, false, value);
             } else {
                 expression_meaning e;
-                if (i < early.size())
+                if (i < early.size() && early[i].node)
                     e = early[i];
                 else
-                    r = expression(a, e);
+                    /* [over.over]/1: "a parameter of a function" */
+                    r = target_expression(a, parameter, e);
                 /* an argument that is one token is reported at the call */
                 node_index at = n;
                 if (!a.is_token() && a.index())
@@ -751,7 +764,7 @@ analysis_result semantic_analysis::call_with(
         if (syntax_is(tree, a, syntax_kind::braced_init_list))
             return not_supported(n, "expr.call");
         expression_meaning e;
-        if (i < early.size())
+        if (i < early.size() && early[i].node)
             e = early[i];
         else
             r = expression(a, e);

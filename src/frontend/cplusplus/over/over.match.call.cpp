@@ -90,6 +90,11 @@ semantic_analysis::resolve_call(node_index n,
         if (syntax_is(tree, arguments[i], syntax_kind::braced_init_list))
             /* [over.ics.list]: list-initialization sequences */
             return not_supported(n, "over.ics.list");
+    for (const expression_meaning &e : early)
+        if (!e.node)
+            /* an overload set's name as an argument: the conversion
+               sequences of [over.ics.ref] and [over.over] together */
+            return not_supported(n, "over.over");
     for (size_t i = early.size(); i < arguments.size(); i++) {
         expression_meaning e;
         analysis_result r = expression(arguments[i], e);

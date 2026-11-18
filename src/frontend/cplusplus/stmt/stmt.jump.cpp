@@ -183,7 +183,8 @@ analysis_result semantic_analysis::return_statement(node_index n,
         }
     }
     expression_meaning m;
-    analysis_result r = expression(operand, m);
+    /* [over.over]/1: "the return value of a function" */
+    analysis_result r = target_expression(operand, returns, m);
     if (r != analysis_result::well_formed)
         return r;
     /* a void operand, or (an extension) one in a function returning void,

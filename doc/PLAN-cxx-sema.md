@@ -734,10 +734,23 @@ libstdc++ and json), since sema cannot analyse a declaration kept as tokens.
   not follow are no longer taken as built-in.  cxx-run 128/128,
   cxx-c-suites 0 wrong.  Left, as `not_supported`: operator=, (), [], ->,
   ->*, comma, unary &, <=> and the allocation functions, members defined
-  outside their class, [over.over] (an overload set's address),
-  [over.literal], [over.ics.list] and [over.match.list], member functions'
+  outside their class, [over.literal], [over.ics.list] and [over.match.list], member functions'
   default arguments, static and non-static members in one set.  The parser
   takes `(a < b) + (b < a)` for a template-id (the function is not parsed).
+- Status (2026-11-18, [over.over]): `over/over.over.cpp`'s
+  `target_expression` analyses an expression for a target type: an
+  unqualified name of an overload set of non-member functions (in
+  parentheses, after &) is the function whose type is the target's
+  function type (named_entity takes the token for it).  The targets: an
+  initialized object or reference, the left side of =, a function's
+  parameter (an argument found by argument-dependent lookup is analysed for
+  its parameter; one of an overloaded callee is not analysed), the return
+  value, a cast.  A function that differs only in its exception
+  specification or return type, a member function (a pointer to member)
+  and a qualified name are not analysed.  Test:
+  `src/test/cxx/run/overload-address.cpp`.  `bench/cxx-sema.py`: 26592
+  declarations as clang, 0 wrong, 0 refuted; lookup 10161; CXX/over 1259
+  as clang.  cxx-run 132/132, cxx-c-suites 0 wrong.
 
 ### S4. Classes and the object model (parallel with S3)
 

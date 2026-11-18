@@ -115,7 +115,11 @@ analysis_result semantic_analysis::assignment(node_index n,
         tokens[children[1].index()].op_or_punc);
     expression_meaning left, right;
     analysis_result r = expression(children[0], left);
-    if (r == analysis_result::well_formed)
+    /* [over.over]/1: "the left side of an assignment" */
+    if (r == analysis_result::well_formed &&
+        op == preprocessing_op_or_punc::EQUAL)
+        r = target_expression(children[2], left.type, right);
+    else if (r == analysis_result::well_formed)
         r = expression(children[2], right);
     if (r != analysis_result::well_formed)
         return r;

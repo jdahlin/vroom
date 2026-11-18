@@ -1793,6 +1793,19 @@ class semantic_analysis
                               const owned_array<syntax_child> &arguments,
                               const owned_array<expression_meaning> &early,
                               expression_meaning &m);
+    /* [over.over]: the expression e analysed for the target type target:
+       a name of an overload set (perhaps in parentheses, after &) as the
+       function whose type the target's function type is; others as
+       expression() does */
+    analysis_result target_expression(syntax_child e, qualified_type target,
+                                      expression_meaning &m);
+    /* the first function of the overload set e names that way (its name's
+       token at), 0 if e is no such name */
+    entity_index named_overload_set(syntax_child e, token_index &at) const;
+    /* ... the token of that name and the function chosen, which
+       named_entity takes it for (0 elsewhere) */
+    token_index overload_target_token = 0;
+    entity_index overload_target_choice = 0;
     /* ---- [over.oper] operator functions (over/over.oper.cpp) ---- */
     /* the name of the operator function of op, as an identifier number
        (operator+ for both forms of +, [over.unary]/2) */

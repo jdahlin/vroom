@@ -547,9 +547,13 @@ analysis_result semantic_analysis::named_entity(token_index t, entity_index e,
 {
     if (entity_table[e].kind == entity_kind::none)
         return not_supported(current_declaration, "basic.lookup.unqual");
+    /* [over.over]: the function target_expression chose for the name */
+    bool chosen = t && t == overload_target_token;
+    if (chosen)
+        e = overload_target_choice;
     /* [over.over]/1 (below): an overload set's name names no one function */
     if (entity_table[e].kind != entity_kind::function ||
-        !entity_table[e].next_overload || t == overloaded_callee)
+        !entity_table[e].next_overload || t == overloaded_callee || chosen)
         used(t, e);
     if (entity_table[e].kind == entity_kind::enumerator)
         return enumerator_value(t, e, m);
@@ -563,11 +567,11 @@ analysis_result semantic_analysis::named_entity(token_index t, entity_index e,
        from S determined based on the target type required in the context":
        not analysed; the name of a function called is [over.call.func]'s */
     if (x.kind == entity_kind::function && x.next_overload &&
-        t != overloaded_callee)
+        t != overloaded_callee && !chosen)
         return not_supported(current_declaration, "over.over");
     /* [dcl.fct.def.delete]/2 (of an overload set: the function chosen,
        resolve_call) */
-    if (x.kind == entity_kind::function && !x.next_overload) {
+    if (x.kind == entity_kind::function && (!x.next_overload || chosen)) {
         analysis_result r = deleted_use(t, e);
         if (r != analysis_result::well_formed)
             return r;
