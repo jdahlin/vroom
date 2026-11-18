@@ -180,4 +180,18 @@ analysis_result semantic_analysis::member_default_arguments(entity_index c)
     return result;
 }
 
+void semantic_analysis::defer_default_arguments(
+    entity_index f, node_index declaration,
+    const owned_array<parameter_meaning> &list)
+{
+    pending_default_arguments p;
+    p.function = f;
+    p.declaration = declaration;
+    p.first = static_cast<uint32_t>(member_default_parameters.size());
+    p.count = static_cast<uint32_t>(list.size());
+    for (const parameter_meaning &q : list)
+        member_default_parameters.append(q);
+    pending_defaults.append(p);
+}
+
 } // namespace cplusplus

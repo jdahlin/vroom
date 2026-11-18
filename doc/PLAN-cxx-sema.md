@@ -816,12 +816,23 @@ libstdc++ and json), since sema cannot analyse a declaration kept as tokens.
   member function bodies (`member_default_arguments`, dcl.fct.default.cpp);
   an operator function's other than operator()'s is ill-formed
   ([over.oper]/10).  Not analysed: a default argument that may name a
-  non-static member or uses this (/8, /9), a constructor's, and default
+  non-static member or uses this (/8, /9), and default
   arguments added by a definition outside the class (/6: the member's calls
   then do not know its defaults).  Test:
   `src/test/cxx/run/member-default-arguments.cpp`.  `bench/cxx-sema.py`:
   27330 declarations as clang, 0 wrong, 448 we accept that clang rejects,
   0 refuted.  cxx-run 156/156, cxx-c-suites 0 wrong.
+- Status (2026-11-18, constructors' default arguments): deferred like
+  other member functions' (`defer_default_arguments`) and taken by
+  `construct` for the parameters a call leaves; a constructor whose
+  default arguments make it a default constructor is one.  Not analysed:
+  a constructor of first parameter X, X& or X&& whose other parameters
+  have default arguments (a copy or move constructor, [class.copy.ctor]/1),
+  and an implicitly-defined special member that would be ill-formed
+  (deleted, [class.default.ctor]/2).  Test:
+  `src/test/cxx/run/constructor-default-arguments.cpp`.
+  `bench/cxx-sema.py`: 27355 declarations as clang, 0 wrong, 448 we accept
+  that clang rejects, 0 refuted.  cxx-run 160/160, cxx-c-suites 0 wrong.
 
 ### S4. Classes and the object model (parallel with S3)
 

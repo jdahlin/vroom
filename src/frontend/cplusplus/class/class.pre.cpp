@@ -1126,14 +1126,7 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
                                   "an operator function cannot have default "
                                   "arguments",
                                   "over.oper");
-            pending_default_arguments p;
-            p.function = e;
-            p.declaration = declaration;
-            p.first = static_cast<uint32_t>(member_default_parameters.size());
-            p.count = static_cast<uint32_t>(parameters.size());
-            for (const parameter_meaning &q : parameters)
-                member_default_parameters.append(q);
-            pending_defaults.append(p);
+            defer_default_arguments(e, declaration, parameters);
         }
     } else if (has_defaults) {
         /* /3: a default argument of a member that is not a function */

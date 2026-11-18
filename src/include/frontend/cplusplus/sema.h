@@ -1215,6 +1215,9 @@ class semantic_analysis
     /* ... analysed now, of the complete class c */
     bool analysing_member_defaults = false;
     analysis_result member_default_arguments(entity_index c);
+    /* ... of the member function f declared by declaration: kept for then */
+    void defer_default_arguments(entity_index f, node_index declaration,
+                                 const owned_array<parameter_meaning> &list);
     /* the default arguments' initializations: a function's are
        [entity::first_default .. + its parameter count), 0 for a parameter
        without one */

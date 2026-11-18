@@ -135,10 +135,15 @@ analysis_result semantic_analysis::special_member_declarator(
     if (r != analysis_result::well_formed)
         return r;
     /* [dcl.fct.default]: a member function's default arguments are a
-       complete-class context ([class.mem]/6), not analysed */
-    for (const parameter_meaning &p : function_parameters)
+       complete-class context ([class.mem]/6): analysed with the class
+       complete (member_default_arguments) */
+    owned_array<parameter_meaning> listed;
+    bool has_defaults = false;
+    for (const parameter_meaning &p : function_parameters) {
+        listed.append(p);
         if (p.default_argument.index())
-            return not_supported(declaration, "dcl.fct.default");
+            has_defaults = true;
+    }
     if (!m.has_id || m.qualifier || m.aligned ||
         (m.gnu_flags & (gnu_packed | gnu_used)))
         return not_supported(declaration, "class.ctor");
@@ -169,6 +174,20 @@ analysis_result semantic_analysis::special_member_declarator(
                                        "in the member-specification",
                                        "class.mem");
     } else {
+        if (has_defaults && f.parameter_count > 1 &&
+            listed.size() == f.parameter_count &&
+            listed[1].default_argument.index()) {
+            /* [class.copy.ctor]/1, /5: a first parameter of X, X& or
+               X&& and the other parameters' default arguments: a copy or
+               move constructor, or ill-formed (X), not told apart */
+            qualified_type first = parameters[0];
+            const struct type &r = type_table[first.unqualified()];
+            if (r.kind == type_kind::lvalue_reference ||
+                r.kind == type_kind::rvalue_reference)
+                first = r.operand;
+            if (first.unqualified() == entity_table[c].type.unqualified())
+                return not_supported(declaration, "class.copy.ctor");
+        }
         for (uint32_t i = 0; i < f.parameter_count; i++) {
             /* [class.copy.ctor]/5: "A declaration of a constructor for a
                class X is ill-formed if its first parameter is of type cv X
@@ -208,6 +227,8 @@ analysis_result semantic_analysis::special_member_declarator(
     x.access = access;
     x.linkage_of_name = entity_table[c].linkage_of_name;
     entity_table.add_declaration(e, declaration);
+    if (has_defaults)
+        defer_default_arguments(e, declaration, listed);
     if (kind == special_member::destructor) {
         entity_table[c].destructor = e;
     } else if (!entity_table[c].first_constructor) {
@@ -371,6 +392,16 @@ semantic_analysis::construct(node_index at, qualified_type type,
         if (r != analysis_result::well_formed)
             return r;
         nodes.append(one.node);
+    }
+    /* [dcl.fct.default]/1: the default arguments of the parameters left */
+    size_t count =
+        type_table[entity_table[chosen].type.unqualified()].parameter_count;
+    for (size_t i = n; i < count; i++) {
+        const entity &k = entity_table[chosen];
+        if (k.unknown_defaults || !k.first_default ||
+            !default_argument_nodes[k.first_default + i])
+            return not_supported(at, "dcl.fct.default");
+        nodes.append(default_argument_nodes[k.first_default + i]);
     }
     expression_meaning made;
     made.type = qualified_type::make(type.unqualified(), cv_none);
@@ -921,6 +952,11 @@ analysis_result semantic_analysis::implicit_definitions(entity_index c,
         function_state.active = false;
         function_state.function = 0;
         function_state.this_entity = 0;
+        if (r == analysis_result::ill_formed)
+            /* [class.default.ctor]/2, [class.copy.ctor]/10: a defaulted
+               special member that would be ill-formed is defined as
+               deleted (an error only where it is used): not analysed */
+            return not_supported(n, "class.default.ctor");
         if (r != analysis_result::well_formed)
             return r;
     }
