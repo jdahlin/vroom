@@ -221,6 +221,11 @@ enum class entity_kind : uint8_t {
        known until instantiation; its type is a type_kind::dependent of
        it, value the qualifier Q (a type_index), name the identifier */
     dependent_member,
+    /* not an entity: [ext:clang_type_traits] a clang-type-transformation
+       of a dependent type, __remove_cv(T); its type is a
+       type_kind::dependent of it, value the operand (cv << 32 | its
+       type_index), name the keyword's identifier */
+    type_transformation,
     /* not an entity: a block scope or a function parameter scope
        ([basic.scope.block], [basic.scope.param]), the scope the names
        declared in it are bound in */
@@ -1851,6 +1856,9 @@ class semantic_analysis
                               bool *decltype_auto = nullptr) const;
     /* [dcl.type.decltype]/1: the type decltype ( expression ) denotes */
     analysis_result decltype_type(node_index n, qualified_type &type);
+    analysis_result clang_type_transformation(node_index n,
+                                              qualified_type &type);
+    owned_array<entity_index> type_transformations;
     /* the type decltype(E) denotes for E analysed as m, E unparenthesized
        id-expression or class member access when named; false when the
        entity it names is not known */
