@@ -1263,6 +1263,18 @@ int64_t cpp_attribute_value(const implementation_defined_behavior &b,
         {"nodiscard", 201907},          {"noreturn", 200809},
         {"unlikely", 201803},
     };
+    /* [impl.clang] __name__ is name, in an attribute-token and in its
+       attribute-namespace (__gnu__::__const__ is gnu::const; clang's
+       normalization of attribute names), except in std's */
+    auto strip = [](const char *&s, size_t &n) {
+        if (n > 4 && s[0] == '_' && s[1] == '_' && s[n - 1] == '_' &&
+            s[n - 2] == '_')
+            s += 2, n -= 4;
+    };
+    bool std_scope = scope_length == 3 && !memcmp(scope, "std", 3);
+    strip(scope, scope_length);
+    if (!std_scope)
+        strip(name, length);
     if (!scope_length)
         for (const auto &a : table18)
             if (strlen(a.name) == length && !memcmp(a.name, name, length))

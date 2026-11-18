@@ -422,9 +422,17 @@ static void dump_lookup_claims(const semantic_analysis &analysis,
     first.resize(analysis.entity_table.size());
     for (size_t e = 0; e < analysis.entity_table.size(); e++)
         first[e] = 0;
-    for (const declared_name &d : analysis.declared)
-        if (d.entity && d.id && !first[d.entity])
-            first[d.entity] = d.id;
+    /* only a name of the entity's first declaration: one declaration
+       analysis records no declared_name for (a member's, in its class)
+       leaves the entity's claims out rather than naming a later one */
+    for (const declared_name &d : analysis.declared) {
+        if (!d.entity || !d.id || first[d.entity])
+            continue;
+        uint32_t f = analysis.entity_table[d.entity].first_declaration;
+        if (f && analysis.entity_table.declaration(f).node != d.declaration)
+            continue;
+        first[d.entity] = d.id;
+    }
     owned_buffer spelling;
     for (const semantic_analysis::name_use &u : analysis.name_uses) {
         if (!u.entity || u.entity >= analysis.entity_table.size())

@@ -1295,6 +1295,26 @@ lines:
   [temp.names] 9666, [temp.fct] 5023; with S3's operators, declarations
   as clang 27232, 0 we reject and clang accepts, 0 refuted; cxx-run
   132/132; cxx-c-suites unchanged.
+  Then [dcl.pre]/6 on, with what enforcing it had shown wrong: GCC's
+  imaginary constants (`0.0j`, typed as without the suffix) unsupported
+  [ext.gnu]; `__has_builtin` of the builtin templates
+  (`__make_integer_seq`, `__type_pack_element`, ...: clang's
+  BuiltinTemplates.td, added to `gen-cplusplus-data.py`'s list and their
+  rows to `feature-checks.inc`, asked of clang 23.1.4 as the rest was of
+  23.1.6) and `__has_cpp_attribute` of `__name__` spellings (`gnu::__const__`,
+  `__gnu__::const`) answer as clang (the C preprocessor's `-E` still does
+  not: a separate path); a typedef-name of a declaration analysis did not
+  follow no longer finds the class its specifier defined (`typedef struct
+  S {...} S __attribute__((aligned(8)))`); a floating value cast to an
+  enumeration whose underlying type is bool truncates ([conv.fpint]/1:
+  0.5 is false, 2.5 has no value, as clang 23; CWG1094 changes it); a weak
+  variable is not usable in constant expressions (clang); lookup claims
+  name an entity only from its first declaration (a static data member's
+  in-class one has no declared name, so its definition was claimed).
+  cxx-sema: declarations as clang 27232 -> 27704, 0 we reject and clang
+  accepts, 0 refuted (types 39708 -> 47474, constants 15419 -> 18879,
+  lookup 11524 -> 12628 verified); [expr.const] is out of the first ten
+  (static_assert's 11002); cxx-run 132/132; cxx-c-suites unchanged.
 
 ### S7. Exceptions and RTTI
 

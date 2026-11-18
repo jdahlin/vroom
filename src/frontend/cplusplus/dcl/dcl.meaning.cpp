@@ -469,6 +469,23 @@ void semantic_analysis::hold_names(node_index declaration)
             entity_table.bind(current_scope, name, e);
             continue;
         }
+        if (found &&
+            (entity_table[found].kind == entity_kind::class_type ||
+             entity_table[found].kind == entity_kind::enumeration) &&
+            declared_by(found, declaration)) {
+            /* a declarator-id never names the class or enumeration its
+               declaration's specifier defines (typedef struct S {...} S
+               __attribute__((aligned(8)))): the name is the declarator's
+               entity's, not known; the class stays the one an
+               elaborated-type-specifier would find, behind it
+               ([basic.scope.hiding]/2) */
+            entity_index e =
+                entity_table.make(entity_kind::none, name, current_scope);
+            entity_table[e].held_by_template = by_template;
+            entity_table[e].hidden_type = found;
+            entity_table.bind(current_scope, name, e);
+            continue;
+        }
         if (found) {
             /* a declaration of the name that analysis could not follow
                (an overload, a redeclaration with default arguments ...):

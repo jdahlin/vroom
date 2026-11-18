@@ -642,18 +642,31 @@ analysis_result semantic_analysis::empty_declaration(node_index)
  * the value of the expression when so converted is true, the declaration
  * has no effect.  Otherwise, the program is ill-formed".
  *
- * Not analysed yet (bool_constant_expression is its entry point): the
- * assertions of clang's tests reach values analysis has wrong or does not
- * have, and a false one is an error.  With the rule on, cxx-sema.py had
- * 11 declarations we reject and clang accepts and 310 refuted claims:
- * _Complex literals typed double, __has_builtin and __has_cpp_attribute,
- * alignof of a class with an aligned attribute, static_cast of a
- * floating value to an enumeration, sizeof of an array whose bound an
- * earlier declaration gave.
+ * An expression that is not a constant expression is left unsupported:
+ * analysis takes some expressions for ones that are not (an invocation of
+ * a constexpr function, until the evaluator has its rules).
  */
 analysis_result semantic_analysis::static_assert_declaration(node_index n)
 {
-    return not_supported(n, "expr.const");
+    const syntax_node &node = tree[n];
+    const syntax_child *children = tree.children(n);
+    /* static_assert ( constant-expression [, string-literal] ) ; */
+    if (node.child_count < 5)
+        return not_supported(n, "dcl.pre");
+    bool constant = false, value = false;
+    analysis_result r =
+        bool_constant_expression(n, children[2], constant, value);
+    if (r != analysis_result::well_formed)
+        return r;
+    if (!constant)
+        return not_supported(n, "expr.const");
+    if (!value)
+        return ill_formed(n,
+                          "if the value of the expression when so converted "
+                          "is true, the declaration has no effect; "
+                          "otherwise, the program is ill-formed",
+                          "dcl.pre");
+    return analysis_result::well_formed;
 }
 
 /*
@@ -1254,6 +1267,11 @@ analysis_result semantic_analysis::declare_with_initializer(
                           record.kind == type_kind::fundamental &&
                           is_integral(type);
     e.usable = constness::not_constant;
+    /* [impl.clang] a weak variable's initializer "is not considered
+       constant because it may be different at runtime" ([ext:gnu_attributes]
+       weak): not usable in constant expressions */
+    if (e.gnu_flags & gnu_weak)
+        integral_const = false;
     if (s.constexpr_ || integral_const) {
         e.usable = value.evaluation;
         e.value = value.value;

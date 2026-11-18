@@ -1652,6 +1652,8 @@ class semantic_analysis
        token at, with its node */
     expression_meaning integer_constant(fundamental_type type, uint64_t value,
                                         token_index at);
+    /* [ext.gnu] an imaginary constant: a numeric literal suffixed i or j */
+    bool imaginary_literal(token_index t) const;
     /* [expr.prim.id.unqual] */
     analysis_result id_expression(token_index t, expression_meaning &m);
     /* [expr.prim.id.qual] */

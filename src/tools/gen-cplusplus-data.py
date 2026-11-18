@@ -344,7 +344,7 @@ def feature_check_queries():
     queries += [('declspec_attribute', n) for n in sorted(declspec)]
     names = set()
     for f in ('Builtins.td', 'BuiltinsAArch64.td', 'BuiltinsAArch64Base.td', 'Builtins.def',
-              'BuiltinsARMBase.td', 'TokenKinds.def'):
+              'BuiltinsARMBase.td', 'BuiltinTemplates.td', 'TokenKinds.def'):
         try:
             text = llvm_file('clang/include/clang/Basic/' + f)
         except Exception:
