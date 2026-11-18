@@ -465,6 +465,24 @@ struct dynamic_class {
     uint32_t first_slot = 0, slot_count = 0;
     bool abstract = false;
     entity_index key_function = 0;
+    /* [abi:vtable-general]: the virtual table group, the primary virtual
+       table (semantic_analysis::vtable_groups[first_group], whose slots are
+       first_slot .. first_slot + slot_count) and a secondary one per
+       dynamic base class subobject that is not a primary base, in the
+       order of [abi:vtable-construction] (each non-primary dynamic base's
+       group, in declaration order) */
+    uint32_t first_group = 0, group_count = 0;
+};
+
+/* one virtual table of a group ([abi:vtable-general]): the offset of the
+   subobject whose virtual table pointer points into it (its offset to
+   top negated), and its function slots, vtable_slots[first_slot ..
+   first_slot + slot_count); vtable_adjustments has, per slot, what a
+   this-adjusting thunk adds to the subobject's address to call the
+   overrider ([abi:thunks]: 0, the function itself) */
+struct vtable_group {
+    uint64_t offset = 0;
+    uint32_t first_slot = 0, slot_count = 0;
 };
 
 /* one declaration of an entity: the syntax node that declares it */
@@ -949,6 +967,18 @@ class semantic_analysis
        functions (dynamic_class::first_slot) */
     owned_array<dynamic_class> dynamic_classes;
     owned_array<entity_index> vtable_slots;
+    owned_array<int64_t> vtable_adjustments;
+    owned_array<vtable_group> vtable_groups;
+    /* while a class's group is made: per slot, whether the class itself
+       overrides it (its thunk's adjustment is the group's offset, known
+       after the layout: dynamic_class_offsets) */
+    owned_array<bool> vtable_own;
+    struct group_source {
+        entity_index base = 0;
+        uint64_t offset = 0;
+    };
+    owned_array<group_source> vtable_group_sources;
+    void dynamic_class_offsets(entity_index c);
     const dynamic_class *dynamic_of(entity_index c) const
     {
         if (!entity_table[c].dynamic)
@@ -1360,6 +1390,7 @@ class semantic_analysis
                                    node_index declaration, token_index id,
                                    bool virtual_specified);
     uint32_t vtable_pointer_store(entity_index c, token_index at);
+    bool overrides_function(entity_index e, entity_index g) const;
     /* whether the syntax is a virt-specifier or virt-specifier-seq
        ([class.mem]/1), and which */
     bool virt_specifier(syntax_child d, bool &override_, bool &final_) const;

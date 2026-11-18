@@ -6,8 +6,10 @@
  * virtual function of a base ([class.virtual]/1, /2); at the class's
  * closing } its virtual table is made ([abi:vtable-components]): the
  * primary base's slots, each replaced by the class's overrider, then the
- * class's new virtual functions in declaration order.  What is analysed:
- * one dynamic base at most, the first (the primary base, at offset 0);
+ * class's new virtual functions in declaration order, then a secondary
+ * table per other dynamic base ([abi:vtable-general]), whose slots the
+ * class overrides call through non-virtual thunks.  What is analysed: no
+ * virtual bases ([class.mi]), the primary base the first base;
  * overriders with the overridden function's type (no covariant returns);
  * no virtual destructors (D0 needs operator delete, R8), no virtual
  * operator functions, no virtual functions in unions or local classes.
@@ -17,6 +19,17 @@
 
 namespace cplusplus
 {
+
+/* [class.virtual]/2: whether member function e has the name,
+   parameter-type-list and cv-qualification of virtual function g */
+bool semantic_analysis::overrides_function(entity_index e, entity_index g) const
+{
+    const entity &gx = entity_table[g];
+    return gx.name == entity_table[e].name &&
+           gx.member_cv == entity_table[e].member_cv &&
+           same_parameters(type_table, gx.type.unqualified(),
+                           entity_table[e].type.unqualified());
+}
 
 /*
  * A non-static member function e just declared in class c: whether it is
@@ -35,9 +48,9 @@ analysis_result semantic_analysis::virtual_member(entity_index c,
         virtual_specified || virt_override || virt_final || virt_pure;
     /* [class.virtual]/2: overriding: the same name, parameter-type-list,
        cv-qualification and ref-qualifier as a virtual function of a base
-       (any slot of a direct base's virtual table is one, inherited or
-       not, under its first declaration's name) */
-    uint32_t overrides = ~0u;
+       (any slot of a direct base's virtual table group is one, inherited
+       or not, under its first declaration's name); each function
+       overridden is checked below, in every base it is in */
     entity_index overridden = 0;
     const entity &x = entity_table[c];
     for (uint32_t i = 0; i < x.base_count; i++) {
@@ -47,22 +60,24 @@ analysis_result semantic_analysis::virtual_member(entity_index c,
         const dynamic_class *d = dynamic_of(b);
         if (!d)
             continue;
-        for (uint32_t k = 0; k < d->slot_count; k++) {
-            entity_index g = vtable_slots[d->first_slot + k];
-            const entity &gx = entity_table[g];
-            if (gx.name != entity_table[e].name ||
-                gx.member_cv != entity_table[e].member_cv ||
-                !same_parameters(type_table, gx.type.unqualified(),
-                                 entity_table[e].type.unqualified()))
+        const vtable_group &first = vtable_groups[d->first_group];
+        const vtable_group &last =
+            vtable_groups[d->first_group + d->group_count - 1];
+        for (uint32_t k = first.first_slot;
+             k < last.first_slot + last.slot_count; k++) {
+            entity_index g = vtable_slots[k];
+            if (!overrides_function(e, g))
                 continue;
-            if (overridden)
-                /* two bases' functions overridden: more than one dynamic
-                   base, which dynamic_class_record refuses anyway */
+            if (overridden && overridden != g &&
+                entity_table[g].type != entity_table[overridden].type)
                 return not_supported(declaration, "class.virtual");
-            overridden = g;
-            overrides = k;
+            if (entity_table[g].final_function)
+                overridden = g;
+            if (!overridden)
+                overridden = g;
         }
     }
+    uint32_t overrides = ~0u;
     if (!overridden && !specified)
         return analysis_result::well_formed;
     if (entity_table[e].operator_function || entity_table[e].constexpr_ ||
@@ -152,23 +167,19 @@ analysis_result semantic_analysis::dynamic_class_record(entity_index c,
 {
     const entity &x = entity_table[c];
     entity_index primary = 0;
-    uint32_t dynamic_bases = 0;
     for (uint32_t i = 0; i < x.base_count; i++) {
         entity_index b = type_table[entity_table[class_bases[x.first_base + i]]
                                         .type.unqualified()]
                              .entity;
         if (!entity_table[b].dynamic)
             continue;
-        dynamic_bases++;
-        if (i)
+        if (i && !primary)
             /* a primary base that is not the first base: allocated first
                ([abi:class-types] II), out of declaration order */
             return not_supported(n, "class.virtual");
-        primary = class_bases[x.first_base + i];
+        if (!primary)
+            primary = class_bases[x.first_base + i];
     }
-    if (dynamic_bases > 1)
-        /* secondary virtual tables and this-adjusting thunks */
-        return not_supported(n, "class.virtual");
     bool any = primary != 0;
     for (const declared_virtual &v : declared_virtuals)
         if (v.c == c)
@@ -182,34 +193,99 @@ analysis_result semantic_analysis::dynamic_class_record(entity_index c,
     dynamic_class d;
     d.primary_base = primary;
     d.first_slot = static_cast<uint32_t>(vtable_slots.size());
+    d.first_group = static_cast<uint32_t>(vtable_groups.size());
+    /* a slot copied from a base's group, with its adjustment */
+    auto copy = [&](uint32_t from) {
+        vtable_slots.append(vtable_slots[from]);
+        vtable_adjustments.append(vtable_adjustments[from]);
+        vtable_own.append(false);
+    };
+    /* [abi:vtable-components]: the primary virtual table: the primary
+       base's, then a slot per virtual function the class declares that
+       overrides none of the primary base's functions */
+    const dynamic_class *pd = nullptr;
     if (primary) {
         entity_index b =
             type_table[entity_table[primary].type.unqualified()].entity;
-        const dynamic_class &bd = dynamic_classes[entity_table[b].dynamic - 1];
-        for (uint32_t k = 0; k < bd.slot_count; k++)
-            vtable_slots.append(vtable_slots[bd.first_slot + k]);
-        d.slot_count = bd.slot_count;
+        pd = dynamic_of(b);
+        for (uint32_t k = 0; k < pd->slot_count; k++)
+            copy(pd->first_slot + k);
+        d.slot_count = pd->slot_count;
     }
     for (const declared_virtual &v : declared_virtuals) {
         if (v.c != c)
             continue;
-        if (v.overrides != ~0u) {
-            vtable_slots[d.first_slot + v.overrides] = v.f;
-            entity_table[v.f].vtable_slot = v.overrides;
-            continue;
+        bool replaced = false;
+        for (uint32_t k = 0; k < d.slot_count; k++) {
+            uint32_t s = d.first_slot + k;
+            if (!overrides_function(v.f, vtable_slots[s]))
+                continue;
+            vtable_slots[s] = v.f;
+            vtable_adjustments[s] = 0;
+            vtable_own[s] = true;
+            if (!replaced)
+                entity_table[v.f].vtable_slot = k;
+            replaced = true;
         }
+        if (replaced)
+            continue;
         entity_table[v.f].vtable_slot = d.slot_count;
         vtable_slots.append(v.f);
+        vtable_adjustments.append(0);
+        vtable_own.append(true);
         d.slot_count++;
     }
+    vtable_group primary_group;
+    primary_group.first_slot = d.first_slot;
+    primary_group.slot_count = d.slot_count;
+    vtable_groups.append(primary_group);
+    vtable_group_sources.append(group_source{});
+    /* then the secondary virtual tables: the primary base's own secondary
+       ones, then each other dynamic base's group, each slot the class
+       overrides replaced (called through a this-adjusting thunk) */
+    auto secondary = [&](entity_index base, const dynamic_class *bd,
+                         uint32_t from) {
+        for (uint32_t g = from; g < bd->group_count; g++) {
+            const vtable_group &bg = vtable_groups[bd->first_group + g];
+            vtable_group group;
+            group.first_slot = static_cast<uint32_t>(vtable_slots.size());
+            group.slot_count = bg.slot_count;
+            for (uint32_t k = 0; k < bg.slot_count; k++) {
+                copy(bg.first_slot + k);
+                for (const declared_virtual &v : declared_virtuals)
+                    if (v.c == c &&
+                        overrides_function(v.f, vtable_slots.back())) {
+                        vtable_slots.back() = v.f;
+                        vtable_own.back() = true;
+                    }
+            }
+            vtable_groups.append(group);
+            group_source source;
+            source.base = base;
+            source.offset = bg.offset;
+            vtable_group_sources.append(source);
+        }
+    };
+    if (pd)
+        secondary(primary, pd, 1);
+    for (uint32_t i = 0; i < x.base_count; i++) {
+        entity_index base = class_bases[x.first_base + i];
+        if (base == primary)
+            continue;
+        const dynamic_class *bd = dynamic_of(
+            type_table[entity_table[base].type.unqualified()].entity);
+        if (bd)
+            secondary(base, bd, 0);
+    }
+    d.group_count = static_cast<uint32_t>(vtable_groups.size()) - d.first_group;
     /* the key function is among all the class's virtual functions,
        overriders too, in declaration order */
     for (const declared_virtual &v : declared_virtuals)
         if (v.c == c && !d.key_function && !entity_table[v.f].pure &&
             !entity_table[v.f].inline_)
             d.key_function = v.f;
-    for (uint32_t k = 0; k < d.slot_count; k++)
-        if (entity_table[vtable_slots[d.first_slot + k]].pure)
+    for (uint32_t k = d.first_slot; k < vtable_slots.size(); k++)
+        if (entity_table[vtable_slots[k]].pure)
             d.abstract = true;
     if (d.abstract) {
         /* a member declared while the class was incomplete whose type
@@ -245,6 +321,30 @@ analysis_result semantic_analysis::dynamic_class_record(entity_index c,
     dynamic_classes.append(d);
     entity_table[c].dynamic = static_cast<uint32_t>(dynamic_classes.size());
     return analysis_result::well_formed;
+}
+
+/*
+ * After class c's layout: each secondary virtual table's subobject offset
+ * (its base subobject's offset plus the table's offset in that base) and
+ * the adjustment of each slot the class overrides there ([abi:thunks]: a
+ * non-virtual thunk subtracts the subobject's offset from this).
+ */
+void semantic_analysis::dynamic_class_offsets(entity_index c)
+{
+    const dynamic_class *d = dynamic_of(c);
+    if (!d)
+        return;
+    for (uint32_t g = d->first_group; g < d->first_group + d->group_count;
+         g++) {
+        vtable_group &group = vtable_groups[g];
+        const group_source &source = vtable_group_sources[g];
+        if (source.base)
+            group.offset = entity_table[source.base].offset + source.offset;
+        for (uint32_t k = 0; k < group.slot_count; k++)
+            if (vtable_own[group.first_slot + k])
+                vtable_adjustments[group.first_slot + k] =
+                    -static_cast<int64_t>(group.offset);
+    }
 }
 
 /* [class.abstract]/2: whether t is (an array of) an abstract class */

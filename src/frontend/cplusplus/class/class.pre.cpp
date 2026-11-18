@@ -488,6 +488,8 @@ analysis_result semantic_analysis::class_definition(node_index n,
     if (result == analysis_result::well_formed)
         result = dynamic_class_record(c, n);
     const char *layout_rule = itanium_class_layout(*this, c);
+    if (!layout_rule && result == analysis_result::well_formed)
+        dynamic_class_offsets(c);
     resume_outer();
     if (layout_rule && result == analysis_result::well_formed)
         result = not_supported(n, layout_rule);

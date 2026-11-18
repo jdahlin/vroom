@@ -424,8 +424,8 @@ analysis_result semantic_analysis::pointer_to_base(token_index at,
                                                    qualified_type type,
                                                    expression_meaning &m)
 {
-    uint64_t offset = 0;
     entity_index first = 0;
+    bool shifted = false;
     for (entity_index c = from; c != to;) {
         bool ambiguous = false;
         entity_index step = base_step(c, to, ambiguous);
@@ -440,14 +440,23 @@ analysis_result semantic_analysis::pointer_to_base(token_index at,
                                        "conversion is ill-formed",
                                        "conv.ptr");
         }
+        /* the conversion names the one step at a nonzero offset, whose
+           offset the lowering adds (else the first step) */
+        if (entity_table[step].offset) {
+            if (shifted)
+                return not_supported(current_declaration, "conv.ptr");
+            shifted = true;
+            first = step;
+        }
         if (!first)
             first = step;
-        offset += entity_table[step].offset;
         c = type_table[entity_table[step].type.unqualified()].entity;
     }
-    if (offset)
-        /* the null pointer check before the offset added */
-        return not_supported(current_declaration, "conv.ptr");
+    /* [conv.ptr]/3: "The result of the conversion is a pointer to the base
+       class subobject of the derived class object.  The null pointer value
+       is converted to the null pointer value of the destination type": a
+       base at a nonzero offset is the address plus its offset, after a
+       null check (the lowering's) */
     m.type = type;
     converted(m, conversion_kind::derived_to_base);
     if (m.node)

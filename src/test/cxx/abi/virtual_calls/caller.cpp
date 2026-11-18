@@ -1,4 +1,3 @@
-/* vcc-xfail: doc/PLAN-cxx-sema.md S4: [class.virtual] is not analysed */
 #include <stdio.h>
 
 #include "shared.h"
