@@ -232,8 +232,7 @@ analysis_result semantic_analysis::class_definition(node_index n,
         /* a class-virt-specifier, a base-clause of an unnamed class */
         return not_supported(n, "class.derived");
     standard_keyword key = p.keyword_of(tokens[head_children[0].index()]);
-    if (key != standard_keyword::class_ && key != standard_keyword::struct_ &&
-        key != standard_keyword::union_)
+    if (!is_class_key(key))
         return not_supported(n, "class.pre");
     /* #pragma pack and the like change the layout: no rules yet */
     if (tokens.files.layout_pragma)
@@ -584,8 +583,7 @@ analysis_result semantic_analysis::elaborated_type_specifier(node_index n,
     if (!node.child_count || !children[0].is_token())
         return not_supported(n, "dcl.type.elab");
     standard_keyword key = p.keyword_of(tokens[children[0].index()]);
-    if (key != standard_keyword::class_ && key != standard_keyword::struct_ &&
-        key != standard_keyword::union_)
+    if (!is_class_key(key))
         return not_supported(n, "dcl.type.elab");
     bool is_union = key == standard_keyword::union_;
     if (node.child_count == 3 &&

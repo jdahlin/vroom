@@ -1737,7 +1737,6 @@ class semantic_analysis
     analysis_result pointer_to_base(token_index at, entity_index from,
                                     entity_index to, qualified_type type,
                                     expression_meaning &m);
-    /* the subobject e (a base or a non-static data member) of *this */
     analysis_result defaulted_or_deleted_special_member(
         entity_index c, node_index n, syntax_child d, syntax_child body,
         uint8_t access, bool constexpr_specified, bool virtual_specified);
@@ -1746,8 +1745,21 @@ class semantic_analysis
                                               const specified &s);
     analysis_result default_member_initializer(token_index at, entity_index e,
                                                uint32_t &statement);
+    /* the subobject e (a base or a non-static data member) of *this */
     analysis_result subobject(token_index at, entity_index e,
                               expression_meaning &m);
+    /* [class.base.init]/13: c's direct bases, then its non-static data
+       members, in the order they are constructed */
+    void construction_order(entity_index c,
+                            owned_array<entity_index> &order) const;
+    /* the subobject object's initialization from value: its bytes, stored
+       as by an assignment, a statement */
+    uint32_t subobject_store(const expression_meaning &object,
+                             qualified_type type, token_index at,
+                             uint32_t value);
+    /* a block of the statements */
+    uint32_t block_statement(token_index at,
+                             const owned_array<uint32_t> &statements);
     /* the classes of the bases and members (arrays' elements) of c */
     void subobject_classes(entity_index c,
                            owned_array<entity_index> &out) const;

@@ -115,8 +115,7 @@ analysis_result semantic_analysis::friend_class(entity_index c, node_index n,
     if (!node.child_count || !parts[0].is_token())
         return not_supported(n, "class.friend");
     standard_keyword key = p.keyword_of(tokens[parts[0].index()]);
-    if (key != standard_keyword::class_ && key != standard_keyword::struct_ &&
-        key != standard_keyword::union_)
+    if (!is_class_key(key))
         return not_supported(n, "class.friend");
     if (node.child_count == 3) {
         /* a qualified name: [basic.lookup.elab]/3, a class declared

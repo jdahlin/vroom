@@ -436,6 +436,13 @@ enum class standard_keyword : uint8_t {
     extension,
 };
 
+/* [class.pre]/1: class-key: class, struct or union */
+inline bool is_class_key(standard_keyword k)
+{
+    return k == standard_keyword::class_ || k == standard_keyword::struct_ ||
+           k == standard_keyword::union_;
+}
+
 /* the keywords of an extension's own grammar (ext/extension-keywords.inc),
    when the extension is on */
 enum class extension_keyword : uint8_t {

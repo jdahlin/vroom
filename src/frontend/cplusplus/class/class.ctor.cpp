@@ -91,15 +91,7 @@ semantic_analysis::default_member_initializer(token_index at, entity_index e,
     r = initializer(syntax_child::node(init), type, value);
     if (r != analysis_result::well_formed)
         return r;
-    expression_meaning stored = object;
-    stored.type = qualified_type::make(type.unqualified(), cv_none);
-    stored.evaluation = constness::not_constant;
-    stored.entity = 0;
-    uint32_t assigned = expression_node(
-        semantic_kind::assignment, stored, at, object.node, value.node,
-        static_cast<uint8_t>(preprocessing_op_or_punc::EQUAL));
-    statement =
-        statement_node(semantic_kind::expression_statement, at, assigned);
+    statement = subobject_store(object, type, at, value.node);
     return analysis_result::well_formed;
 }
 
@@ -865,15 +857,7 @@ analysis_result semantic_analysis::ctor_initializer(syntax_child list,
             return r;
         /* the member's initialization: its bytes, stored as by an
            assignment to (*this).member */
-        expression_meaning stored = object;
-        stored.type = qualified_type::make(type.unqualified(), cv_none);
-        stored.evaluation = constness::not_constant;
-        stored.entity = 0;
-        uint32_t assigned = expression_node(
-            semantic_kind::assignment, stored, id, object.node, value.node,
-            static_cast<uint8_t>(preprocessing_op_or_punc::EQUAL));
-        initialized[slot] =
-            statement_node(semantic_kind::expression_statement, id, assigned);
+        initialized[slot] = subobject_store(object, type, id, value.node);
     }
     /* [class.base.init]/9: "In a non-delegating constructor, if a given
        potentially constructed subobject is not designated by a
@@ -949,12 +933,7 @@ analysis_result semantic_analysis::ctor_initializer(syntax_child list,
     if (initialized.size() == base_count)
         if (uint32_t store = vtable_pointer_store(c, at))
             statements.append(store);
-    built = statement_node(semantic_kind::block, at);
-    if (!statements.empty()) {
-        semantics[built].first =
-            semantics.list(&statements[0], statements.size());
-        semantics[built].count = static_cast<uint32_t>(statements.size());
-    }
+    built = block_statement(at, statements);
     return analysis_result::well_formed;
 }
 
@@ -985,6 +964,44 @@ analysis_result semantic_analysis::subobject(token_index at, entity_index e,
     m.node = expression_node(semantic_kind::indirection, m, at, m.node);
     return to_base(at, type_table[entity_table[e].type.unqualified()].entity,
                    m);
+}
+
+void semantic_analysis::construction_order(
+    entity_index c, owned_array<entity_index> &order) const
+{
+    const entity &x = entity_table[c];
+    for (uint32_t i = 0; i < x.base_count; i++)
+        order.append(class_bases[x.first_base + i]);
+    for (uint32_t i = 0; i < x.member_count; i++)
+        if (!entity_table[class_members[x.first_member + i]].base_subobject)
+            order.append(class_members[x.first_member + i]);
+}
+
+uint32_t semantic_analysis::subobject_store(const expression_meaning &object,
+                                            qualified_type type, token_index at,
+                                            uint32_t value)
+{
+    expression_meaning stored = object;
+    stored.type = qualified_type::make(type.unqualified(), cv_none);
+    stored.evaluation = constness::not_constant;
+    stored.entity = 0;
+    uint32_t assigned = expression_node(
+        semantic_kind::assignment, stored, at, object.node, value,
+        static_cast<uint8_t>(preprocessing_op_or_punc::EQUAL));
+    return statement_node(semantic_kind::expression_statement, at, assigned);
+}
+
+uint32_t
+semantic_analysis::block_statement(token_index at,
+                                   const owned_array<uint32_t> &statements)
+{
+    uint32_t built = statement_node(semantic_kind::block, at);
+    if (!statements.empty()) {
+        semantics[built].first =
+            semantics.list(&statements[0], statements.size());
+        semantics[built].count = static_cast<uint32_t>(statements.size());
+    }
+    return built;
 }
 
 /* the classes of the subobjects of class c (its bases' and its members',
@@ -1400,13 +1417,8 @@ analysis_result semantic_analysis::implicit_copy(entity_index c, node_index n,
                                                  uint32_t &built)
 {
     token_index at = tree[n].first_token;
-    const entity &x = entity_table[c];
     owned_array<entity_index> order;
-    for (uint32_t i = 0; i < x.base_count; i++)
-        order.append(class_bases[x.first_base + i]);
-    for (uint32_t i = 0; i < x.member_count; i++)
-        if (!entity_table[class_members[x.first_member + i]].base_subobject)
-            order.append(class_members[x.first_member + i]);
+    construction_order(c, order);
     owned_array<uint32_t> statements;
     for (entity_index e : order) {
         expression_meaning from;
@@ -1464,26 +1476,13 @@ analysis_result semantic_analysis::implicit_copy(entity_index c, node_index n,
         r = operand_value(n, from);
         if (r != analysis_result::well_formed)
             return r;
-        expression_meaning stored = object;
-        stored.type = qualified_type::make(type.unqualified(), cv_none);
-        stored.evaluation = constness::not_constant;
-        stored.entity = 0;
-        uint32_t assigned = expression_node(
-            semantic_kind::assignment, stored, at, object.node, from.node,
-            static_cast<uint8_t>(preprocessing_op_or_punc::EQUAL));
-        statements.append(
-            statement_node(semantic_kind::expression_statement, at, assigned));
+        statements.append(subobject_store(object, type, at, from.node));
     }
     /* [class.cdtor]/4: the copy's virtual table pointer is its class's,
        not the source's */
     if (uint32_t store = vtable_pointer_store(c, at))
         statements.append(store);
-    built = statement_node(semantic_kind::block, at);
-    if (!statements.empty()) {
-        semantics[built].first =
-            semantics.list(&statements[0], statements.size());
-        semantics[built].count = static_cast<uint32_t>(statements.size());
-    }
+    built = block_statement(at, statements);
     return analysis_result::well_formed;
 }
 
@@ -1499,13 +1498,8 @@ analysis_result semantic_analysis::implicit_copy(entity_index c, node_index n,
 uint32_t semantic_analysis::subobject_destructions(entity_index c,
                                                    token_index at)
 {
-    const entity &x = entity_table[c];
     owned_array<entity_index> order;
-    for (uint32_t i = 0; i < x.base_count; i++)
-        order.append(class_bases[x.first_base + i]);
-    for (uint32_t i = 0; i < x.member_count; i++)
-        if (!entity_table[class_members[x.first_member + i]].base_subobject)
-            order.append(class_members[x.first_member + i]);
+    construction_order(c, order);
     owned_array<uint32_t> statements;
     for (size_t i = order.size(); i-- > 0;) {
         const struct type &r =
@@ -1529,10 +1523,7 @@ uint32_t semantic_analysis::subobject_destructions(entity_index c,
     }
     if (statements.empty())
         return 0;
-    uint32_t built = statement_node(semantic_kind::block, at);
-    semantics[built].first = semantics.list(&statements[0], statements.size());
-    semantics[built].count = static_cast<uint32_t>(statements.size());
-    return built;
+    return block_statement(at, statements);
 }
 
 /*
