@@ -860,6 +860,15 @@ bool same_parameters(const types &table, type_index a, type_index b);
 /* the function whose definition a block-scope entity is declared in, 0
    for an entity not in a function (abi/itanium/mangling.cpp) */
 entity_index enclosing_function(const entities &table, entity_index e);
+/* the function whose member function's definition local class c's
+   enclosing function is in, when that function is a member of a local
+   class: the next function out; 0 otherwise (abi/itanium/mangling.cpp) */
+entity_index next_enclosing_function(const entities &table, entity_index f);
+/* [impl.clang] (clang's VisibleNoLinkage): whether c, a local class or
+   closure type (or a class nested in one), is named in other translation
+   units: the outermost function it is in is inline or a template's
+   specialization (abi/itanium/mangling.cpp) */
+bool visible_local_class(const entities &table, entity_index c);
 
 /* [basic.lval]/1: "Every expression belongs to exactly one of the
    fundamental classifications in this taxonomy: lvalue, xvalue, or
@@ -1736,7 +1745,8 @@ class semantic_analysis
     entity_index qualified_scope = 0;
     /* whether the type is, or is made of, a class or enumeration whose
        name has no external linkage */
-    bool type_without_external_linkage(qualified_type t) const;
+    bool type_without_external_linkage(qualified_type t,
+                                       bool visible = false) const;
     /* [basic.link]/4.3: whether t is (an array of) an unnamed class
        without a typedef name for linkage purposes */
     bool unnamed_class_object(qualified_type t) const;
@@ -3372,6 +3382,10 @@ class semantic_analysis
         return instantiations[entity_table[e].instantiation - 1]
             .template_entity;
     }
+    /* whether specialization e has internal linkage only from local
+       classes or closure types other translation units name too: its
+       symbol has its template's linkage (basic/basic.link.cpp) */
+    bool specialization_visible(entity_index e) const;
     uint32_t specialization_argument_count(entity_index e) const
     {
         return instantiations[entity_table[e].instantiation - 1].argument_count;
