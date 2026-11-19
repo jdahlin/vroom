@@ -325,8 +325,9 @@ analysis_result semantic_analysis::size_of(SyntaxRef n, bool alignment,
                                            expression_meaning &m)
 {
     qualified_type operand;
+    uint32_t typedef_alignment = 0;
     if (n.size() == 4 && n[2].is(syntax_kind::type_id)) {
-        VTRY(r, type_id(n[2], operand));
+        VTRY(r, type_id(n[2], operand, &typedef_alignment));
     } else if (n.size() == 2 && !alignment) {
         /* [expr.sizeof]/3: "The lvalue-to-rvalue, array-to-pointer, and
            function-to-pointer standard conversions are not applied to the
@@ -389,6 +390,9 @@ analysis_result semantic_analysis::size_of(SyntaxRef n, bool alignment,
     uint64_t size = size_of_type(operand);
     if (alignment)
         size = alignment_of_type(operand);
+    /* [ext:gnu_attributes] alignof of a typedef-name declared with aligned */
+    if (alignment && typedef_alignment > size)
+        size = typedef_alignment;
     if (!size)
         return not_supported(n, "expr.sizeof");
     m.type = qualified_type::make(

@@ -1312,6 +1312,7 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
                 k.alone++;
             named = entity_table[e].type.unqualified();
             cv |= entity_table[e].type.cv();
+            s.typedef_aligned = entity_table[e].alignment;
             named_at = t;
             continue;
         }
@@ -1661,6 +1662,10 @@ analysis_result semantic_analysis::named_member_type(SyntaxRef n, token_index t,
                                    "be used only by members and friends of "
                                    "the class in which it is declared",
                                    "class.access");
+    /* [ext:gnu_attributes] a qualified typedef-name's aligned */
+    if (entity_table[e].kind == entity_kind::typedef_name &&
+        entity_table[e].alignment)
+        return not_supported(n, "ext.gnu");
     used(t, e);
     type = entity_table[e].type.unqualified();
     if (entity_table[e].kind == entity_kind::typedef_name)

@@ -1068,9 +1068,28 @@ analysis_result semantic_analysis::declare_with_initializer(
        of the type through that name (a type this table does not tell
        apart from the aliased one); one equal to the type's own changes
        nothing (linux/types.h's __u128, __aligned_u64) */
-    if (aligned && s.typedef_ && !is_function_type &&
-        aligned == alignment_of_type(type))
+    uint32_t typedef_alignment = 0;
+    if (s.typedef_ && !is_function_type) {
+        /* the alignment through the name: this declaration's, or a
+           typedef-name's it names; a smaller one than the type's own
+           (clang lets a typedef decrease it) is not supported */
+        uint64_t natural = alignment_of_type(type);
+        if (aligned && aligned < natural)
+            return not_supported(declaration, "ext.gnu");
+        if (aligned > natural)
+            typedef_alignment = static_cast<uint32_t>(aligned);
+        uint32_t inherited =
+            typedef_alignment_of(s.type.unqualified(), type, s.typedef_aligned);
+        if (inherited > typedef_alignment)
+            typedef_alignment = inherited;
         aligned = 0;
+    }
+    /* [ext:gnu_attributes] an object of a typedef-name's type declared
+       with aligned */
+    uint32_t object_alignment = 0;
+    if (!s.typedef_ && !is_function_type)
+        object_alignment =
+            typedef_alignment_of(s.type.unqualified(), type, s.typedef_aligned);
     if ((aligned && (s.typedef_ || is_function_type)) ||
         ((aligned || gnu_flags) && (m.qualifier || m.qualified_namespace)))
         return not_supported(declaration, "ext.gnu");
@@ -1228,8 +1247,11 @@ analysis_result semantic_analysis::declare_with_initializer(
     if (r == analysis_result::well_formed && placeholder &&
         kind == entity_kind::function)
         entity_table[declared_entity].placeholder_return = true;
+    if (r == analysis_result::well_formed && typedef_alignment &&
+        entity_table[declared_entity].kind == entity_kind::typedef_name)
+        entity_table[declared_entity].alignment = typedef_alignment;
     if (r == analysis_result::well_formed && !s.typedef_ &&
-        (aligned || gnu_flags)) {
+        (aligned || gnu_flags || object_alignment)) {
         entity &x = entity_table[declared_entity];
         /* GCC: "The section attribute specifies that a function lives in
            a particular section"; on a variable of automatic storage
@@ -1248,6 +1270,8 @@ analysis_result semantic_analysis::declare_with_initializer(
             x.abi_tag = abi_tag;
         if (aligned > x.alignment)
             x.alignment = static_cast<uint32_t>(aligned);
+        if (object_alignment > x.alignment)
+            x.alignment = object_alignment;
     }
     /* [ext:gnu_asm_labels] the symbol of a function or variable with
        static storage duration; a later declaration may leave it out, a

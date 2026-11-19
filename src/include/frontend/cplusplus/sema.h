@@ -1608,7 +1608,17 @@ class semantic_analysis
         uint32_t gnu_flags = 0;
         token_index section = 0, abi_tag = 0;
         uint64_t aligned = 0;
+        /* [ext:gnu_attributes] the alignment a typedef-name among the
+           type-specifiers was declared with (aligned), 0 if none: a
+           declared object or member of that type, not a pointer to it,
+           is aligned so (the type table has no type for the name) */
+        uint32_t typedef_aligned = 0;
     };
+    /* the alignment of typedef_aligned that applies to declared, the type
+       a declarator made of specified (arrays keep it, a pointer,
+       reference or function does not) */
+    uint32_t typedef_alignment_of(type_index specified, qualified_type declared,
+                                  uint32_t typedef_aligned) const;
     analysis_result decl_specifier_seq(SyntaxRef seq, specified &s,
                                        bool parameter);
     /* [temp.explicit], [temp.expl.spec]: the function template's
@@ -2518,7 +2528,8 @@ class semantic_analysis
     /* [expr.comma] */
     analysis_result comma(SyntaxRef n, expression_meaning &m);
     /* a type-id ([dcl.name]) */
-    analysis_result type_id(TypeId n, qualified_type &type);
+    analysis_result type_id(TypeId n, qualified_type &type,
+                            uint32_t *typedef_alignment = nullptr);
     analysis_result alignment_specifier(AlignmentSpecifier n,
                                         uint64_t &alignment);
     SyntaxElement class_head_name(SyntaxRef head) const;

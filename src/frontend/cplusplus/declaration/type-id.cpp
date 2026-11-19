@@ -53,7 +53,28 @@ node_index parser::type_id()
  * construction were a declarator in a declaration.  The named type is then
  * the same as the type of the hypothetical identifier."
  */
-analysis_result semantic_analysis::type_id(TypeId n, qualified_type &type)
+/*
+ * [ext:gnu_attributes] A typedef-name declared with aligned has that
+ * alignment for an object or member of the type it names; a declarator
+ * that makes a pointer, reference or function leaves it behind, an array
+ * keeps it (the elements', [dcl.array]/1).
+ */
+uint32_t semantic_analysis::typedef_alignment_of(type_index specified,
+                                                 qualified_type declared,
+                                                 uint32_t typedef_aligned) const
+{
+    if (!typedef_aligned)
+        return 0;
+    type_index t = declared.unqualified();
+    while (type_table[t].kind == type_kind::array)
+        t = type_table[t].operand.unqualified();
+    if (t != specified)
+        return 0;
+    return typedef_aligned;
+}
+
+analysis_result semantic_analysis::type_id(TypeId n, qualified_type &type,
+                                           uint32_t *typedef_alignment)
 {
     if (!n.type_specifier_seq() || n.size() > 2)
         return not_supported(n, "dcl.name");
@@ -69,12 +90,18 @@ analysis_result semantic_analysis::type_id(TypeId n, qualified_type &type)
     if (!s.has_type)
         return not_supported(n, "dcl.name");
     type = s.type;
-    if (count == 1)
+    if (count == 1) {
+        if (typedef_alignment)
+            *typedef_alignment = s.typedef_aligned;
         return analysis_result::well_formed;
+    }
     declarator_meaning m;
     r = declarator(current_declaration, n[1], type, m);
     if (r == analysis_result::well_formed && m.has_id)
         return not_supported(n, "dcl.name");
+    if (typedef_alignment)
+        *typedef_alignment =
+            typedef_alignment_of(s.type.unqualified(), type, s.typedef_aligned);
     return r;
 }
 

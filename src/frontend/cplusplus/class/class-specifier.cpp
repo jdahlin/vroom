@@ -1740,6 +1740,12 @@ semantic_analysis::member_declarator(entity_index c, SyntaxRef declaration,
         entity_table[e].defined = true;
         entity_table[e].field = entity_table[c].member_count;
         entity_table[e].alignment = static_cast<uint32_t>(m.aligned);
+        /* [ext:gnu_attributes] a member of a typedef-name's type declared
+           with aligned */
+        uint32_t named =
+            typedef_alignment_of(s.type.unqualified(), type, s.typedef_aligned);
+        if (named > entity_table[e].alignment)
+            entity_table[e].alignment = named;
         entity_table[e].gnu_flags = m.gnu_flags & gnu_packed;
         class_members.append(e);
         entity_table[c].member_count++;
@@ -1777,7 +1783,8 @@ analysis_result semantic_analysis::member_typedef(
     const specified &s, const declarator_meaning &m, uint8_t access)
 {
     if (s.static_ || s.inline_ || s.constexpr_ || s.virtual_ || s.gnu_flags ||
-        s.aligned || m.aligned || m.gnu_flags || m.section || m.asm_label)
+        s.aligned || s.typedef_aligned || m.aligned || m.gnu_flags ||
+        m.section || m.asm_label)
         return not_supported(declaration, "dcl.typedef");
     uint32_t name = tokens.identifier(id);
     if (name == entity_table[c].name)
