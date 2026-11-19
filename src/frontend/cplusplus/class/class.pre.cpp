@@ -1140,6 +1140,10 @@ semantic_analysis::member_declaration(entity_index c, syntax_child member,
         }
     }
 
+    /* [dcl.fct]/18: an abbreviated member function template */
+    if (node.kind == syntax_kind::function_definition &&
+        is_namespace(entity_table[c].enclosing) && abbreviated_function(n))
+        return member_function_template(c, n, n, access);
     if (node_index id = conversion_function_id_of(n))
         return conversion_function_member(c, n, id, access, bodies);
 

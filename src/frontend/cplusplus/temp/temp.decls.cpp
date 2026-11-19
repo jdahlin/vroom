@@ -194,6 +194,13 @@ analysis_result semantic_analysis::template_head_parameters(
     bool constrained, bool pack_anywhere, bool type_constraints)
 {
     const syntax_node &node = tree[n];
+    /* [dcl.fct]/18: an abbreviated function template without a
+       template-head, its parameters all invented */
+    if (node.kind == syntax_kind::function_definition) {
+        if (!abbreviated_parameters(n, parameters) || parameters.empty())
+            return not_supported(n, "temp.variadic");
+        return analysis_result::well_formed;
+    }
     if (node.child_count != 2 ||
         !syntax_is(tree, tree.children(n)[0], syntax_kind::template_head))
         return not_supported(n, "temp.pre");
@@ -215,6 +222,9 @@ analysis_result semantic_analysis::template_head_parameters(
     node_index head = tree.children(n)[0].index();
     if (!template_head_list(head, parameters))
         return not_supported(n, "temp.pre");
+    /* [dcl.fct]/22: the invented template-parameters after the declared */
+    if (!abbreviated_parameters(n, parameters))
+        return not_supported(n, "temp.variadic");
     if (head_constraint(n).bits && !constrained)
         return not_supported(n, "temp.constr");
     /* a type-parameter class identifier_opt, a template template-parameter
@@ -704,6 +714,8 @@ analysis_result semantic_analysis::declare_template_parameters(
         uint32_t name = 0;
         if (form.named)
             name = tokens.identifier(id);
+        else if (tree[node].kind == syntax_kind::decl_specifier_seq)
+            name = invented_parameter_name(node);
         /* [temp.local]/6: "The name of a template-parameter shall not be
            redeclared within its scope (including nested scopes)." */
         if (name && (entity_table.find(scope, name) || name == reserved))

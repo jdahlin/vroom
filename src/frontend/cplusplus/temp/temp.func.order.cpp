@@ -220,12 +220,14 @@ int semantic_analysis::function_template_order(uint32_t f, uint32_t g,
     const uint32_t both[2] = {f, g};
     for (uint32_t x : both) {
         const function_template t = function_templates[x - 1];
-        for (uint32_t i = 0; i < t.parameter_count; i++)
-            if (!syntax_is(tree,
-                           syntax_child::node(
-                               template_parameter_nodes[t.first_parameter + i]),
-                           syntax_kind::type_parameter))
+        for (uint32_t i = 0; i < t.parameter_count; i++) {
+            /* (a type-parameter, or an invented one, [dcl.fct]/22) */
+            template_parameter_parts form;
+            if (!template_parameter_form(
+                    template_parameter_nodes[t.first_parameter + i], form) ||
+                !form.type || form.template_template)
                 unknown = true;
+        }
         qualified_type type = entity_table[t.entity].type;
         const struct type r = type_table[type.unqualified()];
         const qualified_type *list = type_table.parameters(type.unqualified());
@@ -272,7 +274,19 @@ int semantic_analysis::function_template_order(uint32_t f, uint32_t g,
         return 1;
     if (fpack && !gpack && gcount <= fcount)
         return -1;
-    return 0;
+    /* [temp.func.order]/6.2.2: else, with equivalent template-parameter-lists
+       and function parameters, "if one is more constrained than the other
+       ([temp.constr.order]), the more constrained template is more
+       specialized": here a constrained template against one without
+       constraints ([temp.constr.order]/1.2's subsumption of two sets of
+       constraints is not analysed) */
+    if (fcount != gcount || fpack != gpack ||
+        function_templates[f - 1].parameter_count !=
+            function_templates[g - 1].parameter_count)
+        return 0;
+    bool fc = template_head_constrained(function_templates[f - 1].declaration);
+    bool gc = template_head_constrained(function_templates[g - 1].declaration);
+    return static_cast<int>(fc) - static_cast<int>(gc);
 }
 
 /*

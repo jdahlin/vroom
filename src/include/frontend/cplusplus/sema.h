@@ -3458,6 +3458,28 @@ class semantic_analysis
                              bool type_constraints = false);
     syntax_child head_constraint(node_index n) const;
     syntax_child trailing_constraint(node_index n) const;
+    /* [dcl.fct]/22: the decl-specifier-seqs of the parameters of the
+       function that declaration (a template-declaration's or a
+       function-definition) declares with a generic parameter type
+       placeholder, each an invented type template-parameter, appended to
+       parameters; false for a parameter pack of one (no rules yet) */
+    bool generic_placeholder(node_index seq) const;
+    bool abbreviated_parameters(node_index declaration,
+                                owned_array<node_index> &parameters) const;
+    /* whether a function-definition declares an abbreviated function
+       template ([dcl.fct]/18) */
+    bool abbreviated_function(node_index definition) const
+    {
+        owned_array<node_index> parameters;
+        return !abbreviated_parameters(definition, parameters) ||
+               !parameters.empty();
+    }
+    /* the name of the invented template-parameter of seq, auto:N, which no
+       identifier is spelled as */
+    uint32_t invented_parameter_name(node_index seq) const;
+    /* the type a parameter's placeholder denotes: its invented
+       template-parameter's, or the argument of one bound in scope */
+    bool invented_parameter_type(node_index seq, qualified_type &type) const;
     /* [temp.constr.atomic]/3: the satisfaction of a concept-id, once per
        concept and arguments (a later different result would be ill-formed,
        no diagnostic required; clang keeps the first, as here).  Its

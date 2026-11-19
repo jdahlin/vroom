@@ -109,6 +109,16 @@ semantic_analysis::instantiate(node_index at, entity_index template_entity,
             r = declare_specialization(ft.declarator, m.id, type, s, e);
             instantiating = 0;
         }
+        /* [dcl.fct.def.delete]/2: a specialization of a deleted template
+           is deleted from its declaration on, a call of it ill-formed;
+           its definition is the deleted definition */
+        if (r == analysis_result::well_formed && ft.definition && !lambda &&
+            deleted_body(tree.children(
+                ft.definition)[tree[ft.definition].child_count - 1])) {
+            entity_table[e].deleted = true;
+            entity_table[e].inline_ = true;
+            instantiations[index].defined = true;
+        }
         /* [temp.inst]/12: "If a function template f is called in a way
            that requires a default argument to be used, the dependent names
            are looked up, the semantics constraints are checked, and the
