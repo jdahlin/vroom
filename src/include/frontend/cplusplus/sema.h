@@ -1980,6 +1980,7 @@ class semantic_analysis
     type_index dependent_member_type(type_index qualifier, uint32_t name);
     type_index dependent_written_type(SyntaxRef n);
     bool names_dependent_entity(token_index first, token_index end) const;
+    bool pack_depends(entity_index pack) const;
     owned_array<entity_index> dependent_members;
     owned_array<entity_index> dependent_written_types;
     /* a block scope in the current one, made current */

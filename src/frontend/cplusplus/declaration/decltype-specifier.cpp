@@ -122,6 +122,20 @@ analysis_result semantic_analysis::decltype_type(SyntaxRef n,
     return analysis_result::well_formed;
 }
 
+/* whether one of the arguments a pack is bound to is a type that depends
+   on a template parameter ([temp.dep.type]/10.3): an alias template used
+   in another template's declaration */
+bool semantic_analysis::pack_depends(entity_index pack) const
+{
+    for (uint32_t i = 0; i < entity_table[pack].member_count; i++) {
+        entity_index a = pack_elements[entity_table[pack].value + i];
+        if (a && entity_table[a].kind == entity_kind::typedef_name &&
+            depends_on_template_parameter(entity_table[a].type))
+            return true;
+    }
+    return false;
+}
+
 /* whether a name in [first, end) denotes a template parameter, or a
    variable or type whose type depends on one ([temp.dep.expr]); a
    function template's type depends on its own parameters, not the
@@ -135,8 +149,13 @@ bool semantic_analysis::names_dependent_entity(token_index first,
         lookup_result found =
             lookup_unqualified(tokens.identifier(t), lookup_filter::any);
         entity_index e = found.entity;
-        if (!e)
+        if (!e) {
+            /* (lookup leaves a pack's name unknown outside a pattern) */
+            entity_index pack = find_pack(tokens.identifier(t));
+            if (pack && pack_depends(pack))
+                return true;
             continue;
+        }
         entity_kind k = entity_table[e].kind;
         if (k == entity_kind::none)
             return true;
