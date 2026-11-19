@@ -95,10 +95,10 @@ analysis_result semantic_analysis::typename_type(node_index n, type_index &type,
     if (node.kind == syntax_kind::type_requirement)
         count--;
     if (count < 3 || count > 4 ||
-        !syntax_is(tree, parts[1], syntax_kind::nested_name_specifier))
+        !syntax(parts[1]).is(syntax_kind::nested_name_specifier))
         return not_supported(n, "temp.res");
     syntax_child last = parts[count - 1];
-    if (syntax_is(tree, last, syntax_kind::simple_template_id)) {
+    if (syntax(last).is(syntax_kind::simple_template_id)) {
         /* typename nested-name-specifier template_opt simple-template-id:
            [temp.names]/1's template of the class or namespace named (a
            member alias template, a member class template).  Of a

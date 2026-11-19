@@ -73,12 +73,11 @@ semantic_analysis::instantiate(node_index at, entity_index template_entity,
         placeholder_allowed = true;
         /* (a constructor template's: no type, the decl-specifier-seq
            optional, [class.ctor]/1) */
-        bool specifiers =
-            syntax_is(tree, d[0], syntax_kind::decl_specifier_seq);
+        bool specifiers = syntax(d[0]).is(syntax_kind::decl_specifier_seq);
         bool constructor = t.special == special_member::constructor;
         analysis_result r = analysis_result::well_formed;
-        bool lambda = syntax_is(tree, syntax_child::node(ft.declarator),
-                                syntax_kind::lambda_expression);
+        bool lambda = syntax(syntax_child::node(ft.declarator))
+                          .is(syntax_kind::lambda_expression);
         qualified_type lambda_type;
         if (lambda)
             r = lambda_specialization(ft.declarator, false, lambda_type, 0);
@@ -223,8 +222,7 @@ analysis_result semantic_analysis::instantiate_definition(node_index at,
            (the parameters), then its function-body */
         const syntax_child *d = tree.children(ft.definition) +
                                 leading_gnu_attributes(ft.definition);
-        bool specifiers =
-            syntax_is(tree, d[0], syntax_kind::decl_specifier_seq);
+        bool specifiers = syntax(d[0]).is(syntax_kind::decl_specifier_seq);
         qualified_type type;
         declarator_meaning m;
         function_cv = 0;
@@ -238,8 +236,8 @@ analysis_result semantic_analysis::instantiate_definition(node_index at,
                 syntax(d[specifiers + 1 +
                          (trailing_constraint(ft.declaration).bits != 0)])
                     .function_body());
-    } else if (syntax_is(tree, syntax_child::node(ft.definition),
-                         syntax_kind::lambda_expression)) {
+    } else if (syntax(syntax_child::node(ft.definition))
+                   .is(syntax_kind::lambda_expression)) {
         /* a generic lambda's ([expr.prim.lambda.closure]/3) */
         qualified_type type;
         r = lambda_specialization(ft.definition, true, type,

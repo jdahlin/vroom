@@ -303,17 +303,17 @@ bool semantic_analysis::initializer_form(syntax_child init,
     list = false;
     if (node.kind == syntax_kind::brace_or_equal_initializer &&
         node.child_count == 2 &&
-        !syntax_is(tree, children[1], syntax_kind::braced_init_list)) {
+        !syntax(children[1]).is(syntax_kind::braced_init_list)) {
         clause = children[1];
     } else if (node.kind == syntax_kind::initializer && node.child_count == 3 &&
-               !syntax_is(tree, children[1], syntax_kind::initializer_list) &&
-               !syntax_is(tree, children[1], syntax_kind::braced_init_list)) {
+               !syntax(children[1]).is(syntax_kind::initializer_list) &&
+               !syntax(children[1]).is(syntax_kind::braced_init_list)) {
         clause = children[1];
         direct = true;
     } else if (node.kind == syntax_kind::braced_init_list &&
                node.child_count == 3 &&
-               !syntax_is(tree, children[1], syntax_kind::initializer_list) &&
-               !syntax_is(tree, children[1], syntax_kind::braced_init_list) &&
+               !syntax(children[1]).is(syntax_kind::initializer_list) &&
+               !syntax(children[1]).is(syntax_kind::braced_init_list) &&
                !syntax(children[1]).is(preprocessing_op_or_punc::RIGHT_BRACE)) {
         clause = children[1];
         direct = true;
@@ -513,7 +513,7 @@ analysis_result semantic_analysis::trailing_return(node_index declaration,
     const syntax_node &node = tree[n];
     const syntax_child *children = tree.children(n);
     if (node.child_count != 2 ||
-        !syntax_is(tree, children[1], syntax_kind::trailing_return_type))
+        !syntax(children[1]).is(syntax_kind::trailing_return_type))
         return not_supported(n, "dcl.fct");
     qualified_type auto_type = placeholder_type(false);
     /* (T other than auto: clang takes S(s)()->m, which [dcl.ambig.res]/1
@@ -528,7 +528,7 @@ analysis_result semantic_analysis::trailing_return(node_index declaration,
         return not_supported(n, "dcl.fct");
     node_index trailing = children[1].index();
     if (tree[trailing].child_count != 2 ||
-        !syntax_is(tree, tree.children(trailing)[1], syntax_kind::type_id))
+        !syntax(tree.children(trailing)[1]).is(syntax_kind::type_id))
         return not_supported(n, "dcl.fct");
     /* the type-id's own function declarators would replace the
        parameters and cv-qualifier-seq this declarator's has */

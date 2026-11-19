@@ -456,8 +456,7 @@ analysis_result semantic_analysis::enum_specifier_rules(node_index n,
        of an enumeration in the current scope or a declaration of a new
        enumeration": its head and no enumerator-list */
     bool opaque = node.kind == syntax_kind::opaque_enum_declaration;
-    if (node.child_count &&
-        syntax_is(tree, children[0], syntax_kind::enum_head)) {
+    if (node.child_count && syntax(children[0]).is(syntax_kind::enum_head)) {
         const syntax_node &h = tree[children[0].index()];
         for (uint32_t k = 0; k < h.child_count; k++)
             head.append(tree.children(children[0].index())[k]);
@@ -473,11 +472,11 @@ analysis_result semantic_analysis::enum_specifier_rules(node_index n,
     token_index name_at = node.first_token;
     node_index base = 0;
     for (syntax_child c : head) {
-        if (syntax_is(tree, c, syntax_kind::enum_key)) {
+        if (syntax(c).is(syntax_kind::enum_key)) {
             scoped = true;
             continue;
         }
-        if (syntax_is(tree, c, syntax_kind::enum_base)) {
+        if (syntax(c).is(syntax_kind::enum_base)) {
             base = c.index();
             continue;
         }
@@ -501,7 +500,7 @@ analysis_result semantic_analysis::enum_specifier_rules(node_index n,
     owned_array<syntax_child> enumerators;
     for (i++; i < node.child_count; i++) {
         syntax_child c = children[i];
-        if (syntax_is(tree, c, syntax_kind::enumerator_list)) {
+        if (syntax(c).is(syntax_kind::enumerator_list)) {
             const syntax_node &list = tree[c.index()];
             for (uint32_t k = 0; k < list.child_count; k++) {
                 syntax_child item = tree.children(c.index())[k];
@@ -524,8 +523,8 @@ analysis_result semantic_analysis::enum_specifier_rules(node_index n,
         fixed = fundamental_type::int_;
     if (base) {
         const syntax_node &bn = tree[base];
-        if (bn.child_count != 2 || !syntax_is(tree, tree.children(base)[1],
-                                              syntax_kind::type_specifier_seq))
+        if (bn.child_count != 2 ||
+            !syntax(tree.children(base)[1]).is(syntax_kind::type_specifier_seq))
             return not_supported(n, "dcl.enum");
         specified s;
         analysis_result r =
@@ -670,7 +669,7 @@ analysis_result semantic_analysis::enum_specifier_rules(node_index n,
         syntax_child id = c;
         syntax_child init;
         bool has_init = false;
-        if (syntax_is(tree, c, syntax_kind::enumerator_definition)) {
+        if (syntax(c).is(syntax_kind::enumerator_definition)) {
             const syntax_node &d = tree[c.index()];
             if (d.child_count != 3)
                 return not_supported(n, "dcl.enum");
@@ -681,7 +680,7 @@ analysis_result semantic_analysis::enum_specifier_rules(node_index n,
         /* [dcl.enum]/2: "The optional attribute-specifier-seq in an
            enumerator appertains to that enumerator": one without effect
            (Apple's availability) is passed over */
-        if (syntax_is(tree, id, syntax_kind::enumerator)) {
+        if (syntax(id).is(syntax_kind::enumerator)) {
             const syntax_child *attrs = tree.children(id.index());
             for (uint32_t i = 1; i < tree[id.index()].child_count; i++)
                 if (!class_head_attributes_without_effect(attrs[i]))

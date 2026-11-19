@@ -392,12 +392,12 @@ analysis_result semantic_analysis::gnu_attribute_specifier(node_index n,
             syntax_child c = tree.children(next)[i];
             if (next == n && i == 0 && c.is_token())
                 continue; /* __attribute__ */
-            if (syntax_is(tree, c, syntax_kind::gnu_attribute))
+            if (syntax(c).is(syntax_kind::gnu_attribute))
                 attributes.append(c);
-            else if (syntax_is(tree, c, syntax_kind::gnu_attribute_list) ||
-                     syntax_is(tree, c, syntax_kind::gnu_attribute_specifier))
+            else if (syntax(c).is(syntax_kind::gnu_attribute_list) ||
+                     syntax(c).is(syntax_kind::gnu_attribute_specifier))
                 work.append(c.index());
-            else if (syntax_is(tree, c, syntax_kind::attribute_specifier) &&
+            else if (syntax(c).is(syntax_kind::attribute_specifier) &&
                      attributes_as_gnu(c, standard))
                 g.flags |= standard;
             else if (!c.is_token())

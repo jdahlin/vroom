@@ -755,8 +755,7 @@ analysis_result semantic_analysis::cast(node_index n, expression_meaning &m)
 {
     const syntax_node &node = tree[n];
     const syntax_child *children = tree.children(n);
-    if (node.child_count != 4 ||
-        !syntax_is(tree, children[1], syntax_kind::type_id))
+    if (node.child_count != 4 || !syntax(children[1]).is(syntax_kind::type_id))
         return not_supported(n, "expr.cast");
     qualified_type to;
     analysis_result r = type_id(children[1].index(), to);

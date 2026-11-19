@@ -545,12 +545,12 @@ analysis_result semantic_analysis::attributed_statement(node_index n,
     if (node.child_count < 2)
         return not_supported(n, "stmt.pre");
     syntax_child inner = tree.children(n)[node.child_count - 1];
-    if (syntax_is(tree, inner, syntax_kind::simple_declaration))
+    if (syntax(inner).is(syntax_kind::simple_declaration))
         return not_supported(n, "dcl.attr");
     for (uint32_t i = 0; i + 1 < node.child_count; i++) {
         syntax_child c = tree.children(n)[i];
-        if (!syntax_is(tree, c, syntax_kind::attribute_specifier) &&
-            !syntax_is(tree, c, syntax_kind::attribute_specifier_seq))
+        if (!syntax(c).is(syntax_kind::attribute_specifier) &&
+            !syntax(c).is(syntax_kind::attribute_specifier_seq))
             return not_supported(n, "dcl.attr");
         const syntax_node &a = tree[c.index()];
         for (token_index t = a.first_token; t < a.end_token; t++) {
@@ -584,9 +584,9 @@ analysis_result semantic_analysis::substatement(syntax_child s,
                                                 entity_index conflicts,
                                                 uint32_t &built)
 {
-    if (syntax_is(tree, s, syntax_kind::compound_statement))
+    if (syntax(s).is(syntax_kind::compound_statement))
         return compound_statement(s.index(), conflicts, built);
-    if (!syntax_is(tree, s, syntax_kind::simple_declaration))
+    if (!syntax(s).is(syntax_kind::simple_declaration))
         return statement(s, built);
     entity_index outer = current_scope;
     bool claimable = declarations_claimable;
@@ -657,11 +657,11 @@ analysis_result semantic_analysis::condition(syntax_child c, bool for_switch,
     node_index at = node_of(c);
     analysis_result r = analysis_result::well_formed;
     uint32_t declaration = 0;
-    if (syntax_is(tree, c, syntax_kind::condition)) {
+    if (syntax(c).is(syntax_kind::condition)) {
         const syntax_node &node = tree[at];
         const syntax_child *children = tree.children(at);
         if (node.child_count != 3 ||
-            !syntax_is(tree, children[0], syntax_kind::decl_specifier_seq))
+            !syntax(children[0]).is(syntax_kind::decl_specifier_seq))
             return not_supported(at, "dcl.attr");
         specified s;
         placeholder_allowed = true;

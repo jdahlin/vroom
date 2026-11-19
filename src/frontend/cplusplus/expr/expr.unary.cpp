@@ -318,8 +318,7 @@ analysis_result semantic_analysis::size_of(node_index n, bool alignment,
     const syntax_node &node = tree[n];
     const syntax_child *children = tree.children(n);
     qualified_type operand;
-    if (node.child_count == 4 &&
-        syntax_is(tree, children[2], syntax_kind::type_id)) {
+    if (node.child_count == 4 && syntax(children[2]).is(syntax_kind::type_id)) {
         analysis_result r = type_id(children[2].index(), operand);
         if (r != analysis_result::well_formed)
             return r;
@@ -528,7 +527,7 @@ analysis_result semantic_analysis::unary(node_index n, expression_meaning &m)
     node_index outer_operand = member_pointer_operand;
     member_pointer_operand = 0;
     if (o == preprocessing_op_or_punc::AMPERSAND &&
-        syntax_is(tree, children[1], syntax_kind::qualified_id))
+        syntax(children[1]).is(syntax_kind::qualified_id))
         member_pointer_operand = children[1].index();
     analysis_result r = expression(children[1], m);
     member_pointer_operand = outer_operand;

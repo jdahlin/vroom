@@ -48,7 +48,7 @@ analysis_result semantic_analysis::linkage_specification(node_index n)
             braces = true;
             continue;
         }
-        if (syntax_is(tree, x, syntax_kind::declaration_seq)) {
+        if (syntax(x).is(syntax_kind::declaration_seq)) {
             for (uint32_t k = 0; k < tree[x.index()].child_count; k++) {
                 syntax_child y = tree.children(x.index())[k];
                 if (!y.is_token())

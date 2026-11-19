@@ -169,7 +169,7 @@ analysis_result semantic_analysis::base_class_name(syntax_child name,
                                                    entity_index &base,
                                                    token_index &id)
 {
-    if (syntax_is(tree, name, syntax_kind::simple_template_id)) {
+    if (syntax(name).is(syntax_kind::simple_template_id)) {
         type_index t = 0;
         analysis_result r = template_type(name.index(), 0, false, t);
         if (r != analysis_result::well_formed)
@@ -180,8 +180,7 @@ analysis_result semantic_analysis::base_class_name(syntax_child name,
         base = type_table[t].entity;
         return analysis_result::well_formed;
     }
-    if (!name.is_token() &&
-        !syntax_is(tree, name, syntax_kind::class_or_decltype))
+    if (!name.is_token() && !syntax(name).is(syntax_kind::class_or_decltype))
         return not_supported(n, "class.derived");
     size_t before = unsupported.size();
     analysis_result named = named_class(name, n, base, id);
@@ -230,7 +229,7 @@ analysis_result semantic_analysis::base_clause(entity_index c, node_index n,
     owned_array<bool> expanded;
     for (uint32_t i = 1; i < tree[n].child_count; i++) {
         syntax_child item = tree.children(n)[i];
-        if (!syntax_is(tree, item, syntax_kind::base_specifier_list)) {
+        if (!syntax(item).is(syntax_kind::base_specifier_list)) {
             listed.append(item);
             expanded.append(false);
             continue;
@@ -281,7 +280,7 @@ analysis_result semantic_analysis::base_clause(entity_index c, node_index n,
     owned_array<token_index> named_ids;
     for (size_t si = 0; si < specifiers.size(); si++) {
         syntax_child name = specifiers[si];
-        if (syntax_is(tree, name, syntax_kind::base_specifier))
+        if (syntax(name).is(syntax_kind::base_specifier))
             name =
                 tree.children(name.index())[tree[name.index()].child_count - 1];
         token_index id = 0;
@@ -309,7 +308,7 @@ analysis_result semantic_analysis::base_clause(entity_index c, node_index n,
         if (key == standard_keyword::class_)
             access = 2;
         syntax_child name = specifier;
-        if (syntax_is(tree, specifier, syntax_kind::base_specifier)) {
+        if (syntax(specifier).is(syntax_kind::base_specifier)) {
             const syntax_node &b = tree[specifier.index()];
             const syntax_child *parts = tree.children(specifier.index());
             name = parts[b.child_count - 1];

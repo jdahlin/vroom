@@ -622,7 +622,7 @@ analysis_result semantic_analysis::initialize_from(node_index at,
                                                    bool direct, bool list,
                                                    initialized_value &result)
 {
-    if (syntax_is(tree, clause, syntax_kind::braced_init_list))
+    if (syntax(clause).is(syntax_kind::braced_init_list))
         return list_initialization(clause.index(), type, direct, result);
     const struct type target = type_table[type.unqualified()];
     expression_meaning m;
@@ -842,7 +842,7 @@ semantic_analysis::list_clauses(node_index list,
             syntax(c).is(preprocessing_op_or_punc::RIGHT_BRACE) ||
             syntax(c).is(preprocessing_op_or_punc::COMMA))
             continue;
-        if (syntax_is(tree, c, syntax_kind::initializer_list)) {
+        if (syntax(c).is(syntax_kind::initializer_list)) {
             const syntax_node &items = tree[c.index()];
             for (uint32_t k = 0; k < items.child_count; k++) {
                 syntax_child item = tree.children(c.index())[k];
@@ -855,7 +855,7 @@ semantic_analysis::list_clauses(node_index list,
             continue;
         }
         if (!c.is_token() && !syntax_kind_is_expression(tree[c.index()].kind) &&
-            !syntax_is(tree, c, syntax_kind::braced_init_list))
+            !syntax(c).is(syntax_kind::braced_init_list))
             /* a designated-initializer-list */
             return not_supported(list, "dcl.init.aggr");
         clauses.append(c);
@@ -882,7 +882,7 @@ analysis_result semantic_analysis::list_initialization_of(
         if (clauses.size() == 1 && !clauses[0].is_token() &&
             character_type(fundamental_of(target.operand))) {
             syntax_child inner = clauses[0];
-            while (syntax_is(tree, inner, syntax_kind::primary_expression) &&
+            while (syntax(inner).is(syntax_kind::primary_expression) &&
                    tree[inner.index()].child_count == 3)
                 inner = tree.children(inner.index())[1];
             if (is_string_literal(tokens, inner))
@@ -948,7 +948,7 @@ analysis_result semantic_analysis::list_initialization_of(
                           "element, or from no element; otherwise, the "
                           "program is ill-formed",
                           "dcl.init.list");
-    if (syntax_is(tree, clauses[0], syntax_kind::braced_init_list))
+    if (syntax(clauses[0]).is(syntax_kind::braced_init_list))
         /* braces around a scalar's initializer: clang's warning */
         return not_supported(list, "dcl.init.list");
     return initialize_from(list, clauses[0], type, direct, true, result);
@@ -977,14 +977,14 @@ analysis_result semantic_analysis::initializer(syntax_child init,
     case syntax_kind::brace_or_equal_initializer:
         if (node.child_count != 2)
             return not_supported(n, "dcl.init");
-        if (syntax_is(tree, children[1], syntax_kind::braced_init_list))
+        if (syntax(children[1]).is(syntax_kind::braced_init_list))
             return list_initialization(children[1].index(), type, false,
                                        result);
         return initialize_from(n, children[1], type, false, false, result);
     case syntax_kind::initializer:
         if (node.child_count != 3)
             return not_supported(n, "dcl.init");
-        if (syntax_is(tree, children[1], syntax_kind::initializer_list)) {
+        if (syntax(children[1]).is(syntax_kind::initializer_list)) {
             if (has_pack_expansion(children[1]))
                 return not_supported(n, "temp.variadic");
             const struct type target = type_table[type.unqualified()];
@@ -1110,7 +1110,7 @@ analysis_result semantic_analysis::class_list_initialization(
                                                result);
     }
     if (clauses.size() == 1 &&
-        !syntax_is(tree, clauses[0], syntax_kind::braced_init_list)) {
+        !syntax(clauses[0]).is(syntax_kind::braced_init_list)) {
         /* (3.2): an element of the class's own type */
         expression_meaning e;
         analysis_result r = expression(clauses[0], e);
@@ -1162,7 +1162,7 @@ analysis_result semantic_analysis::constructor_list_initialization(
     }
     owned_array<expression_meaning> arguments;
     for (syntax_child clause : clauses) {
-        if (syntax_is(tree, clause, syntax_kind::braced_init_list))
+        if (syntax(clause).is(syntax_kind::braced_init_list))
             return not_supported(list, "over.match.list");
         expression_meaning e;
         analysis_result r = expression(clause, e);
@@ -1384,7 +1384,7 @@ analysis_result semantic_analysis::aggregate_element(
     /* a copy: analysing the clause adds types, which may move
        type_table's */
     const struct type record = type_table[element.unqualified()];
-    bool braced = syntax_is(tree, clause, syntax_kind::braced_init_list);
+    bool braced = syntax(clause).is(syntax_kind::braced_init_list);
     bool subaggregate =
         record.kind == type_kind::array ||
         (record.kind == type_kind::class_type &&

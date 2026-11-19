@@ -537,7 +537,7 @@ void semantic_analysis::hold_names(node_index declaration)
         for (node_index x = declaration;
              tree[x].kind == syntax_kind::template_declaration &&
              tree[x].child_count >= 2 &&
-             syntax_is(tree, tree.children(x)[0], syntax_kind::template_head) &&
+             syntax(tree.children(x)[0]).is(syntax_kind::template_head) &&
              !tree.children(x)[tree[x].child_count - 1].is_token();
              x = tree.children(x)[tree[x].child_count - 1].index())
             start = tree[tree.children(x)[0].index()].end_token;

@@ -188,15 +188,14 @@ analysis_result semantic_analysis::iteration_statement(node_index n,
     if (k == standard_keyword::while_) {
         if (node.child_count != 5)
             return not_supported(n, "stmt.while");
-        if (syntax_is(tree, children[2], syntax_kind::condition))
+        if (syntax(children[2]).is(syntax_kind::condition))
             statement_scope = open_scope(0, false);
         result = condition(children[2], false, m);
     } else if (k == standard_keyword::for_) {
         if (node.child_count < 6)
             return not_supported(n, "stmt.for");
         for (uint32_t i = 0; i < node.child_count; i++)
-            if (syntax_is(tree, children[i],
-                          syntax_kind::for_range_declaration))
+            if (syntax(children[i]).is(syntax_kind::for_range_declaration))
                 return range_based_for(n, i, built);
         /* for ( init-statement condition_opt ; expression_opt ) statement:
            the init-statement ends with its own ; */
@@ -219,8 +218,8 @@ analysis_result semantic_analysis::iteration_statement(node_index n,
         }
         if (i + 2 != node.child_count)
             return not_supported(n, "stmt.for");
-        if (!syntax_is(tree, init_syntax, syntax_kind::expression_statement) ||
-            (has_cond && syntax_is(tree, cond, syntax_kind::condition)))
+        if (!syntax(init_syntax).is(syntax_kind::expression_statement) ||
+            (has_cond && syntax(cond).is(syntax_kind::condition)))
             statement_scope = open_scope(0, false);
         bool claimable = declarations_claimable;
         declarations_claimable = false;
@@ -401,7 +400,7 @@ analysis_result semantic_analysis::range_based_for(node_index n,
         current_scope = outer;
         return r;
     };
-    if (syntax_is(tree, initializer, syntax_kind::braced_init_list))
+    if (syntax(initializer).is(syntax_kind::braced_init_list))
         /* auto && deduced from a braced-init-list: std::initializer_list
            ([dcl.type.auto.deduct]/4) */
         return failed(not_supported(n, "stmt.ranged"));
@@ -542,7 +541,7 @@ analysis_result semantic_analysis::for_range_declaration(
          syntax(children[1]).is(preprocessing_op_or_punc::AMPERSAND) ||
          syntax(children[1]).is(preprocessing_op_or_punc::AMPERSAND_AMPERSAND));
     if ((node.child_count != 2 && !binding) ||
-        !syntax_is(tree, children[0], syntax_kind::decl_specifier_seq) ||
+        !syntax(children[0]).is(syntax_kind::decl_specifier_seq) ||
         tree[at].first_token != first_token(children[0]))
         /* an attribute-specifier-seq */
         return not_supported(at, "stmt.ranged");
@@ -569,8 +568,8 @@ analysis_result semantic_analysis::for_range_declaration(
         node_index seq = children[0].index();
         for (uint32_t i = 0; i < tree[seq].child_count; i++) {
             syntax_child c = tree.children(seq)[i];
-            if (syntax_is(tree, c, syntax_kind::class_specifier) ||
-                syntax_is(tree, c, syntax_kind::enum_specifier))
+            if (syntax(c).is(syntax_kind::class_specifier) ||
+                syntax(c).is(syntax_kind::enum_specifier))
                 return ill_formed(at,
                                   "the decl-specifier-seq shall not define a "
                                   "class or enumeration",

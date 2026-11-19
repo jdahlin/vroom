@@ -126,7 +126,7 @@ analysis_result semantic_analysis::using_declaration(node_index n)
     owned_array<syntax_child> items;
     for (uint32_t i = 0; i < node.child_count; i++) {
         syntax_child c = tree.children(n)[i];
-        if (syntax_is(tree, c, syntax_kind::using_declarator_list)) {
+        if (syntax(c).is(syntax_kind::using_declarator_list)) {
             for (uint32_t k = 0; k < tree[c.index()].child_count; k++)
                 items.append(tree.children(c.index())[k]);
         } else if (!c.is_token()) {
@@ -137,12 +137,11 @@ analysis_result semantic_analysis::using_declaration(node_index n)
     bool any = false;
     for (size_t i = 0; i < items.size(); i++) {
         syntax_child d = items[i];
-        if (syntax_is(tree, d, syntax_kind::using_declarator)) {
+        if (syntax(d).is(syntax_kind::using_declarator)) {
             gnu_attributes g;
             for (size_t k = i + 1;
                  k < items.size() &&
-                 syntax_is(tree, items[k],
-                           syntax_kind::gnu_attribute_specifier);
+                 syntax(items[k]).is(syntax_kind::gnu_attribute_specifier);
                  k++) {
                 analysis_result r =
                     gnu_attribute_specifier(items[k].index(), g);
@@ -155,7 +154,7 @@ analysis_result semantic_analysis::using_declaration(node_index n)
                 worse(result, using_declarator(d.index(),
                                                g.flags & gnu_using_if_exists));
             any = true;
-        } else if (syntax_is(tree, d, syntax_kind::gnu_attribute_specifier)) {
+        } else if (syntax(d).is(syntax_kind::gnu_attribute_specifier)) {
             continue; /* the using-declarator's before it */
         } else if (!syntax(d).is(preprocessing_op_or_punc::COMMA)) {
             /* a pack expansion */
@@ -185,7 +184,7 @@ analysis_result semantic_analysis::using_declarator(node_index n,
     const syntax_node &node = tree[n];
     const syntax_child *children = tree.children(n);
     if (node.child_count != 2 ||
-        !syntax_is(tree, children[0], syntax_kind::nested_name_specifier) ||
+        !syntax(children[0]).is(syntax_kind::nested_name_specifier) ||
         !children[1].is_token() ||
         tokens[children[1].index()].kind != token_kind::identifier)
         /* typename, an operator-function-id, a destructor's name, a pack

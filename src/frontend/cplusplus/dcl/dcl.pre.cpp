@@ -719,7 +719,7 @@ analysis_result semantic_analysis::alias_type(node_index n,
         type_at = 4;
     }
     if (node.child_count != type_at + 2 ||
-        !syntax_is(tree, c[type_at], syntax_kind::defining_type_id))
+        !syntax(c[type_at]).is(syntax_kind::defining_type_id))
         return not_supported(n, "dcl.attr");
     node_index id = c[type_at].index();
     const syntax_node &d = tree[id];
@@ -730,10 +730,10 @@ analysis_result semantic_analysis::alias_type(node_index n,
        class-specifiers and elaborated-type-specifiers are looked for) */
     for (uint32_t i = 0; i < tree[dc[0].index()].child_count; i++) {
         syntax_child k = tree.children(dc[0].index())[i];
-        if (syntax_is(tree, k, syntax_kind::class_specifier) ||
-            syntax_is(tree, k, syntax_kind::elaborated_type_specifier) ||
-            syntax_is(tree, k, syntax_kind::enum_specifier) ||
-            syntax_is(tree, k, syntax_kind::elaborated_enum_specifier))
+        if (syntax(k).is(syntax_kind::class_specifier) ||
+            syntax(k).is(syntax_kind::elaborated_type_specifier) ||
+            syntax(k).is(syntax_kind::enum_specifier) ||
+            syntax(k).is(syntax_kind::elaborated_enum_specifier))
             return not_supported(n, "dcl.typedef");
     }
     specified s;
@@ -789,7 +789,7 @@ analysis_result semantic_analysis::simple_declaration(node_index n)
 {
     uint32_t k = leading_gnu_attributes(n);
     if (k >= tree[n].child_count ||
-        !syntax_is(tree, tree.children(n)[k], syntax_kind::decl_specifier_seq))
+        !syntax(tree.children(n)[k]).is(syntax_kind::decl_specifier_seq))
         return not_supported(n, "dcl.attr");
     return init_declarators(n, tree.children(n)[k].index(), false);
 }
@@ -820,7 +820,7 @@ bool semantic_analysis::gnu_or_without_effect(node_index n) const
         syntax_child c = tree.children(n)[i];
         if (c.is_token())
             return false;
-        if (!syntax_is(tree, c, syntax_kind::gnu_attribute_specifier) &&
+        if (!syntax(c).is(syntax_kind::gnu_attribute_specifier) &&
             !gnu_or_without_effect(c.index()))
             return false;
     }
@@ -845,12 +845,11 @@ semantic_analysis::function_definition(FunctionDefinition definition)
     node_index n = definition;
     const syntax_node &node = tree[n];
     uint32_t k = leading_gnu_attributes(n);
-    if (k &&
-        (k >= node.child_count || !syntax_is(tree, tree.children(n)[k],
-                                             syntax_kind::decl_specifier_seq)))
+    if (k && (k >= node.child_count ||
+              !syntax(tree.children(n)[k]).is(syntax_kind::decl_specifier_seq)))
         return not_supported(n, "dcl.fct.def.general");
     if (node.child_count &&
-        !syntax_is(tree, tree.children(n)[k], syntax_kind::decl_specifier_seq))
+        !syntax(tree.children(n)[k]).is(syntax_kind::decl_specifier_seq))
         /* [class.mem]/12: a constructor or destructor (or a conversion
            function) defined outside its class */
         return special_member_definition(n, 0);
@@ -895,8 +894,8 @@ analysis_result semantic_analysis::init_declarators(node_index declaration,
        be a class-name in the scope that contains the declaration" */
     sole_elaborated = 0;
     if (!definition && tree[specifiers].child_count == 1 &&
-        syntax_is(tree, tree.children(specifiers)[0],
-                  syntax_kind::elaborated_type_specifier)) {
+        syntax(tree.children(specifiers)[0])
+            .is(syntax_kind::elaborated_type_specifier)) {
         bool declarators = false;
         bool after = false;
         for (uint32_t i = 0; i < tree[declaration].child_count; i++) {
@@ -922,8 +921,8 @@ analysis_result semantic_analysis::init_declarators(node_index declaration,
     const syntax_node &node = tree[declaration];
     uint32_t first = 0;
     while (first < node.child_count &&
-           !(syntax_is(tree, tree.children(declaration)[first],
-                       syntax_kind::decl_specifier_seq) &&
+           !(syntax(tree.children(declaration)[first])
+                 .is(syntax_kind::decl_specifier_seq) &&
              tree.children(declaration)[first].index() == specifiers)) {
         /* [ext:gnu_attributes] before the decl-specifier-seq */
         r = gnu_attribute_specifier(tree.children(declaration)[first].index(),
@@ -935,11 +934,11 @@ analysis_result semantic_analysis::init_declarators(node_index declaration,
     owned_array<syntax_child> items;
     for (uint32_t i = first + 1; i < node.child_count; i++) {
         syntax_child c = tree.children(declaration)[i];
-        if (syntax_is(tree, c, syntax_kind::function_body))
+        if (syntax(c).is(syntax_kind::function_body))
             break;
         /* [dcl.decl]/4: a function template's trailing requires-clause,
            checked at deduction (template_constraints_satisfied) */
-        if (instantiating && syntax_is(tree, c, syntax_kind::requires_clause))
+        if (instantiating && syntax(c).is(syntax_kind::requires_clause))
             continue;
         /* [dcl.struct.bind]/1: ref-qualifier_opt [ identifier-list ] */
         if (syntax(c).is(preprocessing_op_or_punc::LEFT_BRACKET) ||
@@ -953,7 +952,7 @@ analysis_result semantic_analysis::init_declarators(node_index declaration,
             items.append(c);
             continue;
         }
-        if (syntax_is(tree, c, syntax_kind::init_declarator_list)) {
+        if (syntax(c).is(syntax_kind::init_declarator_list)) {
             const syntax_node &list = tree[c.index()];
             for (uint32_t k = 0; k < list.child_count; k++) {
                 syntax_child item = tree.children(c.index())[k];
@@ -1022,11 +1021,10 @@ analysis_result semantic_analysis::init_declarator(node_index declaration,
     syntax_child d = item;
     syntax_child init;
     bool initialized = false;
-    if (syntax_is(tree, item, syntax_kind::init_declarator)) {
+    if (syntax(item).is(syntax_kind::init_declarator)) {
         const syntax_node &node = tree[item.index()];
-        if (node.child_count != 2 ||
-            syntax_is(tree, tree.children(item.index())[1],
-                      syntax_kind::requires_clause))
+        if (node.child_count != 2 || syntax(tree.children(item.index())[1])
+                                         .is(syntax_kind::requires_clause))
             return not_supported(item.index(), "dcl.decl");
         d = tree.children(item.index())[0];
         init = tree.children(item.index())[1];

@@ -553,7 +553,7 @@ bool semantic_analysis::attributes_as_gnu(syntax_child n, uint32_t &flags) const
         const syntax_child *children = tree.children(c.index());
         if (node.kind == syntax_kind::attribute_specifier &&
             node.child_count > 2 &&
-            syntax_is(tree, children[2], syntax_kind::attribute_using_prefix)) {
+            syntax(children[2]).is(syntax_kind::attribute_using_prefix)) {
             /* [dcl.attr.grammar]/3: "If an attribute-specifier contains an
                attribute-using-prefix, ... each attribute-token in that
                attribute-list is treated as if its identifier were prefixed
@@ -615,7 +615,7 @@ bool semantic_analysis::attributes_as_gnu(syntax_child n, uint32_t &flags) const
             /* the token and an attribute-argument-clause, which none of
                these takes for anything vcc generates */
             if (!node.child_count ||
-                syntax_is(tree, children[0], syntax_kind::attribute))
+                syntax(children[0]).is(syntax_kind::attribute))
                 return false;
             work.append(children[0]);
             continue;
@@ -711,11 +711,11 @@ bool semantic_analysis::class_head_attributes_without_effect(
 {
     if (c.is_token())
         return false;
-    if (syntax_is(tree, c, syntax_kind::gnu_attribute_specifier))
+    if (syntax(c).is(syntax_kind::gnu_attribute_specifier))
         return gnu_attributes_without_effect(c);
-    if (syntax_is(tree, c, syntax_kind::attribute_specifier))
+    if (syntax(c).is(syntax_kind::attribute_specifier))
         return attributes_without_effect(c);
-    if (!syntax_is(tree, c, syntax_kind::attribute_specifier_seq))
+    if (!syntax(c).is(syntax_kind::attribute_specifier_seq))
         return false;
     for (uint32_t i = 0; i < tree[c.index()].child_count; i++)
         if (!class_head_attributes_without_effect(tree.children(c.index())[i]))

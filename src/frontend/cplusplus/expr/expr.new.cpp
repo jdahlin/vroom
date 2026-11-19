@@ -194,7 +194,7 @@ analysis_result semantic_analysis::new_type_id(node_index n,
     const syntax_node &node = tree[n];
     const syntax_child *children = tree.children(n);
     if (!node.child_count || node.child_count > 2 ||
-        !syntax_is(tree, children[0], syntax_kind::type_specifier_seq))
+        !syntax(children[0]).is(syntax_kind::type_specifier_seq))
         return not_supported(n, "expr.new");
     specified s;
     analysis_result r = decl_specifier_seq(children[0].index(), s, false);
@@ -207,19 +207,19 @@ analysis_result semantic_analysis::new_type_id(node_index n,
         return analysis_result::well_formed;
     syntax_child d = children[1];
     for (;;) {
-        if (syntax_is(tree, d, syntax_kind::noptr_new_declarator)) {
+        if (syntax(d).is(syntax_kind::noptr_new_declarator)) {
             const syntax_node &bounds = tree[d.index()];
             if (bounds.child_count != 3)
                 return not_supported(d.index(), "expr.new");
             bound = tree.children(d.index())[1];
             return analysis_result::well_formed;
         }
-        if (!syntax_is(tree, d, syntax_kind::new_declarator))
+        if (!syntax(d).is(syntax_kind::new_declarator))
             return not_supported(n, "expr.new");
         const syntax_node &declarator = tree[d.index()];
         const syntax_child *parts = tree.children(d.index());
         if (!declarator.child_count || declarator.child_count > 2 ||
-            !syntax_is(tree, parts[0], syntax_kind::ptr_operator))
+            !syntax(parts[0]).is(syntax_kind::ptr_operator))
             return not_supported(d.index(), "expr.new");
         declarator_meaning ignored;
         r = pointer_operator(parts[0].index(), type, ignored);
@@ -292,15 +292,15 @@ analysis_result semantic_analysis::new_expression(node_index n,
     }
     i++; /* new */
     syntax_child placement{};
-    if (i < count && syntax_is(tree, children[i], syntax_kind::new_placement))
+    if (i < count && syntax(children[i]).is(syntax_kind::new_placement))
         placement = children[i++];
     qualified_type type;
     syntax_child bound{};
     analysis_result r = analysis_result::well_formed;
-    if (i < count && syntax_is(tree, children[i], syntax_kind::new_type_id)) {
+    if (i < count && syntax(children[i]).is(syntax_kind::new_type_id)) {
         r = new_type_id(children[i++].index(), type, bound);
     } else if (i + 2 < count &&
-               syntax_is(tree, children[i + 1], syntax_kind::type_id)) {
+               syntax(children[i + 1]).is(syntax_kind::type_id)) {
         r = type_id(children[i + 1].index(), type);
         i += 3;
     } else {
@@ -547,9 +547,9 @@ analysis_result semantic_analysis::new_expression(node_index n,
                                   "const-default-constructible class type",
                                   "dcl.init");
         }
-    } else if (syntax_is(tree, init, syntax_kind::braced_init_list)) {
+    } else if (syntax(init).is(syntax_kind::braced_init_list)) {
         r = list_initialization(init.index(), type, true, value);
-    } else if (syntax_is(tree, init, syntax_kind::new_initializer)) {
+    } else if (syntax(init).is(syntax_kind::new_initializer)) {
         const syntax_node &k = tree[init.index()];
         const syntax_child *parts = tree.children(init.index());
         if (k.child_count == 2) {
@@ -582,7 +582,7 @@ analysis_result semantic_analysis::new_expression(node_index n,
                 value.node = expression_node(semantic_kind::zero, zero, at);
             }
         } else if (k.child_count == 3 &&
-                   syntax_is(tree, parts[1], syntax_kind::initializer_list)) {
+                   syntax(parts[1]).is(syntax_kind::initializer_list)) {
             /* [dcl.init]/17.6.2: the constructor called with the
                expression-list as its arguments */
             if (has_pack_expansion(parts[1]))

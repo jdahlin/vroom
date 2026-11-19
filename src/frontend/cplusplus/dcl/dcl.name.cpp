@@ -58,7 +58,7 @@ analysis_result semantic_analysis::type_id(node_index n, qualified_type &type)
     const syntax_node &node = tree[n];
     const syntax_child *children = tree.children(n);
     if (!node.child_count ||
-        !syntax_is(tree, children[0], syntax_kind::type_specifier_seq) ||
+        !syntax(children[0]).is(syntax_kind::type_specifier_seq) ||
         node.child_count > 2)
         return not_supported(n, "dcl.name");
     /* [temp.variadic]/5: a template-argument's pack expansion, T ...

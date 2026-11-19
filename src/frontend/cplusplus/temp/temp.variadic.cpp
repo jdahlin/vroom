@@ -50,28 +50,26 @@ bool semantic_analysis::template_parameter_form(
     if (x.kind == syntax_kind::decl_specifier_seq) {
         out.type = true;
         for (uint32_t i = 0; i < x.child_count; i++)
-            if (syntax_is(tree, c[i],
-                          syntax_kind::placeholder_type_specifier) &&
-                syntax_is(tree, tree.children(c[i].index())[0],
-                          syntax_kind::type_constraint))
+            if (syntax(c[i]).is(syntax_kind::placeholder_type_specifier) &&
+                syntax(tree.children(c[i].index())[0])
+                    .is(syntax_kind::type_constraint))
                 out.constraint = tree.children(c[i].index())[0].index();
         return true;
     }
     uint32_t k = 1;
-    out.type =
-        syntax_is(tree, syntax_child::node(p), syntax_kind::type_parameter);
+    out.type = syntax(syntax_child::node(p)).is(syntax_kind::type_parameter);
     if (out.type) {
-        if (syntax_is(tree, c[0], syntax_kind::type_constraint)) {
+        if (syntax(c[0]).is(syntax_kind::type_constraint)) {
             out.constraint = c[0].index();
         } else if (!c[0].is_token()) {
-            if (!syntax_is(tree, c[0], syntax_kind::template_head) ||
+            if (!syntax(c[0]).is(syntax_kind::template_head) ||
                 x.child_count < 2 || !c[1].is_token())
                 return false;
             out.template_template = true;
             out.head = c[0].index();
             k = 2;
         }
-    } else if (!syntax_is(tree, c[0], syntax_kind::decl_specifier_seq)) {
+    } else if (!syntax(c[0]).is(syntax_kind::decl_specifier_seq)) {
         return false;
     }
     if (k < x.child_count &&
@@ -85,7 +83,7 @@ bool semantic_analysis::template_parameter_form(
         out.id = c[k].index();
         k++;
     } else if (!out.type && !out.pack && k < x.child_count &&
-               syntax_is(tree, c[k], syntax_kind::noptr_declarator) &&
+               syntax(c[k]).is(syntax_kind::noptr_declarator) &&
                tree[c[k].index()].child_count == 2 &&
                syntax(tree.children(c[k].index())[0])
                    .is(preprocessing_op_or_punc::ELLIPSIS) &&
@@ -121,22 +119,22 @@ bool semantic_analysis::template_head_list(
         syntax_child c = tree.children(head)[i];
         if (c.is_token())
             continue;
-        if (syntax_is(tree, c, syntax_kind::type_parameter) ||
-            syntax_is(tree, c, syntax_kind::parameter_declaration)) {
+        if (syntax(c).is(syntax_kind::type_parameter) ||
+            syntax(c).is(syntax_kind::parameter_declaration)) {
             parameters.append(c.index());
             continue;
         }
         /* (its requires-clause: head_constraint) */
-        if (syntax_is(tree, c, syntax_kind::requires_clause))
+        if (syntax(c).is(syntax_kind::requires_clause))
             continue;
-        if (!syntax_is(tree, c, syntax_kind::template_parameter_list))
+        if (!syntax(c).is(syntax_kind::template_parameter_list))
             return false;
         for (uint32_t k = 0; k < tree[c.index()].child_count; k++) {
             syntax_child p = tree.children(c.index())[k];
             if (p.is_token())
                 continue;
-            if (!syntax_is(tree, p, syntax_kind::type_parameter) &&
-                !syntax_is(tree, p, syntax_kind::parameter_declaration))
+            if (!syntax(p).is(syntax_kind::type_parameter) &&
+                !syntax(p).is(syntax_kind::parameter_declaration))
                 return false;
             parameters.append(p.index());
         }
@@ -269,7 +267,7 @@ analysis_result semantic_analysis::parameter_pack_expansion(
        argument's (tuple<Ts...>&) */
     token_index from = first;
     if (tree[d].child_count &&
-        syntax_is(tree, tree.children(d)[0], syntax_kind::decl_specifier_seq))
+        syntax(tree.children(d)[0]).is(syntax_kind::decl_specifier_seq))
         from = tree[tree.children(d)[0].index()].end_token;
     token_index found = 0;
     uint32_t ellipses = 0;

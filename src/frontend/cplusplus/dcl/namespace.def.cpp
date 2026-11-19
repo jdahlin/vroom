@@ -314,12 +314,12 @@ analysis_result semantic_analysis::namespace_definition(node_index n)
     owned_array<syntax_child> head;
     for (uint32_t i = 0; i < node.child_count && !body; i++) {
         syntax_child c = tree.children(n)[i];
-        if (syntax_is(tree, c, syntax_kind::enclosing_namespace_specifier)) {
+        if (syntax(c).is(syntax_kind::enclosing_namespace_specifier)) {
             for (uint32_t k = 0; k < tree[c.index()].child_count; k++)
                 head.append(tree.children(c.index())[k]);
             continue;
         }
-        if (syntax_is(tree, c, syntax_kind::gnu_attribute_specifier)) {
+        if (syntax(c).is(syntax_kind::gnu_attribute_specifier)) {
             /* GNU attributes that change nothing a namespace's members
                get (abi_tag, which changes their symbols, has no rule) */
             gnu_attributes g;
@@ -524,7 +524,7 @@ analysis_result semantic_analysis::using_directive(node_index n)
     token_index name = 0;
     for (uint32_t i = 0; i < node.child_count; i++) {
         syntax_child c = children[i];
-        if (syntax_is(tree, c, syntax_kind::nested_name_specifier)) {
+        if (syntax(c).is(syntax_kind::nested_name_specifier)) {
             qualifier = c.index();
             continue;
         }
@@ -574,10 +574,10 @@ analysis_result semantic_analysis::namespace_alias_definition(node_index n)
     node_index qualifier = 0;
     token_index name = 0;
     syntax_child named = children[3];
-    if (syntax_is(tree, named, syntax_kind::qualified_namespace_specifier)) {
+    if (syntax(named).is(syntax_kind::qualified_namespace_specifier)) {
         const syntax_child *parts = tree.children(named.index());
         if (tree[named.index()].child_count != 2 ||
-            !syntax_is(tree, parts[0], syntax_kind::nested_name_specifier) ||
+            !syntax(parts[0]).is(syntax_kind::nested_name_specifier) ||
             !parts[1].is_token())
             return not_supported(n, "namespace.alias");
         qualifier = parts[0].index();

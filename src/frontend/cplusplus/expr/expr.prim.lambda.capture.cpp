@@ -38,8 +38,8 @@ semantic_analysis::lambda_captures_of(node_index n,
             syntax(c).is(preprocessing_op_or_punc::LEFT_BRACKET) ||
             syntax(c).is(preprocessing_op_or_punc::RIGHT_BRACKET))
             continue;
-        if (syntax_is(tree, c, syntax_kind::lambda_capture) ||
-            syntax_is(tree, c, syntax_kind::capture_list)) {
+        if (syntax(c).is(syntax_kind::lambda_capture) ||
+            syntax(c).is(syntax_kind::capture_list)) {
             analysis_result r = lambda_captures_of(c.index(), out);
             if (r != analysis_result::well_formed)
                 return r;
@@ -212,13 +212,13 @@ analysis_result semantic_analysis::lambda_introducer(node_index n,
             } else {
                 return not_supported(n, "expr.prim.lambda.capture");
             }
-        } else if (syntax_is(tree, c, syntax_kind::init_capture)) {
+        } else if (syntax(c).is(syntax_kind::init_capture)) {
             r = init_capture(c.index(), l, record);
             if (r != analysis_result::well_formed)
                 return r;
             lambda_captures.append(record);
             continue;
-        } else if (syntax_is(tree, c, syntax_kind::simple_capture)) {
+        } else if (syntax(c).is(syntax_kind::simple_capture)) {
             const syntax_node &sc = tree[c.index()];
             const syntax_child *parts = tree.children(c.index());
             if (sc.child_count == 2 &&

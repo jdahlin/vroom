@@ -121,7 +121,7 @@ entity_index semantic_analysis::dependent_value_entity(syntax_child written)
 {
     entity_index e = entity_table.make(entity_kind::dependent_value, 0, 0);
     bool negated = false;
-    if (syntax_is(tree, written, syntax_kind::unary_expression) &&
+    if (syntax(written).is(syntax_kind::unary_expression) &&
         tree[written.index()].child_count == 2 &&
         syntax(tree.children(written.index())[0])
             .is(preprocessing_op_or_punc::EXCLAMATION)) {
@@ -138,19 +138,19 @@ entity_index semantic_analysis::dependent_value_entity(syntax_child written)
             entity_table[x.entity].kind == entity_kind::dependent_value)
             return x.entity;
     }
-    if (!negated && syntax_is(tree, written, syntax_kind::simple_template_id))
+    if (!negated && syntax(written).is(syntax_kind::simple_template_id))
         return dependent_variable_specialization(written.index(), e);
-    if (!syntax_is(tree, written, syntax_kind::qualified_id) ||
+    if (!syntax(written).is(syntax_kind::qualified_id) ||
         tree[written.index()].child_count != 2)
         return e;
     syntax_child qualifier = tree.children(written.index())[0];
     syntax_child member = tree.children(written.index())[1];
     if (!member.is_token() ||
         tokens[member.index()].kind != token_kind::identifier ||
-        !syntax_is(tree, qualifier, syntax_kind::nested_name_specifier) ||
+        !syntax(qualifier).is(syntax_kind::nested_name_specifier) ||
         tree[qualifier.index()].child_count != 2 ||
-        !syntax_is(tree, tree.children(qualifier.index())[0],
-                   syntax_kind::simple_template_id))
+        !syntax(tree.children(qualifier.index())[0])
+             .is(syntax_kind::simple_template_id))
         return e;
     /* (its own unsupported records: the argument stays value-dependent) */
     size_t unsupported_before = unsupported.size();
@@ -308,11 +308,11 @@ analysis_result semantic_analysis::template_argument_for(
     if (entity_table[p].kind == entity_kind::template_entity)
         return template_template_argument(at, p, written, out);
     if (entity_table[p].kind == entity_kind::typedef_name) {
-        if (!syntax_is(tree, written, syntax_kind::type_id))
+        if (!syntax(written).is(syntax_kind::type_id))
             return not_supported(at, "temp.arg");
         return type_id(written.index(), out.type);
     }
-    if (syntax_is(tree, written, syntax_kind::type_id))
+    if (syntax(written).is(syntax_kind::type_id))
         return not_supported(at, "temp.arg");
     qualified_type to = entity_table[p].type;
     /* [temp.param]/4: a parameter whose type is an earlier type parameter
@@ -491,7 +491,7 @@ analysis_result semantic_analysis::address_argument(node_index at,
         return analysis_result::well_formed;
     syntax_child operand = written;
     bool address_of = false;
-    if (syntax_is(tree, written, syntax_kind::unary_expression) &&
+    if (syntax(written).is(syntax_kind::unary_expression) &&
         tree[written.index()].child_count == 2 &&
         syntax(tree.children(written.index())[0])
             .is(preprocessing_op_or_punc::AMPERSAND)) {
@@ -542,27 +542,27 @@ analysis_result semantic_analysis::template_template_argument(
     /* the written name: identifier, or nested-name-specifier identifier */
     syntax_child name = written;
     node_index qualifier = 0;
-    if (syntax_is(tree, name, syntax_kind::type_id)) {
+    if (syntax(name).is(syntax_kind::type_id)) {
         if (tree[name.index()].child_count != 1 ||
-            !syntax_is(tree, tree.children(name.index())[0],
-                       syntax_kind::type_specifier_seq))
+            !syntax(tree.children(name.index())[0])
+                 .is(syntax_kind::type_specifier_seq))
             return not_supported(at, "temp.arg.template");
         name = tree.children(name.index())[0];
         if (tree[name.index()].child_count != 1)
             return not_supported(at, "temp.arg.template");
         name = tree.children(name.index())[0];
-        if (syntax_is(tree, name, syntax_kind::simple_type_specifier)) {
+        if (syntax(name).is(syntax_kind::simple_type_specifier)) {
             const syntax_child *c = tree.children(name.index());
             if (tree[name.index()].child_count != 2 ||
-                !syntax_is(tree, c[0], syntax_kind::nested_name_specifier))
+                !syntax(c[0]).is(syntax_kind::nested_name_specifier))
                 return not_supported(at, "temp.arg.template");
             qualifier = c[0].index();
             name = c[1];
         }
-    } else if (syntax_is(tree, name, syntax_kind::qualified_id)) {
+    } else if (syntax(name).is(syntax_kind::qualified_id)) {
         const syntax_child *c = tree.children(name.index());
         if (tree[name.index()].child_count != 2 ||
-            !syntax_is(tree, c[0], syntax_kind::nested_name_specifier))
+            !syntax(c[0]).is(syntax_kind::nested_name_specifier))
             return not_supported(at, "temp.arg.template");
         qualifier = c[0].index();
         name = c[1];

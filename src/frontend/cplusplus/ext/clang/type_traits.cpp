@@ -287,8 +287,8 @@ analysis_result semantic_analysis::clang_type_trait(node_index n,
                 spelled(name, written.size(), "__is_same_as");
     /* ( type-id , type-id ) */
     if (!same || node.child_count != 6 ||
-        !syntax_is(tree, children[2], syntax_kind::type_id) ||
-        !syntax_is(tree, children[4], syntax_kind::type_id))
+        !syntax(children[2]).is(syntax_kind::type_id) ||
+        !syntax(children[4]).is(syntax_kind::type_id))
         return not_supported(n, "ext.clang");
     qualified_type t, u;
     analysis_result r = type_id(children[2].index(), t);
@@ -351,7 +351,7 @@ analysis_result semantic_analysis::builtin_template_arguments(
             expansion.back() = true;
             continue;
         }
-        if (syntax_is(tree, parts[i], syntax_kind::template_argument_list)) {
+        if (syntax(parts[i]).is(syntax_kind::template_argument_list)) {
             if (!expansion_list(parts[i].index(), written, expansion))
                 return not_supported(id, "temp.variadic");
         } else {
@@ -360,7 +360,7 @@ analysis_result semantic_analysis::builtin_template_arguments(
         }
     }
     for (size_t w = 0; w < written.size(); w++)
-        if (syntax_is(tree, written[w], syntax_kind::type_id) &&
+        if (syntax(written[w]).is(syntax_kind::type_id) &&
             tree[written[w].index()].child_count == 2 &&
             syntax(tree.children(written[w].index())[1])
                 .is(preprocessing_op_or_punc::ELLIPSIS))
@@ -378,7 +378,7 @@ analysis_result semantic_analysis::builtin_template_types(
 {
     for (size_t w = from; w < written.size(); w++) {
         syntax_child a = written[w];
-        if (!syntax_is(tree, a, syntax_kind::type_id))
+        if (!syntax(a).is(syntax_kind::type_id))
             return not_supported(id, "ext.clang");
         uint32_t times = 1;
         if (expansion[w]) {
@@ -451,7 +451,7 @@ analysis_result semantic_analysis::builtin_common_type(node_index id,
         templates[i] = e;
     }
     qualified_type empty;
-    if (!syntax_is(tree, written[2], syntax_kind::type_id))
+    if (!syntax(written[2]).is(syntax_kind::type_id))
         return not_supported(id, "ext.clang");
     r = type_id(written[2].index(), empty);
     if (r != analysis_result::well_formed)
@@ -502,7 +502,7 @@ analysis_result semantic_analysis::builtin_type_pack_element(node_index id,
     if (r != analysis_result::well_formed)
         return r;
     if (written.empty() || expansion[0] ||
-        syntax_is(tree, written[0], syntax_kind::type_id))
+        syntax(written[0]).is(syntax_kind::type_id))
         return not_supported(id, "ext.clang");
     owned_array<qualified_type> types;
     bool dependent = false;
@@ -570,7 +570,7 @@ analysis_result semantic_analysis::builtin_make_integer_seq(node_index id,
     if (r != analysis_result::well_formed)
         return r;
     if (written.size() != 3 || expansion[0] || expansion[1] || expansion[2] ||
-        syntax_is(tree, written[2], syntax_kind::type_id))
+        syntax(written[2]).is(syntax_kind::type_id))
         return not_supported(id, "ext.clang");
     /* B, by name */
     token_index first = first_token(written[0]);
@@ -588,7 +588,7 @@ analysis_result semantic_analysis::builtin_make_integer_seq(node_index id,
         t = alias_template_of(b);
     if (!t)
         return not_supported(id, "ext.clang");
-    if (!syntax_is(tree, written[1], syntax_kind::type_id))
+    if (!syntax(written[1]).is(syntax_kind::type_id))
         return not_supported(id, "ext.clang");
     qualified_type element;
     r = type_id(written[1].index(), element);

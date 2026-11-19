@@ -127,8 +127,8 @@ analysis_result semantic_analysis::selection_statement(node_index n,
     }
     entity_index outer = current_scope, statement_scope = 0;
     if ((parts.has_init &&
-         !syntax_is(tree, parts.init, syntax_kind::expression_statement)) ||
-        syntax_is(tree, parts.condition, syntax_kind::condition))
+         !syntax(parts.init).is(syntax_kind::expression_statement)) ||
+        syntax(parts.condition).is(syntax_kind::condition))
         statement_scope = open_scope(0, false);
     analysis_result result = analysis_result::well_formed;
     uint32_t init = 0, body = 0, otherwise = 0;

@@ -109,7 +109,7 @@ analysis_result semantic_analysis::assignment(node_index n,
     const syntax_node &node = tree[n];
     const syntax_child *children = tree.children(n);
     if (node.child_count != 3 || !children[1].is_token() ||
-        syntax_is(tree, children[2], syntax_kind::braced_init_list))
+        syntax(children[2]).is(syntax_kind::braced_init_list))
         return not_supported(n, "expr.ass");
     preprocessing_op_or_punc op = preprocessing_op_or_punc_primary(
         tokens[children[1].index()].op_or_punc);

@@ -95,14 +95,14 @@ semantic_analysis::resolve_call(node_index n,
        reference or array type, are not analysed */
     owned_array<syntax_child> lists;
     for (size_t i = 0; i < arguments.size(); i++) {
-        if (!syntax_is(tree, arguments[i], syntax_kind::braced_init_list))
+        if (!syntax(arguments[i]).is(syntax_kind::braced_init_list))
             continue;
         owned_array<syntax_child> clauses;
         analysis_result r = list_clauses(arguments[i].index(), clauses);
         if (r != analysis_result::well_formed)
             return r;
         if (clauses.size() != 1 ||
-            syntax_is(tree, clauses[0], syntax_kind::braced_init_list))
+            syntax(clauses[0]).is(syntax_kind::braced_init_list))
             return not_supported(n, "over.ics.list");
         for (entity_index e : set) {
             const struct type &ft =
@@ -121,13 +121,13 @@ semantic_analysis::resolve_call(node_index n,
     }
     for (size_t i = 0; i < early.size(); i++)
         if (!early[i].node &&
-            !syntax_is(tree, arguments[i], syntax_kind::braced_init_list))
+            !syntax(arguments[i]).is(syntax_kind::braced_init_list))
             /* an overload set's name as an argument: the conversion
                sequences of [over.ics.ref] and [over.over] together */
             return not_supported(n, "over.over");
     for (size_t i = early.size(); i < arguments.size(); i++) {
         expression_meaning e;
-        if (!syntax_is(tree, arguments[i], syntax_kind::braced_init_list)) {
+        if (!syntax(arguments[i]).is(syntax_kind::braced_init_list)) {
             analysis_result r = expression(arguments[i], e);
             if (r != analysis_result::well_formed)
                 return r;
@@ -136,7 +136,7 @@ semantic_analysis::resolve_call(node_index n,
     }
     size_t list = 0;
     for (size_t i = 0; i < arguments.size(); i++) {
-        if (!syntax_is(tree, arguments[i], syntax_kind::braced_init_list))
+        if (!syntax(arguments[i]).is(syntax_kind::braced_init_list))
             continue;
         analysis_result r = expression(lists[list++], early[i]);
         if (r != analysis_result::well_formed)

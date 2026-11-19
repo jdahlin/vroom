@@ -684,7 +684,7 @@ analysis_result semantic_analysis::qualified_id(node_index n,
     const syntax_node &node = tree[n];
     const syntax_child *parts = tree.children(n);
     if (node.child_count != 2 ||
-        !syntax_is(tree, parts[0], syntax_kind::nested_name_specifier) ||
+        !syntax(parts[0]).is(syntax_kind::nested_name_specifier) ||
         !parts[1].is_token() ||
         tokens[parts[1].index()].kind != token_kind::identifier)
         return not_supported(n, "expr.prim.id.qual");

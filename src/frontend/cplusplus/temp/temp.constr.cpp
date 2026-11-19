@@ -118,13 +118,13 @@ analysis_result semantic_analysis::requires_expression(node_index n,
     const syntax_child *requirements = tree.children(body) + 1;
     uint32_t count = tree[body].child_count - 2;
     if (count == 1 &&
-        syntax_is(tree, requirements[0], syntax_kind::requirement_seq)) {
+        syntax(requirements[0]).is(syntax_kind::requirement_seq)) {
         count = tree[requirements[0].index()].child_count;
         requirements = tree.children(requirements[0].index());
     }
     bool satisfied = true;
     for (uint32_t i = 0; i < count && satisfied; i++) {
-        if (!syntax_is(tree, requirements[i], syntax_kind::type_requirement))
+        if (!syntax(requirements[i]).is(syntax_kind::type_requirement))
             return not_supported(n, "expr.prim.req");
         /* [expr.prim.req.type]/1: "A type-requirement asserts the validity
            of a type" */
@@ -281,8 +281,8 @@ bool semantic_analysis::same_constraints(node_index a, node_index b)
        equivalent template-heads) */
     owned_array<node_index> pa, pb;
     if (tree[a].child_count && tree[b].child_count &&
-        syntax_is(tree, tree.children(a)[0], syntax_kind::template_head) &&
-        syntax_is(tree, tree.children(b)[0], syntax_kind::template_head) &&
+        syntax(tree.children(a)[0]).is(syntax_kind::template_head) &&
+        syntax(tree.children(b)[0]).is(syntax_kind::template_head) &&
         template_head_list(tree.children(a)[0].index(), pa) &&
         template_head_list(tree.children(b)[0].index(), pb)) {
         if (pa.size() != pb.size())
@@ -315,7 +315,7 @@ bool semantic_analysis::template_head_constrained(node_index n)
     if (head_constraint(n).bits)
         return true;
     if (tree[n].child_count &&
-        syntax_is(tree, tree.children(n)[0], syntax_kind::template_head) &&
+        syntax(tree.children(n)[0]).is(syntax_kind::template_head) &&
         !template_head_list(tree.children(n)[0].index(), parameters))
         return false;
     abbreviated_parameters(n, parameters);
@@ -408,10 +408,9 @@ uint32_t semantic_analysis::function_parameter_position(entity_index t,
     while (work.size()) {
         syntax_child c = work[work.size() - 1];
         work.resize(work.size() - 1);
-        if (c.is_token() ||
-            syntax_is(tree, c, syntax_kind::trailing_return_type))
+        if (c.is_token() || syntax(c).is(syntax_kind::trailing_return_type))
             continue;
-        if (syntax_is(tree, c, syntax_kind::parameter_declaration)) {
+        if (syntax(c).is(syntax_kind::parameter_declaration)) {
             position++;
             for (uint32_t j = 1; j < tree[c.index()].child_count; j++) {
                 token_index id = declarator_id(tree.children(c.index())[j]);
@@ -420,8 +419,7 @@ uint32_t semantic_analysis::function_parameter_position(entity_index t,
             }
             continue;
         }
-        bool clause =
-            syntax_is(tree, c, syntax_kind::parameters_and_qualifiers);
+        bool clause = syntax(c).is(syntax_kind::parameters_and_qualifiers);
         if (clause && inside)
             continue;
         inside |= clause;

@@ -170,7 +170,7 @@ semantic_analysis::conversion_function_member(entity_index c, node_index n,
         first++;
     }
     if (first < node.child_count &&
-        syntax_is(tree, children[first], syntax_kind::decl_specifier_seq)) {
+        syntax(children[first]).is(syntax_kind::decl_specifier_seq)) {
         node_index seq = children[first].index();
         first++;
         bool outer_virtual = virtual_allowed, outer_explicit = explicit_allowed;
@@ -215,9 +215,8 @@ node_index semantic_analysis::conversion_function_id_of(node_index n) const
     owned_array<node_index> work;
     for (uint32_t i = 0; i < tree[n].child_count; i++) {
         syntax_child x = tree.children(n)[i];
-        if (!x.is_token() &&
-            !syntax_is(tree, x, syntax_kind::decl_specifier_seq) &&
-            !syntax_is(tree, x, syntax_kind::function_body))
+        if (!x.is_token() && !syntax(x).is(syntax_kind::decl_specifier_seq) &&
+            !syntax(x).is(syntax_kind::function_body))
             work.append(x.index());
     }
     while (!work.empty()) {

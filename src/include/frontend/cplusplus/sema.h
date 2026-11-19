@@ -23,13 +23,6 @@
 namespace cplusplus
 {
 
-/* ---- the syntax tree, as analysis reads it -------------------------------- */
-
-inline bool syntax_is(const syntax_tree &tree, syntax_child c, syntax_kind kind)
-{
-    return !c.is_token() && tree[c.index()].kind == kind;
-}
-
 /* ---- types -------------------------------------------------------------- */
 
 /* a type of the translation unit's type table; 0 is no type */

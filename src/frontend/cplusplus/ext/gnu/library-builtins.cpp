@@ -458,7 +458,7 @@ bool semantic_analysis::builtin_addressof_call(node_index n)
     const syntax_child *children = tree.children(n);
     if (node.child_count != 4 || !children[0].is_token() ||
         tokens[children[0].index()].kind != token_kind::identifier ||
-        syntax_is(tree, children[2], syntax_kind::initializer_list) ||
+        syntax(children[2]).is(syntax_kind::initializer_list) ||
         !tokens.files.behavior.has(extension::gnu_library_builtins))
         return false;
     static const char spelled[] = "__builtin_addressof";

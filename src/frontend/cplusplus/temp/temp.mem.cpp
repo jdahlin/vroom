@@ -45,9 +45,8 @@ analysis_result semantic_analysis::member_function_template(
     const syntax_child *dc = tree.children(definition) + lead;
     /* a constructor template's decl-specifier-seq is optional
        ([class.ctor]/1) */
-    uint32_t specifiers =
-        d.child_count > lead &&
-        syntax_is(tree, dc[0], syntax_kind::decl_specifier_seq);
+    uint32_t specifiers = d.child_count > lead &&
+                          syntax(dc[0]).is(syntax_kind::decl_specifier_seq);
     bool constructor = declares_special_member(c, dc[specifiers]);
     /* [dcl.decl]/4: a trailing requires-clause (trailing_constraint),
        where the template-head has none */
@@ -56,8 +55,7 @@ analysis_result semantic_analysis::member_function_template(
         return not_supported(n, "temp.constr");
     if (d.child_count != lead + 2 + specifiers + trailing ||
         (!specifiers && !constructor) || dc[specifiers].is_token() ||
-        !syntax_is(tree, dc[specifiers + 1 + trailing],
-                   syntax_kind::function_body))
+        !syntax(dc[specifiers + 1 + trailing]).is(syntax_kind::function_body))
         return not_supported(n, "temp.mem");
     uint32_t index = 0, first = 0;
     entity_index scope = 0;
@@ -222,7 +220,7 @@ analysis_result semantic_analysis::member_template_call(
     if (early.empty())
         for (syntax_child a : arguments) {
             token_index set_at = 0;
-            if (syntax_is(tree, a, syntax_kind::braced_init_list) ||
+            if (syntax(a).is(syntax_kind::braced_init_list) ||
                 named_overload_set(a, set_at))
                 return not_supported(n, "temp.deduct.call");
             expression_meaning e;

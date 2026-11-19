@@ -60,7 +60,7 @@ analysis_result semantic_analysis::class_specifier(node_index n,
 {
     analysis_result r = class_definition(n, type);
     if (r == analysis_result::well_formed || !tree[n].child_count ||
-        !syntax_is(tree, tree.children(n)[0], syntax_kind::class_head))
+        !syntax(tree.children(n)[0]).is(syntax_kind::class_head))
         return r;
     /* a class whose definition is not analysed: its name is held in the
        scope it would be declared in, so that a later
@@ -94,11 +94,11 @@ bool semantic_analysis::declares_unnamed_class(node_index seq) const
 {
     for (uint32_t i = 0; i < tree[seq].child_count; i++) {
         syntax_child c = tree.children(seq)[i];
-        if (!syntax_is(tree, c, syntax_kind::class_specifier) ||
+        if (!syntax(c).is(syntax_kind::class_specifier) ||
             !tree[c.index()].child_count)
             continue;
         syntax_child head = tree.children(c.index())[0];
-        if (syntax_is(tree, head, syntax_kind::class_head) &&
+        if (syntax(head).is(syntax_kind::class_head) &&
             tree[head.index()].child_count == 1)
             return true;
     }
@@ -198,8 +198,7 @@ analysis_result semantic_analysis::class_definition(node_index n,
     node_index postponed_declaration = current_declaration;
     const syntax_node &node = tree[n];
     const syntax_child *children = tree.children(n);
-    if (!node.child_count ||
-        !syntax_is(tree, children[0], syntax_kind::class_head))
+    if (!node.child_count || !syntax(children[0]).is(syntax_kind::class_head))
         return not_supported(n, "class.pre");
     node_index head = children[0].index();
     const syntax_node &h = tree[head];
@@ -214,22 +213,22 @@ analysis_result semantic_analysis::class_definition(node_index n,
     for (uint32_t i = 0; i < h.child_count; i++) {
         syntax_child c = tree.children(head)[i];
         bool only_alignment =
-            i && syntax_is(tree, c, syntax_kind::attribute_specifier_seq);
+            i && syntax(c).is(syntax_kind::attribute_specifier_seq);
         for (uint32_t k = 0; only_alignment && k < tree[c.index()].child_count;
              k++)
-            only_alignment = syntax_is(tree, tree.children(c.index())[k],
-                                       syntax_kind::alignment_specifier);
+            only_alignment = syntax(tree.children(c.index())[k])
+                                 .is(syntax_kind::alignment_specifier);
         if (only_alignment) {
             for (uint32_t k = 0; k < tree[c.index()].child_count; k++)
                 alignas_list.append(tree.children(c.index())[k].index());
-        } else if (i && syntax_is(tree, c, syntax_kind::alignment_specifier)) {
+        } else if (i && syntax(c).is(syntax_kind::alignment_specifier)) {
             alignas_list.append(c.index());
         } else if (i && class_head_attributes_without_effect(c)) {
             /* [dcl.attr.deprecated] and the like: nothing generated */
         } else if (i && !c.is_token() && gnu_or_without_effect(c.index())) {
             const syntax_child *each = &c;
             uint32_t count = 1;
-            if (syntax_is(tree, c, syntax_kind::attribute_specifier_seq)) {
+            if (syntax(c).is(syntax_kind::attribute_specifier_seq)) {
                 each = tree.children(c.index());
                 count = tree[c.index()].child_count;
             }
@@ -261,18 +260,16 @@ analysis_result semantic_analysis::class_definition(node_index n,
         tokens[head_children[1].index()].kind == token_kind::identifier) {
         head_name = head_children[1].index();
     } else if (!unnamed && class_instantiating &&
-               syntax_is(tree, head_children[1],
-                         syntax_kind::simple_template_id)) {
+               syntax(head_children[1]).is(syntax_kind::simple_template_id)) {
         /* a partial or explicit specialization's definition, instantiated
            (instantiate_class): the template's name */
         head_name = tree.children(head_children[1].index())[0].index();
-    } else if (!unnamed && syntax_is(tree, head_children[1],
-                                     syntax_kind::class_head_name)) {
+    } else if (!unnamed &&
+               syntax(head_children[1]).is(syntax_kind::class_head_name)) {
         node_index hn = head_children[1].index();
         const syntax_child *name_parts = tree.children(hn);
         if (tree[hn].child_count != 2 ||
-            !syntax_is(tree, name_parts[0],
-                       syntax_kind::nested_name_specifier) ||
+            !syntax(name_parts[0]).is(syntax_kind::nested_name_specifier) ||
             !name_parts[1].is_token() ||
             tokens[name_parts[1].index()].kind != token_kind::identifier)
             /* a simple-template-id: an explicit or partial
@@ -287,9 +284,8 @@ analysis_result semantic_analysis::class_definition(node_index n,
         /* attributes */
         return not_supported(n, "class.pre");
     }
-    bool has_bases =
-        head_count == 3 && !unnamed &&
-        syntax_is(tree, head_children[2], syntax_kind::base_clause);
+    bool has_bases = head_count == 3 && !unnamed &&
+                     syntax(head_children[2]).is(syntax_kind::base_clause);
     if (head_count > 2 && !has_bases)
         /* a class-virt-specifier, a base-clause of an unnamed class */
         return not_supported(n, "class.derived");
@@ -577,7 +573,7 @@ analysis_result semantic_analysis::class_definition(node_index n,
     size_t nested_start = nested_bodies.size();
     for (uint32_t i = 1; i < node.child_count; i++) {
         syntax_child part = children[i];
-        if (!syntax_is(tree, part, syntax_kind::member_specification))
+        if (!syntax(part).is(syntax_kind::member_specification))
             continue;
         const syntax_node &spec = tree[part.index()];
         for (uint32_t k = 0; k < spec.child_count; k++) {
@@ -722,7 +718,7 @@ analysis_result semantic_analysis::elaborated_type_specifier(node_index n,
         return not_supported(n, "dcl.type.elab");
     bool is_union = key == standard_keyword::union_;
     if (child_count == 3 &&
-        syntax_is(tree, children[1], syntax_kind::nested_name_specifier) &&
+        syntax(children[1]).is(syntax_kind::nested_name_specifier) &&
         children[2].is_token() &&
         tokens[children[2].index()].kind == token_kind::identifier) {
         /* [basic.lookup.elab]/3: "If the elaborated-type-specifier has a
@@ -1133,7 +1129,7 @@ semantic_analysis::member_declaration(entity_index c, syntax_child member,
        friend ...) */
     uint32_t leading = leading_gnu_attributes(n);
     if (leading < node.child_count &&
-        syntax_is(tree, children[leading], syntax_kind::decl_specifier_seq)) {
+        syntax(children[leading]).is(syntax_kind::decl_specifier_seq)) {
         node_index seq = children[leading].index();
         for (uint32_t i = 0; i < tree[seq].child_count; i++) {
             syntax_child x = tree.children(seq)[i];
@@ -1164,13 +1160,13 @@ semantic_analysis::member_declaration(entity_index c, syntax_child member,
        virt-specifiers in override_ and final_ */
     bool override_ = false, final_ = false;
     auto special = [&](syntax_child d) {
-        if (!syntax_is(tree, d, syntax_kind::member_declarator) ||
+        if (!syntax(d).is(syntax_kind::member_declarator) ||
             tree[d.index()].child_count < 2)
             return d;
         const syntax_child *dc = tree.children(d.index());
-        if (!syntax_is(tree, dc[0], syntax_kind::noptr_declarator) ||
-            !syntax_is(tree, tree.children(dc[0].index())[0],
-                       syntax_kind::unqualified_id))
+        if (!syntax(dc[0]).is(syntax_kind::noptr_declarator) ||
+            !syntax(tree.children(dc[0].index())[0])
+                 .is(syntax_kind::unqualified_id))
             return d;
         bool o = false, f = false;
         for (uint32_t i = 1; i < tree[d.index()].child_count; i++)
@@ -1181,13 +1177,13 @@ semantic_analysis::member_declaration(entity_index c, syntax_child member,
         return dc[0];
     };
     if (node.child_count > lead + 1 &&
-        syntax_is(tree, children[lead], syntax_kind::decl_specifier_seq) &&
+        syntax(children[lead]).is(syntax_kind::decl_specifier_seq) &&
         function_specifiers_only(children[lead].index(), constexpr_specified,
                                  &virtual_specified, &explicit_specified) &&
         declares_special_member(c, special(children[lead + 1])))
         at = lead + 1;
     if (lead == node.child_count || at > lead ||
-        !syntax_is(tree, children[lead], syntax_kind::decl_specifier_seq)) {
+        !syntax(children[lead]).is(syntax_kind::decl_specifier_seq)) {
         /* [class.mem]/12: "The decl-specifier-seq may be omitted in
            constructor, destructor, and conversion function declarations
            only" */
@@ -1198,7 +1194,7 @@ semantic_analysis::member_declaration(entity_index c, syntax_child member,
             owned_array<node_index> work;
             for (uint32_t i = 0; i < node.child_count; i++)
                 if (!children[i].is_token() &&
-                    !syntax_is(tree, children[i], syntax_kind::function_body))
+                    !syntax(children[i]).is(syntax_kind::function_body))
                     work.append(children[i].index());
             while (!work.empty()) {
                 node_index k = work.back();
@@ -1255,8 +1251,8 @@ semantic_analysis::member_declaration(entity_index c, syntax_child member,
     if (node.kind == syntax_kind::member_declaration && count == 2 &&
         syntax(children[1]).is(preprocessing_op_or_punc::SEMICOLON) &&
         tree[children[0].index()].child_count == 1 &&
-        syntax_is(tree, tree.children(children[0].index())[0],
-                  syntax_kind::elaborated_type_specifier))
+        syntax(tree.children(children[0].index())[0])
+            .is(syntax_kind::elaborated_type_specifier))
         sole_elaborated = tree.children(children[0].index())[0].index();
     bool outer_virtual_allowed = virtual_allowed;
     virtual_allowed = true;
@@ -1314,7 +1310,7 @@ analysis_result semantic_analysis::member_declarators(
         syntax_child d = children[i];
         if (syntax(d).is(preprocessing_op_or_punc::SEMICOLON))
             continue;
-        if (syntax_is(tree, d, syntax_kind::member_declarator_list)) {
+        if (syntax(d).is(syntax_kind::member_declarator_list)) {
             const syntax_node &list = tree[d.index()];
             for (uint32_t k = 0; k < list.child_count; k++) {
                 syntax_child item = tree.children(d.index())[k];
@@ -1337,10 +1333,10 @@ analysis_result semantic_analysis::member_declarators(
            ([class.nest]/3) */
         const syntax_node &seq = tree[children[first - 1].index()];
         if (plain && seq.child_count == 1 &&
-            (syntax_is(tree, tree.children(children[first - 1].index())[0],
-                       syntax_kind::class_specifier) ||
-             syntax_is(tree, tree.children(children[first - 1].index())[0],
-                       syntax_kind::elaborated_type_specifier)))
+            (syntax(tree.children(children[first - 1].index())[0])
+                 .is(syntax_kind::class_specifier) ||
+             syntax(tree.children(children[first - 1].index())[0])
+                 .is(syntax_kind::elaborated_type_specifier)))
             return analysis_result::well_formed;
         /* a nested class, an anonymous union */
         return not_supported(n, "class.mem");
@@ -1366,7 +1362,7 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
                                      syntax_child d, const specified &s,
                                      uint8_t access, bool definition)
 {
-    if (syntax_is(tree, d, syntax_kind::member_declarator)) {
+    if (syntax(d).is(syntax_kind::member_declarator)) {
         /* identifier_opt attribute-specifier-seq_opt : constant-expression */
         const syntax_node &node = tree[d.index()];
         for (uint32_t i = 0; i < node.child_count; i++)
@@ -1382,7 +1378,7 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
                    virt_specifier(parts[i], override_, final_))
                 i++;
             if (i < node.child_count &&
-                syntax_is(tree, parts[i], syntax_kind::pure_specifier)) {
+                syntax(parts[i]).is(syntax_kind::pure_specifier)) {
                 pure = true;
                 i++;
             }
@@ -1405,9 +1401,8 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
            ([class.base.init]/9), a complete-class context ([class.mem]/6) */
         const syntax_child *parts = tree.children(d.index());
         if (node.child_count != 2 ||
-            (!syntax_is(tree, parts[1],
-                        syntax_kind::brace_or_equal_initializer) &&
-             !syntax_is(tree, parts[1], syntax_kind::braced_init_list)))
+            (!syntax(parts[1]).is(syntax_kind::brace_or_equal_initializer) &&
+             !syntax(parts[1]).is(syntax_kind::braced_init_list)))
             return not_supported(d.index(), "class.mem");
         last_declared = 0;
         analysis_result r =
@@ -2198,7 +2193,7 @@ bool semantic_analysis::virt_specifier(syntax_child d, bool &override_,
     };
     if (d.is_token())
         return one(d);
-    if (!syntax_is(tree, d, syntax_kind::virt_specifier_seq))
+    if (!syntax(d).is(syntax_kind::virt_specifier_seq))
         return false;
     for (uint32_t i = 0; i < tree[d.index()].child_count; i++)
         if (!one(tree.children(d.index())[i]))
@@ -2212,15 +2207,15 @@ syntax_child semantic_analysis::class_head_name(node_index head) const
 {
     for (uint32_t i = 1; i < tree[head].child_count; i++) {
         syntax_child c = tree.children(head)[i];
-        if (syntax_is(tree, c, syntax_kind::alignment_specifier) ||
+        if (syntax(c).is(syntax_kind::alignment_specifier) ||
             (!c.is_token() && gnu_or_without_effect(c.index())))
             continue;
         bool only_alignment =
-            syntax_is(tree, c, syntax_kind::attribute_specifier_seq);
+            syntax(c).is(syntax_kind::attribute_specifier_seq);
         for (uint32_t k = 0; only_alignment && k < tree[c.index()].child_count;
              k++)
-            only_alignment = syntax_is(tree, tree.children(c.index())[k],
-                                       syntax_kind::alignment_specifier);
+            only_alignment = syntax(tree.children(c.index())[k])
+                                 .is(syntax_kind::alignment_specifier);
         if (!only_alignment)
             return c;
     }
@@ -2244,7 +2239,7 @@ analysis_result semantic_analysis::alignment_specifier(node_index n,
     const syntax_child *parts = tree.children(n);
     if (tree[n].child_count != 4)
         return not_supported(n, "dcl.align");
-    if (syntax_is(tree, parts[2], syntax_kind::type_id)) {
+    if (syntax(parts[2]).is(syntax_kind::type_id)) {
         qualified_type t;
         analysis_result r = type_id(parts[2].index(), t);
         if (r != analysis_result::well_formed)

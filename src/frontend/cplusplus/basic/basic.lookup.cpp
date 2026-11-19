@@ -736,7 +736,7 @@ analysis_result semantic_analysis::nested_name_specifier(node_index n,
             continue;
         }
         if (!parts[i].is_token() &&
-            syntax_is(tree, parts[i], syntax_kind::simple_template_id) &&
+            syntax(parts[i]).is(syntax_kind::simple_template_id) &&
             i + 1 < node.child_count &&
             syntax(parts[i + 1]).is(preprocessing_op_or_punc::COLON_COLON)) {
             /* [temp.names]/1: a simple-template-id naming a class template
@@ -776,7 +776,7 @@ analysis_result semantic_analysis::nested_name_specifier(node_index n,
             !syntax(parts[i + 1]).is(preprocessing_op_or_punc::COLON_COLON)) {
             /* [temp.names]: template before a simple-template-id */
             if (!parts[i].is_token() &&
-                syntax_is(tree, parts[i], syntax_kind::simple_template_id))
+                syntax(parts[i]).is(syntax_kind::simple_template_id))
                 return not_supported(n, "temp.names");
             return not_supported(n, "basic.lookup.qual");
         }

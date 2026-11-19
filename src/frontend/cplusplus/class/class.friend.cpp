@@ -109,7 +109,7 @@ analysis_result semantic_analysis::friend_class(entity_index c, node_index n,
         friends.append(f);
         return analysis_result::well_formed;
     }
-    if (!syntax_is(tree, type, syntax_kind::elaborated_type_specifier))
+    if (!syntax(type).is(syntax_kind::elaborated_type_specifier))
         return not_supported(n, "class.friend");
     node_index t = type.index();
     const syntax_node &node = tree[t];
@@ -203,16 +203,15 @@ semantic_analysis::friend_function(entity_index c, node_index n,
     if (defines) {
         auto body = syntax(n).function_definition().function_body();
         if (count != 3 ||
-            !syntax_is(tree, children[0], syntax_kind::decl_specifier_seq) ||
+            !syntax(children[0]).is(syntax_kind::decl_specifier_seq) ||
             !body.is(syntax_kind::function_body))
             return not_supported(n, "class.friend");
         if (!body.defaulted() && !body.plain())
             return not_supported(n, "dcl.fct.def.general");
     } else if (node.kind != syntax_kind::member_declaration || count != 3 ||
                !syntax(children[2]).is(preprocessing_op_or_punc::SEMICOLON) ||
-               syntax_is(tree, children[1], syntax_kind::member_declarator) ||
-               syntax_is(tree, children[1],
-                         syntax_kind::member_declarator_list)) {
+               syntax(children[1]).is(syntax_kind::member_declarator) ||
+               syntax(children[1]).is(syntax_kind::member_declarator_list)) {
         return not_supported(n, "class.friend");
     }
     specified s;

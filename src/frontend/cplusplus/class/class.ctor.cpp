@@ -42,15 +42,15 @@ namespace cplusplus
 bool semantic_analysis::declares_special_member(entity_index c,
                                                 syntax_child d) const
 {
-    if (!syntax_is(tree, d, syntax_kind::noptr_declarator))
+    if (!syntax(d).is(syntax_kind::noptr_declarator))
         return false;
     const syntax_node &node = tree[d.index()];
     const syntax_child *children = tree.children(d.index());
     if (node.child_count != 2 ||
-        !syntax_is(tree, children[1], syntax_kind::parameters_and_qualifiers))
+        !syntax(children[1]).is(syntax_kind::parameters_and_qualifiers))
         return false;
     syntax_child head = children[0];
-    if (syntax_is(tree, head, syntax_kind::unqualified_id)) {
+    if (syntax(head).is(syntax_kind::unqualified_id)) {
         const syntax_child *parts = tree.children(head.index());
         if (tree[head.index()].child_count != 2 ||
             !syntax(parts[0]).is(preprocessing_op_or_punc::TILDE))
@@ -81,7 +81,7 @@ analysis_result semantic_analysis::member_template_declaration(entity_index c,
 {
     const syntax_node &node = tree[n];
     if (node.child_count != 2 ||
-        !syntax_is(tree, tree.children(n)[0], syntax_kind::template_head) ||
+        !syntax(tree.children(n)[0]).is(syntax_kind::template_head) ||
         tree.children(n)[1].is_token())
         return not_supported(n, "temp.mem");
     owned_array<node_index> parameters;
@@ -127,14 +127,14 @@ analysis_result semantic_analysis::member_template_declaration(entity_index c,
     if (d.kind == syntax_kind::function_definition && at < d.child_count &&
         !declares_special_member(c, dc[at]) &&
         !(at + 1 < d.child_count &&
-          syntax_is(tree, dc[at], syntax_kind::decl_specifier_seq) &&
+          syntax(dc[at]).is(syntax_kind::decl_specifier_seq) &&
           declares_special_member(c, dc[at + 1])))
         return member_function_template(c, n, inner, access);
     /* a constrained constructor template ([temp.constr.decl]) */
     if (head_constraint(n).bits)
         return not_supported(n, "temp.constr");
     if (at < d.child_count &&
-        syntax_is(tree, dc[at], syntax_kind::decl_specifier_seq)) {
+        syntax(dc[at]).is(syntax_kind::decl_specifier_seq)) {
         specified s;
         analysis_result r = constructor_specifiers(dc[at].index(), s);
         if (r != analysis_result::well_formed)
@@ -144,8 +144,8 @@ analysis_result semantic_analysis::member_template_declaration(entity_index c,
     /* a constructor's declarator, not a destructor's (which [temp.mem]/3
        does not allow a template of) */
     if (at >= d.child_count || !declares_special_member(c, dc[at]) ||
-        syntax_is(tree, tree.children(dc[at].index())[0],
-                  syntax_kind::unqualified_id))
+        syntax(tree.children(dc[at].index())[0])
+            .is(syntax_kind::unqualified_id))
         return not_supported(n, "temp.mem");
     if (d.kind == syntax_kind::function_definition)
         return member_function_template(c, n, inner, access);
@@ -165,7 +165,7 @@ analysis_result semantic_analysis::constructor_specifiers(node_index seq,
 {
     for (uint32_t i = 0; i < tree[seq].child_count; i++) {
         syntax_child x = tree.children(seq)[i];
-        if (syntax_is(tree, x, syntax_kind::gnu_attribute_specifier)) {
+        if (syntax(x).is(syntax_kind::gnu_attribute_specifier)) {
             analysis_result r = gnu_attribute_specifier(x.index(), s);
             if (r != analysis_result::well_formed)
                 return r;
@@ -783,7 +783,7 @@ analysis_result semantic_analysis::expression_list_meanings(
     syntax_child list, owned_array<expression_meaning> &out)
 {
     owned_array<syntax_child> items;
-    if (syntax_is(tree, list, syntax_kind::initializer_list)) {
+    if (syntax(list).is(syntax_kind::initializer_list)) {
         for (uint32_t i = 0; i < tree[list.index()].child_count; i++) {
             syntax_child a = tree.children(list.index())[i];
             if (syntax(a).is(preprocessing_op_or_punc::COMMA))
@@ -794,7 +794,7 @@ analysis_result semantic_analysis::expression_list_meanings(
         items.append(list);
     }
     for (syntax_child a : items) {
-        if (syntax_is(tree, a, syntax_kind::braced_init_list) ||
+        if (syntax(a).is(syntax_kind::braced_init_list) ||
             syntax(a).is(preprocessing_op_or_punc::ELLIPSIS))
             return not_supported(node_of(a), "over.match.list");
         expression_meaning e;
@@ -1053,15 +1053,15 @@ analysis_result semantic_analysis::ctor_initializer(syntax_child list,
     for (uint32_t i = 0; list.index() && i < tree[list.index()].child_count;
          i++) {
         syntax_child item = tree.children(list.index())[i];
-        if (syntax_is(tree, item, syntax_kind::mem_initializer_list)) {
+        if (syntax(item).is(syntax_kind::mem_initializer_list)) {
             for (uint32_t k = 0; k < tree[item.index()].child_count; k++) {
                 syntax_child one = tree.children(item.index())[k];
-                if (syntax_is(tree, one, syntax_kind::mem_initializer))
+                if (syntax(one).is(syntax_kind::mem_initializer))
                     items.append(one);
                 else if (!syntax(one).is(preprocessing_op_or_punc::COMMA))
                     return not_supported(list.index(), "class.base.init");
             }
-        } else if (syntax_is(tree, item, syntax_kind::mem_initializer)) {
+        } else if (syntax(item).is(syntax_kind::mem_initializer)) {
             items.append(item);
         }
     }
@@ -1092,7 +1092,7 @@ analysis_result semantic_analysis::ctor_initializer(syntax_child list,
         /* a class-or-decltype with a nested-name-specifier: the class it
            names ([basic.lookup.qual]) */
         entity_index qualified_class = 0;
-        if (syntax_is(tree, children[0], syntax_kind::class_or_decltype)) {
+        if (syntax(children[0]).is(syntax_kind::class_or_decltype)) {
             analysis_result r =
                 named_class(children[0], n, qualified_class, id);
             if (r != analysis_result::well_formed)
@@ -1216,7 +1216,7 @@ analysis_result semantic_analysis::ctor_initializer(syntax_child list,
         }
         initialized_value value;
         if (node.child_count == 2 &&
-            syntax_is(tree, children[1], syntax_kind::braced_init_list)) {
+            syntax(children[1]).is(syntax_kind::braced_init_list)) {
             r = list_initialization(children[1].index(), type, true, value);
         } else if (node.child_count == 3) {
             /* ( ): value-initialization ([dcl.init]/11): zero for the
@@ -1228,7 +1228,7 @@ analysis_result semantic_analysis::ctor_initializer(syntax_child list,
                 expression_node(semantic_kind::zero, zero, first_token(item));
         } else if (node.child_count == 4) {
             syntax_child init = children[2];
-            if (syntax_is(tree, init, syntax_kind::initializer_list)) {
+            if (syntax(init).is(syntax_kind::initializer_list)) {
                 if (has_pack_expansion(init))
                     return not_supported(n, "temp.variadic");
                 if (record.kind != type_kind::class_type)
@@ -2107,7 +2107,7 @@ analysis_result semantic_analysis::class_conversion(node_index n,
     owned_array<expression_meaning> arguments;
     initialized_value value;
     analysis_result r = analysis_result::well_formed;
-    if (syntax_is(tree, children[1], syntax_kind::braced_init_list)) {
+    if (syntax(children[1]).is(syntax_kind::braced_init_list)) {
         if (node.child_count != 2)
             return not_supported(n, "expr.type.conv");
         r = list_initialization(children[1].index(), type, true, value);

@@ -69,7 +69,7 @@ analysis_result semantic_analysis::block_items(node_index n, uint32_t &built)
         if (syntax(c).is(preprocessing_op_or_punc::LEFT_BRACE) ||
             syntax(c).is(preprocessing_op_or_punc::RIGHT_BRACE))
             continue;
-        if (syntax_is(tree, c, syntax_kind::statement_seq)) {
+        if (syntax(c).is(syntax_kind::statement_seq)) {
             for (uint32_t k = 0; k < tree[c.index()].child_count; k++)
                 items.append(tree.children(c.index())[k]);
             continue;

@@ -144,7 +144,7 @@ analysis_result semantic_analysis::return_statement(node_index n,
         returns_void = true;
     }
     if (function_state.deducing && node.child_count == 3 &&
-        syntax_is(tree, children[1], syntax_kind::braced_init_list))
+        syntax(children[1]).is(syntax_kind::braced_init_list))
         /* [dcl.type.auto.deduct]/3 */
         return ill_formed(n,
                           "if the deduction is for a return statement and E "
@@ -160,7 +160,7 @@ analysis_result semantic_analysis::return_statement(node_index n,
         return not_supported(n, "stmt.return");
     syntax_child operand = children[1];
     initialized_value result;
-    if (syntax_is(tree, operand, syntax_kind::braced_init_list)) {
+    if (syntax(operand).is(syntax_kind::braced_init_list)) {
         if (returns_void)
             return ill_formed(n,
                               "a return statement with any other operand "
