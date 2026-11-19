@@ -289,6 +289,8 @@ node_index parser::declaration_alternative()
             /* before a using-declaration or alias-declaration: clang's
                extension, P9's */
             return beyond_this_step();
+        else if (deduction_guide_follows())
+            n = deduction_guide();
         else
             n = block_or_function_declaration();
     } else if (at(preprocessing_op_or_punc::SEMICOLON)) {

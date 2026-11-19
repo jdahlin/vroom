@@ -100,6 +100,9 @@ EXTENSION(clang_availability, clang,
           "a version a pp-number such as 10.12.1")
 EXTENSION(clang_bit_int, clang,
           "clang Language Extensions, _BitInt (C23 6.2.5) in C++: _BitInt(N) a type-specifier")
+EXTENSION(clang_deduction_guide_attributes, clang,
+          "an attribute-specifier-seq before a deduction-guide (libc++'s "
+          "_LIBCPP_CTAD_SUPPORTED_FOR_TYPE), which the attributes do not change")
 EXTENSION(clang_blocks, clang,
           "clang Language Extensions, Blocks: ^ a ptr-operator, a block pointer to a "
           "function type (Darwin's SDK declares functions taking one under __BLOCKS__)")
