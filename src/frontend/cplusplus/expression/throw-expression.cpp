@@ -75,8 +75,8 @@ analysis_result semantic_analysis::throw_expression(ThrowExpression n,
         type_table.fundamental(fundamental_type::void_), cv_none);
     m.category = value_category::prvalue;
     m.evaluation = constness::not_constant;
-    m.node = expression_node(semantic_kind::throw_exception, m,
-                             n.first_token(), operand_node);
+    m.node = expression_node(semantic_kind::throw_exception, m, n.first_token(),
+                             operand_node);
     return analysis_result::well_formed;
 }
 
