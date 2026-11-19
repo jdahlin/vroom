@@ -661,6 +661,7 @@ CC_PRIVATE const cc_builtin *cc_builtin_lookup(uint32_t id);
 bool cc_eval(cc *c, uint32_t n, cc_value *v);
 CC_PRIVATE bool cc_builtin_fold(cc *c, const node *x, cc_value *v);
 CC_PRIVATE uint32_t cc_builtin_arguments_parse(cc *c, cc_id_list *args);
+CC_PRIVATE uint32_t cc_fpclassify_build(cc *c, const uint32_t *v, uint32_t loc);
 CC_PRIVATE uint32_t cc_builtin_node_new(cc *c, int id, ast_qualified_type ty,
                                         uint32_t loc, const cc_id_list *args);
 CC_PRIVATE uint32_t cc_builtin_vector_build(cc *c, bool shuffle, uint32_t loc);

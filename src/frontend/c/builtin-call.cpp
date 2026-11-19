@@ -178,6 +178,45 @@ CC_PRIVATE uint32_t cc_builtin_offsetof_build(cc *c, uint32_t loc)
     return res;
 }
 
+/* __builtin_fpclassify(nan, infinite, normal, subnormal, zero, x)'s
+   tree of conditionals on its arguments v[0..6) (also the C++ front end's,
+   through ast_builder_builtin_call) */
+CC_PRIVATE uint32_t cc_fpclassify_build(cc *c, const uint32_t *v, uint32_t loc)
+{
+    uint32_t saved[6], pre[6];
+
+    for (int i = 0; i < 6; i++) {
+        uint32_t a = cc_node_rvalue(c, v[i]);
+        if (i < 5)
+            a = cc_conversion_apply(c, a, cc_type_basic(AST_TYPE_INT));
+        saved[i] = cc_lowering_once(c, a, &pre[i]);
+    }
+    /* Match clang's classification tree: save the operand once, test zero,
+    		 * then NaN and infinity, and finally distinguish normal/subnormal.
+    		 * A class code is evaluated as its corresponding test is reached. */
+    cc_id_list unary;
+    cc_id_list_init(&unary);
+    cc_id_list_append(c, &unary, cc_node_rvalue(c, saved[5]));
+    uint32_t n = cc_conditional_build(
+        c,
+        cc_builtin_node_new(c, CC_BUILTIN_ISNORMAL, cc_type_basic(AST_TYPE_INT),
+                            loc, &unary),
+        saved[2], saved[3], loc);
+    n = cc_lowering_sequence(c, pre[2], cc_lowering_sequence(c, pre[3], n));
+    const int ids[] = {CC_BUILTIN_ISNAN, CC_BUILTIN_ISINF};
+    for (int i = 1; i >= 0; i--)
+        n = cc_lowering_sequence(
+            c, pre[i],
+            cc_conditional_build(
+                c,
+                cc_builtin_node_new(c, ids[i], cc_type_basic(AST_TYPE_INT), loc,
+                                    &unary),
+                saved[i], n, loc));
+    n = cc_lowering_sequence(
+        c, pre[4], cc_conditional_build(c, saved[5], n, saved[4], loc));
+    return cc_lowering_sequence(c, pre[5], n);
+}
+
 CC_PRIVATE uint32_t cc_builtin_call_build(cc *c, const cc_builtin *b,
                                           uint32_t loc)
 {
@@ -262,8 +301,6 @@ CC_PRIVATE uint32_t cc_builtin_call_build(cc *c, const cc_builtin *b,
         return cc_lowering_sequence(c, pre, n);
     }
     case CC_BUILTIN_FPCLASSIFY: {
-        uint32_t saved[6], pre[6];
-
         cc_builtin_arguments_parse(c, &args);
         if (args.n != 6) {
             cc_builtin_arity_check(c, loc, 6, &args);
@@ -276,36 +313,7 @@ CC_PRIVATE uint32_t cc_builtin_call_build(cc *c, const cc_builtin *b,
                             tyname(c, AST_NODE(args.v[5])->ty));
             return cc_node_error_new(c, loc);
         }
-        for (int i = 0; i < 6; i++) {
-            uint32_t a = cc_node_rvalue(c, args.v[i]);
-            if (i < 5)
-                a = cc_conversion_apply(c, a, cc_type_basic(AST_TYPE_INT));
-            saved[i] = cc_lowering_once(c, a, &pre[i]);
-        }
-        /* Match clang's classification tree: save the operand once, test zero,
-		 * then NaN and infinity, and finally distinguish normal/subnormal.
-		 * A class code is evaluated as its corresponding test is reached. */
-        cc_id_list unary;
-        cc_id_list_init(&unary);
-        cc_id_list_append(c, &unary, cc_node_rvalue(c, saved[5]));
-        uint32_t n = cc_conditional_build(
-            c,
-            cc_builtin_node_new(c, CC_BUILTIN_ISNORMAL,
-                                cc_type_basic(AST_TYPE_INT), loc, &unary),
-            saved[2], saved[3], loc);
-        n = cc_lowering_sequence(c, pre[2], cc_lowering_sequence(c, pre[3], n));
-        const int ids[] = {CC_BUILTIN_ISNAN, CC_BUILTIN_ISINF};
-        for (int i = 1; i >= 0; i--)
-            n = cc_lowering_sequence(
-                c, pre[i],
-                cc_conditional_build(
-                    c,
-                    cc_builtin_node_new(c, ids[i], cc_type_basic(AST_TYPE_INT),
-                                        loc, &unary),
-                    saved[i], n, loc));
-        n = cc_lowering_sequence(
-            c, pre[4], cc_conditional_build(c, saved[5], n, saved[4], loc));
-        return cc_lowering_sequence(c, pre[5], n);
+        return cc_fpclassify_build(c, args.v, loc);
     }
     case CC_BUILTIN_CHOOSE_EXPR: {
         uint32_t cond, x, y;
