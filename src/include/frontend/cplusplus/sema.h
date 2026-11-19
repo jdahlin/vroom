@@ -4502,6 +4502,7 @@ class semantic_analysis
     const parser &p;
     diagnostic_consumer &diagnostics;
     const SyntaxContext syntax_cx;
+    SyntaxScope syntax_scope{syntax_cx};
 };
 
 /* ---- the Itanium C++ ABI (abi/itanium/) ---- */

@@ -63,6 +63,27 @@ struct SyntaxContext {
     const syntax_child *child_lists;
 };
 
+/* the context the views read with: the thread's current analysis' (a view
+   carries no context of its own, so it is 4 bytes and can be stored) */
+inline constinit thread_local const SyntaxContext *syntax_ambient = nullptr;
+
+/* makes ctx the thread's context for as long as it lives */
+struct SyntaxScope {
+    explicit SyntaxScope(const SyntaxContext &ctx) : saved(syntax_ambient)
+    {
+        syntax_ambient = &ctx;
+    }
+    ~SyntaxScope()
+    {
+        syntax_ambient = saved;
+    }
+    SyntaxScope(const SyntaxScope &) = delete;
+    SyntaxScope &operator=(const SyntaxScope &) = delete;
+
+  private:
+    const SyntaxContext *saved;
+};
+
 /* whether a view of type From converts to the sum To (syntax-views.inc) */
 template <class From, class To> inline constexpr bool syntax_converts = false;
 
@@ -84,12 +105,12 @@ class SyntaxRef
 {
   public:
     SyntaxRef() = default;
-    SyntaxRef(const SyntaxContext &cx, syntax_child c) : cx(&cx)
+    SyntaxRef(const SyntaxContext &, syntax_child c)
     {
         if (!c.is_token())
             n = node_index(c.index());
     }
-    SyntaxRef(const SyntaxContext &cx, node_index n) : cx(&cx), n(n)
+    SyntaxRef(const SyntaxContext &, node_index n) : n(n)
     {
     }
 
@@ -116,7 +137,7 @@ class SyntaxRef
     }
     const SyntaxContext &context() const
     {
-        return *cx;
+        return *syntax_ambient;
     }
     syntax_kind kind() const
     {
@@ -158,18 +179,20 @@ class SyntaxRef
     /* whether child c is a node of kind k */
     bool is(syntax_child c, syntax_kind k) const
     {
-        return !c.is_token() && c.index() && cx->nodes[c.index()].kind == k;
+        return !c.is_token() && c.index() &&
+               syntax_ambient->nodes[c.index()].kind == k;
     }
     /* whether child c is the keyword k */
     bool is_keyword(syntax_child c, standard_keyword k) const
     {
-        return c.is_token() && cx->p.keyword_of(cx->tokens[c.index()]) == k;
+        return c.is_token() && syntax_ambient->p.keyword_of(
+                                   syntax_ambient->tokens[c.index()]) == k;
     }
     bool is_punctuator(syntax_child c, preprocessing_op_or_punc op) const
     {
         if (!c.is_token())
             return false;
-        const token &t = cx->tokens[c.index()];
+        const token &t = syntax_ambient->tokens[c.index()];
         return t.kind == token_kind::operator_or_punctuator &&
                preprocessing_op_or_punc_primary(t.op_or_punc) == op;
     }
@@ -181,18 +204,19 @@ class SyntaxRef
   protected:
     const syntax_node &node() const
     {
-        return cx->nodes[n.index()];
+        return syntax_ambient->nodes[n.index()];
     }
     const syntax_child *children() const
     {
-        return cx->child_lists + cx->nodes[n.index()].first_child;
+        return syntax_ambient->child_lists +
+               syntax_ambient->nodes[n.index()].first_child;
     }
     /* this node as view T, {} if it is of another kind */
     template <class T> T as() const
     {
         if (!n || !T::accepts(node().kind))
             return {};
-        return T(*cx, n);
+        return T(*syntax_ambient, n);
     }
     /* the first child that is a node of view T, {} if none */
     template <class T> T first() const
@@ -200,14 +224,13 @@ class SyntaxRef
         for (uint32_t i = 0; i < size(); i++) {
             syntax_child c = children()[i];
             if (!c.is_token() && c.index() &&
-                T::accepts(cx->nodes[c.index()].kind))
-                return T(*cx, node_index(c.index()));
+                T::accepts(syntax_ambient->nodes[c.index()].kind))
+                return T(*syntax_ambient, node_index(c.index()));
         }
         return {};
     }
     /* the first child that is a token of kind k, {} if none */
     SyntaxElement token_of_kind(token_kind k) const;
-    const SyntaxContext *cx = nullptr;
     node_index n = 0;
 };
 
@@ -273,7 +296,7 @@ class SyntaxElement : public SyntaxRef
     bool is_identifier() const
     {
         return c.is_token() &&
-               cx->tokens[c.index()].kind == token_kind::identifier;
+               syntax_ambient->tokens[c.index()].kind == token_kind::identifier;
     }
     bool is(preprocessing_op_or_punc op) const
     {
@@ -349,7 +372,7 @@ inline SyntaxElement SyntaxRef::operator[](uint32_t i) const
 {
     if (i >= size())
         return {};
-    return SyntaxElement(*cx, children()[i]);
+    return SyntaxElement(*syntax_ambient, children()[i]);
 }
 
 inline SyntaxElement SyntaxRef::back() const
@@ -363,8 +386,8 @@ inline SyntaxElement SyntaxRef::token_of_kind(token_kind k) const
 {
     for (uint32_t i = 0; i < size(); i++) {
         syntax_child c = children()[i];
-        if (c.is_token() && cx->tokens[c.index()].kind == k)
-            return SyntaxElement(*cx, c);
+        if (c.is_token() && syntax_ambient->tokens[c.index()].kind == k)
+            return SyntaxElement(*syntax_ambient, c);
     }
     return {};
 }
@@ -373,14 +396,14 @@ inline SyntaxElements SyntaxRef::elements() const
 {
     if (!n)
         return {};
-    return SyntaxElements(*cx, children(), size());
+    return SyntaxElements(*syntax_ambient, children(), size());
 }
 
 inline SyntaxElements SyntaxRef::elements(uint32_t first) const
 {
     if (!n || first >= size())
         return {};
-    return SyntaxElements(*cx, children() + first, size() - first);
+    return SyntaxElements(*syntax_ambient, children() + first, size() - first);
 }
 
 /* the node children of a node, each as a view of type T (tokens are

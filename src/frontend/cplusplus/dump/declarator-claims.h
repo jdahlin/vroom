@@ -61,6 +61,7 @@ class declarator_claims
     const parser &p;
     vbuffer *out;
     SyntaxContext syntax_cx{tree, tokens, p};
+    SyntaxScope syntax_scope{syntax_cx};
 
     /* the typed view of a node of the tree, or of a child (syntax.h) */
     SyntaxRef syntax(node_index n) const
