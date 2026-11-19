@@ -165,51 +165,37 @@ analysis_result semantic_analysis::declaration_by_kind(node_index n)
                 return function_definition(f);
             },
             [&](TemplateDeclaration t) { return template_declaration(t); },
-            [&](Declaration d) { return other_declaration(d); }});
-}
-
-/* a declaration of an alternative without a view of its own */
-analysis_result semantic_analysis::other_declaration(Declaration d)
-{
-    node_index n = d;
-    switch (d.kind()) {
-    case syntax_kind::gnu_extension_declaration:
-        /* [ext:gnu_extension_keyword]: __extension__ changes no meaning */
-        return declaration_by_kind(tree.children(n)[1].index());
-    case syntax_kind::empty_declaration:
-        return empty_declaration(n);
-    case syntax_kind::static_assert_declaration:
-        return static_assert_declaration(n);
-    case syntax_kind::alias_declaration:
-        return alias_declaration(n);
-    case syntax_kind::explicit_specialization:
-        return explicit_specialization(n);
-    case syntax_kind::explicit_instantiation:
-        return explicit_instantiation(n);
-    case syntax_kind::deduction_guide:
-        return deduction_guide(n);
-    case syntax_kind::simple_declaration:
-        return simple_declaration(n);
-    case syntax_kind::linkage_specification:
-        return linkage_specification(n);
-    case syntax_kind::named_namespace_definition:
-    case syntax_kind::unnamed_namespace_definition:
-    case syntax_kind::nested_namespace_definition:
-        /* in a linkage-specification */
-        return namespace_definition(n);
-    case syntax_kind::using_directive:
-        return using_directive(n);
-    case syntax_kind::namespace_alias_definition:
-        return namespace_alias_definition(n);
-    case syntax_kind::using_declaration:
-        return using_declaration(n);
-    case syntax_kind::opaque_enum_declaration: {
-        type_index type = 0;
-        return enum_specifier(n, type);
-    }
-    default:
-        return not_supported(n);
-    }
+            [&](SimpleDeclaration d) { return simple_declaration(d); },
+            [&](AliasDeclaration a) { return alias_declaration(a); },
+            [&](StaticAssertDeclaration a) {
+                return static_assert_declaration(a);
+            },
+            [&](EmptyDeclaration e) { return empty_declaration(e); },
+            [&](ExplicitSpecialization s) {
+                return explicit_specialization(s);
+            },
+            [&](ExplicitInstantiation i) { return explicit_instantiation(i); },
+            [&](DeductionGuide g) { return deduction_guide(g); },
+            [&](LinkageSpecification l) { return linkage_specification(l); },
+            [&](NamespaceDefinition d) {
+                /* in a linkage-specification */
+                return namespace_definition(d);
+            },
+            [&](UsingDirective u) { return using_directive(u); },
+            [&](NamespaceAliasDefinition a) {
+                return namespace_alias_definition(a);
+            },
+            [&](UsingDeclaration u) { return using_declaration(u); },
+            [&](OpaqueEnumDeclaration e) {
+                type_index type = 0;
+                return enum_specifier(e, type);
+            },
+            [&](GnuExtensionDeclaration e) {
+                /* [ext:gnu_extension_keyword]: __extension__ changes no
+                   meaning */
+                return declaration_by_kind(e[1]);
+            },
+            [&](Declaration d) { return not_supported(d); }});
 }
 
 void semantic_analysis::translation_unit()

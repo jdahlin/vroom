@@ -1573,7 +1573,6 @@ class semantic_analysis
     analysis_result linkage_specification(node_index n);
     /* a declaration of the kinds analysis has (declaration's switch) */
     analysis_result declaration_by_kind(node_index n);
-    analysis_result other_declaration(Declaration d);
     /* [dcl.link]/5: the language linkage of the declarations analysed
        now: "C" (true) or "C++"; and whether the linkage-specification is
        the declaration's own, without braces ([dcl.link]/7) */

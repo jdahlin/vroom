@@ -553,7 +553,10 @@ def generate():
     for k, _ in G.kinds:
         w('    case syntax_kind::%s:' % k)
         w('        if constexpr (syntax_converts<%s, S>)' % kind_type[k])
-        w('            return f(%s(s.context(), s.index()));' % kind_type[k])
+        within = sorted((x for x in sums if k in sums[x] and x != kind_type[k]),
+                        key=lambda x: (len(sums[x]), x))
+        w('            return syntax_call<%s>(f, %s(s.context(), s.index()));' %
+          (', '.join(within), kind_type[k]))
         w('        break;')
     w('    default:')
     w('        break;')

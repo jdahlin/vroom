@@ -414,6 +414,25 @@ template <class... F> struct Overloaded : F... {
 };
 template <class... F> Overloaded(F...) -> Overloaded<F...>;
 
+/* f(v), or, when no case takes v's view alone (a case of a sum v is in
+   and the visitor's default both convert it), f of the narrowest of the
+   sums Sums (v's, narrowest first) a case takes: the most specific case */
+template <class S, class... Rest, class F, class V>
+decltype(auto) syntax_call_sum(F &f, V v)
+{
+    if constexpr (requires { f(S(v)); } || sizeof...(Rest) == 0)
+        return f(S(v));
+    else
+        return syntax_call_sum<Rest...>(f, v);
+}
+template <class... Sums, class F, class V> decltype(auto) syntax_call(F &f, V v)
+{
+    if constexpr (requires { f(v); } || sizeof...(Sums) == 0)
+        return f(v);
+    else
+        return syntax_call_sum<Sums...>(f, v);
+}
+
 /* a member function of self as a callable for visit */
 template <class T, class R, class A>
 auto bind_member(T *self, R (T::*member)(A))
