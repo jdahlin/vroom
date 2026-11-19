@@ -659,6 +659,9 @@ ast_qualified_type c_lowering::type(qualified_type t, token_index at)
     case type_kind::atomic:
         made = ast_builder_type_atomic(c, type(r.operand, at));
         break;
+    case type_kind::ext_vector:
+        made = ast_builder_type_ext_vector(c, type(r.operand, at), r.bound);
+        break;
     case type_kind::function: {
         owned_array<ast_qualified_type> parameters;
         const qualified_type *p =

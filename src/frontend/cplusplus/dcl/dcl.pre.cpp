@@ -703,8 +703,21 @@ analysis_result semantic_analysis::alias_type(node_index n,
     /* using identifier attribute-specifier-seq_opt = defining-type-id ;
        the attributes only those that change nothing vcc generates */
     uint32_t type_at = 3;
-    if (node.child_count == 6 && attributes_without_effect(c[2]))
+    gnu_attributes g;
+    if (node.child_count == 6 && attributes_without_effect(c[2])) {
         type_at = 4;
+    } else if (node.child_count == 6 && !c[2].is_token() &&
+               tokens.files.behavior.has(extension::clang_ext_vector_type)) {
+        /* [ext:clang_ext_vector_type] */
+        g.ext_vector_allowed = true;
+        analysis_result r = gnu_attribute_specifier(c[2].index(), g);
+        if (r != analysis_result::well_formed)
+            return r;
+        if (g.flags || g.aligned || g.section || g.abi_tag ||
+            (!g.ext_vector && !g.ext_vector_parameter))
+            return not_supported(n, "dcl.attr");
+        type_at = 4;
+    }
     if (node.child_count != type_at + 2 ||
         !syntax_is(tree, c[type_at], syntax_kind::defining_type_id))
         return not_supported(n, "dcl.attr");
@@ -731,13 +744,17 @@ analysis_result semantic_analysis::alias_type(node_index n,
         s.extern_ || s.inline_ || s.constexpr_ || s.gnu_flags || s.aligned)
         return not_supported(n, "dcl.typedef");
     type = s.type;
-    if (d.child_count == 1)
-        return analysis_result::well_formed;
-    declarator_meaning m;
-    r = declarator(current_declaration, dc[1], type, m);
-    if (r == analysis_result::well_formed && m.has_id)
-        return not_supported(n, "dcl.name");
-    return r;
+    if (d.child_count == 2) {
+        declarator_meaning m;
+        r = declarator(current_declaration, dc[1], type, m);
+        if (r == analysis_result::well_formed && m.has_id)
+            return not_supported(n, "dcl.name");
+        if (r != analysis_result::well_formed)
+            return r;
+    }
+    if (g.ext_vector || g.ext_vector_parameter)
+        return clang_ext_vector_type(n, g, type);
+    return analysis_result::well_formed;
 }
 
 analysis_result semantic_analysis::alias_declaration(node_index n)

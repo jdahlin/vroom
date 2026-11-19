@@ -1862,6 +1862,13 @@ bool itanium_mangler::type(qualified_type t)
         number(r.bound);
         text("_");
         done = true;
+    } else if (r.kind == type_kind::ext_vector && !r.entity) {
+        /* an ext_vector_type ([ext:clang_ext_vector_type]) as clang
+           mangles it: Dv, the element count, _ and the element type */
+        text("Dv");
+        number(r.bound);
+        text("_");
+        done = type(r.operand);
     } else if (r.kind == type_kind::pack_expansion) {
         /* [abi:mangle.function-type]: a pack expansion,
 

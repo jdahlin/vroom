@@ -325,6 +325,7 @@ static bool deduction_may_succeed(const types &table, qualified_type p,
     case type_kind::lvalue_reference:
     case type_kind::rvalue_reference:
     case type_kind::bit_int:
+    case type_kind::ext_vector:
         return false;
     case type_kind::pointer: {
         /* (A with fewer levels of pointers than P never matches it) */
