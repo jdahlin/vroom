@@ -63,7 +63,8 @@ node_index parser::jump_statement()
  *         coroutine-return-statement
  *         goto identifier ;
  */
-analysis_result semantic_analysis::jump_statement(node_index n, uint32_t &built)
+analysis_result semantic_analysis::jump_statement(JumpStatement n,
+                                                  uint32_t &built)
 {
     auto node = syntax(n);
     if (!node.size() || !node[0].is_token())

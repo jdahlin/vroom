@@ -79,7 +79,7 @@ void semantic_analysis::collect_labels(syntax_child s)
  *         attribute-specifier-seq_opt case constant-expression : statement
  *         attribute-specifier-seq_opt default : statement
  */
-analysis_result semantic_analysis::labeled_statement(node_index n,
+analysis_result semantic_analysis::labeled_statement(LabeledStatement n,
                                                      uint32_t &built)
 {
     auto node = syntax(n);

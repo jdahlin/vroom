@@ -117,7 +117,7 @@ node_index parser::using_declarator()
  * below."  /2: "Every using-declaration is a declaration and a
  * member-declaration and can therefore be used in a class definition."
  */
-analysis_result semantic_analysis::using_declaration(node_index n)
+analysis_result semantic_analysis::using_declaration(UsingDeclaration n)
 {
     /* the using-declarators, the GNU attributes after each (clang's
        extension) and the commas: of the using-declaration, or of its

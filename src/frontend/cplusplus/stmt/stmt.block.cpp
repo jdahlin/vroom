@@ -47,7 +47,7 @@ node_index parser::compound_statement()
  * sequence of statements into a single statement."  [basic.scope.block]/1:
  * "A name declared in a block is local to that block".
  */
-analysis_result semantic_analysis::compound_statement(node_index n,
+analysis_result semantic_analysis::compound_statement(CompoundStatement n,
                                                       entity_index conflicts,
                                                       uint32_t &built)
 {

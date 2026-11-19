@@ -664,7 +664,8 @@ analysis_result semantic_analysis::empty_declaration(node_index)
  * analysis takes some expressions for ones that are not (an invocation of
  * a constexpr function, until the evaluator has its rules).
  */
-analysis_result semantic_analysis::static_assert_declaration(node_index n)
+analysis_result
+semantic_analysis::static_assert_declaration(StaticAssertDeclaration n)
 {
     auto node = syntax(n);
     /* static_assert ( constant-expression [, string-literal] ) ; */

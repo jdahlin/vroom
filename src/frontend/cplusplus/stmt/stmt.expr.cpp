@@ -31,7 +31,7 @@ node_index parser::expression_statement()
 
 /* [stmt.expr]/1: "The expression is a discarded-value expression"; an
    expression-statement without the expression is a null statement */
-analysis_result semantic_analysis::expression_statement(node_index n,
+analysis_result semantic_analysis::expression_statement(ExpressionStatement n,
                                                         uint32_t &built)
 {
     auto node = syntax(n);

@@ -94,7 +94,7 @@ struct statement_parts {
  * [stmt.if]/3 and [stmt.switch]/5: an init-statement's names are local to
  * the statement, as the condition's are ([basic.scope.block]/3).
  */
-analysis_result semantic_analysis::selection_statement(node_index n,
+analysis_result semantic_analysis::selection_statement(SelectionStatement n,
                                                        uint32_t &built)
 {
     auto node = syntax(n);

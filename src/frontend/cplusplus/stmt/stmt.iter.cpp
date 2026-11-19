@@ -155,7 +155,7 @@ node_index parser::for_range_declaration()
  *
  * The range-based for is range_based_for's.
  */
-analysis_result semantic_analysis::iteration_statement(node_index n,
+analysis_result semantic_analysis::iteration_statement(IterationStatement n,
                                                        uint32_t &built)
 {
     auto node = syntax(n);

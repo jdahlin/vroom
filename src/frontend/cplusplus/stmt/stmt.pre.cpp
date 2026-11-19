@@ -538,7 +538,7 @@ analysis_result semantic_analysis::statement(syntax_child s, uint32_t &built)
  * hints for the path of execution, which change nothing vcc generates.
  * Other attributes of a statement have no rules here.
  */
-analysis_result semantic_analysis::attributed_statement(node_index n,
+analysis_result semantic_analysis::attributed_statement(Statement n,
                                                         uint32_t &built)
 {
     /* the attribute-specifiers, then the statement */
@@ -586,7 +586,8 @@ analysis_result semantic_analysis::substatement(syntax_child s,
                                                 uint32_t &built)
 {
     if (syntax(s).is(syntax_kind::compound_statement))
-        return compound_statement(s.index(), conflicts, built);
+        return compound_statement(syntax(s).compound_statement(), conflicts,
+                                  built);
     if (!syntax(s).is(syntax_kind::simple_declaration))
         return statement(s, built);
     entity_index outer = current_scope;

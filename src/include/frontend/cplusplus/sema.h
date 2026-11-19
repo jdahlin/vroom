@@ -1518,7 +1518,7 @@ class semantic_analysis
 
     /* [dcl.pre] */
     analysis_result empty_declaration(node_index n);
-    analysis_result static_assert_declaration(node_index n);
+    analysis_result static_assert_declaration(StaticAssertDeclaration n);
     /* [dcl.typedef]/2: an alias-declaration's typedef-name */
     analysis_result alias_declaration(node_index n);
     /* ... the type its defining-type-id denotes */
@@ -1903,7 +1903,7 @@ class semantic_analysis
     /* [namespace.udir], [namespace.alias], [namespace.udecl] */
     analysis_result using_directive(node_index n);
     analysis_result namespace_alias_definition(node_index n);
-    analysis_result using_declaration(node_index n);
+    analysis_result using_declaration(UsingDeclaration n);
     analysis_result using_declarator(node_index n, bool if_exists = false);
     /* [basic.lookup.udir]: the namespace a namespace-name, after a
        nested-name-specifier (0: none), names */
@@ -2839,7 +2839,8 @@ class semantic_analysis
     /* [class.mem]: one member-declaration of the class being defined */
     /* [temp.mem]/1: the member template n (a template-declaration) of
        class c */
-    analysis_result member_template_declaration(entity_index c, node_index n,
+    analysis_result member_template_declaration(entity_index c,
+                                                TemplateDeclaration n,
                                                 uint8_t access);
     analysis_result member_function_template(entity_index c, node_index n,
                                              node_index definition,
@@ -3864,17 +3865,18 @@ class semantic_analysis
     /* the statement functions give the statement's node in built (when
        well-formed) */
     analysis_result statement(syntax_child s, uint32_t &built);
-    analysis_result attributed_statement(node_index n, uint32_t &built);
+    analysis_result attributed_statement(Statement n, uint32_t &built);
     /* a substatement ([stmt.pre]/2): a block scope of its own whose
        outermost names shall not redeclare conflicts' */
     analysis_result substatement(syntax_child s, entity_index conflicts,
                                  uint32_t &built);
-    analysis_result compound_statement(node_index n, entity_index conflicts,
-                                       uint32_t &built);
+    analysis_result compound_statement(CompoundStatement n,
+                                       entity_index conflicts, uint32_t &built);
     analysis_result block_items(node_index n, uint32_t &built);
-    analysis_result expression_statement(node_index n, uint32_t &built);
-    analysis_result selection_statement(node_index n, uint32_t &built);
-    analysis_result iteration_statement(node_index n, uint32_t &built);
+    analysis_result expression_statement(ExpressionStatement n,
+                                         uint32_t &built);
+    analysis_result selection_statement(SelectionStatement n, uint32_t &built);
+    analysis_result iteration_statement(IterationStatement n, uint32_t &built);
     /* [stmt.ranged]: the range-based for statement n, whose
        for-range-declaration is its child declaration */
     analysis_result range_based_for(node_index n, uint32_t declaration,
@@ -3938,8 +3940,8 @@ class semantic_analysis
        else of static storage duration with this linkage (at namespace
        scope) */
     linkage binding_storage = linkage::none;
-    analysis_result jump_statement(node_index n, uint32_t &built);
-    analysis_result labeled_statement(node_index n, uint32_t &built);
+    analysis_result jump_statement(JumpStatement n, uint32_t &built);
+    analysis_result labeled_statement(LabeledStatement n, uint32_t &built);
     analysis_result case_label(node_index n, syntax_child value,
                                size_t innermost);
     /* operand: the operand's node, initialized as the result (0: none) */

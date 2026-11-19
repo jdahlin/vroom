@@ -72,9 +72,8 @@ bool semantic_analysis::declares_special_member(entity_index c,
  * form, and a construction of the class, which would consider it
  * ([over.match.ctor]), is not analysed either (construct).
  */
-analysis_result semantic_analysis::member_template_declaration(entity_index c,
-                                                               node_index n,
-                                                               uint8_t access)
+analysis_result semantic_analysis::member_template_declaration(
+    entity_index c, TemplateDeclaration n, uint8_t access)
 {
     auto node = syntax(n);
     if (node.size() != 2 || !node[0].is(syntax_kind::template_head) ||
