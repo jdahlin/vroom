@@ -467,39 +467,45 @@ analysis_result semantic_analysis::template_constraints_satisfied(
        constraints, in order, then the requires-clause's
        constraint-expression.  [temp.param]/4: a type-constraint Q
        designating a concept C, of a type-parameter T: C<T>; Q's own
-       template-argument-list, C<T, A...>, is not analysed */
-    for (uint32_t i = 0; i < ft.parameter_count && satisfied; i++) {
-        node_index p = template_parameter_nodes[ft.first_parameter + i];
-        template_parameter_parts x;
-        if (!template_parameter_form(p, x) || !x.constraint)
-            continue;
-        const syntax_child *q = tree.children(x.constraint);
-        if (tree[x.constraint].child_count != 1 || !q[0].is_token())
-            return not_supported(x.constraint, "temp.param");
-        entity_index named =
-            constraint_concept(entity_table[ft.entity].enclosing, q[0].index());
-        uint32_t ct = 0;
-        if (named)
-            ct = concept_of(named);
-        if (!ct || function_templates[ct - 1].parameter_count != 1 ||
-            template_parameter_is_pack(
-                function_templates[ct - 1].first_parameter))
-            return not_supported(x.constraint, "temp.param");
-        owned_array<template_argument> arguments;
-        arguments.append(values[i]);
-        analysis_result r =
-            concept_satisfied(x.constraint, ct, arguments, satisfied);
-        if (r != analysis_result::well_formed)
-            return r;
-    }
-    if (!constraint.bits || !satisfied)
-        return analysis_result::well_formed;
+       template-argument-list, C<T, A...>, with A... analysed with the
+       template's arguments bound */
     entity_index scope = entity_table.make(entity_kind::block_scope, 0,
                                            entity_table[ft.entity].enclosing);
     for (uint32_t i = 0; i < ft.parameter_count; i++)
         bind_template_argument(
             scope, template_parameter_entities[ft.first_parameter + i],
             values[i]);
+    for (uint32_t i = 0; i < ft.parameter_count && satisfied; i++) {
+        node_index p = template_parameter_nodes[ft.first_parameter + i];
+        template_parameter_parts x;
+        if (!template_parameter_form(p, x) || !x.constraint)
+            continue;
+        const syntax_child *q = tree.children(x.constraint);
+        uint32_t parts = tree[x.constraint].child_count;
+        if ((parts != 1 && parts < 3) || !q[0].is_token())
+            return not_supported(x.constraint, "temp.param");
+        entity_index named =
+            constraint_concept(entity_table[ft.entity].enclosing, q[0].index());
+        uint32_t ct = 0;
+        if (named)
+            ct = concept_of(named);
+        if (!ct ||
+            (parts == 1 && function_templates[ct - 1].parameter_count != 1) ||
+            template_parameter_is_pack(
+                function_templates[ct - 1].first_parameter))
+            return not_supported(x.constraint, "temp.param");
+        owned_array<template_argument> arguments;
+        arguments.append(values[i]);
+        analysis_result r = analysis_result::well_formed;
+        if (parts != 1)
+            r = template_id_arguments_in(x.constraint, ct, scope, arguments);
+        if (r == analysis_result::well_formed)
+            r = concept_satisfied(x.constraint, ct, arguments, satisfied);
+        if (r != analysis_result::well_formed)
+            return r;
+    }
+    if (!constraint.bits || !satisfied)
+        return analysis_result::well_formed;
     return constraint_satisfied(constraint, scope,
                                 tree[ft.declaration].first_token, satisfied);
 }
