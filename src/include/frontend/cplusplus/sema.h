@@ -2459,6 +2459,10 @@ class semantic_analysis
     analysis_result conditional(SyntaxRef n, expression_meaning &m);
     analysis_result noexcept_operator(SyntaxRef n, expression_meaning &m);
     analysis_result clang_type_trait(SyntaxRef n, expression_meaning &m);
+    /* [meta.rel] is_convertible; known false when analysis cannot tell */
+    bool copy_constructible_from(entity_index c, value_category category,
+                                 bool &known);
+    bool convertible_types(qualified_type from, qualified_type to, bool &known);
     /* [ext:clang_type_traits] the answer of the trait of one type-id
        numbered which (ext/clang/unary-traits.inc) for the non-dependent
        t; false if the analysis has none */

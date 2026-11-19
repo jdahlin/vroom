@@ -423,8 +423,122 @@ bool semantic_analysis::unary_trait(int which, qualified_type t, int64_t &value)
     return true;
 }
 
+/* [dcl.init.general]/17.6.2: the same class initialized from a value of
+   category c: the copy or move constructor chosen, [over.match.ctor];
+   a deleted one, or the implicit one deleted ([class.copy.ctor]/10), makes
+   it ill-formed.  known is false for what is not analysed (constructor
+   templates) */
+bool semantic_analysis::copy_constructible_from(entity_index c,
+                                                value_category category,
+                                                bool &known)
+{
+    if (entity_table[c].constructor_template ||
+        entity_table[c].constructor_templates) {
+        known = false;
+        return false;
+    }
+    bool movable = false, copy_declared = false, copy_usable = false;
+    for (entity_index k = entity_table[c].first_constructor; k;
+         k = entity_table[k].next_constructor) {
+        const struct type &f = type_table[entity_table[k].type.unqualified()];
+        if (f.parameter_count == 0)
+            continue;
+        qualified_type p =
+            type_table.parameters(entity_table[k].type.unqualified())[0];
+        const struct type &r = type_table[p.unqualified()];
+        if (r.kind != type_kind::lvalue_reference &&
+            r.kind != type_kind::rvalue_reference)
+            continue;
+        const struct type &o = type_table[r.operand.unqualified()];
+        if (o.kind != type_kind::class_type || o.entity != c)
+            continue;
+        if (r.kind == type_kind::rvalue_reference) {
+            if (!entity_table[k].deleted)
+                movable = true;
+            continue;
+        }
+        copy_declared = true;
+        if (!entity_table[k].deleted)
+            copy_usable = true;
+    }
+    if (category != value_category::lvalue && movable)
+        return true;
+    if (copy_declared)
+        return copy_usable;
+    /* [class.copy.ctor]/8: a declared move constructor deletes the
+       implicit copy constructor */
+    if (movable)
+        return false;
+    return !entity_table[c].implicit_copy_deleted;
+}
+
+/* [meta.rel] is_convertible<From, To>: "the return expression in the
+   following code would be well-formed": To test() { return
+   declval<From>(); }.  "Both are void" is true; a void To or From
+   otherwise, and a To that is an array, a function or an abstract class
+   (no object to return), is false.  declval<From>() is From&&: an xvalue,
+   a function's lvalue.  unknown when the analysis cannot tell. */
+bool semantic_analysis::convertible_types(qualified_type from,
+                                          qualified_type to, bool &known)
+{
+    known = true;
+    const struct type f = type_table[from.unqualified()];
+    const struct type t = type_table[to.unqualified()];
+    bool from_void = f.kind == type_kind::fundamental &&
+                     f.fundamental == fundamental_type::void_;
+    bool to_void = t.kind == type_kind::fundamental &&
+                   t.fundamental == fundamental_type::void_;
+    if (from_void || to_void)
+        return from_void && to_void;
+    if (t.kind == type_kind::array || t.kind == type_kind::function)
+        return false;
+    if (abstract_class(to))
+        return false;
+    expression_meaning value;
+    value.type = from;
+    value.category = value_category::xvalue;
+    if (f.kind == type_kind::function)
+        value.category = value_category::lvalue;
+    /* a reference From: declval<From&>() is an lvalue, From&& an xvalue */
+    if (f.kind == type_kind::lvalue_reference ||
+        f.kind == type_kind::rvalue_reference) {
+        value.type = f.operand;
+        value.category = value_category::lvalue;
+        if (f.kind == type_kind::rvalue_reference &&
+            type_table[f.operand.unqualified()].kind != type_kind::function)
+            value.category = value_category::xvalue;
+    }
+    conversion_sequence s = implicit_conversion_sequence(value, to, true);
+    if (s.kind == conversion_sequence::form::unknown)
+        known = false;
+    if (!known)
+        return false;
+    if (s.kind == conversion_sequence::form::bad || s.ambiguous)
+        return false;
+    /* [over.match.general]/3: a deleted function selected makes the
+       initialization ill-formed; [class.access.base]/6: so does an
+       inaccessible base ([conv.ptr]/3, [conv.mem]/2) */
+    if (s.function && entity_table[s.function].deleted)
+        return false;
+    if (s.base_from && s.base_to) {
+        owned_array<entity_index> steps;
+        if (nonvirtual_path(s.base_from, s.base_to, steps)) {
+            for (uint32_t i = 0; i < steps.size(); i++)
+                if (entity_table[steps[i]].access)
+                    return false;
+        }
+    }
+    if (!s.function && t.kind == type_kind::class_type &&
+        type_table[value.type.unqualified()].kind == type_kind::class_type &&
+        type_table[value.type.unqualified()].entity == t.entity)
+        return copy_constructible_from(t.entity, value.category, known);
+    return true;
+}
+
 /* [ext:clang_type_traits] clang-type-trait-expression: a prvalue of type
    bool, a constant.  The traits analysis answers so far:
+     __is_convertible(From, To) (and __is_convertible_to): [meta.rel]
+     is_convertible, by convertible_types;
      __is_same(T, U) (GCC's spelling __is_same_as): [meta.rel] is_same,
      "T and U name the same type with the same cv-qualifications";
      unary-traits.inc's traits of one type, by its category.
@@ -438,8 +552,11 @@ analysis_result semantic_analysis::clang_type_trait(SyntaxRef n,
     const char *name = reinterpret_cast<const char *>(written.data());
     bool same = spelled(name, written.size(), "__is_same") ||
                 spelled(name, written.size(), "__is_same_as");
+    bool convertible = spelled(name, written.size(), "__is_convertible") ||
+                       spelled(name, written.size(), "__is_convertible_to");
     /* ( type-id ): a trait of the type's category */
-    if (!same && n.size() == 4 && n[2].is(syntax_kind::type_id)) {
+    if (!same && !convertible && n.size() == 4 &&
+        n[2].is(syntax_kind::type_id)) {
         int which = unary_trait_named(name, written.size());
         if (which < 0)
             return not_supported(n, "ext.clang");
@@ -457,15 +574,22 @@ analysis_result semantic_analysis::clang_type_trait(SyntaxRef n,
         return analysis_result::well_formed;
     }
     /* ( type-id , type-id ) */
-    if (!same || n.size() != 6 || !n[2].is(syntax_kind::type_id) ||
-        !n[4].is(syntax_kind::type_id))
+    if ((!same && !convertible) || n.size() != 6 ||
+        !n[2].is(syntax_kind::type_id) || !n[4].is(syntax_kind::type_id))
         return not_supported(n, "ext.clang");
     qualified_type t, u;
     VTRY(r, type_id(n[2], t));
     VTRY_SET(r, type_id(n[4], u));
     if (depends_on_template_parameter(t) || depends_on_template_parameter(u))
         return not_supported(n, "temp.dep.constexpr");
-    m = integer_constant(fundamental_type::bool_, t == u, n.first_token());
+    bool answer = t == u;
+    if (convertible) {
+        bool known = true;
+        answer = convertible_types(t, u, known);
+        if (!known)
+            return not_supported(n, "over.best.ics");
+    }
+    m = integer_constant(fundamental_type::bool_, answer, n.first_token());
     return analysis_result::well_formed;
 }
 
