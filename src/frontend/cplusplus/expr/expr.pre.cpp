@@ -24,7 +24,8 @@ analysis_result semantic_analysis::expression(syntax_child e,
     /* [ext:clang_atomic], [ext:clang_bit_int] the operations on an atomic
        object or a _BitInt are not analysed yet */
     type_kind k = type_table[m.type.unqualified()].kind;
-    if (k == type_kind::atomic || k == type_kind::bit_int) {
+    if (k == type_kind::atomic || k == type_kind::bit_int ||
+        k == type_kind::ext_vector) {
         if (e.is_token())
             return not_supported(current_declaration, "ext.clang");
         return not_supported(e.index(), "ext.clang");

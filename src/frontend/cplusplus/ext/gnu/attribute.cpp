@@ -231,11 +231,11 @@ static const gnu_attribute_rule gnu_attribute_rules[] = {
     {"aligned", gnu_aligned},
     /* the attributes that change no code vcc generates: they say what a
        function or variable does (const, pure, nothrow, leaf, malloc,
-       returns_nonnull, nonnull, format, format_arg, alloc_size), ask for
-       a diagnostic (unused, maybe_unused, warn_unused_result, deprecated,
-       sentinel), or name an optimization vcc does not do (noclone, cold,
-       hot, flatten, no_icf, no_reorder, artificial,
-       no_instrument_function), or ask for an instrumentation vcc does not
+       returns_nonnull, nonnull, format, format_arg, alloc_size,
+       alloc_align), ask for a diagnostic (unused, maybe_unused,
+       warn_unused_result, deprecated, sentinel), or name an optimization
+       vcc does not do (noclone, cold, hot, flatten, no_icf, no_reorder,
+       artificial, no_instrument_function), or ask for an instrumentation vcc does not
        add (no_sanitize("cfi"): libc++'s _LIBCPP_NO_CFI) */
     {"unused", 0},
     {"maybe_unused", 0},
@@ -252,6 +252,7 @@ static const gnu_attribute_rule gnu_attribute_rules[] = {
     {"format", 0},
     {"format_arg", 0},
     {"alloc_size", 0},
+    {"alloc_align", 0},
     {"warn_unused_result", 0},
     {"deprecated", 0},
     {"sentinel", 0},
@@ -261,10 +262,18 @@ static const gnu_attribute_rule gnu_attribute_rules[] = {
     {"artificial", 0},
     {"no_instrument_function", 0},
     {"no_sanitize", 0},
+    /* clang's noescape: a pointer parameter does not escape the call
+       (libc++'s _LIBCPP_NOESCAPE), a promise vcc does not use */
+    {"noescape", 0},
     /* clang's availability(PLATFORM, introduced = V, ...): a diagnostic
        when the deployment target is older (libc++'s
        _LIBCPP_INTRODUCED_IN_LLVM_N_ATTRIBUTE) */
     {"availability", 0},
+    /* clang's swift_attr("..."): an annotation for Swift's importer (the
+       SDK's __swift_nonisolated_unsafe) */
+    {"swift_attr", 0},
+    /* clang's enable_if(condition, message) (below) */
+    {"enable_if", gnu_enable_if},
 };
 
 /* the rule of an attribute's spelling, nullptr if analysis has none */
@@ -282,6 +291,18 @@ static const gnu_attribute_rule *gnu_attribute_rule_of(const char *name,
         if (strlen(r.name) == length && !memcmp(r.name, name, length))
             return &r;
     return nullptr;
+}
+
+/* [ext:clang_ext_vector_type] ext_vector_type or __ext_vector_type__ */
+static bool spelling_is_ext_vector_type(const owned_buffer &spelling)
+{
+    const char *name = reinterpret_cast<const char *>(spelling.data());
+    size_t length = spelling.size();
+    if (length > 4 && name[0] == '_' && name[1] == '_') {
+        name += 2;
+        length -= 4;
+    }
+    return length == 15 && !memcmp(name, "ext_vector_type", 15);
 }
 
 /* [ext:clang_availability] the attribute at the token is clang's
@@ -412,8 +433,38 @@ analysis_result semantic_analysis::gnu_attribute_specifier(node_index n,
                              (spelling.size() == 11 &&
                               !memcmp(spelling.data(), "__attribute", 11))))
             continue;
+        if (!rule && g.ext_vector_allowed && count == 4 &&
+            spelling_is_ext_vector_type(spelling)) {
+            analysis_result r = clang_ext_vector_count(at, children[2], g);
+            if (r != analysis_result::well_formed)
+                return r;
+            continue;
+        }
         if (!rule)
             return not_supported(at, "ext.gnu");
+        /* clang's enable_if: the function a candidate only where the
+           condition holds; on a constructor template's declarator
+           (enable_if_allowed: libc++'s _CmpUnspecifiedParam, which allows
+           the literal 0 alone) unchecked, so a call it would refuse is
+           accepted; elsewhere a constant true condition (libc++'s
+           _LIBCPP_PREFERRED_OVERLOAD) makes the function one of its own,
+           preferred over one without (basic.link.cpp, over.match.cpp);
+           any other condition is not analysed */
+        if (rule->flag == gnu_enable_if) {
+            if (enable_if_allowed)
+                continue;
+            if (count != 6)
+                return not_supported(at, "ext.gnu");
+            bool constant = false, value = false;
+            analysis_result r =
+                bool_constant_expression(at, children[2], constant, value);
+            if (r != analysis_result::well_formed)
+                return r;
+            if (!constant || !value)
+                return not_supported(at, "ext.gnu");
+            g.flags |= gnu_enable_if;
+            continue;
+        }
         if (rule->flag == gnu_aligned) {
             uint64_t alignment = 16;
             if (count == 4) {

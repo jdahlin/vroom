@@ -243,15 +243,24 @@ semantic_analysis::parameter_declaration(node_index n, qualified_type &type,
     default_argument = syntax_child();
     /* [dcl.fct]/3: the attribute-specifier-seq_opt before the
        decl-specifier-seq appertains to the parameter: those without effect
-       (libc++'s [[__maybe_unused__]]) are left out */
+       (libc++'s [[__maybe_unused__]]), and GCC's whose rules set nothing
+       (libc++'s __attribute__((noescape))), are left out */
     uint32_t lead = 0;
-    while (lead < tree[n].child_count && !tree.children(n)[lead].is_token() &&
-           (syntax_is(tree, tree.children(n)[lead],
-                      syntax_kind::attribute_specifier_seq) ||
-            syntax_is(tree, tree.children(n)[lead],
-                      syntax_kind::attribute_specifier)) &&
-           attributes_without_effect(tree.children(n)[lead]))
+    while (lead < tree[n].child_count && !tree.children(n)[lead].is_token()) {
+        syntax_child c = tree.children(n)[lead];
+        if (syntax_is(tree, c, syntax_kind::gnu_attribute_specifier)) {
+            gnu_attributes g;
+            analysis_result r = gnu_attribute_specifier(c.index(), g);
+            if (r != analysis_result::well_formed)
+                return r;
+            if (g.flags || g.aligned || g.section || g.abi_tag)
+                break;
+        } else if ((!syntax_is(tree, c, syntax_kind::attribute_specifier_seq) &&
+                    !syntax_is(tree, c, syntax_kind::attribute_specifier)) ||
+                   !attributes_without_effect(c))
+            break;
         lead++;
+    }
     const syntax_child *children = tree.children(n) + lead;
     uint32_t child_count = tree[n].child_count - lead;
     if (!child_count ||
@@ -357,7 +366,7 @@ analysis_result semantic_analysis::function(node_index parameters,
                 continue;
             /* [ext:gnu_attributes] after the parameters: the
                declarator's (declarator takes them) */
-            if (syntax_is(tree, c, syntax_kind::gnu_attribute_specifier))
+            if (!c.is_token() && only_gnu_attributes(tree, c.index()))
                 continue;
             /* [dcl.fct]/1: the cv-qualifier-seq of a member function's
                declarator ([class.mfct.non-static]/5) */
@@ -381,6 +390,9 @@ analysis_result semantic_analysis::function(node_index parameters,
                 exceptions = c.index();
                 continue;
             }
+            /* a generic lambda's requires-clause (lambda_constraint) */
+            if (syntax_is(tree, c, syntax_kind::requires_clause))
+                continue;
             /* a ref-qualifier, attributes, a cv-qualifier-seq of a type
                that is not a member function's */
             return not_supported(parameters, "dcl.fct");
@@ -558,6 +570,107 @@ analysis_result semantic_analysis::function(node_index parameters,
                                                  variadic, non_throwing),
                              cv_none);
     return analysis_result::well_formed;
+}
+
+/* [dcl.fct]/22: "An abbreviated function template is equivalent to a
+   function template whose template-parameter-list includes one invented
+   type template-parameter for each generic parameter type placeholder of
+   the function declaration, in order of appearance": auto or
+   type-constraint auto among a parameter's decl-specifiers */
+bool semantic_analysis::generic_placeholder(node_index seq) const
+{
+    for (uint32_t i = 0; i < tree[seq].child_count; i++) {
+        syntax_child c = tree.children(seq)[i];
+        if (syntax_is(tree, c, syntax_kind::placeholder_type_specifier))
+            c = tree.children(c.index())[tree[c.index()].child_count - 1];
+        if (is_keyword(c, standard_keyword::auto_))
+            return true;
+    }
+    return false;
+}
+
+bool semantic_analysis::abbreviated_parameters(
+    node_index declaration, owned_array<node_index> &parameters) const
+{
+    if (syntax_is(tree, syntax_child::node(declaration),
+                  syntax_kind::template_declaration)) {
+        syntax_child inner = tree.children(declaration)[1];
+        if (tree[declaration].child_count != 2 || inner.is_token())
+            return true;
+        declaration = inner.index();
+    }
+    if (!syntax_is(tree, syntax_child::node(declaration),
+                   syntax_kind::function_definition) &&
+        !syntax_is(tree, syntax_child::node(declaration),
+                   syntax_kind::simple_declaration))
+        return true;
+    /* the declarator's parameters-and-qualifiers */
+    syntax_child d;
+    for (uint32_t i = 0; i < tree[declaration].child_count && !d.bits; i++) {
+        syntax_child c = tree.children(declaration)[i];
+        if (syntax_is(tree, c, syntax_kind::ptr_declarator) ||
+            syntax_is(tree, c, syntax_kind::noptr_declarator))
+            d = c;
+    }
+    while (syntax_is(tree, d, syntax_kind::ptr_declarator))
+        d = tree.children(d.index())[tree[d.index()].child_count - 1];
+    if (!syntax_is(tree, d, syntax_kind::noptr_declarator))
+        return true;
+    syntax_child list;
+    for (uint32_t i = 0; i < tree[d.index()].child_count; i++)
+        if (syntax_is(tree, tree.children(d.index())[i],
+                      syntax_kind::parameters_and_qualifiers))
+            list = tree.children(d.index())[i];
+    if (!list.bits)
+        return true;
+    owned_array<syntax_child> items;
+    for (uint32_t i = 0; i < tree[list.index()].child_count; i++) {
+        syntax_child c = tree.children(list.index())[i];
+        if (syntax_is(tree, c, syntax_kind::parameter_declaration_list))
+            for (uint32_t k = 0; k < tree[c.index()].child_count; k++)
+                items.append(tree.children(c.index())[k]);
+        else
+            items.append(c);
+    }
+    for (syntax_child c : items) {
+        if (!syntax_is(tree, c, syntax_kind::parameter_declaration))
+            continue;
+        const syntax_node &x = tree[c.index()];
+        for (uint32_t k = 0; k < x.child_count; k++) {
+            syntax_child seq = tree.children(c.index())[k];
+            if (!syntax_is(tree, seq, syntax_kind::decl_specifier_seq))
+                continue;
+            if (!generic_placeholder(seq.index()))
+                break;
+            /* [dcl.fct]/22: "The invented type template-parameter is a
+               template parameter pack if the corresponding parameter-
+               declaration declares a function parameter pack" */
+            for (token_index t = x.first_token; t < x.end_token; t++)
+                if (syntax_is_punctuator(tokens, syntax_child::token(t),
+                                         preprocessing_op_or_punc::ELLIPSIS))
+                    return false;
+            parameters.append(seq.index());
+            break;
+        }
+    }
+    return true;
+}
+
+uint32_t semantic_analysis::invented_parameter_name(node_index seq) const
+{
+    char spelling[24];
+    int length = snprintf(spelling, sizeof spelling, "auto:%u", seq);
+    return tokens.pp.identifier(spelling, static_cast<size_t>(length)) + 1;
+}
+
+bool semantic_analysis::invented_parameter_type(node_index seq,
+                                                qualified_type &type) const
+{
+    entity_index e = lookup(invented_parameter_name(seq));
+    if (!e || entity_table[e].kind != entity_kind::typedef_name)
+        return false;
+    type = entity_table[e].type;
+    return true;
 }
 
 } // namespace cplusplus

@@ -174,6 +174,9 @@ analysis_result semantic_analysis::declaration_by_kind(node_index n)
     case syntax_kind::simple_declaration:
         return simple_declaration(n);
     case syntax_kind::function_definition:
+        /* [dcl.fct]/18: an abbreviated function template */
+        if (abbreviated_function(n) && !out_of_class_member(n))
+            return function_template_definition(n, n);
         return function_definition(n);
     case syntax_kind::linkage_specification:
         return linkage_specification(n);

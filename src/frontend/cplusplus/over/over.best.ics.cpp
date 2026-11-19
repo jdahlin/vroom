@@ -309,16 +309,29 @@ semantic_analysis::class_sequence(const expression_meaning &a,
         return of_form(sequence::form::unknown);
     if (!user_defined)
         return of_form(sequence::form::bad);
-    /* [temp.mem]/1: a constructor template of c1 is a candidate too: not
-       analysed */
+    /* [temp.mem]/1: a constructor template of c1 only declared is a
+       candidate too: not analysed */
     if (entity_table[c1].constructor_template)
         return of_form(sequence::form::unknown);
-    /* the converting constructors of c1 with one parameter to take the
+    /* the converting constructors of c1, and the specializations of its
+       converting constructor templates, with one parameter to take the
        argument */
+    owned_array<entity_index> constructors;
+    for (entity_index k = entity_table[c1].first_constructor; k;
+         k = entity_table[k].next_constructor)
+        constructors.append(k);
+    if (entity_table[c1].constructor_templates) {
+        owned_array<overload_candidate> specializations;
+        if (constructor_template_candidates(0, c1, &a, 1, true,
+                                            specializations) !=
+            analysis_result::well_formed)
+            return of_form(sequence::form::unknown);
+        for (const overload_candidate &k : specializations)
+            constructors.append(k.function);
+    }
     sequence best = of_form(sequence::form::bad);
     bool unique = true, unknown = false;
-    for (entity_index k = entity_table[c1].first_constructor; k;
-         k = entity_table[k].next_constructor) {
+    for (entity_index k : constructors) {
         const struct type &f = type_table[entity_table[k].type.unqualified()];
         /* [over.match.copy]/1.1: "the converting constructors of T" */
         if (entity_table[k].explicit_)

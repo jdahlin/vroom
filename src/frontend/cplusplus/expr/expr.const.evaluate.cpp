@@ -980,9 +980,11 @@ constness semantic_analysis::evaluate_call(constant_evaluation &state,
         return constness::constant;
     }
     /* [expr.prim.lambda.closure]/4: whether a closure's function call
-       operator is constexpr is not decided yet (evaluate_invocation) */
+       operator is constexpr is not decided yet (evaluate_invocation),
+       unless its lambda-declarator says constexpr */
     entity_index enclosing = entity_table[semantics[callee].a].enclosing;
-    if (enclosing && entity_table[enclosing].lambda)
+    if (enclosing && entity_table[enclosing].lambda &&
+        !entity_table[semantics[callee].a].constexpr_)
         return constness::unknown;
     /* [class.this]/1: a non-static member function's this, the address
        of the object expression */

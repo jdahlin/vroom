@@ -552,6 +552,112 @@ analysis_result semantic_analysis::builtin_type_pack_element(node_index id,
     return analysis_result::well_formed;
 }
 
+/*
+ * [ext:clang_builtin_templates] __make_integer_seq<B, T, N> is
+ * B<T, 0, 1, ..., N - 1>; N a converted constant expression of type T, not
+ * negative (clang's errors).  libc++'s make_integer_sequence uses it.
+ */
+bool semantic_analysis::is_builtin_make_integer_seq(uint32_t name) const
+{
+    static const char spelled[] = "__make_integer_seq";
+    return name == tokens.pp.identifier(spelled, sizeof spelled - 1) + 1;
+}
+
+analysis_result semantic_analysis::builtin_make_integer_seq(node_index id,
+                                                            type_index &type)
+{
+    owned_array<syntax_child> written;
+    owned_array<bool> expansion;
+    analysis_result r = builtin_template_arguments(id, written, expansion);
+    if (r != analysis_result::well_formed)
+        return r;
+    if (written.size() != 3 || expansion[0] || expansion[1] || expansion[2] ||
+        syntax_is(tree, written[2], syntax_kind::type_id))
+        return not_supported(id, "ext.clang");
+    /* B, by name */
+    token_index first = first_token(written[0]);
+    if ((!written[0].is_token() &&
+         tree[written[0].index()].end_token != first + 1) ||
+        tokens[first].kind != token_kind::identifier)
+        return not_supported(id, "ext.clang");
+    lookup_result x =
+        lookup_unqualified(tokens.identifier(first), lookup_filter::any);
+    entity_index b = x.entity;
+    if (!b)
+        b = x.unknown_entity;
+    uint32_t t = class_template_of(b);
+    if (!t)
+        t = alias_template_of(b);
+    if (!t)
+        return not_supported(id, "ext.clang");
+    if (!syntax_is(tree, written[1], syntax_kind::type_id))
+        return not_supported(id, "ext.clang");
+    qualified_type element;
+    r = type_id(written[1].index(), element);
+    if (r != analysis_result::well_formed)
+        return r;
+    /* N: value-dependent when it names a template's own parameter
+       ([temp.dep.constexpr]/2) */
+    syntax_child n = written[2];
+    token_index end = first_token(n) + 1;
+    if (!n.is_token())
+        end = tree[n.index()].end_token;
+    if (function_templates[t - 1].is_parameter ||
+        depends_on_template_parameter(element) ||
+        names_dependent_entity(first_token(n), end)) {
+        /* [temp.dep.type]/9: a template-id of dependent arguments */
+        type = dependent_written_type(id);
+        return analysis_result::well_formed;
+    }
+    expression_meaning m;
+    r = expression(n, m);
+    if (r == analysis_result::well_formed)
+        r = operand_value(id, m);
+    if (r != analysis_result::well_formed)
+        return r;
+    bool constant = false;
+    fundamental_type f = fundamental_of(element);
+    if (!element.cv() && is_integral(element) && is_integral(m.type)) {
+        r = converted_constant_expression(id, m, f, constant);
+        if (r != analysis_result::well_formed)
+            return r;
+    }
+    if (!constant)
+        return ill_formed(id,
+                          "the length of __make_integer_seq is an integral "
+                          "constant expression of its type",
+                          "ext.clang");
+    if (fundamental_type_is_signed(tokens.files.behavior, f) &&
+        static_cast<int64_t>(m.value) < 0)
+        return ill_formed(id,
+                          "the length of __make_integer_seq is not negative",
+                          "ext.clang");
+    const function_template ft = function_templates[t - 1];
+    if (ft.parameter_count != 2 ||
+        !template_parameter_is_pack(ft.first_parameter + 1))
+        return not_supported(id, "ext.clang");
+    owned_array<template_argument> arguments, values;
+    template_argument a;
+    a.type = element;
+    arguments.append(a);
+    a.kind = template_argument::kind_t::value;
+    for (uint64_t i = 0; i < m.value; i++) {
+        a.value = i;
+        values.append(a);
+    }
+    arguments.append(
+        make_pack(values.data(), static_cast<uint32_t>(values.size())));
+    if (ft.is_alias)
+        return alias_template_specialization(id, t, arguments, type);
+    entity_index c = 0;
+    r = instantiate_class(id, t, arguments.data(),
+                          static_cast<uint32_t>(arguments.size()), c);
+    if (r != analysis_result::well_formed)
+        return r;
+    type = entity_table[c].type.unqualified();
+    return analysis_result::well_formed;
+}
+
 /* [meta.trans.other]/3: the common type of count types */
 analysis_result
 semantic_analysis::common_type_of(node_index id, entity_index base,

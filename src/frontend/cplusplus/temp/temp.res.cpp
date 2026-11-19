@@ -117,7 +117,7 @@ analysis_result semantic_analysis::typename_type(node_index n, type_index &type,
         }
         if (!scope.entity)
             return not_supported(n, "temp.res");
-        return template_type(last.index(), scope.entity, true, type);
+        return template_type(last.index(), scope.entity, true, type, &cv);
     }
     if (count != 3)
         return not_supported(n, "temp.res");

@@ -211,6 +211,7 @@ uint64_t semantic_analysis::size_of_type(qualified_type t) const
             return 0;
         }
     case type_kind::pointer:
+    case type_kind::block_pointer:
         return b.long_width / 8;
     case type_kind::pointer_to_member:
         /* [abi:data-member-pointers]: "The basic ABI properties of data
@@ -229,6 +230,8 @@ uint64_t semantic_analysis::size_of_type(qualified_type t) const
         return atomic_layout(record.operand, false);
     case type_kind::bit_int:
         return bit_int_layout(record.bound, false);
+    case type_kind::ext_vector:
+        return ext_vector_layout(record, false);
     case type_kind::array:
         if (!record.bound_known)
             return 0;
@@ -279,6 +282,8 @@ uint64_t semantic_analysis::alignment_of_type(qualified_type t) const
         return atomic_layout(record.operand, true);
     case type_kind::bit_int:
         return bit_int_layout(record.bound, true);
+    case type_kind::ext_vector:
+        return ext_vector_layout(record, true);
     case type_kind::lvalue_reference:
     case type_kind::rvalue_reference:
     case type_kind::array:

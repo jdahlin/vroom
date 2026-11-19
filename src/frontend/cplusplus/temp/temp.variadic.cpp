@@ -44,6 +44,19 @@ bool semantic_analysis::template_parameter_form(
     const syntax_child *c = tree.children(p);
     if (!x.child_count)
         return false;
+    /* [dcl.fct]/22: a parameter's decl-specifier-seq with a generic
+       parameter type placeholder: an invented type template-parameter,
+       its type-constraint the placeholder's (abbreviated_parameters) */
+    if (x.kind == syntax_kind::decl_specifier_seq) {
+        out.type = true;
+        for (uint32_t i = 0; i < x.child_count; i++)
+            if (syntax_is(tree, c[i],
+                          syntax_kind::placeholder_type_specifier) &&
+                syntax_is(tree, tree.children(c[i].index())[0],
+                          syntax_kind::type_constraint))
+                out.constraint = tree.children(c[i].index())[0].index();
+        return true;
+    }
     uint32_t k = 1;
     out.type =
         syntax_is(tree, syntax_child::node(p), syntax_kind::type_parameter);

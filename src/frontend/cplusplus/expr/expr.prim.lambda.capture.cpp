@@ -188,6 +188,18 @@ analysis_result semantic_analysis::lambda_introducer(node_index n,
                 if (syntax_is_punctuator(tokens, c,
                                          preprocessing_op_or_punc::AMPERSAND))
                     l.default_capture = capture_default::reference;
+                /* [expr.prim.lambda.capture]/3: "A lambda-expression shall
+                   not have a capture-default or simple-capture in its
+                   lambda-introducer unless its innermost enclosing scope
+                   is a block scope ([basic.scope.block]) or it appears
+                   within a default member initializer" */
+                if (!l.enclosing_function)
+                    return ill_formed_at_token(
+                        c.index(),
+                        "a lambda-expression shall not have a "
+                        "capture-default unless its innermost enclosing "
+                        "scope is a block scope",
+                        "expr.prim.lambda.capture");
                 continue;
             }
             if (t.kind == token_kind::keyword &&

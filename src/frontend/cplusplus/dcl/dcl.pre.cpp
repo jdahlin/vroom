@@ -289,6 +289,8 @@ node_index parser::declaration_alternative()
             /* before a using-declaration or alias-declaration: clang's
                extension, P9's */
             return beyond_this_step();
+        else if (deduction_guide_follows())
+            n = deduction_guide();
         else
             n = block_or_function_declaration();
     } else if (at(preprocessing_op_or_punc::SEMICOLON)) {
@@ -701,8 +703,21 @@ analysis_result semantic_analysis::alias_type(node_index n,
     /* using identifier attribute-specifier-seq_opt = defining-type-id ;
        the attributes only those that change nothing vcc generates */
     uint32_t type_at = 3;
-    if (node.child_count == 6 && attributes_without_effect(c[2]))
+    gnu_attributes g;
+    if (node.child_count == 6 && attributes_without_effect(c[2])) {
         type_at = 4;
+    } else if (node.child_count == 6 && !c[2].is_token() &&
+               tokens.files.behavior.has(extension::clang_ext_vector_type)) {
+        /* [ext:clang_ext_vector_type] */
+        g.ext_vector_allowed = true;
+        analysis_result r = gnu_attribute_specifier(c[2].index(), g);
+        if (r != analysis_result::well_formed)
+            return r;
+        if (g.flags || g.aligned || g.section || g.abi_tag ||
+            (!g.ext_vector && !g.ext_vector_parameter))
+            return not_supported(n, "dcl.attr");
+        type_at = 4;
+    }
     if (node.child_count != type_at + 2 ||
         !syntax_is(tree, c[type_at], syntax_kind::defining_type_id))
         return not_supported(n, "dcl.attr");
@@ -729,13 +744,17 @@ analysis_result semantic_analysis::alias_type(node_index n,
         s.extern_ || s.inline_ || s.constexpr_ || s.gnu_flags || s.aligned)
         return not_supported(n, "dcl.typedef");
     type = s.type;
-    if (d.child_count == 1)
-        return analysis_result::well_formed;
-    declarator_meaning m;
-    r = declarator(current_declaration, dc[1], type, m);
-    if (r == analysis_result::well_formed && m.has_id)
-        return not_supported(n, "dcl.name");
-    return r;
+    if (d.child_count == 2) {
+        declarator_meaning m;
+        r = declarator(current_declaration, dc[1], type, m);
+        if (r == analysis_result::well_formed && m.has_id)
+            return not_supported(n, "dcl.name");
+        if (r != analysis_result::well_formed)
+            return r;
+    }
+    if (g.ext_vector || g.ext_vector_parameter)
+        return clang_ext_vector_type(n, g, type);
+    return analysis_result::well_formed;
 }
 
 analysis_result semantic_analysis::alias_declaration(node_index n)
@@ -921,6 +940,10 @@ analysis_result semantic_analysis::init_declarators(node_index declaration,
         syntax_child c = tree.children(declaration)[i];
         if (syntax_is(tree, c, syntax_kind::function_body))
             break;
+        /* [dcl.decl]/4: a function template's trailing requires-clause,
+           checked at deduction (template_constraints_satisfied) */
+        if (instantiating && syntax_is(tree, c, syntax_kind::requires_clause))
+            continue;
         /* [dcl.struct.bind]/1: ref-qualifier_opt [ identifier-list ] */
         if (syntax_is_punctuator(tokens, c,
                                  preprocessing_op_or_punc::LEFT_BRACKET) ||
@@ -1139,6 +1162,13 @@ analysis_result semantic_analysis::declare_with_initializer(
        function type pointed to */
     if ((gnu_flags & gnu_noreturn) && kind != entity_kind::function)
         return not_supported(declaration, "ext.gnu");
+    /* [dcl.constexpr]/2: consteval only on a function */
+    if (s.consteval_ && kind != entity_kind::function)
+        return ill_formed(declaration,
+                          "the consteval specifier shall be applied only to "
+                          "the declaration of a function or function "
+                          "template",
+                          "dcl.constexpr");
     if (s.constexpr_ && kind == entity_kind::variable) {
         /* [dcl.constexpr]/10: "A constexpr specifier used in an object
            declaration declares the object as const.  Such an object shall

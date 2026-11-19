@@ -245,7 +245,9 @@ analysis_result semantic_analysis::variable_specialization(node_index n,
     template_id_name(id, x, named);
     uint32_t vt = variable_template_of(named);
     owned_array<template_argument> arguments;
+    declaring_specializations++;
     analysis_result r = template_id_arguments(id, vt, arguments);
+    declaring_specializations--;
     if (r != analysis_result::well_formed)
         return r;
     for (const template_argument &a : arguments)

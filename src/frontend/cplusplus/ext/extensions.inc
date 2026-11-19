@@ -100,6 +100,16 @@ EXTENSION(clang_availability, clang,
           "a version a pp-number such as 10.12.1")
 EXTENSION(clang_bit_int, clang,
           "clang Language Extensions, _BitInt (C23 6.2.5) in C++: _BitInt(N) a type-specifier")
+EXTENSION(clang_ext_vector_type, clang,
+          "clang Language Extensions, Vectors and Extended Vectors: "
+          "__attribute__((ext_vector_type(N))) on an alias-declaration, a vector of N "
+          "elements (libc++'s __algorithm/simd_utils.h)")
+EXTENSION(clang_deduction_guide_attributes, clang,
+          "an attribute-specifier-seq before a deduction-guide (libc++'s "
+          "_LIBCPP_CTAD_SUPPORTED_FOR_TYPE), which the attributes do not change")
+EXTENSION(clang_blocks, clang,
+          "clang Language Extensions, Blocks: ^ a ptr-operator, a block pointer to a "
+          "function type (Darwin's SDK declares functions taking one under __BLOCKS__)")
 EXTENSION(clang_source_location, clang,
           "clang Language Extensions, Source location builtins: __builtin_source_location(), "
           "std::source_location::current's primitive")

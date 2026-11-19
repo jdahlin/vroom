@@ -649,6 +649,7 @@ ast_qualified_type c_lowering::type(qualified_type t, token_index at)
     case type_kind::pointer:
     case type_kind::lvalue_reference:
     case type_kind::rvalue_reference:
+    case type_kind::block_pointer: /* the block's address, as C's ^ */
         made = ast_builder_type_pointer(c, type(r.operand, at));
         break;
     case type_kind::array:
@@ -657,6 +658,9 @@ ast_qualified_type c_lowering::type(qualified_type t, token_index at)
         break;
     case type_kind::atomic:
         made = ast_builder_type_atomic(c, type(r.operand, at));
+        break;
+    case type_kind::ext_vector:
+        made = ast_builder_type_ext_vector(c, type(r.operand, at), r.bound);
         break;
     case type_kind::function: {
         owned_array<ast_qualified_type> parameters;
@@ -1054,8 +1058,10 @@ void c_lowering::symbol_linkage(entity_index e, int &storage,
     /* [class.local]: a member of a local class has no linkage
        ([basic.link]/8); [impl.clang] its symbol is local unless the
        outermost function the class is in is inline or templated (then
-       its copies link as one) */
-    if (local_class_function(e) &&
+       its copies link as one); so is a member of a closure type of
+       namespace scope, unless an inline variable's initializer has it */
+    if ((local_class_function(e) ||
+         (x.enclosing && analysis.entity_table[x.enclosing].lambda)) &&
         !visible_local_class(analysis.entity_table, x.enclosing)) {
         storage = AST_STORAGE_STATIC;
         flags = AST_SYMBOL_FLAG_GLOBAL;
@@ -1189,7 +1195,15 @@ void c_lowering::gnu_attributes(entity_index e, uint32_t s)
         ast_builder_symbol_flags_add(c, s, flags);
     if (x.gnu_flags & gnu_used)
         ast_builder_symbol_keep(c, s);
-    if (x.gnu_flags & gnu_hidden_visibility)
+    /* [ext:gnu_attributes] a class's visibility("hidden") is its
+       members' (and its nested classes') */
+    bool hidden = x.gnu_flags & gnu_hidden_visibility;
+    for (entity_index k = x.enclosing;
+         !hidden && k &&
+         analysis.entity_table[k].kind == entity_kind::class_type;
+         k = analysis.entity_table[k].enclosing)
+        hidden = analysis.entity_table[k].gnu_flags & gnu_hidden_visibility;
+    if (hidden)
         ast_builder_symbol_visibility(c, s, "hidden", 6);
     if (x.section) {
         /* the string-literal's characters between its quotes (sema took
@@ -3509,6 +3523,9 @@ uint32_t c_lowering::expression(uint32_t index)
                     AST_NODE_FLAG_LVALUE);
     }
     case semantic_kind::call:
+        /* [expr.const]/13: an immediate invocation is its value */
+        if (n.evaluation == constness::constant)
+            return constant(n);
         return call(n);
     case semantic_kind::subscript: {
         uint32_t a = expression(n.a), b = expression(n.b);

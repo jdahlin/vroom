@@ -71,14 +71,36 @@ semantic_analysis::instantiate(node_index at, entity_index template_entity,
         specified s;
         declarator_meaning m;
         placeholder_allowed = true;
-        analysis_result r = decl_specifier_seq(d[0].index(), s, false);
+        /* (a constructor template's: no type, the decl-specifier-seq
+           optional, [class.ctor]/1) */
+        bool specifiers =
+            syntax_is(tree, d[0], syntax_kind::decl_specifier_seq);
+        bool constructor = t.special == special_member::constructor;
+        analysis_result r = analysis_result::well_formed;
+        bool lambda = syntax_is(tree, syntax_child::node(ft.declarator),
+                                syntax_kind::lambda_expression);
+        qualified_type lambda_type;
+        if (lambda)
+            r = lambda_specialization(ft.declarator, false, lambda_type, 0);
+        else if (constructor && specifiers)
+            r = constructor_specifiers(d[0].index(), s);
+        else if (specifiers)
+            r = decl_specifier_seq(d[0].index(), s, false);
         qualified_type type = s.type;
-        if (r == analysis_result::well_formed) {
+        if (lambda) {
+            type = lambda_type;
+            s.constexpr_ = t.constexpr_;
+        }
+        if (r == analysis_result::well_formed && !lambda) {
             function_cv = 0;
             /* (a member function template's cv-qualifier-seq,
                [temp.mem]) */
             member_template_declarator(2 * !is_namespace(t.enclosing));
-            r = declarator(ft.declarator, d[1], type, m);
+            if (constructor)
+                r = constructor_template_declarator(ft.declarator,
+                                                    d[specifiers], type, m);
+            else
+                r = declarator(ft.declarator, d[specifiers], type, m);
             member_template_declarator(0);
         }
         entity_index e = 0;
@@ -86,6 +108,16 @@ semantic_analysis::instantiate(node_index at, entity_index template_entity,
             instantiating = index + 1;
             r = declare_specialization(ft.declarator, m.id, type, s, e);
             instantiating = 0;
+        }
+        /* [dcl.fct.def.delete]/2: a specialization of a deleted template
+           is deleted from its declaration on, a call of it ill-formed;
+           its definition is the deleted definition */
+        if (r == analysis_result::well_formed && ft.definition && !lambda &&
+            deleted_body(tree.children(
+                ft.definition)[tree[ft.definition].child_count - 1])) {
+            entity_table[e].deleted = true;
+            entity_table[e].inline_ = true;
+            instantiations[index].defined = true;
         }
         /* [temp.inst]/12: "If a function template f is called in a way
            that requires a default argument to be used, the dependent names
@@ -185,7 +217,35 @@ analysis_result semantic_analysis::instantiate_definition(node_index at,
        ([temp.mem]): its declarator's cv-qualifier-seq the member's */
     member_template_declarator(
         2 * !is_namespace(entity_table[template_entity].enclosing));
-    analysis_result r = function_definition(ft.definition);
+    analysis_result r = analysis_result::well_formed;
+    if (entity_table[template_entity].special == special_member::constructor) {
+        /* a constructor template's ([temp.mem]/1): its declarator again
+           (the parameters), then its function-body */
+        const syntax_child *d = tree.children(ft.definition) +
+                                leading_gnu_attributes(ft.definition);
+        bool specifiers =
+            syntax_is(tree, d[0], syntax_kind::decl_specifier_seq);
+        qualified_type type;
+        declarator_meaning m;
+        function_cv = 0;
+        function_parameters.clear();
+        r = constructor_template_declarator(ft.definition, d[specifiers], type,
+                                            m);
+        last_declared = instantiations[index].specialization;
+        if (r == analysis_result::well_formed)
+            r = special_member_body(
+                ft.definition,
+                d[specifiers + 1 +
+                  (trailing_constraint(ft.declaration).bits != 0)]);
+    } else if (syntax_is(tree, syntax_child::node(ft.definition),
+                         syntax_kind::lambda_expression)) {
+        /* a generic lambda's ([expr.prim.lambda.closure]/3) */
+        qualified_type type;
+        r = lambda_specialization(ft.definition, true, type,
+                                  instantiations[index].specialization);
+    } else {
+        r = function_definition(ft.definition);
+    }
     member_template_declarator(0);
     instantiations[index].defining = false;
     leave_instantiation(context);
@@ -227,17 +287,34 @@ semantic_analysis::instantiate_class(node_index at, uint32_t class_template,
     const function_template ft = function_templates[class_template - 1];
     if (uint32_t prior = find_instantiation(ft.entity, arguments, count)) {
         uint32_t k = prior - 1;
-        const instantiation_record &x = instantiations[k];
+        const instantiation_record x = instantiations[k];
         c = x.specialization;
         if (!c || entity_table[c].kind != entity_kind::class_type)
             return not_supported(at, "temp.inst");
         /* a specialization named before its template was defined
            ([temp.inst]/2's "declared specialization" is not one): defined
            now that the template is */
+        if (entity_table[c].defined || x.defining)
+            return analysis_result::well_formed;
+        /* the pattern again: a specialization declared since it was
+           named ([temp.class.spec.match]) */
+        uint32_t pattern = 0;
+        owned_array<template_argument> deduced;
+        analysis_result matched = matching_specialization(
+            at, class_template, arguments, count, pattern, deduced);
+        if (matched != analysis_result::well_formed)
+            return matched;
+        if (pattern != x.pattern) {
+            instantiation_record &y = instantiations[k];
+            y.pattern = pattern;
+            y.first_deduced = static_cast<uint32_t>(template_arguments.size());
+            for (const template_argument &a : deduced)
+                template_arguments.append(a);
+        }
         node_index defined_by = ft.definition;
-        if (x.pattern)
-            defined_by = function_templates[x.pattern - 1].definition;
-        if (!entity_table[c].defined && !x.defining && defined_by)
+        if (pattern)
+            defined_by = function_templates[pattern - 1].definition;
+        if (defined_by && !declaring_specializations)
             return define_class_outside(at, k, c);
         return analysis_result::well_formed;
     }
@@ -282,11 +359,15 @@ semantic_analysis::instantiate_class(node_index at, uint32_t class_template,
     node_index defined_by = ft.definition;
     if (pattern)
         defined_by = function_templates[pattern - 1].definition;
-    if (!defined_by) {
+    if (!defined_by || declaring_specializations) {
         /* [temp.class]/1's template, or [temp.expl.spec]/1's explicit
            specialization, declared, not yet defined: the specialization
            is an incomplete class ([basic.types]/5), which a later use
-           defines */
+           defines.  So is one named in a specialization's head (an argument,
+           not a nested-name-specifier's class), which
+           needs no completely-defined type ([temp.inst]/2; libc++'s
+           __desugars_to_v<__plus_tag, plus<void>, ...> before
+           plus<void>'s explicit specialization, [temp.expl.spec]/7) */
         entity_index scope = entity_table[ft.entity].enclosing;
         c = entity_table.make(entity_kind::class_type,
                               entity_table[ft.entity].name, scope);
@@ -440,9 +521,11 @@ analysis_result semantic_analysis::declare_specialization(
     }
     /* (a copy: making the entity can move the table) */
     const entity t = entity_table[record.template_entity];
-    /* (a member function template is inline, [class.mfct]/1) */
+    /* (a member function template is inline, [class.mfct]/1; the
+       definition's declarator may leave out the inline of an earlier
+       declaration, [dcl.inline]/5) */
     bool inline_ = s.inline_ || !is_namespace(t.enclosing);
-    if (inline_ != t.inline_ || s.constexpr_ != t.constexpr_)
+    if ((inline_ && !t.inline_) || s.constexpr_ != t.constexpr_)
         return not_supported(declaration, "temp.inst");
     entity_index e =
         entity_table.make(entity_kind::function, t.name, t.enclosing);
@@ -452,6 +535,7 @@ analysis_result semantic_analysis::declare_specialization(
         entity_table[e].linkage_of_name = linkage::internal;
     entity_table[e].inline_ = true;
     entity_table[e].constexpr_ = t.constexpr_;
+    entity_table[e].immediate = t.immediate;
     entity_table[e].operator_function = t.operator_function;
     entity_table[e].implemented = t.implemented;
     entity_table[e].instantiation = index + 1;
@@ -460,6 +544,8 @@ analysis_result semantic_analysis::declare_specialization(
     entity_table[e].nonstatic_member = t.nonstatic_member;
     entity_table[e].member_cv = t.member_cv;
     entity_table[e].access = t.access;
+    entity_table[e].special = t.special;
+    entity_table[e].explicit_ = t.explicit_;
     entity_table.add_declaration(e, declaration);
     const function_template ft = function_templates[t.instantiation - 1];
     entity_table[e].gnu_flags = ft.gnu_flags;

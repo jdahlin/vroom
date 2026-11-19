@@ -50,8 +50,11 @@ analysis_result semantic_analysis::closure_class(entity_index c, node_index n,
     block_variables = owned_array<entity_index>();
     entity_index enclosing_scope = current_scope;
     node_index declaration = current_declaration;
-    if (!has_capture)
-        r = closure_conversion(c, entity_table[c].call_operator, n);
+    /* (a generic lambda's conversion function template is not
+       declared) */
+    entity_index call = entity_table[c].call_operator;
+    if (!has_capture && entity_table[call].kind == entity_kind::function)
+        r = closure_conversion(c, call, n);
     if (r == analysis_result::well_formed)
         r = implicit_definitions(c, n);
     function_state = static_cast<function_context &&>(enclosing_function);
