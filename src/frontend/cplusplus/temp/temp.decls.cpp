@@ -1947,6 +1947,7 @@ analysis_result semantic_analysis::matching_specialization(
         }
         uint32_t unknowns = deduction_unknowns;
         bool match = true;
+        matching_partial = true;
         for (uint32_t i = 0; i < count && match; i++) {
             const template_argument x = template_arguments[s.first_pattern + i];
             const template_argument &y = arguments[i];
@@ -1956,6 +1957,7 @@ analysis_result semantic_analysis::matching_specialization(
             else
                 match = deduce_argument(x, y, d, set);
         }
+        matching_partial = false;
         if (deduction_unknowns != unknowns)
             return not_supported(at, "temp.deduct.type");
         if (!match)

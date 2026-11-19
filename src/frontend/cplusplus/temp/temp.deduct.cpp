@@ -90,8 +90,10 @@ bool semantic_analysis::deduce_type(qualified_type p, qualified_type a,
         /* a dependent type known by how it is written (__remove_cv(T),
            decltype(e)): [temp.deduct.type]/5.3 a non-deduced context;
            comparing two declarations, the same entity for the same
-           tokens ([temp.over.link]/5) */
-        return !exact || p == a;
+           tokens ([temp.over.link]/5).  Matching a partial
+           specialization, the deduced arguments substituted into it are
+           compared with the use's ([temp.spec.partial.match]/2) */
+        return !exact || matching_partial || p == a;
     }
     if (pr.kind == type_kind::dependent) {
         /* [temp.deduct.type]/8's TT<T>: a class template's specialization,

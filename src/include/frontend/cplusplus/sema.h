@@ -3561,6 +3561,10 @@ class semantic_analysis
     /* analysing a partial specialization's template arguments, which
        matching substitutes again (substitute_specialization) */
     uint32_t partial_arguments = 0;
+    /* deducing a partial specialization's arguments from a use's
+       (matching_specialization): a decltype is a non-deduced context
+       whose substitution substitute_specialization checks */
+    bool matching_partial = false;
     /* the specialization of function_templates[class_template - 1] whose
        pattern the arguments match (0: the primary), with its parameters'
        arguments */
