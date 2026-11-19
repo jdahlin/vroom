@@ -2750,13 +2750,12 @@ class semantic_analysis
         qualified_type &type, bool direct, initialized_value &result);
     /* [dcl.init.list]/3 for a class: an aggregate's elements, each from
        its clause or from an empty list */
-    analysis_result
-    class_list_initialization(node_index list,
-                              const owned_array<syntax_child> &clauses,
-                              qualified_type type, initialized_value &result);
+    analysis_result class_list_initialization(
+        node_index list, const owned_array<syntax_child> &clauses,
+        qualified_type type, bool direct, initialized_value &result);
     analysis_result constructor_list_initialization(
         node_index list, const owned_array<syntax_child> &clauses,
-        qualified_type type, initialized_value &result);
+        qualified_type type, bool direct, initialized_value &result);
     analysis_result too_many_clauses(node_index list,
                                      const owned_array<syntax_child> &clauses,
                                      size_t next);
