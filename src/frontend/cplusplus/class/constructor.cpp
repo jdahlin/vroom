@@ -767,17 +767,7 @@ analysis_result semantic_analysis::defaulted_copy_assignment(entity_index c,
 analysis_result semantic_analysis::expression_list_meanings(
     SyntaxElement list, owned_array<expression_meaning> &out)
 {
-    owned_array<SyntaxElement> items;
-    if (list.is(syntax_kind::initializer_list)) {
-        for (SyntaxElement a : list.elements()) {
-            if (a.is(preprocessing_op_or_punc::COMMA))
-                continue;
-            items.append(a);
-        }
-    } else {
-        items.append(list);
-    }
-    for (SyntaxElement a : items) {
+    for (SyntaxElement a : list.items(syntax_kind::initializer_list)) {
         if (a.is(syntax_kind::braced_init_list) ||
             a.is(preprocessing_op_or_punc::ELLIPSIS))
             return not_supported(node_of(a), "over.match.list");

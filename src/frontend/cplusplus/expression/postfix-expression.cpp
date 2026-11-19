@@ -942,14 +942,8 @@ analysis_result semantic_analysis::template_callee_parts(
             return analysis_result::well_formed;
         name = id[0].token();
         for (uint32_t i = 2; i + 1 < id.size(); i++) {
-            if (id[i].is(syntax_kind::template_argument_list)) {
-                for (auto a : id[i].elements()) {
-                    if (!a.is(preprocessing_op_or_punc::COMMA))
-                        written.append(a);
-                }
-            } else {
-                written.append(id[i]);
-            }
+            for (auto a : id[i].items(syntax_kind::template_argument_list))
+                written.append(a);
         }
     } else {
         return analysis_result::well_formed;

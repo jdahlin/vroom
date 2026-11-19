@@ -99,6 +99,7 @@ inline bool syntax_kind_in(syntax_kind k, const uint64_t *bits)
 
 class SyntaxElement;
 class SyntaxElements;
+class SyntaxItems;
 
 class SyntaxRef
 {
@@ -333,6 +334,10 @@ class SyntaxElement : public SyntaxRef
         return c.index();
     }
     using SyntaxRef::is;
+    /* the items of a list: the children of this node if it is of kind
+       list, else this child alone; the commas between them left out:
+       for (auto a : x.items(syntax_kind::initializer_list)) */
+    SyntaxItems items(syntax_kind list) const;
     /* the keyword this child is: none for a node or another token */
     standard_keyword keyword() const
     {
@@ -417,6 +422,84 @@ class SyntaxElements
     const syntax_child *first = nullptr;
     uint32_t count = 0;
 };
+
+/* the children of a list, or the one child that is no list, without the
+   commas that separate them (SyntaxElement::items) */
+class SyntaxItems
+{
+  public:
+    class iterator
+    {
+      public:
+        iterator(const syntax_child *at, const syntax_child *end)
+            : at(at), end(end)
+        {
+            skip();
+        }
+        SyntaxElement operator*() const
+        {
+            return SyntaxElement(*at);
+        }
+        iterator &operator++()
+        {
+            at++;
+            skip();
+            return *this;
+        }
+        bool operator!=(const iterator &o) const
+        {
+            return at != o.at;
+        }
+
+      private:
+        void skip()
+        {
+            while (at != end &&
+                   SyntaxElement(*at).is(preprocessing_op_or_punc::COMMA))
+                at++;
+        }
+        const syntax_child *at;
+        const syntax_child *end;
+    };
+    SyntaxItems() = default;
+    SyntaxItems(const syntax_child *first, uint32_t count)
+        : first(first), count(count)
+    {
+    }
+    explicit SyntaxItems(syntax_child one) : single(one), count(1)
+    {
+    }
+    iterator begin() const
+    {
+        const syntax_child *at = start();
+        return iterator(at, at + count);
+    }
+    iterator end() const
+    {
+        const syntax_child *at = start();
+        return iterator(at + count, at + count);
+    }
+
+  private:
+    const syntax_child *start() const
+    {
+        if (first)
+            return first;
+        return &single;
+    }
+    const syntax_child *first = nullptr;
+    syntax_child single = {};
+    uint32_t count = 0;
+};
+
+inline SyntaxItems SyntaxElement::items(syntax_kind list) const
+{
+    if (!c)
+        return {};
+    if (is(list))
+        return SyntaxItems(children(), size());
+    return SyntaxItems(c);
+}
 
 inline SyntaxElement SyntaxRef::operator[](uint32_t i) const
 {

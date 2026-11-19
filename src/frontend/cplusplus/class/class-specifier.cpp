@@ -1292,13 +1292,8 @@ analysis_result semantic_analysis::member_declarators(
     for (auto d : n.elements(first)) {
         if (d.is(preprocessing_op_or_punc::SEMICOLON))
             continue;
-        if (d.is(syntax_kind::member_declarator_list)) {
-            for (auto item : d.elements())
-                if (!item.is(preprocessing_op_or_punc::COMMA))
-                    declarators.append(item);
-            continue;
-        }
-        declarators.append(d);
+        for (auto item : d.items(syntax_kind::member_declarator_list))
+            declarators.append(item);
     }
     if (declarators.empty()) {
         /* [class.mem]/3: a member enumeration ([dcl.pre]/5) */

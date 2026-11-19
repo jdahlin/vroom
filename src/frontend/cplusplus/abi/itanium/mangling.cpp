@@ -551,14 +551,9 @@ bool itanium_mangler::dependent_expression(SyntaxElement c)
         return false;
     if (c.size() == 4) {
         auto a = c[2];
-        if (a.is(syntax_kind::initializer_list)) {
-            for (auto x : a.elements()) {
-                if (!x.is(preprocessing_op_or_punc::COMMA) &&
-                    !dependent_expression(x))
-                    return false;
-            }
-        } else if (!dependent_expression(a))
-            return false;
+        for (auto x : a.items(syntax_kind::initializer_list))
+            if (!dependent_expression(x))
+                return false;
     }
     text("E");
     return true;
