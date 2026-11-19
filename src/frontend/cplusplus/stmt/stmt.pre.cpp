@@ -482,52 +482,53 @@ analysis_result semantic_analysis::statement(syntax_child s, uint32_t &built)
     built = 0;
     if (s.is_token())
         return not_supported(current_declaration, "stmt.pre");
-    node_index n = s.index();
-    switch (tree[n].kind) {
-    case syntax_kind::gnu_extension_declaration:
-        /* [ext:gnu_extension_keyword]: __extension__ changes no meaning */
-        return statement(syntax(n)[1], built);
-    case syntax_kind::compound_statement:
-        return compound_statement(n, 0, built);
-    case syntax_kind::expression_statement:
-        return expression_statement(n, built);
-    case syntax_kind::selection_statement:
-        return selection_statement(n, built);
-    case syntax_kind::iteration_statement:
-        return iteration_statement(n, built);
-    case syntax_kind::jump_statement:
-        return jump_statement(n, built);
-    case syntax_kind::labeled_statement:
-        return labeled_statement(n, built);
-    case syntax_kind::simple_declaration: {
-        /* [stmt.dcl]/1: "A declaration statement introduces one or more new
-           names into a block" */
-        size_t first = block_variables.size();
-        analysis_result r = simple_declaration(n);
-        built = declaration_statements(first, syntax(n).first_token());
+    /* [stmt.dcl]/1: a block-declaration that declares no object: no code */
+    auto declares_nothing = [&](SyntaxRef d) {
+        analysis_result r = declaration_by_kind(d);
+        built = statement_node(semantic_kind::null_statement, d.first_token());
         if (r != analysis_result::well_formed)
-            hold_names(n);
+            hold_names(d);
         return r;
-    }
-    case syntax_kind::static_assert_declaration:
-    case syntax_kind::alias_declaration:
-    case syntax_kind::using_directive:
-    case syntax_kind::namespace_alias_definition:
-    case syntax_kind::using_declaration: {
-        /* [stmt.dcl]/1: a block-declaration that declares no object: no
-           code */
-        analysis_result r = declaration_by_kind(n);
-        built = statement_node(semantic_kind::null_statement,
-                               syntax(n).first_token());
-        if (r != analysis_result::well_formed)
-            hold_names(n);
-        return r;
-    }
-    case syntax_kind::statement:
-        return attributed_statement(n, built);
-    default:
-        return not_supported(n);
-    }
+    };
+    auto view = syntax(s).statement();
+    if (!view)
+        /* a node the grammar does not place in a statement */
+        return not_supported(s.index());
+    return view.visit(Overloaded{
+        [&](GnuExtensionDeclaration x) {
+            /* [ext:gnu_extension_keyword]: __extension__ changes no meaning */
+            return statement(x[1], built);
+        },
+        [&](CompoundStatement c) { return compound_statement(c, 0, built); },
+        [&](ExpressionStatement e) { return expression_statement(e, built); },
+        [&](SelectionStatement c) { return selection_statement(c, built); },
+        [&](IterationStatement c) { return iteration_statement(c, built); },
+        /* (jump-statement's sum also has these two kinds: the sum's case
+           would take them, and report their own subclauses elsewhere) */
+        [&](CoroutineReturnStatement c) { return not_supported(c); },
+        [&](GnuComputedGoto c) { return not_supported(c); },
+        [&](JumpStatement c) { return jump_statement(c, built); },
+        [&](LabeledStatement c) { return labeled_statement(c, built); },
+        [&](SimpleDeclaration d) {
+            /* [stmt.dcl]/1: "A declaration statement introduces one or more
+               new names into a block" */
+            size_t first = block_variables.size();
+            analysis_result r = simple_declaration(d);
+            built = declaration_statements(first, d.first_token());
+            if (r != analysis_result::well_formed)
+                hold_names(d);
+            return r;
+        },
+        [&](StaticAssertDeclaration d) { return declares_nothing(d); },
+        [&](AliasDeclaration d) { return declares_nothing(d); },
+        [&](UsingDirective d) { return declares_nothing(d); },
+        [&](NamespaceAliasDefinition d) { return declares_nothing(d); },
+        [&](UsingDeclaration d) { return declares_nothing(d); },
+        [&](Statement other) {
+            if (other.is(syntax_kind::statement))
+                return attributed_statement(other, built);
+            return not_supported(other);
+        }});
 }
 
 /*
