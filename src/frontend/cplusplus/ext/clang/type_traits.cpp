@@ -112,6 +112,12 @@ enum class transformation : uint8_t {
     underlying_type,
 };
 
+/* whether the n bytes at s spell the keyword k */
+static bool spelled(const char *s, size_t n, const char *k)
+{
+    return strlen(k) == n && !memcmp(k, s, n);
+}
+
 static transformation transformation_named(const char *s, size_t n)
 {
     static const struct {
@@ -135,7 +141,7 @@ static transformation transformation_named(const char *s, size_t n)
         {"__underlying_type", transformation::underlying_type},
     };
     for (const auto &k : names)
-        if (strlen(k.name) == n && !memcmp(k.name, s, n))
+        if (spelled(s, n, k.name))
             return k.which;
     return transformation::none;
 }
@@ -263,6 +269,40 @@ semantic_analysis::clang_type_transformation(node_index n, qualified_type &type)
     return analysis_result::well_formed;
 }
 
+/* [ext:clang_type_traits] clang-type-trait-expression: a prvalue of type
+   bool, a constant.  The traits analysis answers so far:
+     __is_same(T, U) (GCC's spelling __is_same_as): [meta.rel] is_same,
+     "T and U name the same type with the same cv-qualifications".
+   A template's own operands are dependent: the template is analysed with
+   its arguments when instantiated, as sizeof's operand is */
+analysis_result semantic_analysis::clang_type_trait(node_index n,
+                                                    expression_meaning &m)
+{
+    const syntax_node &node = tree[n];
+    const syntax_child *children = tree.children(n);
+    owned_buffer written;
+    tokens.spelling(children[0].index(), written.get());
+    const char *name = reinterpret_cast<const char *>(written.data());
+    bool same = spelled(name, written.size(), "__is_same") ||
+                spelled(name, written.size(), "__is_same_as");
+    /* ( type-id , type-id ) */
+    if (!same || node.child_count != 6 ||
+        !syntax_is(tree, children[2], syntax_kind::type_id) ||
+        !syntax_is(tree, children[4], syntax_kind::type_id))
+        return not_supported(n, "ext.clang");
+    qualified_type t, u;
+    analysis_result r = type_id(children[2].index(), t);
+    if (r != analysis_result::well_formed)
+        return r;
+    r = type_id(children[4].index(), u);
+    if (r != analysis_result::well_formed)
+        return r;
+    if (depends_on_template_parameter(t) || depends_on_template_parameter(u))
+        return not_supported(n, "temp.dep.constexpr");
+    m = integer_constant(fundamental_type::bool_, t == u, node.first_token);
+    return analysis_result::well_formed;
+}
+
 /* [meta.trans.other] decay_t<T>: the type of a T passed by value */
 qualified_type semantic_analysis::decayed(qualified_type t)
 {
@@ -297,12 +337,13 @@ bool semantic_analysis::is_builtin_common_type(uint32_t name) const
     return name == tokens.pp.identifier(spelled, sizeof spelled - 1) + 1;
 }
 
-analysis_result semantic_analysis::builtin_common_type(node_index id,
-                                                       type_index &type)
+/* a builtin template's template-arguments as written, each with whether
+   it is a pack expansion */
+analysis_result semantic_analysis::builtin_template_arguments(
+    node_index id, owned_array<syntax_child> &written,
+    owned_array<bool> &expansion)
 {
     const syntax_child *parts = tree.children(id);
-    owned_array<syntax_child> written;
-    owned_array<bool> expansion;
     for (uint32_t i = 2; i + 1 < tree[id].child_count; i++) {
         if (syntax_is_punctuator(tokens, parts[i],
                                  preprocessing_op_or_punc::ELLIPSIS)) {
@@ -325,6 +366,67 @@ analysis_result semantic_analysis::builtin_common_type(node_index id,
             syntax_is_punctuator(tokens, tree.children(written[w].index())[1],
                                  preprocessing_op_or_punc::ELLIPSIS))
             expansion[w] = true;
+    return analysis_result::well_formed;
+}
+
+/* the types of the template-arguments written[from ...), a pack
+   expansion's once per element; dependent when one is, or when it expands
+   a template's own pack not bound to elements */
+analysis_result semantic_analysis::builtin_template_types(
+    node_index id, const owned_array<syntax_child> &written,
+    const owned_array<bool> &expansion, size_t from,
+    owned_array<qualified_type> &types, bool &dependent)
+{
+    for (size_t w = from; w < written.size(); w++) {
+        syntax_child a = written[w];
+        if (!syntax_is(tree, a, syntax_kind::type_id))
+            return not_supported(id, "ext.clang");
+        uint32_t times = 1;
+        if (expansion[w]) {
+            token_index first = first_token(a);
+            token_index end = tree[a.index()].end_token;
+            if (end > first + 1 &&
+                syntax_is_punctuator(tokens, syntax_child::token(end - 1),
+                                     preprocessing_op_or_punc::ELLIPSIS))
+                end--;
+            /* a template's own pack, not bound to elements: a dependent
+               template-id */
+            if (!expansion_count(first, end, times)) {
+                dependent = true;
+                continue;
+            }
+        }
+        for (uint32_t k = 0; k < times; k++) {
+            bool saved = expanding;
+            uint32_t saved_element = expansion_element;
+            if (expansion[w]) {
+                expanding = true;
+                expansion_element = k;
+                type_id_expansion = true;
+            }
+            qualified_type t;
+            analysis_result r = type_id(a.index(), t);
+            type_id_expansion = false;
+            expanding = saved;
+            expansion_element = saved_element;
+            if (r != analysis_result::well_formed)
+                return r;
+            if (depends_on_template_parameter(t))
+                dependent = true;
+            types.append(t);
+        }
+    }
+    return analysis_result::well_formed;
+}
+
+analysis_result semantic_analysis::builtin_common_type(node_index id,
+                                                       type_index &type)
+{
+    owned_array<syntax_child> written;
+    owned_array<bool> expansion;
+    analysis_result r = builtin_template_arguments(id, written, expansion);
+    if (r != analysis_result::well_formed)
+        return r;
     if (written.size() < 3 || expansion[0] || expansion[1] || expansion[2])
         return not_supported(id, "ext.clang");
     /* the two templates, by name */
@@ -353,51 +455,14 @@ analysis_result semantic_analysis::builtin_common_type(node_index id,
     qualified_type empty;
     if (!syntax_is(tree, written[2], syntax_kind::type_id))
         return not_supported(id, "ext.clang");
-    analysis_result r = type_id(written[2].index(), empty);
+    r = type_id(written[2].index(), empty);
     if (r != analysis_result::well_formed)
         return r;
-    /* T...: each type, a pack expansion's once per element */
     owned_array<qualified_type> types;
     bool dependent = depends_on_template_parameter(empty);
-    for (size_t w = 3; w < written.size(); w++) {
-        syntax_child a = written[w];
-        if (!syntax_is(tree, a, syntax_kind::type_id))
-            return not_supported(id, "ext.clang");
-        uint32_t times = 1;
-        if (expansion[w]) {
-            token_index first = first_token(a);
-            token_index end = tree[a.index()].end_token;
-            if (end > first + 1 &&
-                syntax_is_punctuator(tokens, syntax_child::token(end - 1),
-                                     preprocessing_op_or_punc::ELLIPSIS))
-                end--;
-            /* a template's own pack, not bound to elements: a dependent
-               template-id */
-            if (!expansion_count(first, end, times)) {
-                dependent = true;
-                continue;
-            }
-        }
-        for (uint32_t k = 0; k < times; k++) {
-            bool saved = expanding;
-            uint32_t saved_element = expansion_element;
-            if (expansion[w]) {
-                expanding = true;
-                expansion_element = k;
-                type_id_expansion = true;
-            }
-            qualified_type t;
-            r = type_id(a.index(), t);
-            type_id_expansion = false;
-            expanding = saved;
-            expansion_element = saved_element;
-            if (r != analysis_result::well_formed)
-                return r;
-            if (depends_on_template_parameter(t))
-                dependent = true;
-            types.append(t);
-        }
-    }
+    r = builtin_template_types(id, written, expansion, 3, types, dependent);
+    if (r != analysis_result::well_formed)
+        return r;
     if (dependent) {
         /* [temp.dep.type]/9: a template-id of dependent arguments */
         type = dependent_written_type(id);
@@ -416,6 +481,75 @@ analysis_result semantic_analysis::builtin_common_type(node_index id,
         return analysis_result::well_formed;
     }
     return template_with_types(id, templates[1], &c, 1, type);
+}
+
+/*
+ * [ext:clang_builtin_templates] __type_pack_element<N, T...> is the N-th
+ * type of T (from 0); N an integral constant expression, less than
+ * sizeof...(T), else ill-formed (clang's errors).  libc++'s tuple_element
+ * and __type_list use it.
+ */
+bool semantic_analysis::is_builtin_type_pack_element(uint32_t name) const
+{
+    static const char spelled[] = "__type_pack_element";
+    return name == tokens.pp.identifier(spelled, sizeof spelled - 1) + 1;
+}
+
+analysis_result semantic_analysis::builtin_type_pack_element(node_index id,
+                                                             type_index &type)
+{
+    owned_array<syntax_child> written;
+    owned_array<bool> expansion;
+    analysis_result r = builtin_template_arguments(id, written, expansion);
+    if (r != analysis_result::well_formed)
+        return r;
+    if (written.empty() || expansion[0] ||
+        syntax_is(tree, written[0], syntax_kind::type_id))
+        return not_supported(id, "ext.clang");
+    owned_array<qualified_type> types;
+    bool dependent = false;
+    r = builtin_template_types(id, written, expansion, 1, types, dependent);
+    if (r != analysis_result::well_formed)
+        return r;
+    /* N: value-dependent when it names a template's own parameter
+       ([temp.dep.constexpr]/2) */
+    syntax_child n = written[0];
+    token_index first = first_token(n);
+    token_index end = first + 1;
+    if (!n.is_token())
+        end = tree[n.index()].end_token;
+    if (dependent || names_dependent_entity(first, end)) {
+        /* [temp.dep.type]/9: a template-id of dependent arguments */
+        type = dependent_written_type(id);
+        return analysis_result::well_formed;
+    }
+    expression_meaning m;
+    r = expression(n, m);
+    if (r == analysis_result::well_formed)
+        r = operand_value(id, m);
+    if (r != analysis_result::well_formed)
+        return r;
+    bool constant = false;
+    if (is_integral(m.type)) {
+        r = converted_constant_expression(
+            id, m, fundamental_type::unsigned_long_int, constant);
+        if (r != analysis_result::well_formed)
+            return r;
+    }
+    if (!constant)
+        return ill_formed(id,
+                          "the index of __type_pack_element is an integral "
+                          "constant expression",
+                          "ext.clang");
+    if (m.value >= types.size())
+        return ill_formed(id,
+                          "the index of __type_pack_element is less than the "
+                          "number of types",
+                          "ext.clang");
+    if (types[m.value].cv())
+        return not_supported(id, "ext.clang");
+    type = types[m.value].unqualified();
+    return analysis_result::well_formed;
 }
 
 /* [meta.trans.other]/3: the common type of count types */

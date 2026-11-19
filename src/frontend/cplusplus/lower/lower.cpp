@@ -655,6 +655,9 @@ ast_qualified_type c_lowering::type(qualified_type t, token_index at)
         made = ast_builder_type_array(c, type(r.operand, at), r.bound,
                                       r.bound_known);
         break;
+    case type_kind::atomic:
+        made = ast_builder_type_atomic(c, type(r.operand, at));
+        break;
     case type_kind::function: {
         owned_array<ast_qualified_type> parameters;
         const qualified_type *p =
@@ -2165,6 +2168,8 @@ uint32_t c_lowering::conversion(const semantic_node &n)
         return cast(expression(n.a), t, AST_CAST_POINTER_TO_POINTER);
     case conversion_kind::pointer_to_integral:
         return cast(expression(n.a), t, AST_CAST_POINTER_TO_INTEGER);
+    case conversion_kind::bit_cast:
+        return cast(expression(n.a), t, AST_CAST_BIT_CAST);
     case conversion_kind::integral_to_pointer:
         return cast(expression(n.a), t, AST_CAST_INTEGER_TO_POINTER);
     case conversion_kind::to_void:

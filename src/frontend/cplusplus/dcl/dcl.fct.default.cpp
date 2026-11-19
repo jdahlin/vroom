@@ -28,9 +28,10 @@ namespace cplusplus
 
 analysis_result semantic_analysis::default_arguments(node_index n,
                                                      entity_index f,
-                                                     entity_kind kind)
+                                                     entity_kind kind,
+                                                     bool specialization)
 {
-    if (kind == entity_kind::function && f &&
+    if (kind == entity_kind::function && f && !specialization &&
         entity_table[f].enclosing != current_scope)
         /* /4: a declaration in another scope has its own set */
         entity_table[f].unknown_defaults = true;
@@ -68,8 +69,12 @@ analysis_result semantic_analysis::default_arguments(node_index n,
     entity &x = entity_table[f];
     bool member = analysing_member_defaults &&
                   entity_table[x.enclosing].kind == entity_kind::class_type;
-    if (x.unknown_defaults || (!is_namespace(x.enclosing) && !member) ||
-        (at_block_scope() && !member) || function_state.active)
+    /* ([temp.inst]/12: a specialization's are its template's, in the
+       instantiation's scope wherever the call that names it is) */
+    if (x.unknown_defaults ||
+        (!specialization &&
+         ((!is_namespace(x.enclosing) && !member) ||
+          (at_block_scope() && !member) || function_state.active)))
         return not_supported(n, "dcl.fct.default");
     const struct type &function = type_table[x.type.unqualified()];
     size_t count = function.parameter_count;

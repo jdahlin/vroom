@@ -56,6 +56,9 @@ EXTENSION(gnu_designated_initializers, gnu,
           "mixes clauses with designators, [first ... last] =, and the obsolete field:")
 EXTENSION(gnu_compound_literals, gnu,
           "GCC manual 6.30, Compound Literals: C99's (type-id) { initializer-list } in C++")
+EXTENSION(gnu_offsetof, gnu,
+          "GCC manual 6.53, Support for offsetof: __builtin_offsetof (type, member), "
+          "<cstddef>'s offsetof ([support.types.layout]/1)")
 
 /* clang */
 EXTENSION(clang_feature_checks, clang,
@@ -89,6 +92,20 @@ EXTENSION(clang_deleted_function_message, clang,
           "C++26's = delete(\"reason\") (P2573R2) in earlier editions, with a warning")
 EXTENSION(clang_no_operator_names, clang,
           "-fno-operator-names: and, or, ... are identifiers ([lex.digraph]/2 off)")
+EXTENSION(clang_atomic, clang,
+          "clang Language Extensions, C11 _Atomic in C++: _Atomic(T) a type with C11's "
+          "atomic type's layout (C23 6.2.5)")
+EXTENSION(clang_availability, clang,
+          "clang Attributes, availability: availability(platform, introduced=version, ...), "
+          "a version a pp-number such as 10.12.1")
+EXTENSION(clang_bit_int, clang,
+          "clang Language Extensions, _BitInt (C23 6.2.5) in C++: _BitInt(N) a type-specifier")
+EXTENSION(clang_source_location, clang,
+          "clang Language Extensions, Source location builtins: __builtin_source_location(), "
+          "std::source_location::current's primitive")
+EXTENSION(clang_bit_cast, clang,
+          "clang Language Extensions: __builtin_bit_cast (type, expression), "
+          "std::bit_cast ([bit.cast]) as a primitive")
 
 /* Microsoft (-fms-extensions) */
 EXTENSION(microsoft_pragma_operator, microsoft, "MSVC: __pragma(pp-tokens), the #pragma operator")

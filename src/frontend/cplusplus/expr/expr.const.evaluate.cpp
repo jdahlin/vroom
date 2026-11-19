@@ -732,6 +732,19 @@ constness semantic_analysis::evaluate_node(constant_evaluation &state,
             v = constant_value();
             return c;
         }
+        if (k == conversion_kind::bit_cast) {
+            c = evaluate_node(state, x.a, v);
+            if (c != constness::constant)
+                return c;
+            fundamental_type from = evaluated_type(semantics[x.a].type);
+            fundamental_type to = evaluated_type(x.type);
+            uint64_t value = 0;
+            if (!bit_cast_kept(tokens.files.behavior, from, to,
+                               kept_of(from, v), value))
+                return constness::unknown;
+            v = value_of(to, value);
+            return c;
+        }
         if (k != conversion_kind::integral && k != conversion_kind::floating &&
             k != conversion_kind::floating_integral &&
             k != conversion_kind::boolean)

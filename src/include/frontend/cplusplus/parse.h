@@ -454,6 +454,11 @@ enum class extension_keyword : uint8_t {
     type_transformation,
     int128,
     nullability,
+    offsetof_,
+    bit_cast,
+    atomic,
+    bit_int,
+    source_location,
 };
 
 /*
@@ -860,6 +865,8 @@ class parser
     bool at_gnu_attribute(unsigned ahead = 0);
     node_index gnu_attribute_specifier();
     node_index gnu_attributes_opt();
+    bool at_availability();
+    node_index clang_availability_arguments();
     bool standard_attributes_first = false;
     /* ---- ext/gnu/extension_keyword.cpp: __extension__ before a
        declaration (alternative parses what follows) or an expression */
@@ -876,6 +883,16 @@ class parser
     /* ---- ext/clang/type_traits.cpp: __is_same(T, U), __remove_cv(T) */
     node_index clang_type_trait_expression();
     node_index clang_type_transformation();
+    /* ---- ext/gnu/offsetof.cpp: __builtin_offsetof(T, a.b[1]) */
+    node_index gnu_offsetof_expression();
+    /* ---- ext/clang/bit_cast.cpp: __builtin_bit_cast(T, e) */
+    node_index clang_bit_cast_expression();
+    /* ---- ext/clang/source_location.cpp: __builtin_source_location() */
+    node_index clang_source_location_expression();
+    /* ---- ext/clang/atomic.cpp: _Atomic(T) */
+    node_index clang_atomic_type_specifier();
+    /* ---- ext/clang/bit_int.cpp: _BitInt(N) */
+    node_index clang_bit_int_type_specifier();
     /* ---- ext/gnu/asm_label.cpp: declarator asm ( "name" ) attributes */
     bool gnu_declarator_suffix_follows(const declarator_facts &facts);
     node_index gnu_declarator_suffix(size_t mark, token_index first,
@@ -987,7 +1004,8 @@ class parser
     node_index class_or_decltype(scope_index *region);
     /* { member-specification_opt } of the class name (0: unnamed) whose
        region is region, in two passes ([class.mem]/6) */
-    node_index class_body(uint32_t name, scope_index region);
+    node_index class_body(uint32_t name, scope_index region,
+                          bool specialization);
     node_index member_specification();
     node_index member_declaration();
     node_index member_declaration_alternative();

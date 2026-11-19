@@ -48,7 +48,9 @@ bool semantic_analysis::template_parameter_form(
     out.type =
         syntax_is(tree, syntax_child::node(p), syntax_kind::type_parameter);
     if (out.type) {
-        if (!c[0].is_token()) {
+        if (syntax_is(tree, c[0], syntax_kind::type_constraint)) {
+            out.constraint = c[0].index();
+        } else if (!c[0].is_token()) {
             if (!syntax_is(tree, c[0], syntax_kind::template_head) ||
                 x.child_count < 2 || !c[1].is_token())
                 return false;
@@ -214,7 +216,7 @@ static bool token_is(token_stream &tokens, token_index t,
 /* [temp.variadic]/7: "All of the packs expanded by a pack expansion shall
    have the same number of arguments specified." */
 bool semantic_analysis::expansion_count(token_index first, token_index end,
-                                        uint32_t &count) const
+                                        uint32_t &count, bool *own) const
 {
     bool found = false;
     count = 0;
@@ -230,8 +232,11 @@ bool semantic_analysis::expansion_count(token_index first, token_index end,
              token_is(tokens, t - 1, preprocessing_op_or_punc::COLON_COLON)))
             continue;
         entity_index e = find_pack(tokens.identifier(t));
-        if (!e)
+        if (!e) {
+            if (own && own_pack_parameter(tokens.identifier(t)))
+                *own = true;
             continue;
+        }
         uint32_t n = entity_table[e].member_count;
         if (found && n != count)
             return false;
@@ -247,9 +252,16 @@ analysis_result semantic_analysis::parameter_pack_expansion(
     elements = 0;
     ellipsis = 0;
     token_index first = tree[d].first_token, end = tree[d].end_token;
+    /* [dcl.fct]/21: the ellipsis of a function parameter pack is the
+       declarator's; one in the decl-specifier-seq is a template
+       argument's (tuple<Ts...>&) */
+    token_index from = first;
+    if (tree[d].child_count &&
+        syntax_is(tree, tree.children(d)[0], syntax_kind::decl_specifier_seq))
+        from = tree[tree.children(d)[0].index()].end_token;
     token_index found = 0;
     uint32_t ellipses = 0;
-    for (token_index t = first; t < end; t++)
+    for (token_index t = from; t < end; t++)
         if (token_is(tokens, t, preprocessing_op_or_punc::ELLIPSIS)) {
             found = t;
             ellipses++;
@@ -434,13 +446,10 @@ analysis_result semantic_analysis::fold(node_index n, expression_meaning &m)
         if (op != preprocessing_op_or_punc::AMPERSAND_AMPERSAND &&
             op != preprocessing_op_or_punc::BAR_BAR)
             return not_supported(n, "temp.variadic");
-        m = expression_meaning();
-        m.type = qualified_type::make(
-            type_table.fundamental(fundamental_type::bool_), cv_none);
-        m.category = value_category::prvalue;
-        m.evaluation = constness::constant;
-        m.value = op == preprocessing_op_or_punc::AMPERSAND_AMPERSAND;
-        m.node = expression_node(semantic_kind::constant, m, node.first_token);
+        m = integer_constant(fundamental_type::bool_,
+                             op ==
+                                 preprocessing_op_or_punc::AMPERSAND_AMPERSAND,
+                             node.first_token);
         return analysis_result::well_formed;
     }
     auto combine = [&](expression_meaning left, expression_meaning right,

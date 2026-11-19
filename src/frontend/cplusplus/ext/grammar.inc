@@ -73,6 +73,20 @@ PRODUCTION(gnu_attributes, "named-namespace-definition",
 PRODUCTION(gnu_attributes, "unnamed-namespace-definition",
            "inline_opt namespace attribute-specifier-seq_opt gnu-attribute-specifier-seq { namespace-body }")
 
+/* clang Attributes, availability: a gnu-attribute whose identifier is
+   availability (or __availability__), in any gnu-attribute-list (which
+   these rows cannot say: an extension adds no alternative to another's
+   nonterminal) */
+PRODUCTION(clang_availability, "attribute-specifier", "__attribute__ ( ( clang-availability-attribute ) )")
+PRODUCTION(clang_availability, "clang-availability-attribute",
+           "identifier ( identifier , clang-availability-clause-list )")
+PRODUCTION(clang_availability, "clang-availability-clause-list", "clang-availability-clause")
+PRODUCTION(clang_availability, "clang-availability-clause-list",
+           "clang-availability-clause-list , clang-availability-clause")
+PRODUCTION(clang_availability, "clang-availability-clause", "identifier")
+PRODUCTION(clang_availability, "clang-availability-clause", "identifier = pp-number")
+PRODUCTION(clang_availability, "clang-availability-clause", "identifier = string-literal")
+
 /* ---- GCC manual 6.47.4, Controlling Names Used in Assembler Code ---- */
 
 PRODUCTION(gnu_asm_labels, "gnu-asm-label", "asm ( string-literal )")
@@ -129,6 +143,34 @@ PRODUCTION(gnu_designated_initializers, "designator", "[ constant-expression ...
 
 PRODUCTION(gnu_compound_literals, "postfix-expression", "gnu-compound-literal")
 PRODUCTION(gnu_compound_literals, "gnu-compound-literal", "( type-id ) braced-init-list")
+
+/* ---- GCC manual 6.53, Support for offsetof ---- */
+
+PRODUCTION(gnu_offsetof, "primary-expression", "gnu-offsetof-expression")
+PRODUCTION(gnu_offsetof, "gnu-offsetof-expression", "__builtin_offsetof ( type-id , gnu-offsetof-member-designator )")
+PRODUCTION(gnu_offsetof, "gnu-offsetof-member-designator", "identifier")
+PRODUCTION(gnu_offsetof, "gnu-offsetof-member-designator", "gnu-offsetof-member-designator . identifier")
+PRODUCTION(gnu_offsetof, "gnu-offsetof-member-designator", "gnu-offsetof-member-designator [ expression ]")
+
+/* ---- clang Language Extensions, __builtin_bit_cast ---- */
+
+PRODUCTION(clang_bit_cast, "primary-expression", "clang-bit-cast-expression")
+PRODUCTION(clang_bit_cast, "clang-bit-cast-expression", "__builtin_bit_cast ( type-id , assignment-expression )")
+
+/* ---- clang Language Extensions, C11 _Atomic in C++ ---- */
+
+PRODUCTION(clang_atomic, "simple-type-specifier", "clang-atomic-type-specifier")
+PRODUCTION(clang_atomic, "clang-atomic-type-specifier", "_Atomic ( type-id )")
+
+/* ---- clang Language Extensions, _BitInt in C++ ---- */
+
+PRODUCTION(clang_bit_int, "simple-type-specifier", "clang-bit-int-type-specifier")
+PRODUCTION(clang_bit_int, "clang-bit-int-type-specifier", "_BitInt ( constant-expression )")
+
+/* ---- clang Language Extensions, Source location builtins ---- */
+
+PRODUCTION(clang_source_location, "primary-expression", "clang-source-location-expression")
+PRODUCTION(clang_source_location, "clang-source-location-expression", "__builtin_source_location ( )")
 
 /* ---- clang Language Extensions, Type Trait Primitives ---- */
 

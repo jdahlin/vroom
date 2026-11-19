@@ -225,6 +225,10 @@ uint64_t semantic_analysis::size_of_type(qualified_type t) const
     case type_kind::lvalue_reference:
     case type_kind::rvalue_reference:
         return size_of_type(record.operand);
+    case type_kind::atomic:
+        return atomic_layout(record.operand, false);
+    case type_kind::bit_int:
+        return bit_int_layout(record.bound, false);
     case type_kind::array:
         if (!record.bound_known)
             return 0;
@@ -244,10 +248,37 @@ uint64_t semantic_analysis::size_of_type(qualified_type t) const
     }
 }
 
+uint64_t power_of_two_at_least(uint64_t n)
+{
+    uint64_t p = 1;
+    while (p < n)
+        p <<= 1;
+    return p;
+}
+
+/* [ext:clang_atomic] [impl.clang] _Atomic(T)'s size, or alignment: a T
+   of up to 16 bytes is widened to the next power of two, aligned to it
+   (C11's atomic types as clang lays them out) */
+uint64_t semantic_analysis::atomic_layout(qualified_type value,
+                                          bool alignment) const
+{
+    uint64_t size = size_of_type(value);
+    if (!size || size > 16) {
+        if (alignment)
+            return alignment_of_type(value);
+        return size;
+    }
+    return power_of_two_at_least(size);
+}
+
 uint64_t semantic_analysis::alignment_of_type(qualified_type t) const
 {
     const struct type record = type_table[t.unqualified()];
     switch (record.kind) {
+    case type_kind::atomic:
+        return atomic_layout(record.operand, true);
+    case type_kind::bit_int:
+        return bit_int_layout(record.bound, true);
     case type_kind::lvalue_reference:
     case type_kind::rvalue_reference:
     case type_kind::array:
@@ -752,13 +783,7 @@ analysis_result semantic_analysis::noexcept_operator(node_index n,
     r = potentially_throwing(n, e.node, throwing);
     if (r != analysis_result::well_formed)
         return r;
-    m = expression_meaning();
-    m.type = qualified_type::make(
-        type_table.fundamental(fundamental_type::bool_), cv_none);
-    m.category = value_category::prvalue;
-    m.evaluation = constness::constant;
-    m.value = !throwing;
-    m.node = expression_node(semantic_kind::constant, m, node.first_token);
+    m = integer_constant(fundamental_type::bool_, !throwing, node.first_token);
     return analysis_result::well_formed;
 }
 

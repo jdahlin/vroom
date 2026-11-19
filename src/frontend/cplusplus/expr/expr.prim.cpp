@@ -69,6 +69,12 @@ node_index parser::primary_expression()
         return requires_expression();
     if (at(extension_keyword::type_trait)) /* [ext.clang] */
         return clang_type_trait_expression();
+    if (at(extension_keyword::offsetof_)) /* [ext.gnu] */
+        return gnu_offsetof_expression();
+    if (at(extension_keyword::bit_cast)) /* [ext.clang] */
+        return clang_bit_cast_expression();
+    if (at(extension_keyword::source_location)) /* [ext.clang] */
+        return clang_source_location_expression();
     switch (keyword_of(peek())) {
     /* an extension's keyword (__builtin_va_arg, __is_same, ...): P9 */
     case standard_keyword::template_:

@@ -40,6 +40,11 @@ EXTENSION_KEYWORD(nullability, "_Nonnull", clang_nullability)
 EXTENSION_KEYWORD(nullability, "_Nullable", clang_nullability)
 EXTENSION_KEYWORD(nullability, "_Nullable_result", clang_nullability)
 EXTENSION_KEYWORD(nullability, "_Null_unspecified", clang_nullability)
+EXTENSION_KEYWORD(offsetof_, "__builtin_offsetof", gnu_offsetof)
+EXTENSION_KEYWORD(bit_cast, "__builtin_bit_cast", clang_bit_cast)
+EXTENSION_KEYWORD(atomic, "_Atomic", clang_atomic)
+EXTENSION_KEYWORD(bit_int, "_BitInt", clang_bit_int)
+EXTENSION_KEYWORD(source_location, "__builtin_source_location", clang_source_location)
 
 /* [ext:clang_type_traits] (clang Language Extensions, Type Trait
  * Primitives): an expression trait ( type-id, ... ) and a type

@@ -1101,8 +1101,13 @@ analysis_result semantic_analysis::declare_with_initializer(
     }
     /* [dcl.fct]/6: "A function type with a cv-qualifier-seq or a
        ref-qualifier ... shall appear only as the function type for a
-       non-static member function" */
-    if (function_cv)
+       non-static member function" (a member function template's
+       specialization's is: [temp.mem]) */
+    if (function_cv &&
+        !(instantiating &&
+          !is_namespace(
+              entity_table[instantiations[instantiating - 1].template_entity]
+                  .enclosing)))
         return ill_formed_at_token(m.id,
                                    "a function type with a cv-qualifier-seq "
                                    "shall appear only as the function type "
@@ -1193,7 +1198,11 @@ analysis_result semantic_analysis::declare_with_initializer(
         qualified_declarator = false;
         if (r == analysis_result::well_formed && m.qualified_namespace)
             current_scope = entity_table[declared_entity].enclosing;
-        if (r == analysis_result::well_formed) {
+        /* (a function template specialization's definition: its default
+           arguments are those instantiate gave it, [temp.inst]/12) */
+        if (r == analysis_result::well_formed &&
+            !(kind == entity_kind::function &&
+              entity_table[declared_entity].instantiation)) {
             r = default_arguments(declaration, declared_entity, kind);
             if (r != analysis_result::well_formed &&
                 kind == entity_kind::function && declared_entity)

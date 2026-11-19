@@ -90,26 +90,36 @@ analysis_result semantic_analysis::typename_type(node_index n, type_index &type,
     const syntax_child *parts = tree.children(n);
     type = 0;
     cv = 0;
-    if (node.child_count < 3 || node.child_count > 4 ||
+    /* a type-requirement ([expr.prim.req.type]) is one with a ';' */
+    uint32_t count = node.child_count;
+    if (node.kind == syntax_kind::type_requirement)
+        count--;
+    if (count < 3 || count > 4 ||
         !syntax_is(tree, parts[1], syntax_kind::nested_name_specifier))
         return not_supported(n, "temp.res");
-    syntax_child last = parts[node.child_count - 1];
+    syntax_child last = parts[count - 1];
     if (syntax_is(tree, last, syntax_kind::simple_template_id)) {
         /* typename nested-name-specifier template_opt simple-template-id:
            [temp.names]/1's template of the class or namespace named (a
            member alias template, a member class template).  Of a
-           dependent nested-name-specifier, a dependent type whose
-           arguments no type here keeps: not analysed */
+           dependent nested-name-specifier ([temp.res]/5, [temp.names]/5:
+           typename T::template X<U>), a dependent type known by how it
+           is written; an instantiation looks the template up in the
+           substituted class */
         nominated_scope scope;
         analysis_result r =
             nested_name_specifier(parts[1].index(), scope, true);
         if (r != analysis_result::well_formed)
             return r;
-        if (scope.dependent || !scope.entity)
+        if (scope.dependent) {
+            type = dependent_written_type(n);
+            return analysis_result::well_formed;
+        }
+        if (!scope.entity)
             return not_supported(n, "temp.res");
         return template_type(last.index(), scope.entity, true, type);
     }
-    if (node.child_count != 3)
+    if (count != 3)
         return not_supported(n, "temp.res");
     if (!parts[2].is_token() ||
         tokens[parts[2].index()].kind != token_kind::identifier)
@@ -134,19 +144,29 @@ analysis_result semantic_analysis::typename_type(node_index n, type_index &type,
                                    "namespaces",
                                    "namespace.qual");
     entity_index e = found.entity;
-    if (!e && !found.unknown && substituting && scope.entity &&
-        entity_table[scope.entity].kind == entity_kind::class_type &&
-        entity_table[scope.entity].defined &&
-        !entity_table[scope.entity].unknown_names)
-        /* [temp.deduct]/11: "Attempting to use a type in a
-           nested-name-specifier of a qualified-id when that type does not
-           contain the specified member" (a deduction failure) */
-        return ill_formed_at_token(t,
-                                   "the name shall represent one or more "
-                                   "members of that class or of one of its "
-                                   "base classes",
-                                   "class.qual");
+    if (!e && !found.unknown) {
+        analysis_result m = missing_member(t, scope.entity);
+        if (m != analysis_result::well_formed)
+            return m;
+    }
     return named_member_type(n, t, e, "temp.res", type, cv);
+}
+
+/* [temp.deduct]/11: "Attempting to use a type in a nested-name-specifier
+   of a qualified-id when that type does not contain the specified member"
+   (a deduction failure): name t not found in class scope, substituting */
+analysis_result semantic_analysis::missing_member(token_index t,
+                                                  entity_index scope)
+{
+    if (!substituting || !scope ||
+        entity_table[scope].kind != entity_kind::class_type ||
+        !entity_table[scope].defined || entity_table[scope].unknown_names)
+        return analysis_result::well_formed;
+    return ill_formed_at_token(t,
+                               "the name shall represent one or more "
+                               "members of that class or of one of its "
+                               "base classes",
+                               "class.qual");
 }
 
 /* [temp.dep.type]/9: typename Q::name for a dependent Q; [temp.over.link]

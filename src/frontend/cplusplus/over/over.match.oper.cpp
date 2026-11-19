@@ -138,8 +138,27 @@ analysis_result semantic_analysis::overloaded_operator(
                 !entity_table[c].size)
                 return not_supported(n, "over.match.oper");
             lookup_result found = lookup_qualified(c, name, lookup_filter::any);
-            if (found.unknown || found.ambiguous)
+            if (found.unknown && !found.ambiguous && !found.entity &&
+                member_function_template_of(found.unknown_entity)) {
+                /* [temp.mem]/1: member operator function templates, their
+                   specializations deduced from the other operands
+                   ([temp.over]/1) member candidates */
+                owned_array<expression_meaning> rest;
+                for (size_t i = 1; i < count; i++)
+                    rest.append(operand(i));
+                size_t first = candidates.size();
+                analysis_result r = member_template_candidates(
+                    n, found.unknown_entity, rest.data(),
+                    static_cast<uint32_t>(rest.size()), candidates);
+                if (r != analysis_result::well_formed)
+                    return r;
+                for (size_t i = first; i < candidates.size(); i++) {
+                    candidates[i].rewritten = rewritten;
+                    candidates[i].reversed = reversed;
+                }
+            } else if (found.unknown || found.ambiguous) {
                 return not_supported(n, "over.match.oper");
+            }
             if (found.entity) {
                 if (entity_table[found.entity].kind != entity_kind::function ||
                     !entity_table[found.entity].nonstatic_member)
@@ -341,8 +360,11 @@ analysis_result semantic_analysis::overloaded_operator(
             else
                 in_order.append(arguments[i]);
         }
-        r = deduce_from_call(n, c.template_index, in_order.data(),
-                             static_cast<uint32_t>(in_order.size()), deduced);
+        /* (a member's object is no argument to deduce from) */
+        size_t skip = c.member;
+        r = deduce_from_call(n, c.template_index, in_order.data() + skip,
+                             static_cast<uint32_t>(in_order.size() - skip),
+                             deduced);
         if (r == analysis_result::well_formed)
             r = instantiate(n, function_templates[c.template_index - 1].entity,
                             deduced.data(),

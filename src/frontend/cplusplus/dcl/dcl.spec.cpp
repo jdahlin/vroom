@@ -510,6 +510,19 @@ node_index parser::decl_specifier_seq(decl_specifier_facts &facts,
             if (failed())
                 return 0;
             facts.has_defining_type_specifier = true;
+        } else if (at(extension_keyword::atomic) ||
+                   at(extension_keyword::bit_int)) {
+            /* [ext:clang_atomic], [ext:clang_bit_int] a
+               simple-type-specifier */
+            if (facts.has_defining_type_specifier)
+                break;
+            if (at(extension_keyword::atomic))
+                clang_atomic_type_specifier();
+            else
+                clang_bit_int_type_specifier();
+            if (failed())
+                return 0;
+            facts.has_defining_type_specifier = true;
         } else if (at(extension_keyword::int128)) {
             /* [ext:gnu_int128] a simple-type-specifier */
             add_token();
@@ -870,7 +883,7 @@ node_index parser::elaborated_or_class_specifier(decl_specifier_facts &facts)
         if (!at(preprocessing_op_or_punc::LEFT_BRACE))
             return expected("'{' to begin the member-specification",
                             "class.pre");
-        class_body(name, region);
+        class_body(name, region, template_id);
         if (failed())
             return 0;
         facts.declares_type = true;
@@ -987,6 +1000,16 @@ const char *specifier_subclause(standard_keyword k)
 
 } // namespace
 
+/* a class-specifier among the decl-specifiers of seq before its i-th */
+bool semantic_analysis::class_specifier_before(node_index seq, uint32_t i) const
+{
+    for (uint32_t k = 0; k < i; k++)
+        if (syntax_is(tree, tree.children(seq)[k],
+                      syntax_kind::class_specifier))
+            return true;
+    return false;
+}
+
 /*
  * [dcl.spec]/1: the decl-specifiers of a declaration (or of a
  * parameter-declaration, when parameter): its type ([dcl.meaning]/4:
@@ -1020,6 +1043,7 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
     };
     /* a specifier with no rules yet (an attribute after a class-specifier
        may change the class's layout) before any class is defined */
+    trailing_class_alignment = 0;
     for (uint32_t i = 0; i < node.child_count; i++) {
         syntax_child c = tree.children(seq)[i];
         if (c.is_token() || syntax_is(tree, c, syntax_kind::class_specifier) ||
@@ -1031,6 +1055,8 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
             syntax_is(tree, c, syntax_kind::simple_template_id) ||
             syntax_is(tree, c, syntax_kind::decltype_specifier) ||
             syntax_is(tree, c, syntax_kind::clang_type_transformation) ||
+            syntax_is(tree, c, syntax_kind::clang_atomic_type_specifier) ||
+            syntax_is(tree, c, syntax_kind::clang_bit_int_type_specifier) ||
             syntax_is(tree, c, syntax_kind::placeholder_type_specifier))
             continue;
         /* an attribute specifier has rules unless a class-specifier is
@@ -1043,6 +1069,21 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
         if (!defines_class &&
             syntax_is(tree, c, syntax_kind::gnu_attribute_specifier))
             continue;
+        /* [ext:gnu_attributes] aligned after the class-specifier's closing
+           brace: GCC raises the class's alignment (clang's layout too) */
+        if (syntax_is(tree, c, syntax_kind::gnu_attribute_specifier) &&
+            class_specifier_before(seq, i)) {
+            gnu_attributes g;
+            analysis_result r = gnu_attribute_specifier(c.index(), g);
+            if (r != analysis_result::well_formed)
+                return r;
+            if (g.aligned && !(g.flags & ~gnu_aligned) && !g.section &&
+                !g.abi_tag) {
+                if (g.aligned > trailing_class_alignment)
+                    trailing_class_alignment = static_cast<uint32_t>(g.aligned);
+                continue;
+            }
+        }
         /* the class names the declaration would define are held, as
            hold_names holds its declarators' */
         for (uint32_t k = 0; k < node.child_count; k++) {
@@ -1123,6 +1164,18 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
                 class_type = denoted.unqualified();
                 cv |= denoted.cv();
             } else if (syntax_is(tree, c,
+                                 syntax_kind::clang_atomic_type_specifier)) {
+                /* [ext:clang_atomic] */
+                qualified_type denoted;
+                r = clang_atomic_type(c.index(), denoted);
+                class_type = denoted.unqualified();
+            } else if (syntax_is(tree, c,
+                                 syntax_kind::clang_bit_int_type_specifier)) {
+                /* [ext:clang_bit_int] */
+                qualified_type denoted;
+                r = clang_bit_int_type(c.index(), denoted);
+                class_type = denoted.unqualified();
+            } else if (syntax_is(tree, c,
                                  syntax_kind::placeholder_type_specifier)) {
                 /* [dcl.spec.auto]: decltype(auto); a type-constraint is
                    [temp.param]'s */
@@ -1138,6 +1191,10 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
                 r = analysis_result::well_formed;
             } else if (syntax_is(tree, c,
                                  syntax_kind::gnu_attribute_specifier)) {
+                /* (after a class-specifier: the class's alignment, taken
+                   above) */
+                if (class_specifier_before(seq, i))
+                    continue;
                 /* [ext:gnu_attributes] a decl-specifier: it applies to
                    the declaration */
                 r = gnu_attribute_specifier(c.index(), s);
@@ -1158,6 +1215,9 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
                 !syntax_is(tree, c, syntax_kind::typename_specifier) &&
                 !syntax_is(tree, c, syntax_kind::decltype_specifier) &&
                 !syntax_is(tree, c, syntax_kind::clang_type_transformation) &&
+                !syntax_is(tree, c, syntax_kind::clang_atomic_type_specifier) &&
+                !syntax_is(tree, c,
+                           syntax_kind::clang_bit_int_type_specifier) &&
                 !syntax_is(tree, c, syntax_kind::placeholder_type_specifier))
                 declares_class = true;
             continue;

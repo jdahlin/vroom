@@ -151,21 +151,14 @@ analysis_result semantic_analysis::noexcept_specifier(node_index n, bool member,
 }
 
 /*
- * [basic.scope.param]/1: "A function parameter (including one appearing in
- * a lambda-declarator) or function-local predefined variable
- * ([dcl.fct.def]) introduces a name in a function parameter scope", whose
- * potential scope ends at the end of the function declarator when it is
- * not a definition's: the noexcept-specifier n names the parameters of
- * function_parameters, analysed in a scope of their own.
+ * [basic.scope.param]/1: a scope of its own, made current, where the
+ * parameters of function_parameters are bound (a pack's elements as one
+ * bound pack): what a declarator names after its
+ * parameter-declaration-clause (a noexcept-specifier, a
+ * trailing-return-type) finds them.
  */
-analysis_result semantic_analysis::parameter_scope_noexcept(node_index n,
-                                                            bool member,
-                                                            bool &non_throwing)
+void semantic_analysis::open_parameter_scope()
 {
-    const syntax_node &node = tree[n];
-    if (node.child_count != 4 || member)
-        return noexcept_specifier(n, member, non_throwing);
-    entity_index outer = current_scope;
     entity_index scope = open_scope(0, true);
     owned_array<entity_index> pack;
     uint32_t pack_name = 0;
@@ -190,6 +183,35 @@ analysis_result semantic_analysis::parameter_scope_noexcept(node_index n,
     if (pack_name && !entity_table.find(scope, pack_name))
         make_bound_pack(scope, pack_name, pack.data(),
                         static_cast<uint32_t>(pack.size()));
+}
+
+/*
+ * [basic.scope.param]/1: "A function parameter (including one appearing in
+ * a lambda-declarator) or function-local predefined variable
+ * ([dcl.fct.def]) introduces a name in a function parameter scope", whose
+ * potential scope ends at the end of the function declarator when it is
+ * not a definition's: the noexcept-specifier n names the parameters of
+ * function_parameters, analysed in a scope of their own.
+ */
+analysis_result semantic_analysis::parameter_scope_noexcept(node_index n,
+                                                            bool member,
+                                                            bool &non_throwing)
+{
+    const syntax_node &node = tree[n];
+    /* [class.mem]/6: a member function template's noexcept-specifier,
+       is analysed per specialization (taken as value-dependent), whose class is
+       complete by then ([temp.inst]/4) */
+    if (member && node.child_count == 4 && in_member_template_declarator == 1) {
+        non_throwing = false;
+        dependent_exception_specifications.append(n);
+        return analysis_result::well_formed;
+    }
+    if (member && in_member_template_declarator == 2)
+        member = false;
+    if (node.child_count != 4 || member)
+        return noexcept_specifier(n, member, non_throwing);
+    entity_index outer = current_scope;
+    open_parameter_scope();
     analysis_result r = analysis_result::well_formed;
     if (!instantiating && !class_instantiating && !substituting &&
         names_dependent_entity(node.first_token, node.end_token))

@@ -231,8 +231,13 @@ SYNTAX_NODE(gnu_label_address, "gnu-label-address", "ext.gnu")
 SYNTAX_NODE(gnu_computed_goto, "gnu-computed-goto", "ext.gnu")
 SYNTAX_NODE(gnu_initializer_list, "gnu-initializer-list", "ext.gnu")
 SYNTAX_NODE(gnu_designation, "gnu-designation", "ext.gnu")
+SYNTAX_NODE(gnu_offsetof_expression, "gnu-offsetof-expression", "ext.gnu")
 SYNTAX_NODE(clang_type_trait_expression, "clang-type-trait-expression", "ext.clang")
 SYNTAX_NODE(clang_type_transformation, "clang-type-transformation", "ext.clang")
+SYNTAX_NODE(clang_bit_cast_expression, "clang-bit-cast-expression", "ext.clang")
+SYNTAX_NODE(clang_source_location_expression, "clang-source-location-expression", "ext.clang")
+SYNTAX_NODE(clang_atomic_type_specifier, "clang-atomic-type-specifier", "ext.clang")
+SYNTAX_NODE(clang_bit_int_type_specifier, "clang-bit-int-type-specifier", "ext.clang")
 
 /*
  * Scaffolding, not grammar: both are counted, and both are at zero on

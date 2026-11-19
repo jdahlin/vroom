@@ -80,12 +80,19 @@ node_index parser::gnu_attribute_specifier()
         if (at_attribute_identifier()) {
             size_t attribute_mark = begin_node();
             token_index attribute_first = position;
+            bool availability = at_availability();
             add_token();
             if (at(preprocessing_op_or_punc::LEFT_PARENTHESIS)) {
                 add_token();
                 flag_set greater(greater_is_operator, true);
-                bool more = !at(preprocessing_op_or_punc::RIGHT_PARENTHESIS);
-                if (at_attribute_identifier() &&
+                bool more = !availability &&
+                            !at(preprocessing_op_or_punc::RIGHT_PARENTHESIS);
+                if (availability) {
+                    clang_availability_arguments();
+                    if (failed())
+                        return 0;
+                }
+                if (more && at_attribute_identifier() &&
                     (at(preprocessing_op_or_punc::COMMA, 1) ||
                      at(preprocessing_op_or_punc::RIGHT_PARENTHESIS, 1))) {
                     add_token();
@@ -275,6 +282,61 @@ static const gnu_attribute_rule *gnu_attribute_rule_of(const char *name,
         if (strlen(r.name) == length && !memcmp(r.name, name, length))
             return &r;
     return nullptr;
+}
+
+/* [ext:clang_availability] the attribute at the token is clang's
+   availability (or __availability__) */
+bool parser::at_availability()
+{
+    if (!tokens.files.behavior.has(extension::clang_availability))
+        return false;
+    owned_buffer spelling;
+    size_t n = tokens.spelling(position, spelling.get());
+    const gnu_attribute_rule *rule = gnu_attribute_rule_of(
+        reinterpret_cast<const char *>(spelling.data()), n);
+    return rule && !strcmp(rule->name, "availability");
+}
+
+/*
+ * [ext:clang_availability] the arguments after availability's '(': a
+ * version is a pp-number that need not be a literal
+ * ([lex.ppnumber]/2: 10.12.1 converts to no token, so it is not an
+ * expression).
+ *
+ *     attribute-specifier:
+ *         __attribute__ ( ( clang-availability-attribute ) )
+ *
+ *     clang-availability-attribute:
+ *         identifier ( identifier , clang-availability-clause-list )
+ *
+ * (and in any gnu-attribute-list)
+ *
+ *     clang-availability-clause-list:
+ *         clang-availability-clause
+ *         clang-availability-clause-list , clang-availability-clause
+ *
+ *     clang-availability-clause:
+ *         identifier
+ *         identifier = pp-number
+ *         identifier = string-literal
+ */
+node_index parser::clang_availability_arguments()
+{
+    if (!at_identifier())
+        return expected("a platform name", "ext.clang");
+    add_token();
+    while (accept(preprocessing_op_or_punc::COMMA)) {
+        if (!at_attribute_identifier())
+            return expected("an availability clause", "ext.clang");
+        add_token();
+        if (!accept(preprocessing_op_or_punc::EQUAL))
+            continue;
+        if (peek().preprocessing.kind != preprocessing_token_kind::pp_number &&
+            peek().literal != literal_kind::string_literal)
+            return expected("a version or a string-literal", "ext.clang");
+        add_token();
+    }
+    return 0;
 }
 
 /*

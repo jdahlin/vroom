@@ -203,6 +203,10 @@ node_index parser::template_head()
            the end of the template-parameter-list rather than a greater-than
            operator." */
         flag_set greater(greater_is_operator, false);
+        /* [class.mem]/6: a default template-argument is no complete-class
+           context, so a member template's is read in the first pass over
+           the member-specification too (class.mem.cpp) */
+        flag_set collecting(collecting_members, false);
         if (at_closing_angle())
             return expected("a template-parameter", "temp.pre");
         template_parameter_list();
@@ -276,7 +280,8 @@ node_index parser::constraint_logical_or_expression()
         if ((binary_operator_follows() &&
              !at(preprocessing_op_or_punc::AMPERSAND_AMPERSAND) &&
              !at(preprocessing_op_or_punc::BAR_BAR)) ||
-            at(preprocessing_op_or_punc::LEFT_BRACKET) ||
+            (at(preprocessing_op_or_punc::LEFT_BRACKET) &&
+             !at_attribute_specifier()) ||
             at(preprocessing_op_or_punc::DOT) ||
             at(preprocessing_op_or_punc::ARROW) ||
             at(preprocessing_op_or_punc::PLUS_PLUS) ||

@@ -70,17 +70,38 @@ semantic_analysis::instantiate(node_index at, entity_index template_entity,
         expanding = false;
         specified s;
         declarator_meaning m;
+        placeholder_allowed = true;
         analysis_result r = decl_specifier_seq(d[0].index(), s, false);
         qualified_type type = s.type;
         if (r == analysis_result::well_formed) {
             function_cv = 0;
+            /* (a member function template's cv-qualifier-seq,
+               [temp.mem]) */
+            member_template_declarator(2 * !is_namespace(t.enclosing));
             r = declarator(ft.declarator, d[1], type, m);
+            member_template_declarator(0);
         }
         entity_index e = 0;
         if (r == analysis_result::well_formed) {
             instantiating = index + 1;
             r = declare_specialization(ft.declarator, m.id, type, s, e);
             instantiating = 0;
+        }
+        /* [temp.inst]/12: "If a function template f is called in a way
+           that requires a default argument to be used, the dependent names
+           are looked up, the semantics constraints are checked, and the
+           instantiation of any template used in the default argument is
+           done as if the default argument had been an initializer used in
+           a function template specialization"; here for each
+           specialization, one that is not well-formed left to a call that
+           uses it */
+        if (r == analysis_result::well_formed && ft.default_arguments) {
+            size_t unsupported_before = unsupported.size();
+            if (default_arguments(ft.declarator, e, entity_kind::function,
+                                  true) != analysis_result::well_formed) {
+                unsupported.resize(unsupported_before);
+                entity_table[e].unknown_defaults = true;
+            }
         }
         current_scope = saved_scope;
         expanding = saved_expanding;
@@ -110,11 +131,19 @@ semantic_analysis::instantiate(node_index at, entity_index template_entity,
     if (!specialization)
         return not_supported(at, "temp.inst");
     instantiation_record &x = instantiations[index];
-    if (!needed || x.defined || x.pending || x.defining)
+    /* [dcl.spec.auto]/12: "Return type deduction for a templated function
+       with a placeholder in its declared type occurs when the definition
+       is instantiated even if the function body contains a return
+       statement with a non-type-dependent operand"; a use of a
+       specialization whose return type is not deduced yet instantiates
+       its definition there, in an unevaluated operand too */
+    bool deducing = contains_placeholder(
+        type_table[entity_table[specialization].type.unqualified()].operand);
+    if (x.defined || x.defining || (!deducing && (!needed || x.pending)))
         return analysis_result::well_formed;
     /* (a template declared, not yet defined: its definition may come
        later, [temp.point]/7) */
-    if (!t.constexpr_ || !ft.definition) {
+    if ((!t.constexpr_ && !deducing) || !ft.definition) {
         x.pending = true;
         pending_definitions.append(index);
         return analysis_result::well_formed;
@@ -152,7 +181,12 @@ analysis_result semantic_analysis::instantiate_definition(node_index at,
     instantiating = index + 1;
     instantiations[index].defining = true;
     instantiations[index].pending = false;
+    /* a member function template's definition, in its class
+       ([temp.mem]): its declarator's cv-qualifier-seq the member's */
+    member_template_declarator(
+        2 * !is_namespace(entity_table[template_entity].enclosing));
     analysis_result r = function_definition(ft.definition);
+    member_template_declarator(0);
     instantiations[index].defining = false;
     leave_instantiation(context);
     instantiations[index].defined = true;
@@ -406,7 +440,9 @@ analysis_result semantic_analysis::declare_specialization(
     }
     /* (a copy: making the entity can move the table) */
     const entity t = entity_table[record.template_entity];
-    if (s.inline_ != t.inline_ || s.constexpr_ != t.constexpr_)
+    /* (a member function template is inline, [class.mfct]/1) */
+    bool inline_ = s.inline_ || !is_namespace(t.enclosing);
+    if (inline_ != t.inline_ || s.constexpr_ != t.constexpr_)
         return not_supported(declaration, "temp.inst");
     entity_index e =
         entity_table.make(entity_kind::function, t.name, t.enclosing);
@@ -419,6 +455,11 @@ analysis_result semantic_analysis::declare_specialization(
     entity_table[e].operator_function = t.operator_function;
     entity_table[e].implemented = t.implemented;
     entity_table[e].instantiation = index + 1;
+    /* a member function template's specialization: a member function of
+       its class ([temp.mem]) */
+    entity_table[e].nonstatic_member = t.nonstatic_member;
+    entity_table[e].member_cv = t.member_cv;
+    entity_table[e].access = t.access;
     entity_table.add_declaration(e, declaration);
     const function_template ft = function_templates[t.instantiation - 1];
     entity_table[e].gnu_flags = ft.gnu_flags;
@@ -546,6 +587,23 @@ bool semantic_analysis::dependent_parameter_type(entity_index t, uint32_t i,
         return true;
     }
     return false;
+}
+
+token_index semantic_analysis::parameter_type_constraint(entity_index t,
+                                                         uint32_t i) const
+{
+    for (const function_template &ft : function_templates) {
+        if (ft.entity != t || i >= ft.parameter_count)
+            continue;
+        template_parameter_parts x;
+        if (!template_parameter_form(
+                template_parameter_nodes[ft.first_parameter + i], x) ||
+            !x.constraint || tree[x.constraint].child_count != 1 ||
+            !tree.children(x.constraint)[0].is_token())
+            return 0;
+        return tree.children(x.constraint)[0].index();
+    }
+    return 0;
 }
 
 bool semantic_analysis::specialization_template_name(entity_index e, uint32_t i,

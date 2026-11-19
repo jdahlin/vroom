@@ -58,8 +58,17 @@ void token_stream::make_through(token_index i)
                 preprocessing_tokens.data() + begin,
                 preprocessing_tokens.size() - begin));
         } else {
+            size_t issued = files.diagnostics.messages.size();
             tokens.append(files.convert(first));
             token &made = tokens.back();
+            /* [lex.ppnumber]/2: a pp-number that is no literal is a valid
+               preprocessing token that converts to no token: an error
+               only where the grammar wants a literal (the parser stops
+               there), not where it takes a pp-number, as clang's
+               availability takes a version 10.12.1 */
+            if (made.kind == token_kind::invalid &&
+                first.kind == preprocessing_token_kind::pp_number)
+                files.diagnostics.discard_since(issued);
             if (made.kind == token_kind::keyword && made.keyword >= 0 &&
                 static_cast<size_t>(made.keyword) <
                     revertible_keywords.size() &&

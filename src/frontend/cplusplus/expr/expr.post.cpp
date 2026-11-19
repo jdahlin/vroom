@@ -317,18 +317,31 @@ analysis_result semantic_analysis::postfix(node_index n, expression_meaning &m)
         tokens, children[1], preprocessing_op_or_punc::LEFT_PARENTHESIS);
     bool braced = syntax_is(tree, children[1], syntax_kind::braced_init_list);
     type_index named = 0;
+    /* [dcl.type.simple]/1: nested-name-specifier(opt) type-name */
+    entity_index class_named = 0;
+    uint32_t named_cv = 0;
+    if ((parenthesized || braced) &&
+        syntax_is(tree, children[0], syntax_kind::simple_type_specifier)) {
+        analysis_result r =
+            qualified_type_name(children[0].index(), named, named_cv);
+        if (r != analysis_result::well_formed)
+            return r;
+        if (type_table[named].kind == type_kind::class_type &&
+            entity_table[type_table[named].entity].kind ==
+                entity_kind::class_type)
+            class_named = type_table[named].entity;
+    }
     if ((parenthesized || braced) && children[0].is_token()) {
         const token &t = tokens[children[0].index()];
         if (t.kind == token_kind::identifier) {
             entity_index e = lookup(tokens.identifier(children[0].index()));
             if (e && entity_table[e].kind == entity_kind::class_type)
-                return class_conversion(n, e, m);
-            if (e && (entity_table[e].kind == entity_kind::typedef_name ||
-                      entity_table[e].kind == entity_kind::enumeration))
+                class_named = e;
+            else if (e && (entity_table[e].kind == entity_kind::typedef_name ||
+                           entity_table[e].kind == entity_kind::enumeration)) {
                 named = entity_table[e].type.unqualified();
-            if (e && entity_table[e].kind == entity_kind::typedef_name &&
-                entity_table[e].type.cv())
-                return not_supported(n, "expr.type.conv");
+                named_cv = entity_table[e].type.cv();
+            }
         } else if (t.kind == token_kind::keyword) {
             simple_type_keywords k;
             switch (p.keyword_of(t)) {
@@ -389,6 +402,10 @@ analysis_result semantic_analysis::postfix(node_index n, expression_meaning &m)
                 return r;
         }
     }
+    if (named_cv)
+        return not_supported(n, "expr.type.conv");
+    if (class_named)
+        return class_conversion(n, class_named, m);
     if ((parenthesized || braced) &&
         syntax_is(tree, children[0], syntax_kind::simple_template_id)) {
         /* [temp.names]/1 with [expr.type.conv]/1: a simple-template-id
@@ -640,6 +657,33 @@ analysis_result semantic_analysis::call(node_index n, expression_meaning &m)
         uint32_t ft = 0;
         bool qualified = false;
         owned_array<template_argument> specified;
+        /* [class.mfct.non-static]/2: a member function template's name
+           in a member function of its class (or a class derived from
+           it), called on (*this) */
+        if (children[0].is_token() &&
+            tokens[children[0].index()].kind == token_kind::identifier) {
+            lookup_result x = lookup_unqualified(
+                tokens.identifier(children[0].index()), lookup_filter::any);
+            if (x.unknown && !x.entity && !x.ambiguous &&
+                member_function_template_of(x.unknown_entity)) {
+                bool ambiguous = false;
+                entity_index of = entity_table[x.unknown_entity].enclosing;
+                if (!function_state.this_entity ||
+                    (of != current_class() &&
+                     !base_step(current_class(), of, ambiguous)) ||
+                    ambiguous)
+                    return not_supported(n, "temp.mem");
+                expression_meaning object;
+                r = this_object(children[0].index(), object);
+                if (r != analysis_result::well_formed)
+                    return r;
+                owned_array<expression_meaning> early;
+                for (const expression_meaning &e : expanded)
+                    early.append(e);
+                return member_template_call(n, x.unknown_entity, object,
+                                            arguments, early, m);
+            }
+        }
         r = template_callee(children[0], name, ft, specified, qualified);
         if (r != analysis_result::well_formed)
             return r;
@@ -748,8 +792,16 @@ analysis_result semantic_analysis::call(node_index n, expression_meaning &m)
             early.append(e);
     if (!looked_up) {
         overloaded_callee = callee_name(children[0]);
+        member_template_name = 0;
         r = expression(children[0], f);
         overloaded_callee = 0;
+    }
+    if (entity_index held = member_template_name) {
+        member_template_name = 0;
+        if (r != analysis_result::well_formed)
+            return r;
+        expression_meaning object = member_template_object;
+        return member_template_call(n, held, object, arguments, early, m);
     }
     if (r != analysis_result::well_formed)
         return r;
@@ -963,9 +1015,9 @@ analysis_result semantic_analysis::template_callee_parts(
        specify more template-arguments than there are corresponding
        template-parameters" (clang: no candidate) */
     for (syntax_child a : written) {
-        uint32_t position = static_cast<uint32_t>(specified.size());
-        if (position >=
-            function_templates[function_template - 1].parameter_count)
+        uint32_t position = explicit_argument_position(
+            function_template, static_cast<uint32_t>(specified.size()));
+        if (position == UINT32_MAX)
             return not_supported(id.index(), "temp.arg.explicit");
         template_argument x;
         analysis_result r = template_argument_for(
@@ -1006,6 +1058,21 @@ bool semantic_analysis::undo_substitution(const substitution_mark &m)
     return true;
 }
 
+/* [temp.arg.explicit]/9: the template parameter explicit template
+   argument i of function template ft is for, those from a trailing
+   pack's position on that pack's; UINT32_MAX for one too many (/6) */
+uint32_t semantic_analysis::explicit_argument_position(uint32_t ft,
+                                                       uint32_t i) const
+{
+    const function_template &f = function_templates[ft - 1];
+    if (i >= f.parameter_count && f.parameter_count &&
+        template_parameter_is_pack(f.first_parameter + f.parameter_count - 1))
+        return f.parameter_count - 1;
+    if (i >= f.parameter_count)
+        return UINT32_MAX;
+    return i;
+}
+
 /*
  * [temp.over]/1: "For each function template, if the argument deduction
  * and checking succeeds, the template-arguments (deduced and/or explicit)
@@ -1043,11 +1110,15 @@ analysis_result semantic_analysis::template_candidates(
            checked against this template's parameters; more than it has,
            or one of another kind, is no candidate ([temp.deduct]/2) */
         if (written) {
-            if (written->size() > function_templates[g - 1].parameter_count)
-                failed = true;
             for (size_t i = 0; !failed && i < written->size(); i++) {
+                uint32_t position =
+                    explicit_argument_position(g, static_cast<uint32_t>(i));
+                if (position == UINT32_MAX) {
+                    failed = true;
+                    break;
+                }
                 entity_index p = template_parameter_entities
-                    [function_templates[g - 1].first_parameter + i];
+                    [function_templates[g - 1].first_parameter + position];
                 bool type_parameter =
                     entity_table[p].kind == entity_kind::typedef_name;
                 if (entity_table[p].kind != entity_kind::template_entity &&
@@ -1057,8 +1128,7 @@ analysis_result semantic_analysis::template_candidates(
                     break;
                 }
                 template_argument x;
-                r = template_argument_for(written_at, g,
-                                          static_cast<uint32_t>(i),
+                r = template_argument_for(written_at, g, position,
                                           (*written)[i], d.data(), x);
                 if (r != analysis_result::well_formed)
                     break;

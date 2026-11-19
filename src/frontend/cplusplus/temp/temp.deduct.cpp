@@ -85,15 +85,27 @@ bool semantic_analysis::deduce_type(qualified_type p, qualified_type a,
                 cv_none),
             deduced, set, exact);
     }
+    if (pr.kind == type_kind::dependent &&
+        !entity_table[pr.entity].instantiation) {
+        /* a dependent type known by how it is written (__remove_cv(T),
+           decltype(e)): [temp.deduct.type]/5.3 a non-deduced context;
+           comparing two declarations, the same entity for the same
+           tokens ([temp.over.link]/5) */
+        return !exact || p == a;
+    }
     if (pr.kind == type_kind::dependent) {
         /* [temp.deduct.type]/8's TT<T>: a class template's specialization,
            whose arguments are deduced from those of A's, a
            specialization of the same template */
         const struct type &ar = type_table[a.unqualified()];
+        /* comparing two declarations ([temp.over.link]/7), A a
+           specialization in the other's template parameters */
+        bool dependent = exact && ar.kind == type_kind::dependent &&
+                         entity_table[ar.entity].instantiation;
         /* ([temp.deduct.call]/4.1: P may be more cv-qualified) */
-        if (ar.kind != type_kind::class_type || (a.cv() & ~p.cv()) ||
-            (exact && p.cv() != a.cv()) ||
-            !entity_table[ar.entity].instantiation)
+        if ((ar.kind != type_kind::class_type && !dependent) ||
+            (a.cv() & ~p.cv()) || (exact && p.cv() != a.cv()) ||
+            (!dependent && !entity_table[ar.entity].instantiation))
             return false;
         entity_index pt = specialized_template(pr.entity);
         entity_index at = specialized_template(ar.entity);
@@ -146,8 +158,32 @@ bool semantic_analysis::deduce_type(qualified_type p, qualified_type a,
             /* /9: a pack's elements in turn, the pattern's own pack
                (Ts...) the rest */
             if (x.kind == template_argument::kind_t::pack) {
-                if (y.kind != template_argument::kind_t::pack ||
-                    !deduce_pack_argument(x, y, deduced, set))
+                if (y.kind != template_argument::kind_t::pack)
+                    return false;
+                if (dependent) {
+                    /* the two declarations' pack expansions of the
+                       parameter at the same position (Ts... and Us...) */
+                    if (x.count != y.count)
+                        return false;
+                    for (uint32_t k = 0; k < x.count; k++) {
+                        const template_argument &e =
+                            pack_arguments[x.value + k];
+                        const template_argument &f =
+                            pack_arguments[y.value + k];
+                        if (e.kind != f.kind)
+                            return false;
+                        if (e.kind == template_argument::kind_t::pack) {
+                            if (e.count != f.count || e.value != f.value)
+                                return false;
+                            continue;
+                        }
+                        if (e.kind != template_argument::kind_t::type ||
+                            !deduce_type(e.type, f.type, deduced, set, exact))
+                            return false;
+                    }
+                    continue;
+                }
+                if (!deduce_pack_argument(x, y, deduced, set))
                     return false;
                 continue;
             }
@@ -286,6 +322,7 @@ static bool deduction_may_succeed(const types &table, qualified_type p,
     case type_kind::array:
     case type_kind::lvalue_reference:
     case type_kind::rvalue_reference:
+    case type_kind::bit_int:
         return false;
     case type_kind::pointer: {
         /* (A with fewer levels of pointers than P never matches it) */
@@ -379,12 +416,15 @@ analysis_result semantic_analysis::deduce_from_call(
     if (fixed && type_table[parameters[fixed - 1].unqualified()].kind ==
                      type_kind::pack_expansion)
         fixed--;
-    if (f.variadic)
+    /* [dcl.fct]/3's ellipsis: the arguments after the parameters match
+       it, and deduce nothing ([temp.deduct.call]/1 for each parameter) */
+    if (f.variadic && fixed != f.parameter_count)
         return not_supported(at, "temp.deduct.call");
-    if (count < fixed || (fixed == f.parameter_count && count != fixed)) {
-        /* [over.match.viable]/2: no default argument is analysed in a
-           template, so a template of another number of parameters
-           cannot be called with these arguments */
+    if (count + ft.default_arguments < fixed ||
+        (fixed == f.parameter_count && count > fixed && !f.variadic)) {
+        /* [over.match.viable]/2: a template of another number of
+           parameters, less those with a default argument, cannot be
+           called with these arguments */
         if (!failed)
             return not_supported(at, "temp.deduct.call");
         *failed = true;
@@ -402,20 +442,31 @@ analysis_result semantic_analysis::deduce_from_call(
        template-arguments than there are corresponding
        template-parameters" (clang: no candidate) */
     uint32_t specified = static_cast<uint32_t>(deduced.size());
-    if (specified > ft.parameter_count || specified > pack)
-        /* (arguments of a pack given: [temp.arg.explicit]/9's sequence,
-           extended by deduction) */
+    /* /9: those from a trailing pack's position on its elements; when a
+       function parameter pack would extend the sequence by deduction,
+       refused */
+    uint32_t given = specified;
+    if (specified > pack && pack + 1 == ft.parameter_count &&
+        fixed == f.parameter_count)
+        given = pack;
+    if (given > ft.parameter_count || given > pack)
         return not_supported(at, "temp.arg.explicit");
     owned_array<template_argument> values;
     owned_array<bool> set;
     for (uint32_t i = 0; i < ft.parameter_count; i++) {
         template_argument v;
-        if (i < specified)
+        if (i < given)
             v = deduced[i];
         values.append(v);
-        set.append(i < specified);
+        set.append(i < given);
+    }
+    if (given < specified) {
+        values[pack] = make_pack(&deduced[pack], specified - pack);
+        set[pack] = true;
     }
     owned_array<template_argument> elements;
+    if (f.variadic && count > fixed)
+        count = fixed;
     for (uint32_t i = 0; i < count; i++) {
         qualified_type p = parameters[i];
         if (i >= fixed)
@@ -480,8 +531,12 @@ analysis_result semantic_analysis::deduce_from_call(
     }
     /* [temp.arg.explicit]/4: "A trailing template parameter pack not
        otherwise deduced will be deduced as an empty sequence of template
-       arguments." */
-    if (pack < ft.parameter_count) {
+       arguments."  One deduced from another parameter (tuple<Ts...>&)
+       keeps its arguments, which a function parameter pack's would have
+       to agree with (not analysed) */
+    if (pack < ft.parameter_count && set[pack] && !elements.empty())
+        return not_supported(at, "temp.deduct.call");
+    if (pack < ft.parameter_count && !set[pack]) {
         values[pack] =
             make_pack(elements.data(), static_cast<uint32_t>(elements.size()));
         set[pack] = true;

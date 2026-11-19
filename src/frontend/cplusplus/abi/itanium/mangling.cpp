@@ -109,6 +109,9 @@ class itanium_mangler
         entity_index scope = 0;
     };
     owned_array<candidate> candidates;
+    /* the function template whose specialization's encoding is being
+       mangled: what its function parameters' names are */
+    entity_index encoding_template = 0;
     void add_candidate(qualified_type t)
     {
         candidate c;
@@ -133,6 +136,7 @@ class itanium_mangler
     bool encoding(entity_index e);
     bool specialization_encoding(entity_index e);
     bool constraint_expression(entity_index t, syntax_child c);
+    bool dependent_expression(syntax_child c);
     bool punctuator(syntax_child c, preprocessing_op_or_punc op) const
     {
         return analysis.punctuator_is(c, op);
@@ -284,9 +288,20 @@ bool itanium_mangler::specialization_encoding(entity_index e)
     entity_index scope = table[e].enclosing;
     bool nested = scope && !is_std(scope);
     if (nested) {
-        if (table[scope].kind != entity_kind::namespace_entity)
+        /* (a member function template's specialization, [temp.mem]: the
+           nested-name's CV-qualifiers its own, as nested_name's) */
+        const entity &x = table[e];
+        bool member = table[scope].kind == entity_kind::class_type &&
+                      x.kind == entity_kind::function;
+        if (table[scope].kind != entity_kind::namespace_entity && !member)
             return false;
         text("N");
+        if (member && x.nonstatic_member) {
+            if (x.member_cv & cv_volatile)
+                text("V");
+            if (x.member_cv & cv_const)
+                text("K");
+        }
         if (!prefix(scope))
             return false;
     } else if (scope) {
@@ -316,6 +331,7 @@ bool itanium_mangler::specialization_encoding(entity_index e)
     if (table[e].kind == entity_kind::variable)
         return true;
     qualified_type pattern = table[pattern_of].type;
+    encoding_template = pattern_of;
     return type(record(pattern).operand) && bare_function_type(pattern);
 }
 
@@ -366,10 +382,20 @@ bool itanium_mangler::constraint_expression(entity_index t, syntax_child c)
         if (!source_name(analysis.token_identifier(parts[0].index())))
             return false;
         text("I");
+        /* (more than one argument: a template-argument-list) */
+        owned_array<syntax_child> written;
         for (uint32_t i = 2; i + 1 < node.child_count; i++) {
-            if (punctuator(parts[i], preprocessing_op_or_punc::COMMA))
+            if (!parts[i].is_token() && tree[parts[i].index()].kind ==
+                                            syntax_kind::template_argument_list)
+                for (uint32_t k = 0; k < tree[parts[i].index()].child_count;
+                     k++)
+                    written.append(tree.children(parts[i].index())[k]);
+            else
+                written.append(parts[i]);
+        }
+        for (syntax_child a : written) {
+            if (punctuator(a, preprocessing_op_or_punc::COMMA))
                 continue;
-            syntax_child a = parts[i];
             /* a type-id that is one template parameter's name */
             while (!a.is_token() && tree[a.index()].child_count == 1 &&
                    (tree[a.index()].kind == syntax_kind::type_id ||
@@ -387,6 +413,78 @@ bool itanium_mangler::constraint_expression(entity_index t, syntax_child c)
     default:
         return false;
     }
+}
+
+/*
+ * [abi:expressions] of a decltype-specifier's type-dependent operand in a
+ * function template's declarator (encoding_template), as far as it is
+ * written with its function parameters, class member accesses and calls:
+ *
+ *     <expression> ::= cl <expression>+ E
+ *                  ::= dt <expression> <unresolved-name>
+ *                  ::= pt <expression> <unresolved-name>
+ *                  ::= <function-param>
+ *
+ * [abi:mangle.function-param]:
+ *
+ *     <function-param> ::= fp <top-level CV-qualifiers> _
+ *                      ::= fp <top-level CV-qualifiers> <parameter-2 non-negative number> _
+ *
+ * the member's <unresolved-name> its <source-name>.  Anything else: not
+ * mangled yet.
+ */
+bool itanium_mangler::dependent_expression(syntax_child c)
+{
+    if (c.is_token()) {
+        uint32_t position =
+            analysis.function_parameter_position(encoding_template, c.index());
+        if (!position)
+            return false;
+        text("fp");
+        if (position > 1)
+            number(position - 2);
+        text("_");
+        return true;
+    }
+    const syntax_tree &tree = analysis.syntax();
+    const syntax_node &node = tree[c.index()];
+    const syntax_child *parts = tree.children(c.index());
+    if (node.kind != syntax_kind::postfix_expression || node.child_count < 3)
+        return false;
+    bool arrow = punctuator(parts[1], preprocessing_op_or_punc::ARROW);
+    if (node.child_count == 3 &&
+        (arrow || punctuator(parts[1], preprocessing_op_or_punc::DOT)) &&
+        parts[2].is_token()) {
+        if (arrow)
+            text("pt");
+        else
+            text("dt");
+        return dependent_expression(parts[0]) &&
+               source_name(analysis.token_identifier(parts[2].index()));
+    }
+    if (!punctuator(parts[1], preprocessing_op_or_punc::LEFT_PARENTHESIS) ||
+        !punctuator(parts[node.child_count - 1],
+                    preprocessing_op_or_punc::RIGHT_PARENTHESIS) ||
+        node.child_count > 4)
+        return false;
+    text("cl");
+    if (!dependent_expression(parts[0]))
+        return false;
+    if (node.child_count == 4) {
+        syntax_child a = parts[2];
+        if (!a.is_token() &&
+            tree[a.index()].kind == syntax_kind::initializer_list) {
+            for (uint32_t i = 0; i < tree[a.index()].child_count; i++) {
+                syntax_child x = tree.children(a.index())[i];
+                if (!punctuator(x, preprocessing_op_or_punc::COMMA) &&
+                    !dependent_expression(x))
+                    return false;
+            }
+        } else if (!dependent_expression(a))
+            return false;
+    }
+    text("E");
+    return true;
 }
 
 /*
@@ -749,6 +847,19 @@ bool itanium_mangler::template_args(entity_index c, entity_index function)
                 return false;
             text("Tn");
             if (!type(declared))
+                return false;
+        }
+        /* [impl.clang]: a type-parameter with a type-constraint, "Tk"
+           and the concept's name before the argument (clang 17 and later,
+           as Tn) */
+        token_index q = 0;
+        if (function)
+            q = analysis.parameter_type_constraint(function, i);
+        if (q) {
+            if (pack)
+                return false;
+            text("Tk");
+            if (!source_name(analysis.token_identifier(q)))
                 return false;
         }
         if (!pack) {
@@ -1556,6 +1667,19 @@ bool itanium_mangler::type(qualified_type t)
     }
     if (r.kind == type_kind::fundamental && !t.cv())
         return builtin_type(r.fundamental);
+    if (r.kind == type_kind::placeholder && !t.cv()) {
+        /* [abi:mangling-builtin]: a template's declared return type
+           auto or decltype(auto), a builtin type:
+
+               <builtin-type> ::= Da
+                              ::= Dc
+        */
+        if (r.entity == 2)
+            text("Dc");
+        else
+            text("Da");
+        return true;
+    }
     if (substitution(t))
         return true;
     bool done = false;
@@ -1581,6 +1705,20 @@ bool itanium_mangler::type(qualified_type t)
             type(qualified_type::make(
                 analysis.entity_table[r.entity].type.unqualified(), cv_none)) &&
             type(r.operand);
+    } else if (r.kind == type_kind::atomic) {
+        /* [abi:mangling-type]'s vendor extended type qualifier, as clang
+           mangles _Atomic(T) ([ext:clang_atomic]) */
+        text("U7_Atomic");
+        done = type(r.operand);
+    } else if (r.kind == type_kind::bit_int && !r.entity) {
+        /* [abi:mangling-builtin]:
+
+               <builtin-type> ::= DB <number> _
+        */
+        text("DB");
+        number(r.bound);
+        text("_");
+        done = true;
     } else if (r.kind == type_kind::pack_expansion) {
         /* [abi:mangle.function-type]: a pack expansion,
 
@@ -1615,6 +1753,21 @@ bool itanium_mangler::type(qualified_type t)
                 static_cast<uint32_t>(operand >> 32)));
             text("E");
         }
+    } else if (r.kind == type_kind::dependent &&
+               analysis.entity_table[r.entity].kind ==
+                   entity_kind::dependent_written) {
+        /* [abi:mangle.decltype]: decltype of a type-dependent expression,
+
+               <decltype> ::= DT <expression> E
+
+           the decltype-specifier's operand */
+        node_index n =
+            static_cast<node_index>(analysis.entity_table[r.entity].value);
+        const syntax_tree &tree = analysis.syntax();
+        text("DT");
+        done = tree[n].child_count == 4 && encoding_template &&
+               dependent_expression(tree.children(n)[2]);
+        text("E");
     } else if (r.kind == type_kind::class_type ||
                r.kind == type_kind::enumeration ||
                r.kind == type_kind::dependent)
@@ -1665,8 +1818,7 @@ bool itanium_mangler::type(qualified_type t)
  * unsigned long, long long, unsigned long long, float, double, long double,
  * char32_t, char16_t, char8_t, std::nullptr_t, __int128, unsigned
  * __int128.  _Float16 is DF16_ (the
- * DF <number> _ form below); _BitInt(N)'s DB <number> _ needs N, which the
- * type does not keep yet.
+ * DF <number> _ form below); _BitInt(N) is type_kind::bit_int's (type()).
  *
  *     <builtin-type> ::= DF <number> _
  */

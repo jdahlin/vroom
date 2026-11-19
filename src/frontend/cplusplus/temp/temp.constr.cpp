@@ -92,13 +92,57 @@ analysis_result semantic_analysis::concept_id(node_index n, uint32_t ct,
     r = concept_satisfied(n, ct, arguments, satisfied);
     if (r != analysis_result::well_formed)
         return r;
-    m = expression_meaning();
-    m.type = qualified_type::make(
-        type_table.fundamental(fundamental_type::bool_), cv_none);
-    m.category = value_category::prvalue;
-    m.evaluation = constness::constant;
-    m.value = satisfied;
-    m.node = expression_node(semantic_kind::constant, m, tree[n].first_token);
+    m = integer_constant(fundamental_type::bool_, satisfied,
+                         tree[n].first_token);
+    return analysis_result::well_formed;
+}
+
+/*
+ * [expr.prim.req]/6: "The substitution of template arguments into a
+ * requires-expression may result in the formation of invalid types or
+ * expressions in its requirements ... In such cases, the
+ * requires-expression evaluates to false"; "If substitution (if any) and
+ * semantic constraint checking succeed, the requires-expression evaluates
+ * to true."  Of type-requirements typename nested-name-specifier
+ * type-name; (/1 a prvalue of type bool), checked in lexical order.  A
+ * requirement-parameter-list, a simple, compound or nested requirement:
+ * not analysed.
+ */
+analysis_result semantic_analysis::requires_expression(node_index n,
+                                                       expression_meaning &m)
+{
+    const syntax_child *parts = tree.children(n);
+    if (tree[n].child_count != 2 || !substituting)
+        return not_supported(n, "expr.prim.req");
+    node_index body = parts[1].index();
+    const syntax_child *requirements = tree.children(body) + 1;
+    uint32_t count = tree[body].child_count - 2;
+    if (count == 1 &&
+        syntax_is(tree, requirements[0], syntax_kind::requirement_seq)) {
+        count = tree[requirements[0].index()].child_count;
+        requirements = tree.children(requirements[0].index());
+    }
+    bool satisfied = true;
+    for (uint32_t i = 0; i < count && satisfied; i++) {
+        if (!syntax_is(tree, requirements[i], syntax_kind::type_requirement))
+            return not_supported(n, "expr.prim.req");
+        /* [expr.prim.req.type]/1: "A type-requirement asserts the validity
+           of a type" */
+        substitution_mark mark = mark_substitution();
+        type_index type = 0;
+        uint32_t cv = 0;
+        analysis_result r = typename_type(requirements[i].index(), type, cv);
+        if (r == analysis_result::ill_formed && undo_substitution(mark)) {
+            satisfied = false;
+            continue;
+        }
+        if (r != analysis_result::well_formed)
+            return r;
+        if (depends_on_template_parameter(qualified_type::make(type, cv_none)))
+            return not_supported(n, "expr.prim.req");
+    }
+    m = integer_constant(fundamental_type::bool_, satisfied,
+                         tree[n].first_token);
     return analysis_result::well_formed;
 }
 
@@ -234,13 +278,55 @@ analysis_result semantic_analysis::constraint_satisfied(syntax_child e,
  */
 bool semantic_analysis::same_constraints(node_index a, node_index b)
 {
+    /* the type-constraints too, parameter by parameter ([temp.over.link]/6:
+       equivalent template-heads) */
+    owned_array<node_index> pa, pb;
+    if (tree[a].child_count && tree[b].child_count &&
+        syntax_is(tree, tree.children(a)[0], syntax_kind::template_head) &&
+        syntax_is(tree, tree.children(b)[0], syntax_kind::template_head) &&
+        template_head_list(tree.children(a)[0].index(), pa) &&
+        template_head_list(tree.children(b)[0].index(), pb)) {
+        if (pa.size() != pb.size())
+            return false;
+        for (size_t i = 0; i < pa.size(); i++) {
+            template_parameter_parts u, v;
+            if (!template_parameter_form(pa[i], u) ||
+                !template_parameter_form(pb[i], v))
+                continue;
+            if (!u.constraint != !v.constraint ||
+                (u.constraint && !same_tokens(u.constraint, v.constraint)))
+                return false;
+        }
+    }
     syntax_child x = head_constraint(a), y = head_constraint(b);
     if (!x.bits || !y.bits)
         return !x.bits && !y.bits;
     if (x.is_token() || y.is_token())
         return x.is_token() && y.is_token() &&
                same_token_spelling(x.index(), y.index());
-    const syntax_node &p = tree[x.index()], &q = tree[y.index()];
+    return same_tokens(x.index(), y.index());
+}
+
+/* whether template-head n has a requires-clause or a type-constraint */
+bool semantic_analysis::template_head_constrained(node_index n)
+{
+    owned_array<node_index> parameters;
+    if (head_constraint(n).bits || !tree[n].child_count ||
+        !syntax_is(tree, tree.children(n)[0], syntax_kind::template_head) ||
+        !template_head_list(tree.children(n)[0].index(), parameters))
+        return head_constraint(n).bits;
+    for (node_index p : parameters) {
+        template_parameter_parts x;
+        if (template_parameter_form(p, x) && x.constraint)
+            return true;
+    }
+    return false;
+}
+
+/* whether nodes a and b are the same tokens, spelled the same */
+bool semantic_analysis::same_tokens(node_index a, node_index b)
+{
+    const syntax_node &p = tree[a], &q = tree[b];
     if (p.end_token - p.first_token != q.end_token - q.first_token)
         return false;
     for (token_index i = 0; i < p.end_token - p.first_token; i++)
@@ -290,6 +376,48 @@ entity_index semantic_analysis::constraint_parameter(entity_index t,
     return 0;
 }
 
+/* the function parameter of function template t's declarator whose name
+   token i spells: its position plus one (0: none); the parameters of the
+   first parameters-and-qualifiers outside the trailing-return-type */
+uint32_t semantic_analysis::function_parameter_position(entity_index t,
+                                                        token_index i) const
+{
+    uint32_t ft = template_record(t);
+    uint32_t name = tokens.identifier(i);
+    if (!ft || !name)
+        return 0;
+    node_index d = function_templates[ft - 1].declarator;
+    owned_array<syntax_child> work;
+    work.append(tree.children(d)[leading_gnu_attributes(d) + 1]);
+    uint32_t position = 0;
+    bool inside = false;
+    /* (depth first, children in order: the parameters in theirs) */
+    while (work.size()) {
+        syntax_child c = work[work.size() - 1];
+        work.resize(work.size() - 1);
+        if (c.is_token() ||
+            syntax_is(tree, c, syntax_kind::trailing_return_type))
+            continue;
+        if (syntax_is(tree, c, syntax_kind::parameter_declaration)) {
+            position++;
+            for (uint32_t j = 1; j < tree[c.index()].child_count; j++) {
+                token_index id = declarator_id(tree.children(c.index())[j]);
+                if (id && tokens.identifier(id) == name)
+                    return position;
+            }
+            continue;
+        }
+        bool clause =
+            syntax_is(tree, c, syntax_kind::parameters_and_qualifiers);
+        if (clause && inside)
+            continue;
+        inside |= clause;
+        for (uint32_t j = tree[c.index()].child_count; j > 0; j--)
+            work.append(tree.children(c.index())[j - 1]);
+    }
+    return 0;
+}
+
 entity_index semantic_analysis::constraint_concept(entity_index t,
                                                    token_index i) const
 {
@@ -317,7 +445,36 @@ analysis_result semantic_analysis::template_constraints_satisfied(
     const struct function_template ft =
         function_templates[function_template - 1];
     syntax_child constraint = head_constraint(ft.declaration);
-    if (!constraint.bits)
+    /* [temp.constr.decl]/3: the associated constraints are the
+       conjunction of the type-constraints' immediately-declared
+       constraints, in order, then the requires-clause's
+       constraint-expression.  [temp.param]/4: a type-constraint Q
+       designating a concept C, of a type-parameter T: C<T>; Q's own
+       template-argument-list, C<T, A...>, is not analysed */
+    for (uint32_t i = 0; i < ft.parameter_count && satisfied; i++) {
+        node_index p = template_parameter_nodes[ft.first_parameter + i];
+        template_parameter_parts x;
+        if (!template_parameter_form(p, x) || !x.constraint)
+            continue;
+        const syntax_child *q = tree.children(x.constraint);
+        if (tree[x.constraint].child_count != 1 || !q[0].is_token())
+            return not_supported(x.constraint, "temp.param");
+        entity_index named = constraint_concept(ft.entity, q[0].index());
+        uint32_t ct = 0;
+        if (named)
+            ct = concept_of(named);
+        if (!ct || function_templates[ct - 1].parameter_count != 1 ||
+            template_parameter_is_pack(
+                function_templates[ct - 1].first_parameter))
+            return not_supported(x.constraint, "temp.param");
+        owned_array<template_argument> arguments;
+        arguments.append(values[i]);
+        analysis_result r =
+            concept_satisfied(x.constraint, ct, arguments, satisfied);
+        if (r != analysis_result::well_formed)
+            return r;
+    }
+    if (!constraint.bits || !satisfied)
         return analysis_result::well_formed;
     entity_index scope = entity_table.make(entity_kind::block_scope, 0,
                                            entity_table[ft.entity].enclosing);

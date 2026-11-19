@@ -277,6 +277,19 @@ diagnostic_severity diagnostic_consumer::severity_now(diagnostic_id id) const
     return severity;
 }
 
+void diagnostic_consumer::discard_since(size_t count)
+{
+    for (size_t i = count; i < messages.size(); i++) {
+        if (messages[i].severity >= diagnostic_severity::error)
+            error_count--;
+        if (messages[i].severity == diagnostic_severity::fatal)
+            fatal_count--;
+        else if (messages[i].severity == diagnostic_severity::warning)
+            warning_count--;
+    }
+    messages.resize(count);
+}
+
 diagnostic_message &diagnostic_consumer::issue_as(diagnostic_id id,
                                                   source_location location,
                                                   diagnostic_severity severity)

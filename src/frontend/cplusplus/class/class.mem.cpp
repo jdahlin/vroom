@@ -175,7 +175,8 @@ bool parser::constructor_parameters_follow(unsigned ahead)
  * bound in the scope of the class (template) itself; this is known as the
  * injected-class-name."
  */
-node_index parser::class_body(uint32_t name, scope_index region)
+node_index parser::class_body(uint32_t name, scope_index region,
+                              bool specialization)
 {
     if (collecting_members)
         /* a nested class in its enclosing class's first pass: its members
@@ -184,9 +185,11 @@ node_index parser::class_body(uint32_t name, scope_index region)
     add_token(); /* { */
     scope_index outer = names.current();
     /* [temp.local]/1: a class template's injected-class-name is a
-       template-name, or a type-name without template arguments */
+       template-name, or a type-name without template arguments; a
+       specialization's, O<true>, is the template's too */
     name_kind injected = name_kind::type_name;
-    if (name && declared_kind(name_kind::type_name) == name_kind::template_name)
+    if (name && (specialization || declared_kind(name_kind::type_name) ==
+                                       name_kind::template_name))
         injected = name_kind::template_name;
     names.reenter(region);
     if (name)

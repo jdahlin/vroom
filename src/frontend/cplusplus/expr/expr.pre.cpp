@@ -21,6 +21,14 @@ analysis_result semantic_analysis::expression(syntax_child e,
     analysis_result r = expression_kind(e, m);
     if (r != analysis_result::well_formed)
         return r;
+    /* [ext:clang_atomic], [ext:clang_bit_int] the operations on an atomic
+       object or a _BitInt are not analysed yet */
+    type_kind k = type_table[m.type.unqualified()].kind;
+    if (k == type_kind::atomic || k == type_kind::bit_int) {
+        if (e.is_token())
+            return not_supported(current_declaration, "ext.clang");
+        return not_supported(e.index(), "ext.clang");
+    }
     /* [expr.type]/2: "If a prvalue initially has the type "cv T", where T
        is a cv-unqualified non-class, non-array type, the type of the
        expression is adjusted to T prior to any further analysis." */
@@ -124,6 +132,16 @@ analysis_result semantic_analysis::expression_kind(syntax_child e,
         return noexcept_operator(n, m);
     case syntax_kind::simple_template_id:
         return variable_template_id(n, m);
+    case syntax_kind::requires_expression:
+        return requires_expression(n, m);
+    case syntax_kind::clang_type_trait_expression:
+        return clang_type_trait(n, m);
+    case syntax_kind::gnu_offsetof_expression:
+        return gnu_offsetof(n, m);
+    case syntax_kind::clang_bit_cast_expression:
+        return clang_bit_cast(n, m);
+    case syntax_kind::clang_source_location_expression:
+        return clang_source_location(n, m);
     default:
         return not_supported(n);
     }

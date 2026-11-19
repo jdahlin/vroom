@@ -110,6 +110,11 @@ enum class type_kind : uint8_t {
        template parameter pack, the type of a function parameter pack
        ([dcl.fct]/21) in a template's own declaration */
     pack_expansion,
+    /* [ext:clang_atomic] _Atomic(T): operand T */
+    atomic,
+    /* [ext:clang_bit_int] _BitInt(N): bound N, or entity the non-type
+       template-parameter N names in a template's own declaration */
+    bit_int,
 };
 
 struct type {
@@ -167,6 +172,8 @@ class types
     type_index of_entity(type_kind kind, uint32_t entity);
     type_index pointer_to_member(uint32_t class_entity, qualified_type member);
     type_index pack_expansion_of(qualified_type pattern);
+    type_index atomic_of(qualified_type value);
+    type_index bit_int(uint64_t width, uint32_t parameter);
 
     const type &operator[](type_index t) const
     {
@@ -315,6 +322,10 @@ enum gnu_attribute_flag : uint32_t {
 const uint32_t gnu_function_symbol_flags =
     gnu_hidden_visibility | gnu_abi_tag |
     gnu_exclude_from_explicit_instantiation;
+/* noinline, always_inline and noreturn, which lowering gives a member
+   function or function template's specialization as a non-member's */
+const uint32_t gnu_inline_flags =
+    gnu_noinline | gnu_always_inline | gnu_noreturn;
 
 struct entity {
     entity_kind kind = entity_kind::none;
@@ -890,6 +901,15 @@ constness combined_constness(constness a, constness b);
 /* a floating-point value as an expression_meaning keeps it */
 double floating_value(uint64_t kept);
 uint64_t floating_kept(double v);
+/* the least power of two that is n or more (1 for 0) */
+uint64_t power_of_two_at_least(uint64_t n);
+/* [bit.cast]/1 of a value as an expression_meaning keeps it, from one
+   arithmetic type to another of the same size: false where analysis does
+   not know the object representation (long double, 128-bit integers) or
+   the result has no value of to (bool) */
+bool bit_cast_kept(const implementation_defined_behavior &behavior,
+                   fundamental_type from, fundamental_type to, uint64_t kept,
+                   uint64_t &result);
 /* the operators of the arithmetic types on values as expression_meaning
    keeps them (expr/folding.cpp): constant with the value in out,
    not_constant where [expr.pre]/4 makes the operation undefined, unknown
@@ -1175,6 +1195,9 @@ enum class conversion_kind : uint8_t {
     member_pointer_to_base,
     /* [conv.qual]/3 of a pointer to member: the same value */
     member_pointer_qualification,
+    /* [ext:clang_bit_cast] [bit.cast]/1: the operand's object
+       representation as a value of another type of the same size */
+    bit_cast,
 };
 
 /* [expr.cast]/4: the casts that may perform an explicit conversion */
@@ -1883,12 +1906,14 @@ class semantic_analysis
        template-parameters (bound in c) */
     bool dependent_base_specifier(entity_index c, syntax_child name) const;
     uint32_t own_pack_parameter(uint32_t name) const;
+    uint32_t explicit_argument_position(uint32_t ft, uint32_t i) const;
     analysis_result base_class_name(syntax_child name, node_index n,
                                     entity_index &base, token_index &id);
     bool in_dependent_base_only(entity_index c, uint32_t name,
                                 bool &unknown) const;
     /* [temp.res]/3: typename-specifier, as a type */
     analysis_result typename_type(node_index n, type_index &type, uint32_t &cv);
+    analysis_result missing_member(token_index t, entity_index scope);
     /* a dependent type of kind, one per name and value in list */
     type_index dependent_type(owned_array<entity_index> &list, entity_kind kind,
                               uint32_t name, uint64_t value);
@@ -1927,6 +1952,7 @@ class semantic_analysis
                                             declarator_meaning &m);
     analysis_result gnu_attribute_specifier(node_index n, specified &s);
     uint32_t leading_gnu_attributes(node_index n) const;
+    bool class_specifier_before(node_index seq, uint32_t i) const;
     bool gnu_or_without_effect(node_index n) const;
     /* [dcl.attr.grammar]: every attribute at n (an attribute-specifier,
        -seq or -list) changes nothing vcc generates */
@@ -1958,9 +1984,11 @@ class semantic_analysis
         uint32_t pack_name = 0;
     };
     /* [dcl.fct.default]: the default arguments of function_parameters,
-       which the declaration n of the function f gives it */
+       which the declaration n of the function f gives it (specialization:
+       f a function template's specialization, its template's) */
     analysis_result default_arguments(node_index n, entity_index f,
-                                      entity_kind kind);
+                                      entity_kind kind,
+                                      bool specialization = false);
     /* the member functions of the classes being defined whose default
        arguments wait for the class to be complete ([class.mem]/6): their
        parameters are member_default_parameters[first .. first + count) */
@@ -1993,6 +2021,16 @@ class semantic_analysis
     /* a declarator analysed now may have a cv-qualifier-seq: a member
        declarator, or one whose declarator-id is a qualified-id */
     bool in_member_declarator = false;
+    /* in a member function template's declarator: 1 the template's own
+       (temp.mem.cpp), 2 a specialization's (instantiation.cpp) */
+    uint8_t in_member_template_declarator = 0;
+    /* enters (which 1 or 2) or leaves (0) a member function template's
+       declarator, a member declarator */
+    void member_template_declarator(uint8_t which)
+    {
+        in_member_declarator = which != 0;
+        in_member_template_declarator = which;
+    }
     /* [dcl.fct.spec]/2: virtual is analysed on a member-declaration's
        decl-specifier-seq only; a member-declarator's virt-specifiers and
        pure-specifier ([class.mem]/1) for the declarator it holds */
@@ -2317,6 +2355,15 @@ class semantic_analysis
     /* [expr.cond] */
     analysis_result conditional(node_index n, expression_meaning &m);
     analysis_result noexcept_operator(node_index n, expression_meaning &m);
+    analysis_result clang_type_trait(node_index n, expression_meaning &m);
+    analysis_result gnu_offsetof(node_index n, expression_meaning &m);
+    analysis_result clang_bit_cast(node_index n, expression_meaning &m);
+    analysis_result clang_source_location(node_index n, expression_meaning &m);
+    analysis_result clang_atomic_type(node_index n, qualified_type &type);
+    uint64_t atomic_layout(qualified_type value, bool alignment) const;
+    analysis_result clang_bit_int_type(node_index n, qualified_type &type);
+    uint64_t bit_int_layout(uint64_t width, bool alignment) const;
+    entity_index value_parameter_named(syntax_child e);
     analysis_result potentially_throwing(node_index n, uint32_t x,
                                          bool &throwing);
     analysis_result conditional_operands(node_index n,
@@ -2461,6 +2508,7 @@ class semantic_analysis
     analysis_result noexcept_specifier(node_index n, bool member,
                                        bool &non_throwing);
     /* ... with the function_parameters in scope ([basic.scope.param]) */
+    void open_parameter_scope();
     analysis_result parameter_scope_noexcept(node_index n, bool member,
                                              bool &non_throwing);
     /* the noexcept-specifiers left value-dependent in templates' own
@@ -2715,7 +2763,37 @@ class semantic_analysis
     /* [class.mem]: one member-declaration of the class being defined */
     /* [temp.mem]/1: the member template n (a template-declaration) of
        class c */
-    analysis_result member_template_declaration(entity_index c, node_index n);
+    analysis_result member_template_declaration(entity_index c, node_index n,
+                                                uint8_t access);
+    analysis_result member_function_template(entity_index c, node_index n,
+                                             node_index definition,
+                                             uint8_t access);
+    /* a call x.f(args) or x->f(args) of a member function template
+       ([temp.mem]/1): member_reference's object (its address) and the
+       held name it found, for call to deduce from the arguments */
+    entity_index member_template_name = 0;
+    expression_meaning member_template_object;
+    analysis_result member_template_call(
+        node_index n, entity_index held, const expression_meaning &object,
+        const owned_array<syntax_child> &arguments,
+        owned_array<expression_meaning> &early, expression_meaning &m);
+    analysis_result bound_member_call(
+        node_index n, entity_index f, const expression_meaning &object,
+        const owned_array<syntax_child> &arguments,
+        owned_array<expression_meaning> &early, expression_meaning &m);
+    uint32_t member_function_template_of(entity_index held) const
+    {
+        return function_template_of(held, true);
+    }
+    analysis_result
+    function_template_declarator(node_index definition, uint32_t lead,
+                                 entity_index scope, bool member, specified &s,
+                                 declarator_meaning &m, qualified_type &type);
+    analysis_result
+    function_template_attributes(node_index n, const specified &s,
+                                 const declarator_meaning &m, uint32_t allowed,
+                                 const char *subclause, uint32_t &gnu_flags,
+                                 token_index &abi_tag);
     analysis_result member_declaration(entity_index c, syntax_child n,
                                        uint8_t access,
                                        owned_array<node_index> &bodies);
@@ -2922,6 +3000,11 @@ class semantic_analysis
                              owned_array<expression_meaning> &out);
     /* the class whose member-specification is analysed, 0 if none */
     entity_index defining_class = 0;
+    /* [ext:gnu_attributes] the alignment aligned attributes after a
+       class-specifier's closing brace ask of the class the
+       decl-specifier-seq defines (GCC: they apply to the type), 0 if none;
+       class_specifier takes it before the class is laid out */
+    uint32_t trailing_class_alignment = 0;
     /* the access of the member-declaration analysed (an enumeration's and
        its enumerators' in a class) */
     uint8_t declaration_access = 0;
@@ -3108,6 +3191,9 @@ class semantic_analysis
            symbols (gnu_function_symbol_flags) and abi_tag */
         uint32_t gnu_flags = 0;
         token_index abi_tag = 0;
+        /* a function template: its trailing parameters with a default
+           argument ([dcl.fct.default]/1), its specializations' */
+        uint32_t default_arguments = 0;
         /* a class template ([temp.class]): definition is its
            class-specifier */
         bool is_class = false;
@@ -3201,8 +3287,9 @@ class semantic_analysis
        name declared after it is not the template's to find
        (lookup_unqualified) */
     token_index lookup_horizon = 0;
-    /* the function template whose name the held entity is, plus one */
-    uint32_t function_template_of(entity_index held) const;
+    /* the function template (member: member function template) whose name
+       the held entity is, plus one */
+    uint32_t function_template_of(entity_index held, bool member = false) const;
     /* the class template the entity names (its held name, or one of its
        specializations as its injected-class-name), plus one */
     uint32_t class_template_of(entity_index e) const;
@@ -3220,6 +3307,18 @@ class semantic_analysis
        TypeIdentity, Empty, T...> (type_traits.cpp) */
     bool is_builtin_common_type(uint32_t name) const;
     analysis_result builtin_common_type(node_index id, type_index &type);
+    /* __type_pack_element<N, T...> */
+    bool is_builtin_type_pack_element(uint32_t name) const;
+    analysis_result builtin_type_pack_element(node_index id, type_index &type);
+    analysis_result
+    builtin_template_arguments(node_index id,
+                               owned_array<syntax_child> &written,
+                               owned_array<bool> &expansion);
+    analysis_result
+    builtin_template_types(node_index id,
+                           const owned_array<syntax_child> &written,
+                           const owned_array<bool> &expansion, size_t from,
+                           owned_array<qualified_type> &types, bool &dependent);
     enum class common_found : uint8_t { none, found };
     analysis_result common_type_of(node_index id, entity_index base,
                                    const qualified_type *types, uint32_t count,
@@ -3236,6 +3335,9 @@ class semantic_analysis
     qualified_type decayed(qualified_type t);
     analysis_result changed_signedness(node_index n, qualified_type t,
                                        bool to_signed, qualified_type &type);
+    type_index
+    dependent_specialization(entity_index t,
+                             const owned_array<template_argument> &arguments);
     analysis_result alias_template_specialization(
         node_index id, uint32_t at,
         const owned_array<template_argument> &arguments, type_index &type);
@@ -3254,6 +3356,7 @@ class semantic_analysis
        is, plus one; [temp.names]/8: a concept-id's value */
     analysis_result concept_definition(node_index n, node_index definition);
     uint32_t concept_of(entity_index e) const;
+    analysis_result requires_expression(node_index n, expression_meaning &m);
     analysis_result concept_id(node_index n, uint32_t ct,
                                expression_meaning &m);
     /* [temp.constr.constr]: whether constraint-expression e is satisfied,
@@ -3284,7 +3387,8 @@ class semantic_analysis
     analysis_result
     template_head_parameters(node_index n, owned_array<node_index> &parameters,
                              bool packs = false, bool constrained = false,
-                             bool pack_anywhere = false);
+                             bool pack_anywhere = false,
+                             bool type_constraints = false);
     syntax_child head_constraint(node_index n) const;
     /* [temp.constr.atomic]/3: the satisfaction of a concept-id, once per
        concept and arguments (a later different result would be ill-formed,
@@ -3304,7 +3408,13 @@ class semantic_analysis
                       const owned_array<template_argument> &arguments,
                       bool &satisfied);
     bool same_constraints(node_index a, node_index b);
+    bool template_head_constrained(node_index n);
+    bool primary_arguments(node_index n, node_index primary,
+                           const owned_array<template_argument> &arguments,
+                           uint32_t first, size_t count);
+    bool dependent_arguments(const owned_array<template_argument> &a) const;
     bool same_token_spelling(token_index a, token_index b);
+    bool same_tokens(node_index a, node_index b);
     /* [temp.deduct]/5: whether the function template's constraints are
        satisfied by the arguments deduced */
     analysis_result
@@ -3322,6 +3432,8 @@ class semantic_analysis
         bool type = false, template_template = false, pack = false;
         bool named = false, has_default = false, has_declarator = false;
         token_index id = 0;
+        /* a type-parameter's type-constraint ([temp.param]/1), or 0 */
+        node_index constraint = 0;
         node_index head = 0;
         syntax_child default_argument, declarator;
     };
@@ -3563,9 +3675,10 @@ class semantic_analysis
     entity_index find_pack(uint32_t name) const;
     /* [temp.variadic]/5: the number of elements of the packs the pattern
        [first, end) names (false: none, packs of different lengths, or a
-       pack expansion within it) */
-    bool expansion_count(token_index first, token_index end,
-                         uint32_t &count) const;
+       pack expansion within it); own set when it names none but a pack of
+       the template's own declaration (own_pack_parameter) */
+    bool expansion_count(token_index first, token_index end, uint32_t &count,
+                         bool *own = nullptr) const;
     /* expression(pattern) for the element i of the packs it names */
     analysis_result expansion_element_expression(syntax_child pattern,
                                                  uint32_t i,
@@ -3743,6 +3856,9 @@ class semantic_analysis
     syntax_child template_constraint(entity_index t) const;
     entity_index constraint_parameter(entity_index t, token_index i) const;
     entity_index constraint_concept(entity_index t, token_index i) const;
+    /* [abi:mangle.function-param]: the position plus one of function
+       template t's parameter named by token i (0: none) */
+    uint32_t function_parameter_position(entity_index t, token_index i) const;
     bool punctuator_is(syntax_child c, preprocessing_op_or_punc op) const
     {
         return syntax_is_punctuator(tokens, c, op);
@@ -3813,6 +3929,10 @@ class semantic_analysis
        argument */
     bool dependent_parameter_type(entity_index t, uint32_t i,
                                   qualified_type &type) const;
+    /* the concept-name of the function template t's template-parameter
+       at i, a type-parameter with a type-constraint ([temp.param]/1),
+       or 0 */
+    token_index parameter_type_constraint(entity_index t, uint32_t i) const;
     /* whether the argument is a template ([temp.arg.template]/1): the
        class template, or in a template's own declaration the template
        template-parameter it names (also its position plus one in
@@ -3931,6 +4051,11 @@ class semantic_analysis
        arguments start in all */
     /* specified: template arguments already analysed, put before what
        is deduced (as written's are) */
+    /* [temp.over]/1: the member function templates named held, as member
+       candidates (temp.mem.cpp) */
+    analysis_result member_template_candidates(
+        node_index n, entity_index held, const expression_meaning *arguments,
+        uint32_t count, owned_array<overload_candidate> &candidates);
     analysis_result template_candidates(
         node_index n, const owned_array<uint32_t> &group,
         const expression_meaning *meanings, uint32_t count,
