@@ -606,7 +606,7 @@ semantic_analysis::class_reference_binding(node_index at, expression_meaning &m,
         return not_supported(at, "class.temporary");
     if (c1 == c2)
         return analysis_result::well_formed;
-    return to_base(tree[at].first_token, c1, m);
+    return to_base(syntax(at).first_token(), c1, m);
 }
 
 /*

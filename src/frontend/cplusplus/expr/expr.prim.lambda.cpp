@@ -716,8 +716,7 @@ analysis_result semantic_analysis::generic_lambda(node_index n, node_index list,
     if (has_capture)
         return not_supported(n, "expr.prim.lambda.capture");
     owned_array<SyntaxElement> list_items;
-    if (syntax(syntax_child::node(list))
-            .is(syntax_kind::template_parameter_list))
+    if (syntax(list).is(syntax_kind::template_parameter_list))
         for (uint32_t i = 0; i < syntax(list).size(); i++)
             list_items.append(syntax(list)[i]);
     else

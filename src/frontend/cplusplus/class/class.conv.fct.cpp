@@ -157,7 +157,6 @@ semantic_analysis::conversion_function_member(entity_index c, node_index n,
                                               node_index id, uint8_t access,
                                               owned_array<node_index> &bodies)
 {
-    const syntax_node &node = tree[n];
     auto children_syntax = syntax(n);
     specified s;
     uint32_t first = 0;
@@ -170,7 +169,7 @@ semantic_analysis::conversion_function_member(entity_index c, node_index n,
             return r;
         first++;
     }
-    if (first < node.child_count &&
+    if (first < children_syntax.size() &&
         children_syntax[first].is(syntax_kind::decl_specifier_seq)) {
         node_index seq = children_syntax[first].index();
         first++;
@@ -222,7 +221,7 @@ node_index semantic_analysis::conversion_function_id_of(node_index n) const
     while (!work.empty()) {
         node_index k = work.back();
         work.resize(work.size() - 1);
-        syntax_kind kind = tree[k].kind;
+        syntax_kind kind = syntax(k).kind();
         if (kind == syntax_kind::conversion_function_id)
             return k;
         if (kind == syntax_kind::parameters_and_qualifiers ||

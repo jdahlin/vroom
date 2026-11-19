@@ -565,7 +565,7 @@ semantic_analysis::closure_object(lambda_context &l,
                                   const owned_array<capture_record> &captures,
                                   expression_meaning &m)
 {
-    token_index at = tree[l.at].first_token;
+    token_index at = syntax(l.at).first_token();
     owned_array<uint32_t> elements;
     for (const capture_record &c : captures) {
         if (c.init_capture) {

@@ -160,13 +160,13 @@ type_index semantic_analysis::dependent_written_type(node_index n)
 {
     auto x = syntax(n);
     for (entity_index e : dependent_written_types) {
-        const syntax_node &y =
-            tree[static_cast<node_index>(entity_table[e].value)];
+        auto y = syntax(static_cast<node_index>(entity_table[e].value));
         bool same =
-            y.end_token - y.first_token == x.end_token() - x.first_token();
+            y.end_token() - y.first_token() == x.end_token() - x.first_token();
         for (token_index i = 0; same && i < x.end_token() - x.first_token();
              i++)
-            same = same_token_spelling(x.first_token() + i, y.first_token + i);
+            same =
+                same_token_spelling(x.first_token() + i, y.first_token() + i);
         if (same)
             return entity_table[e].type.unqualified();
     }

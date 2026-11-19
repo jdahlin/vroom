@@ -321,7 +321,7 @@ semantic_analysis::lookup_unqualified(uint32_t name, lookup_filter filter) const
     if (lookup_horizon && r.entity && is_namespace(r.found_in))
         for (entity_index o = r.entity; o; o = entity_table[o].next_overload) {
             uint32_t d = entity_table[o].first_declaration;
-            if (d && tree[entity_table.declaration(d).node].first_token >
+            if (d && syntax(entity_table.declaration(d).node).first_token() >
                          lookup_horizon)
                 r.unknown = true;
             if (entity_table[o].kind != entity_kind::function)

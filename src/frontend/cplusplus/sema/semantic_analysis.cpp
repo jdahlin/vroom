@@ -41,7 +41,7 @@ semantic_analysis::semantic_analysis(const syntax_tree &tree,
 
 analysis_result semantic_analysis::not_supported(node_index n, call_site where)
 {
-    return not_supported(n, syntax_kind_subclause(tree[n].kind), where);
+    return not_supported(n, syntax_kind_subclause(syntax(n).kind()), where);
 }
 
 analysis_result semantic_analysis::not_supported(node_index n,

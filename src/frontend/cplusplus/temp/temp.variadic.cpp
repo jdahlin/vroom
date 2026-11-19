@@ -55,7 +55,7 @@ bool semantic_analysis::template_parameter_form(
         return true;
     }
     uint32_t k = 1;
-    out.type = syntax(syntax_child::node(p)).is(syntax_kind::type_parameter);
+    out.type = syntax(p).is(syntax_kind::type_parameter);
     if (out.type) {
         if (x[0].is(syntax_kind::type_constraint)) {
             out.constraint = x[0].index();

@@ -139,7 +139,7 @@ analysis_result semantic_analysis::deduction_guide(node_index n)
    or none */
 SyntaxElement semantic_analysis::head_constraint(node_index n) const
 {
-    if (syntax(syntax_child::node(n)).is(syntax_kind::lambda_expression))
+    if (syntax(n).is(syntax_kind::lambda_expression))
         return lambda_constraint(n);
     if (!syntax(n).size() || !syntax(n)[0].is(syntax_kind::template_head))
         return SyntaxElement();
@@ -1750,13 +1750,14 @@ analysis_result semantic_analysis::class_specialization_definition(
        it: class-key simple-template-id ; (an elaborated-type-specifier),
        whose definition may follow */
     bool defines = spec.is(syntax_kind::class_specifier);
-    node_index id = 0;
-    if (defines) {
-        node_index head = spec[0].index();
-        id = class_head_name(head).index();
-    } else {
-        id = spec[1].index();
-    }
+    /* the specialization's simple-template-id: a name that is a token
+       (a plain identifier) is not one */
+    auto written = spec[1];
+    if (defines)
+        written = class_head_name(spec[0].index());
+    if (!written.is_node())
+        return not_supported(n, rule);
+    node_index id = written.index();
     lookup_result x;
     entity_index named = 0;
     if (!template_id_name(id, x, named))
@@ -2239,9 +2240,8 @@ analysis_result semantic_analysis::template_id_arguments(
                 token_index end = first + 1;
                 if (!a.is_token())
                     end = syntax(a).end_token();
-                if (end > first + 1 &&
-                    syntax(syntax_child::token(end - 1))
-                        .is(preprocessing_op_or_punc::ELLIPSIS))
+                if (end > first + 1 && token_element(end - 1).is(
+                                           preprocessing_op_or_punc::ELLIPSIS))
                     end--;
                 /* a partial specialization's own pack, In... (its
                    pattern the pack's name alone): the rest of the
@@ -2728,7 +2728,7 @@ bool semantic_analysis::pack_only_expanded(uint32_t name, token_index first,
                                            token_index end) const
 {
     auto is = [&](token_index t, preprocessing_op_or_punc op) {
-        return syntax(syntax_child::token(t)).is(op);
+        return token_element(t).is(op);
     };
     for (token_index t = first; t < end; t++) {
         if (tokens[t].kind != token_kind::identifier ||

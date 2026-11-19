@@ -1472,10 +1472,6 @@ class semantic_analysis
     {
         return p;
     }
-    const syntax_tree &syntax() const
-    {
-        return tree;
-    }
     /* a token's spelling, as written (an entity's abi_tag, its section) */
     size_t token_spelling(token_index i, vbuffer *out) const
     {
@@ -4090,9 +4086,10 @@ class semantic_analysis
     {
         return SyntaxRef(syntax_cx, n);
     }
-    SyntaxElement syntax(syntax_child c) const
+    /* a token as a child: to ask it what a SyntaxElement is asked */
+    SyntaxElement token_element(token_index t) const
     {
-        return SyntaxElement(syntax_cx, c);
+        return SyntaxElement(syntax_cx, syntax_child::token(t));
     }
     /* a node as a child: where a function takes a SyntaxElement */
     SyntaxElement element(node_index n) const

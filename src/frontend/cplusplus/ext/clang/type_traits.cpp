@@ -382,8 +382,8 @@ analysis_result semantic_analysis::builtin_template_types(
         if (expansion[w]) {
             token_index first = first_token(a);
             token_index end = syntax(a).end_token();
-            if (end > first + 1 && syntax(syntax_child::token(end - 1))
-                                       .is(preprocessing_op_or_punc::ELLIPSIS))
+            if (end > first + 1 &&
+                token_element(end - 1).is(preprocessing_op_or_punc::ELLIPSIS))
                 end--;
             /* a template's own pack, not bound to elements: a dependent
                template-id */

@@ -67,10 +67,6 @@ class declarator_claims
     {
         return SyntaxRef(syntax_cx, n);
     }
-    SyntaxElement syntax(syntax_child c) const
-    {
-        return SyntaxElement(syntax_cx, c);
-    }
     SyntaxElement syntax(SyntaxElement e) const
     {
         return e;
@@ -105,11 +101,11 @@ class declarator_claims
        the expressions the claim repeats as they are written */
     owned_array<uint32_t> parameter_names, mentioned_names;
 
-    bool is_operator_token(syntax_child c, preprocessing_op_or_punc op) const
+    bool is_operator_token(SyntaxElement c, preprocessing_op_or_punc op) const
     {
         if (!c.is_token())
             return false;
-        const token &t = tokens[c.index()];
+        const token &t = tokens[c.token()];
         return t.kind == token_kind::operator_or_punctuator &&
                preprocessing_op_or_punc_primary(t.op_or_punc) == op;
     }
@@ -123,19 +119,19 @@ class declarator_claims
         if (node.is(syntax_kind::lambda_expression))
             return true;
         for (uint32_t i = 0; i < node.size(); i++) {
-            syntax_child c = node[i];
+            SyntaxElement c = node[i];
             if (!c.is_token() && has_lambda(c.index()))
                 return true;
         }
         return false;
     }
 
-    bool is_kind(syntax_child c, syntax_kind kind) const
+    bool is_kind(SyntaxElement c, syntax_kind kind) const
     {
         return syntax(c).is(kind);
     }
 
-    bool is_attribute(syntax_child c) const
+    bool is_attribute(SyntaxElement c) const
     {
         return is_kind(c, syntax_kind::attribute_specifier) ||
                is_kind(c, syntax_kind::attribute_specifier_seq) ||
@@ -183,11 +179,11 @@ class declarator_claims
         bool named = false;
         type.clear();
         for (uint32_t i = 0; i < node.size(); i++) {
-            syntax_child c = node[i];
+            SyntaxElement c = node[i];
             if (is_attribute(c))
                 continue;
             if (c.is_token()) {
-                const token &t = tokens[c.index()];
+                const token &t = tokens[c.token()];
                 if (t.kind == token_kind::identifier) {
                     /* a template-name alone: a deduced class type, whose
                        type the claim cannot say */
@@ -195,7 +191,7 @@ class declarator_claims
                         if (n == c.index())
                             return false;
                     /* a type-name */
-                    tokens.spelling(c.index(), type.get());
+                    tokens.spelling(c.token(), type.get());
                     named = true;
                     continue;
                 }
@@ -234,7 +230,7 @@ class declarator_claims
                 case standard_keyword::bool_:
                 case standard_keyword::float_:
                 case standard_keyword::void_:
-                    tokens.spelling(c.index(), type.get());
+                    tokens.spelling(c.token(), type.get());
                     named = true;
                     break;
                 case standard_keyword::auto_:
@@ -342,12 +338,12 @@ class declarator_claims
             head = s[0].index();
         auto h = syntax(head);
         for (uint32_t i = 0; i < h.size(); i++) {
-            syntax_child c = syntax(head)[i];
+            SyntaxElement c = syntax(head)[i];
             if (c.is_token() &&
-                tokens[c.index()].kind == token_kind::identifier) {
+                tokens[c.token()].kind == token_kind::identifier) {
                 /* after a nested-name-specifier the name is not the next
                    token alone: the two are written together */
-                token_index first = c.index();
+                token_index first = c.token();
                 if (i && is_kind(syntax(head)[i - 1],
                                  syntax_kind::nested_name_specifier))
                     first = syntax(head)[i - 1].first_token();
@@ -377,7 +373,7 @@ class declarator_claims
     {
         auto node = syntax(op);
         for (uint32_t i = 0; i < node.size(); i++) {
-            syntax_child c = node[i];
+            SyntaxElement c = node[i];
             if (is_attribute(c))
                 continue;
             if (is_kind(c, syntax_kind::nested_name_specifier)) {
@@ -411,11 +407,11 @@ class declarator_claims
         return true;
     }
 
-    bool apply_cv_qualifier(syntax_child c, owned_buffer &type)
+    bool apply_cv_qualifier(SyntaxElement c, owned_buffer &type)
     {
         if (!c.is_token())
             return false;
-        switch (p.keyword_of(tokens[c.index()])) {
+        switch (p.keyword_of(tokens[c.token()])) {
         case standard_keyword::const_:
             wrap(type, "::vcc_claim::const_<", ">");
             return true;
@@ -446,7 +442,7 @@ class declarator_claims
         unsigned count = 0;
         owned_array<node_index> work;
         for (uint32_t i = 0; i < node.size(); i++) {
-            syntax_child c = node[i];
+            SyntaxElement c = node[i];
             if (is_attribute(c))
                 continue;
             if (!closed) {
@@ -476,7 +472,7 @@ class declarator_claims
             } else if (c.is_token()) {
                 /* const, volatile, & or && */
                 vbuffer_append(qualifiers.get(), " ", 1);
-                tokens.spelling(c.index(), qualifiers.get());
+                tokens.spelling(c.token(), qualifiers.get());
             } else {
                 return false;
             }
@@ -493,7 +489,7 @@ class declarator_claims
     /* a child of parameters-and-qualifiers between its parentheses, or of a
        parameter-declaration-clause or -list: the types of its parameters,
        and the ellipsis, added to list */
-    bool parameter_types(syntax_child c, owned_buffer &list, unsigned &count)
+    bool parameter_types(SyntaxElement c, owned_buffer &list, unsigned &count)
     {
         if (is_operator_token(c, preprocessing_op_or_punc::COMMA))
             return true;
@@ -582,15 +578,15 @@ class declarator_claims
      * in int a[2][3], D is D1[3] with D1 = a[2], and a is an array of 2
      * arrays of 3 int.
      */
-    bool declared_type(syntax_child declarator, owned_buffer &type,
+    bool declared_type(SyntaxElement declarator, owned_buffer &type,
                        specifiers &s, declared &d)
     {
         if (declarator.is_token()) {
             /* declarator-id: an identifier */
-            if (tokens[declarator.index()].kind != token_kind::identifier)
+            if (tokens[declarator.token()].kind != token_kind::identifier)
                 return false;
             d.has_id = true;
-            d.id_first = declarator.index();
+            d.id_first = declarator.token();
             d.id_end = declarator.index() + 1;
             return true;
         }
@@ -642,7 +638,7 @@ class declarator_claims
            abstract declarator; then the suffixes */
         uint32_t i = 0;
         bool has_head = false;
-        syntax_child head = {};
+        SyntaxElement head = {};
         if (node.size() >= 3 &&
             is_operator_token(node[0],
                               preprocessing_op_or_punc::LEFT_PARENTHESIS)) {
@@ -734,7 +730,7 @@ class declarator_claims
         auto d = syntax(declaration);
         token_index last = d.end_token() - 1;
         for (uint32_t i = 0; i < d.size(); i++) {
-            syntax_child c = d[i];
+            SyntaxElement c = d[i];
             if (is_kind(c, syntax_kind::function_body) &&
                 syntax(c).first_token() > d.first_token())
                 last = syntax(c).first_token() - 1;
@@ -788,7 +784,7 @@ class declarator_claims
     /* the claim for one declarator of a declaration whose decl-specifier-seq
        is seq */
     void claim(node_index anchor, node_index declaration, node_index seq,
-               syntax_child declarator)
+               SyntaxElement declarator)
     {
         owned_buffer type;
         specifiers s;
@@ -835,14 +831,14 @@ class declarator_claims
             return;
         node_index seq = node[i].index();
         for (i++; i < node.size(); i++) {
-            syntax_child c = node[i];
+            SyntaxElement c = node[i];
             if (is_kind(c, syntax_kind::function_body) ||
                 is_operator_token(c, preprocessing_op_or_punc::SEMICOLON))
                 break;
             if (is_kind(c, syntax_kind::init_declarator_list)) {
                 auto list = syntax(c);
                 for (uint32_t k = 0; k < list.size(); k++) {
-                    syntax_child item = syntax(c)[k];
+                    SyntaxElement item = syntax(c)[k];
                     if (is_operator_token(item,
                                           preprocessing_op_or_punc::COMMA))
                         continue;
@@ -856,7 +852,7 @@ class declarator_claims
 
     /* init-declarator: declarator initializer_opt; the declarator alone
        passes through */
-    syntax_child declarator_of(syntax_child item) const
+    SyntaxElement declarator_of(SyntaxElement item) const
     {
         if (is_kind(item, syntax_kind::init_declarator) && syntax(item).size())
             return syntax(item)[0];
@@ -927,7 +923,7 @@ class declarator_claims
             }
         }
         for (uint32_t i = 0; i < s.size(); i++) {
-            syntax_child c = s[i];
+            SyntaxElement c = s[i];
             if (!c.is_token())
                 declarations(c.index(), anchor,
                              s.is(syntax_kind::declaration_seq));

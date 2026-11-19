@@ -47,9 +47,8 @@ analysis_result semantic_analysis::explicit_specialization(node_index n)
     node_index inner = x[3].index();
     if (node_index id = variable_specialization_id(inner))
         return variable_specialization(n, inner, id);
-    if (!syntax(syntax_child::node(inner))
-             .is(syntax_kind::function_definition) &&
-        !syntax(syntax_child::node(inner)).is(syntax_kind::simple_declaration))
+    if (!syntax(inner).is(syntax_kind::function_definition) &&
+        !syntax(inner).is(syntax_kind::simple_declaration))
         return not_supported(n, "temp.expl.spec");
     bool defines = syntax(inner).is(syntax_kind::function_definition);
     /* [dcl.fct.def.delete], = default: not yet */
@@ -341,7 +340,7 @@ semantic_analysis::named_specialization(node_index n, node_index declaration,
     uint32_t ft = 0;
     owned_array<template_argument> values;
     bool qualified = false;
-    SyntaxElement callee = syntax(syntax_child::token(m.id));
+    SyntaxElement callee = token_element(m.id);
     if (m.template_id)
         callee = element(m.template_id);
     else

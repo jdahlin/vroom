@@ -190,14 +190,13 @@ analysis_result
 semantic_analysis::friend_function(entity_index c, node_index n,
                                    owned_array<node_index> &bodies)
 {
-    const syntax_node &node = tree[n];
     /* [ext:gnu_attributes] before it all: GCC's, which a friend's
        definition has no rules for beyond its form (visibility as the
        class's members') */
     uint32_t leading = leading_gnu_attributes(n);
     auto children_syntax = syntax(n);
-    uint32_t count = node.child_count - leading;
-    bool defines = node.kind == syntax_kind::function_definition;
+    uint32_t count = children_syntax.size() - leading;
+    bool defines = children_syntax.is(syntax_kind::function_definition);
     if (defines) {
         auto body = syntax(n).function_definition().function_body();
         if (count != 3 ||
@@ -206,7 +205,8 @@ semantic_analysis::friend_function(entity_index c, node_index n,
             return not_supported(n, "class.friend");
         if (!body.defaulted() && !body.plain())
             return not_supported(n, "dcl.fct.def.general");
-    } else if (node.kind != syntax_kind::member_declaration || count != 3 ||
+    } else if (!children_syntax.is(syntax_kind::member_declaration) ||
+               count != 3 ||
                !children_syntax[leading + 2].is(
                    preprocessing_op_or_punc::SEMICOLON) ||
                children_syntax[leading + 1].is(
@@ -369,7 +369,7 @@ analysis_result semantic_analysis::friend_function_body(
         auto body = definition.function_body();
         if (body.defaulted()) {
             scoped_value<entity_index> compared(defaulted_comparison, c);
-            r = analyse_function_body(definition, syntax(body.child()));
+            r = analyse_function_body(definition, element(body.index()));
         } else {
             r = analyse_function_body(definition, body.compound_statement());
         }

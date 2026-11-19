@@ -630,8 +630,7 @@ bool semantic_analysis::abbreviated_parameters(
                template parameter pack if the corresponding parameter-
                declaration declares a function parameter pack" */
             for (token_index t = c.first_token(); t < c.end_token(); t++)
-                if (syntax(syntax_child::token(t))
-                        .is(preprocessing_op_or_punc::ELLIPSIS))
+                if (token_element(t).is(preprocessing_op_or_punc::ELLIPSIS))
                     return false;
             parameters.append(seq);
             break;

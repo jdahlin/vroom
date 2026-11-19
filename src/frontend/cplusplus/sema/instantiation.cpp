@@ -76,8 +76,7 @@ semantic_analysis::instantiate(node_index at, entity_index template_entity,
         bool specifiers = d_syntax[d_skip].is(syntax_kind::decl_specifier_seq);
         bool constructor = t.special == special_member::constructor;
         analysis_result r = analysis_result::well_formed;
-        bool lambda = syntax(syntax_child::node(ft.declarator))
-                          .is(syntax_kind::lambda_expression);
+        bool lambda = syntax(ft.declarator).is(syntax_kind::lambda_expression);
         qualified_type lambda_type;
         if (lambda)
             r = lambda_specialization(ft.declarator, false, lambda_type, 0);
@@ -237,8 +236,7 @@ analysis_result semantic_analysis::instantiate_definition(node_index at,
                          (static_cast<bool>(
                              trailing_constraint(ft.declaration)))]
                     .function_body());
-    } else if (syntax(syntax_child::node(ft.definition))
-                   .is(syntax_kind::lambda_expression)) {
+    } else if (syntax(ft.definition).is(syntax_kind::lambda_expression)) {
         /* a generic lambda's ([expr.prim.lambda.closure]/3) */
         qualified_type type;
         r = lambda_specialization(ft.definition, true, type,
