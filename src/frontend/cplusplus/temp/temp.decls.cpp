@@ -1641,11 +1641,12 @@ semantic_analysis::class_template_definition(node_index n, node_index specifier)
         head_name.bits &&
         syntax_is(tree, head_name, syntax_kind::simple_template_id);
     analysis_result r = template_head_parameters(
-        n, parameters, true, specialization, specialization, specialization);
+        n, parameters, true, true, specialization, specialization);
     if (r != analysis_result::well_formed)
         return r;
     /* a partial specialization's requires-clause is checked where it is
-       matched (matching_specialization); the primary's are not analysed */
+       matched (matching_specialization); the primary's where a
+       specialization is named (template_type) */
     if (specialization) {
         return class_specialization_definition(n, specifier, parameters);
     }
@@ -1674,10 +1675,13 @@ semantic_analysis::class_template_definition(node_index n, node_index specifier)
         !function_templates[declared - 1].definition &&
         !function_templates[declared - 1].primary) {
         const function_template d = function_templates[declared - 1];
+        /* [temp.over.link]/6: the same template-head, its requires-clause
+           equivalent (/7) */
         if (entity_table[d.entity].enclosing != outer ||
             d.parameter_count != parameters.size() ||
             !same_template_parameters(first, d.first_parameter,
-                                      d.parameter_count))
+                                      d.parameter_count) ||
+            !same_constraints(d.declaration, n))
             return not_supported(n, "temp.class");
         /* [temp.param]/12: "A template-parameter shall not be given
            default arguments by two different declarations in the same
@@ -2182,6 +2186,23 @@ analysis_result semantic_analysis::template_type(node_index id,
                                         arguments);
         return analysis_result::well_formed;
     }
+    /* [temp.names]/8: "When the template-name of a simple-template-id
+       names a constrained non-function template ... the constraints of
+       that template shall be satisfied" ([temp.constr.decl]/3: its
+       requires-clause) */
+    if (head_constraint(function_templates[ct - 1].declaration).bits) {
+        bool satisfied = true;
+        analysis_result s =
+            template_constraints_satisfied(ct, arguments, satisfied);
+        if (s != analysis_result::well_formed)
+            return s;
+        if (!satisfied && substituting)
+            return analysis_result::ill_formed;
+        if (!satisfied)
+            return ill_formed(id,
+                              "the template's constraints are not satisfied",
+                              "temp.names");
+    }
     entity_index c = 0;
     analysis_result r = instantiate_class(
         id, ct, &arguments[0], static_cast<uint32_t>(arguments.size()), c);
@@ -2421,7 +2442,8 @@ semantic_analysis::class_template_declaration(node_index n,
     if (key != standard_keyword::class_ && key != standard_keyword::struct_)
         return not_supported(n, "temp.class");
     owned_array<node_index> parameters;
-    analysis_result r = template_head_parameters(n, parameters, true);
+    /* [temp.pre]/9: a requires-clause in its template-head */
+    analysis_result r = template_head_parameters(n, parameters, true, true);
     if (r != analysis_result::well_formed)
         return r;
     uint32_t name = tokens.identifier(parts[1].index());
@@ -2444,7 +2466,8 @@ semantic_analysis::class_template_declaration(node_index n,
         if (entity_table[d.entity].enclosing != outer ||
             d.parameter_count != parameters.size() ||
             !same_template_parameters(first, d.first_parameter,
-                                      d.parameter_count))
+                                      d.parameter_count) ||
+            !same_constraints(d.declaration, n))
             return not_supported(n, "temp.class");
         for (node_index x : parameters)
             if (template_parameter_has_default(x))
