@@ -70,6 +70,7 @@ semantic_analysis::instantiate(node_index at, entity_index template_entity,
         expanding = false;
         specified s;
         declarator_meaning m;
+        placeholder_allowed = true;
         analysis_result r = decl_specifier_seq(d[0].index(), s, false);
         qualified_type type = s.type;
         if (r == analysis_result::well_formed) {
@@ -130,11 +131,19 @@ semantic_analysis::instantiate(node_index at, entity_index template_entity,
     if (!specialization)
         return not_supported(at, "temp.inst");
     instantiation_record &x = instantiations[index];
-    if (!needed || x.defined || x.pending || x.defining)
+    /* [dcl.spec.auto]/12: "Return type deduction for a templated function
+       with a placeholder in its declared type occurs when the definition
+       is instantiated even if the function body contains a return
+       statement with a non-type-dependent operand"; a use of a
+       specialization whose return type is not deduced yet instantiates
+       its definition there, in an unevaluated operand too */
+    bool deducing = contains_placeholder(
+        type_table[entity_table[specialization].type.unqualified()].operand);
+    if (x.defined || x.defining || (!deducing && (!needed || x.pending)))
         return analysis_result::well_formed;
     /* (a template declared, not yet defined: its definition may come
        later, [temp.point]/7) */
-    if (!t.constexpr_ || !ft.definition) {
+    if ((!t.constexpr_ && !deducing) || !ft.definition) {
         x.pending = true;
         pending_definitions.append(index);
         return analysis_result::well_formed;

@@ -2455,6 +2455,7 @@ class semantic_analysis
     analysis_result noexcept_specifier(node_index n, bool member,
                                        bool &non_throwing);
     /* ... with the function_parameters in scope ([basic.scope.param]) */
+    void open_parameter_scope();
     analysis_result parameter_scope_noexcept(node_index n, bool member,
                                              bool &non_throwing);
     /* the noexcept-specifiers left value-dependent in templates' own
@@ -3798,6 +3799,9 @@ class semantic_analysis
     syntax_child template_constraint(entity_index t) const;
     entity_index constraint_parameter(entity_index t, token_index i) const;
     entity_index constraint_concept(entity_index t, token_index i) const;
+    /* [abi:mangle.function-param]: the position plus one of function
+       template t's parameter named by token i (0: none) */
+    uint32_t function_parameter_position(entity_index t, token_index i) const;
     bool punctuator_is(syntax_child c, preprocessing_op_or_punc op) const
     {
         return syntax_is_punctuator(tokens, c, op);

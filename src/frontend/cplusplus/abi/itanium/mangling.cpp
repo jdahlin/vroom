@@ -109,6 +109,9 @@ class itanium_mangler
         entity_index scope = 0;
     };
     owned_array<candidate> candidates;
+    /* the function template whose specialization's encoding is being
+       mangled: what its function parameters' names are */
+    entity_index encoding_template = 0;
     void add_candidate(qualified_type t)
     {
         candidate c;
@@ -133,6 +136,7 @@ class itanium_mangler
     bool encoding(entity_index e);
     bool specialization_encoding(entity_index e);
     bool constraint_expression(entity_index t, syntax_child c);
+    bool dependent_expression(syntax_child c);
     bool punctuator(syntax_child c, preprocessing_op_or_punc op) const
     {
         return analysis.punctuator_is(c, op);
@@ -327,6 +331,7 @@ bool itanium_mangler::specialization_encoding(entity_index e)
     if (table[e].kind == entity_kind::variable)
         return true;
     qualified_type pattern = table[pattern_of].type;
+    encoding_template = pattern_of;
     return type(record(pattern).operand) && bare_function_type(pattern);
 }
 
@@ -408,6 +413,78 @@ bool itanium_mangler::constraint_expression(entity_index t, syntax_child c)
     default:
         return false;
     }
+}
+
+/*
+ * [abi:expressions] of a decltype-specifier's type-dependent operand in a
+ * function template's declarator (encoding_template), as far as it is
+ * written with its function parameters, class member accesses and calls:
+ *
+ *     <expression> ::= cl <expression>+ E
+ *                  ::= dt <expression> <unresolved-name>
+ *                  ::= pt <expression> <unresolved-name>
+ *                  ::= <function-param>
+ *
+ * [abi:mangle.function-param]:
+ *
+ *     <function-param> ::= fp <top-level CV-qualifiers> _
+ *                      ::= fp <top-level CV-qualifiers> <parameter-2 non-negative number> _
+ *
+ * the member's <unresolved-name> its <source-name>.  Anything else: not
+ * mangled yet.
+ */
+bool itanium_mangler::dependent_expression(syntax_child c)
+{
+    if (c.is_token()) {
+        uint32_t position =
+            analysis.function_parameter_position(encoding_template, c.index());
+        if (!position)
+            return false;
+        text("fp");
+        if (position > 1)
+            number(position - 2);
+        text("_");
+        return true;
+    }
+    const syntax_tree &tree = analysis.syntax();
+    const syntax_node &node = tree[c.index()];
+    const syntax_child *parts = tree.children(c.index());
+    if (node.kind != syntax_kind::postfix_expression || node.child_count < 3)
+        return false;
+    bool arrow = punctuator(parts[1], preprocessing_op_or_punc::ARROW);
+    if (node.child_count == 3 &&
+        (arrow || punctuator(parts[1], preprocessing_op_or_punc::DOT)) &&
+        parts[2].is_token()) {
+        if (arrow)
+            text("pt");
+        else
+            text("dt");
+        return dependent_expression(parts[0]) &&
+               source_name(analysis.token_identifier(parts[2].index()));
+    }
+    if (!punctuator(parts[1], preprocessing_op_or_punc::LEFT_PARENTHESIS) ||
+        !punctuator(parts[node.child_count - 1],
+                    preprocessing_op_or_punc::RIGHT_PARENTHESIS) ||
+        node.child_count > 4)
+        return false;
+    text("cl");
+    if (!dependent_expression(parts[0]))
+        return false;
+    if (node.child_count == 4) {
+        syntax_child a = parts[2];
+        if (!a.is_token() &&
+            tree[a.index()].kind == syntax_kind::initializer_list) {
+            for (uint32_t i = 0; i < tree[a.index()].child_count; i++) {
+                syntax_child x = tree.children(a.index())[i];
+                if (!punctuator(x, preprocessing_op_or_punc::COMMA) &&
+                    !dependent_expression(x))
+                    return false;
+            }
+        } else if (!dependent_expression(a))
+            return false;
+    }
+    text("E");
+    return true;
 }
 
 /*
@@ -1590,6 +1667,19 @@ bool itanium_mangler::type(qualified_type t)
     }
     if (r.kind == type_kind::fundamental && !t.cv())
         return builtin_type(r.fundamental);
+    if (r.kind == type_kind::placeholder && !t.cv()) {
+        /* [abi:mangling-builtin]: a template's declared return type
+           auto or decltype(auto), a builtin type:
+
+               <builtin-type> ::= Da
+                              ::= Dc
+        */
+        if (r.entity == 2)
+            text("Dc");
+        else
+            text("Da");
+        return true;
+    }
     if (substitution(t))
         return true;
     bool done = false;
@@ -1649,6 +1739,21 @@ bool itanium_mangler::type(qualified_type t)
                 static_cast<uint32_t>(operand >> 32)));
             text("E");
         }
+    } else if (r.kind == type_kind::dependent &&
+               analysis.entity_table[r.entity].kind ==
+                   entity_kind::dependent_written) {
+        /* [abi:mangle.decltype]: decltype of a type-dependent expression,
+
+               <decltype> ::= DT <expression> E
+
+           the decltype-specifier's operand */
+        node_index n =
+            static_cast<node_index>(analysis.entity_table[r.entity].value);
+        const syntax_tree &tree = analysis.syntax();
+        text("DT");
+        done = tree[n].child_count == 4 && encoding_template &&
+               dependent_expression(tree.children(n)[2]);
+        text("E");
     } else if (r.kind == type_kind::class_type ||
                r.kind == type_kind::enumeration ||
                r.kind == type_kind::dependent)

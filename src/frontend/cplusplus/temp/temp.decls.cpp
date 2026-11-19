@@ -234,6 +234,9 @@ analysis_result semantic_analysis::function_template_declarator(
     size_t uses_before = name_uses.size();
     entity_index outer = current_scope;
     current_scope = scope;
+    /* [dcl.spec.auto]/3: a declared return type with a placeholder,
+       deduced per specialization (instantiate) */
+    placeholder_allowed = true;
     analysis_result r = decl_specifier_seq(dc[0].index(), s, false);
     for (uint32_t i = 0; i < lead && r == analysis_result::well_formed; i++)
         r = gnu_attribute_specifier(tree.children(definition)[i].index(), s);

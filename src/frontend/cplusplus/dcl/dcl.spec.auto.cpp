@@ -7,14 +7,14 @@
  * placeholder type that will be replaced later by deduction from an
  * initializer."  Analysed: a variable's declaration with an initializer
  * (/4, /7), a function's declared return type deduced from its return
- * statements (/3, /8, /9, /11), auto before a trailing-return-type
+ * statements (/3, /8, /9, /11; a function template's per specialization,
+ * /12), auto before a trailing-return-type
  * (dcl.meaning.cpp), and decltype(auto) ([dcl.type.auto.deduct]/5).
  *
  * Not analysed: a generic parameter type placeholder (/2), a placeholder in
  * a new-expression or a template-parameter (/5), a type-constraint
  * ([dcl.type.auto.deduct]/6), copy-list-initialization (std::initializer_list,
- * [dcl.type.auto.deduct]/4), a member function's or a function template's
- * deduced return type, and a redeclaration of a function whose declared
+ * [dcl.type.auto.deduct]/4), a member function's deduced return type, and a redeclaration of a function whose declared
  * return type has a placeholder (/13).
  */
 #include "../cplusplus-internal.h"
@@ -447,9 +447,9 @@ analysis_result semantic_analysis::undeduced_use(token_index t, entity_index e)
  * noexcept_opt function of parameter-type-list cv-qualifier-seq_opt
  * ref-qualifier_opt returning U", where ... U is the type specified by the
  * trailing-return-type".  Analysed when the derived-declarator-type-list is
- * empty (D1 is the declarator-id and its parameters) and the
- * trailing-return-type names none of the parameters (whose scope it is in,
- * [basic.scope.param]/1).
+ * empty (D1 is the declarator-id and its parameters), the
+ * trailing-return-type in the scope of the parameters
+ * ([basic.scope.param]/1).
  */
 analysis_result semantic_analysis::trailing_return(node_index declaration,
                                                    node_index n,
@@ -473,15 +473,6 @@ analysis_result semantic_analysis::trailing_return(node_index declaration,
     if (f.kind != type_kind::function || !(f.operand == auto_type))
         return not_supported(n, "dcl.fct");
     node_index trailing = children[1].index();
-    for (token_index t = tree[trailing].first_token;
-         t < tree[trailing].end_token; t++) {
-        if (tokens[t].kind != token_kind::identifier)
-            continue;
-        for (const parameter_meaning &parameter : function_parameters)
-            if (parameter.id &&
-                tokens.identifier(parameter.id) == tokens.identifier(t))
-                return not_supported(n, "basic.scope.param");
-    }
     if (tree[trailing].child_count != 2 ||
         !syntax_is(tree, tree.children(trailing)[1], syntax_kind::type_id))
         return not_supported(n, "dcl.fct");
@@ -492,7 +483,10 @@ analysis_result semantic_analysis::trailing_return(node_index declaration,
         parameters.append(parameter);
     uint32_t cv = function_cv, empty_pack = function_empty_pack;
     qualified_type returned;
+    entity_index outer = current_scope;
+    open_parameter_scope();
     r = type_id(tree.children(trailing)[1].index(), returned);
+    current_scope = outer;
     function_parameters.clear();
     for (const parameter_meaning &parameter : parameters)
         function_parameters.append(parameter);

@@ -376,6 +376,48 @@ entity_index semantic_analysis::constraint_parameter(entity_index t,
     return 0;
 }
 
+/* the function parameter of function template t's declarator whose name
+   token i spells: its position plus one (0: none); the parameters of the
+   first parameters-and-qualifiers outside the trailing-return-type */
+uint32_t semantic_analysis::function_parameter_position(entity_index t,
+                                                        token_index i) const
+{
+    uint32_t ft = template_record(t);
+    uint32_t name = tokens.identifier(i);
+    if (!ft || !name)
+        return 0;
+    node_index d = function_templates[ft - 1].declarator;
+    owned_array<syntax_child> work;
+    work.append(tree.children(d)[leading_gnu_attributes(d) + 1]);
+    uint32_t position = 0;
+    bool inside = false;
+    /* (depth first, children in order: the parameters in theirs) */
+    while (work.size()) {
+        syntax_child c = work[work.size() - 1];
+        work.resize(work.size() - 1);
+        if (c.is_token() ||
+            syntax_is(tree, c, syntax_kind::trailing_return_type))
+            continue;
+        if (syntax_is(tree, c, syntax_kind::parameter_declaration)) {
+            position++;
+            for (uint32_t j = 1; j < tree[c.index()].child_count; j++) {
+                token_index id = declarator_id(tree.children(c.index())[j]);
+                if (id && tokens.identifier(id) == name)
+                    return position;
+            }
+            continue;
+        }
+        bool clause =
+            syntax_is(tree, c, syntax_kind::parameters_and_qualifiers);
+        if (clause && inside)
+            continue;
+        inside |= clause;
+        for (uint32_t j = tree[c.index()].child_count; j > 0; j--)
+            work.append(tree.children(c.index())[j - 1]);
+    }
+    return 0;
+}
+
 entity_index semantic_analysis::constraint_concept(entity_index t,
                                                    token_index i) const
 {

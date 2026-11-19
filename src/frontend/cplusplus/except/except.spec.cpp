@@ -151,6 +151,41 @@ analysis_result semantic_analysis::noexcept_specifier(node_index n, bool member,
 }
 
 /*
+ * [basic.scope.param]/1: a scope of its own, made current, where the
+ * parameters of function_parameters are bound (a pack's elements as one
+ * bound pack): what a declarator names after its
+ * parameter-declaration-clause (a noexcept-specifier, a
+ * trailing-return-type) finds them.
+ */
+void semantic_analysis::open_parameter_scope()
+{
+    entity_index scope = open_scope(0, true);
+    owned_array<entity_index> pack;
+    uint32_t pack_name = 0;
+    for (const parameter_meaning &parameter : function_parameters) {
+        uint32_t name = parameter.pack_name;
+        if (!name && parameter.id)
+            name = tokens.identifier(parameter.id);
+        if (!name)
+            continue;
+        entity_index e = entity_table.make(entity_kind::variable, name, scope);
+        entity_table[e].type = parameter.type;
+        entity_table[e].automatic = true;
+        if (parameter.pack_name) {
+            pack.append(e);
+            pack_name = parameter.pack_name;
+        } else if (!entity_table.find(scope, name)) {
+            entity_table.bind(scope, name, e);
+        }
+    }
+    if (!pack_name && function_empty_pack)
+        make_bound_pack(scope, function_empty_pack, nullptr, 0);
+    if (pack_name && !entity_table.find(scope, pack_name))
+        make_bound_pack(scope, pack_name, pack.data(),
+                        static_cast<uint32_t>(pack.size()));
+}
+
+/*
  * [basic.scope.param]/1: "A function parameter (including one appearing in
  * a lambda-declarator) or function-local predefined variable
  * ([dcl.fct.def]) introduces a name in a function parameter scope", whose
@@ -176,30 +211,7 @@ analysis_result semantic_analysis::parameter_scope_noexcept(node_index n,
     if (node.child_count != 4 || member)
         return noexcept_specifier(n, member, non_throwing);
     entity_index outer = current_scope;
-    entity_index scope = open_scope(0, true);
-    owned_array<entity_index> pack;
-    uint32_t pack_name = 0;
-    for (const parameter_meaning &parameter : function_parameters) {
-        uint32_t name = parameter.pack_name;
-        if (!name && parameter.id)
-            name = tokens.identifier(parameter.id);
-        if (!name)
-            continue;
-        entity_index e = entity_table.make(entity_kind::variable, name, scope);
-        entity_table[e].type = parameter.type;
-        entity_table[e].automatic = true;
-        if (parameter.pack_name) {
-            pack.append(e);
-            pack_name = parameter.pack_name;
-        } else if (!entity_table.find(scope, name)) {
-            entity_table.bind(scope, name, e);
-        }
-    }
-    if (!pack_name && function_empty_pack)
-        make_bound_pack(scope, function_empty_pack, nullptr, 0);
-    if (pack_name && !entity_table.find(scope, pack_name))
-        make_bound_pack(scope, pack_name, pack.data(),
-                        static_cast<uint32_t>(pack.size()));
+    open_parameter_scope();
     analysis_result r = analysis_result::well_formed;
     if (!instantiating && !class_instantiating && !substituting &&
         names_dependent_entity(node.first_token, node.end_token))
