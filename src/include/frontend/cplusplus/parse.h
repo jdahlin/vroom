@@ -1303,6 +1303,18 @@ class parser
     /* the last name of the last nested-name-specifier parsed, before its
        template-argument-list if any ([class.qual]/2) */
     uint32_t last_qualifier_name = 0;
+    /* [temp.expl.spec]/1: the region of each explicit specialization of a
+       class template defined so far, with the tokens of its template-id:
+       an out-of-class member definition's declarator-id C<args>::m names a
+       member of that class, not of the primary template ([class.mfct]/1) */
+    struct specialization_region {
+        scope_index primary;
+        scope_index region;
+        token_index first;
+        token_index end;
+    };
+    owned_array<specialization_region> specialization_regions;
+    bool same_template_id(token_index a, token_index b, token_index length);
     bool abstract_pack_follows();
     /* the token ends a template-argument-list: '>', or '>>', '>=', '>>='
        of which the first '>' does ([temp.names]/3) */

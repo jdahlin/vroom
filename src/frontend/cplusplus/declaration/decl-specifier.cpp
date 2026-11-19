@@ -828,6 +828,8 @@ node_index parser::elaborated_or_class_specifier(decl_specifier_facts &facts)
     }
     uint32_t name = 0;
     bool template_id = false;
+    scope_index primary = 0;
+    token_index template_id_first = 0;
     if (qualifier)
         accept(standard_keyword::template_);
     if (at_identifier()) {
@@ -844,9 +846,9 @@ node_index parser::elaborated_or_class_specifier(decl_specifier_facts &facts)
             if (!qualifier || known) {
                 name_kind kind;
                 if (qualifier)
-                    kind = names.lookup_qualified(scope, name);
+                    kind = names.lookup_qualified(scope, name, &primary);
                 else
-                    kind = names.lookup_unqualified(name);
+                    kind = names.lookup_unqualified(name, &primary);
                 if (kind != name_kind::template_name)
                     return violates("a class template's name before the "
                                     "template-argument-list",
@@ -857,6 +859,7 @@ node_index parser::elaborated_or_class_specifier(decl_specifier_facts &facts)
             if (failed())
                 return 0;
             template_id = true;
+            template_id_first = id_first;
         }
     } else if (qualifier) {
         return expected("an identifier after the nested-name-specifier",
@@ -910,6 +913,9 @@ node_index parser::elaborated_or_class_specifier(decl_specifier_facts &facts)
         if (!at(preprocessing_op_or_punc::LEFT_BRACE))
             return expected("'{' to begin the member-specification",
                             "class.pre");
+        if (template_id && explicit_declaration && primary)
+            specialization_regions.append(
+                {primary, region, template_id_first, position});
         class_body(name, region, template_id);
         if (failed())
             return 0;

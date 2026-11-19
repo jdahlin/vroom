@@ -97,6 +97,20 @@ static unsigned nested_component_length(parser &p, bool qualified, bool known,
     return end;
 }
 
+bool parser::same_template_id(token_index a, token_index b, token_index length)
+{
+    if (b + length > position)
+        return false;
+    for (token_index i = 0; i < length; i++) {
+        owned_buffer x, y;
+        tokens.spelling(a + i, x.get());
+        tokens.spelling(b + i, y.get());
+        if (x.size() != y.size() || memcmp(x.data(), y.data(), x.size()))
+            return false;
+    }
+    return true;
+}
+
 node_index parser::nested_name_specifier(scope_index *scope, bool *known,
                                          bool template_ids)
 {
@@ -177,6 +191,16 @@ node_index parser::nested_name_specifier(scope_index *scope, bool *known,
             *scope = found;
             if (arguments_dependent && !names.encloses_current(found))
                 qualifier_dependent = true;
+            /* [temp.expl.spec]/7: an explicit specialization has its own
+               members: those of the one these arguments name */
+            for (size_t i = specialization_regions.size(); i-- > 0;) {
+                const specialization_region &r = specialization_regions[i];
+                if (r.primary == found &&
+                    same_template_id(r.first, id_first, r.end - r.first)) {
+                    *scope = r.region;
+                    break;
+                }
+            }
         } else if ((kind == name_kind::type_name ||
                     kind == name_kind::template_name) &&
                    found && names.kind_of(found) == scope_kind::class_ &&
