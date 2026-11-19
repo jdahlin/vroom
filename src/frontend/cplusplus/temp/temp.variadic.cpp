@@ -249,9 +249,16 @@ analysis_result semantic_analysis::parameter_pack_expansion(
     elements = 0;
     ellipsis = 0;
     token_index first = tree[d].first_token, end = tree[d].end_token;
+    /* [dcl.fct]/21: the ellipsis of a function parameter pack is the
+       declarator's; one in the decl-specifier-seq is a template
+       argument's (tuple<Ts...>&) */
+    token_index from = first;
+    if (tree[d].child_count &&
+        syntax_is(tree, tree.children(d)[0], syntax_kind::decl_specifier_seq))
+        from = tree[tree.children(d)[0].index()].end_token;
     token_index found = 0;
     uint32_t ellipses = 0;
-    for (token_index t = first; t < end; t++)
+    for (token_index t = from; t < end; t++)
         if (token_is(tokens, t, preprocessing_op_or_punc::ELLIPSIS)) {
             found = t;
             ellipses++;

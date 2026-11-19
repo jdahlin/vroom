@@ -94,10 +94,11 @@ analysis_result semantic_analysis::template_declaration(node_index n)
             /* [temp.fct]/1: a function template's declaration
                (template<class T> T f(T);), one declarator not in an
                init-declarator-list */
-            if (d.child_count == 3 &&
-                (syntax_is(tree, tree.children(inner)[1],
+            uint32_t gnu = leading_gnu_attributes(inner);
+            if (d.child_count == 3 + gnu &&
+                (syntax_is(tree, tree.children(inner)[1 + gnu],
                            syntax_kind::noptr_declarator) ||
-                 syntax_is(tree, tree.children(inner)[1],
+                 syntax_is(tree, tree.children(inner)[1 + gnu],
                            syntax_kind::ptr_declarator)))
                 return function_template_definition(n, inner);
             return not_supported(n, "temp.class");
@@ -364,17 +365,24 @@ semantic_analysis::function_template_definition(node_index n,
         bool pack = packs == 1;
         const struct type ft = type_table[type.unqualified()];
         const qualified_type *list = type_table.parameters(type.unqualified());
-        /* the return type: the pack named only in pack expansions
-           (res<A...>), each name of it followed by ... */
+        uint32_t pack_name = 0;
+        if (pack)
+            pack_name =
+                entity_table[template_parameter_entities[first + last]].name;
+        /* the return type and the parameters' types: the pack named only
+           in pack expansions (res<A...>, tuple<A...>&), each name of it
+           followed by ... */
         if (pack && depends(type_table, ft.operand, &entity_table, last) &&
-            !pack_only_expanded(
-                entity_table[template_parameter_entities[first + last]].name,
-                tree[dc[0].index()].first_token, tree[dc[0].index()].end_token))
+            !pack_only_expanded(pack_name, tree[dc[0].index()].first_token,
+                                tree[dc[0].index()].end_token))
             return not_supported(n, "temp.variadic");
         for (uint32_t i = 0; i < ft.parameter_count; i++) {
             const struct type pt = type_table[list[i].unqualified()];
             if (pt.kind != type_kind::pack_expansion) {
-                if (pack && depends(type_table, list[i], &entity_table, last))
+                if (pack && depends(type_table, list[i], &entity_table, last) &&
+                    !pack_only_expanded(pack_name,
+                                        tree[dc[1].index()].first_token,
+                                        tree[dc[1].index()].end_token))
                     return not_supported(n, "temp.variadic");
                 continue;
             }

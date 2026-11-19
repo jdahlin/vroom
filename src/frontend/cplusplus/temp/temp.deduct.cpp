@@ -90,10 +90,15 @@ bool semantic_analysis::deduce_type(qualified_type p, qualified_type a,
            whose arguments are deduced from those of A's, a
            specialization of the same template */
         const struct type &ar = type_table[a.unqualified()];
+        /* comparing two declarations ([temp.over.link]/7), A a
+           specialization in the other's template parameters */
+        bool dependent =
+            exact && ar.kind == type_kind::dependent &&
+            entity_table[ar.entity].kind != entity_kind::dependent_member;
         /* ([temp.deduct.call]/4.1: P may be more cv-qualified) */
-        if (ar.kind != type_kind::class_type || (a.cv() & ~p.cv()) ||
-            (exact && p.cv() != a.cv()) ||
-            !entity_table[ar.entity].instantiation)
+        if ((ar.kind != type_kind::class_type && !dependent) ||
+            (a.cv() & ~p.cv()) || (exact && p.cv() != a.cv()) ||
+            (!dependent && !entity_table[ar.entity].instantiation))
             return false;
         entity_index pt = specialized_template(pr.entity);
         entity_index at = specialized_template(ar.entity);
@@ -146,8 +151,32 @@ bool semantic_analysis::deduce_type(qualified_type p, qualified_type a,
             /* /9: a pack's elements in turn, the pattern's own pack
                (Ts...) the rest */
             if (x.kind == template_argument::kind_t::pack) {
-                if (y.kind != template_argument::kind_t::pack ||
-                    !deduce_pack_argument(x, y, deduced, set))
+                if (y.kind != template_argument::kind_t::pack)
+                    return false;
+                if (dependent) {
+                    /* the two declarations' pack expansions of the
+                       parameter at the same position (Ts... and Us...) */
+                    if (x.count != y.count)
+                        return false;
+                    for (uint32_t k = 0; k < x.count; k++) {
+                        const template_argument &e =
+                            pack_arguments[x.value + k];
+                        const template_argument &f =
+                            pack_arguments[y.value + k];
+                        if (e.kind != f.kind)
+                            return false;
+                        if (e.kind == template_argument::kind_t::pack) {
+                            if (e.count != f.count || e.value != f.value)
+                                return false;
+                            continue;
+                        }
+                        if (e.kind != template_argument::kind_t::type ||
+                            !deduce_type(e.type, f.type, deduced, set, exact))
+                            return false;
+                    }
+                    continue;
+                }
+                if (!deduce_pack_argument(x, y, deduced, set))
                     return false;
                 continue;
             }
@@ -480,8 +509,12 @@ analysis_result semantic_analysis::deduce_from_call(
     }
     /* [temp.arg.explicit]/4: "A trailing template parameter pack not
        otherwise deduced will be deduced as an empty sequence of template
-       arguments." */
-    if (pack < ft.parameter_count) {
+       arguments."  One deduced from another parameter (tuple<Ts...>&)
+       keeps its arguments, which a function parameter pack's would have
+       to agree with (not analysed) */
+    if (pack < ft.parameter_count && set[pack] && !elements.empty())
+        return not_supported(at, "temp.deduct.call");
+    if (pack < ft.parameter_count && !set[pack]) {
         values[pack] =
             make_pack(elements.data(), static_cast<uint32_t>(elements.size()));
         set[pack] = true;
