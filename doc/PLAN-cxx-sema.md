@@ -758,6 +758,8 @@ libstdc++ and json), since sema cannot analyse a declaration kept as tokens.
   against /1 (an empty string-literal), /2 (a namespace-scope function),
   /3 (the parameter-declaration-clauses, no default argument) and /6 (no C
   language linkage); it mangles as `li <source-name>`.  A
+  suffixes without a leading underscore ([usrlit.suffix]/1, the standard
+  library's `operator""h`, `""sv`) are accepted, as clang warns only.  A
   user-defined-literal ([lex.ext]) is a call of the operator unqualified
   lookup finds: an integer literal's with parameter unsigned long long
   (/3), a character literal's with the type of ch (/6), a string literal's
