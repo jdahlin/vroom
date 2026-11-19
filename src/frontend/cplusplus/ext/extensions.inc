@@ -95,6 +95,9 @@ EXTENSION(clang_no_operator_names, clang,
 EXTENSION(clang_atomic, clang,
           "clang Language Extensions, C11 _Atomic in C++: _Atomic(T) a type with C11's "
           "atomic type's layout (C23 6.2.5)")
+EXTENSION(clang_availability, clang,
+          "clang Attributes, availability: availability(platform, introduced=version, ...), "
+          "a version a pp-number such as 10.12.1")
 EXTENSION(clang_bit_cast, clang,
           "clang Language Extensions: __builtin_bit_cast (type, expression), "
           "std::bit_cast ([bit.cast]) as a primitive")

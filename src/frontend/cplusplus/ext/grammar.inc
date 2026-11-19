@@ -73,6 +73,20 @@ PRODUCTION(gnu_attributes, "named-namespace-definition",
 PRODUCTION(gnu_attributes, "unnamed-namespace-definition",
            "inline_opt namespace attribute-specifier-seq_opt gnu-attribute-specifier-seq { namespace-body }")
 
+/* clang Attributes, availability: a gnu-attribute whose identifier is
+   availability (or __availability__), in any gnu-attribute-list (which
+   these rows cannot say: an extension adds no alternative to another's
+   nonterminal) */
+PRODUCTION(clang_availability, "attribute-specifier", "__attribute__ ( ( clang-availability-attribute ) )")
+PRODUCTION(clang_availability, "clang-availability-attribute",
+           "identifier ( identifier , clang-availability-clause-list )")
+PRODUCTION(clang_availability, "clang-availability-clause-list", "clang-availability-clause")
+PRODUCTION(clang_availability, "clang-availability-clause-list",
+           "clang-availability-clause-list , clang-availability-clause")
+PRODUCTION(clang_availability, "clang-availability-clause", "identifier")
+PRODUCTION(clang_availability, "clang-availability-clause", "identifier = pp-number")
+PRODUCTION(clang_availability, "clang-availability-clause", "identifier = string-literal")
+
 /* ---- GCC manual 6.47.4, Controlling Names Used in Assembler Code ---- */
 
 PRODUCTION(gnu_asm_labels, "gnu-asm-label", "asm ( string-literal )")

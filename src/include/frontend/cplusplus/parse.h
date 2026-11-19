@@ -863,6 +863,8 @@ class parser
     bool at_gnu_attribute(unsigned ahead = 0);
     node_index gnu_attribute_specifier();
     node_index gnu_attributes_opt();
+    bool at_availability();
+    node_index clang_availability_arguments();
     bool standard_attributes_first = false;
     /* ---- ext/gnu/extension_keyword.cpp: __extension__ before a
        declaration (alternative parses what follows) or an expression */

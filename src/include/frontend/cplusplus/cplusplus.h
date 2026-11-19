@@ -262,6 +262,9 @@ class diagnostic_consumer
                                  diagnostic_severity severity);
     void push_mappings();
     bool pop_mappings();
+    /* the messages from the first count on taken back, as if never
+       issued */
+    void discard_since(size_t count);
 
     /* a diagnostic message to which the caller adds the arguments; a
        message that maps to "ignored" is discarded when the next is issued */
