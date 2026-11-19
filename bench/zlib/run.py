@@ -247,7 +247,10 @@ def wbuild_configure(b, vccd):
             sys.exit(f'vccd: configure failed, see {b}/cfg.log')
     with open(os.path.join(b, 'build.log'), 'w') as log:
         # (infcover's rule links with $(CFLAGS), not $(LDFLAGS): its object first, then the link alone)
-        if subprocess.run(['make', '-j6', 'libz.a', 'example.exe', 'minigzip.exe', 'infcover.o', 'LDFLAGS=-v -Wl,-Map=$@.map'],
+        # (the links run one at a time: under -j their -v lines can interleave in build.log)
+        if subprocess.run(['make', '-j6', 'libz.a', 'infcover.o'], cwd=b, env=env, stdout=log,
+                          stderr=subprocess.STDOUT).returncode or \
+           subprocess.run(['make', 'example.exe', 'minigzip.exe', 'LDFLAGS=-v -Wl,-Map=$@.map'],
                           cwd=b, env=env, stdout=log, stderr=subprocess.STDOUT).returncode or \
            subprocess.run(['make', 'infcover', 'CFLAGS=-O2 -v -Wl,-Map=infcover.exe.map'],
                           cwd=b, env=env, stdout=log, stderr=subprocess.STDOUT).returncode:
