@@ -1784,9 +1784,17 @@ VPRIV bool walk_call_can_inline(codegen_context *e, uint32_t s, uint32_t call)
         codegen_function_prepass_request(e, s);
         if (e->unit->function_node_counts[s] > lim)
             return false; /* (a tiny static function too, as clang: an empty stub drops its arguments) */
+        /* (VIR's instance, under WALK_PREFIX, accepts crc32q's asm: walk.h is included once
+           in the unity build, so this is tested here, not through a macro of walk.h) */
+#ifdef WALK_PREFIX
         if (!(y->flags & AST_SYMBOL_FLAG_INLINE) &&
-            !codegen_statement_is_tiny(c, y->body, WALK_IS_VIR))
+            !codegen_statement_is_tiny(c, y->body, true))
             return false;
+#else
+        if (!(y->flags & AST_SYMBOL_FLAG_INLINE) &&
+            !codegen_statement_is_tiny(c, y->body, false))
+            return false;
+#endif
     }
     codegen_function_walk_ensure(e->unit, c, s);
     if (e->unit->symbol_flags[s] & CODEGEN_SYMBOL_NO_INLINE)

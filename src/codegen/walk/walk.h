@@ -22,13 +22,6 @@
 #ifndef VCC_CODEGEN_WALK_H
 #define VCC_CODEGEN_WALK_H
 #include "prefix.h" /* generated (src/tools/gen-walkprefix.py): WALK_PREFIX renames the walker's functions; first, so that codegen-internal.h's wk_ prototypes are renamed too */
-
-/* compiled for VIR's builder (WALK_PREFIX) or for a CPU */
-#ifdef WALK_PREFIX
-#define WALK_IS_VIR true
-#else
-#define WALK_IS_VIR false
-#endif
 #include "../codegen-internal.h"
 #include "../rec/record.h"
 
