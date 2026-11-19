@@ -501,6 +501,7 @@ analysis_result semantic_analysis::declare_specialization(
         entity_table[e].linkage_of_name = linkage::internal;
     entity_table[e].inline_ = true;
     entity_table[e].constexpr_ = t.constexpr_;
+    entity_table[e].immediate = t.immediate;
     entity_table[e].operator_function = t.operator_function;
     entity_table[e].implemented = t.implemented;
     entity_table[e].instantiation = index + 1;

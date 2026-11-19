@@ -3519,6 +3519,9 @@ uint32_t c_lowering::expression(uint32_t index)
                     AST_NODE_FLAG_LVALUE);
     }
     case semantic_kind::call:
+        /* [expr.const]/13: an immediate invocation is its value */
+        if (n.evaluation == constness::constant)
+            return constant(n);
         return call(n);
     case semantic_kind::subscript: {
         uint32_t a = expression(n.a), b = expression(n.b);

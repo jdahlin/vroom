@@ -355,6 +355,10 @@ struct entity {
     uint64_t value = 0;
     /* [dcl.constexpr]/1 */
     bool constexpr_ = false;
+    /* [dcl.constexpr]/2: "A function or function template declared with
+       the consteval specifier is called an immediate function" (also
+       constexpr_ and inline_) */
+    bool immediate = false;
     /* [dcl.inline]: an inline function or variable; [namespace.def]/7: an
        inline namespace */
     bool inline_ = false;
@@ -1571,6 +1575,8 @@ class semantic_analysis
         bool has_type = false;
         bool typedef_ = false, static_ = false, extern_ = false,
              inline_ = false, constexpr_ = false, virtual_ = false;
+        /* [dcl.constexpr]/2: consteval (constexpr_ too) */
+        bool consteval_ = false;
         /* [class.friend]: the friend specifier (only where friend_allowed) */
         bool friend_ = false;
         /* [class.conv.fct]/2: explicit (only where explicit_allowed) */
@@ -2326,6 +2332,7 @@ class semantic_analysis
        function it returns */
     /* [expr.call]/14: a call's type and category from its result type */
     void call_result(qualified_type result, expression_meaning &m) const;
+    analysis_result immediate_invocation(node_index n, expression_meaning &m);
     analysis_result closure_conversion(entity_index c, entity_index call,
                                        node_index n);
     /* [expr.prim.paren] */

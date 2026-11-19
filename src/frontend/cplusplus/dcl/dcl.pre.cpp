@@ -1139,6 +1139,13 @@ analysis_result semantic_analysis::declare_with_initializer(
        function type pointed to */
     if ((gnu_flags & gnu_noreturn) && kind != entity_kind::function)
         return not_supported(declaration, "ext.gnu");
+    /* [dcl.constexpr]/2: consteval only on a function */
+    if (s.consteval_ && kind != entity_kind::function)
+        return ill_formed(declaration,
+                          "the consteval specifier shall be applied only to "
+                          "the declaration of a function or function "
+                          "template",
+                          "dcl.constexpr");
     if (s.constexpr_ && kind == entity_kind::variable) {
         /* [dcl.constexpr]/10: "A constexpr specifier used in an object
            declaration declares the object as const.  Such an object shall
