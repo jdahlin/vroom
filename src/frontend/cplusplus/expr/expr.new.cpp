@@ -189,7 +189,7 @@ node_index parser::new_declarator()
  */
 analysis_result semantic_analysis::new_type_id(node_index n,
                                                qualified_type &type,
-                                               syntax_child &bound)
+                                               SyntaxElement &bound)
 {
     auto node = syntax(n);
     if (!node.size() || node.size() > 2 ||
@@ -204,7 +204,7 @@ analysis_result semantic_analysis::new_type_id(node_index n,
     type = s.type;
     if (node.size() == 1)
         return analysis_result::well_formed;
-    syntax_child d = node[1];
+    SyntaxElement d = node[1];
     for (;;) {
         if (syntax(d).is(syntax_kind::noptr_new_declarator)) {
             auto bounds = syntax(d);
@@ -287,11 +287,11 @@ analysis_result semantic_analysis::new_expression(node_index n,
         i++;
     }
     i++; /* new */
-    syntax_child placement{};
+    SyntaxElement placement{};
     if (i < count && node[i].is(syntax_kind::new_placement))
         placement = node[i++];
     qualified_type type;
-    syntax_child bound{};
+    SyntaxElement bound{};
     analysis_result r = analysis_result::well_formed;
     if (i < count && node[i].is(syntax_kind::new_type_id)) {
         r = new_type_id(node[i++].index(), type, bound);
@@ -303,7 +303,7 @@ analysis_result semantic_analysis::new_expression(node_index n,
     }
     if (r != analysis_result::well_formed)
         return r;
-    syntax_child init{};
+    SyntaxElement init{};
     if (i < count)
         init = node[i++];
     if (i < count)
@@ -311,7 +311,7 @@ analysis_result semantic_analysis::new_expression(node_index n,
     /* [expr.new]/6: an array: "the new-expression yields a pointer to the
        initial element (if any) of the array"; a type-id of array type is
        one too */
-    bool array = bound.bits != 0;
+    bool array = static_cast<bool>(bound);
     uint64_t known_count = 0;
     if (!array && type_table[type.unqualified()].kind == type_kind::array) {
         const struct type &a = type_table[type.unqualified()];
@@ -361,7 +361,7 @@ analysis_result semantic_analysis::new_expression(node_index n,
     uint64_t cookie = 0;
     expression_meaning element_count;
     if (array) {
-        if (init.bits)
+        if (init)
             return not_supported(n, "expr.new");
         /* the class's operator delete[], as clang looks it up, ::new or
            not */
@@ -372,7 +372,7 @@ analysis_result semantic_analysis::new_expression(node_index n,
     bool elements =
         array && c &&
         (entity_table[c].first_constructor || destroys(c) || cookie);
-    if (array && bound.bits) {
+    if (array && bound) {
         /* [expr.new]/9: "If the expression in a noptr-new-declarator is
            present, it is implicitly converted to std::size_t." */
         expression_meaning b;
@@ -456,7 +456,7 @@ analysis_result semantic_analysis::new_expression(node_index n,
        the succeeding arguments." */
     owned_array<expression_meaning> arguments;
     arguments.append(requested);
-    if (placement.bits) {
+    if (placement) {
         auto p = syntax(placement);
         if (p.size() != 3)
             return not_supported(placement.index(), "expr.new");
@@ -520,7 +520,7 @@ analysis_result semantic_analysis::new_expression(node_index n,
         expression_node(semantic_kind::indirection, object, at, pointer.node);
     initialized_value value;
     owned_array<expression_meaning> none;
-    if (!init.bits) {
+    if (!init) {
         /* [dcl.init]/7: "To default-initialize an object of type T means:
            (7.1) If T is a (possibly cv-qualified) class type, constructors
            are considered. ... (7.3) Otherwise, no initialization is

@@ -1286,7 +1286,7 @@ class semantic_tree
 /* one expression analysis gave a type: what -fcxx-dump=type-claims has clang
    check */
 struct analysed_expression {
-    syntax_child at;
+    SyntaxElement at;
     node_index declaration = 0;
     expression_meaning meaning;
     /* where a claim about it can be placed: just after this token (the
@@ -1417,9 +1417,9 @@ class semantic_analysis
         return p.keyword_of(tokens[tree.children(n)[0].index()]);
     }
     /* whether x is the keyword k */
-    bool is_keyword(syntax_child x, standard_keyword k) const
+    bool is_keyword(SyntaxElement x, standard_keyword k) const
     {
-        return x.is_token() && p.keyword_of(tokens[x.index()]) == k;
+        return x.is_token() && p.keyword_of(tokens[x.token()]) == k;
     }
     /* whether a class is trivially copyable and has a trivial destructor:
        its objects are copied as their bytes, passed in registers */
@@ -1442,7 +1442,7 @@ class semantic_analysis
     bool copy_assignment_deleted(entity_index c) const;
     bool default_constructor_deleted(entity_index c) const;
     bool default_constructed(entity_index c, entity_index k) const;
-    entity_index implicitly_movable(syntax_child operand);
+    entity_index implicitly_movable(SyntaxElement operand);
     /* whether destroying an object of class c runs code */
     bool destroys(entity_index c) const;
     /* the type's size and alignment in bytes ([expr.sizeof],
@@ -1669,9 +1669,9 @@ class semantic_analysis
        non-throwing without a noexcept-specifier */
     void implicitly_non_throwing(const declarator_meaning &m,
                                  qualified_type &type);
-    analysis_result declarator(node_index declaration, syntax_child d,
+    analysis_result declarator(node_index declaration, SyntaxElement d,
                                qualified_type &type, declarator_meaning &m);
-    token_index declarator_id(syntax_child d) const;
+    token_index declarator_id(SyntaxElement d) const;
     /* [dcl.meaning]/1: the nested-name-specifier of a qualified
        declarator-id: the class or namespace whose member is declared */
     analysis_result declarator_qualifier(node_index nested,
@@ -1824,7 +1824,7 @@ class semantic_analysis
     analysis_result friend_declaration(entity_index c, node_index n,
                                        owned_array<node_index> &bodies);
     analysis_result friend_class(entity_index c, node_index n,
-                                 syntax_child type);
+                                 SyntaxElement type);
     analysis_result friend_function(entity_index c, node_index n,
                                     owned_array<node_index> &bodies);
     /* [class.friend]/6: the functions friend declarations define */
@@ -1931,10 +1931,10 @@ class semantic_analysis
     /* [temp.dep.type]/9: whether a base-specifier's class-or-decltype in
        class template specialization c's class-specifier names one of the
        template-parameters (bound in c) */
-    bool dependent_base_specifier(entity_index c, syntax_child name) const;
+    bool dependent_base_specifier(entity_index c, SyntaxElement name) const;
     uint32_t own_pack_parameter(uint32_t name) const;
     uint32_t explicit_argument_position(uint32_t ft, uint32_t i) const;
-    analysis_result base_class_name(syntax_child name, node_index n,
+    analysis_result base_class_name(SyntaxElement name, node_index n,
                                     entity_index &base, token_index &id);
     bool in_dependent_base_only(entity_index c, uint32_t name,
                                 bool &unknown) const;
@@ -1989,11 +1989,11 @@ class semantic_analysis
     bool gnu_or_without_effect(node_index n) const;
     /* [dcl.attr.grammar]: every attribute at n (an attribute-specifier,
        -seq or -list) changes nothing vcc generates */
-    bool attributes_without_effect(syntax_child n) const;
+    bool attributes_without_effect(SyntaxElement n) const;
     /* ... or [[noreturn]], whose GCC flag goes into flags */
-    bool attributes_as_gnu(syntax_child n, uint32_t &flags) const;
-    bool gnu_attributes_without_effect(syntax_child n) const;
-    bool class_head_attributes_without_effect(syntax_child c) const;
+    bool attributes_as_gnu(SyntaxElement n, uint32_t &flags) const;
+    bool gnu_attributes_without_effect(SyntaxElement n) const;
+    bool class_head_attributes_without_effect(SyntaxElement c) const;
     uint32_t attributes_without_effect_before(node_index declaration) const;
     bool pack_only_expanded(uint32_t name, token_index first,
                             token_index end) const;
@@ -2018,7 +2018,7 @@ class semantic_analysis
         /* its parameter-declaration, and the initializer-clause of its
            default argument ([dcl.fct.default]/1), none if it has none */
         node_index declaration = 0;
-        syntax_child default_argument;
+        SyntaxElement default_argument;
         /* [temp.variadic]/5: an element of the function parameter pack
            (an instantiation's) of this name, id 0 */
         uint32_t pack_name = 0;
@@ -2112,7 +2112,7 @@ class semantic_analysis
                      qualified_type &type);
     /* whether operand (an expression's syntax) is an unparenthesized
        id-expression or class member access */
-    bool names_entity(syntax_child operand) const;
+    bool names_entity(SyntaxElement operand) const;
     /* [dcl.type.auto.deduct]: the type replacing declared (which contains a
        placeholder) for the initializer E analysed as e (named:
        names_entity of it), and what replaced the placeholder in it */
@@ -2187,10 +2187,10 @@ class semantic_analysis
     uint32_t vtable_pointer_store(entity_index c, token_index at);
     /* whether the syntax is a virt-specifier or virt-specifier-seq
        ([class.mem]/1), and which */
-    bool virt_specifier(syntax_child d, bool &override_, bool &final_) const;
+    bool virt_specifier(SyntaxElement d, bool &override_, bool &final_) const;
     analysis_result parameter_declaration(node_index n, qualified_type &type,
                                           bool &unnamed, token_index &id,
-                                          syntax_child &default_argument);
+                                          SyntaxElement &default_argument);
     /* cv-qualifiers added to a type: to an array's elements
        ([basic.type.qualifier]/3), none to a reference or a function type
        ([dcl.ref]/1, [dcl.fct]/7) */
@@ -2198,7 +2198,7 @@ class semantic_analysis
     analysis_result pointer_qualifier(node_index op, token_index t,
                                       qualified_type &type);
 
-    analysis_result init_declarator(node_index declaration, syntax_child item,
+    analysis_result init_declarator(node_index declaration, SyntaxElement item,
                                     const specified &s, bool definition);
 
     /* [basic.link], [basic.scope.declarative]: the name of a declarator
@@ -2217,13 +2217,13 @@ class semantic_analysis
     void converted(expression_meaning &m, conversion_kind kind);
     uint32_t statement_node(semantic_kind kind, token_index at, uint32_t a = 0,
                             uint32_t b = 0, uint32_t c = 0, uint32_t d = 0);
-    token_index first_token(syntax_child c) const;
+    token_index first_token(SyntaxElement c) const;
 
     /* ---- expressions ([expr]) ---- */
     /* [expr.pre]: an expression's type, value category and value; the
        expression is recorded in expressions */
-    analysis_result expression(syntax_child e, expression_meaning &m);
-    analysis_result expression_kind(syntax_child e, expression_meaning &m);
+    analysis_result expression(SyntaxElement e, expression_meaning &m);
+    analysis_result expression_kind(SyntaxElement e, expression_meaning &m);
     /* [expr.prim.literal], [lex.literal] */
     analysis_result literal(token_index t, expression_meaning &m);
     /* [lex.string]: the string literal token t (its suffix, if any, not
@@ -2286,7 +2286,7 @@ class semantic_analysis
     lambda_call_type(node_index n, node_index d, lambda_context &l,
                      qualified_type &type,
                      owned_array<parameter_meaning> &parameters);
-    analysis_result lambda_body(node_index n, syntax_child body,
+    analysis_result lambda_body(node_index n, SyntaxElement body,
                                 lambda_context &l,
                                 owned_array<parameter_meaning> &parameters,
                                 owned_array<capture_record> &captures);
@@ -2298,7 +2298,7 @@ class semantic_analysis
                                           entity_index specialization);
     analysis_result lambda_introducer(node_index n, lambda_context &l);
     analysis_result lambda_captures_of(node_index n,
-                                       owned_array<syntax_child> &out);
+                                       owned_array<SyntaxElement> &out);
     analysis_result init_capture(node_index n, lambda_context &l,
                                  capture_record &c);
     /* the current lambda's init-captures' variables, bound in its
@@ -2349,17 +2349,18 @@ class semantic_analysis
     analysis_result unary(node_index n, expression_meaning &m);
     analysis_result size_of(node_index n, bool alignment,
                             expression_meaning &m);
-    analysis_result increment(node_index n, syntax_child operand,
+    analysis_result increment(node_index n, SyntaxElement operand,
                               bool decrement, bool postfix,
                               expression_meaning &m);
     /* ... of the operand analysed as m (syntax operand, if it has one),
        the operator at the token at */
     analysis_result increment_of(node_index n, token_index at,
-                                 syntax_child operand, bool decrement,
+                                 SyntaxElement operand, bool decrement,
                                  bool postfix, expression_meaning &m);
     /* [expr.unary.op]/1, [over.unary]: *m, as increment_of */
     analysis_result indirection_of(node_index n, token_index at,
-                                   syntax_child operand, expression_meaning &m);
+                                   SyntaxElement operand,
+                                   expression_meaning &m);
     /* [expr.post] */
     analysis_result postfix(node_index n, expression_meaning &m);
     /* [expr.ref]: E1.E2 and E1->E2 */
@@ -2393,9 +2394,9 @@ class semantic_analysis
        built-in operator */
     analysis_result binary_of(node_index n, token_index at,
                               preprocessing_op_or_punc op,
-                              syntax_child left_syntax,
+                              SyntaxElement left_syntax,
                               expression_meaning &left,
-                              syntax_child right_syntax,
+                              SyntaxElement right_syntax,
                               expression_meaning &right, expression_meaning &m);
     analysis_result builtin_binary(node_index n, token_index at,
                                    preprocessing_op_or_punc op,
@@ -2433,14 +2434,14 @@ class semantic_analysis
     analysis_result clang_atomic_type(node_index n, qualified_type &type);
     uint64_t atomic_layout(qualified_type value, bool alignment) const;
     analysis_result clang_bit_int_type(node_index n, qualified_type &type);
-    analysis_result clang_ext_vector_count(node_index at, syntax_child count,
+    analysis_result clang_ext_vector_count(node_index at, SyntaxElement count,
                                            gnu_attributes &g);
     analysis_result clang_ext_vector_type(node_index at,
                                           const gnu_attributes &g,
                                           qualified_type &type);
     uint64_t ext_vector_layout(const type &record, bool alignment) const;
     uint64_t bit_int_layout(uint64_t width, bool alignment) const;
-    entity_index value_parameter_named(syntax_child e);
+    entity_index value_parameter_named(SyntaxElement e);
     analysis_result potentially_throwing(node_index n, uint32_t x,
                                          bool &throwing);
     analysis_result conditional_operands(node_index n,
@@ -2463,7 +2464,7 @@ class semantic_analysis
     /* a type-id ([dcl.name]) */
     analysis_result type_id(node_index n, qualified_type &type);
     analysis_result alignment_specifier(node_index n, uint64_t &alignment);
-    syntax_child class_head_name(node_index head) const;
+    SyntaxElement class_head_name(node_index head) const;
 
     /* ---- standard conversions ([conv]) ---- */
     /* the fundamental type of t, none if t is no fundamental type */
@@ -2578,7 +2579,7 @@ class semantic_analysis
                                                   bool &constant);
     /* [expr.const]/10: a contextually converted constant expression of
        type bool, from the expression e */
-    analysis_result bool_constant_expression(node_index at, syntax_child e,
+    analysis_result bool_constant_expression(node_index at, SyntaxElement e,
                                              bool &constant, bool &value);
     /* [except.spec]/2: whether the noexcept-specifier n makes the exception
        specification non-throwing */
@@ -2745,9 +2746,9 @@ class semantic_analysis
     /* the assignment-expression of an initializer "= E", "( E )" or
        "{ E }" (direct: not the first; list: the last); false for another
        form */
-    bool initializer_form(syntax_child init, syntax_child &clause, bool &direct,
-                          bool &list) const;
-    analysis_result deduced_initializer(syntax_child init, entity_index e,
+    bool initializer_form(SyntaxElement init, SyntaxElement &clause,
+                          bool &direct, bool &list) const;
+    analysis_result deduced_initializer(SyntaxElement init, entity_index e,
                                         qualified_type &type,
                                         initialized_value &value);
     analysis_result deduced_initialization(node_index n, expression_meaning &m,
@@ -2757,36 +2758,36 @@ class semantic_analysis
     /* the object or reference of type type (an array of unknown bound gets
        its bound) initialized by the initializer node (a
        brace-or-equal-initializer, initializer or braced-init-list) */
-    analysis_result initializer(syntax_child init, qualified_type &type,
+    analysis_result initializer(SyntaxElement init, qualified_type &type,
                                 initialized_value &result);
-    analysis_result initialize_from(node_index at, syntax_child clause,
+    analysis_result initialize_from(node_index at, SyntaxElement clause,
                                     qualified_type &type, bool direct,
                                     bool list, initialized_value &result);
     analysis_result list_initialization(node_index list, qualified_type &type,
                                         bool direct, initialized_value &result);
     /* the initializer-clauses of the braced-init-list list */
     analysis_result list_clauses(node_index list,
-                                 owned_array<syntax_child> &clauses);
+                                 owned_array<SyntaxElement> &clauses);
     analysis_result list_initialization_of(
-        node_index list, const owned_array<syntax_child> &clauses,
+        node_index list, const owned_array<SyntaxElement> &clauses,
         qualified_type &type, bool direct, initialized_value &result);
     /* [dcl.init.list]/3 for a class: an aggregate's elements, each from
        its clause or from an empty list */
     analysis_result class_list_initialization(
-        node_index list, const owned_array<syntax_child> &clauses,
+        node_index list, const owned_array<SyntaxElement> &clauses,
         qualified_type type, bool direct, initialized_value &result);
     analysis_result constructor_list_initialization(
-        node_index list, const owned_array<syntax_child> &clauses,
+        node_index list, const owned_array<SyntaxElement> &clauses,
         qualified_type type, bool direct, initialized_value &result);
     analysis_result too_many_clauses(node_index list,
-                                     const owned_array<syntax_child> &clauses,
+                                     const owned_array<SyntaxElement> &clauses,
                                      size_t next);
-    analysis_result aggregate_elements(node_index list,
-                                       const owned_array<syntax_child> &clauses,
-                                       size_t &next, qualified_type type,
-                                       initialized_value &result);
+    analysis_result
+    aggregate_elements(node_index list,
+                       const owned_array<SyntaxElement> &clauses, size_t &next,
+                       qualified_type type, initialized_value &result);
     analysis_result aggregate_element(node_index list,
-                                      const owned_array<syntax_child> &clauses,
+                                      const owned_array<SyntaxElement> &clauses,
                                       size_t &next, qualified_type element,
                                       initialized_value &one);
     analysis_result string_initialization(node_index at,
@@ -2817,7 +2818,7 @@ class semantic_analysis
     /* a type-name, or nested-name-specifier type-name (the node of a
        class-or-decltype, class-head-name ...), that shall name a class:
        the class, a typedef-name's included; the token of its name */
-    analysis_result named_class(syntax_child name, node_index at,
+    analysis_result named_class(SyntaxElement name, node_index at,
                                 entity_index &c, token_index &id);
     /* [dcl.type.simple]: nested-name-specifier type-name: the type and,
        for a typedef-name, its cv-qualifiers */
@@ -2852,11 +2853,11 @@ class semantic_analysis
     expression_meaning member_template_object;
     analysis_result member_template_call(
         node_index n, entity_index held, const expression_meaning &object,
-        const owned_array<syntax_child> &arguments,
+        const owned_array<SyntaxElement> &arguments,
         owned_array<expression_meaning> &early, expression_meaning &m);
     analysis_result bound_member_call(
         node_index n, entity_index f, const expression_meaning &object,
-        const owned_array<syntax_child> &arguments,
+        const owned_array<SyntaxElement> &arguments,
         owned_array<expression_meaning> &early, expression_meaning &m);
     uint32_t member_function_template_of(entity_index held) const
     {
@@ -2884,7 +2885,7 @@ class semantic_analysis
                                        uint32_t first,
                                        owned_array<node_index> &bodies);
     analysis_result member_declarator(entity_index c, node_index declaration,
-                                      syntax_child d, const specified &s,
+                                      SyntaxElement d, const specified &s,
                                       uint8_t access, bool definition);
     /* the body of a member function defined in its class, analysed at the
        end of the class ([class.mem]/6: a complete-class context) */
@@ -2952,15 +2953,16 @@ class semantic_analysis
                                        bool to_derived, bool access,
                                        expression_meaning &m);
     analysis_result defaulted_or_deleted_special_member(
-        entity_index c, node_index n, syntax_child d, syntax_child body,
+        entity_index c, node_index n, SyntaxElement d, SyntaxElement body,
         uint8_t access, bool constexpr_specified, bool virtual_specified,
         bool explicit_specified);
     analysis_result defaulted_copy_assignment(entity_index c, node_index n,
-                                              syntax_child d,
+                                              SyntaxElement d,
                                               const specified &s,
                                               uint8_t access);
     analysis_result static_member_initializer(node_index declarator,
-                                              entity_index e, syntax_child init,
+                                              entity_index e,
+                                              SyntaxElement init,
                                               const specified &s);
     analysis_result default_member_initializer(token_index at, entity_index e,
                                                uint32_t &statement);
@@ -3039,7 +3041,7 @@ class semantic_analysis
     /* [class.ctor], [class.dtor]: a member-declaration without a
        decl-specifier-seq: a constructor or destructor of c */
     analysis_result special_member_declarator(
-        entity_index c, node_index declaration, syntax_child d, uint8_t access,
+        entity_index c, node_index declaration, SyntaxElement d, uint8_t access,
         bool definition, bool constexpr_specified = false,
         bool virtual_specified = false, bool explicit_specified = false);
     /* virtual_specified: in a class, where virtual is one of them */
@@ -3059,7 +3061,7 @@ class semantic_analysis
                                            entity_index u);
     /* whether the declarator d with no decl-specifier-seq declares a
        constructor or destructor of c */
-    bool declares_special_member(entity_index c, syntax_child d) const;
+    bool declares_special_member(entity_index c, SyntaxElement d) const;
     /* [over.match.ctor]: the constructor of class c that initializes an
        object from the analysed arguments, the construct node made (its
        object a) */
@@ -3077,7 +3079,7 @@ class semantic_analysis
                                 expression_meaning &m);
     /* the expressions of an expression-list, analysed */
     analysis_result
-    expression_list_meanings(syntax_child list,
+    expression_list_meanings(SyntaxElement list,
                              owned_array<expression_meaning> &out);
     /* the class whose member-specification is analysed, 0 if none */
     entity_index defining_class = 0;
@@ -3095,7 +3097,7 @@ class semantic_analysis
                                    const specified &s,
                                    const declarator_meaning &m, uint8_t access);
     analysis_result member_bit_field(entity_index c, node_index declaration,
-                                     syntax_child d, const specified &s,
+                                     SyntaxElement d, const specified &s,
                                      uint8_t access);
 
     /* the declaration analysed now, for the expressions' records */
@@ -3396,11 +3398,11 @@ class semantic_analysis
     analysis_result builtin_make_integer_seq(node_index id, type_index &type);
     analysis_result
     builtin_template_arguments(node_index id,
-                               owned_array<syntax_child> &written,
+                               owned_array<SyntaxElement> &written,
                                owned_array<bool> &expansion);
     analysis_result
     builtin_template_types(node_index id,
-                           const owned_array<syntax_child> &written,
+                           const owned_array<SyntaxElement> &written,
                            const owned_array<bool> &expansion, size_t from,
                            owned_array<qualified_type> &types, bool &dependent);
     enum class common_found : uint8_t { none, found };
@@ -3447,7 +3449,7 @@ class semantic_analysis
                                expression_meaning &m);
     /* [temp.constr.constr]: whether constraint-expression e is satisfied,
        the template parameters bound in scope */
-    analysis_result constraint_satisfied(syntax_child e, entity_index scope,
+    analysis_result constraint_satisfied(SyntaxElement e, entity_index scope,
                                          token_index horizon, bool &satisfied);
     /* the variable template the held name e is, plus one */
     uint32_t variable_template_of(entity_index e) const;
@@ -3475,8 +3477,8 @@ class semantic_analysis
                              bool packs = false, bool constrained = false,
                              bool pack_anywhere = false,
                              bool type_constraints = false);
-    syntax_child head_constraint(node_index n) const;
-    syntax_child trailing_constraint(node_index n) const;
+    SyntaxElement head_constraint(node_index n) const;
+    SyntaxElement trailing_constraint(node_index n) const;
     /* [dcl.fct]/22: the decl-specifier-seqs of the parameters of the
        function that declaration (a template-declaration's or a
        function-definition) declares with a generic parameter type
@@ -3544,7 +3546,7 @@ class semantic_analysis
         /* a type-parameter's type-constraint ([temp.param]/1), or 0 */
         node_index constraint = 0;
         node_index head = 0;
-        syntax_child default_argument, declarator;
+        SyntaxElement default_argument, declarator;
     };
     bool template_parameter_form(node_index parameter,
                                  template_parameter_parts &out) const;
@@ -3567,7 +3569,7 @@ class semantic_analysis
         entity_index outer, uint32_t reserved, uint32_t &index,
         entity_index &scope, uint32_t &first);
     node_index sole_decl_specifier(node_index declaration) const;
-    bool expansion_list(node_index list, owned_array<syntax_child> &written,
+    bool expansion_list(node_index list, owned_array<SyntaxElement> &written,
                         owned_array<bool> &expansion) const;
     bool
     default_missing_after_one(const owned_array<node_index> &parameters) const;
@@ -3579,12 +3581,12 @@ class semantic_analysis
     analysis_result template_argument_for(node_index at,
                                           uint32_t template_index,
                                           uint32_t position,
-                                          syntax_child written,
+                                          SyntaxElement written,
                                           const template_argument *before,
                                           template_argument &out);
     /* [temp.param]/4: a non-type parameter's dependent type
        (typename enable_if<B, int>::type) with the arguments before it */
-    entity_index dependent_value_entity(syntax_child written);
+    entity_index dependent_value_entity(SyntaxElement written);
     entity_index dependent_variable_specialization(node_index id,
                                                    entity_index e);
     owned_array<entity_index> dependent_values;
@@ -3602,13 +3604,13 @@ class semantic_analysis
     bool address_parameter_type(qualified_type t) const;
     /* [temp.arg.nontype]/3: an argument for one of those */
     analysis_result address_argument(node_index at, qualified_type to,
-                                     syntax_child written,
+                                     SyntaxElement written,
                                      template_argument &out);
     /* [temp.arg.template]: the argument for template template-parameter
        parameter */
     analysis_result template_template_argument(node_index at,
                                                entity_index parameter,
-                                               syntax_child written,
+                                               SyntaxElement written,
                                                template_argument &out);
     /* [temp.arg]/4, [temp.param]/12: the arguments not given (set[i]
        false) from the parameters' default template-arguments */
@@ -3717,18 +3719,18 @@ class semantic_analysis
                                   uint32_t function_template,
                                   owned_array<template_argument> &specified,
                                   bool qualified,
-                                  const owned_array<syntax_child> &arguments,
+                                  const owned_array<SyntaxElement> &arguments,
                                   owned_array<expression_meaning> &early,
                                   expression_meaning &f);
     /* a callee that names a function template: f, f<A...>, N::f or
        N::f<A...>; its name, the template (plus one, 0 if the callee is no
        template's name) and the template-arguments given */
-    analysis_result template_callee(syntax_child callee, token_index &name,
+    analysis_result template_callee(SyntaxElement callee, token_index &name,
                                     uint32_t &function_template,
                                     owned_array<template_argument> &specified,
                                     bool &qualified);
     analysis_result template_callee_parts(
-        syntax_child callee, token_index &name, uint32_t &function_template,
+        SyntaxElement callee, token_index &name, uint32_t &function_template,
         owned_array<template_argument> &specified, bool &qualified);
     /* declare()'s part for a specialization an instantiation makes */
     analysis_result declare_specialization(node_index declaration,
@@ -3802,13 +3804,13 @@ class semantic_analysis
     bool expansion_count(token_index first, token_index end, uint32_t &count,
                          bool *own = nullptr) const;
     /* expression(pattern) for the element i of the packs it names */
-    analysis_result expansion_element_expression(syntax_child pattern,
+    analysis_result expansion_element_expression(SyntaxElement pattern,
                                                  uint32_t i,
                                                  expression_meaning &m);
     /* [expr.prim.fold] */
     analysis_result fold(node_index n, expression_meaning &m);
     /* an initializer-list with a pack expansion (an ellipsis child) */
-    bool has_pack_expansion(syntax_child list) const;
+    bool has_pack_expansion(SyntaxElement list) const;
     owned_array<constant_value> instantiation_values;
     owned_array<instantiation_input> instantiation_inputs;
     owned_array<instantiation_record> instantiations;
@@ -3856,19 +3858,19 @@ class semantic_analysis
     owned_array<postponed_body> postponed_bodies;
     bool postpone_member_bodies = false;
     analysis_result analyse_function_body(node_index definition,
-                                          syntax_child compound,
-                                          syntax_child ctor_initializer = {});
+                                          SyntaxElement compound,
+                                          SyntaxElement ctor_initializer = {});
     /* [class.base.init]: a constructor's member initializations, the
        statements of a block (function_body's b) */
-    analysis_result ctor_initializer(syntax_child list, uint32_t &built);
-    void collect_labels(syntax_child s);
+    analysis_result ctor_initializer(SyntaxElement list, uint32_t &built);
+    void collect_labels(SyntaxElement s);
     /* the statement functions give the statement's node in built (when
        well-formed) */
-    analysis_result statement(syntax_child s, uint32_t &built);
+    analysis_result statement(SyntaxElement s, uint32_t &built);
     analysis_result attributed_statement(Statement n, uint32_t &built);
     /* a substatement ([stmt.pre]/2): a block scope of its own whose
        outermost names shall not redeclare conflicts' */
-    analysis_result substatement(syntax_child s, entity_index conflicts,
+    analysis_result substatement(SyntaxElement s, entity_index conflicts,
                                  uint32_t &built);
     analysis_result compound_statement(CompoundStatement n,
                                        entity_index conflicts, uint32_t &built);
@@ -3889,7 +3891,7 @@ class semantic_analysis
     analysis_result range_call(node_index n, token_index at,
                                const expression_meaning &range, uint32_t name,
                                bool member, expression_meaning &m);
-    analysis_result for_range_declaration(syntax_child d,
+    analysis_result for_range_declaration(SyntaxElement d,
                                           const expression_meaning &element,
                                           uint32_t &built);
     /* ---- [dcl.struct.bind] structured bindings (dcl.struct.bind.cpp) ---- */
@@ -3942,7 +3944,7 @@ class semantic_analysis
     linkage binding_storage = linkage::none;
     analysis_result jump_statement(JumpStatement n, uint32_t &built);
     analysis_result labeled_statement(LabeledStatement n, uint32_t &built);
-    analysis_result case_label(node_index n, syntax_child value,
+    analysis_result case_label(node_index n, SyntaxElement value,
                                size_t innermost);
     /* operand: the operand's node, initialized as the result (0: none) */
     analysis_result return_statement(node_index n, uint32_t &operand);
@@ -3951,12 +3953,12 @@ class semantic_analysis
     owned_array<entity_index> block_variables;
     /* the declaration statement of block_variables[first ..] */
     uint32_t declaration_statements(size_t first, token_index at);
-    node_index node_of(syntax_child c) const;
+    node_index node_of(SyntaxElement c) const;
     /* a condition's declarator is analysed ([stmt.pre]/4) */
     bool in_condition = false;
     /* [stmt.pre]: a condition, its value converted to bool (or, for a
        switch, the condition's value promoted: m) */
-    analysis_result condition(syntax_child c, bool for_switch,
+    analysis_result condition(SyntaxElement c, bool for_switch,
                               expression_meaning &m);
     analysis_result switch_condition(node_index at, expression_meaning &m);
     /* [stmt.dcl]/3: a jump from from to to bypasses no initialization */
@@ -3977,13 +3979,13 @@ class semantic_analysis
     /* [abi:mangle.requires-clause]: the requires-clause of the function
        template t's template-head (none: no bits), its template parameter
        and the concept a token of it names (0: neither) */
-    syntax_child template_trailing_constraint(entity_index t) const;
-    syntax_child template_constraint(entity_index t) const;
+    SyntaxElement template_trailing_constraint(entity_index t) const;
+    SyntaxElement template_constraint(entity_index t) const;
     /* [expr.prim.lambda]/1: a generic lambda's requires-clause's
        constraint-expression (none: no bits); trailing: whether it follows
        the lambda-declarator's parameters */
-    syntax_child lambda_constraint(node_index n,
-                                   bool *trailing = nullptr) const;
+    SyntaxElement lambda_constraint(node_index n,
+                                    bool *trailing = nullptr) const;
     /* the number of template-parameters of template entity t */
     uint32_t template_parameter_count(entity_index t) const
     {
@@ -4091,6 +4093,11 @@ class semantic_analysis
     SyntaxElement syntax(syntax_child c) const
     {
         return SyntaxElement(syntax_cx, c);
+    }
+    /* a node as a child: where a function takes a SyntaxElement */
+    SyntaxElement element(node_index n) const
+    {
+        return SyntaxElement(syntax_cx, syntax_child::node(n));
     }
     /* already a view: syntax(x[i]) needs no conversion */
     SyntaxElement syntax(SyntaxElement e) const
@@ -4204,7 +4211,7 @@ class semantic_analysis
        candidates (temp.mem.cpp) */
     analysis_result constructor_specifiers(node_index seq, specified &s);
     analysis_result constructor_template_declarator(node_index definition,
-                                                    syntax_child d,
+                                                    SyntaxElement d,
                                                     qualified_type &type,
                                                     declarator_meaning &m);
     analysis_result constructor_template_candidates(
@@ -4221,14 +4228,14 @@ class semantic_analysis
         owned_array<overload_candidate> &candidates,
         owned_array<uint32_t> *first_arguments = nullptr,
         owned_array<template_argument> *all = nullptr,
-        const owned_array<syntax_child> *written = nullptr,
+        const owned_array<SyntaxElement> *written = nullptr,
         node_index written_at = 0,
         const owned_array<template_argument> *specified = nullptr);
     /* a call's template-id naming several function templates: its
        template-arguments as written, checked against each template by
        template_candidates ([temp.over]/1), from template_callee_parts to
        template_call */
-    owned_array<syntax_child> overloaded_written;
+    owned_array<SyntaxElement> overloaded_written;
     node_index overloaded_written_at = 0;
     /* [over.best.ics]: the argument a converted to the type of a parameter;
        user-defined conversions considered unless [over.best.ics]/4 says
@@ -4296,16 +4303,16 @@ class semantic_analysis
     /* [over.call.func]: the token of the name a call's postfix-expression
        is, and the call's callee f made the best viable function of the
        set (its implied object argument's address object, 0 if none) */
-    token_index callee_name(syntax_child c) const;
+    token_index callee_name(SyntaxElement c) const;
     /* [dcl.fct.def.delete]: whether a function-body is = delete ;, the
        function f so defined by the definition n, and (ill-formed) a
        reference to f if it is deleted */
-    bool explicit_body(syntax_child body, standard_keyword k) const;
-    bool deleted_body(syntax_child body) const;
+    bool explicit_body(SyntaxElement body, standard_keyword k) const;
+    bool deleted_body(SyntaxElement body) const;
     analysis_result deleted_definition(node_index n, entity_index f);
     analysis_result deleted_use(token_index at, entity_index f);
     analysis_result resolve_call(node_index n,
-                                 const owned_array<syntax_child> &arguments,
+                                 const owned_array<SyntaxElement> &arguments,
                                  owned_array<expression_meaning> &early,
                                  const owned_array<entity_index> &set,
                                  uint32_t object, expression_meaning &f);
@@ -4329,7 +4336,7 @@ class semantic_analysis
     analysis_result call_with(node_index n, expression_meaning &f,
                               qualified_type function_type, uint32_t object,
                               entity_index member,
-                              const owned_array<syntax_child> &arguments,
+                              const owned_array<SyntaxElement> &arguments,
                               const owned_array<expression_meaning> &early,
                               expression_meaning &m);
     /* [expr.call]: the call of the function f, named at the token at
@@ -4343,11 +4350,11 @@ class semantic_analysis
        a name of an overload set (perhaps in parentheses, after &) as the
        function whose type the target's function type is; others as
        expression() does */
-    analysis_result target_expression(syntax_child e, qualified_type target,
+    analysis_result target_expression(SyntaxElement e, qualified_type target,
                                       expression_meaning &m);
     /* the first function of the overload set e names that way (its name's
        token at), 0 if e is no such name */
-    entity_index named_overload_set(syntax_child e, token_index &at) const;
+    entity_index named_overload_set(SyntaxElement e, token_index &at) const;
     /* ... the token of that name and the function chosen, which
        named_entity takes it for (0 elsewhere) */
     token_index overload_target_token = 0;
@@ -4423,7 +4430,7 @@ class semantic_analysis
     /* the type of the new-type-id n ([expr.new]/1), the expression of the
        first bound of its noptr-new-declarator if any (bound) */
     analysis_result new_type_id(node_index n, qualified_type &type,
-                                syntax_child &bound);
+                                SyntaxElement &bound);
     /* a declaration analysis did not follow may declare an operator
        function (hold_names): what an operator means is not known */
     bool operators_held = false;
@@ -4452,21 +4459,21 @@ class semantic_analysis
     analysis_result
     overloaded_operator(node_index n, token_index at,
                         preprocessing_op_or_punc op, bool postfix,
-                        const owned_array<syntax_child> &syntax,
+                        const owned_array<SyntaxElement> &syntax,
                         owned_array<expression_meaning> &operands,
                         bool &handled, expression_meaning &m);
     /* ... of one operand (its syntax s): the operand becomes the operator
        function's call when one is chosen (handled) */
     analysis_result unary_operator_function(node_index n, token_index at,
                                             preprocessing_op_or_punc op,
-                                            bool postfix, syntax_child s,
+                                            bool postfix, SyntaxElement s,
                                             expression_meaning &operand,
                                             bool &handled);
     /* ... of two: m the call when one is chosen (handled) */
     analysis_result binary_operator_function(
         node_index n, token_index at, preprocessing_op_or_punc op,
-        syntax_child left_syntax, const expression_meaning &left,
-        syntax_child right_syntax, const expression_meaning &right,
+        SyntaxElement left_syntax, const expression_meaning &left,
+        SyntaxElement right_syntax, const expression_meaning &right,
         bool &handled, expression_meaning &m);
     /* the initialization of type from the analysed expression m */
     analysis_result initialize_with(node_index at, expression_meaning &m,
@@ -4476,8 +4483,8 @@ class semantic_analysis
        init-declarator or a condition; supplied, if not null, is an
        initializer analysed already ("= E", [stmt.ranged]/1; init none) */
     analysis_result
-    declare_with_initializer(node_index declaration, syntax_child d,
-                             syntax_child init, bool initialized,
+    declare_with_initializer(node_index declaration, SyntaxElement d,
+                             SyntaxElement init, bool initialized,
                              const specified &s, bool definition,
                              const expression_meaning *supplied = nullptr);
 

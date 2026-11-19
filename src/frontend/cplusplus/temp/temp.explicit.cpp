@@ -312,7 +312,7 @@ semantic_analysis::named_specialization(node_index n, node_index declaration,
     }
     bool defaults = false;
     for (const parameter_meaning &p : function_parameters)
-        if (p.default_argument.index())
+        if (p.default_argument)
             defaults = true;
     current_scope = outer;
     function_cv = saved_cv;
@@ -341,9 +341,9 @@ semantic_analysis::named_specialization(node_index n, node_index declaration,
     uint32_t ft = 0;
     owned_array<template_argument> values;
     bool qualified = false;
-    syntax_child callee = syntax_child::token(m.id);
+    SyntaxElement callee = syntax(syntax_child::token(m.id));
     if (m.template_id)
-        callee = syntax_child::node(m.template_id);
+        callee = element(m.template_id);
     else
         ft = function_template_of(
             lookup_unqualified(tokens.identifier(m.id), lookup_filter::any)
@@ -559,7 +559,7 @@ analysis_result semantic_analysis::member_explicit_instantiation(
     }
     bool defaults = false;
     for (const parameter_meaning &p : function_parameters)
-        if (p.default_argument.index())
+        if (p.default_argument)
             defaults = true;
     current_scope = outer;
     function_cv = saved_cv;

@@ -164,7 +164,7 @@ node_index parser::class_or_decltype(scope_index *region)
  * after a nested-name-specifier, or a simple-template-id naming a class
  * template's specialization ([temp.names]/1; decltype has no rules yet)
  */
-analysis_result semantic_analysis::base_class_name(syntax_child name,
+analysis_result semantic_analysis::base_class_name(SyntaxElement name,
                                                    node_index n,
                                                    entity_index &base,
                                                    token_index &id)
@@ -225,16 +225,16 @@ analysis_result semantic_analysis::base_clause(entity_index c, node_index n,
        base-specifier": a base-specifier followed by an ellipsis is one
        base per element of the packs it names (an instantiation's; in a
        template's own definition they are not known) */
-    owned_array<syntax_child> listed;
+    owned_array<SyntaxElement> listed;
     owned_array<bool> expanded;
     for (uint32_t i = 1; i < syntax(n).size(); i++) {
-        syntax_child item = syntax(n)[i];
+        SyntaxElement item = syntax(n)[i];
         if (!syntax(item).is(syntax_kind::base_specifier_list)) {
             listed.append(item);
             expanded.append(false);
             continue;
         }
-        for (syntax_child one : syntax(item).elements()) {
+        for (SyntaxElement one : syntax(item).elements()) {
             if (syntax(one).is(preprocessing_op_or_punc::COMMA))
                 continue;
             if (syntax(one).is(preprocessing_op_or_punc::ELLIPSIS)) {
@@ -247,7 +247,7 @@ analysis_result semantic_analysis::base_clause(entity_index c, node_index n,
             expanded.append(false);
         }
     }
-    owned_array<syntax_child> specifiers;
+    owned_array<SyntaxElement> specifiers;
     /* each specifier's pack element, UINT32_MAX for none */
     owned_array<uint32_t> elements;
     for (size_t i = 0; i < listed.size(); i++) {
@@ -256,7 +256,7 @@ analysis_result semantic_analysis::base_clause(entity_index c, node_index n,
             elements.append(UINT32_MAX);
             continue;
         }
-        token_index first = listed[i].index(), end = first + 1;
+        token_index first = listed[i].token(), end = first + 1;
         if (!listed[i].is_token()) {
             first = syntax(listed[i].index()).first_token();
             end = syntax(listed[i].index()).end_token();
@@ -278,7 +278,7 @@ analysis_result semantic_analysis::base_clause(entity_index c, node_index n,
     owned_array<entity_index> named_bases;
     owned_array<token_index> named_ids;
     for (size_t si = 0; si < specifiers.size(); si++) {
-        syntax_child name = specifiers[si];
+        SyntaxElement name = specifiers[si];
         if (syntax(name).is(syntax_kind::base_specifier))
             name = syntax(name)[syntax(name).size() - 1];
         token_index id = 0;
@@ -300,12 +300,12 @@ analysis_result semantic_analysis::base_clause(entity_index c, node_index n,
     entity_table[c].first_base = static_cast<uint32_t>(class_bases.size());
     entity_table[c].base_count = 0;
     for (size_t si = 0; si < specifiers.size(); si++) {
-        syntax_child specifier = specifiers[si];
+        SyntaxElement specifier = specifiers[si];
         uint8_t access = 0;
         bool is_virtual = false;
         if (key == standard_keyword::class_)
             access = 2;
-        syntax_child name = specifier;
+        SyntaxElement name = specifier;
         if (syntax(specifier).is(syntax_kind::base_specifier)) {
             auto b = syntax(specifier);
             name = b[b.size() - 1];
@@ -510,11 +510,11 @@ uint32_t semantic_analysis::base_subobjects(entity_index c,
  * dependent base and c itself or another base may both have it.
  */
 bool semantic_analysis::dependent_base_specifier(entity_index c,
-                                                 syntax_child name) const
+                                                 SyntaxElement name) const
 {
     if (!entity_table[c].instantiation)
         return false;
-    token_index first = name.index(), end = name.index() + 1;
+    token_index first = name.token(), end = name.token() + 1;
     if (!name.is_token()) {
         first = syntax(name).first_token();
         end = syntax(name).end_token();

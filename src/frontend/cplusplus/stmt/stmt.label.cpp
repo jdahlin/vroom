@@ -51,7 +51,7 @@ node_index parser::labeled_statement()
 /* the identifier labels of a function body, before its statements are
    analysed: a goto can name a label that follows it ([stmt.label]/1); a
    lambda's or a local class's body is another function's */
-void semantic_analysis::collect_labels(syntax_child s)
+void semantic_analysis::collect_labels(SyntaxElement s)
 {
     if (s.is_token())
         return;
@@ -87,7 +87,7 @@ analysis_result semantic_analysis::labeled_statement(LabeledStatement n,
         return not_supported(n, "dcl.attr");
     token_index first = node[0].token();
     const token &t = tokens[first];
-    syntax_child last = node[node.size() - 1];
+    SyntaxElement last = node[node.size() - 1];
     if (t.kind == token_kind::identifier) {
         if (node.size() != 3)
             return not_supported(n, "stmt.label");
@@ -164,7 +164,7 @@ analysis_result semantic_analysis::labeled_statement(LabeledStatement n,
  * adjusted type of the switch condition.  No two of the case constants in
  * the same switch shall have the same value after conversion."
  */
-analysis_result semantic_analysis::case_label(node_index n, syntax_child value,
+analysis_result semantic_analysis::case_label(node_index n, SyntaxElement value,
                                               size_t innermost)
 {
     expression_meaning m;

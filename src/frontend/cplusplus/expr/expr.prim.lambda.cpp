@@ -357,10 +357,10 @@ analysis_result semantic_analysis::lambda_expression(node_index n,
        lambda, whose call operator is a template
        ([expr.prim.lambda.closure]/3); its requires-clause is the
        template's (lambda_constraint) */
-    syntax_child declarator, template_list;
+    SyntaxElement declarator, template_list;
     for (uint32_t i = 1; i + 1 < node.size(); i++) {
-        syntax_child x = node[i];
-        if (syntax(x).is(syntax_kind::lambda_declarator) && !declarator.index())
+        SyntaxElement x = node[i];
+        if (syntax(x).is(syntax_kind::lambda_declarator) && !declarator)
             declarator = x;
         else if (syntax(x).is(syntax_kind::template_parameter_list) ||
                  syntax(x).is(syntax_kind::type_parameter) ||
@@ -370,11 +370,11 @@ analysis_result semantic_analysis::lambda_expression(node_index n,
         else if (!x.is_token() && !syntax(x).is(syntax_kind::requires_clause))
             return not_supported(n, "expr.prim.lambda");
     }
-    syntax_child body = node[node.size() - 1];
+    SyntaxElement body = node[node.size() - 1];
     if (!node[0].is(syntax_kind::lambda_introducer) ||
         !syntax(body).is(syntax_kind::compound_statement))
         return not_supported(n, "expr.prim.lambda");
-    if (declarator.index()) {
+    if (declarator) {
         /* [expr.prim.lambda]/5: "A lambda is a generic lambda if the
            lambda-expression has any generic parameter type placeholders"
            (auto in a parameter's decl-specifier-seq) */
@@ -385,7 +385,7 @@ analysis_result semantic_analysis::lambda_expression(node_index n,
                 return not_supported(n, "expr.prim.lambda.closure");
         /* a requires-clause after the parameters: a generic lambda's,
            (lambda_constraint) */
-        if (!template_list.index() &&
+        if (!template_list &&
             syntax(declarator.index())[syntax(declarator).size() - 1].is(
                 syntax_kind::requires_clause))
             return not_supported(n, "temp.constr");
@@ -440,12 +440,12 @@ analysis_result semantic_analysis::lambda_expression(node_index n,
 
     qualified_type type;
     owned_array<parameter_meaning> parameters;
-    if (template_list.index())
+    if (template_list)
         r = generic_lambda(n, template_list.index(), declarator.index(), l,
                            has_capture, m);
     else
         r = lambda_call_type(n, declarator.index(), l, type, parameters);
-    if (r != analysis_result::well_formed || template_list.index()) {
+    if (r != analysis_result::well_formed || template_list) {
         lambda_captures.resize(l.first_capture);
         if (r != analysis_result::well_formed)
             entity_table[c].kind = entity_kind::none;
@@ -521,14 +521,14 @@ semantic_analysis::lambda_call_type(node_index n, node_index d,
         bool closed = false;
         for (uint32_t i = 0;
              i < syntax(d).size() && r == analysis_result::well_formed; i++) {
-            syntax_child part = syntax(d)[i];
+            SyntaxElement part = syntax(d)[i];
             if (syntax(part).is(preprocessing_op_or_punc::RIGHT_PARENTHESIS)) {
                 closed = true;
                 continue;
             }
             if (!closed)
                 continue;
-            owned_array<syntax_child> specifiers;
+            owned_array<SyntaxElement> specifiers;
             if (syntax(part).is(syntax_kind::decl_specifier_seq)) {
                 for (uint32_t k = 0; k < syntax(part).size(); k++)
                     specifiers.append(syntax(part)[k]);
@@ -542,10 +542,10 @@ semantic_analysis::lambda_call_type(node_index n, node_index d,
             } else if (part.is_token()) {
                 specifiers.append(part);
             }
-            for (syntax_child sp : specifiers) {
+            for (SyntaxElement sp : specifiers) {
                 standard_keyword kw = standard_keyword::none;
                 if (sp.is_token())
-                    kw = p.keyword_of(tokens[sp.index()]);
+                    kw = p.keyword_of(tokens[sp.token()]);
                 if (kw == standard_keyword::mutable_)
                     l.mutable_ = true;
                 else if (kw == standard_keyword::constexpr_)
@@ -602,7 +602,7 @@ semantic_analysis::lambda_call_type(node_index n, node_index d,
         if (r != analysis_result::well_formed)
             break;
         /* a default argument ([dcl.fct.default]) or a parameter pack */
-        if (parameter.default_argument.index() || parameter.pack_name)
+        if (parameter.default_argument || parameter.pack_name)
             r = not_supported(n, "dcl.fct.default");
         /* [expr.prim.lambda.capture]/5: "If an identifier in a
            simple-capture appears as the declarator-id of a parameter of the
@@ -629,7 +629,7 @@ semantic_analysis::lambda_call_type(node_index n, node_index d,
  * parameters; the captures it made appended to captures.
  */
 analysis_result
-semantic_analysis::lambda_body(node_index n, syntax_child body,
+semantic_analysis::lambda_body(node_index n, SyntaxElement body,
                                lambda_context &l,
                                owned_array<parameter_meaning> &parameters,
                                owned_array<capture_record> &captures)
@@ -715,15 +715,15 @@ analysis_result semantic_analysis::generic_lambda(node_index n, node_index list,
     entity_index c = l.closure;
     if (has_capture)
         return not_supported(n, "expr.prim.lambda.capture");
-    owned_array<syntax_child> list_items;
+    owned_array<SyntaxElement> list_items;
     if (syntax(syntax_child::node(list))
             .is(syntax_kind::template_parameter_list))
         for (uint32_t i = 0; i < syntax(list).size(); i++)
             list_items.append(syntax(list)[i]);
     else
-        list_items.append(syntax_child::node(list));
+        list_items.append(element(list));
     owned_array<node_index> parameters;
-    for (syntax_child p : list_items) {
+    for (SyntaxElement p : list_items) {
         if (p.is_token())
             continue;
         template_parameter_parts x;
@@ -792,11 +792,11 @@ analysis_result semantic_analysis::generic_lambda(node_index n, node_index list,
  * template-parameter-list or its lambda-declarator (generic_lambda
  * refuses both), or none
  */
-syntax_child semantic_analysis::lambda_constraint(node_index n,
-                                                  bool *trailing) const
+SyntaxElement semantic_analysis::lambda_constraint(node_index n,
+                                                   bool *trailing) const
 {
     for (uint32_t i = 1; i + 1 < syntax(n).size(); i++) {
-        syntax_child c = syntax(n)[i];
+        SyntaxElement c = syntax(n)[i];
         bool in_declarator = syntax(c).is(syntax_kind::lambda_declarator);
         if (in_declarator)
             c = syntax(c)[syntax(c).size() - 1];
@@ -807,7 +807,7 @@ syntax_child semantic_analysis::lambda_constraint(node_index n,
             *trailing = in_declarator;
         return syntax(c)[1];
     }
-    return syntax_child();
+    return SyntaxElement();
 }
 
 /*

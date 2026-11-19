@@ -49,3 +49,38 @@ CustomChecks:
       - BindName: root
         Message: "an element's token() is its token (0 for a node): use index() where a node_index is expected"
         Level: Warning
+  - Name: vcc-syntax-token-index-returned-from-index
+    Query: |
+      match returnStmt(hasReturnValue(ignoringImpCasts(cxxMemberCallExpr(callee(cxxMethodDecl(hasName("index"), ofClass(cxxRecordDecl(hasName("SyntaxElement")))))))), forFunction(returns(typedefType(hasDeclaration(typedefNameDecl(hasName("token_index"))))))).bind("root")
+    Diagnostic:
+      - BindName: root
+        Message: "an element's index() is its node (0 for a token): use token() where a token_index is expected"
+        Level: Warning
+  - Name: vcc-syntax-token-index-init-list-from-index
+    Query: |
+      match initListExpr(hasAnyInit(ignoringImpCasts(cxxMemberCallExpr(callee(cxxMethodDecl(hasName("index"), ofClass(cxxRecordDecl(hasName("SyntaxElement")))))))), hasType(recordDecl())).bind("root")
+    Diagnostic:
+      - BindName: root
+        Message: "an element's index() is its node (0 for a token): use token() in a struct that holds tokens (check the field)"
+        Level: Warning
+  - Name: vcc-syntax-node-index-returned-from-token
+    Query: |
+      match returnStmt(hasReturnValue(ignoringImpCasts(cxxMemberCallExpr(callee(cxxMethodDecl(hasName("token"), ofClass(cxxRecordDecl(hasName("SyntaxElement")))))))), forFunction(returns(typedefType(hasDeclaration(typedefNameDecl(hasName("node_index"))))))).bind("root")
+    Diagnostic:
+      - BindName: root
+        Message: "an element's token() is its token (0 for a node): use index() where a node_index is expected"
+        Level: Warning
+  - Name: vcc-syntax-uint32-var-from-index
+    Query: |
+      match varDecl(hasType(asString("uint32_t")), hasInitializer(ignoringImpCasts(cxxMemberCallExpr(callee(cxxMethodDecl(hasName("index"), ofClass(cxxRecordDecl(hasName("SyntaxElement"))))))))).bind("root")
+    Diagnostic:
+      - BindName: root
+        Message: "an element's index() is 0 for a token: is this a token? (use token())"
+        Level: Warning
+  - Name: vcc-syntax-index-as-condition
+    Query: |
+      match implicitCastExpr(hasImplicitDestinationType(booleanType()), hasSourceExpression(ignoringImpCasts(cxxMemberCallExpr(callee(cxxMethodDecl(hasName("index"), ofClass(cxxRecordDecl(hasName("SyntaxElement"))))))))).bind("root")
+    Diagnostic:
+      - BindName: root
+        Message: "an element's index() is 0 for a token: to ask whether there is a child, test the element itself (if (x))"
+        Level: Warning

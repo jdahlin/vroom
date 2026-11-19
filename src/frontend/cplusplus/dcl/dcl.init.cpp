@@ -617,7 +617,7 @@ semantic_analysis::class_reference_binding(node_index at, expression_meaning &m,
  * conversions are ill-formed ([dcl.init.list]/3.9).
  */
 analysis_result semantic_analysis::initialize_from(node_index at,
-                                                   syntax_child clause,
+                                                   SyntaxElement clause,
                                                    qualified_type &type,
                                                    bool direct, bool list,
                                                    initialized_value &result)
@@ -823,7 +823,7 @@ analysis_result
 semantic_analysis::list_initialization(node_index list, qualified_type &type,
                                        bool direct, initialized_value &result)
 {
-    owned_array<syntax_child> clauses;
+    owned_array<SyntaxElement> clauses;
     analysis_result gathered = list_clauses(list, clauses);
     if (gathered != analysis_result::well_formed)
         return gathered;
@@ -832,7 +832,7 @@ semantic_analysis::list_initialization(node_index list, qualified_type &type,
 
 analysis_result
 semantic_analysis::list_clauses(node_index list,
-                                owned_array<syntax_child> &clauses)
+                                owned_array<SyntaxElement> &clauses)
 {
     auto node = syntax(list);
     for (auto c : node.elements()) {
@@ -860,7 +860,7 @@ semantic_analysis::list_clauses(node_index list,
 }
 
 analysis_result semantic_analysis::list_initialization_of(
-    node_index list, const owned_array<syntax_child> &clauses,
+    node_index list, const owned_array<SyntaxElement> &clauses,
     qualified_type &type, bool direct, initialized_value &result)
 {
     auto node = syntax(list);
@@ -877,7 +877,7 @@ analysis_result semantic_analysis::list_initialization_of(
         /* ... in parentheses: an extension */
         if (clauses.size() == 1 && !clauses[0].is_token() &&
             character_type(fundamental_of(target.operand))) {
-            syntax_child inner = clauses[0];
+            SyntaxElement inner = clauses[0];
             while (syntax(inner).is(syntax_kind::primary_expression) &&
                    syntax(inner).size() == 3)
                 inner = syntax(inner)[1];
@@ -958,7 +958,7 @@ analysis_result semantic_analysis::list_initialization_of(
  * ... is called copy-initialization"; /16: "The initialization that occurs
  * ... in the forms T x(a); T x{a}; ... is called direct-initialization."
  */
-analysis_result semantic_analysis::initializer(syntax_child init,
+analysis_result semantic_analysis::initializer(SyntaxElement init,
                                                qualified_type &type,
                                                initialized_value &result)
 {
@@ -1031,7 +1031,7 @@ analysis_result semantic_analysis::initializer(syntax_child init,
  * aggregate takes a braced-init-list.
  */
 analysis_result semantic_analysis::class_list_initialization(
-    node_index list, const owned_array<syntax_child> &clauses,
+    node_index list, const owned_array<SyntaxElement> &clauses,
     qualified_type type, bool direct, initialized_value &result)
 {
     entity_index c = type_table[type.unqualified()].entity;
@@ -1135,7 +1135,7 @@ analysis_result semantic_analysis::class_list_initialization(
  * initialization ([over.match.list]/1).
  */
 analysis_result semantic_analysis::constructor_list_initialization(
-    node_index list, const owned_array<syntax_child> &clauses,
+    node_index list, const owned_array<SyntaxElement> &clauses,
     qualified_type type, bool direct, initialized_value &result)
 {
     entity_index c = type_table[type.unqualified()].entity;
@@ -1155,7 +1155,7 @@ analysis_result semantic_analysis::constructor_list_initialization(
             return not_supported(list, "over.match.list");
     }
     owned_array<expression_meaning> arguments;
-    for (syntax_child clause : clauses) {
+    for (SyntaxElement clause : clauses) {
         if (syntax(clause).is(syntax_kind::braced_init_list))
             return not_supported(list, "over.match.list");
         expression_meaning e;
@@ -1232,7 +1232,7 @@ analysis_result semantic_analysis::constructor_list_initialization(
 /* [dcl.init.aggr]/11: "An initializer-list is ill-formed if the number of
    initializer-clauses exceeds the number of elements of the aggregate." */
 analysis_result semantic_analysis::too_many_clauses(
-    node_index list, const owned_array<syntax_child> &clauses, size_t next)
+    node_index list, const owned_array<SyntaxElement> &clauses, size_t next)
 {
     if (next < clauses.size())
         return ill_formed(list,
@@ -1258,7 +1258,7 @@ analysis_result semantic_analysis::too_many_clauses(
  * element": without designators, the first.
  */
 analysis_result semantic_analysis::aggregate_elements(
-    node_index list, const owned_array<syntax_child> &clauses, size_t &next,
+    node_index list, const owned_array<SyntaxElement> &clauses, size_t &next,
     qualified_type type, initialized_value &result)
 {
     const struct type target = type_table[type.unqualified()];
@@ -1368,10 +1368,10 @@ analysis_result semantic_analysis::aggregate_elements(
  * of the subaggregate".
  */
 analysis_result semantic_analysis::aggregate_element(
-    node_index list, const owned_array<syntax_child> &clauses, size_t &next,
+    node_index list, const owned_array<SyntaxElement> &clauses, size_t &next,
     qualified_type element, initialized_value &one)
 {
-    syntax_child clause = clauses[next];
+    SyntaxElement clause = clauses[next];
     node_index at = list;
     if (!clause.is_token())
         at = clause.index();

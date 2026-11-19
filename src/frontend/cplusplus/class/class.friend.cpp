@@ -82,16 +82,16 @@ entity_index semantic_analysis::declared_unbound(entity_index scope,
  * innermost enclosing namespace."
  */
 analysis_result semantic_analysis::friend_class(entity_index c, node_index n,
-                                                syntax_child type)
+                                                SyntaxElement type)
 {
     entity_index space = enclosing_namespace(c);
     if (type.is_token()) {
         /* [class.friend]/3 (C++11): friend simple-type-specifier ; */
         if (!tokens.files.behavior.has(language_feature::rvalue_references) ||
-            tokens[type.index()].kind != token_kind::identifier)
+            tokens[type.token()].kind != token_kind::identifier)
             return not_supported(n, "class.friend");
         lookup_result found = lookup_unqualified(
-            tokens.identifier(type.index()), lookup_filter::types);
+            tokens.identifier(type.token()), lookup_filter::types);
         if (found.unknown || found.ambiguous || !found.entity)
             return not_supported(n, "class.friend");
         entity_index e = found.entity;
@@ -245,7 +245,7 @@ semantic_analysis::friend_function(entity_index c, node_index n,
         type_table[type.unqualified()].kind != type_kind::function)
         return not_supported(n, "class.friend");
     for (const parameter_meaning &parameter : function_parameters)
-        if (parameter.default_argument.index())
+        if (parameter.default_argument)
             return not_supported(n, "dcl.fct.default");
     uint32_t name = tokens.identifier(m.id);
     if (defines &&
@@ -369,7 +369,7 @@ analysis_result semantic_analysis::friend_function_body(
         auto body = definition.function_body();
         if (body.defaulted()) {
             scoped_value<entity_index> compared(defaulted_comparison, c);
-            r = analyse_function_body(definition, body.child());
+            r = analyse_function_body(definition, syntax(body.child()));
         } else {
             r = analyse_function_body(definition, body.compound_statement());
         }
@@ -441,7 +441,7 @@ analysis_result semantic_analysis::defaulted_equality(
         }
         analysis_result r = binary_of(
             current_declaration, at, preprocessing_op_or_punc::EQUAL_EQUAL,
-            syntax_child(), sides[0], syntax_child(), sides[1], equal);
+            SyntaxElement(), sides[0], SyntaxElement(), sides[1], equal);
         if (r != analysis_result::well_formed)
             return r;
         /* a bool prvalue each ([class.eq]/2), joined by && ([expr.log.and]) */
@@ -490,9 +490,9 @@ analysis_result semantic_analysis::friend_member_declaration(
     if (node.size() == leading + 2) {
         /* friend class-key identifier ; friend type-name ; */
         node_index seq = children_syntax[leading].index();
-        syntax_child type = {};
+        SyntaxElement type = {};
         unsigned friends_seen = 0, others = 0;
-        for (syntax_child x : syntax(seq).elements()) {
+        for (SyntaxElement x : syntax(seq).elements()) {
             if (is_keyword(x, standard_keyword::friend_)) {
                 friends_seen++;
                 continue;

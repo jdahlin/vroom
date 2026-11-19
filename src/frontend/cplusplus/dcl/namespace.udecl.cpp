@@ -123,9 +123,9 @@ analysis_result semantic_analysis::using_declaration(UsingDeclaration n)
        extension) and the commas: of the using-declaration, or of its
        using-declarator-list */
     auto node = syntax(n);
-    owned_array<syntax_child> items;
+    owned_array<SyntaxElement> items;
     for (uint32_t i = 0; i < node.size(); i++) {
-        syntax_child c = node[i];
+        SyntaxElement c = node[i];
         if (syntax(c).is(syntax_kind::using_declarator_list)) {
             for (uint32_t k = 0; k < syntax(c).size(); k++)
                 items.append(syntax(c)[k]);
@@ -136,7 +136,7 @@ analysis_result semantic_analysis::using_declaration(UsingDeclaration n)
     analysis_result result = analysis_result::well_formed;
     bool any = false;
     for (size_t i = 0; i < items.size(); i++) {
-        syntax_child d = items[i];
+        SyntaxElement d = items[i];
         if (syntax(d).is(syntax_kind::using_declarator)) {
             gnu_attributes g;
             for (size_t k = i + 1;

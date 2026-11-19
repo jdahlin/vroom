@@ -112,7 +112,7 @@ analysis_result semantic_analysis::array_element(node_index n, token_index at,
     analysis_result r = builtin_binary(n, at, preprocessing_op_or_punc::PLUS,
                                        object, index, sum);
     if (r == analysis_result::well_formed)
-        r = indirection_of(n, at, syntax_child(), sum);
+        r = indirection_of(n, at, SyntaxElement(), sum);
     object = sum;
     return r;
 }
@@ -542,17 +542,17 @@ analysis_result semantic_analysis::structured_binding_declaration(
         return not_supported(declaration, "dcl.struct.bind");
     token_index at = node[i].token();
     owned_array<token_index> names;
-    syntax_child list = node[i + 1];
+    SyntaxElement list = node[i + 1];
     if (list.is_token()) {
-        names.append(list.index());
+        names.append(list.token());
     } else {
-        for (syntax_child c : syntax(list).elements()) {
+        for (SyntaxElement c : syntax(list).elements()) {
             if (c.is_token() &&
-                tokens[c.index()].kind == token_kind::identifier)
-                names.append(c.index());
+                tokens[c.token()].kind == token_kind::identifier)
+                names.append(c.token());
         }
     }
-    syntax_child init;
+    SyntaxElement init;
     if (!supplied) {
         if (i + 4 > node.size())
             return not_supported(declaration, "dcl.struct.bind");
@@ -635,7 +635,7 @@ analysis_result semantic_analysis::structured_binding_declaration(
     if (supplied) {
         m = *supplied;
     } else {
-        syntax_child clause;
+        SyntaxElement clause;
         /* [dcl.pre]/8: "The initializer shall be of the form "=
            assignment-expression", of the form "{ assignment-expression }",
            or of the form "( assignment-expression )"" */

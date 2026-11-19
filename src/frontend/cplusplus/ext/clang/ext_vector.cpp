@@ -21,7 +21,7 @@ namespace cplusplus
    template's own declaration a non-type template-parameter
    ([temp.dep.constexpr]/2), as for an array's bound */
 analysis_result semantic_analysis::clang_ext_vector_count(node_index at,
-                                                          syntax_child count,
+                                                          SyntaxElement count,
                                                           gnu_attributes &g)
 {
     if (entity_index named = value_parameter_named(count)) {

@@ -311,9 +311,9 @@ analysis_result semantic_analysis::namespace_definition(node_index n)
     bool body = false;
     /* the tokens before the '{': inline, namespace, the names and ::, and
        those of an enclosing-namespace-specifier */
-    owned_array<syntax_child> head;
+    owned_array<SyntaxElement> head;
     for (uint32_t i = 0; i < node.size() && !body; i++) {
-        syntax_child c = node[i];
+        SyntaxElement c = node[i];
         if (syntax(c).is(syntax_kind::enclosing_namespace_specifier)) {
             for (uint32_t k = 0; k < syntax(c).size(); k++)
                 head.append(syntax(c)[k]);
@@ -340,14 +340,14 @@ analysis_result semantic_analysis::namespace_definition(node_index n)
     }
     if (!body)
         return not_supported(n, "namespace.def");
-    for (syntax_child c : head) {
+    for (SyntaxElement c : head) {
         if (!c.is_token())
             return not_supported(n, "namespace.def");
-        const token &t = tokens[c.index()];
+        const token &t = tokens[c.token()];
         if (t.kind == token_kind::identifier) {
             component x;
-            x.name = tokens.identifier(c.index());
-            x.at = c.index();
+            x.name = tokens.identifier(c.token());
+            x.at = c.token();
             x.inline_ = inline_next;
             inline_next = false;
             components.append(x);
@@ -522,7 +522,7 @@ analysis_result semantic_analysis::using_directive(node_index n)
     node_index qualifier = 0;
     token_index name = 0;
     for (uint32_t i = 0; i < node.size(); i++) {
-        syntax_child c = node[i];
+        SyntaxElement c = node[i];
         if (syntax(c).is(syntax_kind::nested_name_specifier)) {
             qualifier = c.index();
             continue;
@@ -530,8 +530,8 @@ analysis_result semantic_analysis::using_directive(node_index n)
         if (!c.is_token())
             /* an attribute-specifier-seq */
             return unknown(not_supported(n, "dcl.attr"));
-        if (tokens[c.index()].kind == token_kind::identifier)
-            name = c.index();
+        if (tokens[c.token()].kind == token_kind::identifier)
+            name = c.token();
     }
     if (!name)
         return unknown(not_supported(n, "namespace.udir"));
@@ -570,7 +570,7 @@ analysis_result semantic_analysis::namespace_alias_definition(node_index n)
     token_index alias = node[1].token();
     node_index qualifier = 0;
     token_index name = 0;
-    syntax_child named = node[3];
+    SyntaxElement named = node[3];
     if (syntax(named).is(syntax_kind::qualified_namespace_specifier)) {
         auto parts = syntax(named);
         if (syntax(named).size() != 2 ||
@@ -580,8 +580,8 @@ analysis_result semantic_analysis::namespace_alias_definition(node_index n)
         qualifier = parts[0].index();
         name = parts[1].token();
     } else if (named.is_token() &&
-               tokens[named.index()].kind == token_kind::identifier) {
-        name = named.index();
+               tokens[named.token()].kind == token_kind::identifier) {
+        name = named.token();
     } else {
         return not_supported(n, "namespace.alias");
     }

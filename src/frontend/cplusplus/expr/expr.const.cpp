@@ -231,7 +231,7 @@ analysis_result semantic_analysis::converted_constant_expression(
  * contains only the conversions above."
  */
 analysis_result semantic_analysis::bool_constant_expression(node_index at,
-                                                            syntax_child e,
+                                                            SyntaxElement e,
                                                             bool &constant,
                                                             bool &value)
 {

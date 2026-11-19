@@ -42,20 +42,19 @@ analysis_result semantic_analysis::member_function_template(
         return head;
     auto d = syntax(definition);
     uint32_t lead = leading_gnu_attributes(definition);
-    const syntax_child *dc = tree.children(definition) + lead;
     /* a constructor template's decl-specifier-seq is optional
        ([class.ctor]/1) */
     uint32_t specifiers =
-        d.size() > lead && syntax(dc[0]).is(syntax_kind::decl_specifier_seq);
-    bool constructor = declares_special_member(c, dc[specifiers]);
+        d.size() > lead && d[lead].is(syntax_kind::decl_specifier_seq);
+    bool constructor = declares_special_member(c, d[lead + specifiers]);
     /* [dcl.decl]/4: a trailing requires-clause (trailing_constraint),
        where the template-head has none */
-    uint32_t trailing = trailing_constraint(n).bits != 0;
-    if (trailing && head_constraint(n).bits)
+    uint32_t trailing = static_cast<bool>(trailing_constraint(n));
+    if (trailing && head_constraint(n))
         return not_supported(n, "temp.constr");
     if (d.size() != lead + 2 + specifiers + trailing ||
-        (!specifiers && !constructor) || dc[specifiers].is_token() ||
-        !syntax(dc[specifiers + 1 + trailing]).is(syntax_kind::function_body))
+        (!specifiers && !constructor) || d[lead + specifiers].is_token() ||
+        !d[lead + specifiers + 1 + trailing].is(syntax_kind::function_body))
         return not_supported(n, "temp.mem");
     uint32_t index = 0, first = 0;
     entity_index scope = 0;
@@ -214,11 +213,11 @@ analysis_result semantic_analysis::constructor_template_candidates(
  */
 analysis_result semantic_analysis::member_template_call(
     node_index n, entity_index held, const expression_meaning &object,
-    const owned_array<syntax_child> &arguments,
+    const owned_array<SyntaxElement> &arguments,
     owned_array<expression_meaning> &early, expression_meaning &m)
 {
     if (early.empty())
-        for (syntax_child a : arguments) {
+        for (SyntaxElement a : arguments) {
             token_index set_at = 0;
             if (syntax(a).is(syntax_kind::braced_init_list) ||
                 named_overload_set(a, set_at))
@@ -268,7 +267,7 @@ analysis_result semantic_analysis::member_template_call(
    from it) with the arguments: [expr.call]/2's class member access */
 analysis_result semantic_analysis::bound_member_call(
     node_index n, entity_index f, const expression_meaning &object,
-    const owned_array<syntax_child> &arguments,
+    const owned_array<SyntaxElement> &arguments,
     owned_array<expression_meaning> &early, expression_meaning &m)
 {
     token_index at = syntax(n).first_token();

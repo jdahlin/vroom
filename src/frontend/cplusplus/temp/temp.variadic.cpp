@@ -108,7 +108,7 @@ bool semantic_analysis::template_parameter_form(
 bool semantic_analysis::template_head_list(
     node_index head, owned_array<node_index> &parameters) const
 {
-    for (syntax_child c : syntax(head).elements()) {
+    for (SyntaxElement c : syntax(head).elements()) {
         if (c.is_token())
             continue;
         if (syntax(c).is(syntax_kind::type_parameter) ||
@@ -121,7 +121,7 @@ bool semantic_analysis::template_head_list(
             continue;
         if (!syntax(c).is(syntax_kind::template_parameter_list))
             return false;
-        for (syntax_child p : syntax(c).elements()) {
+        for (SyntaxElement p : syntax(c).elements()) {
             if (p.is_token())
                 continue;
             if (!syntax(p).is(syntax_kind::type_parameter) &&
@@ -282,7 +282,7 @@ analysis_result semantic_analysis::parameter_pack_expansion(
     return analysis_result::well_formed;
 }
 
-bool semantic_analysis::has_pack_expansion(syntax_child list) const
+bool semantic_analysis::has_pack_expansion(SyntaxElement list) const
 {
     if (list.is_token())
         return false;
@@ -293,7 +293,7 @@ bool semantic_analysis::has_pack_expansion(syntax_child list) const
 }
 
 analysis_result semantic_analysis::expansion_element_expression(
-    syntax_child pattern, uint32_t i, expression_meaning &m)
+    SyntaxElement pattern, uint32_t i, expression_meaning &m)
 {
     bool saved = expanding;
     uint32_t saved_element = expansion_element;
@@ -338,7 +338,7 @@ static void child_tokens(const syntax_tree &tree, syntax_child c,
 analysis_result semantic_analysis::fold(node_index n, expression_meaning &m)
 {
     auto node = syntax(n);
-    syntax_child pattern = {}, init = {};
+    SyntaxElement pattern = {}, init = {};
     bool right = false, has_init = false;
     token_index at = 0;
     auto ellipsis = [&](uint32_t i) {

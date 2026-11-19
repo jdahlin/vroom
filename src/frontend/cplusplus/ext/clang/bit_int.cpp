@@ -44,7 +44,7 @@ node_index parser::clang_bit_int_type_specifier()
 analysis_result semantic_analysis::clang_bit_int_type(node_index n,
                                                       qualified_type &type)
 {
-    syntax_child width = syntax(n)[2];
+    SyntaxElement width = syntax(n)[2];
     if (entity_index named = value_parameter_named(width)) {
         if (!is_integral(entity_table[named].type))
             return not_supported(n, "temp.dep.constexpr");

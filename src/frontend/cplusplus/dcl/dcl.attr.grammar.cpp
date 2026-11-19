@@ -516,7 +516,7 @@ bool attribute_without_effect(const char *ns, size_t ns_length,
  * (attribute_without_effect): only then may a declaration that has no rules
  * for attributes leave them out.
  */
-bool semantic_analysis::attributes_without_effect(syntax_child n) const
+bool semantic_analysis::attributes_without_effect(SyntaxElement n) const
 {
     uint32_t flags = 0;
     return attributes_as_gnu(n, flags) && !flags;
@@ -525,19 +525,20 @@ bool semantic_analysis::attributes_without_effect(syntax_child n) const
 /* The same, also accepting [dcl.attr.noreturn] noreturn (and
    gnu::noreturn), whose GCC flag goes into flags: GCC's noreturn says
    the same */
-bool semantic_analysis::attributes_as_gnu(syntax_child n, uint32_t &flags) const
+bool semantic_analysis::attributes_as_gnu(SyntaxElement n,
+                                          uint32_t &flags) const
 {
-    owned_array<syntax_child> work;
+    owned_array<SyntaxElement> work;
     work.append(n);
     while (!work.empty()) {
-        syntax_child c = work.back();
+        SyntaxElement c = work.back();
         work.resize(work.size() - 1);
         if (c.is_token()) {
-            token_kind k = tokens[c.index()].kind;
+            token_kind k = tokens[c.token()].kind;
             if (k == token_kind::operator_or_punctuator)
                 continue; /* [ [ , ] ] */
             owned_buffer spelling;
-            tokens.spelling(c.index(), spelling.get());
+            tokens.spelling(c.token(), spelling.get());
             const char *name;
             size_t length;
             attribute_name(spelling, &name, &length);
@@ -564,11 +565,11 @@ bool semantic_analysis::attributes_as_gnu(syntax_child n, uint32_t &flags) const
             const char *ns;
             size_t ns_length;
             attribute_name(ns_spelling, &ns, &ns_length);
-            owned_array<syntax_child> names;
+            owned_array<SyntaxElement> names;
             for (uint32_t i = 3; i < node.size(); i++)
                 names.append(node[i]);
             while (!names.empty()) {
-                syntax_child a = names.back();
+                SyntaxElement a = names.back();
                 names.resize(names.size() - 1);
                 if (!a.is_token()) {
                     auto an = syntax(a);
@@ -585,11 +586,11 @@ bool semantic_analysis::attributes_as_gnu(syntax_child n, uint32_t &flags) const
                         return false;
                     a = syntax(a)[0];
                 }
-                if (tokens[a.index()].kind ==
+                if (tokens[a.token()].kind ==
                     token_kind::operator_or_punctuator)
                     continue; /* , ] ] */
                 owned_buffer spelling;
-                tokens.spelling(a.index(), spelling.get());
+                tokens.spelling(a.token(), spelling.get());
                 const char *name;
                 size_t length;
                 attribute_name(spelling, &name, &length);
@@ -641,15 +642,15 @@ bool semantic_analysis::attributes_as_gnu(syntax_child n, uint32_t &flags) const
 /* [ext:gnu_attributes] the same for a gnu-attribute-specifier (or its
    list): each attribute's name one of attribute_without_effect's gnu
    names, its arguments ignored */
-bool semantic_analysis::gnu_attributes_without_effect(syntax_child n) const
+bool semantic_analysis::gnu_attributes_without_effect(SyntaxElement n) const
 {
-    owned_array<syntax_child> work;
+    owned_array<SyntaxElement> work;
     work.append(n);
     bool any = false;
     while (!work.empty()) {
-        syntax_child c = work.back();
+        SyntaxElement c = work.back();
         work.resize(work.size() - 1);
-        syntax_child name_token = c;
+        SyntaxElement name_token = c;
         if (!c.is_token()) {
             auto node = syntax(c);
             if (node.is(syntax_kind::gnu_attribute_specifier) ||
@@ -667,7 +668,7 @@ bool semantic_analysis::gnu_attributes_without_effect(syntax_child n) const
                the visibility every symbol vcc emits has already
                (gnu_attribute_specifier's rule) */
             owned_buffer spelling, value;
-            tokens.spelling(name_token.index(), spelling.get());
+            tokens.spelling(name_token.token(), spelling.get());
             const char *name;
             size_t length;
             attribute_name(spelling, &name, &length);
@@ -682,10 +683,10 @@ bool semantic_analysis::gnu_attributes_without_effect(syntax_child n) const
             }
         }
         /* __attribute__ ( ( , ) ): not names */
-        if (tokens[name_token.index()].kind != token_kind::identifier)
+        if (tokens[name_token.token()].kind != token_kind::identifier)
             continue;
         owned_buffer spelling;
-        tokens.spelling(name_token.index(), spelling.get());
+        tokens.spelling(name_token.token(), spelling.get());
         const char *name;
         size_t length;
         attribute_name(spelling, &name, &length);
@@ -701,7 +702,7 @@ bool semantic_analysis::gnu_attributes_without_effect(syntax_child n) const
 /* a class-head's attribute-specifier-seq, attribute-specifier or
    gnu-attribute-specifier at c of attributes without effect only */
 bool semantic_analysis::class_head_attributes_without_effect(
-    syntax_child c) const
+    SyntaxElement c) const
 {
     if (c.is_token())
         return false;

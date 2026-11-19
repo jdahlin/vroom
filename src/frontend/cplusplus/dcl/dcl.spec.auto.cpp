@@ -290,8 +290,8 @@ analysis_result semantic_analysis::placeholder_constraint(
 
 /* the assignment-expression of an initializer "= E", "( E )" or "{ E }"
    (direct: not the first; list: the last), false for another form */
-bool semantic_analysis::initializer_form(syntax_child init,
-                                         syntax_child &clause, bool &direct,
+bool semantic_analysis::initializer_form(SyntaxElement init,
+                                         SyntaxElement &clause, bool &direct,
                                          bool &list) const
 {
     if (init.is_token())
@@ -330,14 +330,14 @@ bool semantic_analysis::initializer_form(syntax_child init,
  * [dcl.spec.auto]/4: "In an initializer of the form ( expression-list ) the
  * expression-list shall be a single assignment-expression."
  */
-analysis_result semantic_analysis::deduced_initializer(syntax_child init,
+analysis_result semantic_analysis::deduced_initializer(SyntaxElement init,
                                                        entity_index e,
                                                        qualified_type &type,
                                                        initialized_value &value)
 {
     if (init.is_token())
         return not_supported(current_declaration, "dcl.init");
-    syntax_child clause;
+    SyntaxElement clause;
     bool direct = false, list = false;
     if (!initializer_form(init, clause, direct, list))
         /* copy-list-initialization (std::initializer_list<U>), an

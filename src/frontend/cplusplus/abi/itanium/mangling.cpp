@@ -137,9 +137,9 @@ class itanium_mangler
     }
     bool encoding(entity_index e);
     bool specialization_encoding(entity_index e);
-    bool constraint_expression(entity_index t, syntax_child c);
-    bool dependent_expression(syntax_child c);
-    bool punctuator(syntax_child c, preprocessing_op_or_punc op) const
+    bool constraint_expression(entity_index t, SyntaxElement c);
+    bool dependent_expression(SyntaxElement c);
+    bool punctuator(SyntaxElement c, preprocessing_op_or_punc op) const
     {
         return analysis.syntax(c).is(op);
     }
@@ -324,8 +324,8 @@ bool itanium_mangler::specialization_encoding(entity_index e)
     /* [abi:mangle.template-arg]'s template-args, with [impl.clang]'s
        requires-clause: I, the template-args, Q and the requires-clause's
        expression, E; the requires-clause of the template-head */
-    syntax_child constraint = analysis.template_constraint(pattern_of);
-    if (constraint.bits && !table[scope].lambda) {
+    SyntaxElement constraint = analysis.template_constraint(pattern_of);
+    if (constraint && !table[scope].lambda) {
         out->n--;
         text("Q");
         if (!constraint_expression(pattern_of, constraint))
@@ -352,10 +352,9 @@ bool itanium_mangler::specialization_encoding(entity_index e)
     bool trailing = false;
     if (table[scope].lambda)
         constraint = analysis.lambda_constraint(table[scope].lambda, &trailing);
-    else if ((constraint = analysis.template_trailing_constraint(pattern_of))
-                 .bits)
+    else if ((constraint = analysis.template_trailing_constraint(pattern_of)))
         trailing = true;
-    if (constraint.bits && trailing) {
+    if (constraint && trailing) {
         text("Q");
         return constraint_expression(pattern_of, constraint);
     }
@@ -370,12 +369,12 @@ bool itanium_mangler::specialization_encoding(entity_index e)
  *
  * Parentheses are not mangled.  Anything else: not mangled yet.
  */
-bool itanium_mangler::constraint_expression(entity_index t, syntax_child c)
+bool itanium_mangler::constraint_expression(entity_index t, SyntaxElement c)
 {
     if (c.is_token()) {
         /* a decimal integer-literal of type int: Li <value> E */
         owned_buffer spelling;
-        analysis.token_spelling(c.index(), spelling.get());
+        analysis.token_spelling(c.token(), spelling.get());
         if (!spelling.size() || spelling.size() > 9 ||
             (spelling.data()[0] == '0' && spelling.size() > 1))
             return false;
@@ -510,11 +509,11 @@ bool itanium_mangler::constraint_expression(entity_index t, syntax_child c)
  * the member's <unresolved-name> its <source-name>.  Anything else: not
  * mangled yet.
  */
-bool itanium_mangler::dependent_expression(syntax_child c)
+bool itanium_mangler::dependent_expression(SyntaxElement c)
 {
     if (c.is_token()) {
         uint32_t position =
-            analysis.function_parameter_position(encoding_template, c.index());
+            analysis.function_parameter_position(encoding_template, c.token());
         if (!position)
             return false;
         text("fp");
@@ -1676,9 +1675,9 @@ bool itanium_mangler::closure_type_name(entity_index c)
         /* [impl.clang] the template-head's requires-clause: Q and its
            expression */
         bool trailing = false;
-        syntax_child constraint =
+        SyntaxElement constraint =
             analysis.lambda_constraint(table[c].lambda, &trailing);
-        if (constraint.bits && !trailing) {
+        if (constraint && !trailing) {
             text("Q");
             if (!constraint_expression(call, constraint))
                 return false;

@@ -28,11 +28,11 @@ namespace cplusplus
 
 /* the token of the name the postfix-expression of a call is, 0 if it is
    none of [over.call.func]/1's forms */
-token_index semantic_analysis::callee_name(syntax_child c) const
+token_index semantic_analysis::callee_name(SyntaxElement c) const
 {
     if (c.is_token()) {
-        if (tokens[c.index()].kind == token_kind::identifier)
-            return c.index();
+        if (tokens[c.token()].kind == token_kind::identifier)
+            return c.token();
         return 0;
     }
     auto node = syntax(c);
@@ -68,7 +68,7 @@ token_index semantic_analysis::callee_name(syntax_child c) const
  */
 analysis_result
 semantic_analysis::resolve_call(node_index n,
-                                const owned_array<syntax_child> &arguments,
+                                const owned_array<SyntaxElement> &arguments,
                                 owned_array<expression_meaning> &early,
                                 const owned_array<entity_index> &set,
                                 uint32_t object, expression_meaning &f)
@@ -92,11 +92,11 @@ semantic_analysis::resolve_call(node_index n,
        element stands for the list (the call list-initializes the
        parameter); other lists, and lists for a parameter of class,
        reference or array type, are not analysed */
-    owned_array<syntax_child> lists;
+    owned_array<SyntaxElement> lists;
     for (size_t i = 0; i < arguments.size(); i++) {
         if (!syntax(arguments[i]).is(syntax_kind::braced_init_list))
             continue;
-        owned_array<syntax_child> clauses;
+        owned_array<SyntaxElement> clauses;
         analysis_result r = list_clauses(arguments[i].index(), clauses);
         if (r != analysis_result::well_formed)
             return r;

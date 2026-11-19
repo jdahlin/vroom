@@ -191,7 +191,7 @@ void semantic_analysis::evaluate_analysed_expressions()
         /* a function defined after the expression is undefined at its
            point ([expr.const]/5.3) */
         if (x.at.is_token())
-            state.defined_before = x.at.index();
+            state.defined_before = x.at.token();
         else
             state.defined_before = syntax(x.at.index()).first_token();
         constant_value v;

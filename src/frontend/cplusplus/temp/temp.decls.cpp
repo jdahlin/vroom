@@ -107,7 +107,7 @@ analysis_result semantic_analysis::deduction_guide(node_index n)
     token_index name = 0;
     node_index id = 0;
     for (uint32_t i = 1; i < node.size(); i++) {
-        syntax_child c = node[i];
+        SyntaxElement c = node[i];
         if (!name && syntax(c).is(preprocessing_op_or_punc::LEFT_PARENTHESIS))
             name = node[i - 1].token();
         if (syntax(c).is(syntax_kind::simple_template_id))
@@ -137,34 +137,34 @@ analysis_result semantic_analysis::deduction_guide(node_index n)
  */
 /* [temp.pre]/1: a template-head's requires-clause's constraint-expression,
    or none */
-syntax_child semantic_analysis::head_constraint(node_index n) const
+SyntaxElement semantic_analysis::head_constraint(node_index n) const
 {
     if (syntax(syntax_child::node(n)).is(syntax_kind::lambda_expression))
         return lambda_constraint(n);
     if (!syntax(n).size() || !syntax(n)[0].is(syntax_kind::template_head))
-        return syntax_child();
+        return SyntaxElement();
     node_index head = syntax(n)[0].index();
-    for (syntax_child c : syntax(head).elements()) {
+    for (SyntaxElement c : syntax(head).elements()) {
         if (syntax(c).is(syntax_kind::requires_clause) && syntax(c).size() == 2)
             return syntax(c)[1];
     }
-    return syntax_child();
+    return SyntaxElement();
 }
 
 /* [dcl.decl]/4: a function template's trailing requires-clause, the
    function-definition's child before its function-body, or none */
-syntax_child semantic_analysis::trailing_constraint(node_index n) const
+SyntaxElement semantic_analysis::trailing_constraint(node_index n) const
 {
     if (syntax(n).size() != 2 || syntax(n)[1].is_token())
-        return syntax_child();
+        return SyntaxElement();
     node_index d = syntax(n)[1].index();
     if (!syntax(d).is(syntax_kind::function_definition))
-        return syntax_child();
-    for (syntax_child c : syntax(d).elements()) {
+        return SyntaxElement();
+    for (SyntaxElement c : syntax(d).elements()) {
         if (syntax(c).is(syntax_kind::requires_clause) && syntax(c).size() == 2)
             return syntax(c)[1];
     }
-    return syntax_child();
+    return SyntaxElement();
 }
 
 analysis_result semantic_analysis::template_head_parameters(
@@ -202,7 +202,7 @@ analysis_result semantic_analysis::template_head_parameters(
     /* [dcl.fct]/22: the invented template-parameters after the declared */
     if (!abbreviated_parameters(n, parameters))
         return not_supported(n, "temp.variadic");
-    if (head_constraint(n).bits && !constrained)
+    if (head_constraint(n) && !constrained)
         return not_supported(n, "temp.constr");
     /* a type-parameter class identifier_opt, a template template-parameter
        template < type-parameters > class identifier_opt, a
@@ -370,8 +370,8 @@ semantic_analysis::function_template_definition(node_index n,
     uint32_t lead = leading_gnu_attributes(definition);
     /* [dcl.decl]/4: a trailing requires-clause (trailing_constraint),
        where the template-head has none */
-    uint32_t trailing = trailing_constraint(n).bits != 0;
-    if (trailing && head_constraint(n).bits)
+    uint32_t trailing = static_cast<bool>(trailing_constraint(n));
+    if (trailing && head_constraint(n))
         return not_supported(n, "temp.constr");
     if (d.size() != lead + 3 + trailing ||
         !d[lead].is(syntax_kind::decl_specifier_seq) ||
@@ -413,7 +413,7 @@ semantic_analysis::function_template_definition(node_index n,
        argument */
     uint32_t defaults = 0;
     for (const parameter_meaning &p : function_parameters) {
-        if (!p.default_argument.index())
+        if (!p.default_argument)
             defaults = 0;
         else
             defaults++;
@@ -1093,7 +1093,7 @@ semantic_analysis::variable_template_definition(node_index n,
         type_table[type.unqualified()].kind == type_kind::function ||
         type_table[type.unqualified()].kind == type_kind::none)
         return not_supported(n, "temp.pre");
-    for (syntax_child k : parts[skip].elements()) {
+    for (SyntaxElement k : parts[skip].elements()) {
         if (syntax(k).is(syntax_kind::class_specifier) ||
             syntax(k).is(syntax_kind::elaborated_type_specifier) ||
             syntax(k).is(syntax_kind::enum_specifier))
@@ -1553,10 +1553,10 @@ analysis_result semantic_analysis::template_id_arguments_in(
    ellipsis follows it (expansion, [temp.variadic]/5); false for an
    ellipsis that follows none or another */
 bool semantic_analysis::expansion_list(node_index list,
-                                       owned_array<syntax_child> &written,
+                                       owned_array<SyntaxElement> &written,
                                        owned_array<bool> &expansion) const
 {
-    for (syntax_child a : syntax(list).elements()) {
+    for (SyntaxElement a : syntax(list).elements()) {
         if (syntax(a).is(preprocessing_op_or_punc::COMMA))
             continue;
         if (syntax(a).is(preprocessing_op_or_punc::ELLIPSIS)) {
@@ -1608,9 +1608,9 @@ semantic_analysis::class_template_definition(node_index n, node_index specifier)
     if (!spec.size() || !spec[0].is(syntax_kind::class_head))
         return not_supported(n, "temp.class");
     node_index head = spec[0].index();
-    syntax_child head_name = class_head_name(head);
+    SyntaxElement head_name = class_head_name(head);
     bool specialization =
-        head_name.bits && syntax(head_name).is(syntax_kind::simple_template_id);
+        head_name && syntax(head_name).is(syntax_kind::simple_template_id);
     analysis_result r = template_head_parameters(
         n, parameters, true, true, specialization, specialization);
     if (r != analysis_result::well_formed)
@@ -1622,9 +1622,9 @@ semantic_analysis::class_template_definition(node_index n, node_index specifier)
         return class_specialization_definition(n, specifier, parameters);
     }
     if (!head_name.is_token() ||
-        tokens[head_name.index()].kind != token_kind::identifier)
+        tokens[head_name.token()].kind != token_kind::identifier)
         return not_supported(n, "temp.class");
-    uint32_t name = tokens.identifier(head_name.index());
+    uint32_t name = tokens.identifier(head_name.token());
     uint32_t index = 0, first = 0;
     entity_index scope = 0;
     r = template_parameter_scope(n, parameters, outer, name, index, scope,
@@ -2158,7 +2158,7 @@ analysis_result semantic_analysis::template_type(node_index id,
        names a constrained non-function template ... the constraints of
        that template shall be satisfied" ([temp.constr.decl]/3: its
        requires-clause) */
-    if (head_constraint(function_templates[ct - 1].declaration).bits) {
+    if (head_constraint(function_templates[ct - 1].declaration)) {
         bool satisfied = true;
         analysis_result s =
             template_constraints_satisfied(ct, arguments, satisfied);
@@ -2199,7 +2199,7 @@ analysis_result semantic_analysis::template_id_arguments(
     if (count && template_parameter_is_pack(ft.first_parameter + count - 1))
         pack = count - 1;
     owned_array<template_argument> elements;
-    owned_array<syntax_child> written;
+    owned_array<SyntaxElement> written;
     owned_array<bool> expansion;
     for (uint32_t i = 2; i + 1 < parts.size(); i++) {
         if (parts[i].is(preprocessing_op_or_punc::ELLIPSIS)) {
@@ -2229,7 +2229,7 @@ analysis_result semantic_analysis::template_id_arguments(
         }
     {
         for (size_t w = 0; w < written.size(); w++) {
-            syntax_child a = written[w];
+            SyntaxElement a = written[w];
             /* [temp.variadic]/5: a pack expansion's pattern, once per
                element of an instantiation's packs (a template's own
                pack expansion is not analysed) */

@@ -449,7 +449,7 @@ analysis_result semantic_analysis::enum_specifier_rules(node_index n,
 {
     const implementation_defined_behavior &b = tokens.files.behavior;
     auto node = syntax(n);
-    owned_array<syntax_child> head;
+    owned_array<SyntaxElement> head;
     uint32_t i = 0;
     /* [dcl.enum]/3: "An opaque-enum-declaration is either a redeclaration
        of an enumeration in the current scope or a declaration of a new
@@ -470,7 +470,7 @@ analysis_result semantic_analysis::enum_specifier_rules(node_index n,
     uint32_t name = 0;
     token_index name_at = node.first_token();
     node_index base = 0;
-    for (syntax_child c : head) {
+    for (SyntaxElement c : head) {
         if (syntax(c).is(syntax_kind::enum_key)) {
             scoped = true;
             continue;
@@ -480,13 +480,13 @@ analysis_result semantic_analysis::enum_specifier_rules(node_index n,
             continue;
         }
         if (c.is_token() &&
-            p.keyword_of(tokens[c.index()]) == standard_keyword::enum_)
+            p.keyword_of(tokens[c.token()]) == standard_keyword::enum_)
             continue;
         if (opaque && syntax(c).is(preprocessing_op_or_punc::SEMICOLON))
             continue;
-        if (c.is_token() && tokens[c.index()].kind == token_kind::identifier) {
-            name = tokens.identifier(c.index());
-            name_at = c.index();
+        if (c.is_token() && tokens[c.token()].kind == token_kind::identifier) {
+            name = tokens.identifier(c.token());
+            name_at = c.token();
             continue;
         }
         /* an attribute-specifier-seq, a nested-name-specifier */
@@ -495,13 +495,13 @@ analysis_result semantic_analysis::enum_specifier_rules(node_index n,
     if (!opaque &&
         (i >= node.size() || !node[i].is(preprocessing_op_or_punc::LEFT_BRACE)))
         return not_supported(n, "dcl.enum");
-    owned_array<syntax_child> enumerators;
+    owned_array<SyntaxElement> enumerators;
     for (i++; i < node.size(); i++) {
-        syntax_child c = node[i];
+        SyntaxElement c = node[i];
         if (syntax(c).is(syntax_kind::enumerator_list)) {
             auto list = syntax(c);
             for (uint32_t k = 0; k < list.size(); k++) {
-                syntax_child item = syntax(c)[k];
+                SyntaxElement item = syntax(c)[k];
                 if (!syntax(item).is(preprocessing_op_or_punc::COMMA))
                     enumerators.append(item);
             }
@@ -663,9 +663,9 @@ analysis_result semantic_analysis::enum_specifier_rules(node_index n,
     } restore_scope = {current_scope, current_scope};
     if (scoped)
         current_scope = e;
-    for (syntax_child c : enumerators) {
-        syntax_child id = c;
-        syntax_child init;
+    for (SyntaxElement c : enumerators) {
+        SyntaxElement id = c;
+        SyntaxElement init;
         bool has_init = false;
         if (syntax(c).is(syntax_kind::enumerator_definition)) {
             auto d = syntax(c);
@@ -685,9 +685,9 @@ analysis_result semantic_analysis::enum_specifier_rules(node_index n,
                     return not_supported(n, "dcl.enum");
             id = attrs[0];
         }
-        if (!id.is_token() || tokens[id.index()].kind != token_kind::identifier)
+        if (!id.is_token() || tokens[id.token()].kind != token_kind::identifier)
             return not_supported(n, "dcl.enum");
-        token_index at = id.index();
+        token_index at = id.token();
         __int128 value;
         fundamental_type value_type = previous_type;
         if (has_init) {

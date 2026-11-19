@@ -477,7 +477,7 @@ node_index parser::substatement()
  * (hold_names), so that nothing after it rests on what it would have
  * declared.
  */
-analysis_result semantic_analysis::statement(syntax_child s, uint32_t &built)
+analysis_result semantic_analysis::statement(SyntaxElement s, uint32_t &built)
 {
     built = 0;
     if (s.is_token())
@@ -545,11 +545,11 @@ analysis_result semantic_analysis::attributed_statement(Statement n,
     auto node = syntax(n);
     if (node.size() < 2)
         return not_supported(n, "stmt.pre");
-    syntax_child inner = node[node.size() - 1];
+    SyntaxElement inner = node[node.size() - 1];
     if (syntax(inner).is(syntax_kind::simple_declaration))
         return not_supported(n, "dcl.attr");
     for (uint32_t i = 0; i + 1 < node.size(); i++) {
-        syntax_child c = node[i];
+        SyntaxElement c = node[i];
         if (!syntax(c).is(syntax_kind::attribute_specifier) &&
             !syntax(c).is(syntax_kind::attribute_specifier_seq))
             return not_supported(n, "dcl.attr");
@@ -581,7 +581,7 @@ analysis_result semantic_analysis::attributed_statement(Statement n,
  * statement's condition, whose names the substatement's outermost block
  * shall not redeclare ([basic.scope.block]/3).
  */
-analysis_result semantic_analysis::substatement(syntax_child s,
+analysis_result semantic_analysis::substatement(SyntaxElement s,
                                                 entity_index conflicts,
                                                 uint32_t &built)
 {
@@ -630,7 +630,7 @@ uint32_t semantic_analysis::declaration_statements(size_t first, token_index at)
 
 /* the node of a syntax child, or the declaration's for a token (where a
    diagnostic about it is issued) */
-node_index semantic_analysis::node_of(syntax_child c) const
+node_index semantic_analysis::node_of(SyntaxElement c) const
 {
     if (c.is_token())
         return current_declaration;
@@ -653,7 +653,7 @@ node_index semantic_analysis::node_of(syntax_child c) const
  * of a condition that is an expression is the value of the expression,
  * contextually converted to bool for statements other than switch".
  */
-analysis_result semantic_analysis::condition(syntax_child c, bool for_switch,
+analysis_result semantic_analysis::condition(SyntaxElement c, bool for_switch,
                                              expression_meaning &m)
 {
     node_index at = node_of(c);

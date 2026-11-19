@@ -20,16 +20,16 @@
 namespace cplusplus
 {
 
-bool semantic_analysis::deleted_body(syntax_child body) const
+bool semantic_analysis::deleted_body(SyntaxElement body) const
 {
     return explicit_body(body, standard_keyword::delete_);
 }
 
 /* the function-body = delete ... ; or = default ; (keyword k) */
-bool semantic_analysis::explicit_body(syntax_child body,
+bool semantic_analysis::explicit_body(SyntaxElement body,
                                       standard_keyword k) const
 {
-    if (body.is_token() || !body.index() ||
+    if (body.is_token() || !body ||
         !syntax(body).is(syntax_kind::function_body) || syntax(body).size() < 3)
         return false;
     auto children = syntax(body);

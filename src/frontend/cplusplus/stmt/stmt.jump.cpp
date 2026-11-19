@@ -156,7 +156,7 @@ analysis_result semantic_analysis::return_statement(node_index n,
     }
     if (node.size() != 3)
         return not_supported(n, "stmt.return");
-    syntax_child operand = node[1];
+    SyntaxElement operand = node[1];
     initialized_value result;
     if (syntax(operand).is(syntax_kind::braced_init_list)) {
         if (returns_void)
@@ -256,17 +256,17 @@ analysis_result semantic_analysis::return_statement(node_index n,
  * rvalue reference to a non-volatile object type."  The entity an operand
  * names by an id-expression (in parentheses or not), or none.
  */
-entity_index semantic_analysis::implicitly_movable(syntax_child operand)
+entity_index semantic_analysis::implicitly_movable(SyntaxElement operand)
 {
-    syntax_child named = operand;
+    SyntaxElement named = operand;
     while (!named.is_token() &&
            syntax(named).is(syntax_kind::primary_expression) &&
            syntax(named).size() == 3)
         named = syntax(named)[1];
     if (!named.is_token() ||
-        tokens[named.index()].kind != token_kind::identifier)
+        tokens[named.token()].kind != token_kind::identifier)
         return 0;
-    entity_index e = lookup(tokens.identifier(named.index()));
+    entity_index e = lookup(tokens.identifier(named.token()));
     if (!e || !entity_table[e].automatic)
         return 0;
     qualified_type t = entity_table[e].type;

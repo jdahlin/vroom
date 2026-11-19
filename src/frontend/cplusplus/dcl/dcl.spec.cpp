@@ -1051,7 +1051,7 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
        may change the class's layout) before any class is defined */
     trailing_class_alignment = 0;
     for (uint32_t i = 0; i < node.size(); i++) {
-        syntax_child c = node[i];
+        SyntaxElement c = node[i];
         if (c.is_token() || syntax(c).is(syntax_kind::class_specifier) ||
             syntax(c).is(syntax_kind::elaborated_type_specifier) ||
             syntax(c).is(syntax_kind::enum_specifier) ||
@@ -1092,17 +1092,17 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
         /* the class names the declaration would define are held, as
            hold_names holds its declarators' */
         for (uint32_t k = 0; k < node.size(); k++) {
-            syntax_child spec = node[k];
+            SyntaxElement spec = node[k];
             if (!syntax(spec).is(syntax_kind::class_specifier) ||
                 !syntax(spec).size() ||
                 !syntax(spec)[0].is(syntax_kind::class_head))
                 continue;
             node_index head = syntax(spec)[0].index();
-            for (syntax_child t : syntax(head).elements()) {
+            for (SyntaxElement t : syntax(head).elements()) {
                 if (!t.is_token() ||
-                    tokens[t.index()].kind != token_kind::identifier)
+                    tokens[t.token()].kind != token_kind::identifier)
                     continue;
-                uint32_t name = tokens.identifier(t.index());
+                uint32_t name = tokens.identifier(t.token());
                 entity_index found = entity_table.find(current_scope, name);
                 if (found) {
                     entity_table[found].kind = entity_kind::none;
@@ -1126,7 +1126,7 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
         return not_supported(c.index());
     }
     for (uint32_t i = 0; i < node.size(); i++) {
-        syntax_child c = node[i];
+        SyntaxElement c = node[i];
         if (!c.is_token()) {
             /* [dcl.type.class]... a class-specifier or an
                elaborated-type-specifier: the class is the type */
@@ -1246,7 +1246,7 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
                 declares_class = true;
             continue;
         }
-        token_index t = c.index();
+        token_index t = c.token();
         const token &tok = tokens[t];
         if (tok.kind == token_kind::identifier) {
             /* a type-name ([dcl.type.simple]/1), found by unqualified
@@ -1650,15 +1650,16 @@ semantic_analysis::named_member_type(node_index n, token_index t,
  * "non-type names are ignored").  [dcl.typedef]/1: a typedef-name "is thus
  * a synonym for another type": one that names a class is the class.
  */
-analysis_result semantic_analysis::named_class(syntax_child name, node_index at,
-                                               entity_index &c, token_index &id)
+analysis_result semantic_analysis::named_class(SyntaxElement name,
+                                               node_index at, entity_index &c,
+                                               token_index &id)
 {
     c = 0;
     lookup_result found;
     if (name.is_token()) {
-        if (tokens[name.index()].kind != token_kind::identifier)
+        if (tokens[name.token()].kind != token_kind::identifier)
             return not_supported(at, "basic.lookup.qual");
-        id = name.index();
+        id = name.token();
         found = lookup_unqualified(tokens.identifier(id), lookup_filter::types);
     } else {
         auto node = syntax(name);

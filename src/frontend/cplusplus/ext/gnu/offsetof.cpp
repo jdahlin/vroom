@@ -77,7 +77,7 @@ analysis_result semantic_analysis::gnu_offsetof(node_index n,
     uint64_t offset = 0;
     /* node[4 .. child_count - 1): the member-designator */
     for (uint32_t i = 4; i + 1 < node.size(); i++) {
-        syntax_child c = node[i];
+        SyntaxElement c = node[i];
         if (syntax(c).is(preprocessing_op_or_punc::DOT))
             continue;
         const struct type record = type_table[t.unqualified()];
@@ -110,7 +110,7 @@ analysis_result semantic_analysis::gnu_offsetof(node_index n,
             return ill_formed(n, "offsetof requires a complete class type",
                               "ext.gnu");
         entity_index member = declared_in(
-            record.entity, tokens.identifier(c.index()), lookup_filter::any);
+            record.entity, tokens.identifier(c.token()), lookup_filter::any);
         if (!member)
             return not_supported(n, "ext.gnu");
         const entity &e = entity_table[member];

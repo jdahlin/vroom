@@ -62,10 +62,10 @@ analysis_result semantic_analysis::compound_statement(CompoundStatement n,
    expressions just after it */
 analysis_result semantic_analysis::block_items(node_index n, uint32_t &built)
 {
-    owned_array<syntax_child> items;
+    owned_array<SyntaxElement> items;
     auto node = syntax(n);
     for (uint32_t i = 0; i < node.size(); i++) {
-        syntax_child c = node[i];
+        SyntaxElement c = node[i];
         if (syntax(c).is(preprocessing_op_or_punc::LEFT_BRACE) ||
             syntax(c).is(preprocessing_op_or_punc::RIGHT_BRACE))
             continue;
@@ -80,8 +80,8 @@ analysis_result semantic_analysis::block_items(node_index n, uint32_t &built)
     token_index place = claim_place;
     entity_index place_scope = claim_scope;
     owned_array<uint32_t> statements;
-    for (syntax_child s : items) {
-        claim_place = s.index();
+    for (SyntaxElement s : items) {
+        claim_place = s.token();
         if (!s.is_token())
             claim_place = syntax(s).end_token() - 1;
         claim_scope = current_scope;

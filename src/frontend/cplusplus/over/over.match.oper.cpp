@@ -72,7 +72,7 @@ bool semantic_analysis::converts_to_non_class(entity_index c) const
 
 analysis_result semantic_analysis::overloaded_operator(
     node_index n, token_index at, preprocessing_op_or_punc op, bool postfix,
-    const owned_array<syntax_child> &syntax,
+    const owned_array<SyntaxElement> &syntax,
     owned_array<expression_meaning> &operands, bool &handled,
     expression_meaning &m)
 {
@@ -343,7 +343,7 @@ analysis_result semantic_analysis::overloaded_operator(
     /* [over.match.oper]/2, Table 15: a@ is "(a).operator@ (0)" or
        "operator@(a, 0)" */
     owned_array<expression_meaning> arguments;
-    owned_array<syntax_child> argument_syntax;
+    owned_array<SyntaxElement> argument_syntax;
     for (size_t i = 0; i < operands.size(); i++) {
         arguments.append(operands[i]);
         argument_syntax.append(syntax[i]);
@@ -352,7 +352,7 @@ analysis_result semantic_analysis::overloaded_operator(
         expression_meaning zero =
             integer_constant(fundamental_type::int_, 0, at);
         arguments.append(zero);
-        argument_syntax.append(syntax_child{});
+        argument_syntax.append(SyntaxElement{});
     }
     size_t chosen = 0;
     bool none_viable = false;
@@ -399,7 +399,7 @@ analysis_result semantic_analysis::overloaded_operator(
     /* the arguments in the order of the function's parameters: y, x for a
        synthesized candidate (/9: "y == x") */
     owned_array<expression_meaning> ordered;
-    owned_array<syntax_child> ordered_syntax;
+    owned_array<SyntaxElement> ordered_syntax;
     for (size_t i = 0; i < arguments.size(); i++) {
         size_t k = i;
         if (c.reversed)
@@ -498,7 +498,7 @@ analysis_result semantic_analysis::overloaded_operator(
     }
     /* the arguments for the parameters: a member's object is not one */
     owned_array<expression_meaning> call_arguments;
-    owned_array<syntax_child> call_syntax;
+    owned_array<SyntaxElement> call_syntax;
     for (size_t i = 0; i < ordered.size(); i++) {
         if (c.member && i == 0)
             continue;
@@ -554,9 +554,9 @@ analysis_result semantic_analysis::overloaded_operator(
 
 analysis_result semantic_analysis::unary_operator_function(
     node_index n, token_index at, preprocessing_op_or_punc op, bool postfix,
-    syntax_child s, expression_meaning &operand, bool &handled)
+    SyntaxElement s, expression_meaning &operand, bool &handled)
 {
-    owned_array<syntax_child> syntax;
+    owned_array<SyntaxElement> syntax;
     owned_array<expression_meaning> operands;
     syntax.append(s);
     operands.append(operand);
@@ -570,11 +570,11 @@ analysis_result semantic_analysis::unary_operator_function(
 
 analysis_result semantic_analysis::binary_operator_function(
     node_index n, token_index at, preprocessing_op_or_punc op,
-    syntax_child left_syntax, const expression_meaning &left,
-    syntax_child right_syntax, const expression_meaning &right, bool &handled,
+    SyntaxElement left_syntax, const expression_meaning &left,
+    SyntaxElement right_syntax, const expression_meaning &right, bool &handled,
     expression_meaning &m)
 {
-    owned_array<syntax_child> syntax;
+    owned_array<SyntaxElement> syntax;
     owned_array<expression_meaning> operands;
     syntax.append(left_syntax);
     operands.append(left);

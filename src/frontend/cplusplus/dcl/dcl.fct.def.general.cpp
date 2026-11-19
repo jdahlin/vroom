@@ -274,9 +274,8 @@ void walk_constexpr_body(const semantic_tree &tree, uint32_t n,
 
 } // namespace
 
-analysis_result semantic_analysis::analyse_function_body(node_index definition,
-                                                         syntax_child compound,
-                                                         syntax_child ctor_init)
+analysis_result semantic_analysis::analyse_function_body(
+    node_index definition, SyntaxElement compound, SyntaxElement ctor_init)
 {
     entity_index f = last_declared;
     qualified_type returns =
@@ -390,8 +389,7 @@ analysis_result semantic_analysis::analyse_function_body(node_index definition,
     uint32_t members = 0;
     /* [class.base.init]/9: a constructor without a ctor-initializer
        default-initializes its bases and members as well */
-    if (ctor_init.index() ||
-        entity_table[f].special == special_member::constructor)
+    if (ctor_init || entity_table[f].special == special_member::constructor)
         result = worse(result, ctor_initializer(ctor_init, members));
     else if (entity_table[f].special == special_member::destructor)
         /* [class.cdtor]/4: in the destructor, a virtual call finds this

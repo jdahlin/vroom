@@ -42,13 +42,13 @@ analysis_result semantic_analysis::linkage_specification(node_index n)
     owned_array<node_index> inner;
     bool braces = false;
     for (uint32_t i = 2; i < node.size(); i++) {
-        syntax_child x = node[i];
+        SyntaxElement x = node[i];
         if (x.is_token()) {
             braces = true;
             continue;
         }
         if (syntax(x).is(syntax_kind::declaration_seq)) {
-            for (syntax_child y : syntax(x).elements()) {
+            for (SyntaxElement y : syntax(x).elements()) {
                 if (!y.is_token())
                     inner.append(y.index());
             }

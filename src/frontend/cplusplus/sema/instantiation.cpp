@@ -113,8 +113,7 @@ semantic_analysis::instantiate(node_index at, entity_index template_entity,
            is deleted from its declaration on, a call of it ill-formed;
            its definition is the deleted definition */
         if (r == analysis_result::well_formed && ft.definition && !lambda &&
-            deleted_body(tree.children(
-                ft.definition)[tree[ft.definition].child_count - 1])) {
+            deleted_body(syntax(ft.definition).back())) {
             entity_table[e].deleted = true;
             entity_table[e].inline_ = true;
             instantiations[index].defined = true;
@@ -235,7 +234,8 @@ analysis_result semantic_analysis::instantiate_definition(node_index at,
             r = special_member_body(
                 d_syntax.function_definition(),
                 d_syntax[d_skip + specifiers + 1 +
-                         (trailing_constraint(ft.declaration).bits != 0)]
+                         (static_cast<bool>(
+                             trailing_constraint(ft.declaration)))]
                     .function_body());
     } else if (syntax(syntax_child::node(ft.definition))
                    .is(syntax_kind::lambda_expression)) {

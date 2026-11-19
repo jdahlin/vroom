@@ -406,7 +406,8 @@ analysis_result semantic_analysis::size_of(node_index n, bool alignment,
  * type of the operand."  The operand is modified: never a constant
  * expression here ([expr.const]/5.16).
  */
-analysis_result semantic_analysis::increment(node_index n, syntax_child operand,
+analysis_result semantic_analysis::increment(node_index n,
+                                             SyntaxElement operand,
                                              bool decrement, bool postfix,
                                              expression_meaning &m)
 {
@@ -420,7 +421,7 @@ analysis_result semantic_analysis::increment(node_index n, syntax_child operand,
 /* ... of the operand analysed as m (its syntax operand, none for an
    operand [stmt.ranged]/1 makes) */
 analysis_result semantic_analysis::increment_of(node_index n, token_index at,
-                                                syntax_child operand,
+                                                SyntaxElement operand,
                                                 bool decrement, bool postfix,
                                                 expression_meaning &m)
 {
@@ -635,7 +636,7 @@ analysis_result semantic_analysis::unary(node_index n, expression_meaning &m)
 /* [expr.unary.op]/1: *m of the operand analysed as m (its syntax operand,
    none for an operand [stmt.ranged]/1 makes) */
 analysis_result semantic_analysis::indirection_of(node_index n, token_index at,
-                                                  syntax_child operand,
+                                                  SyntaxElement operand,
                                                   expression_meaning &m)
 {
     {

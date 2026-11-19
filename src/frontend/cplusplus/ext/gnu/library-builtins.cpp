@@ -472,7 +472,7 @@ bool semantic_analysis::builtin_addressof_call(node_index n)
 analysis_result semantic_analysis::builtin_addressof(node_index n,
                                                      expression_meaning &m)
 {
-    syntax_child operand = syntax(n)[2];
+    SyntaxElement operand = syntax(n)[2];
     analysis_result r = expression(operand, m);
     if (r != analysis_result::well_formed)
         return r;

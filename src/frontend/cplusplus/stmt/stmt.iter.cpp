@@ -198,7 +198,7 @@ analysis_result semantic_analysis::iteration_statement(IterationStatement n,
                 return range_based_for(n, i, built);
         /* for ( init-statement condition_opt ; expression_opt ) statement:
            the init-statement ends with its own ; */
-        syntax_child init_syntax = node[2], cond, step;
+        SyntaxElement init_syntax = node[2], cond, step;
         bool has_cond = false, has_step = false;
         uint32_t i = 3;
         if (!node[i].is(preprocessing_op_or_punc::SEMICOLON)) {
@@ -280,7 +280,7 @@ analysis_result semantic_analysis::range_call(node_index n, token_index at,
                                               uint32_t name, bool member,
                                               expression_meaning &m)
 {
-    owned_array<syntax_child> arguments;
+    owned_array<SyntaxElement> arguments;
     owned_array<expression_meaning> early;
     owned_array<entity_index> set;
     expression_meaning f = range;
@@ -322,7 +322,7 @@ analysis_result semantic_analysis::range_call(node_index n, token_index at,
                               "end(range), where begin and end are looked up "
                               "in the associated namespaces",
                               "stmt.ranged");
-        arguments.append(syntax_child());
+        arguments.append(SyntaxElement());
         early.append(range);
         f = expression_meaning();
         overloaded_callee = at;
@@ -370,8 +370,8 @@ analysis_result semantic_analysis::range_based_for(node_index n,
     auto node = syntax(n);
     if (declaration + 5 != node.size())
         return not_supported(n, "stmt.ranged");
-    syntax_child range_declaration = node[declaration];
-    syntax_child initializer = node[declaration + 2];
+    SyntaxElement range_declaration = node[declaration];
+    SyntaxElement initializer = node[declaration + 2];
     token_index at = node[declaration + 1].token();
     entity_index outer = current_scope;
     entity_index statement_scope = open_scope(0, false);
@@ -480,19 +480,19 @@ analysis_result semantic_analysis::range_based_for(node_index n,
     /* begin != end */
     expression_meaning left = begin, right = end, condition;
     r = binary_of(n, at, preprocessing_op_or_punc::EXCLAMATION_EQUAL,
-                  syntax_child(), left, syntax_child(), right, condition);
+                  SyntaxElement(), left, SyntaxElement(), right, condition);
     if (r == analysis_result::well_formed)
         r = contextual_bool(n, condition);
     if (r != analysis_result::well_formed)
         return failed(r);
     /* ++begin */
     expression_meaning step = begin;
-    r = increment_of(n, at, syntax_child(), false, false, step);
+    r = increment_of(n, at, SyntaxElement(), false, false, step);
     if (r != analysis_result::well_formed)
         return failed(r);
     /* for-range-declaration = * begin ; */
     expression_meaning element = begin;
-    r = indirection_of(n, at, syntax_child(), element);
+    r = indirection_of(n, at, SyntaxElement(), element);
     if (r != analysis_result::well_formed)
         return failed(r);
     uint32_t variable = 0;
@@ -525,7 +525,7 @@ analysis_result semantic_analysis::range_based_for(node_index n,
  *         attribute-specifier-seq_opt decl-specifier-seq ref-qualifier_opt [ identifier-list ]
  */
 analysis_result semantic_analysis::for_range_declaration(
-    syntax_child d, const expression_meaning &element, uint32_t &built)
+    SyntaxElement d, const expression_meaning &element, uint32_t &built)
 {
     node_index at = node_of(d);
     auto node = syntax(at);
@@ -560,7 +560,7 @@ analysis_result semantic_analysis::for_range_declaration(
         /* "The decl-specifier-seq shall not define a class or
            enumeration." */
         node_index seq = node[0].index();
-        for (syntax_child c : syntax(seq).elements()) {
+        for (SyntaxElement c : syntax(seq).elements()) {
             if (syntax(c).is(syntax_kind::class_specifier) ||
                 syntax(c).is(syntax_kind::enum_specifier))
                 return ill_formed(at,
@@ -575,7 +575,7 @@ analysis_result semantic_analysis::for_range_declaration(
     if (binding)
         r = structured_binding_declaration(at, 1, s, &element);
     else
-        r = declare_with_initializer(at, node[1], syntax_child(), true, s,
+        r = declare_with_initializer(at, node[1], SyntaxElement(), true, s,
                                      false, &element);
     declarations_claimable = claimable;
     if (r != analysis_result::well_formed) {

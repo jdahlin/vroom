@@ -252,12 +252,12 @@ analysis_result semantic_analysis::pointer_operator(node_index op,
 
 /* [temp.dep.constexpr]/2: in a template's own declaration, the non-type
    template-parameter e names (0 if e is no such name) */
-entity_index semantic_analysis::value_parameter_named(syntax_child e)
+entity_index semantic_analysis::value_parameter_named(SyntaxElement e)
 {
-    if (!e.is_token() || tokens[e.index()].kind != token_kind::identifier)
+    if (!e.is_token() || tokens[e.token()].kind != token_kind::identifier)
         return 0;
     lookup_result x =
-        lookup_unqualified(tokens.identifier(e.index()), lookup_filter::any);
+        lookup_unqualified(tokens.identifier(e.token()), lookup_filter::any);
     entity_index named = x.entity;
     if (!named)
         named = x.unknown_entity;
@@ -382,7 +382,7 @@ analysis_result semantic_analysis::array(node_index at, SyntaxElement bound,
  * the declarator-id: a noptr-declarator's head comes before its suffixes,
  * so an identifier in an array bound comes after it.
  */
-token_index semantic_analysis::declarator_id(syntax_child d) const
+token_index semantic_analysis::declarator_id(SyntaxElement d) const
 {
     auto e = syntax(d);
     if (e.is_identifier())
@@ -503,13 +503,13 @@ void semantic_analysis::hold_names(node_index declaration)
                 syntax(x).is(syntax_kind::qualified_namespace_specifier))
                 continue;
             for (uint32_t i = 0; i < syntax(x).size(); i++) {
-                syntax_child c = syntax(x)[i];
+                SyntaxElement c = syntax(x)[i];
                 if (!c.is_token())
                     work.append(c.index());
-                else if (tokens[c.index()].kind == token_kind::identifier &&
+                else if (tokens[c.token()].kind == token_kind::identifier &&
                          (syntax(x).is(syntax_kind::using_declarator) ||
                           (x == declaration && i == 1)))
-                    ids.append(c.index());
+                    ids.append(c.token());
             }
         }
     } else if (!by_declarator) {
@@ -756,7 +756,7 @@ analysis_result semantic_analysis::declarator_qualifier(node_index nested,
  * int".
  */
 analysis_result semantic_analysis::declarator(node_index declaration,
-                                              syntax_child d,
+                                              SyntaxElement d,
                                               qualified_type &type,
                                               declarator_meaning &m)
 {
@@ -838,7 +838,7 @@ analysis_result semantic_analysis::declarator(node_index declaration,
         /* [class.conv.fct]/1: the type is the declaration's
            (conversion_function_member) */
         m.has_id = true;
-        m.id = syntax_child(e[0]).index();
+        m.id = SyntaxElement(e[0]).token();
         m.conversion_function = true;
         tokens.name_token(m.id, conversion_function_name());
         return analysis_result::well_formed;
@@ -860,7 +860,7 @@ analysis_result semantic_analysis::declarator(node_index declaration,
     entity_index scope_before = current_scope;
     uint32_t i = 0;
     bool has_head = false;
-    syntax_child head = {};
+    SyntaxElement head = {};
     auto parts = NoptrDeclaratorParts(e.context(), n);
     auto id = parts.declarator_id();
     if (e[0].is(LEFT_PARENTHESIS)) {

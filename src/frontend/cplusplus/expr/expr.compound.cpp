@@ -548,10 +548,13 @@ analysis_result semantic_analysis::binary(node_index n, expression_meaning &m)
     return binary_of(n, at, op, node[0], left, node[2], right, m);
 }
 
-analysis_result semantic_analysis::binary_of(
-    node_index n, token_index at, preprocessing_op_or_punc op,
-    syntax_child left_syntax, expression_meaning &left,
-    syntax_child right_syntax, expression_meaning &right, expression_meaning &m)
+analysis_result semantic_analysis::binary_of(node_index n, token_index at,
+                                             preprocessing_op_or_punc op,
+                                             SyntaxElement left_syntax,
+                                             expression_meaning &left,
+                                             SyntaxElement right_syntax,
+                                             expression_meaning &right,
+                                             expression_meaning &m)
 {
     /* [over.match.oper]/2: an operand of class or enumeration type (.*
        is not overloadable) */
@@ -881,7 +884,7 @@ analysis_result semantic_analysis::comma(node_index n, expression_meaning &m)
         if (any) {
             /* [over.match.oper]/2: an operand of class or enumeration type;
                the left operand is the comma expression before ((a, b), c) */
-            syntax_child left = {};
+            SyntaxElement left = {};
             if (i == 2)
                 left = node[0];
             bool handled = false;

@@ -38,7 +38,7 @@ SyntaxElement without_parentheses(SyntaxElement e)
 
 } // namespace
 
-entity_index semantic_analysis::named_overload_set(syntax_child e,
+entity_index semantic_analysis::named_overload_set(SyntaxElement e,
                                                    token_index &at) const
 {
     auto name = without_parentheses(syntax(e));
@@ -58,7 +58,7 @@ entity_index semantic_analysis::named_overload_set(syntax_child e,
     return found.entity;
 }
 
-analysis_result semantic_analysis::target_expression(syntax_child e,
+analysis_result semantic_analysis::target_expression(SyntaxElement e,
                                                      qualified_type target,
                                                      expression_meaning &m)
 {

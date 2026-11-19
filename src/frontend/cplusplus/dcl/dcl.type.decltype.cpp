@@ -14,16 +14,16 @@ namespace cplusplus
 
 /* whether operand is an unparenthesized id-expression or class member
    access ([dcl.type.decltype]/1's third case) */
-bool semantic_analysis::names_entity(syntax_child operand) const
+bool semantic_analysis::names_entity(SyntaxElement operand) const
 {
     if (operand.is_token())
-        return tokens[operand.index()].kind == token_kind::identifier;
+        return tokens[operand.token()].kind == token_kind::identifier;
     auto node = syntax(operand);
     if (node.is(syntax_kind::qualified_id))
         return true;
     if (!node.is(syntax_kind::postfix_expression) || node.size() != 3)
         return false;
-    syntax_child op = node[1];
+    SyntaxElement op = node[1];
     return syntax(op).is(preprocessing_op_or_punc::DOT) ||
            syntax(op).is(preprocessing_op_or_punc::ARROW);
 }
@@ -97,7 +97,7 @@ analysis_result semantic_analysis::decltype_type(node_index n,
     auto node = syntax(n);
     if (node.size() != 4)
         return not_supported(n, "dcl.type.decltype");
-    syntax_child operand = node[2];
+    SyntaxElement operand = node[2];
     /* an operand that names a template parameter (or a type that depends
        on one) is type-dependent ([temp.dep.expr]): not analysed */
     if (names_dependent_entity(node.first_token(), node.end_token())) {

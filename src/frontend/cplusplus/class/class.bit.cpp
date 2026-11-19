@@ -34,7 +34,7 @@ namespace cplusplus
  */
 analysis_result semantic_analysis::member_bit_field(entity_index c,
                                                     node_index declaration,
-                                                    syntax_child d,
+                                                    SyntaxElement d,
                                                     const specified &s,
                                                     uint8_t access)
 {
@@ -47,7 +47,7 @@ analysis_result semantic_analysis::member_bit_field(entity_index c,
     if (k + 2 != node.size() || !node[k].is(preprocessing_op_or_punc::COLON))
         /* attributes, a brace-or-equal-initializer */
         return not_supported(d.index(), "class.bit");
-    syntax_child width_expression = node[k + 1];
+    SyntaxElement width_expression = node[k + 1];
     if (!s.has_type || s.typedef_ || s.static_ || s.extern_ || s.inline_ ||
         s.constexpr_ || s.aligned || s.gnu_flags)
         return not_supported(declaration, "class.bit");

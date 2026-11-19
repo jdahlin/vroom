@@ -108,7 +108,7 @@ bool semantic_analysis::parsed_completely(node_index n) const
         if (s.is(syntax_kind::erroneous) || s.is(syntax_kind::unparsed))
             return false;
         for (uint32_t i = 0; i < s.size(); i++) {
-            syntax_child c = syntax(next)[i];
+            SyntaxElement c = syntax(next)[i];
             if (!c.is_token())
                 work.append(c.index());
         }

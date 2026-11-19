@@ -237,10 +237,10 @@ node_index parser::parameter_declaration()
 analysis_result
 semantic_analysis::parameter_declaration(node_index n, qualified_type &type,
                                          bool &unnamed, token_index &id,
-                                         syntax_child &default_argument)
+                                         SyntaxElement &default_argument)
 {
     id = 0;
-    default_argument = syntax_child();
+    default_argument = SyntaxElement();
     /* [dcl.fct]/3: the attribute-specifier-seq_opt before the
        decl-specifier-seq appertains to the parameter: those without effect
        (libc++'s [[__maybe_unused__]]), and GCC's whose rules set nothing
@@ -430,7 +430,7 @@ analysis_result semantic_analysis::function(node_index parameters,
         qualified_type t;
         bool unnamed = true;
         token_index id = 0;
-        syntax_child default_argument;
+        SyntaxElement default_argument;
         /* [temp.variadic]/5: a function parameter pack of an
            instantiation, whose type names a pack: one parameter per
            element */
@@ -456,7 +456,7 @@ analysis_result semantic_analysis::function(node_index parameters,
                 expansion_element = saved_element;
                 if (r != analysis_result::well_formed)
                     return r;
-                if (declared_pack != ellipsis || default_argument.index() ||
+                if (declared_pack != ellipsis || default_argument ||
                     depends_on_template_parameter(t))
                     return not_supported(declarations[k], "temp.variadic");
                 const struct type &element = type_table[t.unqualified()];
@@ -490,8 +490,8 @@ analysis_result semantic_analysis::function(node_index parameters,
                (function_template_definition checks which), the last
                parameter; [dcl.fct]/22's T... of a type that names none is
                the clause's ellipsis, not analysed */
-            if (k + 1 != declarations.size() || variadic ||
-                default_argument.index() || !depends_on_template_parameter(t))
+            if (k + 1 != declarations.size() || variadic || default_argument ||
+                !depends_on_template_parameter(t))
                 return not_supported(declarations[k], "temp.variadic");
             t = qualified_type::make(
                 type_table.pack_expansion_of(

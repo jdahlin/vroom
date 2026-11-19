@@ -196,7 +196,7 @@ analysis_result semantic_analysis::class_definition(node_index n,
         return not_supported(n, "class.pre");
     /* class-key attribute-specifier-seq_opt class-head-name ...: the
        alignment-specifiers left out of head_children, kept in alignas */
-    owned_array<syntax_child> head_list;
+    owned_array<SyntaxElement> head_list;
     owned_array<node_index> alignas_list;
     /* [ext:gnu_attributes] a class's visibility("hidden") (its members'
        symbols', c_lowering::gnu_attributes), abi_tag (its name's,
@@ -236,7 +236,7 @@ analysis_result semantic_analysis::class_definition(node_index n,
         (gnu.flags & ~(gnu_hidden_visibility | gnu_abi_tag |
                        gnu_exclude_from_explicit_instantiation)))
         return not_supported(n, "ext.gnu");
-    const syntax_child *head_children = head_list.data();
+    const SyntaxElement *head_children = head_list.data();
     uint32_t head_count = static_cast<uint32_t>(head_list.size());
     if (!head_count || !head_children[0].is_token())
         return not_supported(n, "class.pre");
@@ -274,7 +274,7 @@ analysis_result semantic_analysis::class_definition(node_index n,
     if (head_count > 2 && !has_bases)
         /* a class-virt-specifier, a base-clause of an unnamed class */
         return not_supported(n, "class.derived");
-    standard_keyword key = p.keyword_of(tokens[head_children[0].index()]);
+    standard_keyword key = p.keyword_of(tokens[head_children[0].token()]);
     if (!is_class_key(key))
         return not_supported(n, "class.pre");
     /* #pragma pack and the like change the layout: no rules yet */
@@ -364,7 +364,7 @@ analysis_result semantic_analysis::class_definition(node_index n,
     class_instantiating = 0;
     if (has_bases && !is_namespace(scope))
         return not_supported(n, inner_class_rule(scope));
-    token_index id = head_children[0].index();
+    token_index id = head_children[0].token();
     uint32_t name = 0;
     entity_index c = 0;
     if (specialization) {
@@ -511,7 +511,7 @@ analysis_result semantic_analysis::class_definition(node_index n,
         entity_table[c].abi_tag = gnu.abi_tag;
     entity_table[c].defined = true;
     entity_table[c].union_ = key == standard_keyword::union_;
-    entity_table[c].class_key = head_children[0].index();
+    entity_table[c].class_key = head_children[0].token();
     entity_table[c].first_member = static_cast<uint32_t>(class_members.size());
     entity_table[c].member_count = 0;
     type = entity_table[c].type.unqualified();
@@ -1291,7 +1291,7 @@ analysis_result semantic_analysis::member_declarators(
             bodies.append(n);
         return r;
     }
-    owned_array<syntax_child> declarators;
+    owned_array<SyntaxElement> declarators;
     for (uint32_t i = first; i < node.size(); i++) {
         auto d = node[i];
         if (d.is(preprocessing_op_or_punc::SEMICOLON))
@@ -1323,7 +1323,7 @@ analysis_result semantic_analysis::member_declarators(
         return not_supported(n, "class.mem");
     }
     analysis_result result = analysis_result::well_formed;
-    for (syntax_child d : declarators)
+    for (SyntaxElement d : declarators)
         result = worse(result, member_declarator(c, n, d, s, access, false));
     return result;
 }
@@ -1340,7 +1340,7 @@ analysis_result semantic_analysis::member_declarators(
  */
 analysis_result
 semantic_analysis::member_declarator(entity_index c, node_index declaration,
-                                     syntax_child d, const specified &s,
+                                     SyntaxElement d, const specified &s,
                                      uint8_t access, bool definition)
 {
     auto node = syntax(d);
@@ -1417,7 +1417,7 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
        complete (member_default_arguments) */
     bool has_defaults = false;
     for (const parameter_meaning &p : function_parameters)
-        if (p.default_argument.index())
+        if (p.default_argument)
             has_defaults = true;
     owned_array<parameter_meaning> parameters;
     for (const parameter_meaning &p : function_parameters)
@@ -2017,7 +2017,7 @@ analysis_result semantic_analysis::member_redeclaration(
  */
 analysis_result
 semantic_analysis::static_member_initializer(node_index declarator,
-                                             entity_index e, syntax_child init,
+                                             entity_index e, SyntaxElement init,
                                              const specified &s)
 {
     qualified_type type = entity_table[e].type;
@@ -2150,7 +2150,7 @@ analysis_result semantic_analysis::static_member_definition(
  *
  * One virt-specifier is its token; more are a virt-specifier-seq node.
  */
-bool semantic_analysis::virt_specifier(syntax_child d, bool &override_,
+bool semantic_analysis::virt_specifier(SyntaxElement d, bool &override_,
                                        bool &final_) const
 {
     auto one = [&](SyntaxElement t) {
@@ -2180,7 +2180,7 @@ bool semantic_analysis::virt_specifier(syntax_child d, bool &override_,
 
 /* a class-head's class-head-name (or what is in its place), after the
    class-key and alignment-specifiers; none in an unnamed class's */
-syntax_child semantic_analysis::class_head_name(node_index head) const
+SyntaxElement semantic_analysis::class_head_name(node_index head) const
 {
     auto h = syntax(head);
     for (uint32_t i = 1; i < h.size(); i++) {
@@ -2195,7 +2195,7 @@ syntax_child semantic_analysis::class_head_name(node_index head) const
         if (!only_alignment)
             return c;
     }
-    return syntax_child();
+    return SyntaxElement();
 }
 
 /*

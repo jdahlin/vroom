@@ -117,7 +117,7 @@ void semantic_analysis::bind_template_argument(entity_index scope,
 /* what [abi:mangle.template-arg] spells of a value-dependent argument
    (entity_kind::dependent_value): [!] Q<args>::name, Q unqualified as
    written (clang mangles the qualifier as written) */
-entity_index semantic_analysis::dependent_value_entity(syntax_child written)
+entity_index semantic_analysis::dependent_value_entity(SyntaxElement written)
 {
     entity_index e = entity_table.make(entity_kind::dependent_value, 0, 0);
     bool negated = false;
@@ -130,8 +130,8 @@ entity_index semantic_analysis::dependent_value_entity(syntax_child written)
     /* an alias template's parameter bound to such an argument: that
        argument */
     if (!negated && written.is_token() &&
-        tokens[written.index()].kind == token_kind::identifier) {
-        lookup_result x = lookup_unqualified(tokens.identifier(written.index()),
+        tokens[written.token()].kind == token_kind::identifier) {
+        lookup_result x = lookup_unqualified(tokens.identifier(written.token()),
                                              lookup_filter::any);
         if (x.entity &&
             entity_table[x.entity].kind == entity_kind::dependent_value)
@@ -142,10 +142,10 @@ entity_index semantic_analysis::dependent_value_entity(syntax_child written)
     if (!syntax(written).is(syntax_kind::qualified_id) ||
         syntax(written).size() != 2)
         return e;
-    syntax_child qualifier = syntax(written)[0];
-    syntax_child member = syntax(written)[1];
+    SyntaxElement qualifier = syntax(written)[0];
+    SyntaxElement member = syntax(written)[1];
     if (!member.is_token() ||
-        tokens[member.index()].kind != token_kind::identifier ||
+        tokens[member.token()].kind != token_kind::identifier ||
         !syntax(qualifier).is(syntax_kind::nested_name_specifier) ||
         syntax(qualifier).size() != 2 ||
         !syntax(qualifier)[0].is(syntax_kind::simple_template_id))
@@ -162,7 +162,7 @@ entity_index semantic_analysis::dependent_value_entity(syntax_child written)
             entity_kind::template_specialization)
         return e;
     qualified_type type = qualified_type::make(q, cv_none);
-    uint32_t name = tokens.identifier(member.index());
+    uint32_t name = tokens.identifier(member.token());
     uint64_t value = 1;
     if (negated)
         value = 3;
@@ -294,7 +294,7 @@ analysis_result semantic_analysis::substituted_parameter_type(
  */
 analysis_result semantic_analysis::template_argument_for(
     node_index at, uint32_t template_index, uint32_t position,
-    syntax_child written, const template_argument *before,
+    SyntaxElement written, const template_argument *before,
     template_argument &out)
 {
     const function_template ft = function_templates[template_index - 1];
@@ -337,7 +337,7 @@ analysis_result semantic_analysis::template_argument_for(
     /* in a template's own declaration, a non-type template-parameter's
        name: a value dependent argument ([temp.dep.constexpr]/2), of a
        parameter of the same type */
-    token_index first = written.index();
+    token_index first = written.token();
     token_index end = first + 1;
     if (!written.is_token()) {
         first = syntax(written).first_token();
@@ -416,7 +416,7 @@ analysis_result semantic_analysis::template_argument_for(
         tr.fundamental == fundamental_type::std_nullptr_t) {
         /* (nullptr itself; another constant of the type is not followed) */
         if (!written.is_token() ||
-            this->p.keyword_of(tokens[written.index()]) !=
+            this->p.keyword_of(tokens[written.token()]) !=
                 standard_keyword::nullptr_)
             return not_supported(at, "temp.arg.nontype");
         out.kind = template_argument::kind_t::value;
@@ -474,7 +474,7 @@ analysis_result semantic_analysis::template_argument_for(
  */
 analysis_result semantic_analysis::address_argument(node_index at,
                                                     qualified_type to,
-                                                    syntax_child written,
+                                                    SyntaxElement written,
                                                     template_argument &out)
 {
     const struct type r = type_table[to.unqualified()];
@@ -482,9 +482,9 @@ analysis_result semantic_analysis::address_argument(node_index at,
     out.kind = template_argument::kind_t::value;
     out.type = to;
     if (!reference && written.is_token() &&
-        p.keyword_of(tokens[written.index()]) == standard_keyword::nullptr_)
+        p.keyword_of(tokens[written.token()]) == standard_keyword::nullptr_)
         return analysis_result::well_formed;
-    syntax_child operand = written;
+    SyntaxElement operand = written;
     bool address_of = false;
     if (syntax(written).is(syntax_kind::unary_expression) &&
         syntax(written).size() == 2 &&
@@ -530,11 +530,11 @@ analysis_result semantic_analysis::address_argument(node_index at,
  * unsupported, not judged).
  */
 analysis_result semantic_analysis::template_template_argument(
-    node_index at, entity_index parameter, syntax_child written,
+    node_index at, entity_index parameter, SyntaxElement written,
     template_argument &out)
 {
     /* the written name: identifier, or nested-name-specifier identifier */
-    syntax_child name = written;
+    SyntaxElement name = written;
     node_index qualifier = 0;
     if (syntax(name).is(syntax_kind::type_id)) {
         if (syntax(name).size() != 1 ||
@@ -560,7 +560,7 @@ analysis_result semantic_analysis::template_template_argument(
         qualifier = c[0].index();
         name = c[1];
     }
-    if (!name.is_token() || tokens[name.index()].kind != token_kind::identifier)
+    if (!name.is_token() || tokens[name.token()].kind != token_kind::identifier)
         return not_supported(at, "temp.arg.template");
     lookup_result x;
     if (qualifier) {
@@ -570,10 +570,10 @@ analysis_result semantic_analysis::template_template_argument(
             return r;
         if (scope.entity && !is_namespace(scope.entity))
             return not_supported(at, "temp.arg.template");
-        x = lookup_qualified(scope.entity, tokens.identifier(name.index()),
+        x = lookup_qualified(scope.entity, tokens.identifier(name.token()),
                              lookup_filter::any);
     } else {
-        x = lookup_unqualified(tokens.identifier(name.index()),
+        x = lookup_unqualified(tokens.identifier(name.token()),
                                lookup_filter::any);
     }
     entity_index named = x.entity;

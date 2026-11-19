@@ -76,7 +76,7 @@ namespace
 {
 
 struct statement_parts {
-    syntax_child init, condition, expression, body, otherwise;
+    SyntaxElement init, condition, expression, body, otherwise;
     bool has_init = false, has_condition = false, has_expression = false,
          has_otherwise = false;
 };
@@ -106,7 +106,7 @@ analysis_result semantic_analysis::selection_statement(SelectionStatement n,
         p.keyword_of(tokens[node[0].token()]) == standard_keyword::switch_;
     statement_parts parts;
     uint32_t i = 2;
-    owned_array<syntax_child> inside;
+    owned_array<SyntaxElement> inside;
     for (; i < node.size(); i++) {
         if (node[i].is(preprocessing_op_or_punc::RIGHT_PARENTHESIS))
             break;

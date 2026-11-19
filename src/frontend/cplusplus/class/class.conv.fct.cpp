@@ -214,7 +214,7 @@ semantic_analysis::conversion_function_member(entity_index c, node_index n,
 node_index semantic_analysis::conversion_function_id_of(node_index n) const
 {
     owned_array<node_index> work;
-    for (syntax_child x : syntax(n).elements()) {
+    for (SyntaxElement x : syntax(n).elements()) {
         if (!x.is_token() && !syntax(x).is(syntax_kind::decl_specifier_seq) &&
             !syntax(x).is(syntax_kind::function_body))
             work.append(x.index());
@@ -438,7 +438,7 @@ analysis_result semantic_analysis::conversion_function_call(
     callee.category = value_category::lvalue;
     callee.evaluation = constness::constant;
     callee.entity = f;
-    owned_array<syntax_child> syntax;
+    owned_array<SyntaxElement> syntax;
     owned_array<expression_meaning> arguments;
     expression_meaning result;
     r = call_with(at, callee, x.type, address.node, f, syntax, arguments,

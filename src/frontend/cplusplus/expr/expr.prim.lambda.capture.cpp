@@ -30,7 +30,7 @@ namespace cplusplus
    capture passed through), in order, the capture-default first */
 analysis_result
 semantic_analysis::lambda_captures_of(node_index n,
-                                      owned_array<syntax_child> &out)
+                                      owned_array<SyntaxElement> &out)
 {
     for (auto c : syntax(n).elements()) {
         if (c.is(preprocessing_op_or_punc::COMMA) ||
@@ -166,16 +166,16 @@ qualified_type semantic_analysis::enclosing_capture_type(entity_index e,
 analysis_result semantic_analysis::lambda_introducer(node_index n,
                                                      lambda_context &l)
 {
-    owned_array<syntax_child> captures;
+    owned_array<SyntaxElement> captures;
     analysis_result r = lambda_captures_of(n, captures);
     if (r != analysis_result::well_formed)
         return r;
     for (size_t i = 0; i < captures.size(); i++) {
-        syntax_child c = captures[i];
+        SyntaxElement c = captures[i];
         capture_record record;
         token_index name = 0;
         if (c.is_token()) {
-            const token &t = tokens[c.index()];
+            const token &t = tokens[c.token()];
             if (i == 0 && (syntax(c).is(preprocessing_op_or_punc::EQUAL) ||
                            syntax(c).is(preprocessing_op_or_punc::AMPERSAND))) {
                 l.default_capture = capture_default::copy;
@@ -188,7 +188,7 @@ analysis_result semantic_analysis::lambda_introducer(node_index n,
                    within a default member initializer" */
                 if (!l.enclosing_function)
                     return ill_formed_at_token(
-                        c.index(),
+                        c.token(),
                         "a lambda-expression shall not have a "
                         "capture-default unless its innermost enclosing "
                         "scope is a block scope",
@@ -197,9 +197,9 @@ analysis_result semantic_analysis::lambda_introducer(node_index n,
             }
             if (t.kind == token_kind::keyword &&
                 p.keyword_of(t) == standard_keyword::this_) {
-                record.at = c.index();
+                record.at = c.token();
             } else if (t.kind == token_kind::identifier) {
-                name = c.index();
+                name = c.token();
                 /* "shall be of the form & identifier ..." with = */
                 if (l.default_capture == capture_default::copy)
                     return ill_formed_at_token(name,

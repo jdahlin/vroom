@@ -173,7 +173,7 @@ analysis_result semantic_analysis::concept_satisfied(
             scope, template_parameter_entities[c.first_parameter + i],
             arguments[i]);
     analysis_result r =
-        constraint_satisfied(syntax_child::node(c.definition), scope,
+        constraint_satisfied(element(c.definition), scope,
                              syntax(c.declaration).first_token(), satisfied);
     if (r != analysis_result::well_formed && r != analysis_result::unsupported)
         return r;
@@ -196,7 +196,7 @@ analysis_result semantic_analysis::concept_satisfied(
  * (expressions, name uses) is taken back: the constraint's tokens are the
  * template's, not this substitution's.
  */
-analysis_result semantic_analysis::constraint_satisfied(syntax_child e,
+analysis_result semantic_analysis::constraint_satisfied(SyntaxElement e,
                                                         entity_index scope,
                                                         token_index horizon,
                                                         bool &satisfied)
@@ -297,14 +297,14 @@ bool semantic_analysis::same_constraints(node_index a, node_index b)
                 return false;
         }
     }
-    syntax_child x = head_constraint(a), y = head_constraint(b);
-    if (!x.bits && !y.bits)
+    SyntaxElement x = head_constraint(a), y = head_constraint(b);
+    if (!x && !y)
         x = trailing_constraint(a), y = trailing_constraint(b);
-    if (!x.bits || !y.bits)
-        return !x.bits && !y.bits;
+    if (!x || !y)
+        return !x && !y;
     if (x.is_token() || y.is_token())
         return x.is_token() && y.is_token() &&
-               same_token_spelling(x.index(), y.index());
+               same_token_spelling(x.token(), y.token());
     return same_tokens(x.index(), y.index());
 }
 
@@ -312,7 +312,7 @@ bool semantic_analysis::same_constraints(node_index a, node_index b)
 bool semantic_analysis::template_head_constrained(node_index n)
 {
     owned_array<node_index> parameters;
-    if (head_constraint(n).bits)
+    if (head_constraint(n))
         return true;
     if (syntax(n).size() && syntax(n)[0].is(syntax_kind::template_head) &&
         !template_head_list(syntax(n)[0].index(), parameters))
@@ -356,20 +356,20 @@ uint32_t semantic_analysis::template_record(entity_index t) const
     return 0;
 }
 
-syntax_child semantic_analysis::template_constraint(entity_index t) const
+SyntaxElement semantic_analysis::template_constraint(entity_index t) const
 {
     uint32_t ft = template_record(t);
     if (!ft)
-        return syntax_child();
+        return SyntaxElement();
     return head_constraint(function_templates[ft - 1].declaration);
 }
 
-syntax_child
+SyntaxElement
 semantic_analysis::template_trailing_constraint(entity_index t) const
 {
     uint32_t ft = template_record(t);
     if (!ft)
-        return syntax_child();
+        return SyntaxElement();
     return trailing_constraint(function_templates[ft - 1].declaration);
 }
 
@@ -400,13 +400,13 @@ uint32_t semantic_analysis::function_parameter_position(entity_index t,
     if (!ft || !name)
         return 0;
     node_index d = function_templates[ft - 1].declarator;
-    owned_array<syntax_child> work;
+    owned_array<SyntaxElement> work;
     work.append(syntax(d)[leading_gnu_attributes(d) + 1]);
     uint32_t position = 0;
     bool inside = false;
     /* (depth first, children in order: the parameters in theirs) */
     while (work.size()) {
-        syntax_child c = work[work.size() - 1];
+        SyntaxElement c = work[work.size() - 1];
         work.resize(work.size() - 1);
         if (c.is_token() || syntax(c).is(syntax_kind::trailing_return_type))
             continue;
@@ -454,10 +454,10 @@ analysis_result semantic_analysis::template_constraints_satisfied(
     satisfied = true;
     const struct function_template ft =
         function_templates[function_template - 1];
-    syntax_child constraint = head_constraint(ft.declaration);
+    SyntaxElement constraint = head_constraint(ft.declaration);
     /* (a trailing requires-clause only where the head has none: the
        definitions refuse both) */
-    if (!constraint.bits)
+    if (!constraint)
         constraint = trailing_constraint(ft.declaration);
     /* [temp.constr.decl]/3: the associated constraints are the
        conjunction of the type-constraints' immediately-declared
@@ -489,7 +489,7 @@ analysis_result semantic_analysis::template_constraints_satisfied(
         if (r != analysis_result::well_formed)
             return r;
     }
-    if (!constraint.bits || !satisfied)
+    if (!constraint || !satisfied)
         return analysis_result::well_formed;
     entity_index scope = entity_table.make(entity_kind::block_scope, 0,
                                            entity_table[ft.entity].enclosing);

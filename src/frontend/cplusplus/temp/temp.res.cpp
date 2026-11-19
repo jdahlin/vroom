@@ -96,7 +96,7 @@ analysis_result semantic_analysis::typename_type(node_index n, type_index &type,
     if (count < 3 || count > 4 ||
         !node[1].is(syntax_kind::nested_name_specifier))
         return not_supported(n, "temp.res");
-    syntax_child last = node[count - 1];
+    SyntaxElement last = node[count - 1];
     if (syntax(last).is(syntax_kind::simple_template_id)) {
         /* typename nested-name-specifier template_opt simple-template-id:
            [temp.names]/1's template of the class or namespace named (a

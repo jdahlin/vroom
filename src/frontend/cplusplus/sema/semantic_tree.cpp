@@ -141,10 +141,10 @@ uint32_t semantic_analysis::statement_node(semantic_kind kind, token_index at,
     return semantics.add(n);
 }
 
-token_index semantic_analysis::first_token(syntax_child c) const
+token_index semantic_analysis::first_token(SyntaxElement c) const
 {
     if (c.is_token())
-        return c.index();
+        return c.token();
     return syntax(c).first_token();
 }
 

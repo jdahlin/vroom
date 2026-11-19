@@ -37,7 +37,7 @@ analysis_result semantic_analysis::default_arguments(node_index n,
         entity_table[f].unknown_defaults = true;
     bool any = false;
     for (const parameter_meaning &p : function_parameters)
-        if (p.default_argument.index())
+        if (p.default_argument)
             any = true;
     if (any && entity_table[current_scope].kind == entity_kind::class_type &&
         entity_table[current_scope].instantiation)
@@ -92,7 +92,7 @@ analysis_result semantic_analysis::default_arguments(node_index n,
     }
     for (size_t i = 0; i < count; i++) {
         const parameter_meaning &p = function_parameters[i];
-        if (!p.default_argument.index())
+        if (!p.default_argument)
             continue;
         /* /4 (Note 2): "A default argument cannot be redefined by a later
            declaration (not even to the same value)" */
@@ -109,7 +109,7 @@ analysis_result semantic_analysis::default_arguments(node_index n,
         token_index first = syntax(clause).first_token();
         token_index end = syntax(clause).end_token();
         if (p.default_argument.is_token()) {
-            first = p.default_argument.index();
+            first = p.default_argument.token();
             end = first + 1;
         }
         for (token_index t = first; t < end && member; t++) {

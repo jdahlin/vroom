@@ -338,7 +338,7 @@ bool semantic_analysis::is_builtin_common_type(uint32_t name) const
 /* a builtin template's template-arguments as written, each with whether
    it is a pack expansion */
 analysis_result semantic_analysis::builtin_template_arguments(
-    node_index id, owned_array<syntax_child> &written,
+    node_index id, owned_array<SyntaxElement> &written,
     owned_array<bool> &expansion)
 {
     auto parts = syntax(id);
@@ -370,12 +370,12 @@ analysis_result semantic_analysis::builtin_template_arguments(
    expansion's once per element; dependent when one is, or when it expands
    a template's own pack not bound to elements */
 analysis_result semantic_analysis::builtin_template_types(
-    node_index id, const owned_array<syntax_child> &written,
+    node_index id, const owned_array<SyntaxElement> &written,
     const owned_array<bool> &expansion, size_t from,
     owned_array<qualified_type> &types, bool &dependent)
 {
     for (size_t w = from; w < written.size(); w++) {
-        syntax_child a = written[w];
+        SyntaxElement a = written[w];
         if (!syntax(a).is(syntax_kind::type_id))
             return not_supported(id, "ext.clang");
         uint32_t times = 1;
@@ -418,7 +418,7 @@ analysis_result semantic_analysis::builtin_template_types(
 analysis_result semantic_analysis::builtin_common_type(node_index id,
                                                        type_index &type)
 {
-    owned_array<syntax_child> written;
+    owned_array<SyntaxElement> written;
     owned_array<bool> expansion;
     analysis_result r = builtin_template_arguments(id, written, expansion);
     if (r != analysis_result::well_formed)
@@ -428,7 +428,7 @@ analysis_result semantic_analysis::builtin_common_type(node_index id,
     /* the two templates, by name */
     entity_index templates[2] = {0, 0};
     for (uint32_t i = 0; i < 2; i++) {
-        syntax_child a = written[i];
+        SyntaxElement a = written[i];
         token_index first = first_token(a);
         token_index end = first + 1;
         if (!a.is_token())
@@ -494,7 +494,7 @@ bool semantic_analysis::is_builtin_type_pack_element(uint32_t name) const
 analysis_result semantic_analysis::builtin_type_pack_element(node_index id,
                                                              type_index &type)
 {
-    owned_array<syntax_child> written;
+    owned_array<SyntaxElement> written;
     owned_array<bool> expansion;
     analysis_result r = builtin_template_arguments(id, written, expansion);
     if (r != analysis_result::well_formed)
@@ -509,7 +509,7 @@ analysis_result semantic_analysis::builtin_type_pack_element(node_index id,
         return r;
     /* N: value-dependent when it names a template's own parameter
        ([temp.dep.constexpr]/2) */
-    syntax_child n = written[0];
+    SyntaxElement n = written[0];
     token_index first = first_token(n);
     token_index end = first + 1;
     if (!n.is_token())
@@ -562,7 +562,7 @@ bool semantic_analysis::is_builtin_make_integer_seq(uint32_t name) const
 analysis_result semantic_analysis::builtin_make_integer_seq(node_index id,
                                                             type_index &type)
 {
-    owned_array<syntax_child> written;
+    owned_array<SyntaxElement> written;
     owned_array<bool> expansion;
     analysis_result r = builtin_template_arguments(id, written, expansion);
     if (r != analysis_result::well_formed)
@@ -594,7 +594,7 @@ analysis_result semantic_analysis::builtin_make_integer_seq(node_index id,
         return r;
     /* N: value-dependent when it names a template's own parameter
        ([temp.dep.constexpr]/2) */
-    syntax_child n = written[2];
+    SyntaxElement n = written[2];
     token_index end = first_token(n) + 1;
     if (!n.is_token())
         end = syntax(n).end_token();

@@ -725,7 +725,7 @@ analysis_result semantic_analysis::alias_type(node_index n,
         return not_supported(n, "dcl.typedef");
     /* (a simple-template-id counts as declares_class too: the
        class-specifiers and elaborated-type-specifiers are looked for) */
-    for (syntax_child k : d[0].elements()) {
+    for (SyntaxElement k : d[0].elements()) {
         if (syntax(k).is(syntax_kind::class_specifier) ||
             syntax(k).is(syntax_kind::elaborated_type_specifier) ||
             syntax(k).is(syntax_kind::enum_specifier) ||
@@ -809,10 +809,10 @@ bool semantic_analysis::gnu_or_without_effect(node_index n) const
 {
     uint32_t flags = 0;
     if (syntax(n).is(syntax_kind::attribute_specifier))
-        return attributes_as_gnu(syntax_child::node(n), flags);
+        return attributes_as_gnu(element(n), flags);
     if (!syntax(n).is(syntax_kind::attribute_specifier_seq))
         return only_gnu_attributes(tree, n);
-    for (syntax_child c : syntax(n).elements()) {
+    for (SyntaxElement c : syntax(n).elements()) {
         if (c.is_token())
             return false;
         if (!syntax(c).is(syntax_kind::gnu_attribute_specifier) &&
@@ -890,7 +890,7 @@ analysis_result semantic_analysis::init_declarators(node_index declaration,
         syntax(specifiers)[0].is(syntax_kind::elaborated_type_specifier)) {
         bool declarators = false;
         bool after = false;
-        for (syntax_child c : syntax(declaration).elements()) {
+        for (SyntaxElement c : syntax(declaration).elements()) {
             if (!c.is_token() && c.index() == specifiers) {
                 after = true;
                 continue;
@@ -920,9 +920,9 @@ analysis_result semantic_analysis::init_declarators(node_index declaration,
             return r;
         first++;
     }
-    owned_array<syntax_child> items;
+    owned_array<SyntaxElement> items;
     for (uint32_t i = first + 1; i < node.size(); i++) {
-        syntax_child c = node[i];
+        SyntaxElement c = node[i];
         if (syntax(c).is(syntax_kind::function_body))
             break;
         /* [dcl.decl]/4: a function template's trailing requires-clause,
@@ -936,7 +936,7 @@ analysis_result semantic_analysis::init_declarators(node_index declaration,
             return structured_binding_declaration(declaration, i, s, nullptr);
         /* a declarator that is only its identifier is the token */
         if (c.is_token()) {
-            if (tokens[c.index()].kind != token_kind::identifier)
+            if (tokens[c.token()].kind != token_kind::identifier)
                 break;
             items.append(c);
             continue;
@@ -944,9 +944,9 @@ analysis_result semantic_analysis::init_declarators(node_index declaration,
         if (syntax(c).is(syntax_kind::init_declarator_list)) {
             auto list = syntax(c);
             for (uint32_t k = 0; k < list.size(); k++) {
-                syntax_child item = syntax(c)[k];
+                SyntaxElement item = syntax(c)[k];
                 if (!item.is_token() ||
-                    tokens[item.index()].kind == token_kind::identifier)
+                    tokens[item.token()].kind == token_kind::identifier)
                     items.append(item);
             }
         } else {
@@ -985,7 +985,7 @@ analysis_result semantic_analysis::init_declarators(node_index declaration,
                               node.first_token(), nullptr);
     placeholder_group = items.size() > 1 && contains_placeholder(s.type);
     analysis_result result = analysis_result::well_formed;
-    for (syntax_child item : items) {
+    for (SyntaxElement item : items) {
         r = init_declarator(declaration, item, s, definition);
         if (r == analysis_result::ill_formed)
             result = r;
@@ -1003,12 +1003,12 @@ analysis_result semantic_analysis::init_declarators(node_index declaration,
  * (if any)".
  */
 analysis_result semantic_analysis::init_declarator(node_index declaration,
-                                                   syntax_child item,
+                                                   SyntaxElement item,
                                                    const specified &s,
                                                    bool definition)
 {
-    syntax_child d = item;
-    syntax_child init;
+    SyntaxElement d = item;
+    SyntaxElement init;
     bool initialized = false;
     if (syntax(item).is(syntax_kind::init_declarator)) {
         auto node = syntax(item);
@@ -1023,8 +1023,9 @@ analysis_result semantic_analysis::init_declarator(node_index declaration,
 }
 
 analysis_result semantic_analysis::declare_with_initializer(
-    node_index declaration, syntax_child d, syntax_child init, bool initialized,
-    const specified &s, bool definition, const expression_meaning *supplied)
+    node_index declaration, SyntaxElement d, SyntaxElement init,
+    bool initialized, const specified &s, bool definition,
+    const expression_meaning *supplied)
 {
     last_declared = 0;
     qualified_type type = s.type;
@@ -1040,7 +1041,7 @@ analysis_result semantic_analysis::declare_with_initializer(
         return not_supported(declaration, "dcl.meaning");
     bool has_default_arguments = false;
     for (const parameter_meaning &p : function_parameters)
-        if (p.default_argument.index())
+        if (p.default_argument)
             has_default_arguments = true;
     if (m.qualifier && has_default_arguments) {
         /* [dcl.fct.default]/6: a member function's, added to its class's

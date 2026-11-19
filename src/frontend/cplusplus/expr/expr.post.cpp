@@ -588,14 +588,14 @@ analysis_result semantic_analysis::call(node_index n, expression_meaning &m)
     auto node = syntax(n);
     if (builtin_addressof_call(n))
         return builtin_addressof(n, m);
-    owned_array<syntax_child> arguments;
+    owned_array<SyntaxElement> arguments;
     /* [temp.variadic]/5: the arguments, pack expansions instantiated: each
        analysed now, one per element of the packs its pattern names */
     owned_array<expression_meaning> expanded;
     if (node.size() == 4) {
-        syntax_child c = node[2];
+        SyntaxElement c = node[2];
         if (syntax(c).is(syntax_kind::initializer_list)) {
-            owned_array<syntax_child> written;
+            owned_array<SyntaxElement> written;
             owned_array<bool> expansion;
             if (!expansion_list(c.index(), written, expansion))
                 return not_supported(n, "temp.variadic");
@@ -603,7 +603,7 @@ analysis_result semantic_analysis::call(node_index n, expression_meaning &m)
             for (bool x : expansion)
                 any = any || x;
             for (size_t i = 0; i < written.size(); i++) {
-                syntax_child a = written[i];
+                SyntaxElement a = written[i];
                 if (!any) {
                     arguments.append(a);
                     continue;
@@ -738,7 +738,7 @@ analysis_result semantic_analysis::call(node_index n, expression_meaning &m)
                 overload_set(e, found_by_adl);
         } else if (dependent) {
             owned_array<qualified_type> types;
-            for (syntax_child a : arguments) {
+            for (SyntaxElement a : arguments) {
                 expression_meaning e;
                 token_index name = 0;
                 if (entity_index named = named_overload_set(a, name)) {
@@ -806,11 +806,11 @@ analysis_result semantic_analysis::call(node_index n, expression_meaning &m)
            postfix-expression . operator () (expression-list_opt)" */
         if (!expanded.empty())
             return not_supported(n, "temp.variadic");
-        owned_array<syntax_child> operand_syntax;
+        owned_array<SyntaxElement> operand_syntax;
         owned_array<expression_meaning> operands;
         operand_syntax.append(node[0]);
         operands.append(f);
-        for (syntax_child a : arguments) {
+        for (SyntaxElement a : arguments) {
             if (syntax(a).is(syntax_kind::braced_init_list))
                 return not_supported(n, "over.ics.list");
             expression_meaning e;
@@ -900,16 +900,16 @@ analysis_result semantic_analysis::call(node_index n, expression_meaning &m)
  * against the specialization: not analysed.
  */
 analysis_result semantic_analysis::template_callee(
-    syntax_child callee, token_index &name, uint32_t &function_template,
+    SyntaxElement callee, token_index &name, uint32_t &function_template,
     owned_array<template_argument> &specified, bool &qualified)
 {
     name = 0;
     function_template = 0;
     qualified = false;
     if (callee.is_token()) {
-        if (tokens[callee.index()].kind != token_kind::identifier)
+        if (tokens[callee.token()].kind != token_kind::identifier)
             return analysis_result::well_formed;
-        name = callee.index();
+        name = callee.token();
         lookup_result x =
             lookup_unqualified(tokens.identifier(name), lookup_filter::any);
         function_template = function_template_of(x.unknown_entity);
@@ -926,10 +926,10 @@ analysis_result semantic_analysis::template_callee(
 }
 
 analysis_result semantic_analysis::template_callee_parts(
-    syntax_child callee, token_index &name, uint32_t &function_template,
+    SyntaxElement callee, token_index &name, uint32_t &function_template,
     owned_array<template_argument> &specified, bool &qualified)
 {
-    syntax_child id = callee;
+    SyntaxElement id = callee;
     nominated_scope scope;
     if (syntax(callee).is(syntax_kind::qualified_id)) {
         /* [namespace.qual]: a function template of a namespace */
@@ -944,11 +944,11 @@ analysis_result semantic_analysis::template_callee_parts(
             return analysis_result::well_formed;
         qualified = true;
     }
-    owned_array<syntax_child> written;
+    owned_array<SyntaxElement> written;
     if (id.is_token()) {
-        if (!qualified || tokens[id.index()].kind != token_kind::identifier)
+        if (!qualified || tokens[id.token()].kind != token_kind::identifier)
             return analysis_result::well_formed;
-        name = id.index();
+        name = id.token();
     } else if (syntax(id).is(syntax_kind::simple_template_id)) {
         auto t = syntax(id);
         if (t.size() < 3 || !t[0].is_identifier())
@@ -957,7 +957,7 @@ analysis_result semantic_analysis::template_callee_parts(
         for (uint32_t i = 2; i + 1 < t.size(); i++) {
             if (t[i].is(syntax_kind::template_argument_list)) {
                 for (uint32_t k = 0; k < t[i].size(); k++) {
-                    syntax_child a = t[i][k];
+                    SyntaxElement a = t[i][k];
                     if (!syntax(a).is(preprocessing_op_or_punc::COMMA))
                         written.append(a);
                 }
@@ -991,7 +991,7 @@ analysis_result semantic_analysis::template_callee_parts(
             function_templates[function_template - 1].name, group);
         if (group.size() > 1) {
             overloaded_written.clear();
-            for (syntax_child a : written)
+            for (SyntaxElement a : written)
                 overloaded_written.append(a);
             overloaded_written_at = id.index();
             return analysis_result::well_formed;
@@ -1000,7 +1000,7 @@ analysis_result semantic_analysis::template_callee_parts(
     /* [temp.arg.explicit]/6: "The template argument list shall not
        specify more template-arguments than there are corresponding
        template-parameters" (clang: no candidate) */
-    for (syntax_child a : written) {
+    for (SyntaxElement a : written) {
         uint32_t position = explicit_argument_position(
             function_template, static_cast<uint32_t>(specified.size()));
         if (position == UINT32_MAX)
@@ -1075,7 +1075,7 @@ analysis_result semantic_analysis::template_candidates(
     const expression_meaning *meanings, uint32_t count,
     owned_array<overload_candidate> &candidates,
     owned_array<uint32_t> *first_arguments, owned_array<template_argument> *all,
-    const owned_array<syntax_child> *written, node_index written_at,
+    const owned_array<SyntaxElement> *written, node_index written_at,
     const owned_array<template_argument> *specified)
 {
     for (uint32_t g : group) {
@@ -1155,12 +1155,12 @@ analysis_result semantic_analysis::template_candidates(
 analysis_result semantic_analysis::template_call(
     node_index n, token_index name, uint32_t function_template,
     owned_array<template_argument> &specified, bool qualified,
-    const owned_array<syntax_child> &arguments,
+    const owned_array<SyntaxElement> &arguments,
     owned_array<expression_meaning> &early, expression_meaning &f)
 {
-    owned_array<syntax_child> written;
+    owned_array<SyntaxElement> written;
     node_index written_at = overloaded_written_at;
-    for (syntax_child a : overloaded_written)
+    for (SyntaxElement a : overloaded_written)
         written.append(a);
     overloaded_written.clear();
     overloaded_written_at = 0;
@@ -1172,7 +1172,7 @@ analysis_result semantic_analysis::template_call(
             return not_supported(n, "temp.deduct.call");
         types.append(e.type);
     }
-    for (syntax_child a : arguments) {
+    for (SyntaxElement a : arguments) {
         if (given)
             break;
         expression_meaning e;
@@ -1240,7 +1240,7 @@ analysis_result semantic_analysis::template_call(
             candidates.append(c);
             first_arguments.append(0);
         }
-        const owned_array<syntax_child> *given_written = nullptr;
+        const owned_array<SyntaxElement> *given_written = nullptr;
         if (written_at)
             given_written = &written;
         analysis_result added = template_candidates(
@@ -1315,16 +1315,16 @@ analysis_result semantic_analysis::call_function(
     callee.evaluation = constness::constant;
     callee.entity = f;
     callee.node = expression_node(semantic_kind::entity, callee, at, f);
-    owned_array<syntax_child> syntax;
+    owned_array<SyntaxElement> syntax;
     for (size_t i = 0; i < arguments.size(); i++)
-        syntax.append(syntax_child{});
+        syntax.append(SyntaxElement{});
     return call_with(n, callee, x.type, 0, 0, syntax, arguments, m);
 }
 
 analysis_result semantic_analysis::call_with(
     node_index n, expression_meaning &f, qualified_type function_type,
     uint32_t object, entity_index member,
-    const owned_array<syntax_child> &arguments,
+    const owned_array<SyntaxElement> &arguments,
     const owned_array<expression_meaning> &early, expression_meaning &m)
 {
     analysis_result r = analysis_result::well_formed;
@@ -1356,7 +1356,7 @@ analysis_result semantic_analysis::call_with(
                           "with the arguments in the list",
                           "over.match.viable");
     for (size_t i = 0; i < arguments.size(); i++) {
-        syntax_child a = arguments[i];
+        SyntaxElement a = arguments[i];
         initialized_value value;
         if (i < count) {
             /* [expr.call]/7: "When a function is called, each parameter is
@@ -1375,7 +1375,7 @@ analysis_result semantic_analysis::call_with(
                     r = target_expression(a, parameter, e);
                 /* an argument that is one token is reported at the call */
                 node_index at = n;
-                if (!a.is_token() && a.index())
+                if (a.is_node())
                     at = a.index();
                 if (r == analysis_result::well_formed)
                     r = initialize_with(at, e, parameter, false, false, value);
@@ -1483,7 +1483,7 @@ analysis_result semantic_analysis::call_with(
     if (member && entity_table[member].virtual_) {
         if (!node.size())
             return not_supported(n, "class.virtual");
-        syntax_child name = syntax(n)[0];
+        SyntaxElement name = syntax(n)[0];
         if (!name.is_token() &&
             syntax(name).is(syntax_kind::postfix_expression) &&
             syntax(name).size() == 3 &&
@@ -1491,7 +1491,7 @@ analysis_result semantic_analysis::call_with(
              syntax(name)[1].is(preprocessing_op_or_punc::ARROW)))
             name = syntax(name)[2];
         if (name.is_token() &&
-            tokens[name.index()].kind == token_kind::identifier)
+            tokens[name.token()].kind == token_kind::identifier)
             dispatched = true;
         else if (!syntax(name).is(syntax_kind::qualified_id))
             return not_supported(n, "class.virtual");
