@@ -444,8 +444,8 @@ analysis_result semantic_analysis::gnu_attribute_specifier(SyntaxRef n,
            the literal 0 alone) unchecked, so a call it would refuse is
            accepted; elsewhere a constant true condition (libc++'s
            _LIBCPP_PREFERRED_OVERLOAD) makes the function one of its own,
-           preferred over one without (basic.link.cpp, over.match.cpp);
-           any other condition is not analysed */
+           preferred over one without (translation-unit.cpp,
+           overload-resolution.cpp); any other condition is not analysed */
         if (rule->flag == gnu_enable_if) {
             if (enable_if_allowed)
                 continue;

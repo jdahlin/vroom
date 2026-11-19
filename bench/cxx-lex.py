@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The C++ front end's lexer (src/frontend/cplusplus/lex, through the driver:
+"""The C++ front end's lexer (src/frontend/cplusplus/lexer, through the driver:
 vpp -fcxx-dump=, src/frontend/cplusplus/dump/dump.h)
 against clang, on clang's own lexer tests (src/test/cxx/lex/llvm) and ours.
 
@@ -153,7 +153,7 @@ def lexer_diagnostics():
     """name -> regex of the message of each diagnostic the lexer issues"""
     used = set()
     for path in glob.glob(os.path.join(FRONTEND, '**', '*.cpp'), recursive=True):
-        # phases 1-3 and 5-7: phase 4's (cpp/, ext/) are bench/cxx-pp.py's
+        # phases 1-3 and 5-7: phase 4's (preprocessor/, ext/) are bench/cxx-pp.py's
         if os.path.relpath(path, FRONTEND).split(os.sep)[0] not in ('lex', 'intro', 'basic', 'diff'):
             continue
         used.update(re.findall(r'diagnostic_id::(\w+)', open(path).read()))

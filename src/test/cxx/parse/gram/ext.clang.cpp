@@ -1,6 +1,6 @@
 // RUN: %clang_cc1 -std=c++20 %s
 // [ext.clang] clang's type trait primitives (clang Language Extensions,
-// Type Trait Primitives; src/frontend/cplusplus/ext/clang/type_traits.cpp):
+// Type Trait Primitives; src/frontend/cplusplus/ext/clang/type-traits.cpp):
 // expression traits, type transformations, and a trait's keyword used as
 // a name when no ( follows it (libstdc++'s __is_signed,
 // __make_unsigned, ...).

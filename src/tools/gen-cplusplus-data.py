@@ -10,11 +10,11 @@ AGENTS.md asks, and checked in:
                                  components: name, class, default mapping,
                                  -W group, message format
   intro/diagnostic-groups.inc    every -W group with its subgroups
-  lex/lex.key.inc                every keyword spelling in TokenKinds.def with
+  lexer/keyword.inc                every keyword spelling in TokenKinds.def with
                                  clang's token name and its KEY* flags
-  lex/lex.name.inc               XID_Start and XID_Continue as code point
+  lexer/identifier.inc               XID_Start and XID_Continue as code point
                                  ranges (Unicode of this Python's unicodedata)
-  lex/lex.charset.names.inc      Unicode's character names and name aliases
+  lexer/character-names.inc      Unicode's character names and name aliases
                                  for \\N{...}: the names a rule makes
                                  (CJK UNIFIED IDEOGRAPH-4E00) as ranges, the
                                  others front-coded in blocks; Hangul
@@ -101,7 +101,7 @@ KEYWORD_MACROS = {
     'CXX_KEYWORD_OPERATOR': lambda a: (a[0], a[1], 'KEYCXX|OPERATOR'),
     'TESTING_KEYWORD': lambda a: (a[0], 'kw_' + a[0], a[1]),
 }
-# the flags lex.key.cpp models; every other KEY* (OpenCL, HLSL, CUDA, AltiVec,
+# the flags keyword.cpp models; every other KEY* (OpenCL, HLSL, CUDA, AltiVec,
 # Objective-C, ...) never holds for C++ on our targets
 KNOWN_FLAGS = ['KEYALL', 'KEYC99', 'KEYC23', 'KEYCXX', 'KEYCXX11', 'KEYCXX20', 'KEYGNU', 'KEYMS', 'KEYMSCOMPAT',
                'KEYNOCXX', 'KEYNOMS18', 'KEYCOROUTINES', 'KEYMODULES', 'BOOLSUPPORT', 'WCHARSUPPORT',
@@ -303,7 +303,7 @@ def predefined(clang='clang-23'):
 
 
 # [ext.clang] clang_feature_checks: the names clang's tables have, asked of
-# clang in each mode (the variants of cpp.predefined.inc); only the nonzero
+# clang in each mode (the variants of predefined-macros.inc); only the nonzero
 # answers are kept
 def llvm_file(path):
     import subprocess
@@ -350,8 +350,8 @@ def feature_check_queries():
         except Exception:
             continue
         names.update(re.findall(r'\b(__\w+)\b', text))
-    # type traits and other keyword-builtins: the spellings of lex.key.inc
-    for m in re.finditer(r'^KEYWORD\("(__\w+)"', open(os.path.join(OUT, 'lex', 'lex.key.inc')).read(), re.M):
+    # type traits and other keyword-builtins: the spellings of keyword.inc
+    for m in re.finditer(r'^KEYWORD\("(__\w+)"', open(os.path.join(OUT, 'lex', 'keyword.inc')).read(), re.M):
         names.add(m.group(1))
     builtins = sorted(n for n in names if not n.endswith('_'))
     queries += [('builtin', n) for n in builtins]
@@ -388,7 +388,7 @@ def feature_checks(clang='clang-23'):
     version = subprocess_version(clang)
     lines = [HEADER % f'{version}: its answers to __has_feature, __has_builtin, ... ({PREDEFINE_TRIPLE})',
              '/* FEATURE_CHECK(kind, operand, value, variants): the nonzero answers, in',
-             '   the modes whose bit is set (as cpp/cpp.predefined.inc), sorted by kind',
+             '   the modes whose bit is set (as preprocessor/predefined-macros.inc), sorted by kind',
              '   and operand */']
     for (kind, name, value), mask in sorted(rows.items()):
         lines.append(f'FEATURE_CHECK({kind}, {c_string(name)}, {value}, 0x{mask:014x}ull)')
@@ -410,10 +410,10 @@ def main():
     files = {
         'intro/diagnostic-messages.inc': messages,
         'intro/diagnostic-groups.inc': groups,
-        'lex/lex.key.inc': keywords(td),
-        'lex/lex.name.inc': xid(),
-        'lex/lex.charset.names.inc': names(),
-        'cpp/cpp.predefined.inc': predefined(),
+        'lexer/keyword.inc': keywords(td),
+        'lexer/identifier.inc': xid(),
+        'lexer/character-names.inc': names(),
+        'preprocessor/predefined-macros.inc': predefined(),
         'ext/clang/feature-checks.inc': feature_checks(),
     }
     stale = 0

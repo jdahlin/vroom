@@ -214,7 +214,7 @@ VPRIV bool has_gnu_attribute(const syntax_tree &tree, node_index n);
 VPRIV bool is_simple_type_keyword(standard_keyword k);
 
 /* tokens [first, end) of a statement that did not parse use grammar a
-   later step of doc/PLAN-cxx-parse.md writes (dcl.pre.cpp) */
+   later step of doc/PLAN-cxx-parse.md writes (simple-declaration.cpp) */
 VPRIV bool statement_uses_later_grammar(parser &p, token_index first,
                                         token_index end);
 

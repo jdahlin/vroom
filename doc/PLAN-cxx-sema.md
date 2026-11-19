@@ -124,14 +124,14 @@ src/frontend/cplusplus/
   sema/                    not a clause: what every clause's analysis uses
     entities.cpp           declarations and their redeclaration chains
     types.cpp              the type table (hash-consed, canonical)
-    semantic_tree.cpp      typed expressions and statements
+    semantic-tree.cpp      typed expressions and statements
     instantiation.cpp      the unit of instantiation and its record (3.5)
     unsupported.cpp        the scaffolding result and its counters
-  basic/basic.lookup.unqual.cpp, basic.lookup.argdep.cpp, basic.link.cpp, ...
-  conv/conv.lval.cpp, conv.prom.cpp, ...
-  expr/expr.add.cpp, ...   beside the parser's function for the same subclause
-  dcl/dcl.init.list.cpp, dcl.meaning.cpp, ...
-  class/, over/, temp/, except/
+  basic/name-lookup.cpp, translation-unit.cpp, ...
+  expression/standard-conversions.cpp, binary-expression.cpp, ...
+                           beside the parser's function for the same construct
+  declaration/initializer.cpp, declarator-meaning.cpp, ...
+  class/, overload/, template/, exception/
   abi/itanium/mangling.cpp, layout.cpp, vtable.cpp, rtti.cpp, guard.cpp, calls.cpp
   lower/                   semantic program -> struct ast; compile.cpp the driver's entry
   dump/                    the developer outputs, the claims of section 4:
@@ -425,9 +425,9 @@ libstdc++ and json), since sema cannot analyse a declaration kept as tokens.
   then C5.
 - Status (2026-11-17, S1a done): declarators to types and entities at
   global namespace scope, no initializers.  The fundamental types of
-  Table 14 (`dcl/dcl.type.simple.cpp`), the decl-specifier rules of
+  Table 14 (`declaration/simple-type-specifier.cpp`), the decl-specifier rules of
   [dcl.spec], [dcl.stc] and [dcl.typedef], typedef-names; declarators
-  ([dcl.meaning], `dcl/dcl.meaning.cpp`: pointers, references with
+  ([dcl.meaning], `declaration/declarator-meaning.cpp`: pointers, references with
   collapsing, arrays with an integer-literal bound, functions with the
   parameter adjustments of [dcl.fct]/5); redeclarations and linkage
   ([basic.link], [basic.def], [basic.def.odr], [dcl.array]/8's bound taken
@@ -451,10 +451,10 @@ libstdc++ and json), since sema cannot analyse a declaration kept as tokens.
   [basic.lookup.unqual] 2.8k.
 - Status (2026-11-17, S1b done): initializers and constant expressions at
   global namespace scope.  Expressions are typed with their value category
-  (`expr/expr.pre.cpp` dispatches; literals, names, the built-in unary,
+  (`expression/expression.cpp` dispatches; literals, names, the built-in unary,
   multiplicative to comma operators, casts to arithmetic and pointer types,
   functional casts, subscripts, `sizeof`/`alignof`), with the standard
-  conversions and usual arithmetic conversions (`expr/conv.cpp`) and
+  conversions and usual arithmetic conversions (`expression/standard-conversions.cpp`) and
   constant evaluation in three states (constant, not constant, unknown:
   an ill-formed verdict rests only on the first two; long double and
   floating-point under an FENV/`float_control`/`clang fp` pragma are
@@ -504,7 +504,7 @@ libstdc++ and json), since sema cannot analyse a declaration kept as tokens.
 - Status (2026-11-17, S1d in progress): the semantic tree (3.2) and the
   ABI grammar are in.  Analysis builds a `semantic_node` for every
   expression, initializer and statement it accepts
-  (`sema/semantic_tree.cpp`, `semantic_kind` in `sema.h`), each implicit
+  (`sema/semantic-tree.cpp`, `semantic_kind` in `sema.h`), each implicit
   conversion a `conversion` node of its own (lvalue-to-rvalue,
   array-to-pointer, integral, boolean, null pointer, ...), a variadic
   argument's default promotion included.  A function's entity has its
@@ -644,7 +644,7 @@ libstdc++ and json), since sema cannot analyse a declaration kept as tokens.
 - Gate: lookup claims 0 wrong on clang's tests and on the libstdc++ headers
   outside templates; C7 (V4a no worse).
 - Status (2026-11-17, done outside templates and overloads): one lookup
-  (`basic/basic.lookup.cpp`) for unqualified names (scopes outward,
+  (`basic/name-lookup.cpp`) for unqualified names (scopes outward,
   using-directives placed at the nearest enclosing namespace of both,
   transitively; class member lookup), qualified names ([namespace.qual]
   with inline namespaces, nested-name-specifiers through typedefs),
@@ -687,19 +687,19 @@ libstdc++ and json), since sema cannot analyse a declaration kept as tokens.
 - Gate: overload claims 0 wrong; CXX/over.
 - Status (2026-11-18, overload resolution, default arguments, deleted
   functions; operators not started): overload sets are a chain of
-  functions (`entity::next_overload`, declared by `basic.link.cpp` and
-  `class.pre.cpp` with [over.load]'s checks); `over/` has one file per
-  subclause: implicit conversion sequences (`over.best.ics.cpp`, a class
+  functions (`entity::next_overload`, declared by `translation-unit.cpp` and
+  `class-specifier.cpp` with [over.load]'s checks); `overload/` has one file per
+  subclause: implicit conversion sequences (`implicit-conversion-sequence.cpp`, a class
   conversion exactly as the analysed classes have no conversion functions
-  or explicit constructors), their ranking (`over.ics.rank.cpp`, with
+  or explicit constructors), their ranking (`conversion-ranking.cpp`, with
   clang's reading of CWG2352 in /3.2.1 and /3.2.5), viability and the best
-  viable function (`over.match.cpp`; constructors use it too) and calls by
-  name, member access included (`over.match.call.cpp`): the callee node,
+  viable function (`overload-resolution.cpp`; constructors use it too) and calls by
+  name, member access included (`call-candidates.cpp`): the callee node,
   its claim and access are of the function chosen.  Default arguments
-  (`dcl/dcl.fct.default.cpp`) of namespace-scope functions, merged per /4;
+  (`declaration/default-argument.cpp`) of namespace-scope functions, merged per /4;
   a function whose defaults are not analysed or are another scope's is
   `unknown_defaults` and a call that needs them is unsupported.
-  `= delete` (`dcl/dcl.fct.def.delete.cpp`).  An aggregate argument is
+  `= delete` (`declaration/deleted-definition.cpp`).  An aggregate argument is
   lowered as a compound literal.  Tests: `src/test/cxx/run/overloading.cpp`,
   `default-arguments.cpp`.  `bench/cxx-sema.py`: 26169 declarations as
   clang (S2: 24590), 0 we reject that clang accepts, 447 we accept that
@@ -707,10 +707,10 @@ libstdc++ and json), since sema cannot analyse a declaration kept as tokens.
   symbols 1458 (S2: 1400), lowering 211 files (S2: 206); CXX/over 1101 as
   clang, 0 wrong.  cxx-run 124/124; cxx-c-suites 0 wrong (its eight
   `#pragma pack` entries in the passing list fail on main too).
-- Status (2026-11-18, operator functions): `over/over.oper.cpp` names an
+- Status (2026-11-18, operator functions): `overload/operator-function.cpp` names an
   operator-function-id (operator@ as an identifier number, so declaration
   and lookup are unchanged) and checks [over.oper]/7-10 and [over.inc];
-  `over/over.match.oper.cpp` forms the member, non-member and (C++20)
+  `overload/operator-candidates.cpp` forms the member, non-member and (C++20)
   rewritten and reversed operator== candidates of a unary, binary,
   compound assignment, increment or decrement operator with an operand of
   class or enumeration type, and makes the expression a call of the
@@ -738,7 +738,7 @@ libstdc++ and json), since sema cannot analyse a declaration kept as tokens.
   outside their class, [over.ics.list] and [over.match.list], member functions'
   default arguments, static and non-static members in one set.  The parser
   takes `(a < b) + (b < a)` for a template-id (the function is not parsed).
-- Status (2026-11-18, [over.over]): `over/over.over.cpp`'s
+- Status (2026-11-18, [over.over]): `overload/function-address.cpp`'s
   `target_expression` analyses an expression for a target type: an
   unqualified name of an overload set of non-member functions (in
   parentheses, after &) is the function whose type is the target's
@@ -752,7 +752,7 @@ libstdc++ and json), since sema cannot analyse a declaration kept as tokens.
   `src/test/cxx/run/overload-address.cpp`.  `bench/cxx-sema.py`: 26592
   declarations as clang, 0 wrong, 0 refuted; lookup 10161; CXX/over 1259
   as clang.  cxx-run 132/132, cxx-c-suites 0 wrong.
-- Status (2026-11-18, [over.literal]): `over/over.literal.cpp`.  A
+- Status (2026-11-18, [over.literal]): `overload/literal-operator.cpp`.  A
   literal-operator-id names the function operator""X (an identifier, so
   declaration and lookup are any function's); its declaration is checked
   against /1 (an empty string-literal), /2 (a namespace-scope function),
@@ -769,9 +769,9 @@ libstdc++ and json), since sema cannot analyse a declaration kept as tokens.
   clang accepts, 448 we accept that clang rejects, 0 refuted; symbols
   1487.  cxx-run 136/136, cxx-c-suites 0 wrong.
 - Status (2026-11-18, operator=, () and []): [over.ass], [over.call] and
-  [over.sub] in `over/over.oper.cpp` (non-static members alone; static
+  [over.sub] in `overload/operator-function.cpp` (non-static members alone; static
   operator() and operator[], C++23's, and C++23's operator[] of several
-  parameters not analysed) and `over.match.oper.cpp` (member candidates
+  parameters not analysed) and `operator-candidates.cpp` (member candidates
   alone, Table 15).  a = b with a user-declared operator= is overload
   resolution among them when one is a copy assignment operator
   ([class.copy.assign]/1; otherwise the implicit one would be a candidate:
@@ -788,7 +788,7 @@ libstdc++ and json), since sema cannot analyse a declaration kept as tokens.
   unary & operator functions go through `overloaded_operator` like the
   other binary and unary ones (the built-in ->* and .*, pointers to
   members, are not analysed); [over.ref]'s x->m applies operator-> while
-  the result is of class type (`expr.ref.cpp`; a chain of 16, or a cycle,
+  the result is of class type (`member-access.cpp`; a chain of 16, or a cycle,
   is not analysed).  Mangled cm, pm, ad and pt.  Test:
   `src/test/cxx/run/operators-rest.cpp`.  `bench/cxx-sema.py`: 27290
   declarations as clang, 0 wrong, 448 we accept that clang rejects, 0
@@ -806,14 +806,14 @@ libstdc++ and json), since sema cannot analyse a declaration kept as tokens.
   refuted.  cxx-run 148/148, cxx-c-suites 0 wrong.  Left: the allocation
   functions.
 - Status (2026-11-18, members defined outside their class): a declarator-id
-  X::operator@ (`dcl.meaning.cpp`) defines the member operator function
+  X::operator@ (`declarator-meaning.cpp`) defines the member operator function
   declared in X.  Test: `src/test/cxx/run/operators-out-of-class.cpp`.
   `bench/cxx-sema.py`: 27310 declarations as clang, 0 wrong, 0 refuted
   (clang's tests define them mostly in templates).  cxx-run 152/152,
   cxx-c-suites 0 wrong.
 - Status (2026-11-18, member functions' default arguments): a complete-class
   context ([class.mem]/6), analysed when the class is complete, before the
-  member function bodies (`member_default_arguments`, dcl.fct.default.cpp);
+  member function bodies (`member_default_arguments`, default-argument.cpp);
   an operator function's other than operator()'s is ill-formed
   ([over.oper]/10).  Not analysed: a default argument that may name a
   non-static member or uses this (/8, /9), and default
@@ -847,14 +847,14 @@ libstdc++ and json), since sema cannot analyse a declaration kept as tokens.
   delete and delete[] with their rules (/allocation/1, /deallocation/1-3,
   [class.free]/1: a member one is static), the implicit global ones of /2
   (the sized operator delete from C++14, N3778; no std::align_val_t forms),
-  mangled nw, na, dl, da.  new-expressions (`expr/expr.new.cpp`):
+  mangled nw, na, dl, da.  new-expressions (`expression/new-expression.cpp`):
   new-type-id or ( type-id ), one array bound (its size checked for
   overflow at run time as clang does, SIZE_MAX when it does not fit),
   placement arguments, class-specific allocation functions found before the
   global ones unless ::new (/11), default-, value- and direct-initialization
   and braced-init-lists of one object; the initialization skipped for a null
   pointer from an allocation function that is not an implicit one (/20).
-  delete-expressions (`expr/expr.delete.cpp`): the destructor, then the usual
+  delete-expressions (`expression/delete-expression.cpp`): the destructor, then the usual
   deallocation function of [expr.delete]/10 (the sized global one for one
   object, as clang), nothing for a null pointer.  Semantic nodes
   new_object, allocated, array_size, delete_object, lowered as statement
@@ -891,12 +891,12 @@ libstdc++ and json), since sema cannot analyse a declaration kept as tokens.
   member functions in and outside the class, `this`, const member
   functions, static member functions, access, `.`/`->`, aggregate
   initialization, the trivial copy and assignment, classes by value;
-  mangling of members (`class/class.pre.cpp`, `expr/expr.ref.cpp`; lowered
+  mangling of members (`class/class-specifier.cpp`, `expression/member-access.cpp`; lowered
   to C structs whose layout is checked against sema's).  Unsupported with
   their subclause: unions, nested and local classes, bases, constructors,
   destructors, static data members, reference members, brace elision.
   `src/test/cxx/run/classes.cpp`; C5.1 848 -> 915 passing, 0 wrong.
-  Then user-declared constructors and destructors (`class/class.ctor.cpp`):
+  Then user-declared constructors and destructors (`class/constructor.cpp`):
   in and outside the class, mem-initializers in member order, overload
   resolution among constructors for exact and standard conversions,
   `T x;`, `T x(a, b)`, `T x = a`, `T x{}`, `T(args)`; destructors called
@@ -907,7 +907,7 @@ libstdc++ and json), since sema cannot analyse a declaration kept as tokens.
   `src/test/cxx/run/constructors.cpp`.  LLVM's SingleSource/Regression/C++
   still needs [dcl.link] (`extern "C"` in the run-time headers),
   [class.derived], dynamic initialization and [dcl.enum].
-  Then [dcl.link] (`dcl/dcl.link.cpp`: extern "C" and "C++", nested, the
+  Then [dcl.link] (`declaration/linkage-specification.cpp`: extern "C" and "C++", nested, the
   brace-less form as extern; C language linkage names unmangled) with
   extern "C" in src/test/rt's headers, and dynamic initialization of
   namespace-scope variables ([basic.start.dynamic]) as clang's:
@@ -927,7 +927,7 @@ libstdc++ and json), since sema cannot analyse a declaration kept as tokens.
   cannot fold and that needs nothing of the running program (clang folds
   an out-of-range shift) is not lowered as dynamic initialization.
   LLVM import: `llvm-2003-05-14-array-init.cpp`.
-  Then non-virtual base classes (`class/class.derived.cpp`): a base is an
+  Then non-virtual base classes (`class/base-clause.cpp`): a base is an
   unnamed member subobject (`entity::base_subobject`; a non-empty one is
   also a field), laid out as [abi:layout] (empty bases at offset 0, a
   non-POD base's tail padding reused: lowering then refuses the C
@@ -997,7 +997,7 @@ libstdc++ and json), since sema cannot analyse a declaration kept as tokens.
   linkage has internal linkage under its plain name, as in clang.  The
   harness's clang -O0 symbol list uses the driver's
   `-mconstructor-aliases`.  C5.1 1094 passing, 0 wrong.
-  Then enumerations ([dcl.enum], `dcl/dcl.enum.cpp`): scoped and
+  Then enumerations ([dcl.enum], `declaration/enum-specifier.cpp`): scoped and
   unscoped, fixed underlying types, clang's underlying and promoted types
   for the others, enumerators as constants bound in the enclosing scope
   (and in the enumeration's, for `E::e`), in any scope and in classes;
@@ -1057,7 +1057,7 @@ libstdc++ and json), since sema cannot analyse a declaration kept as tokens.
   they were taken for nested classes before), bases.
   `src/test/cxx/run/unions.cpp`; C5.1 2033 -> 2077, 0 wrong.
   Then bit-fields ([class.bit], `member_bit_field` in
-  `class/class.pre.cpp`): integral bit-fields, named, unnamed and of
+  `class/class-specifier.cpp`): integral bit-fields, named, unnamed and of
   width zero, laid out as clang's for aarch64 Linux (a bit-field moves to
   its type's alignment only when it would cross it; every bit-field
   raises the class's alignment), lowered as C bit-fields with each bit
@@ -1119,17 +1119,17 @@ clang's CXX, SemaCXX and SemaTemplate unsupported for that subclause
 
 | # | What | Subclauses (unsupported) | Files | Needs | Gate |
 |---|---|---|---|---|---|
-| R0 | constexpr member functions and constructors, for S6's evaluator: `constexpr` on a member function (inline, `entity::constexpr_`) and on a constructor, in the class and out of it; an invocation of one is `unknown` to the constant rules and counted (`constexpr_calls`), so a static initializer invoking one stays `unsupported` [basic.start.static] until S6 evaluates it; a constexpr destructor and C++11's implicitly const constexpr member stay `unsupported`.  **Done** (2026-11-18): `test/cxx/run/constexpr-members.cpp`, cxx-sema 0 rejected, 0 refuted | [dcl.constexpr] | `class/class.pre.cpp`, `class/class.ctor.cpp`, `expr/expr.post.cpp`, `dcl/dcl.pre.cpp` | - | cxx-sema 0 we reject, cxx-run |
-| R1 | Layout without virtuals, complete: a component that would share its address with one of its type moves ([abi:class-types] II-2, II-3: now `unsupported`); `aligned` and `packed` on a class, `#pragma pack`; enumeration and wide bit-fields, bit-fields in unions; anonymous unions and structs  **In progress** (2026-11-18): done: components that conflict move (II-2, II-3: an empty-subobject map in `layout.cpp`), bit-fields of enumeration type and in unions, anonymous unions and structs as members (`entity::anonymous_object`; `test/cxx/run/anonymous-unions.cpp`, `bit-fields-enum-union.cpp`): layout 10139 as clang (was 9565), 0 refuted.  Left: `aligned`/`packed` on a class, `#pragma pack` (the C++ token stream does not carry the pragma yet; C's is `frontend/c/pragma.cpp`), bit-fields wider than their type, anonymous unions at namespace and block scope, a mem-initializer of an anonymous union's member | [class.derived] 2603 (most are bases analysis cannot name: templates), [class.union.anon] 183, [class.bit] 159, [class.union] 170, [cpp.pragma] | `abi/itanium/layout.cpp`, `class/class.union*.cpp`, `class.bit.cpp` | - | layout claims 0 refuted |
+| R0 | constexpr member functions and constructors, for S6's evaluator: `constexpr` on a member function (inline, `entity::constexpr_`) and on a constructor, in the class and out of it; an invocation of one is `unknown` to the constant rules and counted (`constexpr_calls`), so a static initializer invoking one stays `unsupported` [basic.start.static] until S6 evaluates it; a constexpr destructor and C++11's implicitly const constexpr member stay `unsupported`.  **Done** (2026-11-18): `test/cxx/run/constexpr-members.cpp`, cxx-sema 0 rejected, 0 refuted | [dcl.constexpr] | `class/class-specifier.cpp`, `class/constructor.cpp`, `expression/postfix-expression.cpp`, `declaration/simple-declaration.cpp` | - | cxx-sema 0 we reject, cxx-run |
+| R1 | Layout without virtuals, complete: a component that would share its address with one of its type moves ([abi:class-types] II-2, II-3: now `unsupported`); `aligned` and `packed` on a class, `#pragma pack`; enumeration and wide bit-fields, bit-fields in unions; anonymous unions and structs  **In progress** (2026-11-18): done: components that conflict move (II-2, II-3: an empty-subobject map in `layout.cpp`), bit-fields of enumeration type and in unions, anonymous unions and structs as members (`entity::anonymous_object`; `test/cxx/run/anonymous-unions.cpp`, `bit-fields-enum-union.cpp`): layout 10139 as clang (was 9565), 0 refuted.  Left: `aligned`/`packed` on a class, `#pragma pack` (the C++ token stream does not carry the pragma yet; C's is `frontend/c/pragma.cpp`), bit-fields wider than their type, anonymous unions at namespace and block scope, a mem-initializer of an anonymous union's member | [class.derived] 2603 (most are bases analysis cannot name: templates), [class.union.anon] 183, [class.bit] 159, [class.union] 170, [cpp.pragma] | `abi/itanium/layout.cpp`, `class/class.union*.cpp`, `bit-field.cpp` | - | layout claims 0 refuted |
 | R2 | A class whose layout is not C's, lowered: a base's tail padding reused, an empty base or member off its natural offset.  `ast_builder_type_record_complete` takes explicit offsets, or the base is lowered as its members  **Done** (2026-11-18): `lower.cpp` `class_type` builds the C struct at the layout's offsets (padding fields; a base whose tail padding is reused is a char array of its data size, `c_fields` maps members to C fields), an empty base moved off offset 0 is addressed at its offset, and a trivial assignment of a class with tail padding copies its data size (`data_size_assignment`, as clang): `test/cxx/run/empty-subobjects.cpp`, `tail-padding.cpp`, vcc-abi `cxx/tail_padding` passes | - (lowering refuses: "a class whose layout is not C's") | `lower/lower.cpp`, `frontend/c/ast-builder.h` | C's gates when `struct ast` changes (`vbench.py gate`, `vcc-same.py`) | `cxx/tail_padding` passes |
 | R3 | Member functions and static data members of nested and local classes (`<nested-name>`, `<local-name>` with discriminators), a nested class defined outside its class, in-class initializers of static members, default member initializers  **Mostly done** (2026-11-18): member functions, constructors and static members of nested classes (bodies at the outermost class's }), member functions of local classes (`<local-name>`, local symbols unless the function is inline), default member initializers ([class.base.init]/9.1), const static integral members initialized in the class (reads folded, no odr-use); an in-class member function definition is reread in its class's scope; tests `nested-class-members`, `local-class-members`, `default-member-initializers`, `static-member-constants`.  Left: a nested class defined outside its class, local classes that need a discriminator, default member initializers of class type, arrays and references, aggregate initialization of classes with them ([over.match.list]), inline and constexpr static members (R9), a local class's use of the enclosing function's variables (refused: whether it is an odr-use is not analysed) | [class.mem] 947, [class.nest] 190, [class.local] 127, [class.static.data] 29 | `class/class.nest.cpp`, `class.local.cpp`, `abi/itanium/mangling.cpp` | - | symbols claims; run tests |
-| R4 | Special member functions in full: `= default` and `= delete`, when an implicit one is deleted, move constructors, copy and move assignment (implicit and user-declared), reference and const members, arrays of class type (construction and destruction in order), class members of unions  **In progress** (2026-11-18): done: constructors `= delete` (except `X(X&)` and `X(X&&)`, whose choice on a return needs implicit move into another class), public `X() = default`, `X(const X&) = default`, `~X() = default` (a trivial defaulted default constructor calls nothing); move constructors, and a returned local moved when its class declares one ([class.copy.elision]/3); `static_cast<T&&>`/`<T&>` of a glvalue of the same type; reference members (laid out as pointers, no POD for layout) and const members; an implicitly deleted default constructor ([class.default.ctor]/2) or copy assignment ([class.copy.assign]/2, /7) used is ill-formed; automatic one-dimensional arrays of class type, elements constructed in order and destroyed in reverse; `owned_array::append` of its own element (a use after free that misplaced anonymous unions).  Tests `defaulted-deleted`, `move-constructors`, `reference-members`, `class-arrays`; declarations 30261 as clang (29261 before R4), 0 refuted.  Left: the implicit move constructor and move assignment ([class.copy.ctor]/8: a subobject with a move constructor keeps the implicit members unsupported), an implicit copy assignment that calls a subobject's `operator=`, a deleted destructor, defaulted members that are private, constexpr or not the implicit ones' form, static and multidimensional arrays of class type and their initializers, class members of unions | [dcl.fct.def.general] 1085, [class.ctor] 1491, [class.copy.ctor] 278, [class.default.ctor] 111, [class.copy.assign] | `class/class.ctor.cpp`, `class.copy.*.cpp`, `class.dtor.cpp`, `dcl/dcl.fct.def.*.cpp` | S3: `operator=` and constructors chosen by [over.match] with reference binding and cv-qualifiers | CXX/special; symbols; run tests |
-| R5 | Initialization of classes in full: brace elision, aggregates with bases, list-initialization and its constructors, value- and zero-initialization, lifetime extension ([class.temporary]/6), temporaries in conditional operands, the rest of copy elision  **In progress** (2026-11-18): done: brace elision ([dcl.init.aggr]/16) with too many clauses ill-formed; aggregates by edition (bases from C++17, default member initializers from C++14, no user-declared constructors from C++20); list-initialization through constructors with the narrowing check ([dcl.init.list]/3.7); implicitly deleted default constructors used are ill-formed; `T()` value-initialization of a class without constructors, `T(x)` of the same type a copy; redeclaring a function a using-declaration named is unsupported.  Tests `brace-elision`, `list-constructors`, `value-initialization`.  Left: lifetime extension, temporaries in conditional operands, a missing member with a default member initializer, narrowing into a reference parameter, C++03 value-initialization | [dcl.init.aggr] 215, [dcl.init.list] 86, [dcl.init] 32, [class.temporary] 11, [class.copy.elision] 49 | `dcl/dcl.init*.cpp`, `class/class.temporary.cpp` | S3: [over.match.list], [dcl.init.ref] (S3 owns its file) | CXX/dcl.init; type claims; run tests |
-| R6 | Virtual functions: `virtual`, `override`, `final`, pure, abstract classes; overriding and covariant returns; layout I (the virtual table pointer, the primary base); virtual tables ([abi:vtable-components]), their symbols and vague linkage with the key function ([abi:vague-vtable]), virtual calls, `this`-adjusting thunks, the pointer set during construction and destruction ([class.cdtor]), `__cxa_pure_virtual`, D0  **In progress** (2026-11-18): done (`class/class.virtual.cpp`): `virtual`, `override`, `final`, pure-specifiers, overriding through the direct base's virtual table ([class.virtual]/2, /4, /5, [class.mem]/12, /14), abstract classes (objects, members, arrays and by-value uses of them ill-formed or unsupported); layout I (the vptr at offset 0, or the first base as primary; layout claims write `vptr`); `_ZTV` with offset to top 0, null RTTI, `__cxa_pure_virtual` (in `src/test/rt`), strong where the key function is defined, weak otherwise; constructors (implicit and copy too) store the vptr after the bases; virtual calls through the slot, qualified ones direct; a dynamic class is no aggregate and not trivially copyable.  Test `virtual-functions`; declarations 31089 as clang (30507 before), accepts unchanged, layout 11869 verified, 0 refuted.  Left: a primary base not first (more than one dynamic base and non-virtual thunks: R7, 2026-11-18), covariant returns, ~~virtual destructors and D0 (R8), destructors of dynamic classes (vptr reset)~~ (done in R8, 2026-11-18), copy assignment of dynamic classes, virtual operator functions, local classes, a virtual call whose object address has side effects (lowering refuses), vtable claims against `-fdump-vtable-layouts` | [dcl.fct.spec] 1127, [class.virtual], [class.abstract] | `class/class.virtual.cpp`, `class.abstract.cpp`, `abi/itanium/vtable.cpp`, `layout.cpp` | R8 for D0; RTTI slots are null until S7 (`-fno-rtti`) | vtable claims (`-fcxx-dump=vtable-claims` against `-fdump-vtable-layouts`, to write with the item); layout claims; `cxx/virtual_calls` passes |
+| R4 | Special member functions in full: `= default` and `= delete`, when an implicit one is deleted, move constructors, copy and move assignment (implicit and user-declared), reference and const members, arrays of class type (construction and destruction in order), class members of unions  **In progress** (2026-11-18): done: constructors `= delete` (except `X(X&)` and `X(X&&)`, whose choice on a return needs implicit move into another class), public `X() = default`, `X(const X&) = default`, `~X() = default` (a trivial defaulted default constructor calls nothing); move constructors, and a returned local moved when its class declares one ([class.copy.elision]/3); `static_cast<T&&>`/`<T&>` of a glvalue of the same type; reference members (laid out as pointers, no POD for layout) and const members; an implicitly deleted default constructor ([class.default.ctor]/2) or copy assignment ([class.copy.assign]/2, /7) used is ill-formed; automatic one-dimensional arrays of class type, elements constructed in order and destroyed in reverse; `owned_array::append` of its own element (a use after free that misplaced anonymous unions).  Tests `defaulted-deleted`, `move-constructors`, `reference-members`, `class-arrays`; declarations 30261 as clang (29261 before R4), 0 refuted.  Left: the implicit move constructor and move assignment ([class.copy.ctor]/8: a subobject with a move constructor keeps the implicit members unsupported), an implicit copy assignment that calls a subobject's `operator=`, a deleted destructor, defaulted members that are private, constexpr or not the implicit ones' form, static and multidimensional arrays of class type and their initializers, class members of unions | [dcl.fct.def.general] 1085, [class.ctor] 1491, [class.copy.ctor] 278, [class.default.ctor] 111, [class.copy.assign] | `class/constructor.cpp`, `declaration/function-definition.cpp`, `declaration/deleted-definition.cpp` | S3: `operator=` and constructors chosen by [over.match] with reference binding and cv-qualifiers | CXX/special; symbols; run tests |
+| R5 | Initialization of classes in full: brace elision, aggregates with bases, list-initialization and its constructors, value- and zero-initialization, lifetime extension ([class.temporary]/6), temporaries in conditional operands, the rest of copy elision  **In progress** (2026-11-18): done: brace elision ([dcl.init.aggr]/16) with too many clauses ill-formed; aggregates by edition (bases from C++17, default member initializers from C++14, no user-declared constructors from C++20); list-initialization through constructors with the narrowing check ([dcl.init.list]/3.7); implicitly deleted default constructors used are ill-formed; `T()` value-initialization of a class without constructors, `T(x)` of the same type a copy; redeclaring a function a using-declaration named is unsupported.  Tests `brace-elision`, `list-constructors`, `value-initialization`.  Left: lifetime extension, temporaries in conditional operands, a missing member with a default member initializer, narrowing into a reference parameter, C++03 value-initialization | [dcl.init.aggr] 215, [dcl.init.list] 86, [dcl.init] 32, [class.temporary] 11, [class.copy.elision] 49 | `declaration/initializer.cpp` | S3: [over.match.list], [dcl.init.ref] (S3 owns its file) | CXX/dcl.init; type claims; run tests |
+| R6 | Virtual functions: `virtual`, `override`, `final`, pure, abstract classes; overriding and covariant returns; layout I (the virtual table pointer, the primary base); virtual tables ([abi:vtable-components]), their symbols and vague linkage with the key function ([abi:vague-vtable]), virtual calls, `this`-adjusting thunks, the pointer set during construction and destruction ([class.cdtor]), `__cxa_pure_virtual`, D0  **In progress** (2026-11-18): done (`class/virtual-function.cpp`): `virtual`, `override`, `final`, pure-specifiers, overriding through the direct base's virtual table ([class.virtual]/2, /4, /5, [class.mem]/12, /14), abstract classes (objects, members, arrays and by-value uses of them ill-formed or unsupported); layout I (the vptr at offset 0, or the first base as primary; layout claims write `vptr`); `_ZTV` with offset to top 0, null RTTI, `__cxa_pure_virtual` (in `src/test/rt`), strong where the key function is defined, weak otherwise; constructors (implicit and copy too) store the vptr after the bases; virtual calls through the slot, qualified ones direct; a dynamic class is no aggregate and not trivially copyable.  Test `virtual-functions`; declarations 31089 as clang (30507 before), accepts unchanged, layout 11869 verified, 0 refuted.  Left: a primary base not first (more than one dynamic base and non-virtual thunks: R7, 2026-11-18), covariant returns, ~~virtual destructors and D0 (R8), destructors of dynamic classes (vptr reset)~~ (done in R8, 2026-11-18), copy assignment of dynamic classes, virtual operator functions, local classes, a virtual call whose object address has side effects (lowering refuses), vtable claims against `-fdump-vtable-layouts` | [dcl.fct.spec] 1127, [class.virtual], [class.abstract] | `class/virtual-function.cpp`, `class.abstract.cpp`, `abi/itanium/vtable.cpp`, `layout.cpp` | R8 for D0; RTTI slots are null until S7 (`-fno-rtti`) | vtable claims (`-fcxx-dump=vtable-claims` against `-fdump-vtable-layouts`, to write with the item); layout claims; `cxx/virtual_calls` passes |
 | R7 | Virtual bases: layout III, vbase and vcall offsets, VTT and construction virtual tables, virtual thunks, C1 and D1 no longer C2's and D2's  **In progress** (2026-11-18): done: more than one dynamic base (R6's leftover): a class's virtual table group ([abi:vtable-general]: `vtable_group`, `vtable_adjustments` in `sema.h`), secondary tables with their offsets to top, overriders called through non-virtual thunks `_ZThn<offset>_` (defined with the function, `lower.cpp` `thunk_definitions`), constructors storing every table's address point; pointer conversions to a base at a nonzero offset with the null check ([conv.ptr]/3).  Test `multiple-inheritance`; vcc-abi `cxx/virtual_calls` passes (xfail removed); declarations 31098 as clang, accepts unchanged, layout 11878, 0 refuted.  Left: a primary base that is not the first base, a conversion through two bases at nonzero offsets, thunks of variadic functions or ones returning a class by address; then virtual bases themselves.  2026-11-18: virtual bases done but for virtual thunks: `virtual` base-specifiers, lookup and conversions through them (the vbase offset read from the virtual table; a pointer with side effects through a temporary), layout III (`nv_size`/`nv_alignment`; layout claims list virtual bases), vbase offsets and the vcall offsets of a virtual base's primary table, `_ZTT` and `_ZTC` in clang's VTTBuilder order, C2/D2 taking the VTT and skipping virtual bases, C1 the full body, D1 calling D2 then destroying the virtual bases, an inline structor's C1/D1 only where called.  Tests `virtual-bases`, `virtual-bases-shapes` (tables word for word as clang -O0's), vcc-abi `cxx/virtual_bases`; cxx-run 280/280, declarations 32224 as clang, accepts unchanged, layout 12805, 0 refuted.  2026-11-18: overrides across virtual bases: the final overrider of a virtual base's slot taken from the class's other bases (`virtual_base_overrider`, ambiguous ones unsupported), vcall offsets from the overrider's subobject, virtual thunks `_ZTv0_n<offset>_` (D1/D0 ones for a virtual destructor in a virtual base) and non-virtual D1/D0 thunks of a destructor in a secondary table (R8's leftover); a pointer converted to a base inside a virtual base; a constexpr constructor defined in a class with virtual bases ill-formed ([dcl.constexpr]/3, as clang).  Tests `virtual-thunks` (tables and thunk symbols as clang -O0's), `virtual-base-conversions`, vcc-abi `cxx/virtual_bases` with `virtual ~A` and B overriding A's function; cxx-run 288/288, declarations 32244 as clang, accepts unchanged, layout 12814, 0 refuted.  Left (`unsupported` [class.mi]): a nearly empty virtual base as primary base ([abi:class-types] I: layout, shared vptr, its tables and VTT entries), a virtual thunk for a table at a nonzero offset inside a virtual base (`_ZTv<nv>_`), a final overrider that is not unique; constexpr constructors declared only or defaulted in such a class stay unsupported | [class.mi] 597 | `class/class.mi.cpp`, `abi/itanium/layout.cpp`, `vtable.cpp` | R6 | vtable and layout claims; an ABI case with a diamond |
-| R8 | `new` and `delete`: allocation and deallocation functions looked up and called, placement, array cookies ([abi:array-cookies]), initializers; `operator new`/`delete` in the test run time (`src/test/rt`, on malloc)  **In progress** (2026-11-18): done: virtual destructors (declared, `= default`, overriding a base's, the implicit one virtual when a base's is: [class.virtual]/7, [class.dtor]/13) with their D1/D0 pair of slots ([abi:vtable-components]; D2 in the slot for an inline one, as clang), the deleting destructor D0 calling the deallocation function of [class.dtor]/12 (class-specific or global, sized), `delete p` through the table ([expr.delete]/3); destructors of dynamic classes store the vptr on entry ([class.cdtor]/4); arrays of classes with constructors or destructors in new[]/delete[] (elements constructed in order, destroyed in reverse), the array cookie (max(8, alignof), count before the elements, the whole size to `_ZdaPvm`, SIZE_MAX on overflow), new semantic node `array_count`; `new T()` with a user-provided default constructor ([dcl.init]/8.1).  Fixed on the way: const-default-constructible with default member initializers ([dcl.init]/7.4).  Tests `virtual-destructors`, `new-delete-arrays`; vcc-abi `cxx/new_delete` (allocated in one half, deleted in the other); declarations 31454 as clang (31098 before), 0 we reject, accepts unchanged (504), layout 12161, 0 refuted; cxx-run 248/248.  Operator new/delete stay in each test (none in `src/test/rt`).  Left (`not_supported`): pure virtual destructors, a virtual destructor in a secondary table (D1/D0 thunks), a dynamic class with a deleted or inaccessible subobject destructor or class deallocation function, explicit destructor calls `p->~T()`, an array with a new-initializer, value-initialization of a class without a user-provided default constructor (8.2), Apple arm64's cookie (lowering error), a constructor that throws (/25), destroying operator delete, new-extended alignment, one prvalue of the class in a braced list with constructors (CWG2311) | [expr.new] 601, [expr.delete] 106 | `expr/expr.new.cpp`, `expr.delete.cpp`, `abi/itanium/calls.cpp` | S3: operator functions declared and overloaded | run tests; an ABI case allocating in one object and freeing in the other |
+| R8 | `new` and `delete`: allocation and deallocation functions looked up and called, placement, array cookies ([abi:array-cookies]), initializers; `operator new`/`delete` in the test run time (`src/test/rt`, on malloc)  **In progress** (2026-11-18): done: virtual destructors (declared, `= default`, overriding a base's, the implicit one virtual when a base's is: [class.virtual]/7, [class.dtor]/13) with their D1/D0 pair of slots ([abi:vtable-components]; D2 in the slot for an inline one, as clang), the deleting destructor D0 calling the deallocation function of [class.dtor]/12 (class-specific or global, sized), `delete p` through the table ([expr.delete]/3); destructors of dynamic classes store the vptr on entry ([class.cdtor]/4); arrays of classes with constructors or destructors in new[]/delete[] (elements constructed in order, destroyed in reverse), the array cookie (max(8, alignof), count before the elements, the whole size to `_ZdaPvm`, SIZE_MAX on overflow), new semantic node `array_count`; `new T()` with a user-provided default constructor ([dcl.init]/8.1).  Fixed on the way: const-default-constructible with default member initializers ([dcl.init]/7.4).  Tests `virtual-destructors`, `new-delete-arrays`; vcc-abi `cxx/new_delete` (allocated in one half, deleted in the other); declarations 31454 as clang (31098 before), 0 we reject, accepts unchanged (504), layout 12161, 0 refuted; cxx-run 248/248.  Operator new/delete stay in each test (none in `src/test/rt`).  Left (`not_supported`): pure virtual destructors, a virtual destructor in a secondary table (D1/D0 thunks), a dynamic class with a deleted or inaccessible subobject destructor or class deallocation function, explicit destructor calls `p->~T()`, an array with a new-initializer, value-initialization of a class without a user-provided default constructor (8.2), Apple arm64's cookie (lowering error), a constructor that throws (/25), destroying operator delete, new-extended alignment, one prvalue of the class in a braced list with constructors (CWG2311) | [expr.new] 601, [expr.delete] 106 | `expression/new-expression.cpp`, `delete-expression.cpp`, `abi/itanium/calls.cpp` | S3: operator functions declared and overloaded | run tests; an ABI case allocating in one object and freeing in the other |
 | R9 | The rest of [basic.start]: destructors of static objects (`__cxa_atexit`, `__dso_handle`), local statics with dynamic initialization and their guards ([abi:guards]), inline variables  **In progress** (2026-11-18): done (`lower/lower.cpp`): a namespace-scope object with a destructor registers it with `__cxa_atexit(D, &obj, &__dso_handle)` in its `__cxx_global_var_init` ([basic.start.term]/3, [abi:dso-dtor]; a constant-initialized one gets an init function for the registration alone, as clang); a block-scope static with dynamic initialization or a destructor is initialized under its guard `_ZGV...` ([stmt.dcl]/4, [abi:guards]: acquire load of the first byte, `__cxa_guard_acquire`, the initialization, the registration, `__cxa_guard_release`, as clang -O0); `src/test/rt` has `__cxa_atexit`, `__dso_handle` and the guard functions.  Tests `static-destructors`, `local-statics`; cxx-run 256/256, declarations 31454 as clang, accepts unchanged, 0 refuted.  Left (lowering errors): inline variables with dynamic initialization or a destructor (guarded, COMDAT), guarded statics in inline functions, static arrays with destructors (`__cxx_global_array_dtor`), temporaries in a guarded initializer, `__cxa_guard_abort` (no exceptions yet), thread_local (`unsupported` [dcl.stc]) | [basic.start.term], [stmt.dcl] | `basic/basic.start*.cpp`, `abi/itanium/guard.cpp`, `src/test/rt` | S6a decides which initializers are constant (a constexpr constructor is unsupported today, so no object is constant-initialized by one; clang emits such an object as data, with no start-up code) | symbols claims; run tests |
-| R10 | Access in full and friends: friend functions and classes, access of nested classes and through using-declarations, [class.protected] everywhere  **In progress** (2026-11-18): done (`class/class.friend.cpp`): in a class that is not local, friend classes (class-key identifier of the innermost enclosing namespace, declared before or later, [namespace.memdef]/3; a qualified elaborated-type-specifier; C++11's friend type-name) and friend function declarations by an unqualified name (a function declared before, or one first declared there: unbound in its namespace until declared, found by argument-dependent lookup through the granting class, [basic.lookup.argdep]/4.3); `accessible()` grants friends and friends of derived classes ([class.protected]), a base is accessible in a friend of the derived class ([class.access.base]/5.2); a nested class redeclared with another access is ill-formed ([class.access.spec]/4); `test/cxx/run/friends.cpp`.  cxx-sema 31814 as clang (was 31454), 0 we reject, 494 we accept and clang rejects (was 504).  Left (`unsupported`): friend definitions in the class ([class.friend]/7, hidden friends), friend operator functions and members of other classes, friends of local classes, Microsoft's friend lookup, an implicit constructor using a friend's private constructor or destructor; the naming class of [class.access.base]/5 (CXX/class.access/p4.cpp test9), private destructors of variables and temporaries (p4.cpp test3, test14) | [class.friend] 765, [class.access.base] 26 | `class/class.access*.cpp`, `class.friend.cpp` | S3 for friend operator functions | CXX/class.access: "we accept, clang rejects" down |
+| R10 | Access in full and friends: friend functions and classes, access of nested classes and through using-declarations, [class.protected] everywhere  **In progress** (2026-11-18): done (`class/friend.cpp`): in a class that is not local, friend classes (class-key identifier of the innermost enclosing namespace, declared before or later, [namespace.memdef]/3; a qualified elaborated-type-specifier; C++11's friend type-name) and friend function declarations by an unqualified name (a function declared before, or one first declared there: unbound in its namespace until declared, found by argument-dependent lookup through the granting class, [basic.lookup.argdep]/4.3); `accessible()` grants friends and friends of derived classes ([class.protected]), a base is accessible in a friend of the derived class ([class.access.base]/5.2); a nested class redeclared with another access is ill-formed ([class.access.spec]/4); `test/cxx/run/friends.cpp`.  cxx-sema 31814 as clang (was 31454), 0 we reject, 494 we accept and clang rejects (was 504).  Left (`unsupported`): friend definitions in the class ([class.friend]/7, hidden friends), friend operator functions and members of other classes, friends of local classes, Microsoft's friend lookup, an implicit constructor using a friend's private constructor or destructor; the naming class of [class.access.base]/5 (CXX/class.access/p4.cpp test9), private destructors of variables and temporaries (p4.cpp test3, test14) | [class.friend] 765, [class.access.base] 26 | `class/class.access*.cpp`, `friend.cpp` | S3 for friend operator functions | CXX/class.access: "we accept, clang rejects" down |
 | R11 | Classes in calls, checked across compilers for every shape: empty classes as arguments (clang's C++ and C differ), homogeneous aggregates with bases, classes with bit-fields and unions in registers, by-address classes on the stack  **In progress** (2026-11-18): done: vcc-abi `cxx/call_shapes` (arm64 Linux, clang/vcc x caller/callee under qemu) passes: empty classes as arguments between others and as results (ignored, as clang's C++ ABI), homogeneous float and double aggregates with members in a base, a float/double mix, classes non-trivial for the purposes of calls through the copy constructor alone or the destructor alone (by address, results through x8), a dynamic class by value and as a result, reference members, a union with bit-fields in registers, a class over 16 bytes (the caller's copy), arguments past the eighth register on the stack.  Fixed: a named local returned from a function whose class is trivially copyable with a non-trivial destructor is the result object ([class.copy.elision]/1.1 as clang applies it; it was copied and destroyed).  vcc-abi 39 pass; cxx-run 260/260; cxx-sema unchanged.  Left: classes through `...` (va_arg is not parsed: [expr.call] `unsupported` for a class argument to an ellipsis); the C++ cases run on arm64 Linux only: `--host` (Apple arm64) fails in vcc's C++ front end on the system headers ([dcl.fct]), `--target x86_64` needs an x86-64 host, `win64` the llvm-mingw sysroot | [abi:calls] | `abi/itanium/calls.cpp`, `lower/` | - | ABI cases generated per shape |
 
 Pointers to members ([dcl.mptr] 454, [expr.mptr.oper] 19) are S5's, with
@@ -1164,11 +1164,11 @@ lines:
 - Gate: type claims 0 wrong on CXX/expr; `unsupported` 0 on SingleSource's
   template-free files.
 - Status (2026-11-18, step 1: placeholder types and decltype):
-  `dcl/dcl.type.decltype.cpp` gives decltype(E) its type
+  `declaration/decltype-specifier.cpp` gives decltype(E) its type
   ([dcl.type.decltype]/1: the entity's declared type for an
   unparenthesized id-expression or class member access, else T&&, T& or T
   by value category), the operand analysed as an unevaluated operand.
-  `dcl/dcl.spec.auto.cpp` has [dcl.spec.auto] and [dcl.type.auto.deduct]:
+  `declaration/placeholder-type-specifier.cpp` has [dcl.spec.auto] and [dcl.type.auto.deduct]:
   auto and decltype(auto) are `type_kind::placeholder` types that
   `decl_specifier_seq` accepts only where `placeholder_allowed` says (a
   simple-declaration's or function-definition's decl-specifier-seq, a
@@ -1224,7 +1224,7 @@ lines:
   the static_cast to an rvalue reference that already has it elsewhere).
   cxx-run 376/376 (94 programs).
 - Status (2026-11-18, step 2: conversion functions and explicit):
-  `class/class.conv.fct.cpp` declares conversion functions in their class
+  `class/conversion-function.cpp` declares conversion functions in their class
   ([class.conv.fct]/1, /2; declared or defined there, `explicit` too,
   constexpr, cv-qualified), all named `operator <conversion>` and told
   apart by type, mangled `cv<type>`; `conversion_function_for` is
@@ -1240,7 +1240,7 @@ lines:
   [over.match.ctor]/1: explicit constructors (the keyword) are no
   candidates in copy-initialization (`construct`'s `copy`) nor in
   [over.match.copy]'s converting constructors.  [class.bit] moved to
-  `class/class.bit.cpp` (class.pre.cpp under 2000 lines).  The type-claims
+  `class/bit-field.cpp` (class-specifier.cpp under 2000 lines).  The type-claims
   dump no longer stops at a member function's body (claims after it were
   lost).  Started from another session's uncommitted patch (declarations,
   explicit-specifier, mangling, the [dcl.init] uses).  Tests:
@@ -1263,10 +1263,10 @@ lines:
   refuted; `tree` problems 42 -> 34 (the remaining conditional of two class
   prvalues with destructors is old).  cxx-run 384/384 (96 programs).
 - Status (2026-11-18, step 3: explicit casts): one function,
-  `explicit_conversion` (`expr/expr.cast.cpp`), has the rules of
+  `explicit_conversion` (`expression/cast-expression.cpp`), has the rules of
   [expr.static.cast], [expr.const.cast] and [expr.reinterpret.cast];
   `cast_kinds` says which casts it may use: one for `static_cast`,
-  `const_cast` and `reinterpret_cast` (`named_cast`, `expr/expr.post.cpp`),
+  `const_cast` and `reinterpret_cast` (`named_cast`, `expression/postfix-expression.cpp`),
   all of them in [expr.cast]/4's order for the cast notation and
   [expr.type.conv]'s `T(x)`.  To a class it is [expr.static.cast]/4's
   direct-initialization (`class_direct_initialization`, shared with
@@ -1306,7 +1306,7 @@ lines:
   starting commit too).
   After review (2026-11-18): the pointer conversions between a class and
   its base on one non-virtual path are one routine, `pointer_along_path`
-  (`class/class.derived.cpp`), for both directions and for the cast
+  (`class/base-clause.cpp`), for both directions and for the cast
   notation (which skips the access checks, [expr.cast]/4); the steps come
   from `nonvirtual_path`, which `single_nonvirtual_path` shares.  One
   conversion per base at a nonzero offset, and `null_checked_offset` folds
@@ -1328,13 +1328,13 @@ lines:
   54051 -> 54065 as clang, 12 we reject and clang accepts, 2396 we accept
   and clang rejects, 0 refuted; cxx-run 420/420 (105 programs).
 - Status (2026-11-18, step 4: pointers to members): [dcl.mptr]'s
-  declarator (`pointer_operator`, `dcl/dcl.meaning.cpp`; an enumeration or
+  declarator (`pointer_operator`, `declaration/declarator-meaning.cpp`; an enumeration or
   namespace is ill-formed, so are reference and void members), `&C::m`
   ([expr.unary.op]/4, `member_pointer_constant`), `.*` and `->*`
-  (`expr/expr.mptr.oper.cpp`: node `member_pointer_access`, the object
+  (`expression/pointer-to-member-operator.cpp`: node `member_pointer_access`, the object
   converted to the member's class, a member function's result called in
   `call`), [conv.mem]'s null and base-to-derived conversions and
-  [expr.static.cast]/12's way back (`expr/conv.mem.cpp`;
+  [expr.static.cast]/12's way back (`expression/pointer-to-member-conversions.cpp`;
   `member_pointer_along_path` sums the offsets of `accessible_path`, the
   path walk `pointer_along_path` now shares), equality with composite types,
   [conv.bool], assignment, overload ranking (to bool, from null).  Lowered as
@@ -1378,14 +1378,14 @@ lines:
   programs); cxx-c-suites 0 wrong; quality redundant_tokens 58937,
   duplicate_runs_across_files 351, unchanged.
 - Status (2026-11-18, step 5: non-generic lambdas): a closure is a local
-  class (`expr.prim.lambda.cpp`) with its function call operator (const
+  class (`lambda-expression.cpp`) with its function call operator (const
   unless `mutable`, deduced or trailing return type), its captures
-  unnamed members (`expr.prim.lambda.capture.cpp`: by copy, by reference,
+  unnamed members (`lambda-capture.cpp`: by copy, by reference,
   `[=]`/`[&]`, `this`, `*this`, init-captures, an enclosing lambda's
   captures for a nested one, [expr.prim.lambda.capture]/14), its object an
   initializer list of them.  A captureless lambda has the conversion
   function to pointer to function and clang's static `__invoke`
-  (`expr.prim.lambda.closure.cpp`); `f(args)` on a closure takes the call
+  (`closure-type.cpp`); `f(args)` on a closure takes the call
   operator over the surrogate.  Mangling: `Ul<params>E[n]_` in inline and
   templated contexts (a lambda's call operator among them), clang's
   per-function `$_N` elsewhere, numbered in the order lowering makes the
@@ -1432,7 +1432,7 @@ lines:
   cxx-c-suites 2272 pass, 0 wrong, as before; quality redundant_tokens
   59684 -> 59295, duplicate_runs_across_files 360 -> 353.
 - Status (2026-11-18, step 6: range-based for): [stmt.ranged]/1's
-  rewrite, built in the semantic tree (`stmt.iter.cpp`,
+  rewrite, built in the semantic tree (`iteration-statement.cpp`,
   `range_based_for`): a block of the init-statement, the unnamed
   exposition variables `auto &&range`, `auto begin`, `auto end`
   (`exposition_variable`, deduced by step 1's `deduced_initialization`),
@@ -1471,7 +1471,7 @@ lines:
   now rejected as clang rejects them carry no claims); lowering 435 ->
   437 files.  cxx-run 468/468 (117 programs); quality unchanged.
 
-- Status (2026-11-18, step 7: structured bindings): `dcl.struct.bind.cpp`
+- Status (2026-11-18, step 7: structured bindings): `structured-binding.cpp`
   (`structured_binding_declaration`, called from `init_declarators` and
   `for_range_declaration`): the bindings' names bound before the
   initializer (/2: naming one there is ill-formed), e declared by
@@ -1534,7 +1534,7 @@ lines:
   before the rules, each body answering `unsupported` with its subclause,
   so that `sema.h` is settled once for the sessions working beside S3 and
   S4.  Three commits, on top of S3's commit of its shared surface (`sema.h`,
-  the call node of `expr/expr.post.cpp`, `over/`); each keeps cxx-run and
+  the call node of `expression/postfix-expression.cpp`, `overload/`); each keeps cxx-run and
   cxx-c-suites where they are, cxx-sema's "we reject, clang accepts" at 0,
   and moves `unsupported` only between labels.
   1. One entry point for constant expressions (S6a).  There is none today:
@@ -1551,16 +1551,16 @@ lines:
      `common/softfloat.h`), pointer or lvalue designator, array, class
      object, union, reference; the integer and double cases filled, the
      others `unsupported` [expr.const].  New files beside
-     `expr/expr.const.cpp`: the dispatch over every `semantic_kind`, a
+     `expression/constant-expression.cpp`: the dispatch over every `semantic_kind`, a
      store for locals and parameters, the step and depth limits of
      [implimits] (sema has none).  `constexpr` functions declarable (the
-     rejections at `dcl.pre.cpp` and `class.pre.cpp` go, the entity is
+     rejections at `simple-declaration.cpp` and `class-specifier.cpp` go, the entity is
      marked, a call asks the evaluator); `consteval` and `constinit` stubs.
      Lowering's `constant_initializer` takes the evaluator's value: a
      `call` marked constant would be lowered as a call in static data
      today.  A `constant-claims` dump kind, apart from `type-claims`' fifth
      field.
-  3. The template skeleton (S6b).  Analysis has no template code: `temp/`
+  3. The template skeleton (S6b).  Analysis has no template code: `template/`
      is the parser's, `template_entity`, `template_specialization` and
      `pack` are unused, and a template's name is bound to
      `entity_kind::none`, which makes every later use of it unknown.  The
@@ -1585,7 +1585,7 @@ lines:
 - Status (2026-11-18): commit 1 done, on S3's 1fad9cdb.
   `constant_expression` ([expr.const]/11), `integral_constant_expression`
   (/8, with C++03's narrower rule), `converted_constant_expression` and
-  `bool_constant_expression` (/10) in `expr/expr.const.cpp`; array bounds,
+  `bool_constant_expression` (/10) in `expression/constant-expression.cpp`; array bounds,
   case labels, enumerators, bit-field widths and GNU `aligned` ask them
   (a constexpr variable's initializer is an `initialized_value`, not an
   expression: commit 2 moves it).  A noexcept-specifier is reported as
@@ -1605,7 +1605,7 @@ lines:
   Commit 2 done: the evaluator's skeleton.  `constant_value` (integer to
   128 bits, floating, long double, pointer, lvalue, array, class object,
   union object) and [implimits]/2's two quantities in `sema.h`;
-  `expr/expr.const.evaluate.cpp`: `evaluate_constant`, a case for every
+  `expression/constant-evaluation.cpp`: `evaluate_constant`, a case for every
   `semantic_kind` (a node analysis folded gives its value, integer or
   double; the others unsupported [expr.const]), `evaluate_call` and
   `evaluate_statement` with the depth and full-expression counters.
@@ -1627,7 +1627,7 @@ lines:
   unchanged.
   Commit 3 done, after S3's operators (cb2daf6d): the template skeleton.
   `type_kind` has `template_parameter`, `dependent` and `placeholder` (no
-  analysis makes them yet); `temp/temp.decls.cpp` gives
+  analysis makes them yet); `template/declared-templates.cpp` gives
   template-declarations, explicit specializations and instantiations and
   deduction guides their functions, each answering by what it declares
   ([temp.class], [temp.fct], [temp.alias], [temp.concept], [temp.mem],
@@ -1668,7 +1668,7 @@ lines:
   accepts, 0 refuted (types 39708 -> 47474, constants 15419 -> 18879,
   lookup 11524 -> 12628 verified); [expr.const] is out of the first ten
   (static_assert's 11002); cxx-run 132/132; cxx-c-suites unchanged.
-  The evaluator (S6a), on 9cc43621: `expr/expr.const.evaluate.cpp` runs
+  The evaluator (S6a), on 9cc43621: `expression/constant-evaluation.cpp` runs
   non-member constexpr functions on values of the integer types to 64
   bits, bool, enumerations, float and double: parameters and locals in one
   frame per invocation, reads of variables usable in constant expressions,
@@ -1689,9 +1689,9 @@ lines:
   invokes a constexpr function gets a `constant` node in its place, which
   lowering emits as data ([basic.start.static]/2: `int g = square(7);` has
   no dynamic initializer).  The folds are the evaluator's own, written
-  apart from `arithmetic()` (expr.compound.cpp is S3's while it works
+  apart from `arithmetic()` (binary-expression.cpp is S3's while it works
   there); sharing them is for after S3.  Shared since, on S3's b9a0ee64:
-  `expr/folding.cpp` has `fold_binary` and `fold_unary` on values as
+  `expression/folding.cpp` has `fold_binary` and `fold_unary` on values as
   `expression_meaning` keeps them, which `arithmetic()`, `comparison()`,
   the unary operators and the evaluator (its operators, compound
   assignment and increment) all call; cxx-sema, cxx-run (156/156) and
@@ -1714,7 +1714,7 @@ lines:
   (P2448R2, `constexpr_without_constant_result`): a function that returns
   a value has a return statement (/6, flowing off the end is never
   constant).  Not yet: /1 on a declaration that declares no variable or
-  function (`constexpr int;`, in dcl.pre.cpp where S3 works); /3.5.3's
+  function (`constexpr int;`, in simple-declaration.cpp where S3 works); /3.5.3's
   variable of non-literal type (no literal-type test yet); and clang's
   "never produces a constant expression" (/6 for any argument values),
   which is behind its errors on static and thread_local variables, goto,
@@ -1763,7 +1763,7 @@ lines:
   cxx-sema: declarations as clang 29407 -> 29470, 0 we reject and clang
   accepts, we accept and clang rejects 500 -> 477, 0 refuted; cxx-run
   176/176; cxx-c-suites unchanged.
-  Literal types ([basic.types]/10, `basic/basic.types.cpp`):
+  Literal types ([basic.types]/10, `basic/literal-types.cpp`):
   `literal_type` answers unknown where analysis cannot tell (an implicit
   default constructor or a defaulted destructor, whether constexpr; an
   incomplete class), and only a sure non-literal type is an error: until
@@ -1804,7 +1804,7 @@ lines:
   whose type is its function type over `type_kind::template_parameter`
   types (its declarator analysed with each parameter's name a typedef of
   one), recorded in `function_templates`; its name stays the one
-  hold_names binds.  A call by that name (`template_call`, expr.post.cpp)
+  hold_names binds.  A call by that name (`template_call`, postfix-expression.cpp)
   analyses the arguments, deduces ([temp.deduct.call]/2-3, forwarding
   references; `deduce_type` for T, cv T, pointers, references, arrays and
   function types) and instantiates (sema/instantiation.cpp): the
@@ -1837,7 +1837,7 @@ lines:
   (`parser::unparsed_declaration`, SemaTemplate/explicit-instantiation.cpp),
   which is older than this.
   Then explicit template arguments and qualified calls: `template_callee`
-  (expr.post.cpp) takes `f`, `f<A...>`, `N::f` and `N::f<A...>` (type
+  (postfix-expression.cpp) takes `f`, `f<A...>`, `N::f` and `N::f<A...>` (type
   arguments, [temp.arg.type]/1; a namespace's template found by
   [namespace.qual], no argument-dependent lookup); deduction starts from
   the arguments given and leaves out the parameters they determine, whose
@@ -1853,7 +1853,7 @@ lines:
   accept and clang rejects 943; cxx-run 192/192; cxx-c-suites 2214 pass,
   0 wrong.
   Then class templates of namespace scope with type parameters
-  (`class_template_definition`, temp.decls.cpp): a template-id names a
+  (`class_template_definition`, declared-templates.cpp): a template-id names a
   specialization (`template_type`, from a decl-specifier or after a
   nested-name-specifier), instantiated there (`instantiate_class`,
   instantiation.cpp) by analysing the class-specifier again with the
@@ -1876,7 +1876,7 @@ lines:
   clang rejects 1862; cxx-run 196/196; cxx-c-suites unchanged.
   Then default template-arguments and non-type parameters of integral
   type, for class and function templates (`declare_template_parameters`,
-  `template_argument_for`, `default_template_arguments`, temp.decls.cpp).
+  `template_argument_for`, `default_template_arguments`, declared-templates.cpp).
   A non-type argument is a converted constant expression
   ([temp.arg.nontype]/2); in an instantiation the parameter's name is a
   constant, as an enumerator (`bind_template_argument`); in the template's
@@ -1898,7 +1898,7 @@ lines:
   unchanged.
   Then partial and explicit specializations of class templates
   (`class_specialization_definition`, `matching_specialization`,
-  temp.decls.cpp): each a record of its own (`function_template::primary`)
+  declared-templates.cpp): each a record of its own (`function_template::primary`)
   with its template-id's arguments in terms of its parameters; an
   instantiation deduces them from its arguments exactly
   ([temp.class.spec.match]/2), an explicit specialization of the arguments
@@ -1914,7 +1914,7 @@ lines:
   Then template-ids in expressions and after `::` ([temp.names]): a
   simple-template-id naming a class template in a nested-name-specifier
   names the specialization, whose members are looked up there
-  (`nested_name_specifier`, basic.lookup.cpp: `traits<int>::kind()`,
+  (`nested_name_specifier`, name-lookup.cpp: `traits<int>::kind()`,
   `N::q<int>::g()`); `box<int>(...)` and `box<int>{...}` are explicit
   type conversions to the specialization ([expr.type.conv]/1,
   `postfix`); a static data member or static member function reached
@@ -1962,7 +1962,7 @@ lines:
   6401 -> under 2196; cxx-run 212/212 (template-members-out-of-class.cpp);
   cxx-c-suites unchanged.
   Then dependent names ([temp.res], [temp.dep]).  A typename-specifier
-  (`typename_type`, temp.res.cpp) and C++20's implicit typename in a
+  (`typename_type`, typename-specifier.cpp) and C++20's implicit typename in a
   simple-type-specifier (`qualified_type_name`) with a dependent
   nested-name-specifier (a template-parameter, a dependent specialization,
   or such a name before it: `T::a::b`) are a dependent type of its own
@@ -1995,7 +1995,7 @@ lines:
   tests pr109318 and pr79737-1 not yet, [cpp.pragma]).
   Then explicit instantiations ([temp.explicit]) and explicit
   specializations of function templates ([temp.expl.spec]).
-  `named_specialization` (temp.decls.cpp) finds the function template's
+  `named_specialization` (declared-templates.cpp) finds the function template's
   specialization a declaration names: its declarator-id the template's name
   or a simple-template-id of it (`declarator_template_id` lets
   declarator() take one), the arguments not given deduced from the declared
@@ -2026,7 +2026,7 @@ lines:
   cxx-run 220/220 (template-explicit.cpp); cxx-c-suites unchanged (the
   #pragma pack tests not yet, [cpp.pragma]).
   Then variadic function templates ([temp.variadic], [expr.prim.fold];
-  temp/temp.variadic.cpp).  A function template's last template-parameter
+  template/variadic-template.cpp).  A function template's last template-parameter
   may be a type parameter pack (`class... Ts`); its function parameter
   pack (`Ts... args`, `const Ts &...rest`, the last parameter) has type
   `type_kind::pack_expansion` of the pattern in the template's own
@@ -2037,7 +2037,7 @@ lines:
   same key), an empty one when nothing deduces it ([temp.arg.explicit]/4).
   An instantiation binds the pack's name to an entity of kind pack of its
   elements' typedef-names; the declarator's parameter pack becomes one
-  parameter per element (`parameter_pack_expansion`, dcl.fct.cpp), whose
+  parameter per element (`parameter_pack_expansion`, parameter-declaration-clause.cpp), whose
   name the body finds as a pack of their variables.  A pattern is analysed
   once per element (`expanding`, `expansion_element`: declared_in gives the
   element for a pack's name, a pack named outside a pattern is unknown).
@@ -2088,7 +2088,7 @@ lines:
   definition, only the chosen's), then `best_viable_function` with the
   tie-breakers: a non-template beats a specialization, and of two
   specializations the more specialized template's
-  (temp/temp.func.order.cpp: per call argument, the parameter's type or
+  (template/partial-ordering.cpp: per call argument, the parameter's type or
   its pack's pattern; references and top-level cv removed, /9's
   lvalue/cv rule, [temp.deduct.type]/10's pack rule, /11's trailing pack).
   Head/tail recursive variadic templates work.  Two matching class
@@ -2174,7 +2174,7 @@ lines:
   Then template template-parameters, unnamed template-parameters and
   non-type parameters of other types ([temp.param]/1, /6, /7,
   [temp.arg.template], [temp.arg.nontype]).  A template-parameter's form
-  is read once (`template_parameter_form`, temp.variadic.cpp: key or
+  is read once (`template_parameter_form`, variadic-template.cpp: key or
   template-head, ellipsis, identifier or declarator, default), so an
   unnamed one (`template<class, int = 3>`) is a parameter like the
   others whose name is not bound.  `template<class> class C` is an

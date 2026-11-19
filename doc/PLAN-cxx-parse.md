@@ -57,22 +57,24 @@ and instantiation are later plans.
 ```
 src/frontend/cplusplus/
   parse/                 not a clause: what every clause's parser uses
-    token_stream.cpp     phases 5-7 over the preprocessor, lookahead, marks
-    syntax_tree.cpp      nodes, their owner, the dump
+    token-stream.cpp     phases 5-7 over the preprocessor, lookahead, marks
+    syntax-tree.cpp      nodes, their owner, the dump
     parser.cpp           the parser object, expect/skip, tentative parsing
-    declared_names.cpp   the name kinds the grammar needs (below)
-  basic/basic.link.cpp   translation-unit
-  dcl/dcl.pre.cpp, dcl.spec.cpp, dcl.type.simple.cpp, dcl.decl.cpp, ...
-  expr/expr.prim.cpp, expr.post.cpp, ...
-  stmt/, class/, over/, except/, temp/, module/
+    declared-names.cpp   the name kinds the grammar needs (below)
+  basic/translation-unit.cpp   translation-unit
+  declaration/simple-declaration.cpp, decl-specifier.cpp, simple-type-specifier.cpp, declarator.cpp, ...
+  expression/primary-expression.cpp, postfix-expression.cpp, ...
+  statement/, class/, overload/, exception/, template/, module/
 src/bin/cxxparse/cxxparse.cpp
 src/test/cxx/parse/spec/, gram/   (the old front end's ok-*/bad-*.cpp
                         cases stay beside them: its harness reads parse/*.cpp)
 ```
 
-One file per subclause that has grammar, as for `lex/` and `cpp/`; a
-subclause with rules but no productions (`[dcl.ambig.res]`, `[stmt.ambig]`,
-`[temp.res]`) gets a file for its disambiguation.
+One file per subclause that has grammar, as for `lexer/` and `preprocessor/`,
+named after the syntax node it parses (`[expr.new]` is
+`expression/new-expression.cpp`; doc/PLAN-cxx-spec.md, Decisions); a
+subclause with rules but no productions (`[dcl.ambig.res]`, `[stmt.ambig]`)
+gets a file for its disambiguation (`ambiguity-resolution.cpp`).
 
 ### Implementation language
 
@@ -415,12 +417,12 @@ The first grammar, about 55 nonterminals.
   `cxx98-enum.cpp`, `cxx20-using-enum.cpp`, `cxx-using-declaration.cpp`,
   `cxx1z-using-declaration.cpp`, `CXX/dcl.dcl/dcl.attr` (17),
   `CXX/dcl.dcl/dcl.enum`.
-- Status (2026-11-16, done): `dcl/dcl.attr.grammar.cpp` (attribute-specifier-seq
+- Status (2026-11-16, done): `declaration/attribute-specifier.cpp` (attribute-specifier-seq
   in every place P1's grammar has one, balanced-token-seq, alignas kept as
   tokens, the standard attributes' argument forms, [dcl.attr.grammar]/2, /4's
   ellipsis and keywords as identifiers, /7's `[[`, likely with unlikely),
-  `dcl.enum.cpp` (enum-specifier, opaque-enum-declaration, enumerators,
-  using-enum-declaration), `namespace.udecl.cpp`, `dcl.asm.cpp`,
+  `enum-specifier.cpp` (enum-specifier, opaque-enum-declaration, enumerators,
+  using-enum-declaration), `using-declaration.cpp`, `asm-declaration.cpp`,
   attribute-declaration, and [dcl.type.elab]/1's sole-constituent rules.
   V4a over the clang corpus (1811 runs): 9556 declarations accepted or rejected
   as clang does (P1: 9083), none either way against it; 10212 kept as tokens
@@ -456,14 +458,14 @@ The first grammar, about 55 nonterminals.
   `cxx-ambig-decl-expr.cpp`, `cxx2b-subscript.cpp`.
 - Status (2026-11-16, grammar and both halves of V4b done; V5 is still
   open): one file per subclause in
-  `expr/`: `expr.prim.cpp`, `expr.prim.id.cpp` (the id-expression of an
-  expression, decltype-specifier `::`), `expr.post.cpp`, `expr.unary.cpp`
-  (with sizeof, alignof, noexcept), `expr.new.cpp`, `expr.delete.cpp`,
-  `expr.cast.cpp`, `expr.compound.cpp` (the twelve binary productions of
+  `expression/`: `primary-expression.cpp`, `id-expression.cpp` (the id-expression of an
+  expression, decltype-specifier `::`), `postfix-expression.cpp`, `unary-expression.cpp`
+  (with sizeof, alignof, noexcept), `new-expression.cpp`, `delete-expression.cpp`,
+  `cast-expression.cpp`, `binary-expression.cpp` (the twelve binary productions of
   [expr.mptr.oper] to [expr.log.or] as one table, [expr.comma],
-  [expr.const]), `expr.ass.cpp` (with [expr.cond]); `dcl/dcl.init.cpp`
+  [expr.const]), `assignment-expression.cpp` (with [expr.cond]); `declaration/initializer.cpp`
   (initializer, braced-init-list, initializer-list, designated
-  initializers) and `dcl/dcl.ambig.res.cpp`.  Parsed where P1-P2 kept
+  initializers) and `declaration/ambiguity-resolution.cpp`.  Parsed where P1-P2 kept
   tokens: array bounds, static_assert, enumerator values, alignas,
   decltype, default arguments, noexcept-specifiers and every initializer.
   What is left as tokens is a function body (P4), a class body (P5) and
@@ -580,11 +582,11 @@ The first grammar, about 55 nonterminals.
   `cxx2a-init-statement.cpp`, `cxx2b-label.cpp`,
   `cxx11-stmt-attributes.cpp`, `cxx-default-delete.cpp`.
 - Status (2026-11-16, done; V5 is still open): one file per subclause in
-  `stmt/`: `stmt.pre.cpp` (statement, condition, init-statement, the
-  recovery point), `stmt.label.cpp`, `stmt.expr.cpp`, `stmt.block.cpp`,
-  `stmt.select.cpp`, `stmt.iter.cpp` (with range-based for), `stmt.jump.cpp`,
-  `stmt.dcl.cpp` (block-declaration), `stmt.ambig.cpp` and `stmt.ambig.h`;
-  `dcl/dcl.fct.def.general.cpp` parses a function-body.  `= default` and
+  `statement/`: `statement.cpp` (statement, condition, init-statement, the
+  recovery point), `labeled-statement.cpp`, `expression-statement.cpp`, `compound-statement.cpp`,
+  `selection-statement.cpp`, `iteration-statement.cpp` (with range-based for), `jump-statement.cpp`,
+  `declaration-statement.cpp` (block-declaration), `ambiguity-resolution.cpp` and `ambiguity-resolution.h`;
+  `declaration/function-definition.cpp` parses a function-body.  `= default` and
   `= delete` were P2's.  A function body re-enters its parameters' scope
   ([basic.scope.param]/1); a compound statement, a selection or iteration
   statement and each of their substatements are block scopes.
@@ -678,7 +680,7 @@ The first grammar, about 55 nonterminals.
     class-or-decltype marks the declaration as naming something unknown.
   - The keyword table: `private` lexed as an identifier, because
     `gen-cplusplus-data.py` let an alias with only KEYWORD_OTHER override
-    the keyword's own entry; fixed, `lex.key.inc` regenerated.
+    the keyword's own entry; fixed, `keyword.inc` regenerated.
   - Harness fixes: `-verify` was taken as an option with a value, so the
     option after it was dropped (`-fms-extensions` among others): every
     harness that reads RUN lines through `cxx-pp.py` now runs those
@@ -709,13 +711,13 @@ The first grammar, about 55 nonterminals.
   `cxx1z-constexpr-lambdas.cpp`, `cxx-throw.cpp`, `cxx20-coroutines.cpp`,
   `CXX/expr/expr.prim/expr.prim.lambda`, `CXX/except`.
 - Status: done (2026-11-16).
-  - Files: `expr/expr.prim.lambda.cpp` (lambda-expression,
+  - Files: `expression/lambda-expression.cpp` (lambda-expression,
     lambda-introducer, lambda-capture, capture, init-capture,
-    lambda-declarator), `expr/expr.throw.cpp`, `expr/expr.await.cpp`,
-    `expr/expr.yield.cpp`, `except/except.pre.cpp` (try-block, handler-seq,
-    handler, exception-declaration), `stmt/stmt.return.coroutine.cpp`; a
-    function-try-block in `dcl.fct.def.general.cpp`, C++14's
-    dynamic-exception-specification in `except/except.spec.cpp`.
+    lambda-declarator), `expression/throw-expression.cpp`, `expression/await-expression.cpp`,
+    `expression/yield-expression.cpp`, `exception/try-block.cpp` (try-block, handler-seq,
+    handler, exception-declaration), `statement/coroutine-return-statement.cpp`; a
+    function-try-block in `function-definition.cpp`, C++14's
+    dynamic-exception-specification in `exception/noexcept-specifier.cpp`.
   - Scopes: a lambda's captures are declared in a region of their own, its
     parameters in a function parameter scope the compound-statement
     re-enters; a handler's exception-declaration is in the handler's block;
@@ -757,13 +759,13 @@ The first grammar, about 55 nonterminals.
 - Tests: `CXX/temp` (210 files), the 25 `Parser/cxx*template*`,
   `*concept*`, `*requires*`, `*fold*` files, `CXX/drs` (83 files) whole.
 - Status: done (2026-11-16), except the known differences below.
-  - Files: `temp/temp.pre.cpp` (template-declaration, template-head,
+  - Files: `template/template-declaration.cpp` (template-declaration, template-head,
     requires-clause, constraint-logical-or/and, explicit-specialization,
-    explicit-instantiation), `temp/temp.param.cpp`, `temp/temp.names.cpp`
+    explicit-instantiation), `template/template-parameter.cpp`, `template/template-id.cpp`
     (template-ids, the `>` rule with split `>>`/`>=`/`>>=` tokens recorded in
-    `syntax_tree::split_tokens`), `temp/temp.res.cpp` (typename-specifier),
-    `temp/temp.concept.cpp` (concept-definition, deduction-guide),
-    `expr/expr.prim.fold.cpp` (fold-expression, requires-expression and its
+    `syntax_tree::split_tokens`), `template/typename-specifier.cpp` (typename-specifier),
+    `template/concept-definition.cpp` (concept-definition, deduction-guide),
+    `expression/fold-expression.cpp` (fold-expression, requires-expression and its
     requirements).
   - `declared_names`: template-parameter scopes, searched before the
     enclosing namespace for an out-of-class member ([temp.local]/8); template
@@ -810,12 +812,12 @@ The first grammar, about 55 nonterminals.
 - [module] (8 nonterminals), [cpp.module]'s tokens from the preprocessor.
 - Tests: `CXX/module`, `Parser/cxx-modules-*.cppm`.
 - Status: done (2026-11-16).
-  - `module/module.unit.cpp`: module-declaration, module-name,
+  - `module/module-unit.cpp`: module-declaration, module-name,
     module-partition, module-name-qualifier, module-import-declaration (a
     module-name, a partition or a header-name), export-declaration (one
     declaration, braces, or `export import`), global-module-fragment and
     private-module-fragment; translation-unit's second alternative in
-    `basic/basic.link.cpp`.  export-keyword, import-keyword and
+    `basic/translation-unit.cpp`.  export-keyword, import-keyword and
     module-keyword are read by their phase-4 preprocessing kind
     (`at_phase4_keyword`); `export` elsewhere is the keyword.
   - Checked: no export-declaration inside another or in a class
@@ -859,8 +861,8 @@ The first grammar, about 55 nonterminals.
     `__attribute__`, `__restrict__`, `__extension__`; clang's type traits).
     `ext/gnu/attribute.cpp` (where `[[ ]]` can be, among decl-specifiers,
     after a declarator and a namespace name; clang's placement rules),
-    `ext/gnu/asm_label.cpp`, `ext/gnu/extension_keyword.cpp`,
-    `ext/clang/type_traits.cpp` (expression traits, type transformations,
+    `ext/gnu/asm-label.cpp`, `ext/gnu/extension-keyword.cpp`,
+    `ext/clang/type-traits.cpp` (expression traits, type transformations,
     and a trait's keyword as a name when no `(` follows: libstdc++'s
     `__is_signed`).  Declarations with an extension get no claims.
   - The extensions' grammar (2026-11-17): `ext/grammar.inc`, 41

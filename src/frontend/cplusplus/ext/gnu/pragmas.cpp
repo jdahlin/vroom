@@ -7,7 +7,7 @@
  *     #pragma GCC poison x y        x and y may no longer be used
  *     #pragma GCC system_header     the rest of the file is a system header
  *     #pragma GCC dependency "f"    the file f must exist
- *     #pragma GCC diagnostic ...    pragma_diagnostic.cpp
+ *     #pragma GCC diagnostic ...    pragma-diagnostic.cpp
  *     #pragma GCC warning "text"    a warning, an error
  *     #pragma GCC error "text"
  *   [ext:gnu_push_pop_macro] (GCC manual 6.62.13)

@@ -212,7 +212,7 @@ passes none of them.
 | 2 (1) | `bugprone-too-small-loop-variable` |
 
 **Two of these are defects**, both fixed on 2026-11-18.
-`cpp/cpp.replace.cpp:373` and `:448` loop with a `uint16_t` counter up to a
+`preprocessor/macro-replacement.cpp:373` and `:448` loop with a `uint16_t` counter up to a
 `size_t` count, and a parameter's index was kept in 16 bits: a macro with
 more than 32,767 parameters left the later ones unreplaced, and one with
 65,536 or more ended `vpp -x c++` with SIGBUS, where clang handles 140,000

@@ -16,8 +16,8 @@ the old names.
 ## Conventions (to review)
 
 - **Layout mirrors the standard.**  `src/frontend/cplusplus/<clause>/<stable
-  name>.cpp` is one subclause: `lex/lex.icon.cpp` is `[lex.icon]`,
-  `intro/intro.compliance.cpp` is `[intro.compliance]`.  A subclause too small
+  name>.cpp` is one subclause: `lexer/integer-literal.cpp` is `[lex.icon]`,
+  `intro/diagnostics.cpp` is `[intro.compliance]`.  A subclause too small
   for a file goes into its parent's.  Shared declarations: the public
   `src/include/frontend/cplusplus/cplusplus.h`, the internal
   `cplusplus-internal.h`.
@@ -39,8 +39,8 @@ the old names.
   `ext/extensions.inc` (`EXTENSION(name, vendor, reference)`, vendor `gnu`,
   `clang`, `microsoft` or `vcc`, and where that implementation documents
   it); code asks `behavior.has(extension::name)`, so each can be turned off.
-  The code is in `ext/VENDOR/` where it can be (`ext/gnu/line_marker.cpp`,
-  `ext/clang/feature_checks.cpp`, ...), the standard's file keeping one
+  The code is in `ext/VENDOR/` where it can be (`ext/gnu/line-marker.cpp`,
+  `ext/clang/feature-checks.cpp`, ...), the standard's file keeping one
   call; a call site, or extension code that cannot move, has the tag
   `[ext.VENDOR]` in its comment.  A choice the standard leaves open
   (implementation-defined or undefined behavior) made as clang makes it is
@@ -109,11 +109,11 @@ Now (2026-11-16): 121 runs of 62 tests, raw, tokens, values and diags all
   3000 random floating-point literals and all 43490 Unicode names and
   aliases agree with clang.
 - Our own tests: `src/test/cxx/lex/spec/`, one file per subclause, built from
-  the standard's examples (`lex.string.cpp`).
+  the standard's examples (`string-literal.cpp`).
 - **L2** citation checker (`bench/cxx-spec-refs.py`: every `[label]/N`
   exists, every quoted production matches the spec's), in CI.
 - **L3** phase 4, the preprocessor, written against `[cpp]` like the lexer
-  (`src/frontend/cplusplus/cpp/`, one file per subclause), checked against
+  (`src/frontend/cplusplus/preprocessor/`, one file per subclause), checked against
   clang the same way (decided 2026-11-16, replacing the earlier plan of an
   adapter from vcc's C preprocessor).  The context the lexer needs
   (header-names after `#include`/`import`, the end of a directive's line)
@@ -126,7 +126,7 @@ Now (2026-11-16): 121 runs of 62 tests, raw, tokens, values and diags all
   placemarkers, rescanning as a stack of token contexts (`cpp.rescan`),
   `#line` and GNU line markers, `#error`/`#warning`, the phase-4 pragmas,
   `_Pragma`, the module and import directives, and clang's predefined macros
-  per edition/GNU/MS/char8_t mode (`cpp/cpp.predefined.inc`, from clang -dM
+  per edition/GNU/MS/char8_t mode (`preprocessor/predefined-macros.inc`, from clang -dM
   once).  Locations: `source_files` puts every file and every piece of
   scratch text in one space, so a token knows its file and the invocation it
   came from (clang's expansion location).  `cxxlex -dump-tokens` now runs
@@ -157,7 +157,15 @@ Now (2026-11-16): 121 runs of 62 tests, raw, tokens, values and diags all
 
 ## Decisions (review of PR #307, 2026-11-16)
 
-1. Files keep the dotted stable name (`lex/lex.icon.cpp`).
+1. Files keep the dotted stable name (`lex/lex.icon.cpp`).  Superseded
+   2026-11-19: a file is named after the syntax node it handles, as the
+   grammar spells the nonterminal (`lexer/integer-literal.cpp`,
+   `expression/new-expression.cpp`), or after what it does when it has no
+   node (`overload/overload-resolution.cpp`); directories are named in full
+   (`declaration/`, `expression/`, `statement/`, `template/`, `overload/`,
+   `exception/`, `lexer/`, `preprocessor/`).  The first line of each file
+   names the subclauses it implements (`[expr.new]`), so a citation still
+   finds the file.
 2. Comments quote the sentence each check enforces, not only cite it.
 3. n4861 (C++20) stays the base text; later papers are cited where clang
    follows them.

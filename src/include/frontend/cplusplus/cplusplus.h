@@ -4,8 +4,8 @@
  * Every type, function and variable here is named after the term the
  * standard uses for it (docs/cxx-spec, n4861), and the code is organised as
  * the standard is: one directory per clause, one file per subclause
- * (src/frontend/cplusplus/lex/lex.icon.cpp is [lex.icon]).  A comment that
- * cites "[label]/N" refers to paragraph N of docs/cxx-spec/.../label.md;
+ * (src/frontend/cplusplus/lexer/integer-literal.cpp is [lex.icon]).  A comment
+ * that cites "[label]/N" refers to paragraph N of docs/cxx-spec/.../label.md;
  * "[label]/N.M" is item M of the list in that paragraph.  Grammar quoted in a
  * comment is the spec's, with "_opt" for its subscript opt.
  * (A checker of every citation and quoted production is planned:
@@ -250,7 +250,7 @@ class diagnostic_consumer
     /* while positive, issue() discards: the lexer looks ahead without consuming */
     unsigned suppressed = 0;
 
-    /* #pragma clang diagnostic ([ext.gnu], ext/gnu/pragma_diagnostic.cpp):
+    /* #pragma clang diagnostic ([ext.gnu], ext/gnu/pragma-diagnostic.cpp):
        the severity of a -W group from here on; false if there is no such
        group */
     bool map_group(const char *group, diagnostic_severity severity);
@@ -323,7 +323,7 @@ enum class encoding_prefix : uint8_t { none, u8, u, U, L };
    the table records */
 enum class preprocessing_op_or_punc : uint8_t {
 #define PREPROCESSING_OP_OR_PUNC(name, spelling, primary, clang_name) name,
-#include "../../../frontend/cplusplus/lex/lex.operators.inc"
+#include "../../../frontend/cplusplus/lexer/operator-or-punctuator.inc"
 #undef PREPROCESSING_OP_OR_PUNC
     count
 };
