@@ -55,8 +55,7 @@ void semantic_analysis::collect_labels(SyntaxElement s)
 {
     if (s.is_token())
         return;
-    if (s.is(syntax_kind::lambda_expression) ||
-        s.is(syntax_kind::class_specifier))
+    if (s.is(syntax_kind::lambda_expression, syntax_kind::class_specifier))
         return;
     if (s.is(syntax_kind::labeled_statement) && s.size() && s[0].is_token() &&
         tokens[s[0].token()].kind == token_kind::identifier) {

@@ -527,9 +527,9 @@ analysis_result semantic_analysis::for_range_declaration(
     SyntaxRef at = node_of(d);
     /* the second form: a structured binding ([dcl.struct.bind]) */
     bool binding = at.size() > 2 &&
-                   (at[1].is(preprocessing_op_or_punc::LEFT_BRACKET) ||
-                    at[1].is(preprocessing_op_or_punc::AMPERSAND) ||
-                    at[1].is(preprocessing_op_or_punc::AMPERSAND_AMPERSAND));
+                   (at[1].is(preprocessing_op_or_punc::LEFT_BRACKET,
+                             preprocessing_op_or_punc::AMPERSAND,
+                             preprocessing_op_or_punc::AMPERSAND_AMPERSAND));
     if ((at.size() != 2 && !binding) ||
         !at[0].is(syntax_kind::decl_specifier_seq) ||
         at.first_token() != first_token(at[0]))
@@ -557,8 +557,7 @@ analysis_result semantic_analysis::for_range_declaration(
            enumeration." */
         auto seq = at[0];
         for (SyntaxElement c : seq.elements()) {
-            if (c.is(syntax_kind::class_specifier) ||
-                c.is(syntax_kind::enum_specifier))
+            if (c.is(syntax_kind::class_specifier, syntax_kind::enum_specifier))
                 return ill_formed(at,
                                   "the decl-specifier-seq shall not define a "
                                   "class or enumeration",

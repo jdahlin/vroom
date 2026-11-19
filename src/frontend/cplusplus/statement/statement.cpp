@@ -549,8 +549,8 @@ analysis_result semantic_analysis::attributed_statement(Statement n,
         return not_supported(n, "dcl.attr");
     for (uint32_t i = 0; i + 1 < n.size(); i++) {
         SyntaxElement c = n[i];
-        if (!c.is(syntax_kind::attribute_specifier) &&
-            !c.is(syntax_kind::attribute_specifier_seq))
+        if (!c.is(syntax_kind::attribute_specifier,
+                  syntax_kind::attribute_specifier_seq))
             return not_supported(n, "dcl.attr");
         for (token_index t = c.first_token(); t < c.end_token(); t++) {
             if (tokens[t].kind == token_kind::operator_or_punctuator)

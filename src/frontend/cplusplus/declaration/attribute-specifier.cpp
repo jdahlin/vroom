@@ -601,9 +601,9 @@ bool semantic_analysis::attributes_as_gnu(SyntaxElement n,
             }
             continue;
         }
-        if (c.is(syntax_kind::attribute_specifier_seq) ||
-            c.is(syntax_kind::attribute_specifier) ||
-            c.is(syntax_kind::attribute_list)) {
+        if (c.is(syntax_kind::attribute_specifier_seq,
+                 syntax_kind::attribute_specifier,
+                 syntax_kind::attribute_list)) {
             for (auto child : c.elements())
                 work.append(child);
             continue;
@@ -651,8 +651,8 @@ bool semantic_analysis::gnu_attributes_without_effect(SyntaxElement n) const
         work.resize(work.size() - 1);
         SyntaxElement name_token = c;
         if (!c.is_token()) {
-            if (c.is(syntax_kind::gnu_attribute_specifier) ||
-                c.is(syntax_kind::gnu_attribute_list)) {
+            if (c.is(syntax_kind::gnu_attribute_specifier,
+                     syntax_kind::gnu_attribute_list)) {
                 for (auto child : c.elements())
                     work.append(child);
                 continue;

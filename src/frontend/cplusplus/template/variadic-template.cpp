@@ -110,8 +110,8 @@ bool semantic_analysis::template_head_list(
     for (SyntaxElement c : head.elements()) {
         if (c.is_token())
             continue;
-        if (c.is(syntax_kind::type_parameter) ||
-            c.is(syntax_kind::parameter_declaration)) {
+        if (c.is(syntax_kind::type_parameter,
+                 syntax_kind::parameter_declaration)) {
             parameters.append(c.index());
             continue;
         }
@@ -123,8 +123,8 @@ bool semantic_analysis::template_head_list(
         for (SyntaxElement p : c.elements()) {
             if (p.is_token())
                 continue;
-            if (!p.is(syntax_kind::type_parameter) &&
-                !p.is(syntax_kind::parameter_declaration))
+            if (!p.is(syntax_kind::type_parameter,
+                      syntax_kind::parameter_declaration))
                 return false;
             parameters.append(p.index());
         }

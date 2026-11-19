@@ -377,8 +377,8 @@ semantic_analysis::function_template_definition(SyntaxRef n,
          !definition[lead + 2 + trailing].is(syntax_kind::function_body)) ||
         (!defines &&
          (!definition[lead + 2].is(preprocessing_op_or_punc::SEMICOLON) ||
-          (!definition[lead + 1].is(syntax_kind::noptr_declarator) &&
-           !definition[lead + 1].is(syntax_kind::ptr_declarator)))))
+          (!definition[lead + 1].is(syntax_kind::noptr_declarator,
+                                    syntax_kind::ptr_declarator)))))
         return not_supported(n, "temp.fct");
     uint32_t index = 0, first = 0;
     entity_index scope = 0;
@@ -1118,9 +1118,9 @@ semantic_analysis::variable_template_definition(SyntaxRef n,
         type_table[type.unqualified()].kind == type_kind::none)
         return not_supported(n, "temp.pre");
     for (SyntaxElement k : declaration[skip].elements()) {
-        if (k.is(syntax_kind::class_specifier) ||
-            k.is(syntax_kind::elaborated_type_specifier) ||
-            k.is(syntax_kind::enum_specifier))
+        if (k.is(syntax_kind::class_specifier,
+                 syntax_kind::elaborated_type_specifier,
+                 syntax_kind::enum_specifier))
             return not_supported(n, "temp.pre");
     }
     uint32_t name = tokens.identifier(m.id);

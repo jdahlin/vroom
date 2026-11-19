@@ -835,9 +835,9 @@ semantic_analysis::list_clauses(SyntaxRef list,
                                 owned_array<SyntaxElement> &clauses)
 {
     for (auto c : list.elements()) {
-        if (c.is(preprocessing_op_or_punc::LEFT_BRACE) ||
-            c.is(preprocessing_op_or_punc::RIGHT_BRACE) ||
-            c.is(preprocessing_op_or_punc::COMMA))
+        if (c.is(preprocessing_op_or_punc::LEFT_BRACE,
+                 preprocessing_op_or_punc::RIGHT_BRACE,
+                 preprocessing_op_or_punc::COMMA))
             continue;
         if (c.is(syntax_kind::initializer_list)) {
             for (auto item : c.elements()) {

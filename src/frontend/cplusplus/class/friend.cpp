@@ -203,8 +203,8 @@ semantic_analysis::friend_function(entity_index c, SyntaxRef n,
             return not_supported(n, "dcl.fct.def.general");
     } else if (!n.is(syntax_kind::member_declaration) || count != 3 ||
                !n[leading + 2].is(preprocessing_op_or_punc::SEMICOLON) ||
-               n[leading + 1].is(syntax_kind::member_declarator) ||
-               n[leading + 1].is(syntax_kind::member_declarator_list)) {
+               n[leading + 1].is(syntax_kind::member_declarator,
+                                 syntax_kind::member_declarator_list)) {
         return not_supported(n, "class.friend");
     }
     specified s;

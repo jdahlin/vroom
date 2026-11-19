@@ -303,13 +303,13 @@ bool semantic_analysis::initializer_form(SyntaxElement init,
         !init[1].is(syntax_kind::braced_init_list)) {
         clause = init[1];
     } else if (init.is(syntax_kind::initializer) && init.size() == 3 &&
-               !init[1].is(syntax_kind::initializer_list) &&
-               !init[1].is(syntax_kind::braced_init_list)) {
+               !init[1].is(syntax_kind::initializer_list,
+                           syntax_kind::braced_init_list)) {
         clause = init[1];
         direct = true;
     } else if (init.is(syntax_kind::braced_init_list) && init.size() == 3 &&
-               !init[1].is(syntax_kind::initializer_list) &&
-               !init[1].is(syntax_kind::braced_init_list) &&
+               !init[1].is(syntax_kind::initializer_list,
+                           syntax_kind::braced_init_list) &&
                !init[1].is(preprocessing_op_or_punc::RIGHT_BRACE)) {
         clause = init[1];
         direct = true;

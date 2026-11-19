@@ -722,10 +722,10 @@ analysis_result semantic_analysis::alias_type(SyntaxRef n, qualified_type &type)
     /* (a simple-template-id counts as declares_class too: the
        class-specifiers and elaborated-type-specifiers are looked for) */
     for (SyntaxElement k : id[0].elements()) {
-        if (k.is(syntax_kind::class_specifier) ||
-            k.is(syntax_kind::elaborated_type_specifier) ||
-            k.is(syntax_kind::enum_specifier) ||
-            k.is(syntax_kind::elaborated_enum_specifier))
+        if (k.is(syntax_kind::class_specifier,
+                 syntax_kind::elaborated_type_specifier,
+                 syntax_kind::enum_specifier,
+                 syntax_kind::elaborated_enum_specifier))
             return not_supported(n, "dcl.typedef");
     }
     specified s;
@@ -921,9 +921,9 @@ analysis_result semantic_analysis::init_declarators(SyntaxRef declaration,
         if (instantiating && c.is(syntax_kind::requires_clause))
             continue;
         /* [dcl.struct.bind]/1: ref-qualifier_opt [ identifier-list ] */
-        if (c.is(preprocessing_op_or_punc::LEFT_BRACKET) ||
-            c.is(preprocessing_op_or_punc::AMPERSAND) ||
-            c.is(preprocessing_op_or_punc::AMPERSAND_AMPERSAND))
+        if (c.is(preprocessing_op_or_punc::LEFT_BRACKET,
+                 preprocessing_op_or_punc::AMPERSAND,
+                 preprocessing_op_or_punc::AMPERSAND_AMPERSAND))
             return structured_binding_declaration(declaration, i, s, nullptr);
         /* a declarator that is only its identifier is the token */
         if (c.is_token()) {

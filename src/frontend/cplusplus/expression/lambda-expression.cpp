@@ -361,9 +361,9 @@ analysis_result semantic_analysis::lambda_expression(LambdaExpression n,
         SyntaxElement x = n[i];
         if (x.is(syntax_kind::lambda_declarator) && !declarator)
             declarator = x;
-        else if (x.is(syntax_kind::template_parameter_list) ||
-                 x.is(syntax_kind::type_parameter) ||
-                 x.is(syntax_kind::parameter_declaration))
+        else if (x.is(syntax_kind::template_parameter_list,
+                      syntax_kind::type_parameter,
+                      syntax_kind::parameter_declaration))
             /* (a list of one template-parameter is that parameter) */
             template_list = x;
         else if (!x.is_token() && !x.is(syntax_kind::requires_clause))

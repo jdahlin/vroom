@@ -44,8 +44,8 @@ semantic_analysis::explicit_specialization(ExplicitSpecialization n)
     auto inner = n[3];
     if (SyntaxRef id = variable_specialization_id(inner))
         return variable_specialization(n, inner, id);
-    if (!inner.is(syntax_kind::function_definition) &&
-        !inner.is(syntax_kind::simple_declaration))
+    if (!inner.is(syntax_kind::function_definition,
+                  syntax_kind::simple_declaration))
         return not_supported(n, "temp.expl.spec");
     bool defines = inner.is(syntax_kind::function_definition);
     /* [dcl.fct.def.delete], = default: not yet */
@@ -270,8 +270,8 @@ semantic_analysis::named_specialization(SyntaxRef n, SyntaxRef declaration,
     if (leading_gnu_attributes(declaration) || declaration.size() != 3 ||
         !declaration[0].is(syntax_kind::decl_specifier_seq) ||
         declaration[1].is_token() ||
-        (!declaration[1].is(syntax_kind::noptr_declarator) &&
-         !declaration[1].is(syntax_kind::ptr_declarator)))
+        (!declaration[1].is(syntax_kind::noptr_declarator,
+                            syntax_kind::ptr_declarator)))
         return not_supported(n, rule);
     if (declaration.is(syntax_kind::function_definition) &&
         !declaration.function_definition().plain())

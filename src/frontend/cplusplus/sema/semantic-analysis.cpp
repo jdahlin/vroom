@@ -104,7 +104,7 @@ bool semantic_analysis::parsed_completely(SyntaxRef n) const
     while (!work.empty()) {
         SyntaxRef next = work.back();
         work.resize(work.size() - 1);
-        if (next.is(syntax_kind::erroneous) || next.is(syntax_kind::unparsed))
+        if (next.is(syntax_kind::erroneous, syntax_kind::unparsed))
             return false;
         for (uint32_t i = 0; i < next.size(); i++) {
             SyntaxElement c = next[i];

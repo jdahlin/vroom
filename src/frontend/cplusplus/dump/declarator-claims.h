@@ -696,8 +696,7 @@ class declarator_claims
     bool type_of_type_id(SyntaxRef type_id, owned_buffer &type)
     {
         auto node = type_id;
-        if (!node.is(syntax_kind::type_id) &&
-            !node.is(syntax_kind::defining_type_id))
+        if (!node.is(syntax_kind::type_id, syntax_kind::defining_type_id))
             return false;
         if (!node.size() || node[0].is_token())
             return false;
@@ -748,8 +747,8 @@ class declarator_claims
             SyntaxRef n = work.back();
             work.resize(work.size() - 1);
             auto s = n;
-            if (s.is(syntax_kind::attribute_scoped_token) ||
-                s.is(syntax_kind::attribute_using_prefix) ||
+            if (s.is(syntax_kind::attribute_scoped_token,
+                     syntax_kind::attribute_using_prefix) ||
                 !strncmp(syntax_kind_subclause(s.kind()), "ext.", 4))
                 return true;
             for (uint32_t i = 0; i < s.size(); i++)

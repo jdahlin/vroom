@@ -39,8 +39,8 @@ token_index semantic_analysis::callee_name(SyntaxElement c) const
         tokens[c[1].token()].kind == token_kind::identifier)
         return c[1].token();
     if (c.is(syntax_kind::postfix_expression) && c.size() == 3 &&
-        (c[1].is(preprocessing_op_or_punc::DOT) ||
-         c[1].is(preprocessing_op_or_punc::ARROW)) &&
+        (c[1].is(preprocessing_op_or_punc::DOT,
+                 preprocessing_op_or_punc::ARROW)) &&
         c[2].is_token() && tokens[c[2].token()].kind == token_kind::identifier)
         return c[2].token();
     return 0;

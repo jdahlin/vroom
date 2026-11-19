@@ -474,9 +474,9 @@ void semantic_analysis::hold_names(SyntaxRef declaration)
         }
     };
     bool by_declarator = parsed_completely(declaration) &&
-                         (declaration.is(syntax_kind::simple_declaration) ||
-                          declaration.is(syntax_kind::function_definition) ||
-                          declaration.is(syntax_kind::condition));
+                         (declaration.is(syntax_kind::simple_declaration,
+                                         syntax_kind::function_definition,
+                                         syntax_kind::condition));
     /* a template of a function or of declarators: what its declarator-ids
        name (below), not the types its declaration names (an explicit
        specialization's name is a template-id: all its names held) */
@@ -488,8 +488,8 @@ void semantic_analysis::hold_names(SyntaxRef declaration)
         entity_table[current_scope].unknown_names = true;
         return;
     }
-    if (declaration.is(syntax_kind::using_declaration) ||
-        declaration.is(syntax_kind::namespace_alias_definition)) {
+    if (declaration.is(syntax_kind::using_declaration,
+                       syntax_kind::namespace_alias_definition)) {
         /* the names they bring into the scope: each using-declarator's
            last identifier, the alias; not the namespaces and classes
            named on the way */
@@ -498,8 +498,8 @@ void semantic_analysis::hold_names(SyntaxRef declaration)
         while (!work.empty()) {
             SyntaxRef x = work.back();
             work.resize(work.size() - 1);
-            if (x.is(syntax_kind::nested_name_specifier) ||
-                x.is(syntax_kind::qualified_namespace_specifier))
+            if (x.is(syntax_kind::nested_name_specifier,
+                     syntax_kind::qualified_namespace_specifier))
                 continue;
             for (uint32_t i = 0; i < x.size(); i++) {
                 SyntaxElement c = x[i];
@@ -618,17 +618,17 @@ void semantic_analysis::hold_names(SyntaxRef declaration)
     }
     /* a template's declaration: its declarator-ids too, which may be in
        parentheses (template<class T> void (f)(T);) */
-    bool by_template = declaration.is(syntax_kind::template_declaration) ||
-                       declaration.is(syntax_kind::explicit_specialization);
+    bool by_template = declaration.is(syntax_kind::template_declaration,
+                                      syntax_kind::explicit_specialization);
     for (SyntaxRef inner = declaration;
-         inner.is(syntax_kind::template_declaration) ||
-         inner.is(syntax_kind::explicit_specialization);) {
+         inner.is(syntax_kind::template_declaration,
+                  syntax_kind::explicit_specialization);) {
         auto t = inner;
         if (!t.size() || inner[t.size() - 1].is_token())
             break;
         inner = inner[t.size() - 1].index();
-        if ((inner.is(syntax_kind::simple_declaration) ||
-             inner.is(syntax_kind::function_definition)) &&
+        if ((inner.is(syntax_kind::simple_declaration,
+                      syntax_kind::function_definition)) &&
             parsed_completely(inner))
             declarator_ids(inner);
     }
@@ -638,9 +638,9 @@ void semantic_analysis::hold_names(SyntaxRef declaration)
         uint32_t name = tokens.identifier(id);
         entity_index found = entity_table.find(current_scope, name);
         bool defines_namespace =
-            declaration.is(syntax_kind::named_namespace_definition) ||
-            declaration.is(syntax_kind::unnamed_namespace_definition) ||
-            declaration.is(syntax_kind::nested_namespace_definition);
+            declaration.is(syntax_kind::named_namespace_definition,
+                           syntax_kind::unnamed_namespace_definition,
+                           syntax_kind::nested_namespace_definition);
         if (found && defines_namespace &&
             entity_table[found].kind == entity_kind::namespace_entity &&
             entity_table[found].name == name &&

@@ -23,8 +23,8 @@ bool semantic_analysis::names_entity(SyntaxElement operand) const
     if (!operand.is(syntax_kind::postfix_expression) || operand.size() != 3)
         return false;
     SyntaxElement op = operand[1];
-    return op.is(preprocessing_op_or_punc::DOT) ||
-           op.is(preprocessing_op_or_punc::ARROW);
+    return op.is(preprocessing_op_or_punc::DOT,
+                 preprocessing_op_or_punc::ARROW);
 }
 
 /*

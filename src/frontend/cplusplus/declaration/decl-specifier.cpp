@@ -1051,18 +1051,18 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
     trailing_class_alignment = 0;
     for (uint32_t i = 0; i < seq.size(); i++) {
         SyntaxElement c = seq[i];
-        if (c.is_token() || c.is(syntax_kind::class_specifier) ||
-            c.is(syntax_kind::elaborated_type_specifier) ||
-            c.is(syntax_kind::enum_specifier) ||
-            c.is(syntax_kind::elaborated_enum_specifier) ||
-            c.is(syntax_kind::simple_type_specifier) ||
-            c.is(syntax_kind::typename_specifier) ||
-            c.is(syntax_kind::simple_template_id) ||
-            c.is(syntax_kind::decltype_specifier) ||
-            c.is(syntax_kind::clang_type_transformation) ||
-            c.is(syntax_kind::clang_atomic_type_specifier) ||
-            c.is(syntax_kind::clang_bit_int_type_specifier) ||
-            c.is(syntax_kind::placeholder_type_specifier))
+        if (c.is_token() || c.is(syntax_kind::class_specifier,
+                                 syntax_kind::elaborated_type_specifier,
+                                 syntax_kind::enum_specifier,
+                                 syntax_kind::elaborated_enum_specifier,
+                                 syntax_kind::simple_type_specifier,
+                                 syntax_kind::typename_specifier,
+                                 syntax_kind::simple_template_id,
+                                 syntax_kind::decltype_specifier,
+                                 syntax_kind::clang_type_transformation,
+                                 syntax_kind::clang_atomic_type_specifier,
+                                 syntax_kind::clang_bit_int_type_specifier,
+                                 syntax_kind::placeholder_type_specifier))
             continue;
         /* an attribute specifier has rules unless a class-specifier is
            among the specifiers */
@@ -1229,13 +1229,13 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
                 k.alone++;
             named = class_type;
             named_at = c.first_token();
-            if (!c.is(syntax_kind::simple_type_specifier) &&
-                !c.is(syntax_kind::typename_specifier) &&
-                !c.is(syntax_kind::decltype_specifier) &&
-                !c.is(syntax_kind::clang_type_transformation) &&
-                !c.is(syntax_kind::clang_atomic_type_specifier) &&
-                !c.is(syntax_kind::clang_bit_int_type_specifier) &&
-                !c.is(syntax_kind::placeholder_type_specifier))
+            if (!c.is(syntax_kind::simple_type_specifier,
+                      syntax_kind::typename_specifier,
+                      syntax_kind::decltype_specifier,
+                      syntax_kind::clang_type_transformation,
+                      syntax_kind::clang_atomic_type_specifier,
+                      syntax_kind::clang_bit_int_type_specifier,
+                      syntax_kind::placeholder_type_specifier))
                 declares_class = true;
             continue;
         }

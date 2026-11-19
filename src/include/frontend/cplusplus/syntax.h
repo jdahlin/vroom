@@ -342,6 +342,13 @@ class SyntaxElement : public SyntaxRef
     {
         return is_punctuator(c, op);
     }
+    /* whether the child is one of the punctuators */
+    template <class... K>
+    bool is(preprocessing_op_or_punc op, preprocessing_op_or_punc op2,
+            K... more) const
+    {
+        return is(op) || is(op2, more...);
+    }
     /* an attribute-specifier, its seq or an alignment-specifier */
     bool is_attribute() const
     {

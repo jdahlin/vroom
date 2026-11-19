@@ -394,8 +394,8 @@ analysis_result semantic_analysis::gnu_attribute_specifier(SyntaxRef n,
                 continue; /* __attribute__ */
             if (c.is(syntax_kind::gnu_attribute))
                 attributes.append(c);
-            else if (c.is(syntax_kind::gnu_attribute_list) ||
-                     c.is(syntax_kind::gnu_attribute_specifier))
+            else if (c.is(syntax_kind::gnu_attribute_list,
+                          syntax_kind::gnu_attribute_specifier))
                 work.append(c.index());
             else if (c.is(syntax_kind::attribute_specifier) &&
                      attributes_as_gnu(c, standard))

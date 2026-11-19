@@ -298,8 +298,8 @@ analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
             k == standard_keyword::dynamic_cast_)
             return named_cast(n, k, m);
     }
-    if (n.size() == 3 && (n[1].is(preprocessing_op_or_punc::DOT) ||
-                          n[1].is(preprocessing_op_or_punc::ARROW)))
+    if (n.size() == 3 && (n[1].is(preprocessing_op_or_punc::DOT,
+                                  preprocessing_op_or_punc::ARROW)))
         return member_reference(n, m);
     /* [expr.type.conv]/1: "A simple-type-specifier or typename-specifier
        followed by a parenthesized optional expression-list or by a
@@ -495,8 +495,8 @@ analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
            definition) to *((E1)+(E2)), except that in the case of an array
            operand, the result is an lvalue if that operand is an lvalue and
            an xvalue otherwise." */
-        if (n[2].is(syntax_kind::braced_init_list) ||
-            n[2].is(syntax_kind::initializer_list))
+        if (n[2].is(syntax_kind::braced_init_list,
+                    syntax_kind::initializer_list))
             return not_supported(n, "expr.sub");
         expression_meaning a, i;
         analysis_result r = expression(n[0], a);
@@ -1473,8 +1473,8 @@ analysis_result semantic_analysis::call_with(
         SyntaxElement name = n[0];
         if (!name.is_token() && name.is(syntax_kind::postfix_expression) &&
             name.size() == 3 &&
-            (name[1].is(preprocessing_op_or_punc::DOT) ||
-             name[1].is(preprocessing_op_or_punc::ARROW)))
+            (name[1].is(preprocessing_op_or_punc::DOT,
+                        preprocessing_op_or_punc::ARROW)))
             name = name[2];
         if (name.is_token() &&
             tokens[name.token()].kind == token_kind::identifier)

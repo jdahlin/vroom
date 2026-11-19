@@ -207,10 +207,10 @@ analysis_result semantic_analysis::constraint_satisfied(SyntaxElement e,
            satisfied, the conjunction is not satisfied.  Otherwise, the
            conjunction is satisfied if and only if the second operand is
            satisfied."  /3, a disjunction, the same with "satisfied" */
-        bool conjunction = e.is(syntax_kind::logical_and_expression) ||
-                           e.is(syntax_kind::constraint_logical_and_expression);
-        bool disjunction = e.is(syntax_kind::logical_or_expression) ||
-                           e.is(syntax_kind::constraint_logical_or_expression);
+        bool conjunction = e.is(syntax_kind::logical_and_expression,
+                                syntax_kind::constraint_logical_and_expression);
+        bool disjunction = e.is(syntax_kind::logical_or_expression,
+                                syntax_kind::constraint_logical_or_expression);
         if ((conjunction || disjunction) && e.size() == 3) {
             analysis_result r =
                 constraint_satisfied(e[0], scope, horizon, satisfied);

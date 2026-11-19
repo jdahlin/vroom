@@ -64,8 +64,8 @@ analysis_result semantic_analysis::block_items(SyntaxRef n, uint32_t &built)
 {
     owned_array<SyntaxElement> items;
     for (auto c : n.elements()) {
-        if (c.is(preprocessing_op_or_punc::LEFT_BRACE) ||
-            c.is(preprocessing_op_or_punc::RIGHT_BRACE))
+        if (c.is(preprocessing_op_or_punc::LEFT_BRACE,
+                 preprocessing_op_or_punc::RIGHT_BRACE))
             continue;
         if (c.is(syntax_kind::statement_seq)) {
             for (auto child : c.elements())

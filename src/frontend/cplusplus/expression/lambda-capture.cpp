@@ -33,12 +33,11 @@ semantic_analysis::lambda_captures_of(SyntaxRef n,
                                       owned_array<SyntaxElement> &out)
 {
     for (auto c : n.elements()) {
-        if (c.is(preprocessing_op_or_punc::COMMA) ||
-            c.is(preprocessing_op_or_punc::LEFT_BRACKET) ||
-            c.is(preprocessing_op_or_punc::RIGHT_BRACKET))
+        if (c.is(preprocessing_op_or_punc::COMMA,
+                 preprocessing_op_or_punc::LEFT_BRACKET,
+                 preprocessing_op_or_punc::RIGHT_BRACKET))
             continue;
-        if (c.is(syntax_kind::lambda_capture) ||
-            c.is(syntax_kind::capture_list)) {
+        if (c.is(syntax_kind::lambda_capture, syntax_kind::capture_list)) {
             analysis_result r = lambda_captures_of(c, out);
             if (r != analysis_result::well_formed)
                 return r;
@@ -176,8 +175,8 @@ analysis_result semantic_analysis::lambda_introducer(LambdaIntroducer n,
         token_index name = 0;
         if (c.is_token()) {
             const token &t = tokens[c.token()];
-            if (i == 0 && (c.is(preprocessing_op_or_punc::EQUAL) ||
-                           c.is(preprocessing_op_or_punc::AMPERSAND))) {
+            if (i == 0 && (c.is(preprocessing_op_or_punc::EQUAL,
+                                preprocessing_op_or_punc::AMPERSAND))) {
                 l.default_capture = capture_default::copy;
                 if (c.is(preprocessing_op_or_punc::AMPERSAND))
                     l.default_capture = capture_default::reference;

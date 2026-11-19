@@ -105,8 +105,8 @@ analysis_result semantic_analysis::member_template_declaration(
             return r;
         }
     }
-    if ((!inner.is(syntax_kind::function_definition) &&
-         !inner.is(syntax_kind::member_declaration)) ||
+    if ((!inner.is(syntax_kind::function_definition,
+                   syntax_kind::member_declaration)) ||
         !is_namespace(entity_table[c].enclosing))
         return not_supported(n, "temp.mem");
     /* [ext:gnu_attributes] before it all; [class.ctor]/1: "Each

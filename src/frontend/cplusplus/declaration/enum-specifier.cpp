@@ -503,8 +503,8 @@ analysis_result semantic_analysis::enum_specifier_rules(SyntaxRef n,
             }
             continue;
         }
-        if (c.is(preprocessing_op_or_punc::COMMA) ||
-            c.is(preprocessing_op_or_punc::RIGHT_BRACE))
+        if (c.is(preprocessing_op_or_punc::COMMA,
+                 preprocessing_op_or_punc::RIGHT_BRACE))
             continue;
         enumerators.append(c);
     }
