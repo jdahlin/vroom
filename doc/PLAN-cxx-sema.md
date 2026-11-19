@@ -757,8 +757,7 @@ libstdc++ and json), since sema cannot analyse a declaration kept as tokens.
   declaration and lookup are any function's); its declaration is checked
   against /1 (an empty string-literal), /2 (a namespace-scope function),
   /3 (the parameter-declaration-clauses, no default argument) and /6 (no C
-  language linkage); it mangles as `li <source-name>`.  A
-  suffixes without a leading underscore ([usrlit.suffix]/1, the standard
+  language linkage); it mangles as `li <source-name>`.  Suffixes without a leading underscore ([usrlit.suffix]/1, the standard
   library's `operator""h`, `""sv`) are accepted, as clang warns only.  A
   user-defined-literal ([lex.ext]) is a call of the operator unqualified
   lookup finds: an integer literal's with parameter unsigned long long
