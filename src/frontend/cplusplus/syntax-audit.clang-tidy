@@ -1,0 +1,51 @@
+Checks: '-*,custom-*'
+CustomChecks:
+  - Name: vcc-syntax-token-index-from-index
+    Query: |
+      match callExpr(forEachArgumentWithParam(ignoringImpCasts(cxxMemberCallExpr(callee(cxxMethodDecl(hasName("index"), ofClass(cxxRecordDecl(hasName("SyntaxElement"))))))), parmVarDecl(hasType(typedefNameDecl(hasName("token_index")))))).bind("root")
+    Diagnostic:
+      - BindName: root
+        Message: "an element's index() is its node (0 for a token): use token() where a token_index is expected"
+        Level: Warning
+  - Name: vcc-syntax-token-index-from-index-ctor
+    Query: |
+      match cxxConstructExpr(forEachArgumentWithParam(ignoringImpCasts(cxxMemberCallExpr(callee(cxxMethodDecl(hasName("index"), ofClass(cxxRecordDecl(hasName("SyntaxElement"))))))), parmVarDecl(hasType(typedefNameDecl(hasName("token_index")))))).bind("root")
+    Diagnostic:
+      - BindName: root
+        Message: "an element's index() is its node (0 for a token): use token() where a token_index is expected"
+        Level: Warning
+  - Name: vcc-syntax-token-index-var-from-index
+    Query: |
+      match varDecl(hasType(typedefNameDecl(hasName("token_index"))), hasInitializer(ignoringImpCasts(cxxMemberCallExpr(callee(cxxMethodDecl(hasName("index"), ofClass(cxxRecordDecl(hasName("SyntaxElement"))))))))).bind("root")
+    Diagnostic:
+      - BindName: root
+        Message: "an element's index() is its node (0 for a token): use token() where a token_index is expected"
+        Level: Warning
+  - Name: vcc-syntax-token-index-assign-from-index
+    Query: |
+      match binaryOperator(isAssignmentOperator(), hasLHS(hasType(typedefNameDecl(hasName("token_index")))), hasRHS(ignoringImpCasts(cxxMemberCallExpr(callee(cxxMethodDecl(hasName("index"), ofClass(cxxRecordDecl(hasName("SyntaxElement"))))))))).bind("root")
+    Diagnostic:
+      - BindName: root
+        Message: "an element's index() is its node (0 for a token): use token() where a token_index is expected"
+        Level: Warning
+  - Name: vcc-syntax-token-index-field-from-index
+    Query: |
+      match binaryOperator(isAssignmentOperator(), hasLHS(memberExpr(hasDeclaration(fieldDecl(hasType(typedefNameDecl(hasName("token_index"))))))), hasRHS(ignoringImpCasts(cxxMemberCallExpr(callee(cxxMethodDecl(hasName("index"), ofClass(cxxRecordDecl(hasName("SyntaxElement"))))))))).bind("root")
+    Diagnostic:
+      - BindName: root
+        Message: "an element's index() is its node (0 for a token): use token() where a token_index is expected"
+        Level: Warning
+  - Name: vcc-syntax-node-index-from-token
+    Query: |
+      match callExpr(forEachArgumentWithParam(ignoringImpCasts(cxxMemberCallExpr(callee(cxxMethodDecl(hasName("token"), ofClass(cxxRecordDecl(hasName("SyntaxElement"))))))), parmVarDecl(hasType(typedefNameDecl(hasName("node_index")))))).bind("root")
+    Diagnostic:
+      - BindName: root
+        Message: "an element's token() is its token (0 for a node): use index() where a node_index is expected"
+        Level: Warning
+  - Name: vcc-syntax-node-index-var-from-token
+    Query: |
+      match varDecl(hasType(typedefNameDecl(hasName("node_index"))), hasInitializer(ignoringImpCasts(cxxMemberCallExpr(callee(cxxMethodDecl(hasName("token"), ofClass(cxxRecordDecl(hasName("SyntaxElement"))))))))).bind("root")
+    Diagnostic:
+      - BindName: root
+        Message: "an element's token() is its token (0 for a node): use index() where a node_index is expected"
+        Level: Warning
