@@ -719,11 +719,25 @@ analysis_result semantic_analysis::nested_name_specifier(NestedNameSpecifier n,
         i = 1;
     }
     for (; i < node.size(); i += 2) {
+        /* [temp.names]/4: template before a simple-template-id after a
+           nested-name-specifier */
+        if (qualified && node[i].is(standard_keyword::template_) &&
+            i + 1 < node.size() && !node[i + 1].is_token() &&
+            node[i + 1].is(syntax_kind::simple_template_id))
+            i++;
         if (scope.dependent) {
             /* [temp.dep.type]/6: "A qualified-id in which the
                nested-name-specifier names a dependent type that is not the
                current instantiation" is a member of an unknown
-               specialization, a dependent type (/9): Q::name */
+               specialization, a dependent type (/9): Q::name.  Q::X<A>,
+               a member template of it specialized, is one too, known by
+               how the nested-name-specifier is written (an instantiation
+               analyses it again in the substituted class) */
+            if (!node[i].is_token() &&
+                node[i].is(syntax_kind::simple_template_id)) {
+                scope.dependent = dependent_written_type(n);
+                break;
+            }
             if (!node[i].is_identifier() || i + 1 >= node.size() ||
                 !node[i + 1].is(preprocessing_op_or_punc::COLON_COLON))
                 return not_supported(n, "temp.res");
