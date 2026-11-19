@@ -258,6 +258,22 @@ bool semantic_analysis::same_constraints(node_index a, node_index b)
     return same_tokens(x.index(), y.index());
 }
 
+/* whether template-head n has a requires-clause or a type-constraint */
+bool semantic_analysis::template_head_constrained(node_index n)
+{
+    owned_array<node_index> parameters;
+    if (head_constraint(n).bits || !tree[n].child_count ||
+        !syntax_is(tree, tree.children(n)[0], syntax_kind::template_head) ||
+        !template_head_list(tree.children(n)[0].index(), parameters))
+        return head_constraint(n).bits;
+    for (node_index p : parameters) {
+        template_parameter_parts x;
+        if (template_parameter_form(p, x) && x.constraint)
+            return true;
+    }
+    return false;
+}
+
 /* whether nodes a and b are the same tokens, spelled the same */
 bool semantic_analysis::same_tokens(node_index a, node_index b)
 {

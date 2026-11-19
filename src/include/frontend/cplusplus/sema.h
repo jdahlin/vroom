@@ -3349,6 +3349,8 @@ class semantic_analysis
                       const owned_array<template_argument> &arguments,
                       bool &satisfied);
     bool same_constraints(node_index a, node_index b);
+    bool template_head_constrained(node_index n);
+    bool dependent_arguments(const owned_array<template_argument> &a) const;
     bool same_token_spelling(token_index a, token_index b);
     bool same_tokens(node_index a, node_index b);
     /* [temp.deduct]/5: whether the function template's constraints are

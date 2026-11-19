@@ -812,7 +812,8 @@ analysis_result semantic_analysis::alias_template_definition(node_index n,
 {
     entity_index outer = current_scope;
     owned_array<node_index> parameters;
-    analysis_result r = template_head_parameters(n, parameters, true);
+    analysis_result r =
+        template_head_parameters(n, parameters, true, true, false, true);
     if (r != analysis_result::well_formed)
         return r;
     uint32_t name = tokens.identifier(tree[alias].first_token + 1);
@@ -1234,6 +1235,26 @@ analysis_result semantic_analysis::alias_template_specialization(
             }
         forwarded.append(whole);
     }
+    /* [temp.alias]/2: "when a template-id refers to the specialization of
+       an alias template, it is equivalent to the associated type", which
+       [temp.names]/7 requires to satisfy the template's associated
+       constraints ([temp.constr.decl]/3); of dependent arguments, not
+       checked here (refused) */
+    if (dependent_arguments(arguments)) {
+        if (template_head_constrained(ft.declaration))
+            return not_supported(id, "temp.alias");
+    } else {
+        bool satisfied = true;
+        r = template_constraints_satisfied(at, arguments, satisfied);
+        if (r != analysis_result::well_formed)
+            return r;
+        /* clang reports the unsatisfied constraint at the use; while a
+           candidate is substituted, a deduction failure */
+        if (!satisfied && substituting)
+            return analysis_result::ill_formed;
+        if (!satisfied)
+            return not_supported(id, "temp.names");
+    }
     entity_index scope = entity_table.make(entity_kind::block_scope, 0,
                                            entity_table[ft.entity].enclosing);
     for (uint32_t i = 0; i < ft.parameter_count; i++) {
@@ -1279,17 +1300,8 @@ analysis_result semantic_analysis::alias_template_specialization(
     if (!partial_arguments &&
         !depends_on_template_parameter(
             qualified_type::make(t.unqualified(), cv_none))) {
-        for (const template_argument &a : arguments) {
-            bool dependent =
-                depends_on_template_parameter(a.type) || a.template_entity;
-            if (a.kind == template_argument::kind_t::pack)
-                for (uint32_t k = 0; k < a.count; k++)
-                    if (depends_on_template_parameter(
-                            pack_arguments[a.value + k].type))
-                        dependent = true;
-            if (dependent)
-                return not_supported(id, "temp.alias");
-        }
+        if (dependent_arguments(arguments))
+            return not_supported(id, "temp.alias");
     }
     type = t.unqualified();
     return analysis_result::well_formed;
@@ -1342,6 +1354,22 @@ static bool depends(const types &table, qualified_type t,
 bool semantic_analysis::depends_on_template_parameter(qualified_type t) const
 {
     return depends(type_table, t);
+}
+
+/* whether a template argument, or a pack's element, is dependent */
+bool semantic_analysis::dependent_arguments(
+    const owned_array<template_argument> &arguments) const
+{
+    for (const template_argument &a : arguments) {
+        if (depends_on_template_parameter(a.type) || a.template_entity)
+            return true;
+        if (a.kind == template_argument::kind_t::pack)
+            for (uint32_t k = 0; k < a.count; k++)
+                if (depends_on_template_parameter(
+                        pack_arguments[a.value + k].type))
+                    return true;
+    }
+    return false;
 }
 
 /* the scope of the template-parameters ([basic.scope.temp]) in outer, the
@@ -1671,9 +1699,8 @@ analysis_result semantic_analysis::class_specialization_definition(
        primary's arguments with a requires-clause, more constrained than
        the unconstrained primary ([temp.constr.order]); a type-constraint
        the same (a primary has none) */
-    node_index primary_head = function_templates[ct - 1].declaration;
-    if (identity && !head_constraint(primary_head).bits &&
-        !same_constraints(n, primary_head))
+    if (identity && template_head_constrained(n) &&
+        !template_head_constrained(function_templates[ct - 1].declaration))
         identity = false;
     if (parameters.empty() == dependent || identity)
         return not_supported(n, rule);
