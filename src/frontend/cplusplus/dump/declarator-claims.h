@@ -60,6 +60,21 @@ class declarator_claims
     token_stream &tokens;
     const parser &p;
     vbuffer *out;
+    SyntaxContext syntax_cx{tree, tokens, p};
+
+    /* the typed view of a node of the tree, or of a child (syntax.h) */
+    SyntaxRef syntax(node_index n) const
+    {
+        return SyntaxRef(syntax_cx, n);
+    }
+    SyntaxElement syntax(syntax_child c) const
+    {
+        return SyntaxElement(syntax_cx, c);
+    }
+    SyntaxElement syntax(SyntaxElement e) const
+    {
+        return e;
+    }
 
     /* what a decl-specifier-seq says besides its type */
     struct specifiers {
@@ -104,11 +119,11 @@ class declarator_claims
        decltype([]{}) would name another type */
     bool has_lambda(node_index n) const
     {
-        const syntax_node &node = tree[n];
-        if (node.kind == syntax_kind::lambda_expression)
+        auto node = syntax(n);
+        if (node.is(syntax_kind::lambda_expression))
             return true;
-        for (uint32_t i = 0; i < node.child_count; i++) {
-            syntax_child c = tree.children(n)[i];
+        for (uint32_t i = 0; i < node.size(); i++) {
+            syntax_child c = node[i];
             if (!c.is_token() && has_lambda(c.index()))
                 return true;
         }
@@ -117,7 +132,7 @@ class declarator_claims
 
     bool is_kind(syntax_child c, syntax_kind kind) const
     {
-        return !c.is_token() && tree[c.index()].kind == kind;
+        return syntax(c).is(kind);
     }
 
     bool is_attribute(syntax_child c) const
@@ -162,13 +177,13 @@ class declarator_claims
      */
     bool specified_type(node_index seq, owned_buffer &type, specifiers &s)
     {
-        const syntax_node &node = tree[seq];
+        auto node = syntax(seq);
         unsigned const_ = 0, volatile_ = 0, signed_ = 0, unsigned_ = 0;
         unsigned short_ = 0, long_ = 0, char_ = 0, int_ = 0, double_ = 0;
         bool named = false;
         type.clear();
-        for (uint32_t i = 0; i < node.child_count; i++) {
-            syntax_child c = tree.children(seq)[i];
+        for (uint32_t i = 0; i < node.size(); i++) {
+            syntax_child c = node[i];
             if (is_attribute(c))
                 continue;
             if (c.is_token()) {
@@ -247,24 +262,24 @@ class declarator_claims
                 }
                 continue;
             }
-            const syntax_node &child = tree[c.index()];
-            switch (child.kind) {
+            auto child = syntax(c);
+            switch (child.kind()) {
             case syntax_kind::decltype_specifier:
                 if (has_lambda(c.index()))
                     return false;
-                verbatim(child.first_token, child.end_token, type.get());
+                verbatim(child.first_token(), child.end_token(), type.get());
                 named = true;
                 break;
             case syntax_kind::simple_type_specifier:
                 for (token_index n : tree.template_names_as_types)
-                    if (n >= child.first_token && n < child.end_token)
+                    if (n >= child.first_token() && n < child.end_token())
                         return false;
-                verbatim(child.first_token, child.end_token, type.get());
+                verbatim(child.first_token(), child.end_token(), type.get());
                 named = true;
                 break;
             case syntax_kind::elaborated_type_specifier:
             case syntax_kind::elaborated_enum_specifier:
-                verbatim(child.first_token, child.end_token, type.get());
+                verbatim(child.first_token(), child.end_token(), type.get());
                 named = true;
                 break;
             case syntax_kind::class_specifier:
@@ -322,28 +337,26 @@ class declarator_claims
     bool name_of_defined_type(node_index specifier, owned_buffer &type)
     {
         node_index head = specifier;
-        const syntax_node &s = tree[specifier];
-        if (s.child_count &&
-            is_kind(tree.children(specifier)[0], syntax_kind::enum_head))
-            head = tree.children(specifier)[0].index();
-        const syntax_node &h = tree[head];
-        for (uint32_t i = 0; i < h.child_count; i++) {
-            syntax_child c = tree.children(head)[i];
+        auto s = syntax(specifier);
+        if (s.size() && is_kind(s[0], syntax_kind::enum_head))
+            head = s[0].index();
+        auto h = syntax(head);
+        for (uint32_t i = 0; i < h.size(); i++) {
+            syntax_child c = syntax(head)[i];
             if (c.is_token() &&
                 tokens[c.index()].kind == token_kind::identifier) {
                 /* after a nested-name-specifier the name is not the next
                    token alone: the two are written together */
                 token_index first = c.index();
-                if (i && is_kind(tree.children(head)[i - 1],
+                if (i && is_kind(syntax(head)[i - 1],
                                  syntax_kind::nested_name_specifier))
-                    first =
-                        tree[tree.children(head)[i - 1].index()].first_token;
+                    first = syntax(head)[i - 1].first_token();
                 verbatim(first, c.index() + 1, type.get());
                 return true;
             }
             if (is_kind(c, syntax_kind::enum_head_name)) {
-                const syntax_node &name = tree[c.index()];
-                verbatim(name.first_token, name.end_token, type.get());
+                auto name = syntax(c);
+                verbatim(name.first_token(), name.end_token(), type.get());
                 return true;
             }
             if (is_operator_token(c, preprocessing_op_or_punc::LEFT_BRACE) ||
@@ -362,23 +375,23 @@ class declarator_claims
      */
     bool apply_ptr_operator(node_index op, owned_buffer &type, declared &d)
     {
-        const syntax_node &node = tree[op];
-        for (uint32_t i = 0; i < node.child_count; i++) {
-            syntax_child c = tree.children(op)[i];
+        auto node = syntax(op);
+        for (uint32_t i = 0; i < node.size(); i++) {
+            syntax_child c = node[i];
             if (is_attribute(c))
                 continue;
             if (is_kind(c, syntax_kind::nested_name_specifier)) {
                 /* the class is the specifier without its last :: */
-                const syntax_node &name = tree[c.index()];
+                auto name = syntax(c);
                 wrap(type, "::vcc_claim::pointer_to_member_of<", ", ");
-                verbatim(name.first_token, name.end_token - 1, type.get());
+                verbatim(name.first_token(), name.end_token() - 1, type.get());
                 vbuffer_string_append(type.get(), ">");
                 d.last = outermost::member_pointer;
                 i++; /* its * */
             } else if (is_kind(c, syntax_kind::cv_qualifier_seq)) {
-                const syntax_node &seq = tree[c.index()];
-                for (uint32_t k = 0; k < seq.child_count; k++)
-                    if (!apply_cv_qualifier(tree.children(c.index())[k], type))
+                auto seq = syntax(c);
+                for (uint32_t k = 0; k < seq.size(); k++)
+                    if (!apply_cv_qualifier(syntax(c)[k], type))
                         return false;
             } else if (is_operator_token(c, preprocessing_op_or_punc::STAR)) {
                 wrap(type, "::vcc_claim::pointer_to<", ">");
@@ -427,13 +440,13 @@ class declarator_claims
      */
     bool apply_function(node_index parameters, owned_buffer &type, declared &d)
     {
-        const syntax_node &node = tree[parameters];
+        auto node = syntax(parameters);
         owned_buffer list, qualifiers;
         bool closed = false;
         unsigned count = 0;
         owned_array<node_index> work;
-        for (uint32_t i = 0; i < node.child_count; i++) {
-            syntax_child c = tree.children(parameters)[i];
+        for (uint32_t i = 0; i < node.size(); i++) {
+            syntax_child c = node[i];
             if (is_attribute(c))
                 continue;
             if (!closed) {
@@ -449,15 +462,15 @@ class declarator_claims
                 continue;
             }
             if (is_kind(c, syntax_kind::cv_qualifier_seq)) {
-                const syntax_node &seq = tree[c.index()];
+                auto seq = syntax(c);
                 vbuffer_append(qualifiers.get(), " ", 1);
-                verbatim(seq.first_token, seq.end_token, qualifiers.get());
+                verbatim(seq.first_token(), seq.end_token(), qualifiers.get());
             } else if (is_kind(c, syntax_kind::noexcept_specifier)) {
-                const syntax_node &spec = tree[c.index()];
+                auto spec = syntax(c);
                 if (tokens.files.behavior.edition >=
                     standard_edition::cplusplus_17) {
                     vbuffer_append(qualifiers.get(), " ", 1);
-                    verbatim(spec.first_token, spec.end_token,
+                    verbatim(spec.first_token(), spec.end_token(),
                              qualifiers.get());
                 }
             } else if (c.is_token()) {
@@ -493,9 +506,9 @@ class declarator_claims
         }
         if (is_kind(c, syntax_kind::parameter_declaration_clause) ||
             is_kind(c, syntax_kind::parameter_declaration_list)) {
-            const syntax_node &node = tree[c.index()];
-            for (uint32_t i = 0; i < node.child_count; i++)
-                if (!parameter_types(tree.children(c.index())[i], list, count))
+            auto node = syntax(c);
+            for (uint32_t i = 0; i < node.size(); i++)
+                if (!parameter_types(syntax(c)[i], list, count))
                     return false;
             return true;
         }
@@ -503,24 +516,21 @@ class declarator_claims
             return false;
         /* attribute-specifier-seq_opt decl-specifier-seq declarator_opt,
            then perhaps = initializer-clause */
-        const syntax_node &node = tree[c.index()];
+        auto node = syntax(c);
         owned_buffer type;
         specifiers s;
         declared d;
         uint32_t i = 0;
-        while (i < node.child_count &&
-               is_attribute(tree.children(c.index())[i]))
+        while (i < node.size() && is_attribute(syntax(c)[i]))
             i++;
-        if (i == node.child_count ||
-            !is_kind(tree.children(c.index())[i],
-                     syntax_kind::decl_specifier_seq) ||
-            !specified_type(tree.children(c.index())[i].index(), type, s))
+        if (i == node.size() ||
+            !is_kind(syntax(c)[i], syntax_kind::decl_specifier_seq) ||
+            !specified_type(syntax(c)[i].index(), type, s))
             return false;
         i++;
-        if (i < node.child_count &&
-            !is_operator_token(tree.children(c.index())[i],
-                               preprocessing_op_or_punc::EQUAL) &&
-            !declared_type(tree.children(c.index())[i], type, s, d))
+        if (i < node.size() &&
+            !is_operator_token(syntax(c)[i], preprocessing_op_or_punc::EQUAL) &&
+            !declared_type(syntax(c)[i], type, s, d))
             return false;
         /* a placeholder in a parameter's type makes the function a template
            ([dcl.fct]/18, an abbreviated function template) */
@@ -541,7 +551,7 @@ class declarator_claims
      * bound of T".  The bound is written as the tokens of its
      * constant-expression.
      */
-    void apply_array(const syntax_child *bound, owned_buffer &type, declared &d)
+    void apply_array(SyntaxElement bound, owned_buffer &type, declared &d)
     {
         if (!bound) {
             wrap(type, "::vcc_claim::array_of_unknown_bound<", ">");
@@ -549,11 +559,10 @@ class declarator_claims
             return;
         }
         wrap(type, "::vcc_claim::array_of<", ", (");
-        if (bound->is_token()) {
-            verbatim(bound->index(), bound->index() + 1, type.get());
+        if (bound.is_token()) {
+            verbatim(bound.token(), bound.token() + 1, type.get());
         } else {
-            const syntax_node &e = tree[bound->index()];
-            verbatim(e.first_token, e.end_token, type.get());
+            verbatim(bound.first_token(), bound.end_token(), type.get());
         }
         vbuffer_string_append(type.get(), ")>");
         d.last = outermost::array;
@@ -586,24 +595,22 @@ class declarator_claims
             return true;
         }
         node_index n = declarator.index();
-        const syntax_node &node = tree[n];
-        const syntax_child *children = tree.children(n);
-        switch (node.kind) {
+        auto node = syntax(n);
+        switch (node.kind()) {
         case syntax_kind::qualified_id:
             d.has_id = true;
-            d.id_first = node.first_token;
-            d.id_end = node.end_token;
+            d.id_first = node.first_token();
+            d.id_end = node.end_token();
             return true;
         case syntax_kind::ptr_declarator:
         case syntax_kind::ptr_abstract_declarator:
             /* ptr-operator ptr-declarator */
-            if (!node.child_count ||
-                !is_kind(children[0], syntax_kind::ptr_operator) ||
-                !apply_ptr_operator(children[0].index(), type, d))
+            if (!node.size() || !is_kind(node[0], syntax_kind::ptr_operator) ||
+                !apply_ptr_operator(node[0].index(), type, d))
                 return false;
-            if (node.child_count == 1)
+            if (node.size() == 1)
                 return true;
-            return declared_type(children[1], type, s, d);
+            return declared_type(node[1], type, s, d);
         case syntax_kind::parameters_and_qualifiers:
             /* an abstract declarator that is only its parameters */
             return apply_function(n, type, d);
@@ -613,17 +620,16 @@ class declarator_claims
                trailing-return-type: "T shall be the single type-specifier
                auto", and the function returns "the type specified by the
                trailing-return-type" */
-            if (node.child_count != 2 ||
-                !is_kind(children[1], syntax_kind::trailing_return_type) ||
+            if (node.size() != 2 ||
+                !is_kind(node[1], syntax_kind::trailing_return_type) ||
                 !s.placeholder)
                 return false;
-            const syntax_node &trailing = tree[children[1].index()];
-            if (trailing.child_count != 2 ||
-                !type_of_type_id(tree.children(children[1].index())[1].index(),
-                                 type))
+            auto trailing = node[1];
+            if (trailing.size() != 2 ||
+                !type_of_type_id(syntax(node[1].index())[1].index(), type))
                 return false;
             s.placeholder = false;
-            return declared_type(children[0], type, s, d);
+            return declared_type(node[0], type, s, d);
         }
         case syntax_kind::noptr_declarator:
         case syntax_kind::noptr_abstract_declarator:
@@ -637,46 +643,44 @@ class declarator_claims
         uint32_t i = 0;
         bool has_head = false;
         syntax_child head = {};
-        if (node.child_count >= 3 &&
-            is_operator_token(children[0],
+        if (node.size() >= 3 &&
+            is_operator_token(node[0],
                               preprocessing_op_or_punc::LEFT_PARENTHESIS)) {
-            if (!is_operator_token(children[2],
+            if (!is_operator_token(node[2],
                                    preprocessing_op_or_punc::RIGHT_PARENTHESIS))
                 return false;
             has_head = true;
-            head = children[1];
+            head = node[1];
             i = 3;
-        } else if (node.child_count &&
-                   ((children[0].is_token() &&
-                     tokens[children[0].index()].kind ==
-                         token_kind::identifier) ||
-                    is_kind(children[0], syntax_kind::qualified_id) ||
-                    is_kind(children[0], syntax_kind::unqualified_id))) {
+        } else if (node.size() &&
+                   ((node[0].is_token() &&
+                     tokens[node[0].token()].kind == token_kind::identifier) ||
+                    is_kind(node[0], syntax_kind::qualified_id) ||
+                    is_kind(node[0], syntax_kind::unqualified_id))) {
             has_head = true;
-            head = children[0];
+            head = node[0];
             i = 1;
         }
         struct suffix {
             bool function;
             /* a function's parameters-and-qualifiers; an array's bound in
-               the node's children, or none */
+               the node's node, or none */
             uint32_t child;
             bool has_bound;
         };
         owned_array<suffix> suffixes;
-        while (i < node.child_count) {
-            if (is_attribute(children[i])) {
+        while (i < node.size()) {
+            if (is_attribute(node[i])) {
                 i++;
-            } else if (is_kind(children[i],
+            } else if (is_kind(node[i],
                                syntax_kind::parameters_and_qualifiers)) {
                 suffixes.append({true, i, false});
                 i++;
             } else if (is_operator_token(
-                           children[i],
-                           preprocessing_op_or_punc::LEFT_BRACKET)) {
+                           node[i], preprocessing_op_or_punc::LEFT_BRACKET)) {
                 bool has_bound =
-                    i + 1 < node.child_count &&
-                    !is_operator_token(children[i + 1],
+                    i + 1 < node.size() &&
+                    !is_operator_token(node[i + 1],
                                        preprocessing_op_or_punc::RIGHT_BRACKET);
                 suffixes.append({false, i + 1, has_bound});
                 i += 2;
@@ -689,12 +693,12 @@ class declarator_claims
         for (size_t k = suffixes.size(); k-- > 0;) {
             const suffix &x = suffixes[k];
             if (x.function) {
-                if (!apply_function(children[x.child].index(), type, d))
+                if (!apply_function(node[x.child].index(), type, d))
                     return false;
             } else if (x.has_bound) {
-                apply_array(&children[x.child], type, d);
+                apply_array(node[x.child], type, d);
             } else {
-                apply_array(nullptr, type, d);
+                apply_array({}, type, d);
             }
         }
         if (!has_head)
@@ -707,18 +711,17 @@ class declarator_claims
        is found as a declaration's is */
     bool type_of_type_id(node_index type_id, owned_buffer &type)
     {
-        const syntax_node &node = tree[type_id];
-        if (node.kind != syntax_kind::type_id &&
-            node.kind != syntax_kind::defining_type_id)
+        auto node = syntax(type_id);
+        if (!node.is(syntax_kind::type_id) &&
+            !node.is(syntax_kind::defining_type_id))
             return false;
-        if (!node.child_count || tree.children(type_id)[0].is_token())
+        if (!node.size() || node[0].is_token())
             return false;
         specifiers s;
         declared d;
-        if (!specified_type(tree.children(type_id)[0].index(), type, s))
+        if (!specified_type(node[0].index(), type, s))
             return false;
-        if (node.child_count > 1 &&
-            !declared_type(tree.children(type_id)[1], type, s, d))
+        if (node.size() > 1 && !declared_type(node[1], type, s, d))
             return false;
         return !s.placeholder;
     }
@@ -728,19 +731,19 @@ class declarator_claims
        declaration-seq that the declaration is or is in */
     void write_place(node_index anchor, node_index declaration)
     {
-        const syntax_node &d = tree[declaration];
-        token_index last = d.end_token - 1;
-        for (uint32_t i = 0; i < d.child_count; i++) {
-            syntax_child c = tree.children(declaration)[i];
+        auto d = syntax(declaration);
+        token_index last = d.end_token() - 1;
+        for (uint32_t i = 0; i < d.size(); i++) {
+            syntax_child c = d[i];
             if (is_kind(c, syntax_kind::function_body) &&
-                tree[c.index()].first_token > d.first_token)
-                last = tree[c.index()].first_token - 1;
+                syntax(c).first_token() > d.first_token())
+                last = syntax(c).first_token() - 1;
         }
-        const syntax_node &a = tree[anchor];
-        source_position end = tokens.position(a.end_token - 1);
-        uint32_t extent = tokens[a.end_token - 1].preprocessing.extent;
+        auto a = syntax(anchor);
+        source_position end = tokens.position(a.end_token() - 1);
+        uint32_t extent = tokens[a.end_token() - 1].preprocessing.extent;
         vbuffer_format_append(out, "%s\t%u-%u\t%u:%u\t", end.file_name,
-                              tokens.position(d.first_token).line,
+                              tokens.position(d.first_token()).line,
                               tokens.position(last).line, end.line,
                               end.column + extent);
     }
@@ -752,8 +755,8 @@ class declarator_claims
        encoding does not have */
     bool has_vendor_attribute(node_index declaration) const
     {
-        for (token_index t = tree[declaration].first_token;
-             t < tree[declaration].end_token; t++)
+        for (token_index t = syntax(declaration).first_token();
+             t < syntax(declaration).end_token(); t++)
             if (p.keyword_of(tokens[t]) == standard_keyword::extension)
                 return true;
         owned_array<node_index> work;
@@ -761,14 +764,14 @@ class declarator_claims
         while (!work.empty()) {
             node_index n = work.back();
             work.resize(work.size() - 1);
-            const syntax_node &s = tree[n];
-            if (s.kind == syntax_kind::attribute_scoped_token ||
-                s.kind == syntax_kind::attribute_using_prefix ||
-                !strncmp(syntax_kind_subclause(s.kind), "ext.", 4))
+            auto s = syntax(n);
+            if (s.is(syntax_kind::attribute_scoped_token) ||
+                s.is(syntax_kind::attribute_using_prefix) ||
+                !strncmp(syntax_kind_subclause(s.kind()), "ext.", 4))
                 return true;
-            for (uint32_t i = 0; i < s.child_count; i++)
-                if (!tree.children(n)[i].is_token())
-                    work.append(tree.children(n)[i].index());
+            for (uint32_t i = 0; i < s.size(); i++)
+                if (!syntax(n)[i].is_token())
+                    work.append(syntax(n)[i].index());
         }
         return false;
     }
@@ -823,24 +826,23 @@ class declarator_claims
        itself") */
     void declarators(node_index anchor, node_index declaration)
     {
-        const syntax_node &node = tree[declaration];
-        const syntax_child *children = tree.children(declaration);
+        auto node = syntax(declaration);
         uint32_t i = 0;
-        while (i < node.child_count && is_attribute(children[i]))
+        while (i < node.size() && is_attribute(node[i]))
             i++;
-        if (i == node.child_count ||
-            !is_kind(children[i], syntax_kind::decl_specifier_seq))
+        if (i == node.size() ||
+            !is_kind(node[i], syntax_kind::decl_specifier_seq))
             return;
-        node_index seq = children[i].index();
-        for (i++; i < node.child_count; i++) {
-            syntax_child c = children[i];
+        node_index seq = node[i].index();
+        for (i++; i < node.size(); i++) {
+            syntax_child c = node[i];
             if (is_kind(c, syntax_kind::function_body) ||
                 is_operator_token(c, preprocessing_op_or_punc::SEMICOLON))
                 break;
             if (is_kind(c, syntax_kind::init_declarator_list)) {
-                const syntax_node &list = tree[c.index()];
-                for (uint32_t k = 0; k < list.child_count; k++) {
-                    syntax_child item = tree.children(c.index())[k];
+                auto list = syntax(c);
+                for (uint32_t k = 0; k < list.size(); k++) {
+                    syntax_child item = syntax(c)[k];
                     if (is_operator_token(item,
                                           preprocessing_op_or_punc::COMMA))
                         continue;
@@ -856,9 +858,8 @@ class declarator_claims
        passes through */
     syntax_child declarator_of(syntax_child item) const
     {
-        if (is_kind(item, syntax_kind::init_declarator) &&
-            tree[item.index()].child_count)
-            return tree.children(item.index())[0];
+        if (is_kind(item, syntax_kind::init_declarator) && syntax(item).size())
+            return syntax(item)[0];
         return item;
     }
 
@@ -867,27 +868,22 @@ class declarator_claims
        defining-type-id denotes */
     void alias(node_index anchor, node_index declaration)
     {
-        const syntax_node &node = tree[declaration];
-        const syntax_child *children = tree.children(declaration);
-        if (node.child_count < 4 || !children[1].is_token())
+        auto node = syntax(declaration);
+        if (node.size() < 4 || !node[1].is_token())
             return;
         owned_buffer type;
         parameter_names.resize(0);
         mentioned_names.resize(0);
-        for (uint32_t i = 2; i < node.child_count; i++) {
-            if (!is_kind(children[i], syntax_kind::defining_type_id))
+        for (uint32_t i = 2; i < node.size(); i++) {
+            if (!is_kind(node[i], syntax_kind::defining_type_id))
                 continue;
-            const syntax_node &id = tree[children[i].index()];
+            auto id = node[i];
             specifiers s;
             declared d;
-            if (!id.child_count ||
-                tree.children(children[i].index())[0].is_token() ||
-                !specified_type(tree.children(children[i].index())[0].index(),
-                                type, s))
+            if (!id.size() || node[i][0].is_token() ||
+                !specified_type(node[i][0].index(), type, s))
                 return;
-            if (id.child_count > 1 &&
-                !declared_type(tree.children(children[i].index())[1], type, s,
-                               d))
+            if (id.size() > 1 && !declared_type(node[i][1], type, s, d))
                 return;
             if (s.placeholder || names_a_parameter())
                 return;
@@ -896,7 +892,7 @@ class declarator_claims
             if (d.last == outermost::array_of_unknown_bound)
                 vbuffer_string_append(out, "[]");
             vbuffer_append(out, "\t", 1);
-            tokens.spelling(children[1].index(), out);
+            tokens.spelling(node[1].token(), out);
             vbuffer_append(out, "\t", 1);
             vbuffer_append(out, type.data(), type.size());
             vbuffer_append(out, "\n", 1);
@@ -908,15 +904,15 @@ class declarator_claims
        declaration-seq they are in */
     void declarations(node_index n, node_index anchor, bool in_sequence)
     {
-        const syntax_node &s = tree[n];
+        auto s = syntax(n);
         if (in_sequence) {
             anchor = n;
-            for (token_index t = s.first_token; t < s.end_token; t++)
+            for (token_index t = s.first_token(); t < s.end_token(); t++)
                 if (tokens[t].preprocessing.expansion)
                     return;
         }
         if (anchor) {
-            switch (s.kind) {
+            switch (s.kind()) {
             case syntax_kind::simple_declaration:
             case syntax_kind::function_definition:
                 if (!has_vendor_attribute(n))
@@ -930,11 +926,11 @@ class declarator_claims
                 break;
             }
         }
-        for (uint32_t i = 0; i < s.child_count; i++) {
-            syntax_child c = tree.children(n)[i];
+        for (uint32_t i = 0; i < s.size(); i++) {
+            syntax_child c = s[i];
             if (!c.is_token())
                 declarations(c.index(), anchor,
-                             s.kind == syntax_kind::declaration_seq);
+                             s.is(syntax_kind::declaration_seq));
         }
     }
 };

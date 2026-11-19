@@ -387,51 +387,48 @@ bool itanium_mangler::constraint_expression(entity_index t, syntax_child c)
         text("E");
         return true;
     }
-    const syntax_tree &tree = analysis.syntax();
-    const syntax_node &node = tree[c.index()];
-    const syntax_child *parts = tree.children(c.index());
-    switch (node.kind) {
+    auto node = analysis.syntax(c);
+    switch (node.kind()) {
     case syntax_kind::constraint_logical_or_expression:
     case syntax_kind::constraint_logical_and_expression:
     case syntax_kind::logical_or_expression:
     case syntax_kind::logical_and_expression:
-        if (node.child_count != 3)
+        if (node.size() != 3)
             return false;
-        if (node.kind == syntax_kind::constraint_logical_or_expression ||
-            node.kind == syntax_kind::logical_or_expression)
+        if (node.kind() == syntax_kind::constraint_logical_or_expression ||
+            node.kind() == syntax_kind::logical_or_expression)
             text("oo");
         else
             text("aa");
-        return constraint_expression(t, parts[0]) &&
-               constraint_expression(t, parts[2]);
+        return constraint_expression(t, node[0]) &&
+               constraint_expression(t, node[2]);
     case syntax_kind::primary_expression:
-        if (node.child_count != 3 ||
-            !punctuator(parts[0], preprocessing_op_or_punc::LEFT_PARENTHESIS))
+        if (node.size() != 3 ||
+            !punctuator(node[0], preprocessing_op_or_punc::LEFT_PARENTHESIS))
             return false;
-        return constraint_expression(t, parts[1]);
+        return constraint_expression(t, node[1]);
     case syntax_kind::unary_expression:
-        if (node.child_count == 4 && parts[0].is_token() &&
-            punctuator(parts[1], preprocessing_op_or_punc::LEFT_PARENTHESIS)) {
+        if (node.size() == 4 && node[0].is_token() &&
+            punctuator(node[1], preprocessing_op_or_punc::LEFT_PARENTHESIS)) {
             /* sizeof ( T ), T a template parameter: st <type> */
             owned_buffer spelling;
-            analysis.token_spelling(parts[0].index(), spelling.get());
-            syntax_child a = parts[2];
-            while (!a.is_token() && tree[a.index()].child_count == 1 &&
-                   (tree[a.index()].kind == syntax_kind::type_id ||
-                    tree[a.index()].kind == syntax_kind::type_specifier_seq))
-                a = tree.children(a.index())[0];
+            analysis.token_spelling(node[0].token(), spelling.get());
+            SyntaxElement a = node[2];
+            while (a.is_node() && a.size() == 1 &&
+                   a.is(syntax_kind::type_id, syntax_kind::type_specifier_seq))
+                a = a[0];
             if (spelling.size() != 6 || memcmp(spelling.data(), "sizeof", 6) ||
                 !a.is_token())
                 return false;
-            entity_index pe = analysis.constraint_parameter(t, a.index());
+            entity_index pe = analysis.constraint_parameter(t, a.token());
             text("st");
             return pe && type(analysis.entity_table[pe].type);
         }
-        if (node.child_count != 2 ||
-            !punctuator(parts[0], preprocessing_op_or_punc::EXCLAMATION))
+        if (node.size() != 2 ||
+            !punctuator(node[0], preprocessing_op_or_punc::EXCLAMATION))
             return false;
         text("nt");
-        return constraint_expression(t, parts[1]);
+        return constraint_expression(t, node[1]);
     case syntax_kind::relational_expression:
     case syntax_kind::equality_expression: {
         static const struct {
@@ -445,47 +442,44 @@ bool itanium_mangler::constraint_expression(entity_index t, syntax_child c)
             {preprocessing_op_or_punc::LESS_EQUAL, "le"},
             {preprocessing_op_or_punc::GREATER_EQUAL, "ge"},
         };
-        if (node.child_count != 3)
+        if (node.size() != 3)
             return false;
         const char *code = nullptr;
         for (const auto &x : comparisons)
-            if (punctuator(parts[1], x.op))
+            if (punctuator(node[1], x.op))
                 code = x.code;
         if (!code)
             return false;
         text(code);
-        return constraint_expression(t, parts[0]) &&
-               constraint_expression(t, parts[2]);
+        return constraint_expression(t, node[0]) &&
+               constraint_expression(t, node[2]);
     }
     case syntax_kind::simple_template_id: {
-        if (!parts[0].is_token() ||
-            !analysis.constraint_concept(t, parts[0].index()))
+        if (!node[0].is_token() ||
+            !analysis.constraint_concept(t, node[0].token()))
             return false;
-        if (!source_name(analysis.token_identifier(parts[0].index())))
+        if (!source_name(analysis.token_identifier(node[0].token())))
             return false;
         text("I");
         /* (more than one argument: a template-argument-list) */
-        owned_array<syntax_child> written;
-        for (uint32_t i = 2; i + 1 < node.child_count; i++) {
-            if (!parts[i].is_token() && tree[parts[i].index()].kind ==
-                                            syntax_kind::template_argument_list)
-                for (uint32_t k = 0; k < tree[parts[i].index()].child_count;
-                     k++)
-                    written.append(tree.children(parts[i].index())[k]);
+        owned_array<SyntaxElement> written;
+        for (uint32_t i = 2; i + 1 < node.size(); i++) {
+            if (node[i].is(syntax_kind::template_argument_list))
+                for (auto x : node[i].elements())
+                    written.append(x);
             else
-                written.append(parts[i]);
+                written.append(node[i]);
         }
-        for (syntax_child a : written) {
-            if (punctuator(a, preprocessing_op_or_punc::COMMA))
+        for (SyntaxElement a : written) {
+            if (a.is(preprocessing_op_or_punc::COMMA))
                 continue;
             /* a type-id that is one template parameter's name */
-            while (!a.is_token() && tree[a.index()].child_count == 1 &&
-                   (tree[a.index()].kind == syntax_kind::type_id ||
-                    tree[a.index()].kind == syntax_kind::type_specifier_seq))
-                a = tree.children(a.index())[0];
+            while (a.is_node() && a.size() == 1 &&
+                   a.is(syntax_kind::type_id, syntax_kind::type_specifier_seq))
+                a = a[0];
             if (!a.is_token())
                 return false;
-            entity_index pe = analysis.constraint_parameter(t, a.index());
+            entity_index pe = analysis.constraint_parameter(t, a.token());
             if (!pe || !type(analysis.entity_table[pe].type))
                 return false;
         }
@@ -529,47 +523,43 @@ bool itanium_mangler::dependent_expression(syntax_child c)
         text("_");
         return true;
     }
-    const syntax_tree &tree = analysis.syntax();
-    const syntax_node &node = tree[c.index()];
-    const syntax_child *parts = tree.children(c.index());
-    if (node.kind != syntax_kind::postfix_expression || node.child_count < 3)
+    auto node = analysis.syntax(c);
+    if (node.kind() != syntax_kind::postfix_expression || node.size() < 3)
         return false;
-    bool arrow = punctuator(parts[1], preprocessing_op_or_punc::ARROW);
-    if (node.child_count == 3 &&
-        (arrow || punctuator(parts[1], preprocessing_op_or_punc::DOT)) &&
-        parts[2].is_token()) {
+    bool arrow = punctuator(node[1], preprocessing_op_or_punc::ARROW);
+    if (node.size() == 3 &&
+        (arrow || punctuator(node[1], preprocessing_op_or_punc::DOT)) &&
+        node[2].is_token()) {
         if (arrow)
             text("pt");
         else
             text("dt");
-        return dependent_expression(parts[0]) &&
-               source_name(analysis.token_identifier(parts[2].index()));
+        return dependent_expression(node[0]) &&
+               source_name(analysis.token_identifier(node[2].token()));
     }
-    if (!punctuator(parts[1], preprocessing_op_or_punc::LEFT_PARENTHESIS) ||
-        !punctuator(parts[node.child_count - 1],
+    if (!punctuator(node[1], preprocessing_op_or_punc::LEFT_PARENTHESIS) ||
+        !punctuator(node[node.size() - 1],
                     preprocessing_op_or_punc::RIGHT_PARENTHESIS) ||
-        node.child_count > 4)
+        node.size() > 4)
         return false;
     text("cl");
     /* a callee named by an identifier that is no function parameter: its
        <unresolved-name>, the <source-name> (the overload set is resolved
        per instantiation, [temp.dep]/2) */
-    syntax_child callee = parts[0];
+    SyntaxElement callee = node[0];
     if (callee.is_token() &&
         !analysis.function_parameter_position(encoding_template,
-                                              callee.index()) &&
-        analysis.token_identifier(callee.index())) {
-        if (!source_name(analysis.token_identifier(callee.index())))
+                                              callee.token()) &&
+        analysis.token_identifier(callee.token())) {
+        if (!source_name(analysis.token_identifier(callee.token())))
             return false;
     } else if (!dependent_expression(callee))
         return false;
-    if (node.child_count == 4) {
-        syntax_child a = parts[2];
-        if (!a.is_token() &&
-            tree[a.index()].kind == syntax_kind::initializer_list) {
-            for (uint32_t i = 0; i < tree[a.index()].child_count; i++) {
-                syntax_child x = tree.children(a.index())[i];
-                if (!punctuator(x, preprocessing_op_or_punc::COMMA) &&
+    if (node.size() == 4) {
+        auto a = node[2];
+        if (a.is(syntax_kind::initializer_list)) {
+            for (auto x : a.elements()) {
+                if (!x.is(preprocessing_op_or_punc::COMMA) &&
                     !dependent_expression(x))
                     return false;
             }
@@ -1913,10 +1903,10 @@ bool itanium_mangler::type(qualified_type t)
            the decltype-specifier's operand */
         node_index n =
             static_cast<node_index>(analysis.entity_table[r.entity].value);
-        const syntax_tree &tree = analysis.syntax();
+        auto operand = analysis.syntax(n);
         text("DT");
-        done = tree[n].child_count == 4 && encoding_template &&
-               dependent_expression(tree.children(n)[2]);
+        done = operand.size() == 4 && encoding_template &&
+               dependent_expression(operand[2]);
         text("E");
     } else if (r.kind == type_kind::class_type ||
                r.kind == type_kind::enumeration ||
