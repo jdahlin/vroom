@@ -324,13 +324,10 @@ uint64_t semantic_analysis::alignment_of_type(qualified_type t) const
 analysis_result semantic_analysis::size_of(SyntaxRef n, bool alignment,
                                            expression_meaning &m)
 {
-    auto node = n;
     qualified_type operand;
-    if (node.size() == 4 && node[2].is(syntax_kind::type_id)) {
-        analysis_result r = type_id(node[2], operand);
-        if (r != analysis_result::well_formed)
-            return r;
-    } else if (node.size() == 2 && !alignment) {
+    if (n.size() == 4 && n[2].is(syntax_kind::type_id)) {
+        VTRY(r, type_id(n[2], operand));
+    } else if (n.size() == 2 && !alignment) {
         /* [expr.sizeof]/3: "The lvalue-to-rvalue, array-to-pointer, and
            function-to-pointer standard conversions are not applied to the
            operand of sizeof." */
@@ -338,7 +335,7 @@ analysis_result semantic_analysis::size_of(SyntaxRef n, bool alignment,
         /* [expr.sizeof]/1: "The operand is either an expression, which is
            an unevaluated operand ([expr.prop])" */
         unevaluated++;
-        analysis_result r = expression(node[1], e);
+        analysis_result r = expression(n[1], e);
         unevaluated--;
         if (r != analysis_result::well_formed)
             return r;
@@ -347,16 +344,15 @@ analysis_result semantic_analysis::size_of(SyntaxRef n, bool alignment,
         if (e.bit_field_width)
             return not_supported(n, "class.bit");
         operand = e.type;
-    } else if (!alignment && node.size() == 5 &&
-               node[1].is(preprocessing_op_or_punc::ELLIPSIS) &&
-               node[3].is_token() &&
-               tokens[node[3].token()].kind == token_kind::identifier) {
+    } else if (!alignment && n.size() == 5 &&
+               n[1].is(preprocessing_op_or_punc::ELLIPSIS) && n[3].is_token() &&
+               n[3].is_identifier()) {
         /* [expr.sizeof]/4: "The identifier in a sizeof... expression shall
            name a pack.  The sizeof... operator yields the number of
            elements in the pack ([temp.variadic]).  A sizeof... expression
            is a pack expansion ([temp.variadic])."  An instantiation's pack;
            a template's own is not analysed */
-        entity_index pack = find_pack(tokens.identifier(node[3].token()));
+        entity_index pack = find_pack(tokens.identifier(n[3].token()));
         if (!pack)
             return not_supported(n, "expr.sizeof");
         m.type = qualified_type::make(
@@ -365,8 +361,7 @@ analysis_result semantic_analysis::size_of(SyntaxRef n, bool alignment,
         m.category = value_category::prvalue;
         m.evaluation = constness::constant;
         m.value = entity_table[pack].member_count;
-        m.node =
-            expression_node(semantic_kind::constant, m, node.first_token());
+        m.node = expression_node(semantic_kind::constant, m, n.first_token());
         return analysis_result::well_formed;
     } else {
         /* alignof of an expression (GCC's) */
@@ -402,7 +397,7 @@ analysis_result semantic_analysis::size_of(SyntaxRef n, bool alignment,
     m.evaluation = constness::constant;
     m.value = size;
     /* the operand is unevaluated ([expr.sizeof]/1): the constant alone */
-    m.node = expression_node(semantic_kind::constant, m, node.first_token());
+    m.node = expression_node(semantic_kind::constant, m, n.first_token());
     return analysis_result::well_formed;
 }
 
@@ -419,9 +414,7 @@ analysis_result semantic_analysis::increment(SyntaxRef n, SyntaxElement operand,
                                              bool decrement, bool postfix,
                                              expression_meaning &m)
 {
-    analysis_result r = expression(operand, m);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, expression(operand, m));
     return increment_of(n, n.first_token(), operand, decrement, postfix, m);
 }
 
@@ -509,10 +502,9 @@ analysis_result semantic_analysis::increment_of(SyntaxRef n, token_index at,
  */
 analysis_result semantic_analysis::unary(SyntaxRef n, expression_meaning &m)
 {
-    auto node = n;
-    if (node.size() < 2 || !node[0].is_token())
+    if (n.size() < 2 || !n[0].is_token())
         return not_supported(n, "expr.unary");
-    const token &op = tokens[node[0].token()];
+    const token &op = tokens[n[0].token()];
     if (op.kind == token_kind::keyword) {
         standard_keyword kw = p.keyword_of(op);
         if (kw == standard_keyword::sizeof_)
@@ -521,13 +513,13 @@ analysis_result semantic_analysis::unary(SyntaxRef n, expression_meaning &m)
             return size_of(n, true, m);
         return not_supported(n, "expr.unary");
     }
-    if (op.kind != token_kind::operator_or_punctuator || node.size() != 2)
+    if (op.kind != token_kind::operator_or_punctuator || n.size() != 2)
         return not_supported(n, "expr.unary");
     preprocessing_op_or_punc o =
         preprocessing_op_or_punc_primary(op.op_or_punc);
     if (o == preprocessing_op_or_punc::PLUS_PLUS ||
         o == preprocessing_op_or_punc::MINUS_MINUS)
-        return increment(n, node[1], o == preprocessing_op_or_punc::MINUS_MINUS,
+        return increment(n, n[1], o == preprocessing_op_or_punc::MINUS_MINUS,
                          false, m);
     /* [expr.unary.op]/4: "A pointer to member is only formed when an
        explicit & is used and its operand is a qualified-id not enclosed in
@@ -535,22 +527,22 @@ analysis_result semantic_analysis::unary(SyntaxRef n, expression_meaning &m)
     SyntaxRef outer_operand = member_pointer_operand;
     member_pointer_operand = 0;
     if (o == preprocessing_op_or_punc::AMPERSAND &&
-        node[1].is(syntax_kind::qualified_id))
-        member_pointer_operand = node[1].index();
-    analysis_result r = expression(node[1], m);
+        n[1].is(syntax_kind::qualified_id))
+        member_pointer_operand = n[1].index();
+    analysis_result r = expression(n[1], m);
     member_pointer_operand = outer_operand;
     if (r != analysis_result::well_formed)
         return r;
     if (m.node && semantics[m.node].kind == semantic_kind::member_pointer)
         return analysis_result::well_formed;
     const implementation_defined_behavior &b = tokens.files.behavior;
-    token_index at = node[0].token();
+    token_index at = n[0].token();
     if (o == preprocessing_op_or_punc::STAR)
-        return indirection_of(n, at, node[1], m);
+        return indirection_of(n, at, n[1], m);
     /* [over.unary]: an operand of class or enumeration type
        ([over.match.oper]/2) */
     bool handled = false;
-    r = unary_operator_function(n, at, o, false, node[1], m, handled);
+    r = unary_operator_function(n, at, o, false, n[1], m, handled);
     if (r != analysis_result::well_formed || handled)
         return r;
     switch (o) {
@@ -577,9 +569,7 @@ analysis_result semantic_analysis::unary(SyntaxRef n, expression_meaning &m)
     case preprocessing_op_or_punc::PLUS:
     case preprocessing_op_or_punc::MINUS:
     case preprocessing_op_or_punc::TILDE: {
-        r = operand_value(n, m);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY_SET(r, operand_value(n, m));
         /* [expr.unary.op]/7, /8, /10: "arithmetic or unscoped
            enumeration type", "integral or unscoped enumeration type" */
         promote_enumeration(m);
@@ -626,9 +616,7 @@ analysis_result semantic_analysis::unary(SyntaxRef n, expression_meaning &m)
            ! is contextually converted to bool; its value is true if the
            converted operand is false and false otherwise.  The type of the
            result is bool." */
-        r = contextual_bool(n, m);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY_SET(r, contextual_bool(n, m));
         m.value = !m.value;
         break;
     }
@@ -660,9 +648,7 @@ analysis_result semantic_analysis::indirection_of(SyntaxRef n, token_index at,
        and the result is an lvalue referring to the object or function
        to which the expression points.  If the type of the expression
        is "pointer to T", the type of the result is "T"." */
-    analysis_result r = operand_value(n, m);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, operand_value(n, m));
     if (!is_pointer(m.type)) {
         if (fundamental_of(m.type) == fundamental_type::none)
             return not_supported(n, "expr.unary.op");
@@ -777,25 +763,20 @@ semantic_analysis::member_pointer_constant(token_index t, entity_index e,
 analysis_result semantic_analysis::noexcept_operator(SyntaxRef n,
                                                      expression_meaning &m)
 {
-    auto node = n;
     /* before C++17 a function's exception specification is not part of
        its type, and not kept (parameter-declaration-clause.cpp) */
-    if (node.size() != 4 ||
-        !tokens.files.behavior.has(
-            language_feature::exception_specification_in_type))
+    if (n.size() != 4 || !tokens.files.behavior.has(
+                             language_feature::exception_specification_in_type))
         return not_supported(n, "expr.unary.noexcept");
     expression_meaning e;
     unevaluated++;
-    analysis_result r = expression(node[2], e);
+    analysis_result r = expression(n[2], e);
     unevaluated--;
     if (r != analysis_result::well_formed)
         return r;
     bool throwing = false;
-    r = potentially_throwing(n, e.node, throwing);
-    if (r != analysis_result::well_formed)
-        return r;
-    m = integer_constant(fundamental_type::bool_, !throwing,
-                         node.first_token());
+    VTRY_SET(r, potentially_throwing(n, e.node, throwing));
+    m = integer_constant(fundamental_type::bool_, !throwing, n.first_token());
     return analysis_result::well_formed;
 }
 

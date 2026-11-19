@@ -191,20 +191,16 @@ analysis_result semantic_analysis::new_type_id(NewTypeId n,
                                                qualified_type &type,
                                                SyntaxElement &bound)
 {
-    auto node = n;
-    if (!node.size() || node.size() > 2 ||
-        !node[0].is(syntax_kind::type_specifier_seq))
+    if (!n.type_specifier_seq() || n.size() > 2)
         return not_supported(n, "expr.new");
     specified s;
-    analysis_result r = decl_specifier_seq(node[0].index(), s, false);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, decl_specifier_seq(n.type_specifier_seq(), s, false));
     if (!s.has_type)
         return not_supported(n, "expr.new");
     type = s.type;
-    if (node.size() == 1)
+    if (n.size() == 1)
         return analysis_result::well_formed;
-    SyntaxElement d = node[1];
+    SyntaxElement d = n.new_declarator();
     for (;;) {
         if (d.is(syntax_kind::noptr_new_declarator)) {
             auto bounds = d;
@@ -274,29 +270,28 @@ analysis_result semantic_analysis::allocation_functions(
 analysis_result semantic_analysis::new_expression(NewExpression n,
                                                   expression_meaning &m)
 {
-    auto node = n;
-    token_index at = node.first_token();
-    uint32_t count = node.size();
+    token_index at = n.first_token();
+    uint32_t count = n.size();
     uint32_t i = 0;
     /* [expr.new]/11: "If the new-expression begins with a unary ::
        operator, the allocation function's name is looked up in the global
        scope." */
     bool global = false;
-    if (i < count && node[i].is(preprocessing_op_or_punc::COLON_COLON)) {
+    if (i < count && n[i].is(preprocessing_op_or_punc::COLON_COLON)) {
         global = true;
         i++;
     }
     i++; /* new */
     SyntaxElement placement{};
-    if (i < count && node[i].is(syntax_kind::new_placement))
-        placement = node[i++];
+    if (i < count && n[i].is(syntax_kind::new_placement))
+        placement = n[i++];
     qualified_type type;
     SyntaxElement bound{};
     analysis_result r = analysis_result::well_formed;
-    if (i < count && node[i].is(syntax_kind::new_type_id)) {
-        r = new_type_id(node[i++], type, bound);
-    } else if (i + 2 < count && node[i + 1].is(syntax_kind::type_id)) {
-        r = type_id(node[i + 1], type);
+    if (i < count && n[i].is(syntax_kind::new_type_id)) {
+        r = new_type_id(n[i++], type, bound);
+    } else if (i + 2 < count && n[i + 1].is(syntax_kind::type_id)) {
+        r = type_id(n[i + 1], type);
         i += 3;
     } else {
         return not_supported(n, "expr.new");
@@ -305,7 +300,7 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
         return r;
     SyntaxElement init{};
     if (i < count)
-        init = node[i++];
+        init = n[i++];
     if (i < count)
         return not_supported(n, "expr.new");
     /* [expr.new]/6: an array: "the new-expression yields a pointer to the
@@ -365,9 +360,7 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
             return not_supported(n, "expr.new");
         /* the class's operator delete[], as clang looks it up, ::new or
            not */
-        r = array_cookie(n, c, type, false, cookie);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY_SET(r, array_cookie(n, c, type, false, cookie));
     }
     bool elements =
         array && c &&
@@ -376,12 +369,8 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
         /* [expr.new]/9: "If the expression in a noptr-new-declarator is
            present, it is implicitly converted to std::size_t." */
         expression_meaning b;
-        r = expression(bound, b);
-        if (r != analysis_result::well_formed)
-            return r;
-        r = operand_value(n, b);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY_SET(r, expression(bound, b));
+        VTRY_SET(r, operand_value(n, b));
         const struct type &bt = type_table[b.type.unqualified()];
         bool integral = (bt.kind == type_kind::fundamental &&
                          fundamental_type_is_integral(bt.fundamental)) ||
@@ -396,9 +385,7 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
             fundamental_type_is_signed(tokens.files.behavior, bt.fundamental) &&
             static_cast<int64_t>(b.value) < 0)
             negative = true;
-        r = implicit_conversion(n, b, size_type, false);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY_SET(r, implicit_conversion(n, b, size_type, false));
         if (b.evaluation == constness::constant) {
             /* "The expression is erroneous if: the expression is of
                non-class type and its value before converting to std::size_t
@@ -457,12 +444,9 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
     owned_array<expression_meaning> arguments;
     arguments.append(requested);
     if (placement) {
-        auto p = placement;
-        if (p.size() != 3)
+        if (placement.size() != 3)
             return not_supported(placement.index(), "expr.new");
-        r = expression_list_meanings(placement[1], arguments);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY_SET(r, expression_list_meanings(placement[1], arguments));
     }
     allocation_function kind = allocation_function::new_;
     if (array)
@@ -472,9 +456,7 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
     entity_index scope = c;
     if (global)
         scope = 0;
-    r = allocation_functions(n, kind, scope, set, in_class);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY_SET(r, allocation_functions(n, kind, scope, set, in_class));
     owned_array<overload_candidate> candidates;
     for (entity_index f : set) {
         overload_candidate k;
@@ -484,10 +466,8 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
     }
     size_t chosen = 0;
     bool none_viable = false;
-    r = best_viable_function(n, candidates, nullptr, arguments, chosen,
-                             &none_viable);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY_SET(r, best_viable_function(n, candidates, nullptr, arguments, chosen,
+                                     &none_viable));
     if (none_viable) {
         if (allocation_names_spelled() != allocation_declarations_analysed ||
             tokens.files.behavior.microsoft_extensions)
@@ -502,9 +482,7 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
     }
     entity_index function = set[chosen];
     expression_meaning call;
-    r = call_function(n, at, function, arguments, call);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY_SET(r, call_function(n, at, function, arguments, call));
     /* the pointer to the object, which its initialization is of */
     m = expression_meaning();
     m.type = qualified_type::make(type_table.pointer_to(type), cv_none);
@@ -544,8 +522,7 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
     } else if (init.is(syntax_kind::braced_init_list)) {
         r = list_initialization(init, type, true, value);
     } else if (init.is(syntax_kind::new_initializer)) {
-        auto k = init;
-        if (k.size() == 2) {
+        if (init.size() == 2) {
             /* [dcl.init]/11: "An object whose initializer is an empty set
                of parentheses, i.e., (), shall be value-initialized."; /8:
                (8.3) "Otherwise, the object is zero-initialized." */
@@ -574,10 +551,11 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
                 zero.evaluation = constness::constant;
                 value.node = expression_node(semantic_kind::zero, zero, at);
             }
-        } else if (k.size() == 3 && k[1].is(syntax_kind::initializer_list)) {
+        } else if (init.size() == 3 &&
+                   init[1].is(syntax_kind::initializer_list)) {
             /* [dcl.init]/17.6.2: the constructor called with the
                expression-list as its arguments */
-            if (has_pack_expansion(k[1]))
+            if (has_pack_expansion(init[1]))
                 return not_supported(n, "temp.variadic");
             if (!c)
                 return ill_formed(n,
@@ -589,12 +567,10 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
             if (!entity_table[c].first_constructor)
                 return not_supported(n, "dcl.init");
             owned_array<expression_meaning> list;
-            r = expression_list_meanings(k[1], list);
-            if (r != analysis_result::well_formed)
-                return r;
+            VTRY_SET(r, expression_list_meanings(init[1], list));
             r = construct(n, type, list, object.node, value);
-        } else if (k.size() == 3) {
-            r = initialize_from(n, k[1], type, true, false, value);
+        } else if (init.size() == 3) {
+            r = initialize_from(n, init[1], type, true, false, value);
         } else {
             return not_supported(n, "expr.new");
         }

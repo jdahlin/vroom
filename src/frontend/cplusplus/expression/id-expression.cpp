@@ -565,9 +565,7 @@ analysis_result semantic_analysis::named_entity(token_index t, entity_index e,
     if (entity_table[e].kind == entity_kind::enumerator)
         return enumerator_value(t, e, m);
     if (contains_placeholder(entity_table[e].type)) {
-        analysis_result r = undeduced_use(t, e);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r, undeduced_use(t, e));
     }
     if (entity_table[e].kind == entity_kind::structured_binding)
         return structured_binding_use(t, e, m);
@@ -586,9 +584,7 @@ analysis_result semantic_analysis::named_entity(token_index t, entity_index e,
     /* [dcl.fct.def.delete]/2 (of an overload set: the function chosen,
        resolve_call) */
     if (x.kind == entity_kind::function && (!x.next_overload || chosen)) {
-        analysis_result r = deleted_use(t, e);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r, deleted_use(t, e));
     }
     if (x.nonstatic_member)
         return implicit_member_access(t, e, m);
@@ -681,15 +677,11 @@ analysis_result semantic_analysis::named_entity(token_index t, entity_index e,
 analysis_result semantic_analysis::qualified_id(QualifiedId n,
                                                 expression_meaning &m)
 {
-    auto node = n;
-    if (node.size() != 2 || !node[0].is(syntax_kind::nested_name_specifier) ||
-        !node[1].is_identifier())
+    if (n.size() != 2 || !n.nested_name_specifier() || !n.identifier())
         return not_supported(n, "expr.prim.id.qual");
     nominated_scope scope;
-    analysis_result r = nested_name_specifier(node[0], scope);
-    if (r != analysis_result::well_formed)
-        return r;
-    token_index t = node[1].token();
+    VTRY(r, nested_name_specifier(n.nested_name_specifier(), scope));
+    token_index t = n.identifier().token();
     uint32_t name = tokens.identifier(t);
     entity_index c = scope.entity;
     if (!is_namespace(c) && entity_table[c].kind == entity_kind::enumeration) {
@@ -762,14 +754,10 @@ analysis_result semantic_analysis::qualified_id(QualifiedId n,
         t != overloaded_callee)
         return not_supported(n, "over.over");
     if (x.kind == entity_kind::function && !x.next_overload) {
-        analysis_result r = deleted_use(t, e);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r, deleted_use(t, e));
     }
     if (contains_placeholder(x.type)) {
-        analysis_result r = undeduced_use(t, e);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r, undeduced_use(t, e));
     }
     if (x.nonstatic_member && n == member_pointer_operand)
         return member_pointer_constant(t, e, m);

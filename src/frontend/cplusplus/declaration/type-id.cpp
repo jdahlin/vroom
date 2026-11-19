@@ -55,29 +55,24 @@ node_index parser::type_id()
  */
 analysis_result semantic_analysis::type_id(TypeId n, qualified_type &type)
 {
-    auto node = n;
-    if (!node.size() || !node[0].is(syntax_kind::type_specifier_seq) ||
-        node.size() > 2)
+    if (!n.type_specifier_seq() || n.size() > 2)
         return not_supported(n, "dcl.name");
     /* [temp.variadic]/5: a template-argument's pack expansion, T ...
        (type_id_expansion: its pattern analysed) */
-    uint32_t count = node.size();
+    uint32_t count = n.size();
     bool expansion = type_id_expansion;
     type_id_expansion = false;
-    if (expansion && count == 2 &&
-        node[1].is(preprocessing_op_or_punc::ELLIPSIS))
+    if (expansion && count == 2 && n[1].is(preprocessing_op_or_punc::ELLIPSIS))
         count = 1;
     specified s;
-    analysis_result r = decl_specifier_seq(node[0].index(), s, false);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, decl_specifier_seq(n.type_specifier_seq(), s, false));
     if (!s.has_type)
         return not_supported(n, "dcl.name");
     type = s.type;
     if (count == 1)
         return analysis_result::well_formed;
     declarator_meaning m;
-    r = declarator(current_declaration, node[1], type, m);
+    r = declarator(current_declaration, n[1], type, m);
     if (r == analysis_result::well_formed && m.has_id)
         return not_supported(n, "dcl.name");
     return r;

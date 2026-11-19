@@ -99,6 +99,7 @@ inline bool syntax_kind_in(syntax_kind k, const uint64_t *bits)
 
 class SyntaxElement;
 class SyntaxElements;
+class SyntaxItems;
 
 class SyntaxRef
 {
@@ -109,19 +110,11 @@ class SyntaxRef
         if (!c.is_token())
             n = node_index(c.index());
     }
-    SyntaxRef(const SyntaxContext &, syntax_child c)
-    {
-        if (!c.is_token())
-            n = node_index(c.index());
-    }
     /* a node of the thread's tree (or none: 0) */
     SyntaxRef(node_index n) : n(n)
     {
     }
     SyntaxRef(decltype(nullptr))
-    {
-    }
-    SyntaxRef(const SyntaxContext &, node_index n) : n(n)
     {
     }
 
@@ -177,10 +170,6 @@ class SyntaxRef
         if (!n)
             return {};
         return syntax_child::node(n);
-    }
-    const SyntaxContext &context() const
-    {
-        return *syntax_ambient;
     }
     syntax_kind kind() const
     {
@@ -259,7 +248,7 @@ class SyntaxRef
     {
         if (!n || !T::accepts(node().kind))
             return {};
-        return T(*syntax_ambient, n);
+        return T(n);
     }
     /* the first child that is a node of view T, {} if none */
     template <class T> T first() const
@@ -268,7 +257,7 @@ class SyntaxRef
             syntax_child c = children()[i];
             if (!c.is_token() && c.index() &&
                 T::accepts(syntax_ambient->nodes[c.index()].kind))
-                return T(*syntax_ambient, node_index(c.index()));
+                return T(node_index(c.index()));
         }
         return {};
     }
@@ -285,10 +274,6 @@ class SyntaxElement : public SyntaxRef
 {
   public:
     SyntaxElement() = default;
-    SyntaxElement(const SyntaxContext &cx, syntax_child c)
-        : SyntaxRef(cx, c), c(c)
-    {
-    }
     /* a child of the thread's tree */
     SyntaxElement(syntax_child c) : SyntaxRef(c), c(c)
     {
@@ -349,6 +334,17 @@ class SyntaxElement : public SyntaxRef
         return c.index();
     }
     using SyntaxRef::is;
+    /* the items of a list: the children of this node if it is of kind
+       list, else this child alone; the commas between them left out:
+       for (auto a : x.items(syntax_kind::initializer_list)) */
+    SyntaxItems items(syntax_kind list) const;
+    /* the keyword this child is: none for a node or another token */
+    standard_keyword keyword() const
+    {
+        if (!c.is_token())
+            return standard_keyword::none;
+        return syntax_ambient->p.keyword_of(syntax_ambient->tokens[c.index()]);
+    }
     bool is_identifier() const
     {
         return c.is_token() &&
@@ -357,6 +353,13 @@ class SyntaxElement : public SyntaxRef
     bool is(preprocessing_op_or_punc op) const
     {
         return is_punctuator(c, op);
+    }
+    /* whether the child is one of the punctuators */
+    template <class... K>
+    bool is(preprocessing_op_or_punc op, preprocessing_op_or_punc op2,
+            K... more) const
+    {
+        return is(op) || is(op2, more...);
     }
     /* an attribute-specifier, its seq or an alignment-specifier */
     bool is_attribute() const
@@ -368,6 +371,12 @@ class SyntaxElement : public SyntaxRef
     bool is(standard_keyword k) const
     {
         return is_keyword(c, k);
+    }
+    /* whether the child is one of the keywords */
+    template <class... K>
+    bool is(standard_keyword k, standard_keyword k2, K... more) const
+    {
+        return is(k) || is(k2, more...);
     }
 
   private:
@@ -381,13 +390,12 @@ class SyntaxElements
     class iterator
     {
       public:
-        iterator(const SyntaxContext *cx, const syntax_child *at)
-            : cx(cx), at(at)
+        explicit iterator(const syntax_child *at) : at(at)
         {
         }
         SyntaxElement operator*() const
         {
-            return SyntaxElement(*cx, *at);
+            return SyntaxElement(*at);
         }
         iterator &operator++()
         {
@@ -400,35 +408,138 @@ class SyntaxElements
         }
 
       private:
-        const SyntaxContext *cx;
         const syntax_child *at;
     };
     SyntaxElements() = default;
-    SyntaxElements(const SyntaxContext &cx, const syntax_child *first,
-                   uint32_t count)
-        : cx(&cx), first(first), count(count)
+    SyntaxElements(const syntax_child *first, uint32_t count)
+        : first(first), count(count)
     {
     }
     iterator begin() const
     {
-        return iterator(cx, first);
+        return iterator(first);
     }
     iterator end() const
     {
-        return iterator(cx, first + count);
+        return iterator(first + count);
     }
 
   private:
-    const SyntaxContext *cx = nullptr;
     const syntax_child *first = nullptr;
     uint32_t count = 0;
 };
+
+/* the children of a list, or the one child that is no list, without the
+   commas that separate them (SyntaxElement::items) */
+class SyntaxItems
+{
+  public:
+    class iterator
+    {
+      public:
+        iterator(const syntax_child *at, const syntax_child *end)
+            : at(at), end(end)
+        {
+            skip();
+        }
+        SyntaxElement operator*() const
+        {
+            return SyntaxElement(*at);
+        }
+        iterator &operator++()
+        {
+            at++;
+            skip();
+            return *this;
+        }
+        bool operator!=(const iterator &o) const
+        {
+            return at != o.at;
+        }
+
+      private:
+        void skip()
+        {
+            while (at != end &&
+                   SyntaxElement(*at).is(preprocessing_op_or_punc::COMMA))
+                at++;
+        }
+        const syntax_child *at;
+        const syntax_child *end;
+    };
+    SyntaxItems() = default;
+    SyntaxItems(const syntax_child *first, uint32_t count)
+        : first(first), count(count)
+    {
+    }
+    explicit SyntaxItems(syntax_child one) : single(one), count(1)
+    {
+    }
+    iterator begin() const
+    {
+        const syntax_child *at = start();
+        return iterator(at, at + count);
+    }
+    iterator end() const
+    {
+        const syntax_child *at = start();
+        return iterator(at + count, at + count);
+    }
+
+  private:
+    const syntax_child *start() const
+    {
+        if (first)
+            return first;
+        return &single;
+    }
+    const syntax_child *first = nullptr;
+    syntax_child single = {};
+    uint32_t count = 0;
+};
+
+/* a node's children from the first-th on (after its leading attributes):
+   [] and size() count from there, as the grammar names the rest */
+class SyntaxTail
+{
+  public:
+    SyntaxTail(SyntaxRef node, uint32_t first) : node(node), first(first)
+    {
+    }
+    SyntaxElement operator[](uint32_t i) const
+    {
+        return node[first + i];
+    }
+    uint32_t size() const
+    {
+        if (node.size() < first)
+            return 0;
+        return node.size() - first;
+    }
+    SyntaxElements elements() const
+    {
+        return node.elements(first);
+    }
+
+  private:
+    SyntaxRef node;
+    uint32_t first;
+};
+
+inline SyntaxItems SyntaxElement::items(syntax_kind list) const
+{
+    if (!c)
+        return {};
+    if (is(list))
+        return SyntaxItems(children(), size());
+    return SyntaxItems(c);
+}
 
 inline SyntaxElement SyntaxRef::operator[](uint32_t i) const
 {
     if (i >= size())
         return {};
-    return SyntaxElement(*syntax_ambient, children()[i]);
+    return SyntaxElement(children()[i]);
 }
 
 inline SyntaxElement SyntaxRef::back() const
@@ -443,7 +554,7 @@ inline SyntaxElement SyntaxRef::token_of_kind(token_kind k) const
     for (uint32_t i = 0; i < size(); i++) {
         syntax_child c = children()[i];
         if (c.is_token() && syntax_ambient->tokens[c.index()].kind == k)
-            return SyntaxElement(*syntax_ambient, c);
+            return SyntaxElement(c);
     }
     return {};
 }
@@ -452,14 +563,14 @@ inline SyntaxElements SyntaxRef::elements() const
 {
     if (!n)
         return {};
-    return SyntaxElements(*syntax_ambient, children(), size());
+    return SyntaxElements(children(), size());
 }
 
 inline SyntaxElements SyntaxRef::elements(uint32_t first) const
 {
     if (!n || first >= size())
         return {};
-    return SyntaxElements(*syntax_ambient, children() + first, size() - first);
+    return SyntaxElements(children() + first, size() - first);
 }
 
 /* the node children of a node, each as a view of type T (tokens are
@@ -470,15 +581,14 @@ template <class T> class SyntaxRange
     class iterator
     {
       public:
-        iterator(const SyntaxContext *cx, const syntax_child *at,
-                 const syntax_child *end)
-            : cx(cx), at(at), end(end)
+        iterator(const syntax_child *at, const syntax_child *end)
+            : at(at), end(end)
         {
             skip();
         }
         T operator*() const
         {
-            return T(*cx, at->node());
+            return T(at->node());
         }
         iterator &operator++()
         {
@@ -497,30 +607,27 @@ template <class T> class SyntaxRange
             while (at != end && (at->is_token() || !at->index()))
                 at++;
         }
-        const SyntaxContext *cx;
         const syntax_child *at;
         const syntax_child *end;
     };
     SyntaxRange() = default;
-    SyntaxRange(const SyntaxContext &cx, const syntax_child *first,
-                uint32_t count)
-        : cx(&cx), first(first), count(count)
+    SyntaxRange(const syntax_child *first, uint32_t count)
+        : first(first), count(count)
     {
     }
     /* the one element c */
-    SyntaxRange(const SyntaxContext &cx, syntax_child c)
-        : cx(&cx), single(c), count(1)
+    explicit SyntaxRange(syntax_child c) : single(c), count(1)
     {
     }
     iterator begin() const
     {
         const syntax_child *at = start();
-        return iterator(cx, at, at + count);
+        return iterator(at, at + count);
     }
     iterator end() const
     {
         const syntax_child *at = start();
-        return iterator(cx, at + count, at + count);
+        return iterator(at + count, at + count);
     }
 
   private:
@@ -530,7 +637,6 @@ template <class T> class SyntaxRange
             return first;
         return &single;
     }
-    const SyntaxContext *cx = nullptr;
     const syntax_child *first = nullptr;
     syntax_child single = {};
     uint32_t count = 0;
@@ -578,18 +684,19 @@ auto bind_member(T *self, R (T::*member)(A))
  * so a case taking the sum is the visitor's default; a visitor without one
  * needs a case for every alternative, or it does not compile.
  */
-template <class View> struct SyntaxExtra : SyntaxRef {
+/* what every SyntaxExtra<View> has: SyntaxRef's constructors, a view made
+   from a node of any kind, and narrow(), which an empty view is made by when
+   the node is of another kind (with -DVCC_CHECK_SYNTAX_VIEWS, a bug at the
+   caller's line: a view is asked for where a node of its kind is known, and
+   x.kind_name() tests) */
+struct SyntaxExtraBase : SyntaxRef {
     using SyntaxRef::SyntaxRef;
-    SyntaxExtra() = default;
-    SyntaxExtra(const SyntaxRef &r) : SyntaxRef(r)
+    SyntaxExtraBase() = default;
+    SyntaxExtraBase(const SyntaxRef &r) : SyntaxRef(r)
     {
     }
 
   protected:
-    /* the view made from a node (or an element, or another view) that is
-       not of its kinds is empty; with -DVCC_CHECK_SYNTAX_VIEWS it is a
-       bug at the caller's line: a view is asked for where a node of its
-       kind is known, and x.kind_name() tests */
     void narrow(bool accepted, const char *file, int line)
     {
         if (accepted)
@@ -599,6 +706,10 @@ template <class View> struct SyntaxExtra : SyntaxRef {
 #endif
         n = 0;
     }
+};
+
+template <class View> struct SyntaxExtra : SyntaxExtraBase {
+    using SyntaxExtraBase::SyntaxExtraBase;
 };
 
 /*
@@ -614,21 +725,8 @@ template <class View> struct SyntaxExtra : SyntaxRef {
  * first pass over a member-specification, a body kept as its tokens
  * (unparsed).
  */
-template <> struct SyntaxExtra<FunctionBody> : SyntaxRef {
-    using SyntaxRef::SyntaxRef;
-    SyntaxExtra() = default;
-    SyntaxExtra(const SyntaxRef &r) : SyntaxRef(r)
-    {
-    }
-    void narrow(bool accepted, const char *file, int line)
-    {
-        if (accepted)
-            return;
-#ifdef VCC_CHECK_SYNTAX_VIEWS
-        vbug(file, line, "a node converted to a view of another kind");
-#endif
-        n = 0;
-    }
+template <> struct SyntaxExtra<FunctionBody> : SyntaxExtraBase {
+    using SyntaxExtraBase::SyntaxExtraBase;
     bool unparsed() const
     {
         return is(syntax_kind::function_body) && size() == 1 &&
@@ -683,21 +781,8 @@ template <> struct SyntaxExtra<FunctionBody> : SyntaxRef {
  *
  * ([ext:gnu_attributes] may come first too.)
  */
-template <> struct SyntaxExtra<FunctionDefinition> : SyntaxRef {
-    using SyntaxRef::SyntaxRef;
-    SyntaxExtra() = default;
-    SyntaxExtra(const SyntaxRef &r) : SyntaxRef(r)
-    {
-    }
-    void narrow(bool accepted, const char *file, int line)
-    {
-        if (accepted)
-            return;
-#ifdef VCC_CHECK_SYNTAX_VIEWS
-        vbug(file, line, "a node converted to a view of another kind");
-#endif
-        n = 0;
-    }
+template <> struct SyntaxExtra<FunctionDefinition> : SyntaxExtraBase {
+    using SyntaxExtraBase::SyntaxExtraBase;
     /* the declarator after the decl-specifier-seq ({} without one; a
        declarator that is only its identifier is that token) */
     SyntaxElement declarator() const
@@ -762,6 +847,238 @@ struct NoptrDeclaratorParts : SyntaxRef {
             id.is(syntax_kind::parameters_and_qualifiers))
             return {};
         return id;
+    }
+};
+
+/*
+ * [stmt.iter]/1:
+ *
+ *     iteration-statement:
+ *         while ( condition ) statement
+ *         do statement while ( expression ) ;
+ *         for ( init-statement condition_opt ; expression_opt ) statement
+ *         for ( init-statement_opt for-range-declaration : for-range-initializer ) statement
+ *
+ * (the init-statement ends with its own ;).  The grammar names each part
+ * but the kinds of the condition and the expression overlap, so the
+ * parts are named here by their position in each form.
+ */
+template <> struct SyntaxExtra<IterationStatement> : SyntaxExtraBase {
+    using SyntaxExtraBase::SyntaxExtraBase;
+    /* the keyword the statement begins with: while, do or for */
+    standard_keyword keyword() const
+    {
+        return (*this)[0].keyword();
+    }
+    /* the statement: the do's second child, else the last */
+    SyntaxElement body() const
+    {
+        if (keyword() == standard_keyword::do_)
+            return (*this)[1];
+        return back();
+    }
+    /* while ( condition ) statement */
+    SyntaxElement while_condition() const
+    {
+        return (*this)[2];
+    }
+    /* do statement while ( expression ) ; */
+    SyntaxElement do_expression() const
+    {
+        return (*this)[4];
+    }
+    /* for ( init-statement condition_opt ; expression_opt ) statement */
+    SyntaxElement for_init_statement() const
+    {
+        return (*this)[2];
+    }
+    SyntaxElement for_condition() const
+    {
+        auto c = (*this)[3];
+        if (c.is(preprocessing_op_or_punc::SEMICOLON))
+            return {};
+        return c;
+    }
+    SyntaxElement for_expression() const
+    {
+        auto c = (*this)[after_for_condition()];
+        if (c.is(preprocessing_op_or_punc::RIGHT_PARENTHESIS))
+            return {};
+        return c;
+    }
+    /* whether the children are the for's: the ; after the condition_opt,
+       then the expression_opt, the ) and the statement */
+    bool for_shaped() const
+    {
+        uint32_t i = 3;
+        if (!(*this)[i].is(preprocessing_op_or_punc::SEMICOLON))
+            i++;
+        if (!(*this)[i].is(preprocessing_op_or_punc::SEMICOLON))
+            return false;
+        i++;
+        if (i < size() &&
+            !(*this)[i].is(preprocessing_op_or_punc::RIGHT_PARENTHESIS))
+            i++;
+        return i + 2 == size();
+    }
+
+  private:
+    /* the index after the ; that ends the condition_opt */
+    uint32_t after_for_condition() const
+    {
+        uint32_t i = 3;
+        if (!(*this)[i].is(preprocessing_op_or_punc::SEMICOLON))
+            i++;
+        return i + 1;
+    }
+};
+
+/*
+ * [expr.prim.id.qual]/1:
+ *
+ *     nested-name-specifier:
+ *         ::
+ *         type-name ::
+ *         namespace-name ::
+ *         decltype-specifier ::
+ *         nested-name-specifier identifier ::
+ *         nested-name-specifier template_opt simple-template-id ::
+ *
+ * The parser makes one node of a leading :: and each name with the :: after
+ * it (the last one's may be missing in a node that is cut short).
+ */
+template <> struct SyntaxExtra<NestedNameSpecifier> : SyntaxExtraBase {
+    using SyntaxExtraBase::SyntaxExtraBase;
+    /* a name, whether a template keyword came before it (before a
+       simple-template-id), and whether the :: follows it */
+    struct Part {
+        SyntaxElement name;
+        bool has_template;
+        bool scoped;
+    };
+    class Parts
+    {
+      public:
+        class iterator
+        {
+          public:
+            iterator(SyntaxRef node, uint32_t at) : node(node), at(at)
+            {
+            }
+            Part operator*() const
+            {
+                uint32_t i = at;
+                bool has_template = template_before();
+                if (has_template)
+                    i++;
+                return {node[i], has_template,
+                        node[i + 1].is(preprocessing_op_or_punc::COLON_COLON)};
+            }
+            iterator &operator++()
+            {
+                at += 2;
+                if (template_before())
+                    at++;
+                return *this;
+            }
+            /* (compared with end(): whether the names are not all seen) */
+            bool operator!=(const iterator &) const
+            {
+                return at < node.size();
+            }
+
+          private:
+            bool template_before() const
+            {
+                return node[at].is(standard_keyword::template_) &&
+                       node[at + 1].is(syntax_kind::simple_template_id);
+            }
+            SyntaxRef node;
+            uint32_t at;
+        };
+        Parts(SyntaxRef node, uint32_t first) : node(node), first(first)
+        {
+        }
+        iterator begin() const
+        {
+            return iterator(node, first);
+        }
+        iterator end() const
+        {
+            return iterator(node, node.size());
+        }
+
+      private:
+        SyntaxRef node;
+        uint32_t first;
+    };
+    /* begins with the :: of the global namespace */
+    bool global() const
+    {
+        return size() && (*this)[0].is(preprocessing_op_or_punc::COLON_COLON);
+    }
+    /* the names, each with whether its :: follows */
+    Parts parts() const
+    {
+        if (global())
+            return Parts(*this, 1);
+        return Parts(*this, 0);
+    }
+};
+
+/*
+ * [over.oper.general]/1:
+ *
+ *     operator-function-id:
+ *         operator operator
+ *
+ * where the operator is a punctuator, new or delete (with [ ] after it for
+ * the array forms), or ( ) or [ ] (the second token of a pair is a child).
+ */
+template <> struct SyntaxExtra<OperatorFunctionId> : SyntaxExtraBase {
+    using SyntaxExtraBase::SyntaxExtraBase;
+    /* the operator keyword: the name's token */
+    SyntaxElement operator_keyword() const
+    {
+        return (*this)[0];
+    }
+    /* the operator: a punctuator, new or delete */
+    SyntaxElement symbol() const
+    {
+        return (*this)[1];
+    }
+    /* new[] and delete[] */
+    bool is_array_form() const
+    {
+        return size() == 4;
+    }
+};
+
+/*
+ * [over.literal]/1:
+ *
+ *     literal-operator-id:
+ *         operator string-literal identifier
+ *         operator user-defined-string-literal
+ */
+template <> struct SyntaxExtra<LiteralOperatorId> : SyntaxExtraBase {
+    using SyntaxExtraBase::SyntaxExtraBase;
+    SyntaxElement operator_keyword() const
+    {
+        return (*this)[0];
+    }
+    /* the string-literal (which has no characters), or the
+       user-defined-string-literal that has the suffix after its quotes */
+    SyntaxElement literal() const
+    {
+        return (*this)[1];
+    }
+    /* the suffix identifier of the first form ({} for the second) */
+    SyntaxElement suffix_identifier() const
+    {
+        if (size() != 3)
+            return {};
+        return (*this)[2];
     }
 };
 

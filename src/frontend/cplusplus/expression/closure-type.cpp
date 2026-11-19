@@ -37,9 +37,7 @@ analysis_result semantic_analysis::closure_class(entity_index c, SyntaxRef n,
     /* [class.mem]/7: complete, its members laid out ([abi:class-types]) */
     if (const char *rule = itanium_class_layout(*this, c))
         return not_supported(n, rule);
-    analysis_result r = implicit_special_members(c, n);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, implicit_special_members(c, n));
     /* the definitions are analysed as functions of their own: the
        enclosing function's state aside meanwhile (class_definition) */
     function_context enclosing_function =
@@ -145,9 +143,7 @@ analysis_result semantic_analysis::closure_conversion(entity_index c,
         a.evaluation = constness::not_constant;
         a.node = expression_node(semantic_kind::entity, a, at, p);
         initialized_value value;
-        analysis_result r = initialize_with(n, a, t, false, false, value);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r, initialize_with(n, a, t, false, false, value));
         arguments.append(value.node);
     }
     entity_index object = synthesized_variable(sf, entity_table[c].type, false);
@@ -185,10 +181,7 @@ analysis_result semantic_analysis::closure_conversion(entity_index c,
                                    result.node);
     } else {
         initialized_value value;
-        analysis_result r =
-            initialize_with(n, result, f.operand, false, false, value);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r, initialize_with(n, result, f.operand, false, false, value));
         statement =
             statement_node(semantic_kind::return_statement, at, value.node);
     }
@@ -210,9 +203,7 @@ analysis_result semantic_analysis::closure_conversion(entity_index c,
     named.entity = invoke;
     named.node = expression_node(semantic_kind::entity, named, at, invoke);
     initialized_value value;
-    analysis_result r = initialize_with(n, named, pointer, false, false, value);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, initialize_with(n, named, pointer, false, false, value));
     statement = statement_node(semantic_kind::return_statement, at, value.node);
     block = statement_node(semantic_kind::block, at);
     semantics.set_list(block, &statement, 1);

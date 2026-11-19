@@ -44,9 +44,7 @@ analysis_result semantic_analysis::clang_atomic_type(SyntaxRef n,
                                                      qualified_type &type)
 {
     qualified_type value;
-    analysis_result r = type_id(n[2], value);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, type_id(n[2], value));
     type_kind k = type_table[value.unqualified()].kind;
     if (value.cv() || k == type_kind::array || k == type_kind::function ||
         k == type_kind::atomic || k == type_kind::lvalue_reference ||

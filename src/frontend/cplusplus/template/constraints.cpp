@@ -33,27 +33,22 @@ semantic_analysis::concept_definition(SyntaxRef n, ConceptDefinition definition)
 {
     entity_index outer = current_scope;
     owned_array<SyntaxRef> parameters;
-    analysis_result r = template_head_parameters(n, parameters, true);
-    if (r != analysis_result::well_formed)
-        return r;
-    auto parts = definition;
-    if (parts.size() != 5 || !parts[1].is_token())
+    VTRY(r, template_head_parameters(n, parameters, true));
+    if (definition.size() != 5 || !definition[1].is_token())
         return not_supported(n, "temp.concept");
-    uint32_t name = tokens.identifier(parts[1].token());
+    uint32_t name = tokens.identifier(definition[1].token());
     if (entity_table.find(outer, name))
         return not_supported(n, "temp.concept");
     uint32_t index = 0, first = 0;
     entity_index scope = 0;
-    r = template_parameter_scope(n, parameters, outer, name, index, scope,
-                                 first);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY_SET(r, template_parameter_scope(n, parameters, outer, name, index,
+                                         scope, first));
     function_template record = new_template(
         name, outer, n, index, first, static_cast<uint32_t>(parameters.size()));
     entity_table[record.entity].defined = true;
-    if (parts[3].is_token())
+    if (definition[3].is_token())
         return not_supported(n, "temp.concept");
-    record.definition = parts[3].index();
+    record.definition = definition[3].index();
     record.is_concept = true;
     hold_template_name(record, name, outer);
     return analysis_result::well_formed;
@@ -89,9 +84,7 @@ analysis_result semantic_analysis::concept_id(SyntaxRef n, uint32_t ct,
             depends_on_template_parameter(a.type) || a.template_entity)
             return not_supported(n, "temp.constr");
     bool satisfied = false;
-    r = concept_satisfied(n, ct, arguments, satisfied);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY_SET(r, concept_satisfied(n, ct, arguments, satisfied));
     m = integer_constant(fundamental_type::bool_, satisfied, n.first_token());
     return analysis_result::well_formed;
 }
@@ -110,12 +103,11 @@ analysis_result semantic_analysis::concept_id(SyntaxRef n, uint32_t ct,
 analysis_result semantic_analysis::requires_expression(RequiresExpression n,
                                                        expression_meaning &m)
 {
-    auto parts = n;
-    if (parts.size() != 2 || !substituting)
+    if (n.size() != 2 || !substituting)
         return not_supported(n, "expr.prim.req");
     /* { requirement-seq }: the requirements between the braces, or the
        requirement-seq's */
-    auto requirements = parts[1];
+    auto requirements = n[1];
     uint32_t first = 1;
     uint32_t count = requirements.size() - 2;
     if (count == 1 && requirements[1].is(syntax_kind::requirement_seq)) {
@@ -142,8 +134,7 @@ analysis_result semantic_analysis::requires_expression(RequiresExpression n,
         if (depends_on_template_parameter(qualified_type::make(type, cv_none)))
             return not_supported(n, "expr.prim.req");
     }
-    m = integer_constant(fundamental_type::bool_, satisfied,
-                         parts.first_token());
+    m = integer_constant(fundamental_type::bool_, satisfied, n.first_token());
     return analysis_result::well_formed;
 }
 
@@ -203,33 +194,29 @@ analysis_result semantic_analysis::constraint_satisfied(SyntaxElement e,
     /* (a token is an atomic constraint: true) */
     SyntaxRef at = current_declaration;
     if (!e.is_token()) {
-        auto c = e;
-        at = c;
-        auto node = c;
+        at = e;
         /* [temp.constr.op]/2: "A conjunction is a constraint taking two
            operands.  To determine if a conjunction is satisfied, the
            satisfaction of the first operand is checked.  If that is not
            satisfied, the conjunction is not satisfied.  Otherwise, the
            conjunction is satisfied if and only if the second operand is
            satisfied."  /3, a disjunction, the same with "satisfied" */
-        bool conjunction =
-            node.is(syntax_kind::logical_and_expression) ||
-            node.is(syntax_kind::constraint_logical_and_expression);
-        bool disjunction =
-            node.is(syntax_kind::logical_or_expression) ||
-            node.is(syntax_kind::constraint_logical_or_expression);
-        if ((conjunction || disjunction) && node.size() == 3) {
+        bool conjunction = e.is(syntax_kind::logical_and_expression,
+                                syntax_kind::constraint_logical_and_expression);
+        bool disjunction = e.is(syntax_kind::logical_or_expression,
+                                syntax_kind::constraint_logical_or_expression);
+        if ((conjunction || disjunction) && e.size() == 3) {
             analysis_result r =
-                constraint_satisfied(node[0], scope, horizon, satisfied);
+                constraint_satisfied(e[0], scope, horizon, satisfied);
             if (r != analysis_result::well_formed || satisfied != conjunction)
                 return r;
-            return constraint_satisfied(node[2], scope, horizon, satisfied);
+            return constraint_satisfied(e[2], scope, horizon, satisfied);
         }
         /* [temp.constr.normal]/1.1: "The normal form of an expression (E)
            is the normal form of E." */
-        if (node.is(syntax_kind::primary_expression) && node.size() == 3 &&
-            node[0].is(preprocessing_op_or_punc::LEFT_PARENTHESIS))
-            return constraint_satisfied(node[1], scope, horizon, satisfied);
+        if (e.is(syntax_kind::primary_expression) && e.size() == 3 &&
+            e[0].is(preprocessing_op_or_punc::LEFT_PARENTHESIS))
+            return constraint_satisfied(e[1], scope, horizon, satisfied);
     }
     /* [temp.constr.atomic]/3: "To determine if an atomic constraint is
        satisfied, the parameter mapping and template arguments are first
@@ -325,12 +312,10 @@ bool semantic_analysis::template_head_constrained(SyntaxRef n)
 /* whether nodes a and b are the same tokens, spelled the same */
 bool semantic_analysis::same_tokens(SyntaxRef a, SyntaxRef b)
 {
-    auto p = a;
-    auto q = b;
-    if (p.end_token() - p.first_token() != q.end_token() - q.first_token())
+    if (a.end_token() - a.first_token() != b.end_token() - b.first_token())
         return false;
-    for (token_index i = 0; i < p.end_token() - p.first_token(); i++)
-        if (!same_token_spelling(p.first_token() + i, q.first_token() + i))
+    for (token_index i = 0; i < a.end_token() - a.first_token(); i++)
+        if (!same_token_spelling(a.first_token() + i, b.first_token() + i))
             return false;
     return true;
 }
@@ -493,9 +478,8 @@ analysis_result semantic_analysis::template_constraints_satisfied(
         if (parts != 1)
             r = template_id_arguments_in(x.constraint, ct, scope, arguments);
         if (r == analysis_result::well_formed)
-            r = concept_satisfied(x.constraint, ct, arguments, satisfied);
-        if (r != analysis_result::well_formed)
-            return r;
+            VTRY_SET(r,
+                     concept_satisfied(x.constraint, ct, arguments, satisfied));
     }
     if (!constraint || !satisfied)
         return analysis_result::well_formed;

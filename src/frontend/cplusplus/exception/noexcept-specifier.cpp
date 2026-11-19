@@ -123,12 +123,11 @@ analysis_result semantic_analysis::noexcept_specifier(NoexceptSpecifier n,
                                                       bool member,
                                                       bool &non_throwing)
 {
-    auto node = n;
     non_throwing = true;
-    if (node.size() == 1 || node.size() == 3)
+    if (n.size() == 1 || n.size() == 3)
         /* noexcept, throw ( ) */
         return analysis_result::well_formed;
-    if (node.size() != 4)
+    if (n.size() != 4)
         return not_supported(n, "except.spec");
     if (member)
         /* [class.mem]/6: a member function's noexcept-specifier is a
@@ -136,9 +135,7 @@ analysis_result semantic_analysis::noexcept_specifier(NoexceptSpecifier n,
            deferred yet */
         return not_supported(n, "except.spec");
     bool constant = false, value = false;
-    analysis_result r = bool_constant_expression(n, node[2], constant, value);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, bool_constant_expression(n, n[2], constant, value));
     if (!constant)
         return ill_formed(n,
                           "in a noexcept-specifier, the constant-expression "
@@ -196,24 +193,23 @@ analysis_result semantic_analysis::parameter_scope_noexcept(SyntaxRef n,
                                                             bool member,
                                                             bool &non_throwing)
 {
-    auto node = n;
     /* [class.mem]/6: a member function template's noexcept-specifier,
        is analysed per specialization (taken as value-dependent), whose class is
        complete by then ([temp.inst]/4) */
-    if (member && node.size() == 4 && in_member_template_declarator == 1) {
+    if (member && n.size() == 4 && in_member_template_declarator == 1) {
         non_throwing = false;
         dependent_exception_specifications.append(n);
         return analysis_result::well_formed;
     }
     if (member && in_member_template_declarator == 2)
         member = false;
-    if (node.size() != 4 || member)
+    if (n.size() != 4 || member)
         return noexcept_specifier(n, member, non_throwing);
     entity_index outer = current_scope;
     open_parameter_scope();
     analysis_result r = analysis_result::well_formed;
     if (!instantiating && !class_instantiating && !substituting &&
-        names_dependent_entity(node.first_token(), node.end_token()))
+        names_dependent_entity(n.first_token(), n.end_token()))
     /* [temp.dep.constexpr]: value-dependent in the template's own
            declaration; each specialization's declaration is analysed with
            the arguments, and the template's own type says potentially

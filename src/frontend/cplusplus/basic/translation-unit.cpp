@@ -685,10 +685,8 @@ analysis_result semantic_analysis::declare(SyntaxRef declaration,
             e.linkage_of_name == linkage::external &&
             tokens.files.behavior.microsoft_extensions) {
             /* Microsoft's extension: the name keeps its external linkage */
-            analysis_result r = extension_used(
-                diagnostic_id::sema_static_after_non_static, id, nullptr);
-            if (r != analysis_result::well_formed)
-                return r;
+            VTRY(r, extension_used(diagnostic_id::sema_static_after_non_static,
+                                   id, nullptr));
         } else if (implied == linkage::internal && !in_unnamed &&
                    e.linkage_of_name == linkage::external)
             return ill_formed_at_token(id,

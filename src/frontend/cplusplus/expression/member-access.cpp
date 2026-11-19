@@ -76,9 +76,7 @@ analysis_result semantic_analysis::this_object(token_index t,
     if (own)
         r = function_this(t, m);
     else
-        r = this_pointer(t, m);
-    if (r != analysis_result::well_formed)
-        return r;
+        VTRY_SET(r, this_pointer(t, m));
     m.type = type_table[m.type.unqualified()].operand;
     m.category = value_category::lvalue;
     m.evaluation = constness::not_constant;
@@ -102,9 +100,7 @@ analysis_result semantic_analysis::member_access(token_index at, entity_index e,
     if (entity_table[e].nonstatic_member && through) {
         /* [class.union.anon]/1: a member of an anonymous union, of its
            unnamed object */
-        analysis_result r = member_access(at, through, m);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r, member_access(at, through, m));
         object_class = type_table[m.type.unqualified()].entity;
     }
     if (aggregate_prvalue(m))
@@ -121,9 +117,7 @@ analysis_result semantic_analysis::member_access(token_index at, entity_index e,
     if (x.nonstatic_member && x.enclosing != object_class) {
         /* [class.derived]/1: a member of a base class, of the base class
            subobject */
-        analysis_result r = to_base(at, x.enclosing, m);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r, to_base(at, x.enclosing, m));
     }
     if (x.kind == entity_kind::variable && x.nonstatic_member) {
         /* [expr.ref]/6.2: "If E2 is a non-static data member and the type
@@ -187,9 +181,7 @@ analysis_result semantic_analysis::member_access(token_index at, entity_index e,
             return not_supported(current_declaration, "over.over");
         if (!x.next_overload) {
             /* [dcl.fct.def.delete]/2 */
-            analysis_result r = deleted_use(at, e);
-            if (r != analysis_result::well_formed)
-                return r;
+            VTRY(r, deleted_use(at, e));
         }
         if ((m.type.cv() & ~x.member_cv) && !x.next_overload)
             return ill_formed_at_token(at,
@@ -226,9 +218,7 @@ analysis_result semantic_analysis::member_access(token_index at, entity_index e,
         uint32_t object = m.node;
         constness object_evaluation = m.evaluation;
         expression_meaning result;
-        analysis_result r = named_entity(at, e, result);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r, named_entity(at, e, result));
         if (object_evaluation != constness::constant &&
             result.evaluation != constness::not_constant)
             result.evaluation = constness::unknown;
@@ -269,12 +259,8 @@ analysis_result semantic_analysis::implicit_member_access(token_index at,
         /* in a static member function, or unevaluated ([expr.prim.id]/2) */
         return not_supported(current_declaration, "expr.prim.id");
     expression_meaning object;
-    analysis_result r = this_object(at, object);
-    if (r != analysis_result::well_formed)
-        return r;
-    r = member_access(at, e, object);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, this_object(at, object));
+    VTRY_SET(r, member_access(at, e, object));
     m = object;
     return analysis_result::well_formed;
 }
@@ -292,19 +278,16 @@ analysis_result semantic_analysis::implicit_member_access(token_index at,
 analysis_result semantic_analysis::member_reference(SyntaxRef n,
                                                     expression_meaning &m)
 {
-    auto children = n;
-    bool arrow = children[1].is(preprocessing_op_or_punc::ARROW);
-    if (!children[2].is_identifier())
+    bool arrow = n[1].is(preprocessing_op_or_punc::ARROW);
+    if (!n[2].is_identifier())
         /* template, a qualified-id, a destructor's name, an operator
            function's */
         return not_supported(n, "expr.ref");
-    token_index name = children[2].token();
+    token_index name = n[2].token();
     /* (the call's callee name, which analysing the object expression's
        calls changes) */
     token_index callee = overloaded_callee;
-    analysis_result r = expression(children[0], m);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, expression(n[0], m));
     /* [over.ref]/1: "An expression x->m is interpreted as
        (x.operator->())->m for a class object x of type T if T::operator->()
        exists and if the operator is selected as the best match function by
@@ -316,18 +299,14 @@ analysis_result semantic_analysis::member_reference(SyntaxRef n,
             /* a chain of operator-> this long, or a cycle */
             return not_supported(n, "over.ref");
         bool handled = false;
-        r = unary_operator_function(n, children[1].token(),
-                                    preprocessing_op_or_punc::ARROW, false,
-                                    children[0], m, handled);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY_SET(r, unary_operator_function(n, n[1].token(),
+                                            preprocessing_op_or_punc::ARROW,
+                                            false, n[0], m, handled));
         if (!handled)
             break;
     }
     if (arrow) {
-        r = operand_value(n, m);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY_SET(r, operand_value(n, m));
         const struct type pointer = type_table[m.type.unqualified()];
         if (pointer.kind != type_kind::pointer ||
             type_table[pointer.operand.unqualified()].kind !=
@@ -344,8 +323,8 @@ analysis_result semantic_analysis::member_reference(SyntaxRef n,
         m.category = value_category::lvalue;
         if (m.evaluation != constness::not_constant)
             m.evaluation = constness::unknown;
-        m.node = expression_node(semantic_kind::indirection, m,
-                                 children.first_token(), m.node);
+        m.node = expression_node(semantic_kind::indirection, m, n.first_token(),
+                                 m.node);
     }
     const struct type object = type_table[m.type.unqualified()];
     if (object.kind != type_kind::class_type) {

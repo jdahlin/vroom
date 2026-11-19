@@ -86,17 +86,15 @@ node_index parser::typename_specifier()
 analysis_result semantic_analysis::typename_type(SyntaxRef n, type_index &type,
                                                  uint32_t &cv)
 {
-    auto node = n;
     type = 0;
     cv = 0;
     /* a type-requirement ([expr.prim.req.type]) is one with a ';' */
-    uint32_t count = node.size();
-    if (node.is(syntax_kind::type_requirement))
+    uint32_t count = n.size();
+    if (n.is(syntax_kind::type_requirement))
         count--;
-    if (count < 3 || count > 4 ||
-        !node[1].is(syntax_kind::nested_name_specifier))
+    if (count < 3 || count > 4 || !n[1].is(syntax_kind::nested_name_specifier))
         return not_supported(n, "temp.res");
-    SyntaxElement last = node[count - 1];
+    SyntaxElement last = n[count - 1];
     if (last.is(syntax_kind::simple_template_id)) {
         /* typename nested-name-specifier template_opt simple-template-id:
            [temp.names]/1's template of the class or namespace named (a
@@ -106,9 +104,7 @@ analysis_result semantic_analysis::typename_type(SyntaxRef n, type_index &type,
            is written; an instantiation looks the template up in the
            substituted class */
         nominated_scope scope;
-        analysis_result r = nested_name_specifier(node[1], scope, true);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r, nested_name_specifier(n[1], scope, true));
         if (scope.dependent) {
             type = dependent_written_type(n);
             return analysis_result::well_formed;
@@ -119,14 +115,12 @@ analysis_result semantic_analysis::typename_type(SyntaxRef n, type_index &type,
     }
     if (count != 3)
         return not_supported(n, "temp.res");
-    if (!node[2].is_identifier())
+    if (!n[2].is_identifier())
         return not_supported(n, "temp.res");
-    token_index t = node[2].token();
+    token_index t = n[2].token();
     uint32_t name = tokens.identifier(t);
     nominated_scope scope;
-    analysis_result r = nested_name_specifier(node[1], scope, true);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, nested_name_specifier(n[1], scope, true));
     if (scope.dependent) {
         type = dependent_member_type(scope.dependent, name);
         return analysis_result::well_formed;
@@ -142,9 +136,7 @@ analysis_result semantic_analysis::typename_type(SyntaxRef n, type_index &type,
                                    "namespace.qual");
     entity_index e = found.entity;
     if (!e && !found.unknown) {
-        analysis_result m = missing_member(t, scope.entity);
-        if (m != analysis_result::well_formed)
-            return m;
+        VTRY(m, missing_member(t, scope.entity));
     }
     return named_member_type(n, t, e, "temp.res", type, cv);
 }

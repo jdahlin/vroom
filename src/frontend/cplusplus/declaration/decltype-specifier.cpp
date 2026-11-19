@@ -17,15 +17,14 @@ namespace cplusplus
 bool semantic_analysis::names_entity(SyntaxElement operand) const
 {
     if (operand.is_token())
-        return tokens[operand.token()].kind == token_kind::identifier;
-    auto node = operand;
-    if (node.is(syntax_kind::qualified_id))
+        return operand.is_identifier();
+    if (operand.is(syntax_kind::qualified_id))
         return true;
-    if (!node.is(syntax_kind::postfix_expression) || node.size() != 3)
+    if (!operand.is(syntax_kind::postfix_expression) || operand.size() != 3)
         return false;
-    SyntaxElement op = node[1];
-    return op.is(preprocessing_op_or_punc::DOT) ||
-           op.is(preprocessing_op_or_punc::ARROW);
+    SyntaxElement op = operand[1];
+    return op.is(preprocessing_op_or_punc::DOT,
+                 preprocessing_op_or_punc::ARROW);
 }
 
 /*
@@ -94,13 +93,12 @@ bool semantic_analysis::decltype_of(const expression_meaning &m, bool named,
 analysis_result semantic_analysis::decltype_type(SyntaxRef n,
                                                  qualified_type &type)
 {
-    auto node = n;
-    if (node.size() != 4)
+    if (n.size() != 4)
         return not_supported(n, "dcl.type.decltype");
-    SyntaxElement operand = node[2];
+    SyntaxElement operand = n[2];
     /* an operand that names a template parameter (or a type that depends
        on one) is type-dependent ([temp.dep.expr]): not analysed */
-    if (names_dependent_entity(node.first_token(), node.end_token())) {
+    if (names_dependent_entity(n.first_token(), n.end_token())) {
         /* [temp.dep.type]/10.3: "denoted by decltype(expression), where
            expression is type-dependent" a dependent type, in a template's
            own declaration (an instantiation's names are bound to
@@ -158,16 +156,15 @@ bool semantic_analysis::names_dependent_entity(token_index first,
    same tokens */
 type_index semantic_analysis::dependent_written_type(SyntaxRef n)
 {
-    auto x = n;
     for (entity_index e : dependent_written_types) {
         auto y =
             SyntaxRef(node_index(static_cast<uint32_t>(entity_table[e].value)));
         bool same =
-            y.end_token() - y.first_token() == x.end_token() - x.first_token();
-        for (token_index i = 0; same && i < x.end_token() - x.first_token();
+            y.end_token() - y.first_token() == n.end_token() - n.first_token();
+        for (token_index i = 0; same && i < n.end_token() - n.first_token();
              i++)
             same =
-                same_token_spelling(x.first_token() + i, y.first_token() + i);
+                same_token_spelling(n.first_token() + i, y.first_token() + i);
         if (same)
             return entity_table[e].type.unqualified();
     }

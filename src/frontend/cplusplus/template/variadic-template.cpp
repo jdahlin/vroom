@@ -40,15 +40,14 @@ bool semantic_analysis::template_parameter_form(
     SyntaxRef p, template_parameter_parts &out) const
 {
     out = template_parameter_parts();
-    auto x = p;
-    if (!x.size())
+    if (!p.size())
         return false;
     /* [dcl.fct]/22: a parameter's decl-specifier-seq with a generic
        parameter type placeholder: an invented type template-parameter,
        its type-constraint the placeholder's (abbreviated_parameters) */
-    if (x.is(syntax_kind::decl_specifier_seq)) {
+    if (p.is(syntax_kind::decl_specifier_seq)) {
         out.type = true;
-        for (auto child : x.elements())
+        for (auto child : p.elements())
             if (child.is(syntax_kind::placeholder_type_specifier) &&
                 child[0].is(syntax_kind::type_constraint))
                 out.constraint = child[0].index();
@@ -57,52 +56,50 @@ bool semantic_analysis::template_parameter_form(
     uint32_t k = 1;
     out.type = p.is(syntax_kind::type_parameter);
     if (out.type) {
-        if (x[0].is(syntax_kind::type_constraint)) {
-            out.constraint = x[0].index();
-        } else if (!x[0].is_token()) {
-            if (!x[0].is(syntax_kind::template_head) || x.size() < 2 ||
-                !x[1].is_token())
+        if (p[0].is(syntax_kind::type_constraint)) {
+            out.constraint = p[0].index();
+        } else if (!p[0].is_token()) {
+            if (!p[0].is(syntax_kind::template_head) || p.size() < 2 ||
+                !p[1].is_token())
                 return false;
             out.template_template = true;
-            out.head = x[0].index();
+            out.head = p[0].index();
             k = 2;
         }
-    } else if (!x[0].is(syntax_kind::decl_specifier_seq)) {
+    } else if (!p[0].is(syntax_kind::decl_specifier_seq)) {
         return false;
     }
-    if (k < x.size() && x[k].is(preprocessing_op_or_punc::ELLIPSIS)) {
+    if (k < p.size() && p[k].is(preprocessing_op_or_punc::ELLIPSIS)) {
         out.pack = true;
         k++;
     }
-    if (k < x.size() && x[k].is_token() &&
-        tokens[x[k].token()].kind == token_kind::identifier) {
+    if (k < p.size() && p[k].is_token() && p[k].is_identifier()) {
         out.named = true;
-        out.id = x[k].token();
+        out.id = p[k].token();
         k++;
-    } else if (!out.type && !out.pack && k < x.size() &&
-               x[k].is(syntax_kind::noptr_declarator) && x[k].size() == 2 &&
-               x[k][0].is(preprocessing_op_or_punc::ELLIPSIS) &&
-               x[k][1].is_token() &&
-               tokens[x[k][1].token()].kind == token_kind::identifier) {
+    } else if (!out.type && !out.pack && k < p.size() &&
+               p[k].is(syntax_kind::noptr_declarator) && p[k].size() == 2 &&
+               p[k][0].is(preprocessing_op_or_punc::ELLIPSIS) &&
+               p[k][1].is_token() && p[k][1].is_identifier()) {
         /* [temp.param]/17: a non-type template parameter pack, int... N
            (the parser's declarator: the ellipsis, then the name) */
         out.pack = true;
         out.named = true;
-        out.id = x[k][1].token();
+        out.id = p[k][1].token();
         k++;
-    } else if (!out.type && k < x.size() && !x[k].is_token()) {
+    } else if (!out.type && k < p.size() && !p[k].is_token()) {
         out.has_declarator = true;
-        out.declarator = x[k];
-        out.id = declarator_id(x[k]);
+        out.declarator = p[k];
+        out.id = declarator_id(p[k]);
         out.named = out.id != 0;
         k++;
     }
-    if (k + 2 == x.size() && x[k].is(preprocessing_op_or_punc::EQUAL)) {
+    if (k + 2 == p.size() && p[k].is(preprocessing_op_or_punc::EQUAL)) {
         out.has_default = true;
-        out.default_argument = x[k + 1];
+        out.default_argument = p[k + 1];
         k += 2;
     }
-    return k == x.size();
+    return k == p.size();
 }
 
 bool semantic_analysis::template_head_list(
@@ -111,9 +108,9 @@ bool semantic_analysis::template_head_list(
     for (SyntaxElement c : head.elements()) {
         if (c.is_token())
             continue;
-        if (c.is(syntax_kind::type_parameter) ||
-            c.is(syntax_kind::parameter_declaration)) {
-            parameters.append(c.index());
+        if (c.is(syntax_kind::type_parameter,
+                 syntax_kind::parameter_declaration)) {
+            parameters.append(c);
             continue;
         }
         /* (its requires-clause: head_constraint) */
@@ -124,10 +121,10 @@ bool semantic_analysis::template_head_list(
         for (SyntaxElement p : c.elements()) {
             if (p.is_token())
                 continue;
-            if (!p.is(syntax_kind::type_parameter) &&
-                !p.is(syntax_kind::parameter_declaration))
+            if (!p.is(syntax_kind::type_parameter,
+                      syntax_kind::parameter_declaration))
                 return false;
-            parameters.append(p.index());
+            parameters.append(p);
         }
     }
     return true;
@@ -337,46 +334,45 @@ static void child_tokens(const syntax_tree &tree, syntax_child c,
  */
 analysis_result semantic_analysis::fold(SyntaxRef n, expression_meaning &m)
 {
-    auto node = n;
     SyntaxElement pattern = {}, init = {};
     bool right = false, has_init = false;
     token_index at = 0;
     auto ellipsis = [&](uint32_t i) {
-        return node[i].is(preprocessing_op_or_punc::ELLIPSIS);
+        return n[i].is(preprocessing_op_or_punc::ELLIPSIS);
     };
     uint32_t count = 0;
-    if (node.size() == 5 && ellipsis(3)) {
-        pattern = node[1];
-        at = node[2].token();
+    if (n.size() == 5 && ellipsis(3)) {
+        pattern = n[1];
+        at = n[2].token();
         right = true;
-    } else if (node.size() == 5 && ellipsis(1)) {
-        pattern = node[3];
-        at = node[2].token();
-    } else if (node.size() == 7 && ellipsis(3)) {
+    } else if (n.size() == 5 && ellipsis(1)) {
+        pattern = n[3];
+        at = n[2].token();
+    } else if (n.size() == 7 && ellipsis(3)) {
         token_index first = 0, end = 0;
         uint32_t left_count = 0, right_count = 0;
-        child_tokens(tree, node[1], first, end);
+        child_tokens(tree, n[1], first, end);
         bool in_left = expansion_count(first, end, left_count);
-        child_tokens(tree, node[5], first, end);
+        child_tokens(tree, n[5], first, end);
         bool in_right = expansion_count(first, end, right_count);
         if (in_left == in_right)
             return not_supported(n, "expr.prim.fold");
         has_init = true;
-        at = node[2].token();
+        at = n[2].token();
         if (in_left) {
-            pattern = node[1];
-            init = node[5];
+            pattern = n[1];
+            init = n[5];
             right = true;
         } else {
-            pattern = node[5];
-            init = node[1];
+            pattern = n[5];
+            init = n[1];
         }
     } else {
         return not_supported(n, "expr.prim.fold");
     }
     token_index first = 0, end = 0;
     child_tokens(tree, pattern, first, end);
-    if (!node[2].is_token() || !expansion_count(first, end, count))
+    if (!n[2].is_token() || !expansion_count(first, end, count))
         return not_supported(n, "expr.prim.fold");
     preprocessing_op_or_punc op =
         preprocessing_op_or_punc_primary(tokens[at].op_or_punc);
@@ -409,16 +405,12 @@ analysis_result semantic_analysis::fold(SyntaxRef n, expression_meaning &m)
     owned_array<expression_meaning> operands;
     for (uint32_t i = 0; i < count; i++) {
         expression_meaning e;
-        analysis_result r = expansion_element_expression(pattern, i, e);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r, expansion_element_expression(pattern, i, e));
         operands.append(e);
     }
     expression_meaning e;
     if (has_init) {
-        analysis_result r = expression(init, e);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r, expression(init, e));
     }
     for (const expression_meaning &x : operands) {
         type_kind k = type_table[x.type.unqualified()].kind;
@@ -446,7 +438,7 @@ analysis_result semantic_analysis::fold(SyntaxRef n, expression_meaning &m)
         m = integer_constant(fundamental_type::bool_,
                              op ==
                                  preprocessing_op_or_punc::AMPERSAND_AMPERSAND,
-                             node.first_token());
+                             n.first_token());
         return analysis_result::well_formed;
     }
     auto combine = [&](expression_meaning left, expression_meaning right,
@@ -482,9 +474,7 @@ analysis_result semantic_analysis::fold(SyntaxRef n, expression_meaning &m)
         }
         while (i-- > 0) {
             expression_meaning next;
-            analysis_result r = combine(operands[i], acc, next);
-            if (r != analysis_result::well_formed)
-                return r;
+            VTRY(r, combine(operands[i], acc, next));
             acc = next;
         }
     } else {
@@ -497,9 +487,7 @@ analysis_result semantic_analysis::fold(SyntaxRef n, expression_meaning &m)
         }
         for (; i < count; i++) {
             expression_meaning next;
-            analysis_result r = combine(acc, operands[i], next);
-            if (r != analysis_result::well_formed)
-                return r;
+            VTRY(r, combine(acc, operands[i], next));
             acc = next;
         }
     }

@@ -106,26 +106,23 @@ node_index parser::assignment_expression()
 analysis_result semantic_analysis::assignment(SyntaxRef n,
                                               expression_meaning &m)
 {
-    auto node = n;
-    if (node.size() != 3 || !node[1].is_token() ||
-        node[2].is(syntax_kind::braced_init_list))
+    if (n.size() != 3 || !n[1].is_token() ||
+        n[2].is(syntax_kind::braced_init_list))
         return not_supported(n, "expr.ass");
     preprocessing_op_or_punc op =
-        preprocessing_op_or_punc_primary(tokens[node[1].token()].op_or_punc);
+        preprocessing_op_or_punc_primary(tokens[n[1].token()].op_or_punc);
     expression_meaning left, right;
-    analysis_result r = expression(node[0], left);
+    analysis_result r = expression(n[0], left);
     /* [over.over]/1: "the left side of an assignment" */
     if (r == analysis_result::well_formed &&
         op == preprocessing_op_or_punc::EQUAL)
-        r = target_expression(node[2], left.type, right);
+        r = target_expression(n[2], left.type, right);
     else if (r == analysis_result::well_formed)
-        r = expression(node[2], right);
-    if (r != analysis_result::well_formed)
-        return r;
+        VTRY_SET(r, expression(n[2], right));
     /* [over.match.oper]/2: an operand of class or enumeration type */
     bool handled = false;
-    r = binary_operator_function(n, node[1].token(), op, node[0], left, node[2],
-                                 right, handled, m);
+    r = binary_operator_function(n, n[1].token(), op, n[0], left, n[2], right,
+                                 handled, m);
     if (r != analysis_result::well_formed || handled)
         return r;
     const struct type record = type_table[left.type.unqualified()];
@@ -144,9 +141,7 @@ analysis_result semantic_analysis::assignment(SyntaxRef n,
                           "the assignment operators require a modifiable "
                           "lvalue as their left operand",
                           "expr.ass");
-    r = operand_value(n, right);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY_SET(r, operand_value(n, right));
     qualified_type target =
         qualified_type::make(left.type.unqualified(), cv_none);
     /* E1 op= E2: the type E1 op E2 is computed in */
@@ -155,9 +150,7 @@ analysis_result semantic_analysis::assignment(SyntaxRef n,
         /* [expr.ass]/3: "If the right operand is an expression, it is
            implicitly converted to the cv-unqualified type of the left
            operand." */
-        r = implicit_conversion(n, right, target, false);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY_SET(r, implicit_conversion(n, right, target, false));
     } else {
         /* [expr.ass]/6: "The behavior of an expression of the form E1 op= E2
            is equivalent to E1 = E1 op E2 except that E1 is evaluated only
@@ -203,9 +196,7 @@ analysis_result semantic_analysis::assignment(SyntaxRef n,
                 r = arithmetic(n, arithmetic_op, value, right, result);
             computation = result.type;
             if (r == analysis_result::well_formed)
-                r = implicit_conversion(n, result, target, false);
-            if (r != analysis_result::well_formed)
-                return r;
+                VTRY_SET(r, implicit_conversion(n, result, target, false));
         }
     }
     uint32_t assigned = left.node;
@@ -213,7 +204,7 @@ analysis_result semantic_analysis::assignment(SyntaxRef n,
     m.evaluation = constness::not_constant;
     m.entity = 0;
     m.beyond_integral_constant = true;
-    m.node = expression_node(semantic_kind::assignment, m, node[1].token(),
+    m.node = expression_node(semantic_kind::assignment, m, n[1].token(),
                              assigned, right.node, static_cast<uint8_t>(op));
     semantics[m.node].computation = computation;
     return analysis_result::well_formed;
@@ -312,9 +303,7 @@ analysis_result semantic_analysis::class_assignment(SyntaxRef n,
     if (left.category != value_category::lvalue ||
         (left.type.cv() & cv_volatile))
         return not_supported(n, "class.copy.assign");
-    analysis_result r = operand_value(n, right);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, operand_value(n, right));
     uint32_t assigned = left.node;
     m = left;
     m.evaluation = constness::not_constant;

@@ -493,9 +493,7 @@ analysis_result semantic_analysis::comparison(SyntaxRef n,
     if (!equality && !(is_pointer(left.type) && is_pointer(right.type)))
         /* a relational comparison with a null pointer constant */
         return not_supported(n, "expr.rel");
-    analysis_result r = composite_pointer_type(n, left, right);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, composite_pointer_type(n, left, right));
     m.evaluation = combined_constness(left.evaluation, right.evaluation);
     if (fundamental_of(left.type) == fundamental_type::std_nullptr_t &&
         m.evaluation == constness::constant) {
@@ -532,23 +530,18 @@ analysis_result semantic_analysis::binary_built(analysis_result r,
  */
 analysis_result semantic_analysis::binary(SyntaxRef n, expression_meaning &m)
 {
-    auto node = n;
-    if (node.size() != 3 || !node[1].is_token())
+    if (n.size() != 3 || !n[1].is_token())
         return not_supported(n, "expr.compound");
-    const token &t = tokens[node[1].token()];
+    const token &t = tokens[n[1].token()];
     if (t.kind != token_kind::operator_or_punctuator)
         return not_supported(n, "expr.compound");
     preprocessing_op_or_punc op =
         preprocessing_op_or_punc_primary(t.op_or_punc);
-    token_index at = node[1].token();
+    token_index at = n[1].token();
     expression_meaning left, right;
-    analysis_result r = expression(node[0], left);
-    if (r != analysis_result::well_formed)
-        return r;
-    r = expression(node[2], right);
-    if (r != analysis_result::well_formed)
-        return r;
-    return binary_of(n, at, op, node[0], left, node[2], right, m);
+    VTRY(r, expression(n[0], left));
+    VTRY_SET(r, expression(n[2], right));
+    return binary_of(n, at, op, n[0], left, n[2], right, m);
 }
 
 analysis_result semantic_analysis::binary_of(SyntaxRef n, token_index at,
@@ -596,12 +589,8 @@ analysis_result semantic_analysis::builtin_binary(SyntaxRef n, token_index at,
            otherwise. ... the second operand is not evaluated if the first
            operand is false."  [expr.log.or]/1 likewise: "the second operand
            is not evaluated if the first operand evaluates to true." */
-        r = contextual_bool(n, left);
-        if (r != analysis_result::well_formed)
-            return r;
-        r = contextual_bool(n, right);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY_SET(r, contextual_bool(n, left));
+        VTRY_SET(r, contextual_bool(n, right));
         bool is_and = op == preprocessing_op_or_punc::AMPERSAND_AMPERSAND;
         m = expression_meaning();
         m.type = left.type;
@@ -625,9 +614,7 @@ analysis_result semantic_analysis::builtin_binary(SyntaxRef n, token_index at,
     }
     r = operand_value(n, left);
     if (r == analysis_result::well_formed)
-        r = operand_value(n, right);
-    if (r != analysis_result::well_formed)
-        return r;
+        VTRY_SET(r, operand_value(n, right));
     /* [expr.arith.conv]/1, [expr.add]/1, [expr.shift]/1: unscoped
        enumeration operands are promoted; two of one scoped enumeration
        type are compared ([expr.rel]/3, [expr.eq]/7) */
@@ -730,20 +717,17 @@ analysis_result semantic_analysis::builtin_binary(SyntaxRef n, token_index at,
 analysis_result semantic_analysis::conditional(SyntaxRef n,
                                                expression_meaning &m)
 {
-    auto node = n;
-    if (node.size() != 5)
+    if (n.size() != 5)
         /* GCC's a ?: b */
         return not_supported(n, "expr.cond");
     expression_meaning c, e2, e3;
-    analysis_result r = expression(node[0], c);
+    analysis_result r = expression(n[0], c);
     if (r == analysis_result::well_formed)
         r = contextual_bool(n, c);
     if (r == analysis_result::well_formed)
-        r = expression(node[2], e2);
+        r = expression(n[2], e2);
     if (r == analysis_result::well_formed)
-        r = expression(node[4], e3);
-    if (r != analysis_result::well_formed)
-        return r;
+        VTRY_SET(r, expression(n[4], e3));
     return conditional_operands(n, c, e2, e3, m);
 }
 
@@ -805,9 +789,7 @@ analysis_result semantic_analysis::conditional_operands(
        conversions are performed on the second and third operands." */
     r = operand_value(n, e2);
     if (r == analysis_result::well_formed)
-        r = operand_value(n, e3);
-    if (r != analysis_result::well_formed)
-        return r;
+        VTRY_SET(r, operand_value(n, e3));
     bool zero2 = e2.zero_literal, zero3 = e3.zero_literal;
     /* [expr.cond]/7.3: "The second and third operands have arithmetic or
        enumeration type; the usual arithmetic conversions are performed" */
@@ -833,9 +815,7 @@ analysis_result semantic_analysis::conditional_operands(
             !(is_pointer(e3.type) || zero3 ||
               fundamental_of(e3.type) == fundamental_type::std_nullptr_t))
             return not_supported(n, "expr.cond");
-        r = composite_pointer_type(n, e2, e3);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY_SET(r, composite_pointer_type(n, e2, e3));
     } else {
         if (fundamental_of(e2.type) == fundamental_type::none ||
             fundamental_of(e3.type) == fundamental_type::none)
@@ -875,29 +855,25 @@ analysis_result semantic_analysis::conditional_operands(
  */
 analysis_result semantic_analysis::comma(SyntaxRef n, expression_meaning &m)
 {
-    auto node = n;
     constness so_far = constness::constant;
     bool any = false;
-    for (uint32_t i = 0; i < node.size(); i++) {
-        if (node[i].is(preprocessing_op_or_punc::COMMA))
+    for (uint32_t i = 0; i < n.size(); i++) {
+        if (n[i].is(preprocessing_op_or_punc::COMMA))
             continue;
         expression_meaning e;
-        analysis_result r = expression(node[i], e);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r, expression(n[i], e));
         if (any) {
             /* [over.match.oper]/2: an operand of class or enumeration type;
                the left operand is the comma expression before ((a, b), c) */
             SyntaxElement left = {};
             if (i == 2)
-                left = node[0];
+                left = n[0];
             bool handled = false;
             expression_meaning result;
-            r = binary_operator_function(n, node[i - 1].token(),
-                                         preprocessing_op_or_punc::COMMA, left,
-                                         m, node[i], e, handled, result);
-            if (r != analysis_result::well_formed)
-                return r;
+            VTRY_SET(
+                r, binary_operator_function(n, n[i - 1].token(),
+                                            preprocessing_op_or_punc::COMMA,
+                                            left, m, n[i], e, handled, result));
             if (handled) {
                 so_far = combined_constness(so_far, m.evaluation);
                 m = result;
@@ -913,8 +889,8 @@ analysis_result semantic_analysis::comma(SyntaxRef n, expression_meaning &m)
         m = e;
         /* the left operand is evaluated first ([expr.comma]/1) */
         if (any)
-            m.node = expression_node(semantic_kind::comma, e,
-                                     first_token(node[i]), previous, e.node);
+            m.node = expression_node(semantic_kind::comma, e, first_token(n[i]),
+                                     previous, e.node);
         any = true;
     }
     if (!any)
@@ -930,7 +906,7 @@ analysis_result semantic_analysis::comma(SyntaxRef n, expression_meaning &m)
     m.beyond_integral_constant = true;
     m.zero_literal = false;
     m.string_literal = 0;
-    if (m.node && node.size() > 1)
+    if (m.node && n.size() > 1)
         semantics[m.node].evaluation = m.evaluation;
     return analysis_result::well_formed;
 }

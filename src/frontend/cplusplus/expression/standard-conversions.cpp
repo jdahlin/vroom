@@ -808,11 +808,8 @@ analysis_result semantic_analysis::implicit_conversion(SyntaxRef at,
             !target_pointee.cv()) {
             if (tokens.files.behavior.has(
                     language_feature::list_initialization)) {
-                analysis_result r =
-                    extension_used(diagnostic_id::sema_writable_string,
-                                   m.string_literal, nullptr);
-                if (r != analysis_result::well_formed)
-                    return r;
+                VTRY(r, extension_used(diagnostic_id::sema_writable_string,
+                                       m.string_literal, nullptr));
             }
             converts = true;
         }
@@ -888,17 +885,14 @@ analysis_result semantic_analysis::contextual_bool(SyntaxRef at,
         /* bool t(E): direct-initialization, by a conversion function
            ([dcl.init]/17.7) */
         bool converted = false;
-        r = conversion_function_call(
-            at, m,
-            qualified_type::make(
-                type_table.fundamental(fundamental_type::bool_), cv_none),
-            true, converted);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY_SET(r, conversion_function_call(
+                        at, m,
+                        qualified_type::make(
+                            type_table.fundamental(fundamental_type::bool_),
+                            cv_none),
+                        true, converted));
     }
-    r = operand_value(at, m);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY_SET(r, operand_value(at, m));
     return implicit_conversion(
         at, m,
         qualified_type::make(type_table.fundamental(fundamental_type::bool_),

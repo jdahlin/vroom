@@ -158,64 +158,51 @@ node_index parser::for_range_declaration()
 analysis_result semantic_analysis::iteration_statement(IterationStatement n,
                                                        uint32_t &built)
 {
-    auto node = n;
     standard_keyword k = leading_keyword(n);
     if (k == standard_keyword::none)
         return not_supported(n, "stmt.iter");
     entity_index outer = current_scope, statement_scope = 0;
     analysis_result result = analysis_result::well_formed;
     expression_meaning m;
-    token_index at = node[0].token();
+    token_index at = n[0].token();
     uint32_t body = 0, init = 0, step_node = 0;
     if (k == standard_keyword::do_) {
         /* do statement while ( expression ) ; */
-        if (node.size() != 7)
+        if (n.size() != 7)
             return not_supported(n, "stmt.do");
         function_state.loops++;
         function_state.breakable++;
-        result = substatement(node[1], 0, body);
+        result = substatement(n.body(), 0, body);
         function_state.loops--;
         function_state.breakable--;
         /* [stmt.do]/1: "The expression is contextually converted to bool;
            if that conversion is ill-formed, the program is ill-formed." */
-        analysis_result r = expression(node[4], m);
+        analysis_result r = expression(n.do_expression(), m);
         if (r == analysis_result::well_formed)
             r = contextual_bool(n, m);
         built = statement_node(semantic_kind::do_statement, at, body, m.node);
         return worse(result, r);
     }
     if (k == standard_keyword::while_) {
-        if (node.size() != 5)
+        if (n.size() != 5)
             return not_supported(n, "stmt.while");
-        if (node[2].is(syntax_kind::condition))
+        if (n.while_condition().is(syntax_kind::condition))
             statement_scope = open_scope(0, false);
-        result = condition(node[2], false, m);
+        result = condition(n.while_condition(), false, m);
     } else if (k == standard_keyword::for_) {
-        if (node.size() < 6)
+        if (n.size() < 6)
             return not_supported(n, "stmt.for");
-        for (uint32_t i = 0; i < node.size(); i++)
-            if (node[i].is(syntax_kind::for_range_declaration))
+        for (uint32_t i = 0; i < n.size(); i++)
+            if (n[i].is(syntax_kind::for_range_declaration))
                 return range_based_for(n, i, built);
         /* for ( init-statement condition_opt ; expression_opt ) statement:
            the init-statement ends with its own ; */
-        SyntaxElement init_syntax = node[2], cond, step;
-        bool has_cond = false, has_step = false;
-        uint32_t i = 3;
-        if (!node[i].is(preprocessing_op_or_punc::SEMICOLON)) {
-            cond = node[i++];
-            has_cond = true;
-        }
-        if (i >= node.size() ||
-            !node[i].is(preprocessing_op_or_punc::SEMICOLON))
+        if (!n.for_shaped())
             return not_supported(n, "stmt.for");
-        i++;
-        if (i < node.size() &&
-            !node[i].is(preprocessing_op_or_punc::RIGHT_PARENTHESIS)) {
-            step = node[i++];
-            has_step = true;
-        }
-        if (i + 2 != node.size())
-            return not_supported(n, "stmt.for");
+        SyntaxElement init_syntax = n.for_init_statement();
+        SyntaxElement cond = n.for_condition(), step = n.for_expression();
+        bool has_cond = static_cast<bool>(cond),
+             has_step = static_cast<bool>(step);
         if (!init_syntax.is(syntax_kind::expression_statement) ||
             (has_cond && cond.is(syntax_kind::condition)))
             statement_scope = open_scope(0, false);
@@ -235,8 +222,7 @@ analysis_result semantic_analysis::iteration_statement(IterationStatement n,
     }
     function_state.loops++;
     function_state.breakable++;
-    result = worse(result,
-                   substatement(node[node.size() - 1], statement_scope, body));
+    result = worse(result, substatement(n.body(), statement_scope, body));
     function_state.loops--;
     function_state.breakable--;
     current_scope = outer;
@@ -261,10 +247,7 @@ analysis_result semantic_analysis::exposition_variable(
     entity_table[v].automatic = true;
     initialized_value value;
     scoped_value<qualified_type> deduced(declaration_deduced, qualified_type());
-    analysis_result r =
-        deduced_initialization(n, m, named, false, false, v, type, value);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, deduced_initialization(n, m, named, false, false, v, type, value));
     entity_table[v].definition = value.node;
     declaration =
         statement_node(semantic_kind::declaration_statement, at, v, value.node);
@@ -332,9 +315,7 @@ analysis_result semantic_analysis::range_call(SyntaxRef n, token_index at,
             return r;
     }
     if (set.size() > 1) {
-        r = resolve_call(n, arguments, early, set, object, f);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY_SET(r, resolve_call(n, arguments, early, set, object, f));
         if (member)
             chosen = semantics[f.node].b;
     }
@@ -367,12 +348,11 @@ analysis_result semantic_analysis::range_based_for(SyntaxRef n,
                                                    uint32_t declaration,
                                                    uint32_t &built)
 {
-    auto node = n;
-    if (declaration + 5 != node.size())
+    if (declaration + 5 != n.size())
         return not_supported(n, "stmt.ranged");
-    SyntaxElement range_declaration = node[declaration];
-    SyntaxElement initializer = node[declaration + 2];
-    token_index at = node[declaration + 1].token();
+    SyntaxElement range_declaration = n[declaration];
+    SyntaxElement initializer = n[declaration + 2];
+    token_index at = n[declaration + 1].token();
     entity_index outer = current_scope;
     entity_index statement_scope = open_scope(0, false);
     owned_array<uint32_t> items;
@@ -382,7 +362,7 @@ analysis_result semantic_analysis::range_based_for(SyntaxRef n,
         bool claimable = declarations_claimable;
         declarations_claimable = false;
         uint32_t init = 0;
-        result = statement(node[2], init);
+        result = statement(n[2], init);
         declarations_claimable = claimable;
         if (result != analysis_result::well_formed) {
             current_scope = outer;
@@ -502,7 +482,7 @@ analysis_result semantic_analysis::range_based_for(SyntaxRef n,
     uint32_t body = 0;
     function_state.loops++;
     function_state.breakable++;
-    result = substatement(node[node.size() - 1], statement_scope, body);
+    result = substatement(n[n.size() - 1], statement_scope, body);
     function_state.loops--;
     function_state.breakable--;
     current_scope = outer;
@@ -511,7 +491,7 @@ analysis_result semantic_analysis::range_based_for(SyntaxRef n,
     semantics.set_list(loop_body, pair, 2);
     items.append(statement_node(semantic_kind::for_statement, at, 0,
                                 condition.node, step.node, loop_body));
-    built = statement_node(semantic_kind::block, first_token(node[0]));
+    built = statement_node(semantic_kind::block, first_token(n[0]));
     semantics.set_list(built, items.data(), items.size());
     return result;
 }
@@ -528,24 +508,21 @@ analysis_result semantic_analysis::for_range_declaration(
     SyntaxElement d, const expression_meaning &element, uint32_t &built)
 {
     SyntaxRef at = node_of(d);
-    auto node = at;
     /* the second form: a structured binding ([dcl.struct.bind]) */
-    bool binding = node.size() > 2 &&
-                   (node[1].is(preprocessing_op_or_punc::LEFT_BRACKET) ||
-                    node[1].is(preprocessing_op_or_punc::AMPERSAND) ||
-                    node[1].is(preprocessing_op_or_punc::AMPERSAND_AMPERSAND));
-    if ((node.size() != 2 && !binding) ||
-        !node[0].is(syntax_kind::decl_specifier_seq) ||
-        at.first_token() != first_token(node[0]))
+    bool binding = at.size() > 2 &&
+                   (at[1].is(preprocessing_op_or_punc::LEFT_BRACKET,
+                             preprocessing_op_or_punc::AMPERSAND,
+                             preprocessing_op_or_punc::AMPERSAND_AMPERSAND));
+    if ((at.size() != 2 && !binding) ||
+        !at[0].is(syntax_kind::decl_specifier_seq) ||
+        at.first_token() != first_token(at[0]))
         /* an attribute-specifier-seq */
         return not_supported(at, "stmt.ranged");
     specified s;
     placeholder_allowed = true;
     scoped_value<qualified_type> deduced(declaration_deduced, qualified_type());
     scoped_value<bool> group(placeholder_group, false);
-    analysis_result r = decl_specifier_seq(node[0].index(), s, false);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, decl_specifier_seq(at[0], s, false));
     /* [stmt.ranged]/2: "In the decl-specifier-seq of a for-range-declaration,
        each decl-specifier shall be either a type-specifier or constexpr.
        The decl-specifier-seq shall not define a class or enumeration." */
@@ -559,10 +536,9 @@ analysis_result semantic_analysis::for_range_declaration(
     {
         /* "The decl-specifier-seq shall not define a class or
            enumeration." */
-        auto seq = node[0];
+        auto seq = at[0];
         for (SyntaxElement c : seq.elements()) {
-            if (c.is(syntax_kind::class_specifier) ||
-                c.is(syntax_kind::enum_specifier))
+            if (c.is(syntax_kind::class_specifier, syntax_kind::enum_specifier))
                 return ill_formed(at,
                                   "the decl-specifier-seq shall not define a "
                                   "class or enumeration",
@@ -575,8 +551,8 @@ analysis_result semantic_analysis::for_range_declaration(
     if (binding)
         r = structured_binding_declaration(at, 1, s, &element);
     else
-        r = declare_with_initializer(at, node[1], SyntaxElement(), true, s,
-                                     false, &element);
+        r = declare_with_initializer(at, at[1], SyntaxElement(), true, s, false,
+                                     &element);
     declarations_claimable = claimable;
     if (r != analysis_result::well_formed) {
         block_variables.resize(first);

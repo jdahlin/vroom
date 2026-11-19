@@ -65,9 +65,7 @@ analysis_result semantic_analysis::throw_expression(ThrowExpression n,
     uint32_t operand_node = 0;
     if (n.size() > 1) {
         expression_meaning operand;
-        analysis_result r = expression(n[1], operand);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r, expression(n[1], operand));
         operand_node = operand.node;
     }
     m = expression_meaning();
