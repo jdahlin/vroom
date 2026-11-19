@@ -358,8 +358,10 @@ bool parser::at_decl_specifier(bool unknown_names)
     case standard_keyword::union_:
     case standard_keyword::enum_:
     case standard_keyword::typename_:
-    case standard_keyword::extension:
         return true;
+    case standard_keyword::extension:
+        /* a keyword that is a literal (__null) is an operand */
+        return peek().literal == literal_kind::none;
     default:
         break;
     }
@@ -552,8 +554,10 @@ node_index parser::decl_specifier_seq(decl_specifier_facts &facts,
             /* [ext:gnu_complex] a modifier of float and double, as signed
                is of int; what it combines with is analysis's */
             add_token();
-        } else if (k == standard_keyword::extension) {
-            /* an extension's keyword (P9) */
+        } else if (k == standard_keyword::extension &&
+                   peek().literal == literal_kind::none) {
+            /* an extension's keyword (P9); one that is a literal, __null,
+               is an operand, no decl-specifier */
             return beyond_this_step();
         } else if (at_identifier() ||
                    at(preprocessing_op_or_punc::COLON_COLON)) {
