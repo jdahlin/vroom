@@ -55,7 +55,7 @@ void semantic_analysis::collect_labels(SyntaxElement s)
 {
     if (s.is_token())
         return;
-    auto node = syntax(s);
+    auto node = s;
     if (node.is(syntax_kind::lambda_expression) ||
         node.is(syntax_kind::class_specifier))
         return;
@@ -82,7 +82,7 @@ void semantic_analysis::collect_labels(SyntaxElement s)
 analysis_result semantic_analysis::labeled_statement(LabeledStatement n,
                                                      uint32_t &built)
 {
-    auto node = syntax(n);
+    auto node = n;
     if (!node.size() || !node[0].is_token())
         return not_supported(n, "dcl.attr");
     token_index first = node[0].token();

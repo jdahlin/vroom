@@ -158,7 +158,7 @@ node_index parser::for_range_declaration()
 analysis_result semantic_analysis::iteration_statement(IterationStatement n,
                                                        uint32_t &built)
 {
-    auto node = syntax(n);
+    auto node = n;
     standard_keyword k = leading_keyword(n);
     if (k == standard_keyword::none)
         return not_supported(n, "stmt.iter");
@@ -216,8 +216,8 @@ analysis_result semantic_analysis::iteration_statement(IterationStatement n,
         }
         if (i + 2 != node.size())
             return not_supported(n, "stmt.for");
-        if (!syntax(init_syntax).is(syntax_kind::expression_statement) ||
-            (has_cond && syntax(cond).is(syntax_kind::condition)))
+        if (!init_syntax.is(syntax_kind::expression_statement) ||
+            (has_cond && cond.is(syntax_kind::condition)))
             statement_scope = open_scope(0, false);
         bool claimable = declarations_claimable;
         declarations_claimable = false;
@@ -397,7 +397,7 @@ analysis_result semantic_analysis::range_based_for(SyntaxRef n,
         current_scope = outer;
         return r;
     };
-    if (syntax(initializer).is(syntax_kind::braced_init_list))
+    if (initializer.is(syntax_kind::braced_init_list))
         /* auto && deduced from a braced-init-list: std::initializer_list
            ([dcl.type.auto.deduct]/4) */
         return failed(not_supported(n, "stmt.ranged"));

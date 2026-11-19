@@ -709,7 +709,7 @@ analysis_result semantic_analysis::nested_name_specifier(NestedNameSpecifier n,
                                                          nominated_scope &scope,
                                                          bool dependent_allowed)
 {
-    auto node = syntax(n);
+    auto node = n;
     uint32_t i = 0;
     bool qualified = false;
     scope = nominated_scope();

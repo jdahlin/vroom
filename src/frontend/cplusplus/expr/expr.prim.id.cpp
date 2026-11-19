@@ -681,7 +681,7 @@ analysis_result semantic_analysis::named_entity(token_index t, entity_index e,
 analysis_result semantic_analysis::qualified_id(QualifiedId n,
                                                 expression_meaning &m)
 {
-    auto node = syntax(n);
+    auto node = n;
     if (node.size() != 2 || !node[0].is(syntax_kind::nested_name_specifier) ||
         !node[1].is_identifier())
         return not_supported(n, "expr.prim.id.qual");

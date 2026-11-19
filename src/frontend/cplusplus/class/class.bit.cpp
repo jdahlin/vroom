@@ -38,7 +38,7 @@ analysis_result semantic_analysis::member_bit_field(entity_index c,
                                                     const specified &s,
                                                     uint8_t access)
 {
-    auto node = syntax(d);
+    auto node = d;
     token_index id = 0;
     uint32_t k = 0;
     if (k < node.size() && node[k].is_token() &&

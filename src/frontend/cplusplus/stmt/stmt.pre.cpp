@@ -490,7 +490,7 @@ analysis_result semantic_analysis::statement(SyntaxElement s, uint32_t &built)
             hold_names(d);
         return r;
     };
-    auto view = syntax(s).statement();
+    auto view = s.statement();
     if (!view)
         /* a node the grammar does not place in a statement */
         return not_supported(s.index());
@@ -542,18 +542,18 @@ analysis_result semantic_analysis::attributed_statement(Statement n,
                                                         uint32_t &built)
 {
     /* the attribute-specifiers, then the statement */
-    auto node = syntax(n);
+    auto node = n;
     if (node.size() < 2)
         return not_supported(n, "stmt.pre");
     SyntaxElement inner = node[node.size() - 1];
-    if (syntax(inner).is(syntax_kind::simple_declaration))
+    if (inner.is(syntax_kind::simple_declaration))
         return not_supported(n, "dcl.attr");
     for (uint32_t i = 0; i + 1 < node.size(); i++) {
         SyntaxElement c = node[i];
-        if (!syntax(c).is(syntax_kind::attribute_specifier) &&
-            !syntax(c).is(syntax_kind::attribute_specifier_seq))
+        if (!c.is(syntax_kind::attribute_specifier) &&
+            !c.is(syntax_kind::attribute_specifier_seq))
             return not_supported(n, "dcl.attr");
-        auto a = syntax(c);
+        auto a = c;
         for (token_index t = a.first_token(); t < a.end_token(); t++) {
             if (tokens[t].kind == token_kind::operator_or_punctuator)
                 continue;
@@ -585,9 +585,9 @@ analysis_result semantic_analysis::substatement(SyntaxElement s,
                                                 entity_index conflicts,
                                                 uint32_t &built)
 {
-    if (syntax(s).is(syntax_kind::compound_statement))
-        return compound_statement(syntax(s), conflicts, built);
-    if (!syntax(s).is(syntax_kind::simple_declaration))
+    if (s.is(syntax_kind::compound_statement))
+        return compound_statement(s, conflicts, built);
+    if (!s.is(syntax_kind::simple_declaration))
         return statement(s, built);
     entity_index outer = current_scope;
     bool claimable = declarations_claimable;

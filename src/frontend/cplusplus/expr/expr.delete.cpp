@@ -54,7 +54,7 @@ node_index parser::delete_expression()
 analysis_result semantic_analysis::delete_expression(DeleteExpression n,
                                                      expression_meaning &m)
 {
-    auto node = syntax(n);
+    auto node = n;
     token_index at = node.first_token();
     uint32_t count = node.size();
     uint32_t i = 0;

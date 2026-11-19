@@ -218,7 +218,7 @@ uint32_t semantic_analysis::allocation_function_name(allocation_function kind)
 analysis_result semantic_analysis::operator_function_id(OperatorFunctionId id,
                                                         declarator_meaning &m)
 {
-    auto node = syntax(id);
+    auto node = id;
     operators_held = true;
     if ((node.size() == 2 || node.size() == 4) && node[1].is_token() &&
         tokens[node[1].token()].kind == token_kind::keyword &&

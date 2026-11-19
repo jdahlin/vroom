@@ -97,7 +97,7 @@ struct statement_parts {
 analysis_result semantic_analysis::selection_statement(SelectionStatement n,
                                                        uint32_t &built)
 {
-    auto node = syntax(n);
+    auto node = n;
     if (node.size() < 5 || !node[0].is_token() ||
         !node[1].is(preprocessing_op_or_punc::LEFT_PARENTHESIS))
         /* if constexpr, if consteval */

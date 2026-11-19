@@ -145,8 +145,8 @@ SyntaxElement semantic_analysis::head_constraint(SyntaxRef n) const
         return SyntaxElement();
     auto head = n[0];
     for (SyntaxElement c : head.elements()) {
-        if (syntax(c).is(syntax_kind::requires_clause) && syntax(c).size() == 2)
-            return syntax(c)[1];
+        if (c.is(syntax_kind::requires_clause) && c.size() == 2)
+            return c[1];
     }
     return SyntaxElement();
 }
@@ -161,8 +161,8 @@ SyntaxElement semantic_analysis::trailing_constraint(SyntaxRef n) const
     if (!d.is(syntax_kind::function_definition))
         return SyntaxElement();
     for (SyntaxElement c : d.elements()) {
-        if (syntax(c).is(syntax_kind::requires_clause) && syntax(c).size() == 2)
-            return syntax(c)[1];
+        if (c.is(syntax_kind::requires_clause) && c.size() == 2)
+            return c[1];
     }
     return SyntaxElement();
 }
@@ -1094,9 +1094,9 @@ semantic_analysis::variable_template_definition(SyntaxRef n,
         type_table[type.unqualified()].kind == type_kind::none)
         return not_supported(n, "temp.pre");
     for (SyntaxElement k : parts[skip].elements()) {
-        if (syntax(k).is(syntax_kind::class_specifier) ||
-            syntax(k).is(syntax_kind::elaborated_type_specifier) ||
-            syntax(k).is(syntax_kind::enum_specifier))
+        if (k.is(syntax_kind::class_specifier) ||
+            k.is(syntax_kind::elaborated_type_specifier) ||
+            k.is(syntax_kind::enum_specifier))
             return not_supported(n, "temp.pre");
     }
     uint32_t name = tokens.identifier(m.id);
@@ -1557,9 +1557,9 @@ bool semantic_analysis::expansion_list(SyntaxRef list,
                                        owned_array<bool> &expansion) const
 {
     for (SyntaxElement a : list.elements()) {
-        if (syntax(a).is(preprocessing_op_or_punc::COMMA))
+        if (a.is(preprocessing_op_or_punc::COMMA))
             continue;
-        if (syntax(a).is(preprocessing_op_or_punc::ELLIPSIS)) {
+        if (a.is(preprocessing_op_or_punc::ELLIPSIS)) {
             if (written.empty() || expansion.back())
                 return false;
             expansion.back() = true;
@@ -1610,7 +1610,7 @@ semantic_analysis::class_template_definition(SyntaxRef n, SyntaxRef specifier)
     auto head = spec[0];
     SyntaxElement head_name = class_head_name(head);
     bool specialization =
-        head_name && syntax(head_name).is(syntax_kind::simple_template_id);
+        head_name && head_name.is(syntax_kind::simple_template_id);
     analysis_result r = template_head_parameters(
         n, parameters, true, true, specialization, specialization);
     if (r != analysis_result::well_formed)
@@ -2239,7 +2239,7 @@ analysis_result semantic_analysis::template_id_arguments(
                 token_index first = first_token(a);
                 token_index end = first + 1;
                 if (!a.is_token())
-                    end = syntax(a).end_token();
+                    end = a.end_token();
                 if (end > first + 1 && token_element(end - 1).is(
                                            preprocessing_op_or_punc::ELLIPSIS))
                     end--;

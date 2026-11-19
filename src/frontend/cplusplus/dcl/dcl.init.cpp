@@ -622,7 +622,7 @@ analysis_result semantic_analysis::initialize_from(node_index at,
                                                    bool direct, bool list,
                                                    initialized_value &result)
 {
-    if (syntax(clause).is(syntax_kind::braced_init_list))
+    if (clause.is(syntax_kind::braced_init_list))
         return list_initialization(syntax(clause.index()), type, direct,
                                    result);
     const struct type target = type_table[type.unqualified()];
@@ -879,9 +879,9 @@ analysis_result semantic_analysis::list_initialization_of(
         if (clauses.size() == 1 && !clauses[0].is_token() &&
             character_type(fundamental_of(target.operand))) {
             SyntaxElement inner = clauses[0];
-            while (syntax(inner).is(syntax_kind::primary_expression) &&
-                   syntax(inner).size() == 3)
-                inner = syntax(inner)[1];
+            while (inner.is(syntax_kind::primary_expression) &&
+                   inner.size() == 3)
+                inner = inner[1];
             if (is_string_literal(tokens, inner))
                 return not_supported(list, "dcl.init.string");
         }
@@ -1380,7 +1380,7 @@ analysis_result semantic_analysis::aggregate_element(
     /* a copy: analysing the clause adds types, which may move
        type_table's */
     const struct type record = type_table[element.unqualified()];
-    bool braced = syntax(clause).is(syntax_kind::braced_init_list);
+    bool braced = clause.is(syntax_kind::braced_init_list);
     bool subaggregate =
         record.kind == type_kind::array ||
         (record.kind == type_kind::class_type &&

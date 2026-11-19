@@ -169,18 +169,18 @@ analysis_result semantic_analysis::base_class_name(SyntaxElement name,
                                                    entity_index &base,
                                                    token_index &id)
 {
-    if (syntax(name).is(syntax_kind::simple_template_id)) {
+    if (name.is(syntax_kind::simple_template_id)) {
         type_index t = 0;
         analysis_result r = template_type(syntax(name.index()), 0, false, t);
         if (r != analysis_result::well_formed)
             return r;
-        id = syntax(name).first_token();
+        id = name.first_token();
         if (type_table[t].kind != type_kind::class_type)
             return not_supported(n, "class.derived");
         base = type_table[t].entity;
         return analysis_result::well_formed;
     }
-    if (!name.is_token() && !syntax(name).is(syntax_kind::class_or_decltype))
+    if (!name.is_token() && !name.is(syntax_kind::class_or_decltype))
         return not_supported(n, "class.derived");
     size_t before = unsupported.size();
     analysis_result named = named_class(name, n, base, id);
@@ -227,16 +227,16 @@ analysis_result semantic_analysis::base_clause(entity_index c, BaseClause n,
        template's own definition they are not known) */
     owned_array<SyntaxElement> listed;
     owned_array<bool> expanded;
-    for (auto item : syntax(n).elements(1)) {
-        if (!syntax(item).is(syntax_kind::base_specifier_list)) {
+    for (auto item : n.elements(1)) {
+        if (!item.is(syntax_kind::base_specifier_list)) {
             listed.append(item);
             expanded.append(false);
             continue;
         }
-        for (SyntaxElement one : syntax(item).elements()) {
-            if (syntax(one).is(preprocessing_op_or_punc::COMMA))
+        for (SyntaxElement one : item.elements()) {
+            if (one.is(preprocessing_op_or_punc::COMMA))
                 continue;
-            if (syntax(one).is(preprocessing_op_or_punc::ELLIPSIS)) {
+            if (one.is(preprocessing_op_or_punc::ELLIPSIS)) {
                 if (expanded.empty())
                     return not_supported(n, "temp.variadic");
                 expanded[expanded.size() - 1] = true;
@@ -278,8 +278,8 @@ analysis_result semantic_analysis::base_clause(entity_index c, BaseClause n,
     owned_array<token_index> named_ids;
     for (size_t si = 0; si < specifiers.size(); si++) {
         SyntaxElement name = specifiers[si];
-        if (syntax(name).is(syntax_kind::base_specifier))
-            name = syntax(name)[syntax(name).size() - 1];
+        if (name.is(syntax_kind::base_specifier))
+            name = name[name.size() - 1];
         token_index id = 0;
         entity_index base = 0;
         bool saved_expanding = expanding;
@@ -305,8 +305,8 @@ analysis_result semantic_analysis::base_clause(entity_index c, BaseClause n,
         if (key == standard_keyword::class_)
             access = 2;
         SyntaxElement name = specifier;
-        if (syntax(specifier).is(syntax_kind::base_specifier)) {
-            auto b = syntax(specifier);
+        if (specifier.is(syntax_kind::base_specifier)) {
+            auto b = specifier;
             name = b[b.size() - 1];
             for (uint32_t k = 0; k + 1 < b.size(); k++) {
                 if (!b[k].is_token())
@@ -515,8 +515,8 @@ bool semantic_analysis::dependent_base_specifier(entity_index c,
         return false;
     token_index first = name.token(), end = name.token() + 1;
     if (!name.is_token()) {
-        first = syntax(name).first_token();
-        end = syntax(name).end_token();
+        first = name.first_token();
+        end = name.end_token();
     }
     for (token_index t = first; t < end; t++) {
         if (tokens[t].kind != token_kind::identifier)

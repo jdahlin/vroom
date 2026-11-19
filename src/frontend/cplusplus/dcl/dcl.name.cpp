@@ -55,7 +55,7 @@ node_index parser::type_id()
  */
 analysis_result semantic_analysis::type_id(TypeId n, qualified_type &type)
 {
-    auto node = syntax(n);
+    auto node = n;
     if (!node.size() || !node[0].is(syntax_kind::type_specifier_seq) ||
         node.size() > 2)
         return not_supported(n, "dcl.name");

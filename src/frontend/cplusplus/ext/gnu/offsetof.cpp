@@ -78,10 +78,10 @@ analysis_result semantic_analysis::gnu_offsetof(SyntaxRef n,
     /* node[4 .. child_count - 1): the member-designator */
     for (uint32_t i = 4; i + 1 < node.size(); i++) {
         SyntaxElement c = node[i];
-        if (syntax(c).is(preprocessing_op_or_punc::DOT))
+        if (c.is(preprocessing_op_or_punc::DOT))
             continue;
         const struct type record = type_table[t.unqualified()];
-        if (syntax(c).is(preprocessing_op_or_punc::LEFT_BRACKET)) {
+        if (c.is(preprocessing_op_or_punc::LEFT_BRACKET)) {
             if (record.kind != type_kind::array)
                 return ill_formed(n,
                                   "a subscript in the member-designator "

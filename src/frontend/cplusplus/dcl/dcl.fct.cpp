@@ -245,7 +245,7 @@ analysis_result semantic_analysis::parameter_declaration(
        (libc++'s [[__maybe_unused__]]), and GCC's whose rules set nothing
        (libc++'s __attribute__((noescape))), are left out */
     using enum preprocessing_op_or_punc;
-    auto parameter = syntax(n);
+    auto parameter = n;
     uint32_t lead = 0;
     while (parameter[lead].is_node()) {
         auto c = parameter[lead];

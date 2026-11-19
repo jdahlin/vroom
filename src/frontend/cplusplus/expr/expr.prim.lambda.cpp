@@ -346,7 +346,7 @@ semantic_analysis::lambda_context *semantic_analysis::current_lambda()
 analysis_result semantic_analysis::lambda_expression(LambdaExpression n,
                                                      expression_meaning &m)
 {
-    auto node = syntax(n);
+    auto node = n;
     /* a lambda in a default argument or member initializer, in an
        unevaluated operand or while a candidate template is substituted;
        outside a function body only at namespace scope */
@@ -360,25 +360,25 @@ analysis_result semantic_analysis::lambda_expression(LambdaExpression n,
     SyntaxElement declarator, template_list;
     for (uint32_t i = 1; i + 1 < node.size(); i++) {
         SyntaxElement x = node[i];
-        if (syntax(x).is(syntax_kind::lambda_declarator) && !declarator)
+        if (x.is(syntax_kind::lambda_declarator) && !declarator)
             declarator = x;
-        else if (syntax(x).is(syntax_kind::template_parameter_list) ||
-                 syntax(x).is(syntax_kind::type_parameter) ||
-                 syntax(x).is(syntax_kind::parameter_declaration))
+        else if (x.is(syntax_kind::template_parameter_list) ||
+                 x.is(syntax_kind::type_parameter) ||
+                 x.is(syntax_kind::parameter_declaration))
             /* (a list of one template-parameter is that parameter) */
             template_list = x;
-        else if (!x.is_token() && !syntax(x).is(syntax_kind::requires_clause))
+        else if (!x.is_token() && !x.is(syntax_kind::requires_clause))
             return not_supported(n, "expr.prim.lambda");
     }
     SyntaxElement body = node[node.size() - 1];
     if (!node[0].is(syntax_kind::lambda_introducer) ||
-        !syntax(body).is(syntax_kind::compound_statement))
+        !body.is(syntax_kind::compound_statement))
         return not_supported(n, "expr.prim.lambda");
     if (declarator) {
         /* [expr.prim.lambda]/5: "A lambda is a generic lambda if the
            lambda-expression has any generic parameter type placeholders"
            (auto in a parameter's decl-specifier-seq) */
-        auto d = syntax(declarator);
+        auto d = declarator;
         for (token_index t = d.first_token(); t < d.end_token(); t++)
             if (tokens[t].kind == token_kind::keyword &&
                 p.keyword_of(tokens[t]) == standard_keyword::auto_)
@@ -386,7 +386,7 @@ analysis_result semantic_analysis::lambda_expression(LambdaExpression n,
         /* a requires-clause after the parameters: a generic lambda's,
            (lambda_constraint) */
         if (!template_list &&
-            syntax(declarator.index())[syntax(declarator).size() - 1].is(
+            syntax(declarator.index())[declarator.size() - 1].is(
                 syntax_kind::requires_clause))
             return not_supported(n, "temp.constr");
     }
@@ -523,17 +523,17 @@ semantic_analysis::lambda_call_type(SyntaxRef n, SyntaxRef d, lambda_context &l,
         for (uint32_t i = 0; i < d.size() && r == analysis_result::well_formed;
              i++) {
             SyntaxElement part = d[i];
-            if (syntax(part).is(preprocessing_op_or_punc::RIGHT_PARENTHESIS)) {
+            if (part.is(preprocessing_op_or_punc::RIGHT_PARENTHESIS)) {
                 closed = true;
                 continue;
             }
             if (!closed)
                 continue;
             owned_array<SyntaxElement> specifiers;
-            if (syntax(part).is(syntax_kind::decl_specifier_seq)) {
-                for (auto child : syntax(part).elements())
+            if (part.is(syntax_kind::decl_specifier_seq)) {
+                for (auto child : part.elements())
                     specifiers.append(child);
-            } else if (syntax(part).is(syntax_kind::gnu_attribute_specifier)) {
+            } else if (part.is(syntax_kind::gnu_attribute_specifier)) {
                 /* [ext:gnu_attributes] always_inline and the like: no
                    effect on the closure type */
                 gnu_attributes g;
@@ -562,7 +562,7 @@ semantic_analysis::lambda_call_type(SyntaxRef n, SyntaxRef d, lambda_context &l,
                     /* consteval ([dcl.constexpr]) */
                     r = not_supported(n, "dcl.constexpr");
             }
-            if (syntax(part).is(syntax_kind::trailing_return_type)) {
+            if (part.is(syntax_kind::trailing_return_type)) {
                 auto trailing = part;
                 if (trailing.size() != 2 ||
                     !trailing[1].is(syntax_kind::type_id)) {
@@ -796,15 +796,14 @@ SyntaxElement semantic_analysis::lambda_constraint(SyntaxRef n,
 {
     for (uint32_t i = 1; i + 1 < n.size(); i++) {
         SyntaxElement c = n[i];
-        bool in_declarator = syntax(c).is(syntax_kind::lambda_declarator);
+        bool in_declarator = c.is(syntax_kind::lambda_declarator);
         if (in_declarator)
-            c = syntax(c)[syntax(c).size() - 1];
-        if (!syntax(c).is(syntax_kind::requires_clause) ||
-            syntax(c).size() != 2)
+            c = c[c.size() - 1];
+        if (!c.is(syntax_kind::requires_clause) || c.size() != 2)
             continue;
         if (trailing)
             *trailing = in_declarator;
-        return syntax(c)[1];
+        return c[1];
     }
     return SyntaxElement();
 }

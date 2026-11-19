@@ -550,7 +550,7 @@ bool semantic_analysis::attributes_as_gnu(SyntaxElement n,
                 return false;
             continue;
         }
-        auto node = syntax(c);
+        auto node = c;
         if (node.is(syntax_kind::attribute_specifier) && node.size() > 2 &&
             node[2].is(syntax_kind::attribute_using_prefix)) {
             /* [dcl.attr.grammar]/3: "If an attribute-specifier contains an
@@ -572,19 +572,19 @@ bool semantic_analysis::attributes_as_gnu(SyntaxElement n,
                 SyntaxElement a = names.back();
                 names.resize(names.size() - 1);
                 if (!a.is_token()) {
-                    auto an = syntax(a);
+                    auto an = a;
                     if (an.is(syntax_kind::attribute_list)) {
                         for (uint32_t i = 0; i < an.size(); i++)
-                            names.append(syntax(a)[i]);
+                            names.append(a[i]);
                         continue;
                     }
                     /* an attribute: its token and an argument clause,
                        which none of these takes for anything vcc
                        generates */
                     if (!an.is(syntax_kind::attribute) || !an.size() ||
-                        !syntax(a)[0].is_token())
+                        !a[0].is_token())
                         return false;
-                    a = syntax(a)[0];
+                    a = a[0];
                 }
                 if (tokens[a.token()].kind ==
                     token_kind::operator_or_punctuator)
@@ -652,7 +652,7 @@ bool semantic_analysis::gnu_attributes_without_effect(SyntaxElement n) const
         work.resize(work.size() - 1);
         SyntaxElement name_token = c;
         if (!c.is_token()) {
-            auto node = syntax(c);
+            auto node = c;
             if (node.is(syntax_kind::gnu_attribute_specifier) ||
                 node.is(syntax_kind::gnu_attribute_list)) {
                 for (auto child : node.elements())
@@ -706,13 +706,13 @@ bool semantic_analysis::class_head_attributes_without_effect(
 {
     if (c.is_token())
         return false;
-    if (syntax(c).is(syntax_kind::gnu_attribute_specifier))
+    if (c.is(syntax_kind::gnu_attribute_specifier))
         return gnu_attributes_without_effect(c);
-    if (syntax(c).is(syntax_kind::attribute_specifier))
+    if (c.is(syntax_kind::attribute_specifier))
         return attributes_without_effect(c);
-    if (!syntax(c).is(syntax_kind::attribute_specifier_seq))
+    if (!c.is(syntax_kind::attribute_specifier_seq))
         return false;
-    for (auto child : syntax(c).elements())
+    for (auto child : c.elements())
         if (!class_head_attributes_without_effect(child))
             return false;
     return true;

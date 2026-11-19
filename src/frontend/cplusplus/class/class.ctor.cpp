@@ -42,14 +42,14 @@ namespace cplusplus
 bool semantic_analysis::declares_special_member(entity_index c,
                                                 SyntaxElement d) const
 {
-    if (!syntax(d).is(syntax_kind::noptr_declarator))
+    if (!d.is(syntax_kind::noptr_declarator))
         return false;
-    auto node = syntax(d);
+    auto node = d;
     if (node.size() != 2 || !node[1].is(syntax_kind::parameters_and_qualifiers))
         return false;
     SyntaxElement head = node[0];
-    if (syntax(head).is(syntax_kind::unqualified_id)) {
-        auto parts = syntax(head);
+    if (head.is(syntax_kind::unqualified_id)) {
+        auto parts = head;
         if (parts.size() != 2 || !parts[0].is(preprocessing_op_or_punc::TILDE))
             return false;
         head = parts[1];
@@ -155,7 +155,7 @@ analysis_result semantic_analysis::constructor_specifiers(SyntaxRef seq,
                                                           specified &s)
 {
     for (SyntaxElement x : seq.elements()) {
-        if (syntax(x).is(syntax_kind::gnu_attribute_specifier)) {
+        if (x.is(syntax_kind::gnu_attribute_specifier)) {
             analysis_result r = gnu_attribute_specifier(x.index(), s);
             if (r != analysis_result::well_formed)
                 return r;
@@ -586,7 +586,7 @@ analysis_result semantic_analysis::defaulted_or_deleted_special_member(
     uint8_t access, bool constexpr_specified, bool virtual_specified,
     bool explicit_specified)
 {
-    auto form = syntax(body).function_body();
+    auto form = body.function_body();
     if (form.deleted()) {
         if (explicit_specified)
             return not_supported(n, "dcl.fct.def.delete");
@@ -771,9 +771,9 @@ analysis_result semantic_analysis::expression_list_meanings(
     SyntaxElement list, owned_array<expression_meaning> &out)
 {
     owned_array<SyntaxElement> items;
-    if (syntax(list).is(syntax_kind::initializer_list)) {
-        for (SyntaxElement a : syntax(list).elements()) {
-            if (syntax(a).is(preprocessing_op_or_punc::COMMA))
+    if (list.is(syntax_kind::initializer_list)) {
+        for (SyntaxElement a : list.elements()) {
+            if (a.is(preprocessing_op_or_punc::COMMA))
                 continue;
             items.append(a);
         }
@@ -781,8 +781,8 @@ analysis_result semantic_analysis::expression_list_meanings(
         items.append(list);
     }
     for (SyntaxElement a : items) {
-        if (syntax(a).is(syntax_kind::braced_init_list) ||
-            syntax(a).is(preprocessing_op_or_punc::ELLIPSIS))
+        if (a.is(syntax_kind::braced_init_list) ||
+            a.is(preprocessing_op_or_punc::ELLIPSIS))
             return not_supported(node_of(a), "over.match.list");
         expression_meaning e;
         analysis_result r = expression(a, e);

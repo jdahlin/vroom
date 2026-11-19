@@ -667,7 +667,7 @@ analysis_result semantic_analysis::empty_declaration(EmptyDeclaration)
 analysis_result
 semantic_analysis::static_assert_declaration(StaticAssertDeclaration n)
 {
-    auto node = syntax(n);
+    auto node = n;
     /* static_assert ( constant-expression [, string-literal] ) ; */
     if (node.size() < 5)
         return not_supported(n, "dcl.pre");
@@ -725,10 +725,10 @@ analysis_result semantic_analysis::alias_type(SyntaxRef n, qualified_type &type)
     /* (a simple-template-id counts as declares_class too: the
        class-specifiers and elaborated-type-specifiers are looked for) */
     for (SyntaxElement k : d[0].elements()) {
-        if (syntax(k).is(syntax_kind::class_specifier) ||
-            syntax(k).is(syntax_kind::elaborated_type_specifier) ||
-            syntax(k).is(syntax_kind::enum_specifier) ||
-            syntax(k).is(syntax_kind::elaborated_enum_specifier))
+        if (k.is(syntax_kind::class_specifier) ||
+            k.is(syntax_kind::elaborated_type_specifier) ||
+            k.is(syntax_kind::enum_specifier) ||
+            k.is(syntax_kind::elaborated_enum_specifier))
             return not_supported(n, "dcl.typedef");
     }
     specified s;
@@ -765,8 +765,8 @@ analysis_result semantic_analysis::alias_declaration(AliasDeclaration n)
     s.type = type;
     s.has_type = true;
     entity_index declared = 0;
-    r = declare(n, syntax(n).first_token() + 1, entity_kind::typedef_name, type,
-                s, false, false, declared);
+    r = declare(n, n.first_token() + 1, entity_kind::typedef_name, type, s,
+                false, false, declared);
     last_declared = declared;
     return r;
 }
@@ -813,7 +813,7 @@ bool semantic_analysis::gnu_or_without_effect(SyntaxRef n) const
     for (SyntaxElement c : n.elements()) {
         if (c.is_token())
             return false;
-        if (!syntax(c).is(syntax_kind::gnu_attribute_specifier) &&
+        if (!c.is(syntax_kind::gnu_attribute_specifier) &&
             !gnu_or_without_effect(syntax(c.index())))
             return false;
     }
@@ -895,7 +895,7 @@ analysis_result semantic_analysis::init_declarators(SyntaxRef declaration,
                 after = true;
                 continue;
             }
-            if (after && !syntax(c).is(preprocessing_op_or_punc::SEMICOLON))
+            if (after && !c.is(preprocessing_op_or_punc::SEMICOLON))
                 declarators = true;
         }
         if (!declarators)
@@ -923,16 +923,16 @@ analysis_result semantic_analysis::init_declarators(SyntaxRef declaration,
     owned_array<SyntaxElement> items;
     for (uint32_t i = first + 1; i < node.size(); i++) {
         SyntaxElement c = node[i];
-        if (syntax(c).is(syntax_kind::function_body))
+        if (c.is(syntax_kind::function_body))
             break;
         /* [dcl.decl]/4: a function template's trailing requires-clause,
            checked at deduction (template_constraints_satisfied) */
-        if (instantiating && syntax(c).is(syntax_kind::requires_clause))
+        if (instantiating && c.is(syntax_kind::requires_clause))
             continue;
         /* [dcl.struct.bind]/1: ref-qualifier_opt [ identifier-list ] */
-        if (syntax(c).is(preprocessing_op_or_punc::LEFT_BRACKET) ||
-            syntax(c).is(preprocessing_op_or_punc::AMPERSAND) ||
-            syntax(c).is(preprocessing_op_or_punc::AMPERSAND_AMPERSAND))
+        if (c.is(preprocessing_op_or_punc::LEFT_BRACKET) ||
+            c.is(preprocessing_op_or_punc::AMPERSAND) ||
+            c.is(preprocessing_op_or_punc::AMPERSAND_AMPERSAND))
             return structured_binding_declaration(declaration, i, s, nullptr);
         /* a declarator that is only its identifier is the token */
         if (c.is_token()) {
@@ -941,10 +941,10 @@ analysis_result semantic_analysis::init_declarators(SyntaxRef declaration,
             items.append(c);
             continue;
         }
-        if (syntax(c).is(syntax_kind::init_declarator_list)) {
-            auto list = syntax(c);
+        if (c.is(syntax_kind::init_declarator_list)) {
+            auto list = c;
             for (uint32_t k = 0; k < list.size(); k++) {
-                SyntaxElement item = syntax(c)[k];
+                SyntaxElement item = c[k];
                 if (!item.is_token() ||
                     tokens[item.token()].kind == token_kind::identifier)
                     items.append(item);
@@ -1010,8 +1010,8 @@ analysis_result semantic_analysis::init_declarator(SyntaxRef declaration,
     SyntaxElement d = item;
     SyntaxElement init;
     bool initialized = false;
-    if (syntax(item).is(syntax_kind::init_declarator)) {
-        auto node = syntax(item);
+    if (item.is(syntax_kind::init_declarator)) {
+        auto node = item;
         if (node.size() != 2 || node[1].is(syntax_kind::requires_clause))
             return not_supported(item.index(), "dcl.decl");
         d = node[0];

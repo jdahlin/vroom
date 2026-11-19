@@ -219,7 +219,7 @@ analysis_result semantic_analysis::member_template_call(
     if (early.empty())
         for (SyntaxElement a : arguments) {
             token_index set_at = 0;
-            if (syntax(a).is(syntax_kind::braced_init_list) ||
+            if (a.is(syntax_kind::braced_init_list) ||
                 named_overload_set(a, set_at))
                 return not_supported(n, "temp.deduct.call");
             expression_meaning e;

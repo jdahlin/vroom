@@ -59,7 +59,7 @@ analysis_result semantic_analysis::class_specifier(ClassSpecifier n,
                                                    type_index &type)
 {
     analysis_result r = class_definition(n, type);
-    auto head = syntax(n).class_specifier().class_head();
+    auto head = n.class_specifier().class_head();
     if (r == analysis_result::well_formed || !head)
         return r;
     /* a class whose definition is not analysed: its name is held in the
@@ -693,7 +693,7 @@ semantic_analysis::elaborated_type_specifier(ElaboratedTypeSpecifier n,
     /* the attribute-specifier-seq (or GNU attributes, libc++'s
        _LIBCPP_EXPORTED_FROM_ABI) after the class-key: left out when none
        changes what vcc generates (class_head_attributes_without_effect) */
-    auto e = syntax(n);
+    auto e = n;
     uint32_t at = 1;
     if (e.size() > 2 && class_head_attributes_without_effect(e[1]))
         at = 2;
@@ -1345,7 +1345,7 @@ semantic_analysis::member_declarator(entity_index c, SyntaxRef declaration,
                                      SyntaxElement d, const specified &s,
                                      uint8_t access, bool definition)
 {
-    auto node = syntax(d);
+    auto node = d;
     if (node.is(syntax_kind::member_declarator)) {
         /* identifier_opt attribute-specifier-seq_opt : constant-expression */
         for (auto x : node.elements())
@@ -2170,10 +2170,10 @@ bool semantic_analysis::virt_specifier(SyntaxElement d, bool &override_,
         return false;
     };
     if (d.is_token())
-        return one(syntax(d));
-    if (!syntax(d).is(syntax_kind::virt_specifier_seq))
+        return one(d);
+    if (!d.is(syntax_kind::virt_specifier_seq))
         return false;
-    for (auto t : syntax(d).elements())
+    for (auto t : d.elements())
         if (!one(t))
             return false;
     return true;
@@ -2212,7 +2212,7 @@ analysis_result semantic_analysis::alignment_specifier(AlignmentSpecifier n,
                                                        uint64_t &alignment)
 {
     alignment = 0;
-    auto parts = syntax(n);
+    auto parts = n;
     if (parts.size() != 4)
         return not_supported(n, "dcl.align");
     if (parts[2].is(syntax_kind::type_id)) {

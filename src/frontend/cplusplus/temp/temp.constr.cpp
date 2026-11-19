@@ -36,7 +36,7 @@ semantic_analysis::concept_definition(SyntaxRef n, ConceptDefinition definition)
     analysis_result r = template_head_parameters(n, parameters, true);
     if (r != analysis_result::well_formed)
         return r;
-    auto parts = syntax(definition);
+    auto parts = definition;
     if (parts.size() != 5 || !parts[1].is_token())
         return not_supported(n, "temp.concept");
     uint32_t name = tokens.identifier(parts[1].token());
@@ -110,7 +110,7 @@ analysis_result semantic_analysis::concept_id(SyntaxRef n, uint32_t ct,
 analysis_result semantic_analysis::requires_expression(RequiresExpression n,
                                                        expression_meaning &m)
 {
-    auto parts = syntax(n);
+    auto parts = n;
     if (parts.size() != 2 || !substituting)
         return not_supported(n, "expr.prim.req");
     /* { requirement-seq }: the requirements between the braces, or the

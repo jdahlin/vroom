@@ -314,12 +314,12 @@ analysis_result semantic_analysis::namespace_definition(SyntaxRef n)
     owned_array<SyntaxElement> head;
     for (uint32_t i = 0; i < node.size() && !body; i++) {
         SyntaxElement c = node[i];
-        if (syntax(c).is(syntax_kind::enclosing_namespace_specifier)) {
-            for (auto child : syntax(c).elements())
+        if (c.is(syntax_kind::enclosing_namespace_specifier)) {
+            for (auto child : c.elements())
                 head.append(child);
             continue;
         }
-        if (syntax(c).is(syntax_kind::gnu_attribute_specifier)) {
+        if (c.is(syntax_kind::gnu_attribute_specifier)) {
             /* GNU attributes that change nothing a namespace's members
                get (abi_tag, which changes their symbols, has no rule) */
             gnu_attributes g;
@@ -333,7 +333,7 @@ analysis_result semantic_analysis::namespace_definition(SyntaxRef n)
         if (!c.is_token())
             /* an attribute-specifier-seq */
             return not_supported(n, "dcl.attr");
-        if (syntax(c).is(preprocessing_op_or_punc::LEFT_BRACE))
+        if (c.is(preprocessing_op_or_punc::LEFT_BRACE))
             body = true;
         else
             head.append(c);

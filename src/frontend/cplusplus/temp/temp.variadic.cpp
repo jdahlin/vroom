@@ -111,21 +111,21 @@ bool semantic_analysis::template_head_list(
     for (SyntaxElement c : head.elements()) {
         if (c.is_token())
             continue;
-        if (syntax(c).is(syntax_kind::type_parameter) ||
-            syntax(c).is(syntax_kind::parameter_declaration)) {
+        if (c.is(syntax_kind::type_parameter) ||
+            c.is(syntax_kind::parameter_declaration)) {
             parameters.append(c.index());
             continue;
         }
         /* (its requires-clause: head_constraint) */
-        if (syntax(c).is(syntax_kind::requires_clause))
+        if (c.is(syntax_kind::requires_clause))
             continue;
-        if (!syntax(c).is(syntax_kind::template_parameter_list))
+        if (!c.is(syntax_kind::template_parameter_list))
             return false;
-        for (SyntaxElement p : syntax(c).elements()) {
+        for (SyntaxElement p : c.elements()) {
             if (p.is_token())
                 continue;
-            if (!syntax(p).is(syntax_kind::type_parameter) &&
-                !syntax(p).is(syntax_kind::parameter_declaration))
+            if (!p.is(syntax_kind::type_parameter) &&
+                !p.is(syntax_kind::parameter_declaration))
                 return false;
             parameters.append(p.index());
         }
@@ -286,7 +286,7 @@ bool semantic_analysis::has_pack_expansion(SyntaxElement list) const
 {
     if (list.is_token())
         return false;
-    for (auto child : syntax(list).elements())
+    for (auto child : list.elements())
         if (child.is(preprocessing_op_or_punc::ELLIPSIS))
             return true;
     return false;

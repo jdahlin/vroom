@@ -65,11 +65,11 @@ analysis_result semantic_analysis::block_items(SyntaxRef n, uint32_t &built)
     owned_array<SyntaxElement> items;
     auto node = n;
     for (auto c : node.elements()) {
-        if (syntax(c).is(preprocessing_op_or_punc::LEFT_BRACE) ||
-            syntax(c).is(preprocessing_op_or_punc::RIGHT_BRACE))
+        if (c.is(preprocessing_op_or_punc::LEFT_BRACE) ||
+            c.is(preprocessing_op_or_punc::RIGHT_BRACE))
             continue;
-        if (syntax(c).is(syntax_kind::statement_seq)) {
-            for (auto child : syntax(c).elements())
+        if (c.is(syntax_kind::statement_seq)) {
+            for (auto child : c.elements())
                 items.append(child);
             continue;
         }
@@ -82,7 +82,7 @@ analysis_result semantic_analysis::block_items(SyntaxRef n, uint32_t &built)
     for (SyntaxElement s : items) {
         claim_place = s.token();
         if (!s.is_token())
-            claim_place = syntax(s).end_token() - 1;
+            claim_place = s.end_token() - 1;
         claim_scope = current_scope;
         uint32_t one = 0;
         result = worse(result, statement(s, one));

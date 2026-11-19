@@ -907,7 +907,7 @@ analysis_result
 semantic_analysis::elaborated_enum_specifier(ElaboratedEnumSpecifier n,
                                              type_index &type)
 {
-    auto node = syntax(n);
+    auto node = n;
     if (node.size() != 2 || !node[1].is_identifier())
         return not_supported(n, "dcl.type.elab");
     entity_index e = lookup(tokens.identifier(node[1].token()));

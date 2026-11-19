@@ -109,7 +109,7 @@ analysis_result semantic_analysis::friend_class(entity_index c, SyntaxRef n,
         friends.append(f);
         return analysis_result::well_formed;
     }
-    if (!syntax(type).is(syntax_kind::elaborated_type_specifier))
+    if (!type.is(syntax_kind::elaborated_type_specifier))
         return not_supported(n, "class.friend");
     auto t = type;
     auto node = t;

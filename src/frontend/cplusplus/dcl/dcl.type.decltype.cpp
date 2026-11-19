@@ -18,14 +18,14 @@ bool semantic_analysis::names_entity(SyntaxElement operand) const
 {
     if (operand.is_token())
         return tokens[operand.token()].kind == token_kind::identifier;
-    auto node = syntax(operand);
+    auto node = operand;
     if (node.is(syntax_kind::qualified_id))
         return true;
     if (!node.is(syntax_kind::postfix_expression) || node.size() != 3)
         return false;
     SyntaxElement op = node[1];
-    return syntax(op).is(preprocessing_op_or_punc::DOT) ||
-           syntax(op).is(preprocessing_op_or_punc::ARROW);
+    return op.is(preprocessing_op_or_punc::DOT) ||
+           op.is(preprocessing_op_or_punc::ARROW);
 }
 
 /*

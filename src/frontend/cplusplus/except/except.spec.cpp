@@ -123,7 +123,7 @@ analysis_result semantic_analysis::noexcept_specifier(NoexceptSpecifier n,
                                                       bool member,
                                                       bool &non_throwing)
 {
-    auto node = syntax(n);
+    auto node = n;
     non_throwing = true;
     if (node.size() == 1 || node.size() == 3)
         /* noexcept, throw ( ) */

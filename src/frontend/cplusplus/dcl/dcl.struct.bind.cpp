@@ -546,7 +546,7 @@ analysis_result semantic_analysis::structured_binding_declaration(
     if (list.is_token()) {
         names.append(list.token());
     } else {
-        for (SyntaxElement c : syntax(list).elements()) {
+        for (SyntaxElement c : list.elements()) {
             if (c.is_token() &&
                 tokens[c.token()].kind == token_kind::identifier)
                 names.append(c.token());

@@ -176,10 +176,10 @@ analysis_result semantic_analysis::lambda_introducer(LambdaIntroducer n,
         token_index name = 0;
         if (c.is_token()) {
             const token &t = tokens[c.token()];
-            if (i == 0 && (syntax(c).is(preprocessing_op_or_punc::EQUAL) ||
-                           syntax(c).is(preprocessing_op_or_punc::AMPERSAND))) {
+            if (i == 0 && (c.is(preprocessing_op_or_punc::EQUAL) ||
+                           c.is(preprocessing_op_or_punc::AMPERSAND))) {
                 l.default_capture = capture_default::copy;
-                if (syntax(c).is(preprocessing_op_or_punc::AMPERSAND))
+                if (c.is(preprocessing_op_or_punc::AMPERSAND))
                     l.default_capture = capture_default::reference;
                 /* [expr.prim.lambda.capture]/3: "A lambda-expression shall
                    not have a capture-default or simple-capture in its
@@ -211,14 +211,14 @@ analysis_result semantic_analysis::lambda_introducer(LambdaIntroducer n,
             } else {
                 return not_supported(n, "expr.prim.lambda.capture");
             }
-        } else if (syntax(c).is(syntax_kind::init_capture)) {
+        } else if (c.is(syntax_kind::init_capture)) {
             r = init_capture(c, l, record);
             if (r != analysis_result::well_formed)
                 return r;
             lambda_captures.append(record);
             continue;
-        } else if (syntax(c).is(syntax_kind::simple_capture)) {
-            auto sc = syntax(c);
+        } else if (c.is(syntax_kind::simple_capture)) {
+            auto sc = c;
             if (sc.size() == 2 && sc[0].is(preprocessing_op_or_punc::STAR)) {
                 /* * this: *this captured by copy (/10) */
                 record.at = sc[1].token();
@@ -336,7 +336,7 @@ analysis_result semantic_analysis::init_capture(InitCapture n,
                                                 lambda_context &l,
                                                 capture_record &record)
 {
-    auto node = syntax(n);
+    auto node = n;
     uint32_t i = 0;
     bool by_reference = node[0].is(preprocessing_op_or_punc::AMPERSAND);
     if (by_reference)

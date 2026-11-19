@@ -96,7 +96,7 @@ analysis_result
 semantic_analysis::explicit_instantiation(ExplicitInstantiation n)
 {
     /* [extern] template declaration */
-    auto x = syntax(n);
+    auto x = n;
     bool extern_ = x.size() == 3;
     if ((x.size() != 2 && x.size() != 3) || x[x.size() - 1].is_token())
         return not_supported(n, "temp.explicit");

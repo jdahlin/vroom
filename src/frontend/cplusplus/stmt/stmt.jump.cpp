@@ -66,7 +66,7 @@ node_index parser::jump_statement()
 analysis_result semantic_analysis::jump_statement(JumpStatement n,
                                                   uint32_t &built)
 {
-    auto node = syntax(n);
+    auto node = n;
     if (!node.size() || !node[0].is_token())
         return not_supported(n, "stmt.jump");
     token_index at = node[0].token();
@@ -158,7 +158,7 @@ analysis_result semantic_analysis::return_statement(SyntaxRef n,
         return not_supported(n, "stmt.return");
     SyntaxElement operand = node[1];
     initialized_value result;
-    if (syntax(operand).is(syntax_kind::braced_init_list)) {
+    if (operand.is(syntax_kind::braced_init_list)) {
         if (returns_void)
             return ill_formed(n,
                               "a return statement with any other operand "
@@ -259,10 +259,9 @@ analysis_result semantic_analysis::return_statement(SyntaxRef n,
 entity_index semantic_analysis::implicitly_movable(SyntaxElement operand)
 {
     SyntaxElement named = operand;
-    while (!named.is_token() &&
-           syntax(named).is(syntax_kind::primary_expression) &&
-           syntax(named).size() == 3)
-        named = syntax(named)[1];
+    while (!named.is_token() && named.is(syntax_kind::primary_expression) &&
+           named.size() == 3)
+        named = named[1];
     if (!named.is_token() ||
         tokens[named.token()].kind != token_kind::identifier)
         return 0;

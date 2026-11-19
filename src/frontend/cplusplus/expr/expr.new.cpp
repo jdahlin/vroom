@@ -191,7 +191,7 @@ analysis_result semantic_analysis::new_type_id(NewTypeId n,
                                                qualified_type &type,
                                                SyntaxElement &bound)
 {
-    auto node = syntax(n);
+    auto node = n;
     if (!node.size() || node.size() > 2 ||
         !node[0].is(syntax_kind::type_specifier_seq))
         return not_supported(n, "expr.new");
@@ -206,16 +206,16 @@ analysis_result semantic_analysis::new_type_id(NewTypeId n,
         return analysis_result::well_formed;
     SyntaxElement d = node[1];
     for (;;) {
-        if (syntax(d).is(syntax_kind::noptr_new_declarator)) {
-            auto bounds = syntax(d);
+        if (d.is(syntax_kind::noptr_new_declarator)) {
+            auto bounds = d;
             if (bounds.size() != 3)
                 return not_supported(d.index(), "expr.new");
-            bound = syntax(d)[1];
+            bound = d[1];
             return analysis_result::well_formed;
         }
-        if (!syntax(d).is(syntax_kind::new_declarator))
+        if (!d.is(syntax_kind::new_declarator))
             return not_supported(n, "expr.new");
-        auto declarator = syntax(d);
+        auto declarator = d;
         if (!declarator.size() || declarator.size() > 2 ||
             !declarator[0].is(syntax_kind::ptr_operator))
             return not_supported(d.index(), "expr.new");
@@ -274,7 +274,7 @@ analysis_result semantic_analysis::allocation_functions(
 analysis_result semantic_analysis::new_expression(NewExpression n,
                                                   expression_meaning &m)
 {
-    auto node = syntax(n);
+    auto node = n;
     token_index at = node.first_token();
     uint32_t count = node.size();
     uint32_t i = 0;
@@ -457,10 +457,10 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
     owned_array<expression_meaning> arguments;
     arguments.append(requested);
     if (placement) {
-        auto p = syntax(placement);
+        auto p = placement;
         if (p.size() != 3)
             return not_supported(placement.index(), "expr.new");
-        r = expression_list_meanings(syntax(placement)[1], arguments);
+        r = expression_list_meanings(placement[1], arguments);
         if (r != analysis_result::well_formed)
             return r;
     }
@@ -541,10 +541,10 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
                                   "const-default-constructible class type",
                                   "dcl.init");
         }
-    } else if (syntax(init).is(syntax_kind::braced_init_list)) {
+    } else if (init.is(syntax_kind::braced_init_list)) {
         r = list_initialization(syntax(init.index()), type, true, value);
-    } else if (syntax(init).is(syntax_kind::new_initializer)) {
-        auto k = syntax(init);
+    } else if (init.is(syntax_kind::new_initializer)) {
+        auto k = init;
         if (k.size() == 2) {
             /* [dcl.init]/11: "An object whose initializer is an empty set
                of parentheses, i.e., (), shall be value-initialized."; /8:

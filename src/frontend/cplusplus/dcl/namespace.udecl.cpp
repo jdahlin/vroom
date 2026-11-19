@@ -122,11 +122,11 @@ analysis_result semantic_analysis::using_declaration(UsingDeclaration n)
     /* the using-declarators, the GNU attributes after each (clang's
        extension) and the commas: of the using-declaration, or of its
        using-declarator-list */
-    auto node = syntax(n);
+    auto node = n;
     owned_array<SyntaxElement> items;
     for (auto c : node.elements()) {
-        if (syntax(c).is(syntax_kind::using_declarator_list)) {
-            for (auto child : syntax(c).elements())
+        if (c.is(syntax_kind::using_declarator_list)) {
+            for (auto child : c.elements())
                 items.append(child);
         } else if (!c.is_token()) {
             items.append(c);
@@ -136,7 +136,7 @@ analysis_result semantic_analysis::using_declaration(UsingDeclaration n)
     bool any = false;
     for (size_t i = 0; i < items.size(); i++) {
         SyntaxElement d = items[i];
-        if (syntax(d).is(syntax_kind::using_declarator)) {
+        if (d.is(syntax_kind::using_declarator)) {
             gnu_attributes g;
             for (size_t k = i + 1;
                  k < items.size() &&
@@ -152,9 +152,9 @@ analysis_result semantic_analysis::using_declaration(UsingDeclaration n)
             result = worse(result,
                            using_declarator(d, g.flags & gnu_using_if_exists));
             any = true;
-        } else if (syntax(d).is(syntax_kind::gnu_attribute_specifier)) {
+        } else if (d.is(syntax_kind::gnu_attribute_specifier)) {
             continue; /* the using-declarator's before it */
-        } else if (!syntax(d).is(preprocessing_op_or_punc::COMMA)) {
+        } else if (!d.is(preprocessing_op_or_punc::COMMA)) {
             /* a pack expansion */
             result = worse(result, not_supported(n, "temp.variadic"));
         }
@@ -179,7 +179,7 @@ analysis_result semantic_analysis::using_declaration(UsingDeclaration n)
 analysis_result semantic_analysis::using_declarator(UsingDeclarator n,
                                                     bool if_exists)
 {
-    auto node = syntax(n);
+    auto node = n;
     if (node.size() != 2 || !node[0].is(syntax_kind::nested_name_specifier) ||
         !node[1].is_identifier())
         /* typename, an operator-function-id, a destructor's name, a pack

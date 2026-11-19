@@ -1665,7 +1665,7 @@ analysis_result semantic_analysis::named_class(SyntaxElement name,
         id = name.token();
         found = lookup_unqualified(tokens.identifier(id), lookup_filter::types);
     } else {
-        auto node = syntax(name);
+        auto node = name;
         if (node.size() != 2 ||
             !node[0].is(syntax_kind::nested_name_specifier) ||
             !node[1].is_identifier())

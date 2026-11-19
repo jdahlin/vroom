@@ -29,10 +29,10 @@ bool semantic_analysis::deleted_body(SyntaxElement body) const
 bool semantic_analysis::explicit_body(SyntaxElement body,
                                       standard_keyword k) const
 {
-    if (body.is_token() || !body ||
-        !syntax(body).is(syntax_kind::function_body) || syntax(body).size() < 3)
+    if (body.is_token() || !body || !body.is(syntax_kind::function_body) ||
+        body.size() < 3)
         return false;
-    auto children = syntax(body);
+    auto children = body;
     return children[0].is(preprocessing_op_or_punc::EQUAL) &&
            children[1].is_token() &&
            p.keyword_of(tokens[children[1].token()]) == k;

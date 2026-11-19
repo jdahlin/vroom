@@ -35,7 +35,7 @@ token_index semantic_analysis::callee_name(SyntaxElement c) const
             return c.token();
         return 0;
     }
-    auto node = syntax(c);
+    auto node = c;
     if (node.is(syntax_kind::qualified_id) && node.size() == 2 &&
         node[1].is_token() &&
         tokens[node[1].token()].kind == token_kind::identifier)

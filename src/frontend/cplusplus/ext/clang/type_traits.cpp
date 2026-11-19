@@ -154,7 +154,7 @@ analysis_result
 semantic_analysis::clang_type_transformation(ClangTypeTransformation n,
                                              qualified_type &type)
 {
-    auto children_syntax = syntax(n);
+    auto children_syntax = n;
     token_index keyword = children_syntax[0].token();
     owned_buffer written;
     tokens.spelling(keyword, written.get());
@@ -377,12 +377,12 @@ analysis_result semantic_analysis::builtin_template_types(
 {
     for (size_t w = from; w < written.size(); w++) {
         SyntaxElement a = written[w];
-        if (!syntax(a).is(syntax_kind::type_id))
+        if (!a.is(syntax_kind::type_id))
             return not_supported(id, "ext.clang");
         uint32_t times = 1;
         if (expansion[w]) {
             token_index first = first_token(a);
-            token_index end = syntax(a).end_token();
+            token_index end = a.end_token();
             if (end > first + 1 &&
                 token_element(end - 1).is(preprocessing_op_or_punc::ELLIPSIS))
                 end--;
@@ -433,7 +433,7 @@ analysis_result semantic_analysis::builtin_common_type(SyntaxRef id,
         token_index first = first_token(a);
         token_index end = first + 1;
         if (!a.is_token())
-            end = syntax(a).end_token();
+            end = a.end_token();
         if (end != first + 1 || tokens[first].kind != token_kind::identifier)
             return not_supported(id, "ext.clang");
         lookup_result x =
@@ -514,7 +514,7 @@ analysis_result semantic_analysis::builtin_type_pack_element(SyntaxRef id,
     token_index first = first_token(n);
     token_index end = first + 1;
     if (!n.is_token())
-        end = syntax(n).end_token();
+        end = n.end_token();
     if (dependent || names_dependent_entity(first, end)) {
         /* [temp.dep.type]/9: a template-id of dependent arguments */
         type = dependent_written_type(id);
@@ -597,7 +597,7 @@ analysis_result semantic_analysis::builtin_make_integer_seq(SyntaxRef id,
     SyntaxElement n = written[2];
     token_index end = first_token(n) + 1;
     if (!n.is_token())
-        end = syntax(n).end_token();
+        end = n.end_token();
     if (function_templates[t - 1].is_parameter ||
         depends_on_template_parameter(element) ||
         names_dependent_entity(first_token(n), end)) {

@@ -121,11 +121,10 @@ entity_index semantic_analysis::dependent_value_entity(SyntaxElement written)
 {
     entity_index e = entity_table.make(entity_kind::dependent_value, 0, 0);
     bool negated = false;
-    if (syntax(written).is(syntax_kind::unary_expression) &&
-        syntax(written).size() == 2 &&
-        syntax(written)[0].is(preprocessing_op_or_punc::EXCLAMATION)) {
+    if (written.is(syntax_kind::unary_expression) && written.size() == 2 &&
+        written[0].is(preprocessing_op_or_punc::EXCLAMATION)) {
         negated = true;
-        written = syntax(written)[1];
+        written = written[1];
     }
     /* an alias template's parameter bound to such an argument: that
        argument */
@@ -137,24 +136,23 @@ entity_index semantic_analysis::dependent_value_entity(SyntaxElement written)
             entity_table[x.entity].kind == entity_kind::dependent_value)
             return x.entity;
     }
-    if (!negated && syntax(written).is(syntax_kind::simple_template_id))
+    if (!negated && written.is(syntax_kind::simple_template_id))
         return dependent_variable_specialization(syntax(written.index()), e);
-    if (!syntax(written).is(syntax_kind::qualified_id) ||
-        syntax(written).size() != 2)
+    if (!written.is(syntax_kind::qualified_id) || written.size() != 2)
         return e;
-    SyntaxElement qualifier = syntax(written)[0];
-    SyntaxElement member = syntax(written)[1];
+    SyntaxElement qualifier = written[0];
+    SyntaxElement member = written[1];
     if (!member.is_token() ||
         tokens[member.token()].kind != token_kind::identifier ||
-        !syntax(qualifier).is(syntax_kind::nested_name_specifier) ||
-        syntax(qualifier).size() != 2 ||
-        !syntax(qualifier)[0].is(syntax_kind::simple_template_id))
+        !qualifier.is(syntax_kind::nested_name_specifier) ||
+        qualifier.size() != 2 ||
+        !qualifier[0].is(syntax_kind::simple_template_id))
         return e;
     /* (its own unsupported records: the argument stays value-dependent) */
     size_t unsupported_before = unsupported.size();
     type_index q = 0;
     analysis_result r =
-        template_type(syntax(syntax(qualifier)[0].index()), 0, false, q);
+        template_type(syntax(qualifier[0].index()), 0, false, q);
     unsupported.resize(unsupported_before);
     if (r != analysis_result::well_formed ||
         type_table[q].kind != type_kind::dependent ||
@@ -303,11 +301,11 @@ analysis_result semantic_analysis::template_argument_for(
     if (entity_table[p].kind == entity_kind::template_entity)
         return template_template_argument(at, p, written, out);
     if (entity_table[p].kind == entity_kind::typedef_name) {
-        if (!syntax(written).is(syntax_kind::type_id))
+        if (!written.is(syntax_kind::type_id))
             return not_supported(at, "temp.arg");
         return type_id(written, out.type);
     }
-    if (syntax(written).is(syntax_kind::type_id))
+    if (written.is(syntax_kind::type_id))
         return not_supported(at, "temp.arg");
     qualified_type to = entity_table[p].type;
     /* [temp.param]/4: a parameter whose type is an earlier type parameter
@@ -340,8 +338,8 @@ analysis_result semantic_analysis::template_argument_for(
     token_index first = written.token();
     token_index end = first + 1;
     if (!written.is_token()) {
-        first = syntax(written).first_token();
-        end = syntax(written).end_token();
+        first = written.first_token();
+        end = written.end_token();
     }
     if (end == first + 1 && tokens[first].kind == token_kind::identifier) {
         lookup_result x =
@@ -486,10 +484,9 @@ analysis_result semantic_analysis::address_argument(node_index at,
         return analysis_result::well_formed;
     SyntaxElement operand = written;
     bool address_of = false;
-    if (syntax(written).is(syntax_kind::unary_expression) &&
-        syntax(written).size() == 2 &&
-        syntax(written)[0].is(preprocessing_op_or_punc::AMPERSAND)) {
-        operand = syntax(written)[1];
+    if (written.is(syntax_kind::unary_expression) && written.size() == 2 &&
+        written[0].is(preprocessing_op_or_punc::AMPERSAND)) {
+        operand = written[1];
         address_of = true;
     }
     if (reference && address_of)

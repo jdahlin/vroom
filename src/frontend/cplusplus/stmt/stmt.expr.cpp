@@ -34,7 +34,7 @@ node_index parser::expression_statement()
 analysis_result semantic_analysis::expression_statement(ExpressionStatement n,
                                                         uint32_t &built)
 {
-    auto node = syntax(n);
+    auto node = n;
     if (node.size() == 1) {
         built =
             statement_node(semantic_kind::null_statement, node.first_token());

@@ -41,7 +41,7 @@ SyntaxElement without_parentheses(SyntaxElement e)
 entity_index semantic_analysis::named_overload_set(SyntaxElement e,
                                                    token_index &at) const
 {
-    auto name = without_parentheses(syntax(e));
+    auto name = without_parentheses(e);
     if (name.is(syntax_kind::unary_expression) && name.size() == 2 &&
         name[0].is(preprocessing_op_or_punc::AMPERSAND))
         name = without_parentheses(name[1]);

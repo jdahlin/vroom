@@ -50,7 +50,7 @@ uint32_t semantic_analysis::literal_operator_name(const char *suffix,
 analysis_result semantic_analysis::literal_operator_id(LiteralOperatorId id,
                                                        declarator_meaning &m)
 {
-    auto node = syntax(id);
+    auto node = id;
     owned_buffer suffix;
     if (node.size() == 3 && node[2].is_token() &&
         tokens[node[2].token()].kind == token_kind::identifier) {

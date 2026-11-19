@@ -384,7 +384,7 @@ analysis_result semantic_analysis::array(node_index at, SyntaxElement bound,
  */
 token_index semantic_analysis::declarator_id(SyntaxElement d) const
 {
-    auto e = syntax(d);
+    auto e = d;
     if (e.is_identifier())
         return e.token();
     if (e.is_token())
