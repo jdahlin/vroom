@@ -488,6 +488,7 @@ template <class T> using array_of_unknown_bound = T[];
 template <class T, class C> using pointer_to_member_of = T C::*;
 template <class T> using const_ = const T;
 template <class T> using volatile_ = volatile T;
+template <class T> using restrict_ = T __restrict;
 template <class F> using function = F;
 }
 """
