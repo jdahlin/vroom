@@ -349,6 +349,21 @@ static bool deduction_may_succeed(const types &table, qualified_type p,
     }
 }
 
+/* to = from: the deduced values and which are set, saved before a match
+   that may fail partway */
+template <typename T>
+static void copy_deduction(const owned_array<T> &from,
+                           const owned_array<bool> &from_set,
+                           owned_array<T> &to, owned_array<bool> &to_set)
+{
+    to.clear();
+    to_set.clear();
+    for (uint32_t k = 0; k < from.size(); k++) {
+        to.append(from[k]);
+        to_set.append(from_set[k]);
+    }
+}
+
 /* [temp.deduct.call]/4.3: "If P is a class and P has the form
    simple-template-id, then the transformed A can be a derived class D of
    the deduced A.  ..."  /5: "If there is more than one possible deduced
@@ -379,17 +394,17 @@ int semantic_analysis::deduce_from_base(qualified_type p, qualified_type a,
         qualified_type b = qualified_type::make(
             entity_table[class_bases[x.first_base + i]].type.unqualified(),
             a.cv());
+        /* each attempt, direct or through b's bases, starts from the
+           values before it: a failed match may have set some */
         owned_array<template_argument> values;
         owned_array<bool> given;
-        for (uint32_t k = 0; k < deduced.size(); k++) {
-            values.append(deduced[k]);
-            given.append(set[k]);
-        }
+        copy_deduction(deduced, set, values, given);
         uint32_t unknowns = deduction_unknowns;
         int r = 1;
         if (!deduce_type(p, b, values, given)) {
             if (deduction_unknowns != unknowns)
                 return -1;
+            copy_deduction(deduced, set, values, given);
             r = deduce_from_base(p, b, values, given);
         }
         if (r < 0)
@@ -556,10 +571,14 @@ analysis_result semantic_analysis::deduce_from_call(
            its other functions decides; neither is analysed yet */
         uint32_t unknowns = deduction_unknowns;
         if (i < fixed) {
+            owned_array<template_argument> before;
+            owned_array<bool> before_set;
+            copy_deduction(values, set, before, before_set);
             if (deduce_type(p, a, values, set))
                 continue;
             if (deduction_unknowns != unknowns)
                 return not_supported(at, "temp.deduct.type");
+            copy_deduction(before, before_set, values, set);
             int base = deduce_from_base(p, a, values, set);
             if (base > 0)
                 continue;
