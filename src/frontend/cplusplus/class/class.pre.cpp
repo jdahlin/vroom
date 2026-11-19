@@ -2080,7 +2080,12 @@ analysis_result semantic_analysis::static_member_definition(
     declared_entity = 0;
     if (at_block_scope() || function_state.active)
         return not_supported(declaration, "class.static.data");
-    if (s.typedef_ || s.inline_ || s.constexpr_)
+    if (s.typedef_)
+        return not_supported(declaration, "class.static.data");
+    /* [dcl.inline]/6 and [class.static.data]/3: an inline or constexpr
+       definition makes it an inline variable (C++17) */
+    if ((s.inline_ || s.constexpr_) &&
+        tokens.files.behavior.edition < standard_edition::cplusplus_17)
         return not_supported(declaration, "class.static.data");
     /* static or extern on the definition: clang's error */
     if (s.static_ || s.extern_)
@@ -2117,6 +2122,10 @@ analysis_result semantic_analysis::static_member_definition(
        definition (it has no extern) */
     (void)definition;
     entity_table[e].defined = true;
+    if (s.inline_ || s.constexpr_) {
+        entity_table[e].inline_ = true;
+        entity_table[e].constexpr_ |= s.constexpr_;
+    }
     if (type_table[type.unqualified()].kind == type_kind::array &&
         type_table[type.unqualified()].bound_known)
         entity_table[e].type = type;
