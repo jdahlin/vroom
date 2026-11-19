@@ -1754,19 +1754,6 @@ analysis_result semantic_analysis::class_specialization_definition(
         entity_table[function_templates[ct - 1].entity].enclosing != outer)
         return not_supported(n, rule);
     const function_template primary = function_templates[ct - 1];
-    /* [temp.expl.spec]/7, [temp.class.spec]/1: one declared after a
-       specialization it would be used for was instantiated makes the
-       program ill-formed (no diagnostic required); any instantiation
-       before it is not analysed.  One of an explicit specialization is
-       that specialization's own (declared, it is defined at its next
-       use), never another's.  One named but not defined yet (a
-       specialization's head, instantiate_class) is not instantiated */
-    for (const instantiation_record &r : instantiations)
-        if (r.template_entity == primary.entity && r.specialization &&
-            entity_table[r.specialization].kind == entity_kind::class_type &&
-            (entity_table[r.specialization].defined || r.defining) &&
-            !(r.pattern && !function_templates[r.pattern - 1].parameter_count))
-            return not_supported(n, rule);
     uint32_t index = 0, first = 0;
     entity_index scope = 0;
     VTRY(r, template_parameter_scope(n, parameters, outer, 0, index, scope,
@@ -1789,6 +1776,43 @@ analysis_result semantic_analysis::class_specialization_definition(
        (primary_arguments) */
     if (parameters.empty() == dependent || identity)
         return not_supported(n, rule);
+    /* [temp.expl.spec]/7, [temp.class.spec]/1: one declared after a
+       specialization it would be used for was instantiated makes the
+       program ill-formed (no diagnostic required); any instantiation
+       before it is not analysed.  One of an explicit specialization is
+       that specialization's own (declared, it is defined at its next
+       use), never another's.  One named but not defined yet (a
+       specialization's head, instantiate_class) is not instantiated */
+    /* only an instantiation whose arguments this one matches would have
+       used it: [temp.class.spec]/1, [temp.spec.partial.match]/2 */
+    for (const instantiation_record &r : instantiations)
+        if (r.template_entity == primary.entity && r.specialization &&
+            entity_table[r.specialization].kind == entity_kind::class_type &&
+            (entity_table[r.specialization].defined || r.defining) &&
+            !(r.pattern &&
+              !function_templates[r.pattern - 1].parameter_count) &&
+            r.argument_count == arguments.size()) {
+            owned_array<template_argument> d;
+            owned_array<bool> set;
+            for (size_t i = 0; i < parameters.size(); i++) {
+                d.append(template_argument());
+                set.append(false);
+            }
+            bool match = true;
+            matching_partial = true;
+            for (size_t i = 0; i < arguments.size() && match; i++) {
+                const template_argument &y =
+                    template_arguments[r.first_argument + i];
+                if (arguments[i].kind == template_argument::kind_t::pack &&
+                    y.kind == template_argument::kind_t::pack)
+                    match = deduce_pack_argument(arguments[i], y, d, set);
+                else
+                    match = deduce_argument(arguments[i], y, d, set);
+            }
+            matching_partial = false;
+            if (match)
+                return not_supported(n, rule);
+        }
     function_template record;
     record.entity = primary.entity;
     record.declaration = n;
