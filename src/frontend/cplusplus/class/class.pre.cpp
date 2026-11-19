@@ -1121,6 +1121,9 @@ semantic_analysis::member_declaration(entity_index c, syntax_child member,
     }
     if (node.kind == syntax_kind::template_declaration)
         return member_template_declaration(c, n, access);
+    if (node.kind == syntax_kind::static_assert_declaration)
+        /* [class.mem]/1: a member-declaration */
+        return static_assert_declaration(n);
     if (node.kind != syntax_kind::member_declaration &&
         node.kind != syntax_kind::function_definition)
         return not_supported(n);
