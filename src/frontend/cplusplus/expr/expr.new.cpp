@@ -187,7 +187,7 @@ node_index parser::new_declarator()
  * ([expr.new]/6), its bound the expression returned.  More bounds, an
  * omitted one and attributes are not analysed.
  */
-analysis_result semantic_analysis::new_type_id(node_index n,
+analysis_result semantic_analysis::new_type_id(NewTypeId n,
                                                qualified_type &type,
                                                SyntaxElement &bound)
 {
@@ -271,7 +271,7 @@ analysis_result semantic_analysis::allocation_functions(
  * new-extended alignment (/18), the deallocation when the initialization
  * throws (/25).
  */
-analysis_result semantic_analysis::new_expression(node_index n,
+analysis_result semantic_analysis::new_expression(NewExpression n,
                                                   expression_meaning &m)
 {
     auto node = syntax(n);
@@ -294,7 +294,7 @@ analysis_result semantic_analysis::new_expression(node_index n,
     SyntaxElement bound{};
     analysis_result r = analysis_result::well_formed;
     if (i < count && node[i].is(syntax_kind::new_type_id)) {
-        r = new_type_id(node[i++].index(), type, bound);
+        r = new_type_id(node[i++].new_type_id(), type, bound);
     } else if (i + 2 < count && node[i + 1].is(syntax_kind::type_id)) {
         r = type_id(node[i + 1].index(), type);
         i += 3;

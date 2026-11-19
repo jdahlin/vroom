@@ -100,7 +100,7 @@ semantic_analysis::template_simple_declaration(TemplateDeclaration t,
 
 /* [temp.deduct.guide]/1: "Deduction guides are used when a template-name
    appears as a type specifier for a deduced class type" */
-analysis_result semantic_analysis::deduction_guide(node_index n)
+analysis_result semantic_analysis::deduction_guide(DeductionGuide n)
 {
     /* the template-name: the token before the parameters' '(' */
     auto node = syntax(n);
@@ -2221,7 +2221,7 @@ analysis_result semantic_analysis::template_id_arguments(
        it */
     for (size_t w = 0; w < written.size(); w++)
         if (syntax(written[w]).is(syntax_kind::type_id) &&
-            syntax(written[w].index()).size() == 2 &&
+            written[w].size() == 2 &&
             syntax(written[w].index())[1].is(
                 preprocessing_op_or_punc::ELLIPSIS)) {
             if (expansion[w])

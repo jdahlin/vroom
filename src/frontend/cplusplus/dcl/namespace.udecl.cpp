@@ -151,7 +151,7 @@ analysis_result semantic_analysis::using_declaration(UsingDeclaration n)
             if ((g.flags & ~gnu_using_if_exists) || g.aligned || g.section)
                 return worse(result, not_supported(n, "namespace.udecl"));
             result =
-                worse(result, using_declarator(d.index(),
+                worse(result, using_declarator(d.using_declarator(),
                                                g.flags & gnu_using_if_exists));
             any = true;
         } else if (syntax(d).is(syntax_kind::gnu_attribute_specifier)) {
@@ -178,7 +178,7 @@ analysis_result semantic_analysis::using_declaration(UsingDeclaration n)
  * functions, or a class and what hides it found in two namespaces) has no
  * rules yet.
  */
-analysis_result semantic_analysis::using_declarator(node_index n,
+analysis_result semantic_analysis::using_declarator(UsingDeclarator n,
                                                     bool if_exists)
 {
     auto node = syntax(n);

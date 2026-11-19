@@ -51,7 +51,7 @@ node_index parser::delete_expression()
  * incomplete class (/5), a destroying operator delete and
  * new-extended alignment (/10).
  */
-analysis_result semantic_analysis::delete_expression(node_index n,
+analysis_result semantic_analysis::delete_expression(DeleteExpression n,
                                                      expression_meaning &m)
 {
     auto node = syntax(n);

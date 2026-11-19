@@ -151,7 +151,8 @@ static transformation transformation_named(const char *s, size_t n)
    the same keyword and operand ([temp.over.link]), and a template's
    instantiation analyses it again with its arguments */
 analysis_result
-semantic_analysis::clang_type_transformation(node_index n, qualified_type &type)
+semantic_analysis::clang_type_transformation(ClangTypeTransformation n,
+                                             qualified_type &type)
 {
     auto children_syntax = syntax(n);
     token_index keyword = children_syntax[0].token();
@@ -359,7 +360,7 @@ analysis_result semantic_analysis::builtin_template_arguments(
     }
     for (size_t w = 0; w < written.size(); w++)
         if (syntax(written[w]).is(syntax_kind::type_id) &&
-            syntax(written[w].index()).size() == 2 &&
+            written[w].size() == 2 &&
             syntax(written[w].index())[1].is(
                 preprocessing_op_or_punc::ELLIPSIS))
             expansion[w] = true;
@@ -572,8 +573,7 @@ analysis_result semantic_analysis::builtin_make_integer_seq(node_index id,
         return not_supported(id, "ext.clang");
     /* B, by name */
     token_index first = first_token(written[0]);
-    if ((!written[0].is_token() &&
-         syntax(written[0].index()).end_token() != first + 1) ||
+    if ((!written[0].is_token() && written[0].end_token() != first + 1) ||
         tokens[first].kind != token_kind::identifier)
         return not_supported(id, "ext.clang");
     lookup_result x =

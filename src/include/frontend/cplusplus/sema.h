@@ -1513,10 +1513,10 @@ class semantic_analysis
                                    const char *argument);
 
     /* [dcl.pre] */
-    analysis_result empty_declaration(node_index n);
+    analysis_result empty_declaration(EmptyDeclaration n);
     analysis_result static_assert_declaration(StaticAssertDeclaration n);
     /* [dcl.typedef]/2: an alias-declaration's typedef-name */
-    analysis_result alias_declaration(node_index n);
+    analysis_result alias_declaration(AliasDeclaration n);
     /* ... the type its defining-type-id denotes */
     analysis_result alias_type(node_index n, qualified_type &type);
     /* [temp.pre], [temp.expl.spec], [temp.explicit], [temp.deduct.guide]
@@ -1528,8 +1528,8 @@ class semantic_analysis
     /* [temp.fct]: a function template defined at namespace scope */
     analysis_result function_template_definition(node_index n,
                                                  node_index definition);
-    analysis_result explicit_specialization(node_index n);
-    analysis_result explicit_instantiation(node_index n);
+    analysis_result explicit_specialization(ExplicitSpecialization n);
+    analysis_result explicit_instantiation(ExplicitInstantiation n);
     analysis_result class_explicit_instantiation(node_index n, node_index id,
                                                  bool extern_);
     analysis_result member_explicit_instantiation(node_index n,
@@ -1538,11 +1538,11 @@ class semantic_analysis
     /* whether the declarator may have a simple-template-id as its
        declarator-id */
     bool declarator_template_id = false;
-    analysis_result deduction_guide(node_index n);
+    analysis_result deduction_guide(DeductionGuide n);
     analysis_result simple_declaration(node_index n);
     analysis_result function_definition(FunctionDefinition definition);
     /* [dcl.link]: extern "C" or extern "C++", and the declarations in it */
-    analysis_result linkage_specification(node_index n);
+    analysis_result linkage_specification(LinkageSpecification n);
     /* a declaration of the kinds analysis has (declaration's switch) */
     analysis_result declaration_by_kind(node_index n);
     /* [dcl.link]/5: the language linkage of the declarations analysed
@@ -1897,10 +1897,10 @@ class semantic_analysis
     /* [basic.scope.namespace]/1, [namespace.def] */
     analysis_result namespace_definition(node_index n);
     /* [namespace.udir], [namespace.alias], [namespace.udecl] */
-    analysis_result using_directive(node_index n);
-    analysis_result namespace_alias_definition(node_index n);
+    analysis_result using_directive(UsingDirective n);
+    analysis_result namespace_alias_definition(NamespaceAliasDefinition n);
     analysis_result using_declaration(UsingDeclaration n);
-    analysis_result using_declarator(node_index n, bool if_exists = false);
+    analysis_result using_declarator(UsingDeclarator n, bool if_exists = false);
     /* [basic.lookup.udir]: the namespace a namespace-name, after a
        nested-name-specifier (0: none), names */
     analysis_result named_namespace(node_index at, node_index qualifier,
@@ -2098,7 +2098,7 @@ class semantic_analysis
                               entity_index *named_concept = nullptr) const;
     /* [dcl.type.decltype]/1: the type decltype ( expression ) denotes */
     analysis_result decltype_type(node_index n, qualified_type &type);
-    analysis_result clang_type_transformation(node_index n,
+    analysis_result clang_type_transformation(ClangTypeTransformation n,
                                               qualified_type &type);
     owned_array<entity_index> type_transformations;
     /* the type decltype(E) denotes for E analysed as m, E unparenthesized
@@ -2184,8 +2184,9 @@ class semantic_analysis
     /* whether the syntax is a virt-specifier or virt-specifier-seq
        ([class.mem]/1), and which */
     bool virt_specifier(SyntaxElement d, bool &override_, bool &final_) const;
-    analysis_result parameter_declaration(node_index n, qualified_type &type,
-                                          bool &unnamed, token_index &id,
+    analysis_result parameter_declaration(ParameterDeclaration n,
+                                          qualified_type &type, bool &unnamed,
+                                          token_index &id,
                                           SyntaxElement &default_argument);
     /* cv-qualifiers added to a type: to an array's elements
        ([basic.type.qualifier]/3), none to a reference or a function type
@@ -2234,7 +2235,7 @@ class semantic_analysis
     /* [expr.prim.id.unqual] */
     analysis_result id_expression(token_index t, expression_meaning &m);
     /* [expr.prim.id.qual] */
-    analysis_result qualified_id(node_index n, expression_meaning &m);
+    analysis_result qualified_id(QualifiedId n, expression_meaning &m);
     /* [expr.prim.id]: the expression that names the entity e, found by
        lookup of the identifier t */
     analysis_result named_entity(token_index t, entity_index e,
@@ -2277,7 +2278,8 @@ class semantic_analysis
     /* the lambda whose compound-statement is analysed now (its body, not a
        local class's member function in it), nullptr if none */
     lambda_context *current_lambda();
-    analysis_result lambda_expression(node_index n, expression_meaning &m);
+    analysis_result lambda_expression(LambdaExpression n,
+                                      expression_meaning &m);
     analysis_result
     lambda_call_type(node_index n, node_index d, lambda_context &l,
                      qualified_type &type,
@@ -2292,10 +2294,10 @@ class semantic_analysis
     analysis_result lambda_specialization(node_index n, bool body,
                                           qualified_type &type,
                                           entity_index specialization);
-    analysis_result lambda_introducer(node_index n, lambda_context &l);
+    analysis_result lambda_introducer(LambdaIntroducer n, lambda_context &l);
     analysis_result lambda_captures_of(node_index n,
                                        owned_array<SyntaxElement> &out);
-    analysis_result init_capture(node_index n, lambda_context &l,
+    analysis_result init_capture(InitCapture n, lambda_context &l,
                                  capture_record &c);
     /* the current lambda's init-captures' variables, bound in its
        function parameter scope */
@@ -2459,7 +2461,8 @@ class semantic_analysis
     analysis_result comma(node_index n, expression_meaning &m);
     /* a type-id ([dcl.name]) */
     analysis_result type_id(node_index n, qualified_type &type);
-    analysis_result alignment_specifier(node_index n, uint64_t &alignment);
+    analysis_result alignment_specifier(AlignmentSpecifier n,
+                                        uint64_t &alignment);
     SyntaxElement class_head_name(node_index head) const;
 
     /* ---- standard conversions ([conv]) ---- */
@@ -2579,7 +2582,7 @@ class semantic_analysis
                                              bool &constant, bool &value);
     /* [except.spec]/2: whether the noexcept-specifier n makes the exception
        specification non-throwing */
-    analysis_result noexcept_specifier(node_index n, bool member,
+    analysis_result noexcept_specifier(NoexceptSpecifier n, bool member,
                                        bool &non_throwing);
     /* ... with the function_parameters in scope ([basic.scope.param]) */
     void open_parameter_scope();
@@ -2800,7 +2803,7 @@ class semantic_analysis
 
     /* ---- classes ([class]) ---- */
     /* [class.pre]: a class-specifier, the class's type */
-    analysis_result class_specifier(node_index n, type_index &type);
+    analysis_result class_specifier(ClassSpecifier n, type_index &type);
     analysis_result class_definition(node_index n, type_index &type);
     /* "class.nest" or "class.local" for a class declared in scope */
     const char *inner_class_rule(entity_index scope) const;
@@ -2827,12 +2830,14 @@ class semantic_analysis
     analysis_result enum_specifier(node_index n, type_index &type);
     analysis_result enum_specifier_rules(node_index n, type_index &type);
     /* [dcl.type.elab]: enum identifier, the enumeration's type */
-    analysis_result elaborated_enum_specifier(node_index n, type_index &type);
+    analysis_result elaborated_enum_specifier(ElaboratedEnumSpecifier n,
+                                              type_index &type);
     /* [dcl.enum]: an enumerator named by an id-expression */
     analysis_result enumerator_value(token_index t, entity_index e,
                                      expression_meaning &m);
     /* [dcl.type.elab]: class-key identifier, the class's type */
-    analysis_result elaborated_type_specifier(node_index n, type_index &type);
+    analysis_result elaborated_type_specifier(ElaboratedTypeSpecifier n,
+                                              type_index &type);
     /* [class.mem]: one member-declaration of the class being defined */
     /* [temp.mem]/1: the member template n (a template-declaration) of
        class c */
@@ -2917,7 +2922,7 @@ class semantic_analysis
     analysis_result to_base(token_index at, entity_index base,
                             expression_meaning &m);
     /* the base-clause of class c ([class.derived]) */
-    analysis_result base_clause(entity_index c, node_index n,
+    analysis_result base_clause(entity_index c, BaseClause n,
                                 standard_keyword key);
     /* [conv.ptr]/3: the pointer m to class from as a pointer to its base
        to, of type type */
@@ -3438,9 +3443,11 @@ class semantic_analysis
                                             node_index id);
     /* [temp.concept]: a concept-definition; the concept the held name e
        is, plus one; [temp.names]/8: a concept-id's value */
-    analysis_result concept_definition(node_index n, node_index definition);
+    analysis_result concept_definition(node_index n,
+                                       ConceptDefinition definition);
     uint32_t concept_of(entity_index e) const;
-    analysis_result requires_expression(node_index n, expression_meaning &m);
+    analysis_result requires_expression(RequiresExpression n,
+                                        expression_meaning &m);
     analysis_result concept_id(node_index n, uint32_t ct,
                                expression_meaning &m);
     /* [temp.constr.constr]: whether constraint-expression e is satisfied,
@@ -4379,7 +4386,8 @@ class semantic_analysis
                                              qualified_type to, bool direct,
                                              bool &converted);
     /* the operator-function-id node id as a declarator-id */
-    analysis_result operator_function_id(node_index id, declarator_meaning &m);
+    analysis_result operator_function_id(OperatorFunctionId id,
+                                         declarator_meaning &m);
     /* [over.oper]/7-10: the rules of the declaration n of operator
        function f */
     analysis_result operator_function_declaration(node_index n, entity_index f);
@@ -4411,8 +4419,9 @@ class semantic_analysis
                                          bool class_complete = false);
 
     /* [expr.new] and [expr.delete]: the expressions */
-    analysis_result new_expression(node_index n, expression_meaning &m);
-    analysis_result delete_expression(node_index n, expression_meaning &m);
+    analysis_result new_expression(NewExpression n, expression_meaning &m);
+    analysis_result delete_expression(DeleteExpression n,
+                                      expression_meaning &m);
     analysis_result usual_deallocation(node_index n, entity_index c,
                                        bool global, bool array,
                                        entity_index &function, bool &sized,
@@ -4426,7 +4435,7 @@ class semantic_analysis
                                  uint64_t &cookie);
     /* the type of the new-type-id n ([expr.new]/1), the expression of the
        first bound of its noptr-new-declarator if any (bound) */
-    analysis_result new_type_id(node_index n, qualified_type &type,
+    analysis_result new_type_id(NewTypeId n, qualified_type &type,
                                 SyntaxElement &bound);
     /* a declaration analysis did not follow may declare an operator
        function (hold_names): what an operator means is not known */
@@ -4442,7 +4451,8 @@ class semantic_analysis
        suffix, as an identifier number */
     uint32_t literal_operator_name(const char *suffix, size_t length);
     /* the literal-operator-id node id as a declarator-id */
-    analysis_result literal_operator_id(node_index id, declarator_meaning &m);
+    analysis_result literal_operator_id(LiteralOperatorId id,
+                                        declarator_meaning &m);
     /* [over.literal]/2-6: the rules of the declaration n of literal
        operator f */
     analysis_result literal_operator_declaration(node_index n, entity_index f);

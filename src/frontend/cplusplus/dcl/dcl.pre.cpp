@@ -649,7 +649,7 @@ node_index parser::attribute_declaration()
  *
  * [dcl.pre]/7: "An empty-declaration has no effect."
  */
-analysis_result semantic_analysis::empty_declaration(node_index)
+analysis_result semantic_analysis::empty_declaration(EmptyDeclaration)
 {
     return analysis_result::well_formed;
 }
@@ -753,7 +753,7 @@ analysis_result semantic_analysis::alias_type(node_index n,
     return analysis_result::well_formed;
 }
 
-analysis_result semantic_analysis::alias_declaration(node_index n)
+analysis_result semantic_analysis::alias_declaration(AliasDeclaration n)
 {
     if (defining_class)
         return not_supported(n, "class.mem");

@@ -904,8 +904,9 @@ analysis_result semantic_analysis::enum_specifier_rules(node_index n,
  * declaration to which the name in the elaborated-type-specifier refers":
  * an enumeration not declared yet is not declared by it.
  */
-analysis_result semantic_analysis::elaborated_enum_specifier(node_index n,
-                                                             type_index &type)
+analysis_result
+semantic_analysis::elaborated_enum_specifier(ElaboratedEnumSpecifier n,
+                                             type_index &type)
 {
     auto node = syntax(n);
     if (node.size() != 2 || !node[1].is_identifier())

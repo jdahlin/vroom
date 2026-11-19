@@ -28,8 +28,9 @@ namespace cplusplus
  * Recorded as a template whose definition is the constraint-expression,
  * analysed for each concept-id's arguments (concept_id).
  */
-analysis_result semantic_analysis::concept_definition(node_index n,
-                                                      node_index definition)
+analysis_result
+semantic_analysis::concept_definition(node_index n,
+                                      ConceptDefinition definition)
 {
     entity_index outer = current_scope;
     owned_array<node_index> parameters;
@@ -108,7 +109,7 @@ analysis_result semantic_analysis::concept_id(node_index n, uint32_t ct,
  * requirement-parameter-list, a simple, compound or nested requirement:
  * not analysed.
  */
-analysis_result semantic_analysis::requires_expression(node_index n,
+analysis_result semantic_analysis::requires_expression(RequiresExpression n,
                                                        expression_meaning &m)
 {
     auto parts = syntax(n);

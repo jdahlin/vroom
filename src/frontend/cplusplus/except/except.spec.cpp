@@ -119,7 +119,8 @@ namespace cplusplus
  * /5: noexcept(true) is a non-throwing exception specification, and with
  * -fno-exceptions nothing analysis generates depends on it but the type.
  */
-analysis_result semantic_analysis::noexcept_specifier(node_index n, bool member,
+analysis_result semantic_analysis::noexcept_specifier(NoexceptSpecifier n,
+                                                      bool member,
                                                       bool &non_throwing)
 {
     auto node = syntax(n);
@@ -207,7 +208,8 @@ analysis_result semantic_analysis::parameter_scope_noexcept(node_index n,
     if (member && in_member_template_declarator == 2)
         member = false;
     if (node.size() != 4 || member)
-        return noexcept_specifier(n, member, non_throwing);
+        return noexcept_specifier(syntax(n).noexcept_specifier(), member,
+                                  non_throwing);
     entity_index outer = current_scope;
     open_parameter_scope();
     analysis_result r = analysis_result::well_formed;
@@ -221,7 +223,8 @@ analysis_result semantic_analysis::parameter_scope_noexcept(node_index n,
         non_throwing = false;
         dependent_exception_specifications.append(n);
     } else
-        r = noexcept_specifier(n, member, non_throwing);
+        r = noexcept_specifier(syntax(n).noexcept_specifier(), member,
+                               non_throwing);
     current_scope = outer;
     return r;
 }

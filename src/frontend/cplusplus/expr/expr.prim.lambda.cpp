@@ -343,7 +343,7 @@ semantic_analysis::lambda_context *semantic_analysis::current_lambda()
  * class scope, or namespace scope that contains the corresponding
  * lambda-expression."
  */
-analysis_result semantic_analysis::lambda_expression(node_index n,
+analysis_result semantic_analysis::lambda_expression(LambdaExpression n,
                                                      expression_meaning &m)
 {
     auto node = syntax(n);
@@ -430,7 +430,7 @@ analysis_result semantic_analysis::lambda_expression(node_index n,
     entity_table.add_declaration(c, n);
     l.closure = c;
     l.first_capture = static_cast<uint32_t>(lambda_captures.size());
-    analysis_result r = lambda_introducer(node[0].index(), l);
+    analysis_result r = lambda_introducer(node[0].lambda_introducer(), l);
     if (r != analysis_result::well_formed) {
         lambda_captures.resize(l.first_capture);
         entity_table[c].kind = entity_kind::none;

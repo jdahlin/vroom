@@ -163,7 +163,7 @@ qualified_type semantic_analysis::enclosing_capture_type(entity_index e,
  * find a local entity.  The simple-captures this and * this denote the
  * local entity *this."
  */
-analysis_result semantic_analysis::lambda_introducer(node_index n,
+analysis_result semantic_analysis::lambda_introducer(LambdaIntroducer n,
                                                      lambda_context &l)
 {
     owned_array<SyntaxElement> captures;
@@ -212,7 +212,7 @@ analysis_result semantic_analysis::lambda_introducer(node_index n,
                 return not_supported(n, "expr.prim.lambda.capture");
             }
         } else if (syntax(c).is(syntax_kind::init_capture)) {
-            r = init_capture(c.index(), l, record);
+            r = init_capture(c.init_capture(), l, record);
             if (r != analysis_result::well_formed)
                 return r;
             lambda_captures.append(record);
@@ -332,7 +332,8 @@ analysis_result semantic_analysis::lambda_introducer(node_index n,
  * (bind_init_captures).  The member is initialized as the variable would
  * be; a name of the variable designates the member (named_entity).
  */
-analysis_result semantic_analysis::init_capture(node_index n, lambda_context &l,
+analysis_result semantic_analysis::init_capture(InitCapture n,
+                                                lambda_context &l,
                                                 capture_record &record)
 {
     auto node = syntax(n);

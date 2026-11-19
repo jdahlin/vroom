@@ -22,7 +22,7 @@
 namespace cplusplus
 {
 
-analysis_result semantic_analysis::linkage_specification(node_index n)
+analysis_result semantic_analysis::linkage_specification(LinkageSpecification n)
 {
     auto node = syntax(n);
     if (node.size() < 3 || !node[1].is_token())

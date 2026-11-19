@@ -437,7 +437,8 @@ analysis_result semantic_analysis::define_class_instantiation(node_index at,
     class_instantiating = index + 1;
     postpone_member_bodies = context.defining_class != 0;
     type_index type = 0;
-    analysis_result r = class_specifier(definition.definition, type);
+    analysis_result r =
+        class_specifier(syntax(definition.definition).class_specifier(), type);
     postpone_member_bodies = false;
     leave_instantiation(context);
     instantiations[index].defining = false;

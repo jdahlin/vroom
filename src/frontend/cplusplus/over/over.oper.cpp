@@ -215,7 +215,7 @@ uint32_t semantic_analysis::allocation_function_name(allocation_function kind)
  * operator [], or an allocation or deallocation function's name
  * ([basic.stc.dynamic]/1).  co_await is not analysed.
  */
-analysis_result semantic_analysis::operator_function_id(node_index id,
+analysis_result semantic_analysis::operator_function_id(OperatorFunctionId id,
                                                         declarator_meaning &m)
 {
     auto node = syntax(id);

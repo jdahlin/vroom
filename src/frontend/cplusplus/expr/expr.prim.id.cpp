@@ -678,7 +678,7 @@ analysis_result semantic_analysis::named_entity(token_index t, entity_index e,
  * member so named is a class member access as an unqualified name is
  * ([class.mfct.non-static]/2).
  */
-analysis_result semantic_analysis::qualified_id(node_index n,
+analysis_result semantic_analysis::qualified_id(QualifiedId n,
                                                 expression_meaning &m)
 {
     auto node = syntax(n);

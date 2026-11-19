@@ -12,7 +12,8 @@ namespace cplusplus
 
 /* [temp.expl.spec]/1: "An explicit specialization of any of the following
    ... can be declared by a declaration introduced by template<>" */
-analysis_result semantic_analysis::explicit_specialization(node_index n)
+analysis_result
+semantic_analysis::explicit_specialization(ExplicitSpecialization n)
 {
     /* template < > declaration: a class's definition, its class-head
        a simple-template-id */
@@ -91,7 +92,8 @@ analysis_result semantic_analysis::explicit_specialization(node_index n)
 
 /* [temp.explicit]/1: "A class, function, variable, or member template
    specialization can be explicitly instantiated from its template." */
-analysis_result semantic_analysis::explicit_instantiation(node_index n)
+analysis_result
+semantic_analysis::explicit_instantiation(ExplicitInstantiation n)
 {
     /* [extern] template declaration */
     auto x = syntax(n);

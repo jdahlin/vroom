@@ -55,7 +55,7 @@ const char *semantic_analysis::local_class_rule(entity_index c) const
  * ([class.name]) within its scope."  [class.name]/2: "A class declaration
  * introduces the class name into the scope where it is declared".
  */
-analysis_result semantic_analysis::class_specifier(node_index n,
+analysis_result semantic_analysis::class_specifier(ClassSpecifier n,
                                                    type_index &type)
 {
     analysis_result r = class_definition(n, type);
@@ -537,13 +537,14 @@ analysis_result semantic_analysis::class_definition(node_index n,
     entity_table[c].base_count = 0;
     analysis_result result = analysis_result::well_formed;
     if (has_bases)
-        result = base_clause(c, head_children[2].index(), key);
+        result = base_clause(c, head_children[2].base_clause(), key);
     entity_table[c].requested_alignment = trailing_class_alignment;
     trailing_class_alignment = 0;
     for (node_index a : alignas_list) {
         uint64_t alignment = 0;
         if (result == analysis_result::well_formed)
-            result = alignment_specifier(a, alignment);
+            result =
+                alignment_specifier(syntax(a).alignment_specifier(), alignment);
         if (alignment > entity_table[c].requested_alignment)
             entity_table[c].requested_alignment =
                 static_cast<uint32_t>(alignment);
@@ -684,8 +685,9 @@ analysis_result semantic_analysis::class_definition(node_index n,
  * found, the declaration `class-key identifier ;` declares the class in
  * the scope (an incomplete class), as does any other at namespace scope.
  */
-analysis_result semantic_analysis::elaborated_type_specifier(node_index n,
-                                                             type_index &type)
+analysis_result
+semantic_analysis::elaborated_type_specifier(ElaboratedTypeSpecifier n,
+                                             type_index &type)
 {
     /* the attribute-specifier-seq (or GNU attributes, libc++'s
        _LIBCPP_EXPORTED_FROM_ABI) after the class-key: left out when none
@@ -2208,7 +2210,7 @@ SyntaxElement semantic_analysis::class_head_name(node_index head) const
  * the form alignas( type-id ) has the same effect as alignas(alignof(
  * type-id ))."  /4: zero has no effect.  A pack expansion: no rules yet.
  */
-analysis_result semantic_analysis::alignment_specifier(node_index n,
+analysis_result semantic_analysis::alignment_specifier(AlignmentSpecifier n,
                                                        uint64_t &alignment)
 {
     alignment = 0;

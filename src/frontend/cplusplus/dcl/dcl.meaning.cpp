@@ -831,9 +831,9 @@ analysis_result semantic_analysis::declarator(node_index declaration,
         return declarator(declaration, e[0], type, m);
     }
     case syntax_kind::operator_function_id:
-        return operator_function_id(n, m);
+        return operator_function_id(syntax(n).operator_function_id(), m);
     case syntax_kind::literal_operator_id:
-        return literal_operator_id(n, m);
+        return literal_operator_id(syntax(n).literal_operator_id(), m);
     case syntax_kind::conversion_function_id:
         /* [class.conv.fct]/1: the type is the declaration's
            (conversion_function_member) */

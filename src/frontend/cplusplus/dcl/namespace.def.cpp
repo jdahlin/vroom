@@ -506,7 +506,7 @@ analysis_result semantic_analysis::named_namespace(node_index at,
  * with its scope; unqualified and qualified lookup use it
  * (basic/basic.lookup.cpp).
  */
-analysis_result semantic_analysis::using_directive(node_index n)
+analysis_result semantic_analysis::using_directive(UsingDirective n)
 {
     auto node = syntax(n);
     entity_index scope = current_scope;
@@ -562,7 +562,8 @@ analysis_result semantic_analysis::using_directive(node_index n)
  * is [basic.scope.declarative]/4's.  The alias is the namespace bound under
  * another name in the scope.
  */
-analysis_result semantic_analysis::namespace_alias_definition(node_index n)
+analysis_result
+semantic_analysis::namespace_alias_definition(NamespaceAliasDefinition n)
 {
     auto node = syntax(n);
     if (defining_class || node.size() < 4 || !node[1].is_identifier())

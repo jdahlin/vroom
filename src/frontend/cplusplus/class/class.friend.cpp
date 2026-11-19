@@ -120,7 +120,8 @@ analysis_result semantic_analysis::friend_class(entity_index c, node_index n,
         /* a qualified name: [basic.lookup.elab]/3, a class declared
            before */
         type_index named = 0;
-        analysis_result r = elaborated_type_specifier(t, named);
+        analysis_result r = elaborated_type_specifier(
+            syntax(t).elaborated_type_specifier(), named);
         if (r != analysis_result::well_formed)
             return r;
         const struct type &record = type_table[named];

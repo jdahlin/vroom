@@ -1133,14 +1133,16 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
             type_index class_type = 0;
             analysis_result r;
             if (syntax(c).is(syntax_kind::class_specifier))
-                r = class_specifier(c.index(), class_type);
+                r = class_specifier(c.class_specifier(), class_type);
             else if (syntax(c).is(syntax_kind::elaborated_type_specifier))
-                r = elaborated_type_specifier(c.index(), class_type);
+                r = elaborated_type_specifier(c.elaborated_type_specifier(),
+                                              class_type);
             else if (syntax(c).is(syntax_kind::enum_specifier)) {
                 r = enum_specifier(c.index(), class_type);
                 declares_enumeration = true;
             } else if (syntax(c).is(syntax_kind::elaborated_enum_specifier))
-                r = elaborated_enum_specifier(c.index(), class_type);
+                r = elaborated_enum_specifier(c.elaborated_enum_specifier(),
+                                              class_type);
             else if (syntax(c).is(syntax_kind::simple_template_id)) {
                 uint32_t named_cv = 0;
                 r = template_type(c.index(), 0, false, class_type, &named_cv);
@@ -1162,7 +1164,8 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
             } else if (syntax(c).is(syntax_kind::clang_type_transformation)) {
                 /* [ext:clang_type_traits] */
                 qualified_type denoted;
-                r = clang_type_transformation(c.index(), denoted);
+                r = clang_type_transformation(c.clang_type_transformation(),
+                                              denoted);
                 class_type = denoted.unqualified();
                 cv |= denoted.cv();
             } else if (syntax(c).is(syntax_kind::clang_atomic_type_specifier)) {

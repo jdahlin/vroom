@@ -218,7 +218,7 @@ analysis_result semantic_analysis::base_class_name(SyntaxElement name,
  * order of their construction ([class.base.init]/13.1), each a subobject
  * entity whose offset the layout gives (abi/itanium/layout.cpp).
  */
-analysis_result semantic_analysis::base_clause(entity_index c, node_index n,
+analysis_result semantic_analysis::base_clause(entity_index c, BaseClause n,
                                                standard_keyword key)
 {
     /* [temp.variadic]/5.3: "In a base-specifier-list; the pattern is a
@@ -258,8 +258,8 @@ analysis_result semantic_analysis::base_clause(entity_index c, node_index n,
         }
         token_index first = listed[i].token(), end = first + 1;
         if (!listed[i].is_token()) {
-            first = syntax(listed[i].index()).first_token();
-            end = syntax(listed[i].index()).end_token();
+            first = listed[i].first_token();
+            end = listed[i].end_token();
         }
         uint32_t count = 0;
         if (!expansion_count(first, end, count))

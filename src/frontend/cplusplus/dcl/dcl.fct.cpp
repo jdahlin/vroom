@@ -234,10 +234,9 @@ node_index parser::parameter_declaration()
  * [dcl.fct]/5: "The type of each parameter (including function parameter
  * packs) is determined from its own decl-specifier-seq and declarator."
  */
-analysis_result
-semantic_analysis::parameter_declaration(node_index n, qualified_type &type,
-                                         bool &unnamed, token_index &id,
-                                         SyntaxElement &default_argument)
+analysis_result semantic_analysis::parameter_declaration(
+    ParameterDeclaration n, qualified_type &type, bool &unnamed,
+    token_index &id, SyntaxElement &default_argument)
 {
     id = 0;
     default_argument = SyntaxElement();
@@ -450,8 +449,9 @@ analysis_result semantic_analysis::function(node_index parameters,
             for (uint32_t e = 0; e < elements; e++) {
                 expanding = true;
                 expansion_element = e;
-                r = parameter_declaration(declarations[k], t, unnamed, id,
-                                          default_argument);
+                r = parameter_declaration(
+                    syntax(declarations[k]).parameter_declaration(), t, unnamed,
+                    id, default_argument);
                 expanding = saved;
                 expansion_element = saved_element;
                 if (r != analysis_result::well_formed)
@@ -480,8 +480,9 @@ analysis_result semantic_analysis::function(node_index parameters,
                 empty_pack = pack_name;
             continue;
         }
-        r = parameter_declaration(declarations[k], t, unnamed, id,
-                                  default_argument);
+        r = parameter_declaration(
+            syntax(declarations[k]).parameter_declaration(), t, unnamed, id,
+            default_argument);
         if (r != analysis_result::well_formed)
             return r;
         if (declared_pack) {

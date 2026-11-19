@@ -47,7 +47,7 @@ uint32_t semantic_analysis::literal_operator_name(const char *suffix,
  *         operator string-literal identifier
  *         operator user-defined-string-literal
  */
-analysis_result semantic_analysis::literal_operator_id(node_index id,
+analysis_result semantic_analysis::literal_operator_id(LiteralOperatorId id,
                                                        declarator_meaning &m)
 {
     auto node = syntax(id);
