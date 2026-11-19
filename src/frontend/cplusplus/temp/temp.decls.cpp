@@ -172,7 +172,8 @@ analysis_result semantic_analysis::template_head_parameters(
         /* [temp.param]/4: a type-constraint's immediately-declared
            constraint is one of the template's associated constraints
            ([temp.constr.decl]/3), checked with its requires-clause
-           (template_constraints_satisfied): a function template's */
+           (template_constraints_satisfied): a function template's and a
+           partial specialization's ([temp.class.spec.match]/2) */
         if (x.constraint && (!type_constraints || x.pack))
             return not_supported(p, "temp.param");
         /* [temp.param]/18: "If a template-parameter is a type-parameter
@@ -1454,7 +1455,7 @@ semantic_analysis::class_template_definition(node_index n, node_index specifier)
         head_name.bits &&
         syntax_is(tree, head_name, syntax_kind::simple_template_id);
     analysis_result r = template_head_parameters(
-        n, parameters, true, specialization, specialization);
+        n, parameters, true, specialization, specialization, specialization);
     if (r != analysis_result::well_formed)
         return r;
     /* a partial specialization's requires-clause is checked where it is
@@ -1668,9 +1669,11 @@ analysis_result semantic_analysis::class_specialization_definition(
        (the primary's own arguments are not; other cases are
        [temp.class.order]'s, not analysed); /9 Example 1's #2: the
        primary's arguments with a requires-clause, more constrained than
-       the unconstrained primary ([temp.constr.order]) */
-    if (identity && head_constraint(n).bits &&
-        !head_constraint(function_templates[ct - 1].declaration).bits)
+       the unconstrained primary ([temp.constr.order]); a type-constraint
+       the same (a primary has none) */
+    node_index primary_head = function_templates[ct - 1].declaration;
+    if (identity && !head_constraint(primary_head).bits &&
+        !same_constraints(n, primary_head))
         identity = false;
     if (parameters.empty() == dependent || identity)
         return not_supported(n, rule);

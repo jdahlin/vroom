@@ -229,6 +229,26 @@ analysis_result semantic_analysis::constraint_satisfied(syntax_child e,
  */
 bool semantic_analysis::same_constraints(node_index a, node_index b)
 {
+    /* the type-constraints too, parameter by parameter ([temp.over.link]/6:
+       equivalent template-heads) */
+    owned_array<node_index> pa, pb;
+    if (tree[a].child_count && tree[b].child_count &&
+        syntax_is(tree, tree.children(a)[0], syntax_kind::template_head) &&
+        syntax_is(tree, tree.children(b)[0], syntax_kind::template_head) &&
+        template_head_list(tree.children(a)[0].index(), pa) &&
+        template_head_list(tree.children(b)[0].index(), pb)) {
+        if (pa.size() != pb.size())
+            return false;
+        for (size_t i = 0; i < pa.size(); i++) {
+            template_parameter_parts u, v;
+            if (!template_parameter_form(pa[i], u) ||
+                !template_parameter_form(pb[i], v))
+                continue;
+            if (!u.constraint != !v.constraint ||
+                (u.constraint && !same_tokens(u.constraint, v.constraint)))
+                return false;
+        }
+    }
     syntax_child x = head_constraint(a), y = head_constraint(b);
     if (!x.bits || !y.bits)
         return !x.bits && !y.bits;
