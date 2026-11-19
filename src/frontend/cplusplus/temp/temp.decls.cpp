@@ -1187,6 +1187,40 @@ analysis_result semantic_analysis::alias_template_type(node_index id,
     return alias_template_specialization(id, at, arguments, type);
 }
 
+/* the dependent type template t's simple-template-id with arguments
+   denotes ([temp.dep.type]/9), not instantiated; one per template and
+   arguments */
+type_index semantic_analysis::dependent_specialization(
+    entity_index t, const owned_array<template_argument> &arguments)
+{
+    for (const instantiation_record &x : instantiations) {
+        if (x.template_entity != t || x.argument_count != arguments.size())
+            continue;
+        bool same = true;
+        for (uint32_t i = 0; i < x.argument_count && same; i++)
+            same = template_arguments[x.first_argument + i] == arguments[i];
+        if (same)
+            return entity_table[x.specialization].type.unqualified();
+    }
+    instantiation_record record;
+    record.template_entity = t;
+    record.first_argument = static_cast<uint32_t>(template_arguments.size());
+    record.argument_count = static_cast<uint32_t>(arguments.size());
+    for (const template_argument &a : arguments)
+        template_arguments.append(a);
+    uint32_t index = static_cast<uint32_t>(instantiations.size());
+    entity_index e =
+        entity_table.make(entity_kind::template_specialization,
+                          entity_table[t].name, entity_table[t].enclosing);
+    entity_table[e].type = qualified_type::make(
+        type_table.of_entity(type_kind::dependent, e), cv_none);
+    entity_table[e].instantiation = index + 1;
+    entity_table[e].linkage_of_name = entity_table[t].linkage_of_name;
+    record.specialization = e;
+    instantiations.append(record);
+    return entity_table[e].type.unqualified();
+}
+
 /* the type alias template function_templates[at - 1] denotes with
    arguments (one per parameter, a pack's as one) */
 analysis_result semantic_analysis::alias_template_specialization(
@@ -1200,7 +1234,10 @@ analysis_result semantic_analysis::alias_template_specialization(
        to a pack parameter (libc++'s __invoke_result_t<_Args...>), the
        parameter's name is bound to the enclosing pack itself, so that the
        alias denotes what its type-id with that pack written there would
-       ([temp.alias]/2); anything else is refused */
+       ([temp.alias]/2); anything else (__invoke_result_t<_Fn, _Args...>)
+       is the dependent template-id itself ([temp.dep.type]/9), analysed
+       again with the elements when the enclosing template is
+       instantiated ([temp.variadic]/5) */
     owned_array<entity_index> forwarded;
     for (uint32_t i = 0; i < ft.parameter_count; i++) {
         const template_argument &a = arguments[i];
@@ -1213,8 +1250,10 @@ analysis_result semantic_analysis::alias_template_specialization(
                 if (a.count != 1 ||
                     !template_parameter_is_pack(ft.first_parameter + i) ||
                     entity_table[x.template_entity].kind !=
-                        entity_kind::typedef_name)
-                    return not_supported(id, "temp.variadic");
+                        entity_kind::typedef_name) {
+                    type = dependent_specialization(ft.entity, arguments);
+                    return analysis_result::well_formed;
+                }
                 whole = x.template_entity;
             }
         forwarded.append(whole);
@@ -1835,8 +1874,8 @@ bool semantic_analysis::deduce_pack_argument(const template_argument &x,
         if (e.kind == template_argument::kind_t::pack &&
             e.count == UINT32_MAX) {
             /* /5.7: a pack expansion not at the end is a non-deduced
-               context: not analysed */
-            if (k + 1 != x.count) {
+               context: not analysed; nor one of a pattern (no position) */
+            if (k + 1 != x.count || e.value == UINT32_MAX) {
                 deduction_unknowns++;
                 return false;
             }
@@ -2030,36 +2069,8 @@ analysis_result semantic_analysis::template_type(node_index id,
            template parameter or any of the template arguments is a
            dependent type": a template's own declarator names it (not
            instantiated); one per template and arguments */
-        entity_index t = function_templates[ct - 1].entity;
-        for (const instantiation_record &x : instantiations) {
-            if (x.template_entity != t || x.argument_count != arguments.size())
-                continue;
-            bool same = true;
-            for (uint32_t i = 0; i < x.argument_count && same; i++)
-                same = template_arguments[x.first_argument + i] == arguments[i];
-            if (same) {
-                type = entity_table[x.specialization].type.unqualified();
-                return analysis_result::well_formed;
-            }
-        }
-        instantiation_record record;
-        record.template_entity = t;
-        record.first_argument =
-            static_cast<uint32_t>(template_arguments.size());
-        record.argument_count = static_cast<uint32_t>(arguments.size());
-        for (const template_argument &a : arguments)
-            template_arguments.append(a);
-        uint32_t index = static_cast<uint32_t>(instantiations.size());
-        entity_index e =
-            entity_table.make(entity_kind::template_specialization,
-                              entity_table[t].name, entity_table[t].enclosing);
-        entity_table[e].type = qualified_type::make(
-            type_table.of_entity(type_kind::dependent, e), cv_none);
-        entity_table[e].instantiation = index + 1;
-        entity_table[e].linkage_of_name = entity_table[t].linkage_of_name;
-        record.specialization = e;
-        instantiations.append(record);
-        type = entity_table[e].type.unqualified();
+        type = dependent_specialization(function_templates[ct - 1].entity,
+                                        arguments);
         return analysis_result::well_formed;
     }
     entity_index c = 0;
@@ -2154,8 +2165,26 @@ analysis_result semantic_analysis::template_id_arguments(
                     elements.append(v);
                     continue;
                 }
-                if (!expansion_count(first, end, times))
-                    return not_supported(id, "temp.variadic");
+                /* a pattern naming the template's own packs (in its own
+                   declaration, __enable_if_t<_Pred::value>...): one
+                   element of unknown count, the pattern's dependent
+                   written type, analysed again with the elements when
+                   the template is instantiated */
+                bool own_pattern = false;
+                if (!expansion_count(first, end, times, &own_pattern)) {
+                    if (!own_pattern || a.is_token() || pack >= count ||
+                        arguments.size() < pack)
+                        return not_supported(id, "temp.variadic");
+                    template_argument v;
+                    v.kind = template_argument::kind_t::pack;
+                    v.type = qualified_type::make(
+                        dependent_written_type(a.index()), cv_none);
+                    v.template_entity = type_table[v.type.unqualified()].entity;
+                    v.value = UINT32_MAX;
+                    v.count = UINT32_MAX;
+                    elements.append(v);
+                    continue;
+                }
             }
             for (uint32_t k = 0; k < times; k++) {
                 uint32_t position = static_cast<uint32_t>(arguments.size());
@@ -2591,18 +2620,48 @@ uint32_t semantic_analysis::attributes_without_effect_before(
 }
 
 /* [temp.variadic]/7: whether each of the tokens [first, end) that is the
-   pack's name is directly followed by ... (a pattern of the pack alone,
-   A...) */
+   pack's name is within the pattern of a pack expansion: an ellipsis
+   follows it that ends the template argument or parenthesized element it
+   is in, or one enclosing it (A..., tuple<A>&..., x<y<A::v>...>), not a
+   sibling's (res<A, B...>) */
 bool semantic_analysis::pack_only_expanded(uint32_t name, token_index first,
                                            token_index end) const
 {
-    for (token_index t = first; t < end; t++)
-        if (tokens[t].kind == token_kind::identifier &&
-            tokens.identifier(t) == name &&
-            (t + 1 >= end ||
-             !syntax_is_punctuator(tokens, syntax_child::token(t + 1),
-                                   preprocessing_op_or_punc::ELLIPSIS)))
+    auto is = [&](token_index t, preprocessing_op_or_punc op) {
+        return syntax_is_punctuator(tokens, syntax_child::token(t), op);
+    };
+    for (token_index t = first; t < end; t++) {
+        if (tokens[t].kind != token_kind::identifier ||
+            tokens.identifier(t) != name)
+            continue;
+        /* depth of brackets from the name's; level the element the scan
+           is in, sibling once a comma passed into the next element */
+        int depth = 0, level = 0;
+        bool sibling = false, expanded = false;
+        for (token_index u = t + 1; u < end && !expanded; u++) {
+            if (is(u, preprocessing_op_or_punc::LESS) ||
+                is(u, preprocessing_op_or_punc::LEFT_PARENTHESIS) ||
+                is(u, preprocessing_op_or_punc::LEFT_BRACKET))
+                depth++;
+            else if (is(u, preprocessing_op_or_punc::GREATER) ||
+                     is(u, preprocessing_op_or_punc::RIGHT_PARENTHESIS) ||
+                     is(u, preprocessing_op_or_punc::RIGHT_BRACKET))
+                depth--;
+            else if (is(u, preprocessing_op_or_punc::GREATER_GREATER))
+                depth -= 2;
+            else if (is(u, preprocessing_op_or_punc::COMMA) && depth == level)
+                sibling = true;
+            else if (is(u, preprocessing_op_or_punc::ELLIPSIS) &&
+                     depth == level && !sibling)
+                expanded = true;
+            if (depth < level) {
+                level = depth;
+                sibling = false;
+            }
+        }
+        if (!expanded)
             return false;
+    }
     return true;
 }
 

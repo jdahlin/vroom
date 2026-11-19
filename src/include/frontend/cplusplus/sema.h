@@ -1862,6 +1862,7 @@ class semantic_analysis
        template-parameters (bound in c) */
     bool dependent_base_specifier(entity_index c, syntax_child name) const;
     uint32_t own_pack_parameter(uint32_t name) const;
+    uint32_t explicit_argument_position(uint32_t ft, uint32_t i) const;
     analysis_result base_class_name(syntax_child name, node_index n,
                                     entity_index &base, token_index &id);
     bool in_dependent_base_only(entity_index c, uint32_t name,
@@ -3282,6 +3283,9 @@ class semantic_analysis
     qualified_type decayed(qualified_type t);
     analysis_result changed_signedness(node_index n, qualified_type t,
                                        bool to_signed, qualified_type &type);
+    type_index
+    dependent_specialization(entity_index t,
+                             const owned_array<template_argument> &arguments);
     analysis_result alias_template_specialization(
         node_index id, uint32_t at,
         const owned_array<template_argument> &arguments, type_index &type);
@@ -3619,9 +3623,10 @@ class semantic_analysis
     entity_index find_pack(uint32_t name) const;
     /* [temp.variadic]/5: the number of elements of the packs the pattern
        [first, end) names (false: none, packs of different lengths, or a
-       pack expansion within it) */
-    bool expansion_count(token_index first, token_index end,
-                         uint32_t &count) const;
+       pack expansion within it); own set when it names none but a pack of
+       the template's own declaration (own_pack_parameter) */
+    bool expansion_count(token_index first, token_index end, uint32_t &count,
+                         bool *own = nullptr) const;
     /* expression(pattern) for the element i of the packs it names */
     analysis_result expansion_element_expression(syntax_child pattern,
                                                  uint32_t i,

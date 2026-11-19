@@ -216,7 +216,7 @@ static bool token_is(token_stream &tokens, token_index t,
 /* [temp.variadic]/7: "All of the packs expanded by a pack expansion shall
    have the same number of arguments specified." */
 bool semantic_analysis::expansion_count(token_index first, token_index end,
-                                        uint32_t &count) const
+                                        uint32_t &count, bool *own) const
 {
     bool found = false;
     count = 0;
@@ -232,8 +232,11 @@ bool semantic_analysis::expansion_count(token_index first, token_index end,
              token_is(tokens, t - 1, preprocessing_op_or_punc::COLON_COLON)))
             continue;
         entity_index e = find_pack(tokens.identifier(t));
-        if (!e)
+        if (!e) {
+            if (own && own_pack_parameter(tokens.identifier(t)))
+                *own = true;
             continue;
+        }
         uint32_t n = entity_table[e].member_count;
         if (found && n != count)
             return false;

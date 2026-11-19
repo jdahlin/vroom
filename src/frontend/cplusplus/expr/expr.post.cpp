@@ -1015,9 +1015,9 @@ analysis_result semantic_analysis::template_callee_parts(
        specify more template-arguments than there are corresponding
        template-parameters" (clang: no candidate) */
     for (syntax_child a : written) {
-        uint32_t position = static_cast<uint32_t>(specified.size());
-        if (position >=
-            function_templates[function_template - 1].parameter_count)
+        uint32_t position = explicit_argument_position(
+            function_template, static_cast<uint32_t>(specified.size()));
+        if (position == UINT32_MAX)
             return not_supported(id.index(), "temp.arg.explicit");
         template_argument x;
         analysis_result r = template_argument_for(
@@ -1058,6 +1058,21 @@ bool semantic_analysis::undo_substitution(const substitution_mark &m)
     return true;
 }
 
+/* [temp.arg.explicit]/9: the template parameter explicit template
+   argument i of function template ft is for, those from a trailing
+   pack's position on that pack's; UINT32_MAX for one too many (/6) */
+uint32_t semantic_analysis::explicit_argument_position(uint32_t ft,
+                                                       uint32_t i) const
+{
+    const function_template &f = function_templates[ft - 1];
+    if (i >= f.parameter_count && f.parameter_count &&
+        template_parameter_is_pack(f.first_parameter + f.parameter_count - 1))
+        return f.parameter_count - 1;
+    if (i >= f.parameter_count)
+        return UINT32_MAX;
+    return i;
+}
+
 /*
  * [temp.over]/1: "For each function template, if the argument deduction
  * and checking succeeds, the template-arguments (deduced and/or explicit)
@@ -1095,11 +1110,15 @@ analysis_result semantic_analysis::template_candidates(
            checked against this template's parameters; more than it has,
            or one of another kind, is no candidate ([temp.deduct]/2) */
         if (written) {
-            if (written->size() > function_templates[g - 1].parameter_count)
-                failed = true;
             for (size_t i = 0; !failed && i < written->size(); i++) {
+                uint32_t position =
+                    explicit_argument_position(g, static_cast<uint32_t>(i));
+                if (position == UINT32_MAX) {
+                    failed = true;
+                    break;
+                }
                 entity_index p = template_parameter_entities
-                    [function_templates[g - 1].first_parameter + i];
+                    [function_templates[g - 1].first_parameter + position];
                 bool type_parameter =
                     entity_table[p].kind == entity_kind::typedef_name;
                 if (entity_table[p].kind != entity_kind::template_entity &&
@@ -1109,8 +1128,7 @@ analysis_result semantic_analysis::template_candidates(
                     break;
                 }
                 template_argument x;
-                r = template_argument_for(written_at, g,
-                                          static_cast<uint32_t>(i),
+                r = template_argument_for(written_at, g, position,
                                           (*written)[i], d.data(), x);
                 if (r != analysis_result::well_formed)
                     break;

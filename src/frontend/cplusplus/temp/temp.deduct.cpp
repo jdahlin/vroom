@@ -415,10 +415,12 @@ analysis_result semantic_analysis::deduce_from_call(
     if (fixed && type_table[parameters[fixed - 1].unqualified()].kind ==
                      type_kind::pack_expansion)
         fixed--;
-    if (f.variadic)
+    /* [dcl.fct]/3's ellipsis: the arguments after the parameters match
+       it, and deduce nothing ([temp.deduct.call]/1 for each parameter) */
+    if (f.variadic && fixed != f.parameter_count)
         return not_supported(at, "temp.deduct.call");
     if (count + ft.default_arguments < fixed ||
-        (fixed == f.parameter_count && count > fixed)) {
+        (fixed == f.parameter_count && count > fixed && !f.variadic)) {
         /* [over.match.viable]/2: a template of another number of
            parameters, less those with a default argument, cannot be
            called with these arguments */
@@ -439,20 +441,31 @@ analysis_result semantic_analysis::deduce_from_call(
        template-arguments than there are corresponding
        template-parameters" (clang: no candidate) */
     uint32_t specified = static_cast<uint32_t>(deduced.size());
-    if (specified > ft.parameter_count || specified > pack)
-        /* (arguments of a pack given: [temp.arg.explicit]/9's sequence,
-           extended by deduction) */
+    /* /9: those from a trailing pack's position on its elements; when a
+       function parameter pack would extend the sequence by deduction,
+       refused */
+    uint32_t given = specified;
+    if (specified > pack && pack + 1 == ft.parameter_count &&
+        fixed == f.parameter_count)
+        given = pack;
+    if (given > ft.parameter_count || given > pack)
         return not_supported(at, "temp.arg.explicit");
     owned_array<template_argument> values;
     owned_array<bool> set;
     for (uint32_t i = 0; i < ft.parameter_count; i++) {
         template_argument v;
-        if (i < specified)
+        if (i < given)
             v = deduced[i];
         values.append(v);
-        set.append(i < specified);
+        set.append(i < given);
+    }
+    if (given < specified) {
+        values[pack] = make_pack(&deduced[pack], specified - pack);
+        set[pack] = true;
     }
     owned_array<template_argument> elements;
+    if (f.variadic && count > fixed)
+        count = fixed;
     for (uint32_t i = 0; i < count; i++) {
         qualified_type p = parameters[i];
         if (i >= fixed)
