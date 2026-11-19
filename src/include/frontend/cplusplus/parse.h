@@ -159,6 +159,15 @@ class syntax_tree
     {
         return child_lists.data() + nodes[n].first_child;
     }
+    /* the two arrays: for a reader that holds them (syntax.h) */
+    const syntax_node *node_data() const
+    {
+        return nodes.data();
+    }
+    const syntax_child *child_data() const
+    {
+        return child_lists.data();
+    }
     /* the number of nodes, the unused node 0 included */
     size_t size() const
     {

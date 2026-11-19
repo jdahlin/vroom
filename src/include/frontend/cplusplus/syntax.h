@@ -39,9 +39,19 @@ namespace cplusplus
 /* what a view reads: the tree, its tokens, and the parser's keyword
    table (parser::keyword_of) */
 struct SyntaxContext {
+    SyntaxContext(const syntax_tree &tree, token_stream &tokens,
+                  const parser &p)
+        : tree(tree), tokens(tokens), p(p), nodes(tree.node_data()),
+          child_lists(tree.child_data())
+    {
+    }
     const syntax_tree &tree;
     token_stream &tokens;
     const parser &p;
+    /* the tree's two arrays, read directly (the tree is complete when a
+       context is made: it must not grow while one is in use) */
+    const syntax_node *nodes;
+    const syntax_child *child_lists;
 };
 
 /* whether a view of type From converts to the sum To (syntax-views.inc) */
@@ -139,7 +149,7 @@ class SyntaxRef
     /* whether child c is a node of kind k */
     bool is(syntax_child c, syntax_kind k) const
     {
-        return !c.is_token() && c.index() && cx->tree[c.index()].kind == k;
+        return !c.is_token() && c.index() && cx->nodes[c.index()].kind == k;
     }
     /* whether child c is the keyword k */
     bool is_keyword(syntax_child c, standard_keyword k) const
@@ -162,11 +172,11 @@ class SyntaxRef
   protected:
     const syntax_node &node() const
     {
-        return cx->tree[n];
+        return cx->nodes[n];
     }
     const syntax_child *children() const
     {
-        return cx->tree.children(n);
+        return cx->child_lists + cx->nodes[n].first_child;
     }
     /* this node as view T, {} if it is of another kind */
     template <class T> T as() const
@@ -181,7 +191,7 @@ class SyntaxRef
         for (uint32_t i = 0; i < size(); i++) {
             syntax_child c = children()[i];
             if (!c.is_token() && c.index() &&
-                T::accepts(cx->tree[c.index()].kind))
+                T::accepts(cx->nodes[c.index()].kind))
                 return T(*cx, c.index());
         }
         return {};
@@ -330,7 +340,7 @@ inline SyntaxElement SyntaxRef::operator[](uint32_t i) const
 {
     if (i >= size())
         return {};
-    return SyntaxElement(*cx, cx->tree.children(n)[i]);
+    return SyntaxElement(*cx, children()[i]);
 }
 
 inline SyntaxElement SyntaxRef::back() const
