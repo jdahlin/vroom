@@ -97,6 +97,55 @@ analysis_result semantic_analysis::concept_id(node_index n, uint32_t ct,
     return analysis_result::well_formed;
 }
 
+/*
+ * [expr.prim.req]/6: "The substitution of template arguments into a
+ * requires-expression may result in the formation of invalid types or
+ * expressions in its requirements ... In such cases, the
+ * requires-expression evaluates to false"; "If substitution (if any) and
+ * semantic constraint checking succeed, the requires-expression evaluates
+ * to true."  Of type-requirements typename nested-name-specifier
+ * type-name; (/1 a prvalue of type bool), checked in lexical order.  A
+ * requirement-parameter-list, a simple, compound or nested requirement:
+ * not analysed.
+ */
+analysis_result semantic_analysis::requires_expression(node_index n,
+                                                       expression_meaning &m)
+{
+    const syntax_child *parts = tree.children(n);
+    if (tree[n].child_count != 2 || !substituting)
+        return not_supported(n, "expr.prim.req");
+    node_index body = parts[1].index();
+    const syntax_child *requirements = tree.children(body) + 1;
+    uint32_t count = tree[body].child_count - 2;
+    if (count == 1 &&
+        syntax_is(tree, requirements[0], syntax_kind::requirement_seq)) {
+        count = tree[requirements[0].index()].child_count;
+        requirements = tree.children(requirements[0].index());
+    }
+    bool satisfied = true;
+    for (uint32_t i = 0; i < count && satisfied; i++) {
+        if (!syntax_is(tree, requirements[i], syntax_kind::type_requirement))
+            return not_supported(n, "expr.prim.req");
+        /* [expr.prim.req.type]/1: "A type-requirement asserts the validity
+           of a type" */
+        substitution_mark mark = mark_substitution();
+        type_index type = 0;
+        uint32_t cv = 0;
+        analysis_result r = typename_type(requirements[i].index(), type, cv);
+        if (r == analysis_result::ill_formed && undo_substitution(mark)) {
+            satisfied = false;
+            continue;
+        }
+        if (r != analysis_result::well_formed)
+            return r;
+        if (depends_on_template_parameter(qualified_type::make(type, cv_none)))
+            return not_supported(n, "expr.prim.req");
+    }
+    m = integer_constant(fundamental_type::bool_, satisfied,
+                         tree[n].first_token);
+    return analysis_result::well_formed;
+}
+
 analysis_result semantic_analysis::concept_satisfied(
     node_index at, uint32_t ct, const owned_array<template_argument> &arguments,
     bool &satisfied)

@@ -90,10 +90,14 @@ analysis_result semantic_analysis::typename_type(node_index n, type_index &type,
     const syntax_child *parts = tree.children(n);
     type = 0;
     cv = 0;
-    if (node.child_count < 3 || node.child_count > 4 ||
+    /* a type-requirement ([expr.prim.req.type]) is one with a ';' */
+    uint32_t count = node.child_count;
+    if (node.kind == syntax_kind::type_requirement)
+        count--;
+    if (count < 3 || count > 4 ||
         !syntax_is(tree, parts[1], syntax_kind::nested_name_specifier))
         return not_supported(n, "temp.res");
-    syntax_child last = parts[node.child_count - 1];
+    syntax_child last = parts[count - 1];
     if (syntax_is(tree, last, syntax_kind::simple_template_id)) {
         /* typename nested-name-specifier template_opt simple-template-id:
            [temp.names]/1's template of the class or namespace named (a
@@ -109,7 +113,7 @@ analysis_result semantic_analysis::typename_type(node_index n, type_index &type,
             return not_supported(n, "temp.res");
         return template_type(last.index(), scope.entity, true, type);
     }
-    if (node.child_count != 3)
+    if (count != 3)
         return not_supported(n, "temp.res");
     if (!parts[2].is_token() ||
         tokens[parts[2].index()].kind != token_kind::identifier)

@@ -3298,6 +3298,7 @@ class semantic_analysis
        is, plus one; [temp.names]/8: a concept-id's value */
     analysis_result concept_definition(node_index n, node_index definition);
     uint32_t concept_of(entity_index e) const;
+    analysis_result requires_expression(node_index n, expression_meaning &m);
     analysis_result concept_id(node_index n, uint32_t ct,
                                expression_meaning &m);
     /* [temp.constr.constr]: whether constraint-expression e is satisfied,
