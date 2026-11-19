@@ -89,9 +89,9 @@ parser::parser(token_stream &tokens, syntax_tree &tree, declared_names &names,
                          name_kind::type_name);
     /* [ext:clang_builtin_templates] clang's predeclared templates
        (libc++'s common_type derives from the first, tuple_element uses the
-       second) */
-    static const char *const builtin_templates[] = {"__builtin_common_type",
-                                                    "__type_pack_element"};
+       second, integer_sequence the third) */
+    static const char *const builtin_templates[] = {
+        "__builtin_common_type", "__type_pack_element", "__make_integer_seq"};
     for (const char *name : builtin_templates)
         names.declare_in(declared_names::global_namespace,
                          tokens.pp.identifier(name, strlen(name)) + 1,

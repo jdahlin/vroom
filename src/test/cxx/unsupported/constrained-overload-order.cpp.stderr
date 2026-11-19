@@ -1,2 +1,0 @@
-constrained-overload-order.cpp:7:9: error: the rules of [temp.func.order] are not implemented yet
-constrained-overload-order.cpp:7:9: note: refused by vcc's frontend/cplusplus/over/over.match.cpp:N (best_viable_function)

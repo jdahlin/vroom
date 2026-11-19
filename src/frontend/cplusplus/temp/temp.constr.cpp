@@ -299,6 +299,8 @@ bool semantic_analysis::same_constraints(node_index a, node_index b)
         }
     }
     syntax_child x = head_constraint(a), y = head_constraint(b);
+    if (!x.bits && !y.bits)
+        x = trailing_constraint(a), y = trailing_constraint(b);
     if (!x.bits || !y.bits)
         return !x.bits && !y.bits;
     if (x.is_token() || y.is_token())
@@ -311,10 +313,13 @@ bool semantic_analysis::same_constraints(node_index a, node_index b)
 bool semantic_analysis::template_head_constrained(node_index n)
 {
     owned_array<node_index> parameters;
-    if (head_constraint(n).bits || !tree[n].child_count ||
-        !syntax_is(tree, tree.children(n)[0], syntax_kind::template_head) ||
+    if (head_constraint(n).bits)
+        return true;
+    if (tree[n].child_count &&
+        syntax_is(tree, tree.children(n)[0], syntax_kind::template_head) &&
         !template_head_list(tree.children(n)[0].index(), parameters))
-        return head_constraint(n).bits;
+        return false;
+    abbreviated_parameters(n, parameters);
     for (node_index p : parameters) {
         template_parameter_parts x;
         if (template_parameter_form(p, x) && x.constraint)
@@ -358,6 +363,15 @@ syntax_child semantic_analysis::template_constraint(entity_index t) const
     if (!ft)
         return syntax_child();
     return head_constraint(function_templates[ft - 1].declaration);
+}
+
+syntax_child
+semantic_analysis::template_trailing_constraint(entity_index t) const
+{
+    uint32_t ft = template_record(t);
+    if (!ft)
+        return syntax_child();
+    return trailing_constraint(function_templates[ft - 1].declaration);
 }
 
 entity_index semantic_analysis::constraint_parameter(entity_index t,
@@ -418,15 +432,14 @@ uint32_t semantic_analysis::function_parameter_position(entity_index t,
     return 0;
 }
 
-entity_index semantic_analysis::constraint_concept(entity_index t,
+entity_index semantic_analysis::constraint_concept(entity_index scope,
                                                    token_index i) const
 {
     uint32_t name = tokens.identifier(i);
     if (!name)
         return 0;
-    /* the template's scopes outward, the global namespace (0) last */
-    for (entity_index s = entity_table[t].enclosing;;
-         s = entity_table[s].enclosing) {
+    /* scope's scopes outward, the global namespace (0) last */
+    for (entity_index s = scope;; s = entity_table[s].enclosing) {
         entity_index e = entity_table.find(s, name);
         if (e && concept_of(e))
             return e;
@@ -445,6 +458,10 @@ analysis_result semantic_analysis::template_constraints_satisfied(
     const struct function_template ft =
         function_templates[function_template - 1];
     syntax_child constraint = head_constraint(ft.declaration);
+    /* (a trailing requires-clause only where the head has none: the
+       definitions refuse both) */
+    if (!constraint.bits)
+        constraint = trailing_constraint(ft.declaration);
     /* [temp.constr.decl]/3: the associated constraints are the
        conjunction of the type-constraints' immediately-declared
        constraints, in order, then the requires-clause's
@@ -459,7 +476,8 @@ analysis_result semantic_analysis::template_constraints_satisfied(
         const syntax_child *q = tree.children(x.constraint);
         if (tree[x.constraint].child_count != 1 || !q[0].is_token())
             return not_supported(x.constraint, "temp.param");
-        entity_index named = constraint_concept(ft.entity, q[0].index());
+        entity_index named =
+            constraint_concept(entity_table[ft.entity].enclosing, q[0].index());
         uint32_t ct = 0;
         if (named)
             ct = concept_of(named);

@@ -53,6 +53,17 @@ ast_qualified_type ast_builder_type_atomic(cc *c, ast_qualified_type value)
     return cc_type_atomic(c, value, 0);
 }
 
+ast_qualified_type
+ast_builder_type_ext_vector(cc *c, ast_qualified_type element, uint64_t count)
+{
+    uint64_t size = 1;
+    while (size < count * cc_type_size(c, element))
+        size <<= 1;
+    ctype v = *AST_TYPE(c, cc_type_vector(c, element, (uint32_t)size));
+    v.ext = (uint16_t)count;
+    return AST_QUALIFIED_TYPE(cc_type_intern(c, &v), 0);
+}
+
 ast_qualified_type ast_builder_type_array(cc *c, ast_qualified_type element,
                                           uint64_t count, bool known)
 {
@@ -306,11 +317,22 @@ uint32_t ast_builder_builtin_call(cc *c, const char *name, size_t length,
     const cc_builtin *b = ast_builder_builtin(name, length);
     if (!b)
         return 0;
+    /* the parser's tree of conditionals, as for C */
+    if (b->id == CC_BUILTIN_FPCLASSIFY && count == 6)
+        return cc_fpclassify_build(c, args, 0);
     cc_id_list list;
     cc_id_list_init(&list);
     for (uint32_t i = 0; i < count; i++)
         cc_id_list_append(c, &list, args[i]);
     return cc_builtin_node_new(c, b->id, t, 0, &list);
+}
+
+uint32_t ast_builder_convert_vector(cc *c, ast_qualified_type t,
+                                    uint32_t vector)
+{
+    return ast_builder_node(c, AST_NODE_BUILTIN, t, 0,
+                            ast_builder_list(c, &vector, 1), 1,
+                            CC_BUILTIN_CONVERTVECTOR, 0);
 }
 
 uint32_t ast_builder_atomic_load(cc *c, ast_qualified_type t, uint32_t pointer,

@@ -24,7 +24,8 @@ analysis_result semantic_analysis::expression(syntax_child e,
     /* [ext:clang_atomic], [ext:clang_bit_int] the operations on an atomic
        object or a _BitInt are not analysed yet */
     type_kind k = type_table[m.type.unqualified()].kind;
-    if (k == type_kind::atomic || k == type_kind::bit_int) {
+    if (k == type_kind::atomic || k == type_kind::bit_int ||
+        k == type_kind::ext_vector) {
         if (e.is_token())
             return not_supported(current_declaration, "ext.clang");
         return not_supported(e.index(), "ext.clang");
@@ -143,6 +144,8 @@ analysis_result semantic_analysis::expression_kind(syntax_child e,
         return gnu_offsetof(n, m);
     case syntax_kind::clang_bit_cast_expression:
         return clang_bit_cast(n, m);
+    case syntax_kind::clang_convertvector_expression:
+        return clang_convertvector(n, m);
     case syntax_kind::clang_source_location_expression:
         return clang_source_location(n, m);
     default:

@@ -207,6 +207,10 @@ analysis_result semantic_analysis::class_definition(node_index n,
        alignment-specifiers left out of head_children, kept in alignas */
     owned_array<syntax_child> head_list;
     owned_array<node_index> alignas_list;
+    /* [ext:gnu_attributes] a class's visibility("hidden") (its members'
+       symbols', c_lowering::gnu_attributes), abi_tag (its name's,
+       [abi:mangle.abi-tag]) and exclude_from_explicit_instantiation */
+    gnu_attributes gnu;
     for (uint32_t i = 0; i < h.child_count; i++) {
         syntax_child c = tree.children(head)[i];
         bool only_alignment =
@@ -222,10 +226,27 @@ analysis_result semantic_analysis::class_definition(node_index n,
             alignas_list.append(c.index());
         } else if (i && class_head_attributes_without_effect(c)) {
             /* [dcl.attr.deprecated] and the like: nothing generated */
+        } else if (i && !c.is_token() && gnu_or_without_effect(c.index())) {
+            const syntax_child *each = &c;
+            uint32_t count = 1;
+            if (syntax_is(tree, c, syntax_kind::attribute_specifier_seq)) {
+                each = tree.children(c.index());
+                count = tree[c.index()].child_count;
+            }
+            for (uint32_t k = 0; k < count; k++) {
+                analysis_result r =
+                    gnu_attribute_specifier(each[k].index(), gnu);
+                if (r != analysis_result::well_formed)
+                    return r;
+            }
         } else {
             head_list.append(c);
         }
     }
+    if (gnu.aligned || gnu.section ||
+        (gnu.flags & ~(gnu_hidden_visibility | gnu_abi_tag |
+                       gnu_exclude_from_explicit_instantiation)))
+        return not_supported(n, "ext.gnu");
     const syntax_child *head_children = head_list.data();
     uint32_t head_count = static_cast<uint32_t>(head_list.size());
     if (!head_count || !head_children[0].is_token())
@@ -504,6 +525,9 @@ analysis_result semantic_analysis::class_definition(node_index n,
         entity_table[c].access = declaration_access;
     }
     entity_table.add_declaration(c, current_declaration);
+    entity_table[c].gnu_flags |= gnu.flags;
+    if (gnu.abi_tag)
+        entity_table[c].abi_tag = gnu.abi_tag;
     entity_table[c].defined = true;
     entity_table[c].union_ = key == standard_keyword::union_;
     entity_table[c].class_key = head_children[0].index();
@@ -936,7 +960,7 @@ bool semantic_analysis::is_aggregate(entity_index c) const
        constructors" */
     if (x.explicit_default_constructor)
         return false;
-    if (x.constructor_template)
+    if (x.constructor_template || x.constructor_templates)
         return false;
     for (entity_index k = x.first_constructor; k;
          k = entity_table[k].next_constructor)
@@ -1100,12 +1124,18 @@ semantic_analysis::member_declaration(entity_index c, syntax_child member,
     }
     if (node.kind == syntax_kind::template_declaration)
         return member_template_declaration(c, n, access);
+    if (node.kind == syntax_kind::static_assert_declaration)
+        /* [class.mem]/1: a member-declaration */
+        return static_assert_declaration(n);
     if (node.kind != syntax_kind::member_declaration &&
         node.kind != syntax_kind::function_definition)
         return not_supported(n);
-    if (node.child_count &&
-        syntax_is(tree, children[0], syntax_kind::decl_specifier_seq)) {
-        node_index seq = children[0].index();
+    /* [ext:gnu_attributes] before it all (libc++'s _LIBCPP_HIDE_FROM_ABI
+       friend ...) */
+    uint32_t leading = leading_gnu_attributes(n);
+    if (leading < node.child_count &&
+        syntax_is(tree, children[leading], syntax_kind::decl_specifier_seq)) {
+        node_index seq = children[leading].index();
         for (uint32_t i = 0; i < tree[seq].child_count; i++) {
             syntax_child x = tree.children(seq)[i];
             if (is_keyword(x, standard_keyword::friend_))
@@ -1113,6 +1143,10 @@ semantic_analysis::member_declaration(entity_index c, syntax_child member,
         }
     }
 
+    /* [dcl.fct]/18: an abbreviated member function template */
+    if (node.kind == syntax_kind::function_definition &&
+        is_namespace(entity_table[c].enclosing) && abbreviated_function(n))
+        return member_function_template(c, n, n, access);
     if (node_index id = conversion_function_id_of(n))
         return conversion_function_member(c, n, id, access, bodies);
 
@@ -1834,7 +1868,7 @@ analysis_result semantic_analysis::member_function_body(entity_index c,
                                                         node_index n)
 {
     auto definition = syntax(n).function_definition();
-    if (entity_index f = friend_defined_by(definition))
+    if (entity_index f = friend_defined_by(definition, c))
         return friend_function_body(c, definition, f);
     current_declaration = definition;
     /* [basic.scope.class]/1: the declaration is in the class's scope, its
@@ -2075,7 +2109,12 @@ analysis_result semantic_analysis::static_member_definition(
     declared_entity = 0;
     if (at_block_scope() || function_state.active)
         return not_supported(declaration, "class.static.data");
-    if (s.typedef_ || s.inline_ || s.constexpr_)
+    if (s.typedef_)
+        return not_supported(declaration, "class.static.data");
+    /* [dcl.inline]/6 and [class.static.data]/3: an inline or constexpr
+       definition makes it an inline variable (C++17) */
+    if ((s.inline_ || s.constexpr_) &&
+        tokens.files.behavior.edition < standard_edition::cplusplus_17)
         return not_supported(declaration, "class.static.data");
     /* static or extern on the definition: clang's error */
     if (s.static_ || s.extern_)
@@ -2112,6 +2151,10 @@ analysis_result semantic_analysis::static_member_definition(
        definition (it has no extern) */
     (void)definition;
     entity_table[e].defined = true;
+    if (s.inline_ || s.constexpr_) {
+        entity_table[e].inline_ = true;
+        entity_table[e].constexpr_ |= s.constexpr_;
+    }
     if (type_table[type.unqualified()].kind == type_kind::array &&
         type_table[type.unqualified()].bound_known)
         entity_table[e].type = type;
@@ -2174,7 +2217,7 @@ syntax_child semantic_analysis::class_head_name(node_index head) const
     for (uint32_t i = 1; i < tree[head].child_count; i++) {
         syntax_child c = tree.children(head)[i];
         if (syntax_is(tree, c, syntax_kind::alignment_specifier) ||
-            class_head_attributes_without_effect(c))
+            (!c.is_token() && gnu_or_without_effect(c.index())))
             continue;
         bool only_alignment =
             syntax_is(tree, c, syntax_kind::attribute_specifier_seq);

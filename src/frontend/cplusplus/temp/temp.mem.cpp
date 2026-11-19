@@ -5,10 +5,12 @@
  * template; such a template is called a member template.  A member
  * template can be defined within or outside its class definition or class
  * template definition."  Here a member function template defined in a
- * class of namespace scope (constructor templates are
- * member_template_declaration's): a function_templates record whose
- * entity's scope is the class, its name held in the class
- * (hold_template_name).  Its body is analysed per specialization only
+ * class of namespace scope: a function_templates record whose entity's
+ * scope is the class, its name held in the class (hold_template_name);
+ * a constructor template's name is held by the class's
+ * constructor_templates, not bound, and its specializations are
+ * candidates of a construction (construct) and of a conversion to the
+ * class (class_sequence).  Its body is analysed per specialization only
  * (instantiate, instantiate_definition), the specialization a member
  * function of the class (declare_specialization).  A call x.f(args),
  * x->f(args) or, through operator(), x(args) deduces its template
@@ -38,9 +40,24 @@ analysis_result semantic_analysis::member_function_template(
     defining_class = saved_class;
     if (head != analysis_result::well_formed)
         return head;
-    auto def = syntax(definition).function_definition();
+    const syntax_node &d = tree[definition];
     uint32_t lead = leading_gnu_attributes(definition);
-    if (!def.plain() || def.size() != lead + 3 || def.declarator().is_token())
+    const syntax_child *dc = tree.children(definition) + lead;
+    /* a constructor template's decl-specifier-seq is optional
+       ([class.ctor]/1) */
+    uint32_t specifiers =
+        d.child_count > lead &&
+        syntax_is(tree, dc[0], syntax_kind::decl_specifier_seq);
+    bool constructor = declares_special_member(c, dc[specifiers]);
+    /* [dcl.decl]/4: a trailing requires-clause (trailing_constraint),
+       where the template-head has none */
+    uint32_t trailing = trailing_constraint(n).bits != 0;
+    if (trailing && head_constraint(n).bits)
+        return not_supported(n, "temp.constr");
+    if (d.child_count != lead + 2 + specifiers + trailing ||
+        (!specifiers && !constructor) || dc[specifiers].is_token() ||
+        !syntax_is(tree, dc[specifiers + 1 + trailing],
+                   syntax_kind::function_body))
         return not_supported(n, "temp.mem");
     uint32_t index = 0, first = 0;
     entity_index scope = 0;
@@ -57,7 +74,7 @@ analysis_result semantic_analysis::member_function_template(
     declarator_meaning m;
     qualified_type type;
     analysis_result r =
-        function_template_declarator(definition, lead, scope, true, s, m, type);
+        function_template_declarator(definition, lead, c, scope, s, m, type);
     if (r != analysis_result::well_formed)
         return r;
     /* [temp.mem]/3: "A member function template shall not be virtual." */
@@ -67,7 +84,8 @@ analysis_result semantic_analysis::member_function_template(
                                    "virtual",
                                    "temp.mem");
     if (!m.has_id || m.qualifier || m.qualified_namespace || m.destructor ||
-        m.conversion_function || m.literal_operator || s.explicit_ ||
+        m.conversion_function || m.literal_operator ||
+        (s.explicit_ && !constructor) ||
         m.allocation != allocation_function::none ||
         type_table[type.unqualified()].kind != type_kind::function)
         return not_supported(n, "temp.mem");
@@ -87,7 +105,9 @@ analysis_result semantic_analysis::member_function_template(
     /* [temp.over]/1: other member function templates of the name are
        overloads; a non-template member of the name too ([temp.mem]/2),
        which a call would weigh against them: not analysed */
-    entity_index prior = entity_table.find(c, name);
+    entity_index prior = 0;
+    if (!constructor)
+        prior = entity_table.find(c, name);
     if (prior && (entity_table[prior].enclosing != c ||
                   !member_function_template_of(prior)))
         return not_supported(n, "temp.mem");
@@ -107,8 +127,21 @@ analysis_result semantic_analysis::member_function_template(
     /* [class.mfct]/1: defined in its class, inline */
     entity_table[t].inline_ = true;
     entity_table[t].constexpr_ = s.constexpr_;
+    entity_table[t].immediate = s.consteval_;
     entity_table[t].operator_function = m.operator_function;
     entity_table[t].implemented = m.implemented;
+    if (constructor) {
+        /* [class.ctor]/2: a constructor has no name to find; the class
+           keeps its templates' (construct, class_sequence) */
+        entity_table[t].special = special_member::constructor;
+        entity_table[t].explicit_ = s.explicit_;
+        prior = entity_table[c].constructor_templates;
+        if (!prior) {
+            prior = entity_table.make(entity_kind::none, name, c);
+            entity_table[prior].held_by_template = true;
+            entity_table[c].constructor_templates = prior;
+        }
+    }
     if (prior) {
         record.name = prior;
         function_templates.append(record);
@@ -140,6 +173,36 @@ analysis_result semantic_analysis::member_template_candidates(
     for (size_t i = first; i < candidates.size(); i++)
         candidates[i].member = true;
     return r;
+}
+
+/*
+ * [over.match.ctor]/1, [temp.over]/1: the specializations of class c's
+ * constructor templates deduced from the arguments, appended to
+ * candidates; for a copy-initialization only the converting ones
+ * ([class.conv.ctor]/1: not explicit).
+ */
+analysis_result semantic_analysis::constructor_template_candidates(
+    node_index n, entity_index c, const expression_meaning *arguments,
+    uint32_t count, bool copy, owned_array<overload_candidate> &candidates,
+    owned_array<uint32_t> *first_arguments, owned_array<template_argument> *all)
+{
+    owned_array<uint32_t> group;
+    function_template_overloads(entity_table[c].constructor_templates, group);
+    if (copy) {
+        size_t kept = 0;
+        for (uint32_t g : group)
+            if (!entity_table[function_templates[g - 1].entity].explicit_)
+                group[kept++] = g;
+        group.resize(kept);
+    }
+    owned_array<template_argument> deduced;
+    if (!all)
+        all = &deduced;
+    owned_array<uint32_t> firsts;
+    if (!first_arguments)
+        first_arguments = &firsts;
+    return template_candidates(n, group, arguments, count, candidates,
+                               first_arguments, all);
 }
 
 /*

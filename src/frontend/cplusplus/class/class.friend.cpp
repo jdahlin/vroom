@@ -8,7 +8,9 @@
  * or (C++11, [class.friend]/3) by a type-name; a friend function declared
  * (not defined) by an unqualified identifier, of the innermost enclosing
  * namespace ([namespace.memdef]/3).  Friend definitions, operator
- * functions, members of other classes and templates are not.
+ * functions, members of other classes and templates are not.  A class
+ * template's friends are declared per specialization (instantiate_class),
+ * each granting only that specialization ([temp.friend]).
  */
 #include "../cplusplus-internal.h"
 #include "frontend/cplusplus/sema.h"
@@ -191,16 +193,22 @@ semantic_analysis::friend_function(entity_index c, node_index n,
                                    owned_array<node_index> &bodies)
 {
     const syntax_node &node = tree[n];
-    const syntax_child *children = tree.children(n);
+    /* [ext:gnu_attributes] before it all: GCC's, which a friend's
+       definition has no rules for beyond its form (visibility as the
+       class's members') */
+    uint32_t leading = leading_gnu_attributes(n);
+    const syntax_child *children = tree.children(n) + leading;
+    uint32_t count = node.child_count - leading;
     bool defines = node.kind == syntax_kind::function_definition;
     if (defines) {
-        auto def = syntax(n).function_definition();
-        if (!def.plain() || def.size() != 3)
+        auto body = syntax(n).function_definition().body();
+        if (count != 3 ||
+            !syntax_is(tree, children[0], syntax_kind::decl_specifier_seq) ||
+            !body.is(syntax_kind::function_body))
             return not_supported(n, "class.friend");
-        if (!def.body().plain())
+        if (!body.defaulted() && !body.plain())
             return not_supported(n, "dcl.fct.def.general");
-    } else if (node.kind != syntax_kind::member_declaration ||
-               node.child_count != 3 ||
+    } else if (node.kind != syntax_kind::member_declaration || count != 3 ||
                !syntax_is_punctuator(tokens, children[2],
                                      preprocessing_op_or_punc::SEMICOLON) ||
                syntax_is(tree, children[1], syntax_kind::member_declarator) ||
@@ -240,6 +248,9 @@ semantic_analysis::friend_function(entity_index c, node_index n,
         if (parameter.default_argument.index())
             return not_supported(n, "dcl.fct.default");
     uint32_t name = tokens.identifier(m.id);
+    if (defines && explicit_body(children[2], standard_keyword::default_) &&
+        !defaulted_equality_declared(c, name, type))
+        return not_supported(n, "class.compare.default");
     entity_index space = enclosing_namespace(c);
     if (entity_table[space].unknown_names ||
         entity_table.bound_by_using(space, name))
@@ -318,11 +329,14 @@ bool semantic_analysis::defined_by_friend(entity_index f) const
     return false;
 }
 
-/* the function a friend definition n defines, 0 if n is not one */
-entity_index semantic_analysis::friend_defined_by(node_index n) const
+/* the function a friend definition n in class c defines (a class
+   template's defines one per specialization, [temp.friend]), 0 if n is
+   not one */
+entity_index semantic_analysis::friend_defined_by(node_index n,
+                                                  entity_index c) const
 {
     for (const friend_definition &d : friend_definitions)
-        if (d.definition == n)
+        if (d.definition == n && d.granting == c)
             return d.function;
     return 0;
 }
@@ -350,11 +364,98 @@ analysis_result semantic_analysis::friend_function_body(
     }
     if (r == analysis_result::well_formed) {
         last_declared = f;
-        r = analyse_function_body(definition,
-                                  definition.body().compound_statement());
+        auto body = definition.body();
+        if (body.defaulted()) {
+            scoped_value<entity_index> compared(defaulted_comparison, c);
+            r = analyse_function_body(definition, body.child());
+        } else {
+            r = analyse_function_body(definition, body.compound_statement());
+        }
     }
     current_scope = scope;
     return r;
+}
+
+/*
+ * [class.compare.default]/1: "A defaulted comparison operator function
+ * ([over.binary]) for some class C shall be a non-template function that
+ * is ... a friend of C having either two parameters of type const C& or
+ * two parameters of type C."  [class.eq]/1: "A defaulted equality
+ * operator function shall have a declared return type bool."  Only the
+ * friend operator== of a class without base classes is analysed.
+ */
+bool semantic_analysis::defaulted_equality_declared(entity_index c,
+                                                    uint32_t name,
+                                                    qualified_type type)
+{
+    const struct type &f = type_table[type.unqualified()];
+    if (name != operator_name(preprocessing_op_or_punc::EQUAL_EQUAL) ||
+        f.kind != type_kind::function || f.variadic || f.parameter_count != 2 ||
+        entity_table[c].base_count ||
+        fundamental_of(f.operand) != fundamental_type::bool_)
+        return false;
+    const qualified_type *parameters =
+        type_table.parameters(type.unqualified());
+    qualified_type object =
+        qualified_type::make(entity_table[c].type.unqualified(), cv_none);
+    qualified_type reference = qualified_type::make(
+        type_table.lvalue_reference_to(
+            qualified_type::make(object.unqualified(), cv_const)),
+        cv_none);
+    return parameters[0] == parameters[1] &&
+           (parameters[0] == object || parameters[0] == reference);
+}
+
+/*
+ * [class.eq]/3: "The return value V of a defaulted == operator function
+ * with parameters x and y is determined by comparing corresponding
+ * elements x_i and y_i in the expanded lists of subobjects for x and y
+ * (in increasing index order) until the first index i where x_i == y_i
+ * yields a result value which, when contextually converted to bool,
+ * yields false.  If no such index exists, V is true.  Otherwise, V is
+ * false."  The body: return x.m0 == y.m0 && x.m1 == y.m1 ...; for the
+ * class's non-static data members, at least one, none an array.
+ */
+analysis_result semantic_analysis::defaulted_equality(
+    token_index at, const owned_array<uint32_t> &parameters, uint32_t &block)
+{
+    const entity &x = entity_table[defaulted_comparison];
+    if (!x.member_count || parameters.size() != 2)
+        return not_supported(current_declaration, "class.compare.default");
+    expression_meaning all;
+    for (uint32_t i = 0; i < x.member_count; i++) {
+        entity_index member = class_members[x.first_member + i];
+        if (type_table[entity_table[member].type.unqualified()].kind ==
+            type_kind::array)
+            return not_supported(current_declaration, "class.compare.default");
+        expression_meaning sides[2], equal;
+        for (int k = 0; k < 2; k++) {
+            analysis_result r =
+                named_entity(at, parameters[k], sides[k], false);
+            if (r == analysis_result::well_formed)
+                r = member_access(at, member, sides[k]);
+            if (r != analysis_result::well_formed)
+                return r;
+        }
+        analysis_result r = binary_of(
+            current_declaration, at, preprocessing_op_or_punc::EQUAL_EQUAL,
+            syntax_child(), sides[0], syntax_child(), sides[1], equal);
+        if (r != analysis_result::well_formed)
+            return r;
+        /* a bool prvalue each ([class.eq]/2), joined by && ([expr.log.and]) */
+        if (i) {
+            if (all.evaluation == constness::not_constant)
+                equal.evaluation = constness::not_constant;
+            equal.node = expression_node(semantic_kind::logical_and, equal, at,
+                                         all.node, equal.node);
+        }
+        all = equal;
+    }
+    owned_array<uint32_t> statements;
+    statements.append(
+        statement_node(semantic_kind::return_statement, at, all.node));
+    block = block_statement(at, statements);
+    return analysis_result::well_formed;
 }
 
 /* a member-declaration whose decl-specifier-seq has friend */
@@ -380,10 +481,12 @@ semantic_analysis::friend_member_declaration(entity_index c, Declaration d,
 {
     node_index n = d;
     const syntax_node &node = tree[n];
-    const syntax_child *children = tree.children(n);
-    if (node.kind != syntax_kind::member_declaration || node.child_count < 2)
+    uint32_t leading = leading_gnu_attributes(n);
+    const syntax_child *children = tree.children(n) + leading;
+    if (node.kind != syntax_kind::member_declaration ||
+        node.child_count < leading + 2)
         return not_supported(n, "class.friend");
-    if (node.child_count == 2) {
+    if (node.child_count == leading + 2) {
         /* friend class-key identifier ; friend type-name ; */
         node_index seq = children[0].index();
         syntax_child type = {};

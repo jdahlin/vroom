@@ -268,10 +268,13 @@ node_index parser::enum_specifier_or_elaborated(decl_specifier_facts &facts)
                         "dcl.enum", position);
     if (pending.size() - mark > 1)
         finish_node(syntax_kind::enum_head, mark, first);
+    /* [basic.scope.enum]/1: the enumerators' region */
+    scope_index region = names.enter(scope_kind::enumeration);
+    names.leave();
     if (name)
-        names.declare(name, name_kind::type_name);
+        names.declare(name, name_kind::type_name, region);
     add_token(); /* { */
-    enumerator_list(scoped);
+    enumerator_list(scoped, region);
     if (failed())
         return 0;
     if (!accept(preprocessing_op_or_punc::RIGHT_BRACE))
@@ -295,7 +298,7 @@ node_index parser::enum_specifier_or_elaborated(decl_specifier_facts &facts)
  * declaration for an enumerator is immediately after its
  * enumerator-definition."
  */
-node_index parser::enumerator_list(bool scoped)
+node_index parser::enumerator_list(bool scoped, scope_index region)
 {
     size_t mark = begin_node();
     token_index first = position;
@@ -321,6 +324,7 @@ node_index parser::enumerator_list(bool scoped)
             finish_node(syntax_kind::enumerator_definition, definition_mark,
                         definition_first);
         }
+        names.declare_in(region, name, name_kind::other);
         if (!scoped)
             names.declare(name, name_kind::other);
         count++;
@@ -679,8 +683,17 @@ analysis_result semantic_analysis::enum_specifier_rules(node_index n,
             init = tree.children(c.index())[2];
             has_init = true;
         }
+        /* [dcl.enum]/2: "The optional attribute-specifier-seq in an
+           enumerator appertains to that enumerator": one without effect
+           (Apple's availability) is passed over */
+        if (syntax_is(tree, id, syntax_kind::enumerator)) {
+            const syntax_child *attrs = tree.children(id.index());
+            for (uint32_t i = 1; i < tree[id.index()].child_count; i++)
+                if (!class_head_attributes_without_effect(attrs[i]))
+                    return not_supported(n, "dcl.enum");
+            id = attrs[0];
+        }
         if (!id.is_token() || tokens[id.index()].kind != token_kind::identifier)
-            /* an attribute-specifier-seq on the enumerator */
             return not_supported(n, "dcl.enum");
         token_index at = id.index();
         __int128 value;

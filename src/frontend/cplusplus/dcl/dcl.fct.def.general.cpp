@@ -347,10 +347,12 @@ analysis_result semantic_analysis::analyse_function_body(node_index definition,
             pack_name = parameter.pack_name;
             continue;
         }
-        if (!parameter.id)
+        if (!parameter.id && !defaulted_comparison)
             continue;
-        uint32_t name = tokens.identifier(parameter.id);
-        if (entity_table.find(parameters, name)) {
+        uint32_t name = 0;
+        if (parameter.id)
+            name = tokens.identifier(parameter.id);
+        if (name && entity_table.find(parameters, name)) {
             /* [basic.def.odr]/1: each parameter of a function definition
                is a definition ([basic.def]/2) */
             result =
@@ -367,7 +369,10 @@ analysis_result semantic_analysis::analyse_function_body(node_index definition,
         entity_table[e].defined = true;
         entity_table[e].automatic = true;
         entity_table.add_declaration(e, definition);
-        entity_table.bind(parameters, name, e);
+        /* (a defaulted comparison's unnamed parameters too: its body
+           compares them, defaulted_equality) */
+        if (name)
+            entity_table.bind(parameters, name, e);
         parameter_entities.back() = e;
     }
     if (current_lambda()) /* [expr.prim.lambda.capture]/6 */
@@ -396,7 +401,11 @@ analysis_result semantic_analysis::analyse_function_body(node_index definition,
                                        first_token(compound));
     open_scope(parameters, false);
     uint32_t block = 0;
-    result = worse(result, block_items(compound.index(), block));
+    if (defaulted_comparison)
+        result = worse(result, defaulted_equality(first_token(compound),
+                                                  parameter_entities, block));
+    else
+        result = worse(result, block_items(compound.index(), block));
     result = finish_return_deduction(definition, result, returns);
     uint32_t destructions = 0;
     if (entity_table[f].special == special_member::destructor)

@@ -243,6 +243,9 @@ enum class scope_kind : uint8_t {
     namespace_,
     block,
     class_,
+    /* [basic.scope.enum]: an enumeration's enumerators, found by E::name
+       ([basic.lookup.qual]/1) */
+    enumeration,
     function_prototype,
     template_parameter,
 };
@@ -456,6 +459,7 @@ enum class extension_keyword : uint8_t {
     nullability,
     offsetof_,
     bit_cast,
+    convertvector,
     atomic,
     bit_int,
     source_location,
@@ -887,6 +891,8 @@ class parser
     node_index gnu_offsetof_expression();
     /* ---- ext/clang/bit_cast.cpp: __builtin_bit_cast(T, e) */
     node_index clang_bit_cast_expression();
+    /* ---- ext/clang/convertvector.cpp: __builtin_convertvector(e, T) */
+    node_index clang_convertvector_expression();
     /* ---- ext/clang/source_location.cpp: __builtin_source_location() */
     node_index clang_source_location_expression();
     /* ---- ext/clang/atomic.cpp: _Atomic(T) */
@@ -927,7 +933,7 @@ class parser
     node_index opaque_enum_declaration();
     /* enum-specifier or elaborated-enum-specifier in a decl-specifier-seq */
     node_index enum_specifier_or_elaborated(decl_specifier_facts &facts);
-    node_index enumerator_list(bool scoped);
+    node_index enumerator_list(bool scoped, scope_index region);
     node_index using_enum_declaration();
 
     /* ---- [namespace.udecl], [dcl.asm] */

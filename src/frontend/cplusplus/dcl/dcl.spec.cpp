@@ -133,8 +133,10 @@ name_class classify(parser &p, unsigned ahead, unsigned *length,
             } else if (kind == name_kind::type_name ||
                        kind == name_kind::template_name) {
                 class_name = name;
-                class_known = !found_dependent && found &&
-                              p.names.kind_of(found) == scope_kind::class_;
+                class_known =
+                    !found_dependent && found &&
+                    (p.names.kind_of(found) == scope_kind::class_ ||
+                     p.names.kind_of(found) == scope_kind::enumeration);
                 if (class_known)
                     scope = found;
                 dependent = dependent || found_dependent;
@@ -1035,7 +1037,7 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
     uint32_t cv = cv_none;
     unsigned const_ = 0, volatile_ = 0, typedef_ = 0, static_ = 0, extern_ = 0,
              inline_ = 0, constexpr_ = 0, virtual_ = 0, friend_ = 0,
-             explicit_ = 0;
+             explicit_ = 0, consteval_ = 0;
     type_index named = 0;
     bool declares_class = false, declares_enumeration = false;
     token_index named_at = 0, duplicate = 0;
@@ -1145,9 +1147,11 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
             } else if (syntax_is(tree, c,
                                  syntax_kind::elaborated_enum_specifier))
                 r = elaborated_enum_specifier(c.index(), class_type);
-            else if (syntax_is(tree, c, syntax_kind::simple_template_id))
-                r = template_type(c.index(), 0, false, class_type);
-            else if (syntax_is(tree, c, syntax_kind::simple_type_specifier)) {
+            else if (syntax_is(tree, c, syntax_kind::simple_template_id)) {
+                uint32_t named_cv = 0;
+                r = template_type(c.index(), 0, false, class_type, &named_cv);
+                cv |= named_cv;
+            } else if (syntax_is(tree, c, syntax_kind::simple_type_specifier)) {
                 uint32_t named_cv = 0;
                 r = qualified_type_name(c.index(), class_type, named_cv);
                 cv |= named_cv;
@@ -1185,15 +1189,43 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
                 /* [dcl.spec.auto]: decltype(auto); a type-constraint is
                    [temp.param]'s */
                 const syntax_child *parts = tree.children(c.index());
-                if (!allow_placeholder ||
-                    !tokens.files.behavior.has(
-                        language_feature::return_type_deduction) ||
-                    !parts[0].is_token() ||
-                    p.keyword_of(tokens[parts[0].index()]) !=
-                        standard_keyword::decltype_)
-                    return not_supported(seq, "dcl.spec.auto");
-                class_type = placeholder_type(true).unqualified();
-                r = analysis_result::well_formed;
+                qualified_type invented;
+                if (parameter && invented_parameter_type(seq, invented)) {
+                    /* [dcl.fct]/22: C auto's invented template-parameter */
+                    class_type = invented.unqualified();
+                    cv |= invented.cv();
+                    r = analysis_result::well_formed;
+                } else {
+                    /* [dcl.spec.auto]/1: type-constraint_opt auto,
+                       type-constraint_opt decltype(auto); a type-constraint
+                       of a concept-name alone, C<U> ([temp.param]/4) */
+                    entity_index named_concept = 0;
+                    uint32_t last = tree[c.index()].child_count - 1;
+                    if (syntax_is(tree, parts[0],
+                                  syntax_kind::type_constraint)) {
+                        const syntax_child *q = tree.children(parts[0].index());
+                        if (tree[parts[0].index()].child_count == 1 &&
+                            q[0].is_token())
+                            named_concept =
+                                constraint_concept(current_scope, q[0].index());
+                        if (!named_concept ||
+                            function_templates[concept_of(named_concept) - 1]
+                                    .parameter_count != 1)
+                            return not_supported(parts[0].index(),
+                                                 "temp.param");
+                    }
+                    bool decltype_auto =
+                        !parts[last].is_token() ||
+                        p.keyword_of(tokens[parts[last].index()]) !=
+                            standard_keyword::auto_;
+                    if (!allow_placeholder ||
+                        !tokens.files.behavior.has(
+                            language_feature::return_type_deduction))
+                        return not_supported(seq, "dcl.spec.auto");
+                    class_type = placeholder_type(decltype_auto, named_concept)
+                                     .unqualified();
+                    r = analysis_result::well_formed;
+                }
             } else if (syntax_is(tree, c,
                                  syntax_kind::gnu_attribute_specifier)) {
                 /* (after a class-specifier: the class's alignment, taken
@@ -1293,7 +1325,8 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
             kw != standard_keyword::inline_ &&
             kw != standard_keyword::virtual_ &&
             kw != standard_keyword::explicit_ &&
-            kw != standard_keyword::constexpr_)
+            kw != standard_keyword::constexpr_ &&
+            kw != standard_keyword::consteval_)
             k.first = t;
         switch (kw) {
         case standard_keyword::const_:
@@ -1368,6 +1401,12 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
         case standard_keyword::constexpr_:
             count(constexpr_, t, "constexpr");
             break;
+        case standard_keyword::consteval_:
+            /* [dcl.constexpr]/2: "The consteval specifier shall be applied
+               only to the declaration of a function or function template";
+               an immediate function is a constexpr function */
+            count(consteval_, t, "consteval");
+            break;
         case standard_keyword::virtual_:
             /* [dcl.fct.spec]/2: "The virtual specifier shall be used only
                in the initial declaration of a non-static member
@@ -1377,7 +1416,18 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
                 return not_supported(seq, specifier_subclause(kw));
             count(virtual_, t, "virtual");
             break;
-        case standard_keyword::auto_:
+        case standard_keyword::auto_: {
+            /* [dcl.fct]/22: a generic parameter type placeholder, the type
+               of its invented template-parameter */
+            qualified_type invented;
+            if (parameter && invented_parameter_type(seq, invented)) {
+                if (named)
+                    k.alone++;
+                named = invented.unqualified();
+                cv |= invented.cv();
+                named_at = t;
+                break;
+            }
             /* [dcl.spec.auto]/1: a placeholder-type-specifier */
             if (!allow_placeholder ||
                 !tokens.files.behavior.has(
@@ -1388,6 +1438,7 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
             named = placeholder_type(false).unqualified();
             named_at = t;
             break;
+        }
         case standard_keyword::explicit_:
             /* [dcl.fct.spec]/3: "An explicit-specifier shall be used only
                in the declaration of a constructor or conversion function
@@ -1405,6 +1456,15 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
             return not_supported(seq, specifier_subclause(kw));
         }
     }
+    /* [dcl.spec]/2: "At most one of the constexpr, consteval, and
+       constinit keywords shall appear in a decl-specifier-seq." */
+    if (constexpr_ && consteval_)
+        return ill_formed(seq,
+                          "at most one of the constexpr, consteval, and "
+                          "constinit keywords shall appear in a "
+                          "decl-specifier-seq",
+                          "dcl.spec");
+    constexpr_ += consteval_;
     if (parameter && (typedef_ || static_ || extern_ || inline_ || constexpr_))
         return not_supported(seq, "dcl.fct");
     /* [dcl.stc]/1: "At most one storage-class-specifier shall appear in a
@@ -1488,6 +1548,7 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
     s.friend_ = friend_ != 0;
     s.explicit_ = explicit_ != 0;
     s.constexpr_ = constexpr_;
+    s.consteval_ = consteval_;
     if (type)
         s.type = add_cv(qualified_type::make(type, cv_none), cv);
     return analysis_result::well_formed;
@@ -1529,7 +1590,8 @@ analysis_result semantic_analysis::qualified_type_name(node_index n,
             if (!is_namespace(scope.entity) &&
                 entity_table[scope.entity].kind != entity_kind::class_type)
                 return not_supported(n, "temp.names");
-            return template_type(parts[1].index(), scope.entity, true, type);
+            return template_type(parts[1].index(), scope.entity, true, type,
+                                 &cv);
         }
         return not_supported(n, "dcl.type.simple");
     }

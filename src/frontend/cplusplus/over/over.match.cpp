@@ -179,11 +179,21 @@ analysis_result semantic_analysis::best_viable_function(
             /* (an order analysis cannot tell is neither: the final check
                below makes the call unsupported) */
             bool unknown = false;
-            int order = function_template_order(x.template_index,
-                                                y.template_index, n, unknown);
+            /* (two member candidates' first argument is the object's,
+               the same class's implicit object parameter, [temp.func.order]/3) */
+            int order =
+                function_template_order(x.template_index, y.template_index,
+                                        n - (x.member && y.member), unknown);
             if (!unknown && order != 0)
                 return order > 0;
         }
+        /* [ext:gnu_attributes] [impl.clang] a function with clang's
+           enable_if (a true condition: libc++'s _LIBCPP_PREFERRED_OVERLOAD)
+           is better than one without */
+        if (x.function && y.function &&
+            (entity_table[x.function].gnu_flags & gnu_enable_if) >
+                (entity_table[y.function].gnu_flags & gnu_enable_if))
+            return true;
         /* (2.8) "F2 is a rewritten candidate ([over.match.oper]) and F1 is
            not"; (2.9) "F1 and F2 are rewritten candidates, and F2 is a
            synthesized candidate with reversed order of parameters and F1

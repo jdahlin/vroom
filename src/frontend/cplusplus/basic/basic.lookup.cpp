@@ -222,6 +222,14 @@ semantic_analysis::lookup_unqualified(uint32_t name, lookup_filter filter) const
     entity_index first = current_scope;
     if (is_namespace(first) && defining_class)
         first = defining_class;
+    /* (a member class template's specialization, defined in its
+       enclosing class's scope: the specialization's first) */
+    for (entity_index s = defining_class; s && !is_namespace(first);
+         s = entity_table[s].enclosing)
+        if (entity_table[s].enclosing == first) {
+            first = defining_class;
+            break;
+        }
     for (entity_index s = first;; s = lexical_parent(s)) {
         if (entity_table[s].has_using_directive) {
             entity_index from = enclosing_namespace(s);
@@ -547,6 +555,7 @@ bool semantic_analysis::associated_with(
     case type_kind::array:
     case type_kind::lvalue_reference:
     case type_kind::rvalue_reference:
+    case type_kind::block_pointer:
         return associated_with(record.operand, classes, namespaces);
     case type_kind::function: {
         const qualified_type *parameters =
@@ -737,8 +746,13 @@ analysis_result semantic_analysis::nested_name_specifier(node_index n,
                names the specialization ([temp.spec]/4), a class; its
                members are looked up there ([class.qual]/1) */
             type_index named = 0;
+            /* (its class is looked into: defined, even in a
+               specialization's head) */
+            uint32_t declaring = declaring_specializations;
+            declaring_specializations = 0;
             analysis_result r =
                 template_type(parts[i].index(), scope.entity, qualified, named);
+            declaring_specializations = declaring;
             if (r != analysis_result::well_formed)
                 return r;
             const struct type &st = type_table[named];

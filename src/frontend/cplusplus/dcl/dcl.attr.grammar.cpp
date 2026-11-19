@@ -471,8 +471,8 @@ bool name_is(const char *name, size_t length, const char *s)
  * for a diagnostic or describe the program to a tool.  Standard:
  * maybe_unused, nodiscard, deprecated, likely, unlikely; GCC's, as
  * gnu::NAME: nodebug, unused, deprecated, returns_nonnull, alloc_size,
- * alloc_align, nonnull; clang's, as clang::NAME:
- * preferred_name, no_specializations, lifetimebound (the names clang 23
+ * alloc_align, nonnull, pure, const; clang's, as clang::NAME:
+ * preferred_name, no_specializations, lifetimebound, availability (the names clang 23
  * knows in each namespace; another is an unknown attribute to clang).
  */
 bool attribute_without_effect(const char *ns, size_t ns_length,
@@ -481,12 +481,15 @@ bool attribute_without_effect(const char *ns, size_t ns_length,
     static const char *const standard[] = {"maybe_unused", "nodiscard",
                                            "deprecated", "likely", "unlikely"};
     /* returns_nonnull, alloc_size, alloc_align, nonnull: promises about a
-       function's parameters and result that vcc does not use */
+       function's parameters and result that vcc does not use; pure,
+       const: that a call has no side effects, which vcc does not use */
     static const char *const gnu[] = {
-        "nodebug",    "unused",      "deprecated", "returns_nonnull",
-        "alloc_size", "alloc_align", "nonnull"};
+        "nodebug",         "unused",     "deprecated",
+        "returns_nonnull", "alloc_size", "alloc_align",
+        "nonnull",         "pure",       "const"};
+    /* availability: platform versions, for diagnostics only */
     static const char *const clang[] = {"preferred_name", "no_specializations",
-                                        "lifetimebound"};
+                                        "lifetimebound", "availability"};
     if (!ns) {
         for (const char *s : standard)
             if (name_is(name, length, s))
@@ -692,7 +695,9 @@ bool semantic_analysis::gnu_attributes_without_effect(syntax_child n) const
         const char *name;
         size_t length;
         attribute_name(spelling, &name, &length);
-        if (!attribute_without_effect("gnu", 3, name, length))
+        /* clang's attributes have a GNU spelling too */
+        if (!attribute_without_effect("gnu", 3, name, length) &&
+            !attribute_without_effect("clang", 5, name, length))
             return false;
         any = true;
     }

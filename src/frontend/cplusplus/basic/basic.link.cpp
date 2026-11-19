@@ -125,6 +125,7 @@ bool semantic_analysis::type_without_external_linkage(qualified_type t,
     case type_kind::array:
     case type_kind::lvalue_reference:
     case type_kind::rvalue_reference:
+    case type_kind::block_pointer:
         return type_without_external_linkage(record.operand, visible);
     case type_kind::function: {
         const qualified_type *parameters =
@@ -541,11 +542,14 @@ analysis_result semantic_analysis::declare(node_index declaration,
     }
     if (prior && kind == entity_kind::function &&
         entity_table[prior].kind == entity_kind::function) {
+        /* [ext:gnu_attributes] [impl.clang] a function with clang's
+           enable_if is another than one of the same parameters without */
         entity_index same = 0;
         for (entity_index o = prior; o && !same;
              o = entity_table[o].next_overload)
             if (same_parameters(type_table, entity_table[o].type.unqualified(),
-                                type.unqualified()))
+                                type.unqualified()) &&
+                !((entity_table[o].gnu_flags ^ s.gnu_flags) & gnu_enable_if))
                 same = o;
         /* a function declared before by a friend declaration only
            ([namespace.memdef]/3), whose name is bound to others */
@@ -769,6 +773,7 @@ analysis_result semantic_analysis::declare(node_index declaration,
         entity_table[declared_entity].kind == entity_kind::function) {
         entity_table[declared_entity].inline_ = true;
         entity_table[declared_entity].constexpr_ = true;
+        entity_table[declared_entity].immediate = s.consteval_;
     }
     declared_name d;
     d.declaration = declaration;

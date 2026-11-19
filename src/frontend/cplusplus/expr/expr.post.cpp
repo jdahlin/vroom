@@ -594,6 +594,8 @@ analysis_result semantic_analysis::call(node_index n, expression_meaning &m)
 {
     const syntax_node &node = tree[n];
     const syntax_child *children = tree.children(n);
+    if (builtin_addressof_call(n))
+        return builtin_addressof(n, m);
     owned_array<syntax_child> arguments;
     /* [temp.variadic]/5: the arguments, pack expansions instantiated: each
        analysed now, one per element of the packs its pattern names */
@@ -1415,6 +1417,13 @@ analysis_result semantic_analysis::call_with(
             r = operand_value(node_of(a), e);
         if (r != analysis_result::well_formed)
             return r;
+        /* [ext:gnu_library_builtins] a type-generic builtin of the C
+           front end (__builtin_isfinite, ...) takes its argument as it
+           is, as clang's custom type checking does: no promotion */
+        if (called && (entity_table[called].gnu_flags & gnu_compiler_builtin)) {
+            argument_nodes.append(e.node);
+            continue;
+        }
         promote_enumeration(e);
         fundamental_type passed = fundamental_of(e.type);
         if (passed == fundamental_type::void_)
@@ -1510,6 +1519,44 @@ analysis_result semantic_analysis::call_with(
     if (dispatched)
         semantics[m.node].c = 1;
     semantics.set_list(m.node, argument_nodes.data(), argument_nodes.size());
+    if (called && entity_table[called].immediate)
+        return immediate_invocation(n, m);
+    return analysis_result::well_formed;
+}
+
+/*
+ * [expr.const]/13: "An expression or conversion is in an immediate
+ * function context if it is potentially evaluated and its innermost
+ * non-block scope is a function parameter scope of an immediate function.
+ * An expression or conversion is an immediate invocation if it is a
+ * potentially-evaluated explicit or implicit invocation of an immediate
+ * function and is not in an immediate function context.  An immediate
+ * invocation shall be a constant expression."  Its value replaces the
+ * call (lowering emits no call, so no definition of the function).
+ */
+analysis_result semantic_analysis::immediate_invocation(node_index n,
+                                                        expression_meaning &m)
+{
+    if (unevaluated || (function_state.function &&
+                        entity_table[function_state.function].immediate))
+        return analysis_result::well_formed;
+    constant_value v;
+    bool constant = false;
+    analysis_result r = evaluate_constant(n, m.node, v, constant);
+    if (r != analysis_result::well_formed)
+        return r;
+    if (!constant)
+        return ill_formed(n,
+                          "an immediate invocation shall be a constant "
+                          "expression",
+                          "expr.const");
+    /* a value of class type is not one an expression_meaning keeps */
+    if (m.category != value_category::prvalue ||
+        evaluated_type(m.type) == fundamental_type::none)
+        return not_supported(n, "expr.const");
+    evaluated_meaning(m, v);
+    semantics[m.node].evaluation = m.evaluation;
+    semantics[m.node].value = m.value;
     return analysis_result::well_formed;
 }
 

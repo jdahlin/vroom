@@ -220,6 +220,28 @@ type_index types::bit_int(uint64_t width, uint32_t parameter)
     return intern(t, nullptr);
 }
 
+/* [ext:clang_ext_vector_type] element
+   __attribute__((ext_vector_type(count))), or of the parameter N */
+type_index types::ext_vector_of(qualified_type element, uint64_t count,
+                                uint32_t parameter)
+{
+    type t;
+    t.kind = type_kind::ext_vector;
+    t.operand = element;
+    t.bound = count;
+    t.entity = parameter;
+    return intern(t, nullptr);
+}
+
+/* [ext:clang_blocks] T (^)(...): a block pointer to a function type */
+type_index types::block_pointer_to(qualified_type function)
+{
+    type t;
+    t.kind = type_kind::block_pointer;
+    t.operand = function;
+    return intern(t, nullptr);
+}
+
 /* [ext:clang_atomic] _Atomic(T) */
 type_index types::atomic_of(qualified_type value)
 {

@@ -43,6 +43,7 @@ struct SyntaxContext {
     SYNTAX_VIEW(concept_definition, ConceptDefinition)                         \
     SYNTAX_VIEW(alias_declaration, AliasDeclaration)                           \
     SYNTAX_VIEW(simple_declaration, SimpleDeclaration)                         \
+    SYNTAX_VIEW(deduction_guide, DeductionGuide)                               \
     SYNTAX_VIEW(function_body, FunctionBody)
 
 #define SYNTAX_VIEW_DECLARE(name, Type) struct Type;
@@ -398,6 +399,16 @@ struct SimpleDeclaration : SyntaxRef {
     }
 };
 
+/* [temp.deduct.guide]/1: deduction-guide: explicit-specifier_opt
+   template-name ( parameter-declaration-clause ) -> simple-template-id ; */
+struct DeductionGuide : SyntaxRef {
+    using SyntaxRef::SyntaxRef;
+    static bool accepts(syntax_kind k)
+    {
+        return k == syntax_kind::deduction_guide;
+    }
+};
+
 /*
  * [dcl.pre]/1:
  *
@@ -419,7 +430,8 @@ struct DeclarationSeq : SyntaxRef {
     ALTERNATIVE(template_declaration, TemplateDeclaration)                     \
     ALTERNATIVE(concept_definition, ConceptDefinition)                         \
     ALTERNATIVE(alias_declaration, AliasDeclaration)                           \
-    ALTERNATIVE(simple_declaration, SimpleDeclaration)
+    ALTERNATIVE(simple_declaration, SimpleDeclaration)                         \
+    ALTERNATIVE(deduction_guide, DeductionGuide)
 
 /*
  * [dcl.pre]/1: a declaration is one of its alternatives

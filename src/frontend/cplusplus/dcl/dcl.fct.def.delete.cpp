@@ -20,6 +20,26 @@
 namespace cplusplus
 {
 
+bool semantic_analysis::deleted_body(syntax_child body) const
+{
+    return explicit_body(body, standard_keyword::delete_);
+}
+
+/* the function-body = delete ... ; or = default ; (keyword k) */
+bool semantic_analysis::explicit_body(syntax_child body,
+                                      standard_keyword k) const
+{
+    if (body.is_token() || !body.index() ||
+        tree[body.index()].kind != syntax_kind::function_body ||
+        tree[body.index()].child_count < 3)
+        return false;
+    const syntax_child *children = tree.children(body.index());
+    return syntax_is_punctuator(tokens, children[0],
+                                preprocessing_op_or_punc::EQUAL) &&
+           children[1].is_token() &&
+           p.keyword_of(tokens[children[1].index()]) == k;
+}
+
 analysis_result semantic_analysis::deleted_definition(node_index n,
                                                       entity_index f)
 {

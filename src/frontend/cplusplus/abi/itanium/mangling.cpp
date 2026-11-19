@@ -43,6 +43,8 @@ entity_index next_enclosing_function(const entities &table, entity_index f)
 
 bool visible_local_class(const entities &table, entity_index c)
 {
+    if (table[c].closure_variable)
+        return true;
     /* (a class nested in a local class: as a member of it) */
     entity_index f = next_enclosing_function(table, c);
     if (!f)
@@ -295,6 +297,11 @@ bool itanium_mangler::specialization_encoding(entity_index e)
                       x.kind == entity_kind::function;
         if (table[scope].kind != entity_kind::namespace_entity && !member)
             return false;
+        /* (a member of a local class: its function scope first, as
+           name()'s) */
+        entity_index local = local_function(e);
+        if (member && local && !function_scope(local))
+            return false;
         text("N");
         if (member && x.nonstatic_member) {
             if (x.member_cv & cv_volatile)
@@ -318,7 +325,7 @@ bool itanium_mangler::specialization_encoding(entity_index e)
        requires-clause: I, the template-args, Q and the requires-clause's
        expression, E; the requires-clause of the template-head */
     syntax_child constraint = analysis.template_constraint(pattern_of);
-    if (constraint.bits) {
+    if (constraint.bits && !table[scope].lambda) {
         out->n--;
         text("Q");
         if (!constraint_expression(pattern_of, constraint))
@@ -332,7 +339,27 @@ bool itanium_mangler::specialization_encoding(entity_index e)
         return true;
     qualified_type pattern = table[pattern_of].type;
     encoding_template = pattern_of;
-    return type(record(pattern).operand) && bare_function_type(pattern);
+    /* (a constructor template's has none: [abi:mangle.function-type]'s
+       exception for constructors) */
+    if (table[e].special == special_member::none &&
+        !type(record(pattern).operand))
+        return false;
+    if (!bare_function_type(pattern))
+        return false;
+    /* [impl.clang] a generic lambda's or a function template's trailing
+       requires-clause: Q and its expression, after the parameters (one after its template-parameters
+       is the closure type's, closure_type_name) */
+    bool trailing = false;
+    if (table[scope].lambda)
+        constraint = analysis.lambda_constraint(table[scope].lambda, &trailing);
+    else if ((constraint = analysis.template_trailing_constraint(pattern_of))
+                 .bits)
+        trailing = true;
+    if (constraint.bits && trailing) {
+        text("Q");
+        return constraint_expression(pattern_of, constraint);
+    }
+    return true;
 }
 
 /*
@@ -345,8 +372,21 @@ bool itanium_mangler::specialization_encoding(entity_index e)
  */
 bool itanium_mangler::constraint_expression(entity_index t, syntax_child c)
 {
-    if (c.is_token())
-        return false;
+    if (c.is_token()) {
+        /* a decimal integer-literal of type int: Li <value> E */
+        owned_buffer spelling;
+        analysis.token_spelling(c.index(), spelling.get());
+        if (!spelling.size() || spelling.size() > 9 ||
+            (spelling.data()[0] == '0' && spelling.size() > 1))
+            return false;
+        for (size_t i = 0; i < spelling.size(); i++)
+            if (spelling.data()[i] < '0' || spelling.data()[i] > '9')
+                return false;
+        text("Li");
+        vbuffer_append(out, spelling.data(), spelling.size());
+        text("E");
+        return true;
+    }
     const syntax_tree &tree = analysis.syntax();
     const syntax_node &node = tree[c.index()];
     const syntax_child *parts = tree.children(c.index());
@@ -370,11 +410,53 @@ bool itanium_mangler::constraint_expression(entity_index t, syntax_child c)
             return false;
         return constraint_expression(t, parts[1]);
     case syntax_kind::unary_expression:
+        if (node.child_count == 4 && parts[0].is_token() &&
+            punctuator(parts[1], preprocessing_op_or_punc::LEFT_PARENTHESIS)) {
+            /* sizeof ( T ), T a template parameter: st <type> */
+            owned_buffer spelling;
+            analysis.token_spelling(parts[0].index(), spelling.get());
+            syntax_child a = parts[2];
+            while (!a.is_token() && tree[a.index()].child_count == 1 &&
+                   (tree[a.index()].kind == syntax_kind::type_id ||
+                    tree[a.index()].kind == syntax_kind::type_specifier_seq))
+                a = tree.children(a.index())[0];
+            if (spelling.size() != 6 || memcmp(spelling.data(), "sizeof", 6) ||
+                !a.is_token())
+                return false;
+            entity_index pe = analysis.constraint_parameter(t, a.index());
+            text("st");
+            return pe && type(analysis.entity_table[pe].type);
+        }
         if (node.child_count != 2 ||
             !punctuator(parts[0], preprocessing_op_or_punc::EXCLAMATION))
             return false;
         text("nt");
         return constraint_expression(t, parts[1]);
+    case syntax_kind::relational_expression:
+    case syntax_kind::equality_expression: {
+        static const struct {
+            preprocessing_op_or_punc op;
+            const char *code;
+        } comparisons[] = {
+            {preprocessing_op_or_punc::EQUAL_EQUAL, "eq"},
+            {preprocessing_op_or_punc::EXCLAMATION_EQUAL, "ne"},
+            {preprocessing_op_or_punc::LESS, "lt"},
+            {preprocessing_op_or_punc::GREATER, "gt"},
+            {preprocessing_op_or_punc::LESS_EQUAL, "le"},
+            {preprocessing_op_or_punc::GREATER_EQUAL, "ge"},
+        };
+        if (node.child_count != 3)
+            return false;
+        const char *code = nullptr;
+        for (const auto &x : comparisons)
+            if (punctuator(parts[1], x.op))
+                code = x.code;
+        if (!code)
+            return false;
+        text(code);
+        return constraint_expression(t, parts[0]) &&
+               constraint_expression(t, parts[2]);
+    }
     case syntax_kind::simple_template_id: {
         if (!parts[0].is_token() ||
             !analysis.constraint_concept(t, parts[0].index()))
@@ -514,7 +596,8 @@ bool itanium_mangler::name(entity_index e)
 {
     const entities &table = analysis.entity_table;
     entity_index scope = table[e].enclosing;
-    if (scope == 0 || is_std(scope))
+    /* (a closure type with a <data-member-prefix> is a <nested-name>) */
+    if ((scope == 0 || is_std(scope)) && !table[e].closure_variable)
         return unscoped_name(e);
     entity_index local = local_function(e);
     if (local && table[scope].kind == entity_kind::class_type) {
@@ -1073,13 +1156,17 @@ bool itanium_mangler::unqualified_name(entity_index e)
     if (!unqualified_name_untagged(e))
         return false;
     token_index tag = analysis.entity_table[e].abi_tag;
-    if (!tag)
-        return true;
-    owned_buffer written;
-    analysis.token_spelling(tag, written.get());
-    text("B");
-    number(written.size() - 2);
-    vbuffer_append(out, written.data() + 1, written.size() - 2);
+    if (tag) {
+        owned_buffer written;
+        analysis.token_spelling(tag, written.get());
+        text("B");
+        number(written.size() - 2);
+        vbuffer_append(out, written.data() + 1, written.size() - 2);
+    }
+    /* [impl.clang] enable_if(true, ...): the vendor qualifier
+       "U <source-name> <template-args>" of its condition */
+    if (analysis.entity_table[e].gnu_flags & gnu_enable_if)
+        text("Ua9enable_ifILb1EE");
     return true;
 }
 
@@ -1517,6 +1604,8 @@ bool itanium_mangler::local_name(entity_index e, entity_index function)
 bool itanium_mangler::closure_numbered(entity_index c) const
 {
     const entities &table = analysis.entity_table;
+    if (table[c].closure_variable)
+        return true;
     /* (a member function of a local class: its enclosing function's
        too) */
     for (entity_index f = enclosing_function(table, c); f;
@@ -1537,8 +1626,9 @@ bool itanium_mangler::closure_numbered(entity_index c) const
  * lexical order) with that same <lambda-sig> and context."  A closure type
  * unique to the translation unit has no encoding in the ABI: [impl.clang]
  * names it $_N, a <source-name>, N the closure's number among those of
- * its function in the order their names are first mangled (as clang's
- * code generator mangles them).
+ * its function (or of namespace scope, which a generic lambda's of a
+ * function counts too) in the order their names are first mangled (as
+ * clang's code generator mangles them).
  */
 bool itanium_mangler::closure_type_name(entity_index c)
 {
@@ -1557,7 +1647,11 @@ bool itanium_mangler::closure_type_name(entity_index c)
                 seen = true;
                 break;
             }
-            if (enclosing_function(table, k) == context)
+            /* ([impl.clang] a generic lambda's closure of a function takes
+               a number of the translation unit's too) */
+            if (enclosing_function(table, k) == context ||
+                (!context && table[table[k].call_operator].kind ==
+                                 entity_kind::template_entity))
                 n++;
         }
         if (!seen)
@@ -1569,7 +1663,37 @@ bool itanium_mangler::closure_type_name(entity_index c)
         vbuffer_append(out, written.data(), written.size());
         return true;
     }
+    /* [impl.clang] the context of a closure type in an inline variable's
+       initializer (the ABI's later data-member-prefix): the variable's
+       <source-name> and M */
+    entity_index variable = table[c].closure_variable;
+    if (variable) {
+        if (!source_name(table[variable].name))
+            return false;
+        text("M");
+        candidate x;
+        x.scope = variable;
+        candidates.append(x);
+    }
     text("Ul");
+    /* [impl.clang] (the ABI's later template-param-decl) before the
+       parameter types, one per template-parameter of a lambda's
+       template-parameter-list: Ty for a type-parameter (the only ones
+       analysed) */
+    if (table[call].kind == entity_kind::template_entity) {
+        for (uint32_t i = 0; i < analysis.template_parameter_count(call); i++)
+            text("Ty");
+        /* [impl.clang] the template-head's requires-clause: Q and its
+           expression */
+        bool trailing = false;
+        syntax_child constraint =
+            analysis.lambda_constraint(table[c].lambda, &trailing);
+        if (constraint.bits && !trailing) {
+            text("Q");
+            if (!constraint_expression(call, constraint))
+                return false;
+        }
+    }
     qualified_type signature = table[call].type;
     if (!bare_function_type(signature))
         return false;
@@ -1579,7 +1703,8 @@ bool itanium_mangler::closure_type_name(entity_index c)
     for (entity_index other = 1; other < c; other++) {
         const entity &k = table[other];
         if (k.kind != entity_kind::class_type || !k.lambda ||
-            !k.call_operator || enclosing_function(table, other) != context)
+            !k.call_operator || enclosing_function(table, other) != context ||
+            k.closure_variable != variable)
             continue;
         const struct type &a = record(table[k.call_operator].type);
         const struct type &b = record(signature);
@@ -1684,12 +1809,14 @@ bool itanium_mangler::type(qualified_type t)
 
                <builtin-type> ::= Da
                               ::= Dc
-        */
-        if (r.entity == 2)
-            text("Dc");
-        else
-            text("Da");
-        return true;
+
+           Constrained by a concept C ([dcl.spec.auto]/1), Dk (DK of
+           decltype(auto)) then C's <name>, as clang (the ABI's
+           <type-constraint>, later than the version fetched) */
+        static const char *const codes[2][2] = {{"Da", "Dc"}, {"Dk", "DK"}};
+        entity_index constraint = r.entity >> 2;
+        text(codes[constraint != 0][(r.entity & 3) == 2]);
+        return !constraint || name(constraint);
     }
     if (substitution(t))
         return true;
@@ -1716,6 +1843,11 @@ bool itanium_mangler::type(qualified_type t)
             type(qualified_type::make(
                 analysis.entity_table[r.entity].type.unqualified(), cv_none)) &&
             type(r.operand);
+    } else if (r.kind == type_kind::block_pointer) {
+        /* [abi:mangling-type]'s vendor extended type qualifier, as clang
+           mangles a block pointer ([ext:clang_blocks]) */
+        text("U13block_pointer");
+        done = type(r.operand);
     } else if (r.kind == type_kind::atomic) {
         /* [abi:mangling-type]'s vendor extended type qualifier, as clang
            mangles _Atomic(T) ([ext:clang_atomic]) */
@@ -1730,6 +1862,13 @@ bool itanium_mangler::type(qualified_type t)
         number(r.bound);
         text("_");
         done = true;
+    } else if (r.kind == type_kind::ext_vector && !r.entity) {
+        /* an ext_vector_type ([ext:clang_ext_vector_type]) as clang
+           mangles it: Dv, the element count, _ and the element type */
+        text("Dv");
+        number(r.bound);
+        text("_");
+        done = type(r.operand);
     } else if (r.kind == type_kind::pack_expansion) {
         /* [abi:mangle.function-type]: a pack expansion,
 
