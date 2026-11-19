@@ -727,9 +727,6 @@ node_index parser::simple_type_specifier_with_name()
         kind = names.lookup_unqualified(name, &region, &dependent);
     else if (known)
         kind = names.lookup_qualified(scope, name, &region, &dependent);
-    /* the class the type-name names (a class template's, for one of its
-       specializations): a typedef-name of it names its members too */
-    last_type_region = region;
     if (kind == name_kind::template_name && !at(preprocessing_op_or_punc::LESS))
         tree.template_names_as_types.append(name_first);
     if (at(preprocessing_op_or_punc::LESS) && qualifier &&
@@ -753,6 +750,12 @@ node_index parser::simple_type_specifier_with_name()
         return expected("a simple-template-id after template",
                         "dcl.type.simple");
     }
+    /* the class the type-name names (a class template's, for one of its
+       specializations): a typedef-name of it names its members too.  Set
+       after the template-argument-list, whose own type-names set it too
+       ([dcl.typedef]/2: typedef duration<long, ratio<3>> hours;
+       hours::rep). */
+    last_type_region = region;
     if (!qualifier)
         return 0;
     return finish_node(syntax_kind::simple_type_specifier, mark, first);
