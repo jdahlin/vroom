@@ -2185,13 +2185,44 @@ bool semantic_analysis::virt_specifier(SyntaxElement d, bool &override_,
     return true;
 }
 
+/* [dcl.attr.grammar]/3 and GCC's aligned: [[gnu::aligned(N)]] alone, the
+   standard syntax of what __attribute__((aligned(N))) says.  A class
+   template's head names it; an instantiation asks for the layout
+   (class_definition) and is not analysed yet. */
+static bool only_gnu_aligned(token_stream &tokens, SyntaxElement c)
+{
+    if (!c.is(syntax_kind::attribute_specifier))
+        return false;
+    bool seen = false;
+    for (auto k : c.elements()) {
+        if (k.is_token())
+            continue;
+        if (!k.is(syntax_kind::attribute) || !k.size() ||
+            !k[0].is(syntax_kind::attribute_scoped_token) || k[0].size() != 3)
+            return false;
+        owned_buffer ns, name;
+        tokens.spelling(k[0][0].token(), ns.get());
+        tokens.spelling(k[0][2].token(), name.get());
+        bool gnu = (ns.size() == 3 && !memcmp(ns.data(), "gnu", 3)) ||
+                   (ns.size() == 7 && !memcmp(ns.data(), "__gnu__", 7));
+        bool aligned =
+            (name.size() == 7 && !memcmp(name.data(), "aligned", 7)) ||
+            (name.size() == 11 && !memcmp(name.data(), "__aligned__", 11));
+        if (!gnu || !aligned)
+            return false;
+        seen = true;
+    }
+    return seen;
+}
+
 /* a class-head's class-head-name (or what is in its place), after the
    class-key and alignment-specifiers; none in an unnamed class's */
 SyntaxElement semantic_analysis::class_head_name(SyntaxRef head) const
 {
     for (auto c : head.elements(1)) {
         if (c.is(syntax_kind::alignment_specifier) ||
-            (c.is_node() && gnu_or_without_effect(c)))
+            (c.is_node() && gnu_or_without_effect(c)) ||
+            only_gnu_aligned(tokens, c))
             continue;
         bool only_alignment = c.is(syntax_kind::attribute_specifier_seq);
         for (auto k : c.elements())

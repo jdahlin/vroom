@@ -1819,6 +1819,10 @@ analysis_result semantic_analysis::class_specialization_definition(
             if (match)
                 return not_supported(n, rule);
         }
+    /* [temp.class.spec]/1: a partial specialization declared only is
+       recorded by its definition */
+    if (!defines && !parameters.empty())
+        return analysis_result::well_formed;
     function_template record;
     record.entity = primary.entity;
     record.declaration = n;
@@ -2392,11 +2396,23 @@ analysis_result
 semantic_analysis::class_template_declaration(SyntaxRef n, SyntaxRef elaborated)
 {
     entity_index outer = current_scope;
+    if (elaborated.size() == 2 && elaborated[0].is_token() &&
+        elaborated[1].is(syntax_kind::simple_template_id)) {
+        /* [temp.class.spec]/1: template<class A> class S<bool, A>; a
+           partial specialization declared, its definition later */
+        standard_keyword k = elaborated[0].keyword();
+        if (k != standard_keyword::class_ && k != standard_keyword::struct_)
+            return not_supported(n, "temp.class.spec");
+        owned_array<SyntaxRef> list;
+        VTRY(r, template_head_parameters(n, list, true, true, true, true));
+        return class_specialization_definition(n, elaborated, list);
+    }
     if (elaborated.size() != 2 || !elaborated[0].is_token() ||
         !elaborated[1].is_identifier())
         return not_supported(n, "temp.class");
     standard_keyword key = elaborated[0].keyword();
-    if (key != standard_keyword::class_ && key != standard_keyword::struct_)
+    if (key != standard_keyword::class_ && key != standard_keyword::struct_ &&
+        key != standard_keyword::union_)
         return not_supported(n, "temp.class");
     owned_array<SyntaxRef> parameters;
     /* [temp.pre]/9: a requires-clause in its template-head */
