@@ -9,6 +9,7 @@ struct AliasDeclaration;
 struct AlignmentSpecifier;
 struct AndExpression;
 struct AndOperation;
+struct AnnotatedBaseSpecifier;
 struct AsmDeclaration;
 struct Assignment;
 struct AssignmentExpression;
@@ -19,8 +20,11 @@ struct AttributeList;
 struct AttributeScopedToken;
 struct AttributeSpecifier;
 struct AttributeSpecifierSeq;
+struct AttributeSpecifiers;
 struct AttributeUsingPrefix;
+struct AttributeWithArguments;
 struct AttributedStatement;
+struct Attributes;
 struct AwaitExpression;
 struct BalancedToken;
 struct BalancedTokenSeq;
@@ -28,6 +32,7 @@ struct BalancedTokens;
 struct BaseClause;
 struct BaseSpecifier;
 struct BaseSpecifierList;
+struct BaseSpecifiers;
 struct BlockDeclaration;
 struct BraceOrEqualInitializer;
 struct BracedInitList;
@@ -41,6 +46,8 @@ struct ClangBitCastExpression;
 struct ClangBitIntTypeSpecifier;
 struct ClangConvertvectorExpression;
 struct ClangSourceLocationExpression;
+struct ClangTypeTraitArgument;
+struct ClangTypeTraitArgumentList;
 struct ClangTypeTraitExpression;
 struct ClangTypeTransformation;
 struct ClassHead;
@@ -65,6 +72,7 @@ struct ConstraintLogicalOrExpression;
 struct ConversionDeclarator;
 struct ConversionFunctionId;
 struct ConversionTypeId;
+struct ConversionTypeWithDeclarator;
 struct CoroutineReturnStatement;
 struct CtorInitializer;
 struct CvQualifierSeq;
@@ -76,6 +84,7 @@ struct DeclarationStatement;
 struct Declarations;
 struct Declarator;
 struct DeclaratorId;
+struct DeclaratorWithInitializer;
 struct DecltypeSpecifier;
 struct DeductionGuide;
 struct DefaultAndCaptures;
@@ -117,6 +126,7 @@ struct ExplicitSpecifier;
 struct ExportDeclaration;
 struct ExprOrBracedInitList;
 struct Expression;
+struct ExpressionList;
 struct ExpressionStatement;
 struct FoldExpression;
 struct ForRangeDeclaration;
@@ -127,20 +137,24 @@ struct FunctionTryBlock;
 struct GlobalModuleFragment;
 struct GnuAsmLabel;
 struct GnuAttribute;
+struct GnuAttributeArguments;
 struct GnuAttributeList;
 struct GnuAttributeSpecifier;
+struct GnuAttributes;
 struct GnuCompoundLiteral;
 struct GnuComputedGoto;
 struct GnuDeclarator;
 struct GnuDesignation;
 struct GnuExtensionDeclaration;
 struct GnuExtensionExpression;
+struct GnuInitializerClauses;
 struct GnuInitializerList;
 struct GnuLabelAddress;
 struct GnuOffsetofExpression;
 struct GnuOldDesignation;
 struct Handler;
 struct HandlerSeq;
+struct Handlers;
 struct IdExpression;
 struct IdentifierList;
 struct InclusiveOrExpression;
@@ -152,6 +166,7 @@ struct InitDeclarators;
 struct InitStatement;
 struct Initializer;
 struct InitializerClause;
+struct InitializerClauses;
 struct InitializerList;
 struct IterationStatement;
 struct Jump;
@@ -170,9 +185,11 @@ struct LogicalOrOperation;
 struct MemInitializer;
 struct MemInitializerId;
 struct MemInitializerList;
+struct MemInitializers;
 struct MemberDeclaration;
 struct MemberDeclarator;
 struct MemberDeclaratorList;
+struct MemberDeclaratorWithParts;
 struct MemberDeclarators;
 struct MemberSimpleDeclaration;
 struct MemberSpecification;
@@ -185,6 +202,7 @@ struct MultiplicativeExpression;
 struct MultiplicativeOperation;
 struct NamedNamespaceDefinition;
 struct NamespaceAliasDefinition;
+struct NamespaceBody;
 struct NamespaceDefinition;
 struct NestedNameSpecifier;
 struct NestedNamespaceDefinition;
@@ -203,6 +221,8 @@ struct OpaqueEnumDeclaration;
 struct OperatorFunctionId;
 struct OperatorTemplateId;
 struct OrdinaryFunctionBody;
+struct PackDeclaratorId;
+struct ParameterClause;
 struct ParameterDeclaration;
 struct ParameterDeclarationClause;
 struct ParameterDeclarationList;
@@ -214,6 +234,7 @@ struct ParenthesizedOrThis;
 struct PlaceholderTypeSpecifier;
 struct PmExpression;
 struct PointerAbstractDeclarator;
+struct PointerConversionDeclarator;
 struct PointerDeclarator;
 struct PointerNewDeclarator;
 struct PointerToMemberOperation;
@@ -225,6 +246,7 @@ struct PtrAbstractDeclarator;
 struct PtrDeclarator;
 struct PtrOperator;
 struct PureSpecifier;
+struct QualifiedClassHeadName;
 struct QualifiedClassName;
 struct QualifiedId;
 struct QualifiedNamespaceSpecifier;
@@ -252,8 +274,10 @@ struct Statement;
 struct StatementSeq;
 struct Statements;
 struct StaticAssertDeclaration;
+struct SuffixedDeclarator;
 struct TemplateArgument;
 struct TemplateArgumentList;
+struct TemplateArguments;
 struct TemplateDeclaration;
 struct TemplateHead;
 struct TemplateId;
@@ -283,6 +307,7 @@ struct UnqualifiedId;
 struct UsingDeclaration;
 struct UsingDeclarator;
 struct UsingDeclaratorList;
+struct UsingDeclarators;
 struct UsingDirective;
 struct UsingEnumDeclaration;
 struct VirtSpecifierSeq;
@@ -290,6 +315,7 @@ struct YieldExpression;
 /* a member of a sum, or a sum within it, converts to the sum */
 template <> inline constexpr bool syntax_converts<NoptrAbstractDeclarator, AbstractDeclarator> = true;
 template <> inline constexpr bool syntax_converts<PointerAbstractDeclarator, AbstractDeclarator> = true;
+template <> inline constexpr bool syntax_converts<PtrOperator, AbstractDeclarator> = true;
 template <> inline constexpr bool syntax_converts<TrailingAbstractDeclarator, AbstractDeclarator> = true;
 template <> inline constexpr bool syntax_converts<PtrAbstractDeclarator, AbstractDeclarator> = true;
 template <> inline constexpr bool syntax_converts<AdditiveOperation, AdditiveExpression> = true;
@@ -442,11 +468,36 @@ template <> inline constexpr bool syntax_converts<ShiftExpression, AssignmentExp
 template <> inline constexpr bool syntax_converts<TemplateId, AssignmentExpression> = true;
 template <> inline constexpr bool syntax_converts<UnaryExpression, AssignmentExpression> = true;
 template <> inline constexpr bool syntax_converts<UnqualifiedId, AssignmentExpression> = true;
+template <> inline constexpr bool syntax_converts<AttributeScopedToken, Attribute> = true;
+template <> inline constexpr bool syntax_converts<AttributeWithArguments, Attribute> = true;
+template <> inline constexpr bool syntax_converts<AttributeScopedToken, AttributeList> = true;
+template <> inline constexpr bool syntax_converts<AttributeWithArguments, AttributeList> = true;
+template <> inline constexpr bool syntax_converts<Attributes, AttributeList> = true;
+template <> inline constexpr bool syntax_converts<Attribute, AttributeList> = true;
 template <> inline constexpr bool syntax_converts<AlignmentSpecifier, AttributeSpecifier> = true;
 template <> inline constexpr bool syntax_converts<GnuAttributeSpecifier, AttributeSpecifier> = true;
 template <> inline constexpr bool syntax_converts<StandardAttributeSpecifier, AttributeSpecifier> = true;
+template <> inline constexpr bool syntax_converts<AlignmentSpecifier, AttributeSpecifierSeq> = true;
+template <> inline constexpr bool syntax_converts<AttributeSpecifiers, AttributeSpecifierSeq> = true;
+template <> inline constexpr bool syntax_converts<GnuAttributeSpecifier, AttributeSpecifierSeq> = true;
+template <> inline constexpr bool syntax_converts<StandardAttributeSpecifier, AttributeSpecifierSeq> = true;
+template <> inline constexpr bool syntax_converts<AttributeSpecifier, AttributeSpecifierSeq> = true;
 template <> inline constexpr bool syntax_converts<BalancedToken, BalancedTokenSeq> = true;
 template <> inline constexpr bool syntax_converts<BalancedTokens, BalancedTokenSeq> = true;
+template <> inline constexpr bool syntax_converts<AnnotatedBaseSpecifier, BaseSpecifier> = true;
+template <> inline constexpr bool syntax_converts<DecltypeSpecifier, BaseSpecifier> = true;
+template <> inline constexpr bool syntax_converts<QualifiedClassName, BaseSpecifier> = true;
+template <> inline constexpr bool syntax_converts<SimpleTemplateId, BaseSpecifier> = true;
+template <> inline constexpr bool syntax_converts<ClassOrDecltype, BaseSpecifier> = true;
+template <> inline constexpr bool syntax_converts<MemInitializerId, BaseSpecifier> = true;
+template <> inline constexpr bool syntax_converts<AnnotatedBaseSpecifier, BaseSpecifierList> = true;
+template <> inline constexpr bool syntax_converts<BaseSpecifiers, BaseSpecifierList> = true;
+template <> inline constexpr bool syntax_converts<DecltypeSpecifier, BaseSpecifierList> = true;
+template <> inline constexpr bool syntax_converts<QualifiedClassName, BaseSpecifierList> = true;
+template <> inline constexpr bool syntax_converts<SimpleTemplateId, BaseSpecifierList> = true;
+template <> inline constexpr bool syntax_converts<BaseSpecifier, BaseSpecifierList> = true;
+template <> inline constexpr bool syntax_converts<ClassOrDecltype, BaseSpecifierList> = true;
+template <> inline constexpr bool syntax_converts<MemInitializerId, BaseSpecifierList> = true;
 template <> inline constexpr bool syntax_converts<AliasDeclaration, BlockDeclaration> = true;
 template <> inline constexpr bool syntax_converts<AsmDeclaration, BlockDeclaration> = true;
 template <> inline constexpr bool syntax_converts<GnuExtensionDeclaration, BlockDeclaration> = true;
@@ -497,8 +548,145 @@ template <> inline constexpr bool syntax_converts<PrimaryExpression, CastExpress
 template <> inline constexpr bool syntax_converts<TemplateId, CastExpression> = true;
 template <> inline constexpr bool syntax_converts<UnaryExpression, CastExpression> = true;
 template <> inline constexpr bool syntax_converts<UnqualifiedId, CastExpression> = true;
+template <> inline constexpr bool syntax_converts<AdditiveOperation, ClangTypeTraitArgument> = true;
+template <> inline constexpr bool syntax_converts<AndOperation, ClangTypeTraitArgument> = true;
+template <> inline constexpr bool syntax_converts<Assignment, ClangTypeTraitArgument> = true;
+template <> inline constexpr bool syntax_converts<AwaitExpression, ClangTypeTraitArgument> = true;
+template <> inline constexpr bool syntax_converts<CastNotation, ClangTypeTraitArgument> = true;
+template <> inline constexpr bool syntax_converts<ClangBitCastExpression, ClangTypeTraitArgument> = true;
+template <> inline constexpr bool syntax_converts<ClangConvertvectorExpression, ClangTypeTraitArgument> = true;
+template <> inline constexpr bool syntax_converts<ClangSourceLocationExpression, ClangTypeTraitArgument> = true;
+template <> inline constexpr bool syntax_converts<ClangTypeTraitExpression, ClangTypeTraitArgument> = true;
+template <> inline constexpr bool syntax_converts<ConditionalOperation, ClangTypeTraitArgument> = true;
+template <> inline constexpr bool syntax_converts<ConversionFunctionId, ClangTypeTraitArgument> = true;
+template <> inline constexpr bool syntax_converts<DeleteExpression, ClangTypeTraitArgument> = true;
+template <> inline constexpr bool syntax_converts<DestructorTypeId, ClangTypeTraitArgument> = true;
+template <> inline constexpr bool syntax_converts<EqualityOperation, ClangTypeTraitArgument> = true;
+template <> inline constexpr bool syntax_converts<ExclusiveOrOperation, ClangTypeTraitArgument> = true;
+template <> inline constexpr bool syntax_converts<FoldExpression, ClangTypeTraitArgument> = true;
+template <> inline constexpr bool syntax_converts<GnuCompoundLiteral, ClangTypeTraitArgument> = true;
+template <> inline constexpr bool syntax_converts<GnuExtensionExpression, ClangTypeTraitArgument> = true;
+template <> inline constexpr bool syntax_converts<GnuLabelAddress, ClangTypeTraitArgument> = true;
+template <> inline constexpr bool syntax_converts<GnuOffsetofExpression, ClangTypeTraitArgument> = true;
+template <> inline constexpr bool syntax_converts<InclusiveOrOperation, ClangTypeTraitArgument> = true;
+template <> inline constexpr bool syntax_converts<LambdaExpression, ClangTypeTraitArgument> = true;
+template <> inline constexpr bool syntax_converts<LiteralOperatorId, ClangTypeTraitArgument> = true;
+template <> inline constexpr bool syntax_converts<LogicalAndOperation, ClangTypeTraitArgument> = true;
+template <> inline constexpr bool syntax_converts<LogicalOrOperation, ClangTypeTraitArgument> = true;
+template <> inline constexpr bool syntax_converts<MultiplicativeOperation, ClangTypeTraitArgument> = true;
+template <> inline constexpr bool syntax_converts<NewExpression, ClangTypeTraitArgument> = true;
+template <> inline constexpr bool syntax_converts<NoexceptExpression, ClangTypeTraitArgument> = true;
+template <> inline constexpr bool syntax_converts<OperatorFunctionId, ClangTypeTraitArgument> = true;
+template <> inline constexpr bool syntax_converts<OperatorTemplateId, ClangTypeTraitArgument> = true;
+template <> inline constexpr bool syntax_converts<ParenthesizedOrThis, ClangTypeTraitArgument> = true;
+template <> inline constexpr bool syntax_converts<PointerToMemberOperation, ClangTypeTraitArgument> = true;
+template <> inline constexpr bool syntax_converts<PostfixOperation, ClangTypeTraitArgument> = true;
+template <> inline constexpr bool syntax_converts<QualifiedId, ClangTypeTraitArgument> = true;
+template <> inline constexpr bool syntax_converts<RelationalOperation, ClangTypeTraitArgument> = true;
+template <> inline constexpr bool syntax_converts<RequiresExpression, ClangTypeTraitArgument> = true;
+template <> inline constexpr bool syntax_converts<ShiftOperation, ClangTypeTraitArgument> = true;
+template <> inline constexpr bool syntax_converts<SimpleTemplateId, ClangTypeTraitArgument> = true;
+template <> inline constexpr bool syntax_converts<ThreeWayComparison, ClangTypeTraitArgument> = true;
+template <> inline constexpr bool syntax_converts<ThrowExpression, ClangTypeTraitArgument> = true;
+template <> inline constexpr bool syntax_converts<TypeId, ClangTypeTraitArgument> = true;
+template <> inline constexpr bool syntax_converts<UnaryOperation, ClangTypeTraitArgument> = true;
+template <> inline constexpr bool syntax_converts<YieldExpression, ClangTypeTraitArgument> = true;
+template <> inline constexpr bool syntax_converts<AdditiveExpression, ClangTypeTraitArgument> = true;
+template <> inline constexpr bool syntax_converts<AndExpression, ClangTypeTraitArgument> = true;
+template <> inline constexpr bool syntax_converts<AssignmentExpression, ClangTypeTraitArgument> = true;
+template <> inline constexpr bool syntax_converts<CastExpression, ClangTypeTraitArgument> = true;
+template <> inline constexpr bool syntax_converts<CompareExpression, ClangTypeTraitArgument> = true;
+template <> inline constexpr bool syntax_converts<ConditionalExpression, ClangTypeTraitArgument> = true;
+template <> inline constexpr bool syntax_converts<ConstantExpression, ClangTypeTraitArgument> = true;
+template <> inline constexpr bool syntax_converts<ConstraintExpression, ClangTypeTraitArgument> = true;
+template <> inline constexpr bool syntax_converts<EqualityExpression, ClangTypeTraitArgument> = true;
+template <> inline constexpr bool syntax_converts<ExclusiveOrExpression, ClangTypeTraitArgument> = true;
+template <> inline constexpr bool syntax_converts<IdExpression, ClangTypeTraitArgument> = true;
+template <> inline constexpr bool syntax_converts<InclusiveOrExpression, ClangTypeTraitArgument> = true;
+template <> inline constexpr bool syntax_converts<LogicalAndExpression, ClangTypeTraitArgument> = true;
+template <> inline constexpr bool syntax_converts<LogicalOrExpression, ClangTypeTraitArgument> = true;
+template <> inline constexpr bool syntax_converts<MultiplicativeExpression, ClangTypeTraitArgument> = true;
+template <> inline constexpr bool syntax_converts<PmExpression, ClangTypeTraitArgument> = true;
+template <> inline constexpr bool syntax_converts<PostfixExpression, ClangTypeTraitArgument> = true;
+template <> inline constexpr bool syntax_converts<PrimaryExpression, ClangTypeTraitArgument> = true;
+template <> inline constexpr bool syntax_converts<RelationalExpression, ClangTypeTraitArgument> = true;
+template <> inline constexpr bool syntax_converts<ShiftExpression, ClangTypeTraitArgument> = true;
+template <> inline constexpr bool syntax_converts<TemplateArgument, ClangTypeTraitArgument> = true;
+template <> inline constexpr bool syntax_converts<TemplateId, ClangTypeTraitArgument> = true;
+template <> inline constexpr bool syntax_converts<UnaryExpression, ClangTypeTraitArgument> = true;
+template <> inline constexpr bool syntax_converts<UnqualifiedId, ClangTypeTraitArgument> = true;
+template <> inline constexpr bool syntax_converts<AdditiveOperation, ClangTypeTraitArgumentList> = true;
+template <> inline constexpr bool syntax_converts<AndOperation, ClangTypeTraitArgumentList> = true;
+template <> inline constexpr bool syntax_converts<Assignment, ClangTypeTraitArgumentList> = true;
+template <> inline constexpr bool syntax_converts<AwaitExpression, ClangTypeTraitArgumentList> = true;
+template <> inline constexpr bool syntax_converts<CastNotation, ClangTypeTraitArgumentList> = true;
+template <> inline constexpr bool syntax_converts<ClangBitCastExpression, ClangTypeTraitArgumentList> = true;
+template <> inline constexpr bool syntax_converts<ClangConvertvectorExpression, ClangTypeTraitArgumentList> = true;
+template <> inline constexpr bool syntax_converts<ClangSourceLocationExpression, ClangTypeTraitArgumentList> = true;
+template <> inline constexpr bool syntax_converts<ClangTypeTraitExpression, ClangTypeTraitArgumentList> = true;
+template <> inline constexpr bool syntax_converts<ConditionalOperation, ClangTypeTraitArgumentList> = true;
+template <> inline constexpr bool syntax_converts<ConversionFunctionId, ClangTypeTraitArgumentList> = true;
+template <> inline constexpr bool syntax_converts<DeleteExpression, ClangTypeTraitArgumentList> = true;
+template <> inline constexpr bool syntax_converts<DestructorTypeId, ClangTypeTraitArgumentList> = true;
+template <> inline constexpr bool syntax_converts<EqualityOperation, ClangTypeTraitArgumentList> = true;
+template <> inline constexpr bool syntax_converts<ExclusiveOrOperation, ClangTypeTraitArgumentList> = true;
+template <> inline constexpr bool syntax_converts<FoldExpression, ClangTypeTraitArgumentList> = true;
+template <> inline constexpr bool syntax_converts<GnuCompoundLiteral, ClangTypeTraitArgumentList> = true;
+template <> inline constexpr bool syntax_converts<GnuExtensionExpression, ClangTypeTraitArgumentList> = true;
+template <> inline constexpr bool syntax_converts<GnuLabelAddress, ClangTypeTraitArgumentList> = true;
+template <> inline constexpr bool syntax_converts<GnuOffsetofExpression, ClangTypeTraitArgumentList> = true;
+template <> inline constexpr bool syntax_converts<InclusiveOrOperation, ClangTypeTraitArgumentList> = true;
+template <> inline constexpr bool syntax_converts<LambdaExpression, ClangTypeTraitArgumentList> = true;
+template <> inline constexpr bool syntax_converts<LiteralOperatorId, ClangTypeTraitArgumentList> = true;
+template <> inline constexpr bool syntax_converts<LogicalAndOperation, ClangTypeTraitArgumentList> = true;
+template <> inline constexpr bool syntax_converts<LogicalOrOperation, ClangTypeTraitArgumentList> = true;
+template <> inline constexpr bool syntax_converts<MultiplicativeOperation, ClangTypeTraitArgumentList> = true;
+template <> inline constexpr bool syntax_converts<NewExpression, ClangTypeTraitArgumentList> = true;
+template <> inline constexpr bool syntax_converts<NoexceptExpression, ClangTypeTraitArgumentList> = true;
+template <> inline constexpr bool syntax_converts<OperatorFunctionId, ClangTypeTraitArgumentList> = true;
+template <> inline constexpr bool syntax_converts<OperatorTemplateId, ClangTypeTraitArgumentList> = true;
+template <> inline constexpr bool syntax_converts<ParenthesizedOrThis, ClangTypeTraitArgumentList> = true;
+template <> inline constexpr bool syntax_converts<PointerToMemberOperation, ClangTypeTraitArgumentList> = true;
+template <> inline constexpr bool syntax_converts<PostfixOperation, ClangTypeTraitArgumentList> = true;
+template <> inline constexpr bool syntax_converts<QualifiedId, ClangTypeTraitArgumentList> = true;
+template <> inline constexpr bool syntax_converts<RelationalOperation, ClangTypeTraitArgumentList> = true;
+template <> inline constexpr bool syntax_converts<RequiresExpression, ClangTypeTraitArgumentList> = true;
+template <> inline constexpr bool syntax_converts<ShiftOperation, ClangTypeTraitArgumentList> = true;
+template <> inline constexpr bool syntax_converts<SimpleTemplateId, ClangTypeTraitArgumentList> = true;
+template <> inline constexpr bool syntax_converts<ThreeWayComparison, ClangTypeTraitArgumentList> = true;
+template <> inline constexpr bool syntax_converts<ThrowExpression, ClangTypeTraitArgumentList> = true;
+template <> inline constexpr bool syntax_converts<TypeId, ClangTypeTraitArgumentList> = true;
+template <> inline constexpr bool syntax_converts<UnaryOperation, ClangTypeTraitArgumentList> = true;
+template <> inline constexpr bool syntax_converts<YieldExpression, ClangTypeTraitArgumentList> = true;
+template <> inline constexpr bool syntax_converts<AdditiveExpression, ClangTypeTraitArgumentList> = true;
+template <> inline constexpr bool syntax_converts<AndExpression, ClangTypeTraitArgumentList> = true;
+template <> inline constexpr bool syntax_converts<AssignmentExpression, ClangTypeTraitArgumentList> = true;
+template <> inline constexpr bool syntax_converts<CastExpression, ClangTypeTraitArgumentList> = true;
+template <> inline constexpr bool syntax_converts<CompareExpression, ClangTypeTraitArgumentList> = true;
+template <> inline constexpr bool syntax_converts<ConditionalExpression, ClangTypeTraitArgumentList> = true;
+template <> inline constexpr bool syntax_converts<ConstantExpression, ClangTypeTraitArgumentList> = true;
+template <> inline constexpr bool syntax_converts<ConstraintExpression, ClangTypeTraitArgumentList> = true;
+template <> inline constexpr bool syntax_converts<EqualityExpression, ClangTypeTraitArgumentList> = true;
+template <> inline constexpr bool syntax_converts<ExclusiveOrExpression, ClangTypeTraitArgumentList> = true;
+template <> inline constexpr bool syntax_converts<IdExpression, ClangTypeTraitArgumentList> = true;
+template <> inline constexpr bool syntax_converts<InclusiveOrExpression, ClangTypeTraitArgumentList> = true;
+template <> inline constexpr bool syntax_converts<LogicalAndExpression, ClangTypeTraitArgumentList> = true;
+template <> inline constexpr bool syntax_converts<LogicalOrExpression, ClangTypeTraitArgumentList> = true;
+template <> inline constexpr bool syntax_converts<MultiplicativeExpression, ClangTypeTraitArgumentList> = true;
+template <> inline constexpr bool syntax_converts<PmExpression, ClangTypeTraitArgumentList> = true;
+template <> inline constexpr bool syntax_converts<PostfixExpression, ClangTypeTraitArgumentList> = true;
+template <> inline constexpr bool syntax_converts<PrimaryExpression, ClangTypeTraitArgumentList> = true;
+template <> inline constexpr bool syntax_converts<RelationalExpression, ClangTypeTraitArgumentList> = true;
+template <> inline constexpr bool syntax_converts<ShiftExpression, ClangTypeTraitArgumentList> = true;
+template <> inline constexpr bool syntax_converts<TemplateArgument, ClangTypeTraitArgumentList> = true;
+template <> inline constexpr bool syntax_converts<TemplateId, ClangTypeTraitArgumentList> = true;
+template <> inline constexpr bool syntax_converts<UnaryExpression, ClangTypeTraitArgumentList> = true;
+template <> inline constexpr bool syntax_converts<UnqualifiedId, ClangTypeTraitArgumentList> = true;
+template <> inline constexpr bool syntax_converts<QualifiedClassHeadName, ClassHeadName> = true;
+template <> inline constexpr bool syntax_converts<SimpleTemplateId, ClassHeadName> = true;
 template <> inline constexpr bool syntax_converts<DecltypeSpecifier, ClassOrDecltype> = true;
 template <> inline constexpr bool syntax_converts<QualifiedClassName, ClassOrDecltype> = true;
+template <> inline constexpr bool syntax_converts<SimpleTemplateId, ClassOrDecltype> = true;
 template <> inline constexpr bool syntax_converts<AdditiveOperation, CompareExpression> = true;
 template <> inline constexpr bool syntax_converts<AwaitExpression, CompareExpression> = true;
 template <> inline constexpr bool syntax_converts<CastNotation, CompareExpression> = true;
@@ -827,6 +1015,10 @@ template <> inline constexpr bool syntax_converts<IdExpression, ConstraintLogica
 template <> inline constexpr bool syntax_converts<PrimaryExpression, ConstraintLogicalOrExpression> = true;
 template <> inline constexpr bool syntax_converts<TemplateId, ConstraintLogicalOrExpression> = true;
 template <> inline constexpr bool syntax_converts<UnqualifiedId, ConstraintLogicalOrExpression> = true;
+template <> inline constexpr bool syntax_converts<PointerConversionDeclarator, ConversionDeclarator> = true;
+template <> inline constexpr bool syntax_converts<PtrOperator, ConversionDeclarator> = true;
+template <> inline constexpr bool syntax_converts<ConversionTypeWithDeclarator, ConversionTypeId> = true;
+template <> inline constexpr bool syntax_converts<TypeSpecifierSeq, ConversionTypeId> = true;
 template <> inline constexpr bool syntax_converts<ClangAtomicTypeSpecifier, DeclSpecifier> = true;
 template <> inline constexpr bool syntax_converts<ClangBitIntTypeSpecifier, DeclSpecifier> = true;
 template <> inline constexpr bool syntax_converts<ClangTypeTransformation, DeclSpecifier> = true;
@@ -838,6 +1030,7 @@ template <> inline constexpr bool syntax_converts<EnumSpecifier, DeclSpecifier> 
 template <> inline constexpr bool syntax_converts<ExplicitSpecifier, DeclSpecifier> = true;
 template <> inline constexpr bool syntax_converts<GnuAttributeSpecifier, DeclSpecifier> = true;
 template <> inline constexpr bool syntax_converts<PlaceholderTypeSpecifier, DeclSpecifier> = true;
+template <> inline constexpr bool syntax_converts<SimpleTemplateId, DeclSpecifier> = true;
 template <> inline constexpr bool syntax_converts<SimpleTypeName, DeclSpecifier> = true;
 template <> inline constexpr bool syntax_converts<TypenameSpecifier, DeclSpecifier> = true;
 template <> inline constexpr bool syntax_converts<DefiningTypeSpecifier, DeclSpecifier> = true;
@@ -908,10 +1101,34 @@ template <> inline constexpr bool syntax_converts<StaticAssertDeclaration, Decla
 template <> inline constexpr bool syntax_converts<UsingDeclaration, DeclarationStatement> = true;
 template <> inline constexpr bool syntax_converts<UsingDirective, DeclarationStatement> = true;
 template <> inline constexpr bool syntax_converts<UsingEnumDeclaration, DeclarationStatement> = true;
-template <> inline constexpr bool syntax_converts<NoptrDeclarator, Declarator> = true;
+template <> inline constexpr bool syntax_converts<ConversionFunctionId, Declarator> = true;
+template <> inline constexpr bool syntax_converts<DestructorTypeId, Declarator> = true;
+template <> inline constexpr bool syntax_converts<LiteralOperatorId, Declarator> = true;
+template <> inline constexpr bool syntax_converts<OperatorFunctionId, Declarator> = true;
+template <> inline constexpr bool syntax_converts<OperatorTemplateId, Declarator> = true;
+template <> inline constexpr bool syntax_converts<PackDeclaratorId, Declarator> = true;
 template <> inline constexpr bool syntax_converts<PointerDeclarator, Declarator> = true;
+template <> inline constexpr bool syntax_converts<QualifiedId, Declarator> = true;
+template <> inline constexpr bool syntax_converts<SimpleTemplateId, Declarator> = true;
+template <> inline constexpr bool syntax_converts<SuffixedDeclarator, Declarator> = true;
 template <> inline constexpr bool syntax_converts<TrailingReturnDeclarator, Declarator> = true;
+template <> inline constexpr bool syntax_converts<DeclaratorId, Declarator> = true;
+template <> inline constexpr bool syntax_converts<IdExpression, Declarator> = true;
+template <> inline constexpr bool syntax_converts<NoptrDeclarator, Declarator> = true;
 template <> inline constexpr bool syntax_converts<PtrDeclarator, Declarator> = true;
+template <> inline constexpr bool syntax_converts<TemplateId, Declarator> = true;
+template <> inline constexpr bool syntax_converts<UnqualifiedId, Declarator> = true;
+template <> inline constexpr bool syntax_converts<ConversionFunctionId, DeclaratorId> = true;
+template <> inline constexpr bool syntax_converts<DestructorTypeId, DeclaratorId> = true;
+template <> inline constexpr bool syntax_converts<LiteralOperatorId, DeclaratorId> = true;
+template <> inline constexpr bool syntax_converts<OperatorFunctionId, DeclaratorId> = true;
+template <> inline constexpr bool syntax_converts<OperatorTemplateId, DeclaratorId> = true;
+template <> inline constexpr bool syntax_converts<PackDeclaratorId, DeclaratorId> = true;
+template <> inline constexpr bool syntax_converts<QualifiedId, DeclaratorId> = true;
+template <> inline constexpr bool syntax_converts<SimpleTemplateId, DeclaratorId> = true;
+template <> inline constexpr bool syntax_converts<IdExpression, DeclaratorId> = true;
+template <> inline constexpr bool syntax_converts<TemplateId, DeclaratorId> = true;
+template <> inline constexpr bool syntax_converts<UnqualifiedId, DeclaratorId> = true;
 template <> inline constexpr bool syntax_converts<ClangAtomicTypeSpecifier, DefiningTypeSpecifier> = true;
 template <> inline constexpr bool syntax_converts<ClangBitIntTypeSpecifier, DefiningTypeSpecifier> = true;
 template <> inline constexpr bool syntax_converts<ClangTypeTransformation, DefiningTypeSpecifier> = true;
@@ -921,6 +1138,7 @@ template <> inline constexpr bool syntax_converts<ElaboratedClassSpecifier, Defi
 template <> inline constexpr bool syntax_converts<ElaboratedEnumSpecifier, DefiningTypeSpecifier> = true;
 template <> inline constexpr bool syntax_converts<EnumSpecifier, DefiningTypeSpecifier> = true;
 template <> inline constexpr bool syntax_converts<PlaceholderTypeSpecifier, DefiningTypeSpecifier> = true;
+template <> inline constexpr bool syntax_converts<SimpleTemplateId, DefiningTypeSpecifier> = true;
 template <> inline constexpr bool syntax_converts<SimpleTypeName, DefiningTypeSpecifier> = true;
 template <> inline constexpr bool syntax_converts<TypenameSpecifier, DefiningTypeSpecifier> = true;
 template <> inline constexpr bool syntax_converts<ElaboratedTypeSpecifier, DefiningTypeSpecifier> = true;
@@ -1167,6 +1385,74 @@ template <> inline constexpr bool syntax_converts<ShiftExpression, Expression> =
 template <> inline constexpr bool syntax_converts<TemplateId, Expression> = true;
 template <> inline constexpr bool syntax_converts<UnaryExpression, Expression> = true;
 template <> inline constexpr bool syntax_converts<UnqualifiedId, Expression> = true;
+template <> inline constexpr bool syntax_converts<AdditiveOperation, ExpressionList> = true;
+template <> inline constexpr bool syntax_converts<AndOperation, ExpressionList> = true;
+template <> inline constexpr bool syntax_converts<Assignment, ExpressionList> = true;
+template <> inline constexpr bool syntax_converts<AwaitExpression, ExpressionList> = true;
+template <> inline constexpr bool syntax_converts<BracedInitList, ExpressionList> = true;
+template <> inline constexpr bool syntax_converts<CastNotation, ExpressionList> = true;
+template <> inline constexpr bool syntax_converts<ClangBitCastExpression, ExpressionList> = true;
+template <> inline constexpr bool syntax_converts<ClangConvertvectorExpression, ExpressionList> = true;
+template <> inline constexpr bool syntax_converts<ClangSourceLocationExpression, ExpressionList> = true;
+template <> inline constexpr bool syntax_converts<ClangTypeTraitExpression, ExpressionList> = true;
+template <> inline constexpr bool syntax_converts<ConditionalOperation, ExpressionList> = true;
+template <> inline constexpr bool syntax_converts<ConversionFunctionId, ExpressionList> = true;
+template <> inline constexpr bool syntax_converts<DeleteExpression, ExpressionList> = true;
+template <> inline constexpr bool syntax_converts<DestructorTypeId, ExpressionList> = true;
+template <> inline constexpr bool syntax_converts<EqualityOperation, ExpressionList> = true;
+template <> inline constexpr bool syntax_converts<ExclusiveOrOperation, ExpressionList> = true;
+template <> inline constexpr bool syntax_converts<FoldExpression, ExpressionList> = true;
+template <> inline constexpr bool syntax_converts<GnuCompoundLiteral, ExpressionList> = true;
+template <> inline constexpr bool syntax_converts<GnuExtensionExpression, ExpressionList> = true;
+template <> inline constexpr bool syntax_converts<GnuLabelAddress, ExpressionList> = true;
+template <> inline constexpr bool syntax_converts<GnuOffsetofExpression, ExpressionList> = true;
+template <> inline constexpr bool syntax_converts<InclusiveOrOperation, ExpressionList> = true;
+template <> inline constexpr bool syntax_converts<InitializerClauses, ExpressionList> = true;
+template <> inline constexpr bool syntax_converts<LambdaExpression, ExpressionList> = true;
+template <> inline constexpr bool syntax_converts<LiteralOperatorId, ExpressionList> = true;
+template <> inline constexpr bool syntax_converts<LogicalAndOperation, ExpressionList> = true;
+template <> inline constexpr bool syntax_converts<LogicalOrOperation, ExpressionList> = true;
+template <> inline constexpr bool syntax_converts<MultiplicativeOperation, ExpressionList> = true;
+template <> inline constexpr bool syntax_converts<NewExpression, ExpressionList> = true;
+template <> inline constexpr bool syntax_converts<NoexceptExpression, ExpressionList> = true;
+template <> inline constexpr bool syntax_converts<OperatorFunctionId, ExpressionList> = true;
+template <> inline constexpr bool syntax_converts<OperatorTemplateId, ExpressionList> = true;
+template <> inline constexpr bool syntax_converts<ParenthesizedOrThis, ExpressionList> = true;
+template <> inline constexpr bool syntax_converts<PointerToMemberOperation, ExpressionList> = true;
+template <> inline constexpr bool syntax_converts<PostfixOperation, ExpressionList> = true;
+template <> inline constexpr bool syntax_converts<QualifiedId, ExpressionList> = true;
+template <> inline constexpr bool syntax_converts<RelationalOperation, ExpressionList> = true;
+template <> inline constexpr bool syntax_converts<RequiresExpression, ExpressionList> = true;
+template <> inline constexpr bool syntax_converts<ShiftOperation, ExpressionList> = true;
+template <> inline constexpr bool syntax_converts<SimpleTemplateId, ExpressionList> = true;
+template <> inline constexpr bool syntax_converts<ThreeWayComparison, ExpressionList> = true;
+template <> inline constexpr bool syntax_converts<ThrowExpression, ExpressionList> = true;
+template <> inline constexpr bool syntax_converts<UnaryOperation, ExpressionList> = true;
+template <> inline constexpr bool syntax_converts<YieldExpression, ExpressionList> = true;
+template <> inline constexpr bool syntax_converts<AdditiveExpression, ExpressionList> = true;
+template <> inline constexpr bool syntax_converts<AndExpression, ExpressionList> = true;
+template <> inline constexpr bool syntax_converts<AssignmentExpression, ExpressionList> = true;
+template <> inline constexpr bool syntax_converts<CastExpression, ExpressionList> = true;
+template <> inline constexpr bool syntax_converts<CompareExpression, ExpressionList> = true;
+template <> inline constexpr bool syntax_converts<ConditionalExpression, ExpressionList> = true;
+template <> inline constexpr bool syntax_converts<ConstantExpression, ExpressionList> = true;
+template <> inline constexpr bool syntax_converts<ConstraintExpression, ExpressionList> = true;
+template <> inline constexpr bool syntax_converts<EqualityExpression, ExpressionList> = true;
+template <> inline constexpr bool syntax_converts<ExclusiveOrExpression, ExpressionList> = true;
+template <> inline constexpr bool syntax_converts<IdExpression, ExpressionList> = true;
+template <> inline constexpr bool syntax_converts<InclusiveOrExpression, ExpressionList> = true;
+template <> inline constexpr bool syntax_converts<InitializerClause, ExpressionList> = true;
+template <> inline constexpr bool syntax_converts<LogicalAndExpression, ExpressionList> = true;
+template <> inline constexpr bool syntax_converts<LogicalOrExpression, ExpressionList> = true;
+template <> inline constexpr bool syntax_converts<MultiplicativeExpression, ExpressionList> = true;
+template <> inline constexpr bool syntax_converts<PmExpression, ExpressionList> = true;
+template <> inline constexpr bool syntax_converts<PostfixExpression, ExpressionList> = true;
+template <> inline constexpr bool syntax_converts<PrimaryExpression, ExpressionList> = true;
+template <> inline constexpr bool syntax_converts<RelationalExpression, ExpressionList> = true;
+template <> inline constexpr bool syntax_converts<ShiftExpression, ExpressionList> = true;
+template <> inline constexpr bool syntax_converts<TemplateId, ExpressionList> = true;
+template <> inline constexpr bool syntax_converts<UnaryExpression, ExpressionList> = true;
+template <> inline constexpr bool syntax_converts<UnqualifiedId, ExpressionList> = true;
 template <> inline constexpr bool syntax_converts<AdditiveOperation, ForRangeInitializer> = true;
 template <> inline constexpr bool syntax_converts<AndOperation, ForRangeInitializer> = true;
 template <> inline constexpr bool syntax_converts<Assignment, ForRangeInitializer> = true;
@@ -1238,8 +1524,148 @@ template <> inline constexpr bool syntax_converts<UnaryExpression, ForRangeIniti
 template <> inline constexpr bool syntax_converts<UnqualifiedId, ForRangeInitializer> = true;
 template <> inline constexpr bool syntax_converts<FunctionTryBlock, FunctionBody> = true;
 template <> inline constexpr bool syntax_converts<OrdinaryFunctionBody, FunctionBody> = true;
+template <> inline constexpr bool syntax_converts<AdditiveOperation, GnuAttributeArguments> = true;
+template <> inline constexpr bool syntax_converts<AndOperation, GnuAttributeArguments> = true;
+template <> inline constexpr bool syntax_converts<Assignment, GnuAttributeArguments> = true;
+template <> inline constexpr bool syntax_converts<AwaitExpression, GnuAttributeArguments> = true;
+template <> inline constexpr bool syntax_converts<BracedInitList, GnuAttributeArguments> = true;
+template <> inline constexpr bool syntax_converts<CastNotation, GnuAttributeArguments> = true;
+template <> inline constexpr bool syntax_converts<ClangBitCastExpression, GnuAttributeArguments> = true;
+template <> inline constexpr bool syntax_converts<ClangConvertvectorExpression, GnuAttributeArguments> = true;
+template <> inline constexpr bool syntax_converts<ClangSourceLocationExpression, GnuAttributeArguments> = true;
+template <> inline constexpr bool syntax_converts<ClangTypeTraitExpression, GnuAttributeArguments> = true;
+template <> inline constexpr bool syntax_converts<ConditionalOperation, GnuAttributeArguments> = true;
+template <> inline constexpr bool syntax_converts<ConversionFunctionId, GnuAttributeArguments> = true;
+template <> inline constexpr bool syntax_converts<DeleteExpression, GnuAttributeArguments> = true;
+template <> inline constexpr bool syntax_converts<DestructorTypeId, GnuAttributeArguments> = true;
+template <> inline constexpr bool syntax_converts<EqualityOperation, GnuAttributeArguments> = true;
+template <> inline constexpr bool syntax_converts<ExclusiveOrOperation, GnuAttributeArguments> = true;
+template <> inline constexpr bool syntax_converts<FoldExpression, GnuAttributeArguments> = true;
+template <> inline constexpr bool syntax_converts<GnuCompoundLiteral, GnuAttributeArguments> = true;
+template <> inline constexpr bool syntax_converts<GnuExtensionExpression, GnuAttributeArguments> = true;
+template <> inline constexpr bool syntax_converts<GnuLabelAddress, GnuAttributeArguments> = true;
+template <> inline constexpr bool syntax_converts<GnuOffsetofExpression, GnuAttributeArguments> = true;
+template <> inline constexpr bool syntax_converts<InclusiveOrOperation, GnuAttributeArguments> = true;
+template <> inline constexpr bool syntax_converts<InitializerClauses, GnuAttributeArguments> = true;
+template <> inline constexpr bool syntax_converts<LambdaExpression, GnuAttributeArguments> = true;
+template <> inline constexpr bool syntax_converts<LiteralOperatorId, GnuAttributeArguments> = true;
+template <> inline constexpr bool syntax_converts<LogicalAndOperation, GnuAttributeArguments> = true;
+template <> inline constexpr bool syntax_converts<LogicalOrOperation, GnuAttributeArguments> = true;
+template <> inline constexpr bool syntax_converts<MultiplicativeOperation, GnuAttributeArguments> = true;
+template <> inline constexpr bool syntax_converts<NewExpression, GnuAttributeArguments> = true;
+template <> inline constexpr bool syntax_converts<NoexceptExpression, GnuAttributeArguments> = true;
+template <> inline constexpr bool syntax_converts<OperatorFunctionId, GnuAttributeArguments> = true;
+template <> inline constexpr bool syntax_converts<OperatorTemplateId, GnuAttributeArguments> = true;
+template <> inline constexpr bool syntax_converts<ParenthesizedOrThis, GnuAttributeArguments> = true;
+template <> inline constexpr bool syntax_converts<PointerToMemberOperation, GnuAttributeArguments> = true;
+template <> inline constexpr bool syntax_converts<PostfixOperation, GnuAttributeArguments> = true;
+template <> inline constexpr bool syntax_converts<QualifiedId, GnuAttributeArguments> = true;
+template <> inline constexpr bool syntax_converts<RelationalOperation, GnuAttributeArguments> = true;
+template <> inline constexpr bool syntax_converts<RequiresExpression, GnuAttributeArguments> = true;
+template <> inline constexpr bool syntax_converts<ShiftOperation, GnuAttributeArguments> = true;
+template <> inline constexpr bool syntax_converts<SimpleTemplateId, GnuAttributeArguments> = true;
+template <> inline constexpr bool syntax_converts<ThreeWayComparison, GnuAttributeArguments> = true;
+template <> inline constexpr bool syntax_converts<ThrowExpression, GnuAttributeArguments> = true;
+template <> inline constexpr bool syntax_converts<UnaryOperation, GnuAttributeArguments> = true;
+template <> inline constexpr bool syntax_converts<YieldExpression, GnuAttributeArguments> = true;
+template <> inline constexpr bool syntax_converts<AdditiveExpression, GnuAttributeArguments> = true;
+template <> inline constexpr bool syntax_converts<AndExpression, GnuAttributeArguments> = true;
+template <> inline constexpr bool syntax_converts<AssignmentExpression, GnuAttributeArguments> = true;
+template <> inline constexpr bool syntax_converts<CastExpression, GnuAttributeArguments> = true;
+template <> inline constexpr bool syntax_converts<CompareExpression, GnuAttributeArguments> = true;
+template <> inline constexpr bool syntax_converts<ConditionalExpression, GnuAttributeArguments> = true;
+template <> inline constexpr bool syntax_converts<ConstantExpression, GnuAttributeArguments> = true;
+template <> inline constexpr bool syntax_converts<ConstraintExpression, GnuAttributeArguments> = true;
+template <> inline constexpr bool syntax_converts<EqualityExpression, GnuAttributeArguments> = true;
+template <> inline constexpr bool syntax_converts<ExclusiveOrExpression, GnuAttributeArguments> = true;
+template <> inline constexpr bool syntax_converts<IdExpression, GnuAttributeArguments> = true;
+template <> inline constexpr bool syntax_converts<InclusiveOrExpression, GnuAttributeArguments> = true;
+template <> inline constexpr bool syntax_converts<InitializerClause, GnuAttributeArguments> = true;
+template <> inline constexpr bool syntax_converts<LogicalAndExpression, GnuAttributeArguments> = true;
+template <> inline constexpr bool syntax_converts<LogicalOrExpression, GnuAttributeArguments> = true;
+template <> inline constexpr bool syntax_converts<MultiplicativeExpression, GnuAttributeArguments> = true;
+template <> inline constexpr bool syntax_converts<PmExpression, GnuAttributeArguments> = true;
+template <> inline constexpr bool syntax_converts<PostfixExpression, GnuAttributeArguments> = true;
+template <> inline constexpr bool syntax_converts<PrimaryExpression, GnuAttributeArguments> = true;
+template <> inline constexpr bool syntax_converts<RelationalExpression, GnuAttributeArguments> = true;
+template <> inline constexpr bool syntax_converts<ShiftExpression, GnuAttributeArguments> = true;
+template <> inline constexpr bool syntax_converts<TemplateId, GnuAttributeArguments> = true;
+template <> inline constexpr bool syntax_converts<UnaryExpression, GnuAttributeArguments> = true;
+template <> inline constexpr bool syntax_converts<UnqualifiedId, GnuAttributeArguments> = true;
+template <> inline constexpr bool syntax_converts<GnuAttribute, GnuAttributeList> = true;
+template <> inline constexpr bool syntax_converts<GnuAttributes, GnuAttributeList> = true;
 template <> inline constexpr bool syntax_converts<Designator, GnuDesignation> = true;
 template <> inline constexpr bool syntax_converts<GnuOldDesignation, GnuDesignation> = true;
+template <> inline constexpr bool syntax_converts<AdditiveOperation, GnuInitializerList> = true;
+template <> inline constexpr bool syntax_converts<AndOperation, GnuInitializerList> = true;
+template <> inline constexpr bool syntax_converts<Assignment, GnuInitializerList> = true;
+template <> inline constexpr bool syntax_converts<AwaitExpression, GnuInitializerList> = true;
+template <> inline constexpr bool syntax_converts<BracedInitList, GnuInitializerList> = true;
+template <> inline constexpr bool syntax_converts<CastNotation, GnuInitializerList> = true;
+template <> inline constexpr bool syntax_converts<ClangBitCastExpression, GnuInitializerList> = true;
+template <> inline constexpr bool syntax_converts<ClangConvertvectorExpression, GnuInitializerList> = true;
+template <> inline constexpr bool syntax_converts<ClangSourceLocationExpression, GnuInitializerList> = true;
+template <> inline constexpr bool syntax_converts<ClangTypeTraitExpression, GnuInitializerList> = true;
+template <> inline constexpr bool syntax_converts<ConditionalOperation, GnuInitializerList> = true;
+template <> inline constexpr bool syntax_converts<ConversionFunctionId, GnuInitializerList> = true;
+template <> inline constexpr bool syntax_converts<DeleteExpression, GnuInitializerList> = true;
+template <> inline constexpr bool syntax_converts<DestructorTypeId, GnuInitializerList> = true;
+template <> inline constexpr bool syntax_converts<EqualityOperation, GnuInitializerList> = true;
+template <> inline constexpr bool syntax_converts<ExclusiveOrOperation, GnuInitializerList> = true;
+template <> inline constexpr bool syntax_converts<FoldExpression, GnuInitializerList> = true;
+template <> inline constexpr bool syntax_converts<GnuCompoundLiteral, GnuInitializerList> = true;
+template <> inline constexpr bool syntax_converts<GnuExtensionExpression, GnuInitializerList> = true;
+template <> inline constexpr bool syntax_converts<GnuInitializerClauses, GnuInitializerList> = true;
+template <> inline constexpr bool syntax_converts<GnuLabelAddress, GnuInitializerList> = true;
+template <> inline constexpr bool syntax_converts<GnuOffsetofExpression, GnuInitializerList> = true;
+template <> inline constexpr bool syntax_converts<InclusiveOrOperation, GnuInitializerList> = true;
+template <> inline constexpr bool syntax_converts<LambdaExpression, GnuInitializerList> = true;
+template <> inline constexpr bool syntax_converts<LiteralOperatorId, GnuInitializerList> = true;
+template <> inline constexpr bool syntax_converts<LogicalAndOperation, GnuInitializerList> = true;
+template <> inline constexpr bool syntax_converts<LogicalOrOperation, GnuInitializerList> = true;
+template <> inline constexpr bool syntax_converts<MultiplicativeOperation, GnuInitializerList> = true;
+template <> inline constexpr bool syntax_converts<NewExpression, GnuInitializerList> = true;
+template <> inline constexpr bool syntax_converts<NoexceptExpression, GnuInitializerList> = true;
+template <> inline constexpr bool syntax_converts<OperatorFunctionId, GnuInitializerList> = true;
+template <> inline constexpr bool syntax_converts<OperatorTemplateId, GnuInitializerList> = true;
+template <> inline constexpr bool syntax_converts<ParenthesizedOrThis, GnuInitializerList> = true;
+template <> inline constexpr bool syntax_converts<PointerToMemberOperation, GnuInitializerList> = true;
+template <> inline constexpr bool syntax_converts<PostfixOperation, GnuInitializerList> = true;
+template <> inline constexpr bool syntax_converts<QualifiedId, GnuInitializerList> = true;
+template <> inline constexpr bool syntax_converts<RelationalOperation, GnuInitializerList> = true;
+template <> inline constexpr bool syntax_converts<RequiresExpression, GnuInitializerList> = true;
+template <> inline constexpr bool syntax_converts<ShiftOperation, GnuInitializerList> = true;
+template <> inline constexpr bool syntax_converts<SimpleTemplateId, GnuInitializerList> = true;
+template <> inline constexpr bool syntax_converts<ThreeWayComparison, GnuInitializerList> = true;
+template <> inline constexpr bool syntax_converts<ThrowExpression, GnuInitializerList> = true;
+template <> inline constexpr bool syntax_converts<UnaryOperation, GnuInitializerList> = true;
+template <> inline constexpr bool syntax_converts<YieldExpression, GnuInitializerList> = true;
+template <> inline constexpr bool syntax_converts<AdditiveExpression, GnuInitializerList> = true;
+template <> inline constexpr bool syntax_converts<AndExpression, GnuInitializerList> = true;
+template <> inline constexpr bool syntax_converts<AssignmentExpression, GnuInitializerList> = true;
+template <> inline constexpr bool syntax_converts<CastExpression, GnuInitializerList> = true;
+template <> inline constexpr bool syntax_converts<CompareExpression, GnuInitializerList> = true;
+template <> inline constexpr bool syntax_converts<ConditionalExpression, GnuInitializerList> = true;
+template <> inline constexpr bool syntax_converts<ConstantExpression, GnuInitializerList> = true;
+template <> inline constexpr bool syntax_converts<ConstraintExpression, GnuInitializerList> = true;
+template <> inline constexpr bool syntax_converts<EqualityExpression, GnuInitializerList> = true;
+template <> inline constexpr bool syntax_converts<ExclusiveOrExpression, GnuInitializerList> = true;
+template <> inline constexpr bool syntax_converts<IdExpression, GnuInitializerList> = true;
+template <> inline constexpr bool syntax_converts<InclusiveOrExpression, GnuInitializerList> = true;
+template <> inline constexpr bool syntax_converts<InitializerClause, GnuInitializerList> = true;
+template <> inline constexpr bool syntax_converts<LogicalAndExpression, GnuInitializerList> = true;
+template <> inline constexpr bool syntax_converts<LogicalOrExpression, GnuInitializerList> = true;
+template <> inline constexpr bool syntax_converts<MultiplicativeExpression, GnuInitializerList> = true;
+template <> inline constexpr bool syntax_converts<PmExpression, GnuInitializerList> = true;
+template <> inline constexpr bool syntax_converts<PostfixExpression, GnuInitializerList> = true;
+template <> inline constexpr bool syntax_converts<PrimaryExpression, GnuInitializerList> = true;
+template <> inline constexpr bool syntax_converts<RelationalExpression, GnuInitializerList> = true;
+template <> inline constexpr bool syntax_converts<ShiftExpression, GnuInitializerList> = true;
+template <> inline constexpr bool syntax_converts<TemplateId, GnuInitializerList> = true;
+template <> inline constexpr bool syntax_converts<UnaryExpression, GnuInitializerList> = true;
+template <> inline constexpr bool syntax_converts<UnqualifiedId, GnuInitializerList> = true;
+template <> inline constexpr bool syntax_converts<Handler, HandlerSeq> = true;
+template <> inline constexpr bool syntax_converts<Handlers, HandlerSeq> = true;
 template <> inline constexpr bool syntax_converts<ConversionFunctionId, IdExpression> = true;
 template <> inline constexpr bool syntax_converts<DestructorTypeId, IdExpression> = true;
 template <> inline constexpr bool syntax_converts<LiteralOperatorId, IdExpression> = true;
@@ -1301,8 +1727,46 @@ template <> inline constexpr bool syntax_converts<ShiftExpression, InclusiveOrEx
 template <> inline constexpr bool syntax_converts<TemplateId, InclusiveOrExpression> = true;
 template <> inline constexpr bool syntax_converts<UnaryExpression, InclusiveOrExpression> = true;
 template <> inline constexpr bool syntax_converts<UnqualifiedId, InclusiveOrExpression> = true;
-template <> inline constexpr bool syntax_converts<InitDeclarator, InitDeclaratorList> = true;
+template <> inline constexpr bool syntax_converts<ConversionFunctionId, InitDeclarator> = true;
+template <> inline constexpr bool syntax_converts<DeclaratorWithInitializer, InitDeclarator> = true;
+template <> inline constexpr bool syntax_converts<DestructorTypeId, InitDeclarator> = true;
+template <> inline constexpr bool syntax_converts<LiteralOperatorId, InitDeclarator> = true;
+template <> inline constexpr bool syntax_converts<OperatorFunctionId, InitDeclarator> = true;
+template <> inline constexpr bool syntax_converts<OperatorTemplateId, InitDeclarator> = true;
+template <> inline constexpr bool syntax_converts<PackDeclaratorId, InitDeclarator> = true;
+template <> inline constexpr bool syntax_converts<PointerDeclarator, InitDeclarator> = true;
+template <> inline constexpr bool syntax_converts<QualifiedId, InitDeclarator> = true;
+template <> inline constexpr bool syntax_converts<SimpleTemplateId, InitDeclarator> = true;
+template <> inline constexpr bool syntax_converts<SuffixedDeclarator, InitDeclarator> = true;
+template <> inline constexpr bool syntax_converts<TrailingReturnDeclarator, InitDeclarator> = true;
+template <> inline constexpr bool syntax_converts<Declarator, InitDeclarator> = true;
+template <> inline constexpr bool syntax_converts<DeclaratorId, InitDeclarator> = true;
+template <> inline constexpr bool syntax_converts<IdExpression, InitDeclarator> = true;
+template <> inline constexpr bool syntax_converts<NoptrDeclarator, InitDeclarator> = true;
+template <> inline constexpr bool syntax_converts<PtrDeclarator, InitDeclarator> = true;
+template <> inline constexpr bool syntax_converts<TemplateId, InitDeclarator> = true;
+template <> inline constexpr bool syntax_converts<UnqualifiedId, InitDeclarator> = true;
+template <> inline constexpr bool syntax_converts<ConversionFunctionId, InitDeclaratorList> = true;
+template <> inline constexpr bool syntax_converts<DeclaratorWithInitializer, InitDeclaratorList> = true;
+template <> inline constexpr bool syntax_converts<DestructorTypeId, InitDeclaratorList> = true;
 template <> inline constexpr bool syntax_converts<InitDeclarators, InitDeclaratorList> = true;
+template <> inline constexpr bool syntax_converts<LiteralOperatorId, InitDeclaratorList> = true;
+template <> inline constexpr bool syntax_converts<OperatorFunctionId, InitDeclaratorList> = true;
+template <> inline constexpr bool syntax_converts<OperatorTemplateId, InitDeclaratorList> = true;
+template <> inline constexpr bool syntax_converts<PackDeclaratorId, InitDeclaratorList> = true;
+template <> inline constexpr bool syntax_converts<PointerDeclarator, InitDeclaratorList> = true;
+template <> inline constexpr bool syntax_converts<QualifiedId, InitDeclaratorList> = true;
+template <> inline constexpr bool syntax_converts<SimpleTemplateId, InitDeclaratorList> = true;
+template <> inline constexpr bool syntax_converts<SuffixedDeclarator, InitDeclaratorList> = true;
+template <> inline constexpr bool syntax_converts<TrailingReturnDeclarator, InitDeclaratorList> = true;
+template <> inline constexpr bool syntax_converts<Declarator, InitDeclaratorList> = true;
+template <> inline constexpr bool syntax_converts<DeclaratorId, InitDeclaratorList> = true;
+template <> inline constexpr bool syntax_converts<IdExpression, InitDeclaratorList> = true;
+template <> inline constexpr bool syntax_converts<InitDeclarator, InitDeclaratorList> = true;
+template <> inline constexpr bool syntax_converts<NoptrDeclarator, InitDeclaratorList> = true;
+template <> inline constexpr bool syntax_converts<PtrDeclarator, InitDeclaratorList> = true;
+template <> inline constexpr bool syntax_converts<TemplateId, InitDeclaratorList> = true;
+template <> inline constexpr bool syntax_converts<UnqualifiedId, InitDeclaratorList> = true;
 template <> inline constexpr bool syntax_converts<ExpressionStatement, InitStatement> = true;
 template <> inline constexpr bool syntax_converts<SimpleDeclaration, InitStatement> = true;
 template <> inline constexpr bool syntax_converts<BracedInitList, Initializer> = true;
@@ -1375,6 +1839,74 @@ template <> inline constexpr bool syntax_converts<ShiftExpression, InitializerCl
 template <> inline constexpr bool syntax_converts<TemplateId, InitializerClause> = true;
 template <> inline constexpr bool syntax_converts<UnaryExpression, InitializerClause> = true;
 template <> inline constexpr bool syntax_converts<UnqualifiedId, InitializerClause> = true;
+template <> inline constexpr bool syntax_converts<AdditiveOperation, InitializerList> = true;
+template <> inline constexpr bool syntax_converts<AndOperation, InitializerList> = true;
+template <> inline constexpr bool syntax_converts<Assignment, InitializerList> = true;
+template <> inline constexpr bool syntax_converts<AwaitExpression, InitializerList> = true;
+template <> inline constexpr bool syntax_converts<BracedInitList, InitializerList> = true;
+template <> inline constexpr bool syntax_converts<CastNotation, InitializerList> = true;
+template <> inline constexpr bool syntax_converts<ClangBitCastExpression, InitializerList> = true;
+template <> inline constexpr bool syntax_converts<ClangConvertvectorExpression, InitializerList> = true;
+template <> inline constexpr bool syntax_converts<ClangSourceLocationExpression, InitializerList> = true;
+template <> inline constexpr bool syntax_converts<ClangTypeTraitExpression, InitializerList> = true;
+template <> inline constexpr bool syntax_converts<ConditionalOperation, InitializerList> = true;
+template <> inline constexpr bool syntax_converts<ConversionFunctionId, InitializerList> = true;
+template <> inline constexpr bool syntax_converts<DeleteExpression, InitializerList> = true;
+template <> inline constexpr bool syntax_converts<DestructorTypeId, InitializerList> = true;
+template <> inline constexpr bool syntax_converts<EqualityOperation, InitializerList> = true;
+template <> inline constexpr bool syntax_converts<ExclusiveOrOperation, InitializerList> = true;
+template <> inline constexpr bool syntax_converts<FoldExpression, InitializerList> = true;
+template <> inline constexpr bool syntax_converts<GnuCompoundLiteral, InitializerList> = true;
+template <> inline constexpr bool syntax_converts<GnuExtensionExpression, InitializerList> = true;
+template <> inline constexpr bool syntax_converts<GnuLabelAddress, InitializerList> = true;
+template <> inline constexpr bool syntax_converts<GnuOffsetofExpression, InitializerList> = true;
+template <> inline constexpr bool syntax_converts<InclusiveOrOperation, InitializerList> = true;
+template <> inline constexpr bool syntax_converts<InitializerClauses, InitializerList> = true;
+template <> inline constexpr bool syntax_converts<LambdaExpression, InitializerList> = true;
+template <> inline constexpr bool syntax_converts<LiteralOperatorId, InitializerList> = true;
+template <> inline constexpr bool syntax_converts<LogicalAndOperation, InitializerList> = true;
+template <> inline constexpr bool syntax_converts<LogicalOrOperation, InitializerList> = true;
+template <> inline constexpr bool syntax_converts<MultiplicativeOperation, InitializerList> = true;
+template <> inline constexpr bool syntax_converts<NewExpression, InitializerList> = true;
+template <> inline constexpr bool syntax_converts<NoexceptExpression, InitializerList> = true;
+template <> inline constexpr bool syntax_converts<OperatorFunctionId, InitializerList> = true;
+template <> inline constexpr bool syntax_converts<OperatorTemplateId, InitializerList> = true;
+template <> inline constexpr bool syntax_converts<ParenthesizedOrThis, InitializerList> = true;
+template <> inline constexpr bool syntax_converts<PointerToMemberOperation, InitializerList> = true;
+template <> inline constexpr bool syntax_converts<PostfixOperation, InitializerList> = true;
+template <> inline constexpr bool syntax_converts<QualifiedId, InitializerList> = true;
+template <> inline constexpr bool syntax_converts<RelationalOperation, InitializerList> = true;
+template <> inline constexpr bool syntax_converts<RequiresExpression, InitializerList> = true;
+template <> inline constexpr bool syntax_converts<ShiftOperation, InitializerList> = true;
+template <> inline constexpr bool syntax_converts<SimpleTemplateId, InitializerList> = true;
+template <> inline constexpr bool syntax_converts<ThreeWayComparison, InitializerList> = true;
+template <> inline constexpr bool syntax_converts<ThrowExpression, InitializerList> = true;
+template <> inline constexpr bool syntax_converts<UnaryOperation, InitializerList> = true;
+template <> inline constexpr bool syntax_converts<YieldExpression, InitializerList> = true;
+template <> inline constexpr bool syntax_converts<AdditiveExpression, InitializerList> = true;
+template <> inline constexpr bool syntax_converts<AndExpression, InitializerList> = true;
+template <> inline constexpr bool syntax_converts<AssignmentExpression, InitializerList> = true;
+template <> inline constexpr bool syntax_converts<CastExpression, InitializerList> = true;
+template <> inline constexpr bool syntax_converts<CompareExpression, InitializerList> = true;
+template <> inline constexpr bool syntax_converts<ConditionalExpression, InitializerList> = true;
+template <> inline constexpr bool syntax_converts<ConstantExpression, InitializerList> = true;
+template <> inline constexpr bool syntax_converts<ConstraintExpression, InitializerList> = true;
+template <> inline constexpr bool syntax_converts<EqualityExpression, InitializerList> = true;
+template <> inline constexpr bool syntax_converts<ExclusiveOrExpression, InitializerList> = true;
+template <> inline constexpr bool syntax_converts<IdExpression, InitializerList> = true;
+template <> inline constexpr bool syntax_converts<InclusiveOrExpression, InitializerList> = true;
+template <> inline constexpr bool syntax_converts<InitializerClause, InitializerList> = true;
+template <> inline constexpr bool syntax_converts<LogicalAndExpression, InitializerList> = true;
+template <> inline constexpr bool syntax_converts<LogicalOrExpression, InitializerList> = true;
+template <> inline constexpr bool syntax_converts<MultiplicativeExpression, InitializerList> = true;
+template <> inline constexpr bool syntax_converts<PmExpression, InitializerList> = true;
+template <> inline constexpr bool syntax_converts<PostfixExpression, InitializerList> = true;
+template <> inline constexpr bool syntax_converts<PrimaryExpression, InitializerList> = true;
+template <> inline constexpr bool syntax_converts<RelationalExpression, InitializerList> = true;
+template <> inline constexpr bool syntax_converts<ShiftExpression, InitializerList> = true;
+template <> inline constexpr bool syntax_converts<TemplateId, InitializerList> = true;
+template <> inline constexpr bool syntax_converts<UnaryExpression, InitializerList> = true;
+template <> inline constexpr bool syntax_converts<UnqualifiedId, InitializerList> = true;
 template <> inline constexpr bool syntax_converts<CoroutineReturnStatement, JumpStatement> = true;
 template <> inline constexpr bool syntax_converts<GnuComputedGoto, JumpStatement> = true;
 template <> inline constexpr bool syntax_converts<Jump, JumpStatement> = true;
@@ -1496,6 +2028,9 @@ template <> inline constexpr bool syntax_converts<UnaryExpression, LogicalOrExpr
 template <> inline constexpr bool syntax_converts<UnqualifiedId, LogicalOrExpression> = true;
 template <> inline constexpr bool syntax_converts<DecltypeSpecifier, MemInitializerId> = true;
 template <> inline constexpr bool syntax_converts<QualifiedClassName, MemInitializerId> = true;
+template <> inline constexpr bool syntax_converts<SimpleTemplateId, MemInitializerId> = true;
+template <> inline constexpr bool syntax_converts<MemInitializer, MemInitializerList> = true;
+template <> inline constexpr bool syntax_converts<MemInitializers, MemInitializerList> = true;
 template <> inline constexpr bool syntax_converts<AliasDeclaration, MemberDeclaration> = true;
 template <> inline constexpr bool syntax_converts<DeductionGuide, MemberDeclaration> = true;
 template <> inline constexpr bool syntax_converts<EmptyDeclaration, MemberDeclaration> = true;
@@ -1507,8 +2042,46 @@ template <> inline constexpr bool syntax_converts<StaticAssertDeclaration, Membe
 template <> inline constexpr bool syntax_converts<TemplateDeclaration, MemberDeclaration> = true;
 template <> inline constexpr bool syntax_converts<UsingDeclaration, MemberDeclaration> = true;
 template <> inline constexpr bool syntax_converts<UsingEnumDeclaration, MemberDeclaration> = true;
-template <> inline constexpr bool syntax_converts<MemberDeclarator, MemberDeclaratorList> = true;
+template <> inline constexpr bool syntax_converts<ConversionFunctionId, MemberDeclarator> = true;
+template <> inline constexpr bool syntax_converts<DestructorTypeId, MemberDeclarator> = true;
+template <> inline constexpr bool syntax_converts<LiteralOperatorId, MemberDeclarator> = true;
+template <> inline constexpr bool syntax_converts<MemberDeclaratorWithParts, MemberDeclarator> = true;
+template <> inline constexpr bool syntax_converts<OperatorFunctionId, MemberDeclarator> = true;
+template <> inline constexpr bool syntax_converts<OperatorTemplateId, MemberDeclarator> = true;
+template <> inline constexpr bool syntax_converts<PackDeclaratorId, MemberDeclarator> = true;
+template <> inline constexpr bool syntax_converts<PointerDeclarator, MemberDeclarator> = true;
+template <> inline constexpr bool syntax_converts<QualifiedId, MemberDeclarator> = true;
+template <> inline constexpr bool syntax_converts<SimpleTemplateId, MemberDeclarator> = true;
+template <> inline constexpr bool syntax_converts<SuffixedDeclarator, MemberDeclarator> = true;
+template <> inline constexpr bool syntax_converts<TrailingReturnDeclarator, MemberDeclarator> = true;
+template <> inline constexpr bool syntax_converts<Declarator, MemberDeclarator> = true;
+template <> inline constexpr bool syntax_converts<DeclaratorId, MemberDeclarator> = true;
+template <> inline constexpr bool syntax_converts<IdExpression, MemberDeclarator> = true;
+template <> inline constexpr bool syntax_converts<NoptrDeclarator, MemberDeclarator> = true;
+template <> inline constexpr bool syntax_converts<PtrDeclarator, MemberDeclarator> = true;
+template <> inline constexpr bool syntax_converts<TemplateId, MemberDeclarator> = true;
+template <> inline constexpr bool syntax_converts<UnqualifiedId, MemberDeclarator> = true;
+template <> inline constexpr bool syntax_converts<ConversionFunctionId, MemberDeclaratorList> = true;
+template <> inline constexpr bool syntax_converts<DestructorTypeId, MemberDeclaratorList> = true;
+template <> inline constexpr bool syntax_converts<LiteralOperatorId, MemberDeclaratorList> = true;
+template <> inline constexpr bool syntax_converts<MemberDeclaratorWithParts, MemberDeclaratorList> = true;
 template <> inline constexpr bool syntax_converts<MemberDeclarators, MemberDeclaratorList> = true;
+template <> inline constexpr bool syntax_converts<OperatorFunctionId, MemberDeclaratorList> = true;
+template <> inline constexpr bool syntax_converts<OperatorTemplateId, MemberDeclaratorList> = true;
+template <> inline constexpr bool syntax_converts<PackDeclaratorId, MemberDeclaratorList> = true;
+template <> inline constexpr bool syntax_converts<PointerDeclarator, MemberDeclaratorList> = true;
+template <> inline constexpr bool syntax_converts<QualifiedId, MemberDeclaratorList> = true;
+template <> inline constexpr bool syntax_converts<SimpleTemplateId, MemberDeclaratorList> = true;
+template <> inline constexpr bool syntax_converts<SuffixedDeclarator, MemberDeclaratorList> = true;
+template <> inline constexpr bool syntax_converts<TrailingReturnDeclarator, MemberDeclaratorList> = true;
+template <> inline constexpr bool syntax_converts<Declarator, MemberDeclaratorList> = true;
+template <> inline constexpr bool syntax_converts<DeclaratorId, MemberDeclaratorList> = true;
+template <> inline constexpr bool syntax_converts<IdExpression, MemberDeclaratorList> = true;
+template <> inline constexpr bool syntax_converts<MemberDeclarator, MemberDeclaratorList> = true;
+template <> inline constexpr bool syntax_converts<NoptrDeclarator, MemberDeclaratorList> = true;
+template <> inline constexpr bool syntax_converts<PtrDeclarator, MemberDeclaratorList> = true;
+template <> inline constexpr bool syntax_converts<TemplateId, MemberDeclaratorList> = true;
+template <> inline constexpr bool syntax_converts<UnqualifiedId, MemberDeclaratorList> = true;
 template <> inline constexpr bool syntax_converts<AwaitExpression, MultiplicativeExpression> = true;
 template <> inline constexpr bool syntax_converts<CastNotation, MultiplicativeExpression> = true;
 template <> inline constexpr bool syntax_converts<ClangBitCastExpression, MultiplicativeExpression> = true;
@@ -1545,13 +2118,59 @@ template <> inline constexpr bool syntax_converts<PrimaryExpression, Multiplicat
 template <> inline constexpr bool syntax_converts<TemplateId, MultiplicativeExpression> = true;
 template <> inline constexpr bool syntax_converts<UnaryExpression, MultiplicativeExpression> = true;
 template <> inline constexpr bool syntax_converts<UnqualifiedId, MultiplicativeExpression> = true;
+template <> inline constexpr bool syntax_converts<AliasDeclaration, NamespaceBody> = true;
+template <> inline constexpr bool syntax_converts<AsmDeclaration, NamespaceBody> = true;
+template <> inline constexpr bool syntax_converts<AttributeDeclaration, NamespaceBody> = true;
+template <> inline constexpr bool syntax_converts<Declarations, NamespaceBody> = true;
+template <> inline constexpr bool syntax_converts<DeductionGuide, NamespaceBody> = true;
+template <> inline constexpr bool syntax_converts<EmptyDeclaration, NamespaceBody> = true;
+template <> inline constexpr bool syntax_converts<ExplicitInstantiation, NamespaceBody> = true;
+template <> inline constexpr bool syntax_converts<ExplicitSpecialization, NamespaceBody> = true;
+template <> inline constexpr bool syntax_converts<ExportDeclaration, NamespaceBody> = true;
+template <> inline constexpr bool syntax_converts<FunctionDefinition, NamespaceBody> = true;
+template <> inline constexpr bool syntax_converts<GnuExtensionDeclaration, NamespaceBody> = true;
+template <> inline constexpr bool syntax_converts<LinkageSpecification, NamespaceBody> = true;
+template <> inline constexpr bool syntax_converts<ModuleImportDeclaration, NamespaceBody> = true;
+template <> inline constexpr bool syntax_converts<NamedNamespaceDefinition, NamespaceBody> = true;
+template <> inline constexpr bool syntax_converts<NamespaceAliasDefinition, NamespaceBody> = true;
+template <> inline constexpr bool syntax_converts<NestedNamespaceDefinition, NamespaceBody> = true;
+template <> inline constexpr bool syntax_converts<OpaqueEnumDeclaration, NamespaceBody> = true;
+template <> inline constexpr bool syntax_converts<SimpleDeclaration, NamespaceBody> = true;
+template <> inline constexpr bool syntax_converts<StaticAssertDeclaration, NamespaceBody> = true;
+template <> inline constexpr bool syntax_converts<TemplateDeclaration, NamespaceBody> = true;
+template <> inline constexpr bool syntax_converts<UnnamedNamespaceDefinition, NamespaceBody> = true;
+template <> inline constexpr bool syntax_converts<UsingDeclaration, NamespaceBody> = true;
+template <> inline constexpr bool syntax_converts<UsingDirective, NamespaceBody> = true;
+template <> inline constexpr bool syntax_converts<UsingEnumDeclaration, NamespaceBody> = true;
+template <> inline constexpr bool syntax_converts<BlockDeclaration, NamespaceBody> = true;
+template <> inline constexpr bool syntax_converts<Declaration, NamespaceBody> = true;
+template <> inline constexpr bool syntax_converts<DeclarationStatement, NamespaceBody> = true;
+template <> inline constexpr bool syntax_converts<NamespaceDefinition, NamespaceBody> = true;
 template <> inline constexpr bool syntax_converts<NamedNamespaceDefinition, NamespaceDefinition> = true;
 template <> inline constexpr bool syntax_converts<NestedNamespaceDefinition, NamespaceDefinition> = true;
 template <> inline constexpr bool syntax_converts<UnnamedNamespaceDefinition, NamespaceDefinition> = true;
 template <> inline constexpr bool syntax_converts<NoptrNewDeclarator, NewDeclarator> = true;
 template <> inline constexpr bool syntax_converts<PointerNewDeclarator, NewDeclarator> = true;
+template <> inline constexpr bool syntax_converts<PtrOperator, NewDeclarator> = true;
 template <> inline constexpr bool syntax_converts<BracedInitList, NewInitializer> = true;
 template <> inline constexpr bool syntax_converts<ParenthesizedNewInitializer, NewInitializer> = true;
+template <> inline constexpr bool syntax_converts<ConversionFunctionId, NoptrDeclarator> = true;
+template <> inline constexpr bool syntax_converts<DestructorTypeId, NoptrDeclarator> = true;
+template <> inline constexpr bool syntax_converts<LiteralOperatorId, NoptrDeclarator> = true;
+template <> inline constexpr bool syntax_converts<OperatorFunctionId, NoptrDeclarator> = true;
+template <> inline constexpr bool syntax_converts<OperatorTemplateId, NoptrDeclarator> = true;
+template <> inline constexpr bool syntax_converts<PackDeclaratorId, NoptrDeclarator> = true;
+template <> inline constexpr bool syntax_converts<QualifiedId, NoptrDeclarator> = true;
+template <> inline constexpr bool syntax_converts<SimpleTemplateId, NoptrDeclarator> = true;
+template <> inline constexpr bool syntax_converts<SuffixedDeclarator, NoptrDeclarator> = true;
+template <> inline constexpr bool syntax_converts<DeclaratorId, NoptrDeclarator> = true;
+template <> inline constexpr bool syntax_converts<IdExpression, NoptrDeclarator> = true;
+template <> inline constexpr bool syntax_converts<TemplateId, NoptrDeclarator> = true;
+template <> inline constexpr bool syntax_converts<UnqualifiedId, NoptrDeclarator> = true;
+template <> inline constexpr bool syntax_converts<ParameterClause, ParameterDeclarationClause> = true;
+template <> inline constexpr bool syntax_converts<ParameterDeclaration, ParameterDeclarationClause> = true;
+template <> inline constexpr bool syntax_converts<ParameterDeclarations, ParameterDeclarationClause> = true;
+template <> inline constexpr bool syntax_converts<ParameterDeclarationList, ParameterDeclarationClause> = true;
 template <> inline constexpr bool syntax_converts<ParameterDeclaration, ParameterDeclarationList> = true;
 template <> inline constexpr bool syntax_converts<ParameterDeclarations, ParameterDeclarationList> = true;
 template <> inline constexpr bool syntax_converts<AwaitExpression, PmExpression> = true;
@@ -1631,8 +2250,22 @@ template <> inline constexpr bool syntax_converts<TemplateId, PrimaryExpression>
 template <> inline constexpr bool syntax_converts<UnqualifiedId, PrimaryExpression> = true;
 template <> inline constexpr bool syntax_converts<NoptrAbstractDeclarator, PtrAbstractDeclarator> = true;
 template <> inline constexpr bool syntax_converts<PointerAbstractDeclarator, PtrAbstractDeclarator> = true;
-template <> inline constexpr bool syntax_converts<NoptrDeclarator, PtrDeclarator> = true;
+template <> inline constexpr bool syntax_converts<PtrOperator, PtrAbstractDeclarator> = true;
+template <> inline constexpr bool syntax_converts<ConversionFunctionId, PtrDeclarator> = true;
+template <> inline constexpr bool syntax_converts<DestructorTypeId, PtrDeclarator> = true;
+template <> inline constexpr bool syntax_converts<LiteralOperatorId, PtrDeclarator> = true;
+template <> inline constexpr bool syntax_converts<OperatorFunctionId, PtrDeclarator> = true;
+template <> inline constexpr bool syntax_converts<OperatorTemplateId, PtrDeclarator> = true;
+template <> inline constexpr bool syntax_converts<PackDeclaratorId, PtrDeclarator> = true;
 template <> inline constexpr bool syntax_converts<PointerDeclarator, PtrDeclarator> = true;
+template <> inline constexpr bool syntax_converts<QualifiedId, PtrDeclarator> = true;
+template <> inline constexpr bool syntax_converts<SimpleTemplateId, PtrDeclarator> = true;
+template <> inline constexpr bool syntax_converts<SuffixedDeclarator, PtrDeclarator> = true;
+template <> inline constexpr bool syntax_converts<DeclaratorId, PtrDeclarator> = true;
+template <> inline constexpr bool syntax_converts<IdExpression, PtrDeclarator> = true;
+template <> inline constexpr bool syntax_converts<NoptrDeclarator, PtrDeclarator> = true;
+template <> inline constexpr bool syntax_converts<TemplateId, PtrDeclarator> = true;
+template <> inline constexpr bool syntax_converts<UnqualifiedId, PtrDeclarator> = true;
 template <> inline constexpr bool syntax_converts<AdditiveOperation, RelationalExpression> = true;
 template <> inline constexpr bool syntax_converts<AwaitExpression, RelationalExpression> = true;
 template <> inline constexpr bool syntax_converts<CastNotation, RelationalExpression> = true;
@@ -1732,36 +2365,57 @@ template <> inline constexpr bool syntax_converts<ClangBitIntTypeSpecifier, Simp
 template <> inline constexpr bool syntax_converts<ClangTypeTransformation, SimpleTypeSpecifier> = true;
 template <> inline constexpr bool syntax_converts<DecltypeSpecifier, SimpleTypeSpecifier> = true;
 template <> inline constexpr bool syntax_converts<PlaceholderTypeSpecifier, SimpleTypeSpecifier> = true;
+template <> inline constexpr bool syntax_converts<SimpleTemplateId, SimpleTypeSpecifier> = true;
 template <> inline constexpr bool syntax_converts<SimpleTypeName, SimpleTypeSpecifier> = true;
 template <> inline constexpr bool syntax_converts<AliasDeclaration, Statement> = true;
 template <> inline constexpr bool syntax_converts<AsmDeclaration, Statement> = true;
 template <> inline constexpr bool syntax_converts<AttributedStatement, Statement> = true;
+template <> inline constexpr bool syntax_converts<CompoundStatement, Statement> = true;
+template <> inline constexpr bool syntax_converts<CoroutineReturnStatement, Statement> = true;
+template <> inline constexpr bool syntax_converts<ExpressionStatement, Statement> = true;
+template <> inline constexpr bool syntax_converts<GnuComputedGoto, Statement> = true;
 template <> inline constexpr bool syntax_converts<GnuExtensionDeclaration, Statement> = true;
+template <> inline constexpr bool syntax_converts<IterationStatement, Statement> = true;
+template <> inline constexpr bool syntax_converts<Jump, Statement> = true;
 template <> inline constexpr bool syntax_converts<LabeledStatement, Statement> = true;
 template <> inline constexpr bool syntax_converts<NamespaceAliasDefinition, Statement> = true;
 template <> inline constexpr bool syntax_converts<OpaqueEnumDeclaration, Statement> = true;
+template <> inline constexpr bool syntax_converts<SelectionStatement, Statement> = true;
 template <> inline constexpr bool syntax_converts<SimpleDeclaration, Statement> = true;
 template <> inline constexpr bool syntax_converts<StaticAssertDeclaration, Statement> = true;
+template <> inline constexpr bool syntax_converts<TryBlock, Statement> = true;
 template <> inline constexpr bool syntax_converts<UsingDeclaration, Statement> = true;
 template <> inline constexpr bool syntax_converts<UsingDirective, Statement> = true;
 template <> inline constexpr bool syntax_converts<UsingEnumDeclaration, Statement> = true;
 template <> inline constexpr bool syntax_converts<BlockDeclaration, Statement> = true;
 template <> inline constexpr bool syntax_converts<DeclarationStatement, Statement> = true;
+template <> inline constexpr bool syntax_converts<InitStatement, Statement> = true;
+template <> inline constexpr bool syntax_converts<JumpStatement, Statement> = true;
 template <> inline constexpr bool syntax_converts<AliasDeclaration, StatementSeq> = true;
 template <> inline constexpr bool syntax_converts<AsmDeclaration, StatementSeq> = true;
 template <> inline constexpr bool syntax_converts<AttributedStatement, StatementSeq> = true;
+template <> inline constexpr bool syntax_converts<CompoundStatement, StatementSeq> = true;
+template <> inline constexpr bool syntax_converts<CoroutineReturnStatement, StatementSeq> = true;
+template <> inline constexpr bool syntax_converts<ExpressionStatement, StatementSeq> = true;
+template <> inline constexpr bool syntax_converts<GnuComputedGoto, StatementSeq> = true;
 template <> inline constexpr bool syntax_converts<GnuExtensionDeclaration, StatementSeq> = true;
+template <> inline constexpr bool syntax_converts<IterationStatement, StatementSeq> = true;
+template <> inline constexpr bool syntax_converts<Jump, StatementSeq> = true;
 template <> inline constexpr bool syntax_converts<LabeledStatement, StatementSeq> = true;
 template <> inline constexpr bool syntax_converts<NamespaceAliasDefinition, StatementSeq> = true;
 template <> inline constexpr bool syntax_converts<OpaqueEnumDeclaration, StatementSeq> = true;
+template <> inline constexpr bool syntax_converts<SelectionStatement, StatementSeq> = true;
 template <> inline constexpr bool syntax_converts<SimpleDeclaration, StatementSeq> = true;
 template <> inline constexpr bool syntax_converts<Statements, StatementSeq> = true;
 template <> inline constexpr bool syntax_converts<StaticAssertDeclaration, StatementSeq> = true;
+template <> inline constexpr bool syntax_converts<TryBlock, StatementSeq> = true;
 template <> inline constexpr bool syntax_converts<UsingDeclaration, StatementSeq> = true;
 template <> inline constexpr bool syntax_converts<UsingDirective, StatementSeq> = true;
 template <> inline constexpr bool syntax_converts<UsingEnumDeclaration, StatementSeq> = true;
 template <> inline constexpr bool syntax_converts<BlockDeclaration, StatementSeq> = true;
 template <> inline constexpr bool syntax_converts<DeclarationStatement, StatementSeq> = true;
+template <> inline constexpr bool syntax_converts<InitStatement, StatementSeq> = true;
+template <> inline constexpr bool syntax_converts<JumpStatement, StatementSeq> = true;
 template <> inline constexpr bool syntax_converts<Statement, StatementSeq> = true;
 template <> inline constexpr bool syntax_converts<AdditiveOperation, TemplateArgument> = true;
 template <> inline constexpr bool syntax_converts<AndOperation, TemplateArgument> = true;
@@ -1825,6 +2479,70 @@ template <> inline constexpr bool syntax_converts<ShiftExpression, TemplateArgum
 template <> inline constexpr bool syntax_converts<TemplateId, TemplateArgument> = true;
 template <> inline constexpr bool syntax_converts<UnaryExpression, TemplateArgument> = true;
 template <> inline constexpr bool syntax_converts<UnqualifiedId, TemplateArgument> = true;
+template <> inline constexpr bool syntax_converts<AdditiveOperation, TemplateArgumentList> = true;
+template <> inline constexpr bool syntax_converts<AndOperation, TemplateArgumentList> = true;
+template <> inline constexpr bool syntax_converts<AwaitExpression, TemplateArgumentList> = true;
+template <> inline constexpr bool syntax_converts<CastNotation, TemplateArgumentList> = true;
+template <> inline constexpr bool syntax_converts<ClangBitCastExpression, TemplateArgumentList> = true;
+template <> inline constexpr bool syntax_converts<ClangConvertvectorExpression, TemplateArgumentList> = true;
+template <> inline constexpr bool syntax_converts<ClangSourceLocationExpression, TemplateArgumentList> = true;
+template <> inline constexpr bool syntax_converts<ClangTypeTraitExpression, TemplateArgumentList> = true;
+template <> inline constexpr bool syntax_converts<ConditionalOperation, TemplateArgumentList> = true;
+template <> inline constexpr bool syntax_converts<ConversionFunctionId, TemplateArgumentList> = true;
+template <> inline constexpr bool syntax_converts<DeleteExpression, TemplateArgumentList> = true;
+template <> inline constexpr bool syntax_converts<DestructorTypeId, TemplateArgumentList> = true;
+template <> inline constexpr bool syntax_converts<EqualityOperation, TemplateArgumentList> = true;
+template <> inline constexpr bool syntax_converts<ExclusiveOrOperation, TemplateArgumentList> = true;
+template <> inline constexpr bool syntax_converts<FoldExpression, TemplateArgumentList> = true;
+template <> inline constexpr bool syntax_converts<GnuCompoundLiteral, TemplateArgumentList> = true;
+template <> inline constexpr bool syntax_converts<GnuExtensionExpression, TemplateArgumentList> = true;
+template <> inline constexpr bool syntax_converts<GnuLabelAddress, TemplateArgumentList> = true;
+template <> inline constexpr bool syntax_converts<GnuOffsetofExpression, TemplateArgumentList> = true;
+template <> inline constexpr bool syntax_converts<InclusiveOrOperation, TemplateArgumentList> = true;
+template <> inline constexpr bool syntax_converts<LambdaExpression, TemplateArgumentList> = true;
+template <> inline constexpr bool syntax_converts<LiteralOperatorId, TemplateArgumentList> = true;
+template <> inline constexpr bool syntax_converts<LogicalAndOperation, TemplateArgumentList> = true;
+template <> inline constexpr bool syntax_converts<LogicalOrOperation, TemplateArgumentList> = true;
+template <> inline constexpr bool syntax_converts<MultiplicativeOperation, TemplateArgumentList> = true;
+template <> inline constexpr bool syntax_converts<NewExpression, TemplateArgumentList> = true;
+template <> inline constexpr bool syntax_converts<NoexceptExpression, TemplateArgumentList> = true;
+template <> inline constexpr bool syntax_converts<OperatorFunctionId, TemplateArgumentList> = true;
+template <> inline constexpr bool syntax_converts<OperatorTemplateId, TemplateArgumentList> = true;
+template <> inline constexpr bool syntax_converts<ParenthesizedOrThis, TemplateArgumentList> = true;
+template <> inline constexpr bool syntax_converts<PointerToMemberOperation, TemplateArgumentList> = true;
+template <> inline constexpr bool syntax_converts<PostfixOperation, TemplateArgumentList> = true;
+template <> inline constexpr bool syntax_converts<QualifiedId, TemplateArgumentList> = true;
+template <> inline constexpr bool syntax_converts<RelationalOperation, TemplateArgumentList> = true;
+template <> inline constexpr bool syntax_converts<RequiresExpression, TemplateArgumentList> = true;
+template <> inline constexpr bool syntax_converts<ShiftOperation, TemplateArgumentList> = true;
+template <> inline constexpr bool syntax_converts<SimpleTemplateId, TemplateArgumentList> = true;
+template <> inline constexpr bool syntax_converts<TemplateArguments, TemplateArgumentList> = true;
+template <> inline constexpr bool syntax_converts<ThreeWayComparison, TemplateArgumentList> = true;
+template <> inline constexpr bool syntax_converts<TypeId, TemplateArgumentList> = true;
+template <> inline constexpr bool syntax_converts<UnaryOperation, TemplateArgumentList> = true;
+template <> inline constexpr bool syntax_converts<AdditiveExpression, TemplateArgumentList> = true;
+template <> inline constexpr bool syntax_converts<AndExpression, TemplateArgumentList> = true;
+template <> inline constexpr bool syntax_converts<CastExpression, TemplateArgumentList> = true;
+template <> inline constexpr bool syntax_converts<CompareExpression, TemplateArgumentList> = true;
+template <> inline constexpr bool syntax_converts<ConditionalExpression, TemplateArgumentList> = true;
+template <> inline constexpr bool syntax_converts<ConstantExpression, TemplateArgumentList> = true;
+template <> inline constexpr bool syntax_converts<ConstraintExpression, TemplateArgumentList> = true;
+template <> inline constexpr bool syntax_converts<EqualityExpression, TemplateArgumentList> = true;
+template <> inline constexpr bool syntax_converts<ExclusiveOrExpression, TemplateArgumentList> = true;
+template <> inline constexpr bool syntax_converts<IdExpression, TemplateArgumentList> = true;
+template <> inline constexpr bool syntax_converts<InclusiveOrExpression, TemplateArgumentList> = true;
+template <> inline constexpr bool syntax_converts<LogicalAndExpression, TemplateArgumentList> = true;
+template <> inline constexpr bool syntax_converts<LogicalOrExpression, TemplateArgumentList> = true;
+template <> inline constexpr bool syntax_converts<MultiplicativeExpression, TemplateArgumentList> = true;
+template <> inline constexpr bool syntax_converts<PmExpression, TemplateArgumentList> = true;
+template <> inline constexpr bool syntax_converts<PostfixExpression, TemplateArgumentList> = true;
+template <> inline constexpr bool syntax_converts<PrimaryExpression, TemplateArgumentList> = true;
+template <> inline constexpr bool syntax_converts<RelationalExpression, TemplateArgumentList> = true;
+template <> inline constexpr bool syntax_converts<ShiftExpression, TemplateArgumentList> = true;
+template <> inline constexpr bool syntax_converts<TemplateArgument, TemplateArgumentList> = true;
+template <> inline constexpr bool syntax_converts<TemplateId, TemplateArgumentList> = true;
+template <> inline constexpr bool syntax_converts<UnaryExpression, TemplateArgumentList> = true;
+template <> inline constexpr bool syntax_converts<UnqualifiedId, TemplateArgumentList> = true;
 template <> inline constexpr bool syntax_converts<OperatorTemplateId, TemplateId> = true;
 template <> inline constexpr bool syntax_converts<SimpleTemplateId, TemplateId> = true;
 template <> inline constexpr bool syntax_converts<ParameterDeclaration, TemplateParameter> = true;
@@ -1840,6 +2558,7 @@ template <> inline constexpr bool syntax_converts<DecltypeSpecifier, TypeSpecifi
 template <> inline constexpr bool syntax_converts<ElaboratedClassSpecifier, TypeSpecifier> = true;
 template <> inline constexpr bool syntax_converts<ElaboratedEnumSpecifier, TypeSpecifier> = true;
 template <> inline constexpr bool syntax_converts<PlaceholderTypeSpecifier, TypeSpecifier> = true;
+template <> inline constexpr bool syntax_converts<SimpleTemplateId, TypeSpecifier> = true;
 template <> inline constexpr bool syntax_converts<SimpleTypeName, TypeSpecifier> = true;
 template <> inline constexpr bool syntax_converts<TypenameSpecifier, TypeSpecifier> = true;
 template <> inline constexpr bool syntax_converts<ElaboratedTypeSpecifier, TypeSpecifier> = true;
@@ -1881,6 +2600,8 @@ template <> inline constexpr bool syntax_converts<OperatorFunctionId, Unqualifie
 template <> inline constexpr bool syntax_converts<OperatorTemplateId, UnqualifiedId> = true;
 template <> inline constexpr bool syntax_converts<SimpleTemplateId, UnqualifiedId> = true;
 template <> inline constexpr bool syntax_converts<TemplateId, UnqualifiedId> = true;
+template <> inline constexpr bool syntax_converts<UsingDeclarator, UsingDeclaratorList> = true;
+template <> inline constexpr bool syntax_converts<UsingDeclarators, UsingDeclaratorList> = true;
 #endif
 
 #ifdef SYNTAX_VIEWS_ACCESSORS
@@ -1918,6 +2639,8 @@ ClangBitCastExpression clang_bit_cast_expression() const;
 ClangBitIntTypeSpecifier clang_bit_int_type_specifier() const;
 ClangConvertvectorExpression clang_convertvector_expression() const;
 ClangSourceLocationExpression clang_source_location_expression() const;
+ClangTypeTraitArgument clang_type_trait_argument() const;
+ClangTypeTraitArgumentList clang_type_trait_argument_list() const;
 ClangTypeTraitExpression clang_type_trait_expression() const;
 ClangTypeTransformation clang_type_transformation() const;
 ClassHead class_head() const;
@@ -1980,7 +2703,7 @@ ExplicitSpecifier explicit_specifier() const;
 ExportDeclaration export_declaration() const;
 ExprOrBracedInitList expr_or_braced_init_list() const;
 Expression expression() const;
-InitializerList expression_list() const;
+ExpressionList expression_list() const;
 ExpressionStatement expression_statement() const;
 FoldExpression fold_expression() const;
 ForRangeDeclaration for_range_declaration() const;
@@ -1992,9 +2715,10 @@ FunctionTryBlock function_try_block() const;
 GlobalModuleFragment global_module_fragment() const;
 GnuAsmLabel gnu_asm_label() const;
 GnuAttribute gnu_attribute() const;
-InitializerList gnu_attribute_arguments() const;
+GnuAttributeArguments gnu_attribute_arguments() const;
 GnuAttributeList gnu_attribute_list() const;
 GnuAttributeSpecifier gnu_attribute_specifier() const;
+GnuAttributeSpecifier gnu_attribute_specifier_seq() const;
 GnuCompoundLiteral gnu_compound_literal() const;
 GnuComputedGoto gnu_computed_goto() const;
 GnuDeclarator gnu_declarator() const;
@@ -2043,6 +2767,7 @@ ModulePartition module_partition() const;
 MultiplicativeExpression multiplicative_expression() const;
 NamedNamespaceDefinition named_namespace_definition() const;
 NamespaceAliasDefinition namespace_alias_definition() const;
+NamespaceBody namespace_body() const;
 NamespaceDefinition namespace_definition() const;
 NestedNameSpecifier nested_name_specifier() const;
 NestedNamespaceDefinition nested_namespace_definition() const;
@@ -2128,19 +2853,28 @@ TrailingAbstractDeclarator trailing_abstract_declarator() const;
 AdditiveOperation additive_operation() const;
 AndOperation and_operation() const;
 Assignment assignment() const;
+AttributeWithArguments attribute_with_arguments() const;
+Attributes attributes() const;
 StandardAttributeSpecifier standard_attribute_specifier() const;
+AttributeSpecifiers attribute_specifiers() const;
 BalancedTokens balanced_tokens() const;
+AnnotatedBaseSpecifier annotated_base_specifier() const;
+BaseSpecifiers base_specifiers() const;
 EqualInitializer equal_initializer() const;
 Captures captures() const;
 CastNotation cast_notation() const;
+QualifiedClassHeadName qualified_class_head_name() const;
 QualifiedClassName qualified_class_name() const;
 ThreeWayComparison three_way_comparison() const;
 ConditionDeclaration condition_declaration() const;
 ConditionalOperation conditional_operation() const;
 ConstraintConjunction constraint_conjunction() const;
 ConstraintDisjunction constraint_disjunction() const;
+PointerConversionDeclarator pointer_conversion_declarator() const;
+ConversionTypeWithDeclarator conversion_type_with_declarator() const;
 Declarations declarations() const;
 TrailingReturnDeclarator trailing_return_declarator() const;
+PackDeclaratorId pack_declarator_id() const;
 DesignatedInitializers designated_initializers() const;
 ElaboratedClassSpecifier elaborated_class_specifier() const;
 EnumeratorWithValue enumerator_with_value() const;
@@ -2149,19 +2883,28 @@ EqualityOperation equality_operation() const;
 ExclusiveOrOperation exclusive_or_operation() const;
 CommaExpression comma_expression() const;
 OrdinaryFunctionBody ordinary_function_body() const;
+GnuAttributes gnu_attributes() const;
 GnuOldDesignation gnu_old_designation() const;
+GnuInitializerClauses gnu_initializer_clauses() const;
+Handlers handlers() const;
 InclusiveOrOperation inclusive_or_operation() const;
+DeclaratorWithInitializer declarator_with_initializer() const;
 InitDeclarators init_declarators() const;
 ParenthesizedInitializer parenthesized_initializer() const;
+InitializerClauses initializer_clauses() const;
 Jump jump() const;
 DefaultAndCaptures default_and_captures() const;
 LogicalAndOperation logical_and_operation() const;
 LogicalOrOperation logical_or_operation() const;
+MemInitializers mem_initializers() const;
 MemberSimpleDeclaration member_simple_declaration() const;
+MemberDeclaratorWithParts member_declarator_with_parts() const;
 MemberDeclarators member_declarators() const;
 MultiplicativeOperation multiplicative_operation() const;
 PointerNewDeclarator pointer_new_declarator() const;
 ParenthesizedNewInitializer parenthesized_new_initializer() const;
+SuffixedDeclarator suffixed_declarator() const;
+ParameterClause parameter_clause() const;
 ParameterDeclarations parameter_declarations() const;
 PointerToMemberOperation pointer_to_member_operation() const;
 PostfixOperation postfix_operation() const;
@@ -2174,15 +2917,17 @@ ShiftOperation shift_operation() const;
 SimpleTypeName simple_type_name() const;
 AttributedStatement attributed_statement() const;
 Statements statements() const;
+TemplateArguments template_arguments() const;
 OperatorTemplateId operator_template_id() const;
 TemplateParameters template_parameters() const;
 UnaryOperation unary_operation() const;
 DestructorTypeId destructor_type_id() const;
+UsingDeclarators using_declarators() const;
 #endif
 
 #ifdef SYNTAX_VIEWS_DEFINE
 
-/* abstract-declarator: one of abstract_declarator, noptr_abstract_declarator, ptr_abstract_declarator */
+/* abstract-declarator: one of abstract_declarator, noptr_abstract_declarator, ptr_abstract_declarator, ptr_operator */
 struct AbstractDeclarator : SyntaxExtra<AbstractDeclarator> {
     using SyntaxExtra<AbstractDeclarator>::SyntaxExtra;
     AbstractDeclarator() = default;
@@ -2264,6 +3009,14 @@ struct AndOperation : SyntaxExtra<AndOperation> {
     static bool accepts(syntax_kind k);
 };
 
+/* the base-specifier node */
+struct AnnotatedBaseSpecifier : SyntaxExtra<AnnotatedBaseSpecifier> {
+    using SyntaxExtra<AnnotatedBaseSpecifier>::SyntaxExtra;
+    static bool accepts(syntax_kind k);
+    AttributeSpecifierSeq attribute_specifier_seq() const;
+    ClassOrDecltype class_or_decltype() const;
+};
+
 /* the asm-declaration node */
 struct AsmDeclaration : SyntaxExtra<AsmDeclaration> {
     using SyntaxExtra<AsmDeclaration>::SyntaxExtra;
@@ -2295,12 +3048,22 @@ struct AssignmentExpression : SyntaxExtra<AssignmentExpression> {
     }
 };
 
-/* the attribute node */
+/* attribute: one of attribute, attribute_scoped_token */
 struct Attribute : SyntaxExtra<Attribute> {
     using SyntaxExtra<Attribute>::SyntaxExtra;
+    Attribute() = default;
+    template <class V>
+        requires syntax_converts<V, Attribute>
+    Attribute(V v) : SyntaxExtra<Attribute>(v.context(), v.index())
+    {
+    }
     static bool accepts(syntax_kind k);
-    AttributeArgumentClause attribute_argument_clause() const;
-    AttributeScopedToken attribute_token() const;
+    template <class F> decltype(auto) visit(F &&f) const;
+    template <class T, class... M>
+    decltype(auto) visit(T *self, M... members) const
+    {
+        return visit(Overloaded{bind_member(self, members)...});
+    }
 };
 
 /* the attribute-argument-clause node */
@@ -2317,12 +3080,22 @@ struct AttributeDeclaration : SyntaxExtra<AttributeDeclaration> {
     AttributeSpecifierSeq attribute_specifier_seq() const;
 };
 
-/* the attribute-list node */
+/* attribute-list: one of attribute, attribute_list, attribute_scoped_token */
 struct AttributeList : SyntaxExtra<AttributeList> {
     using SyntaxExtra<AttributeList>::SyntaxExtra;
+    AttributeList() = default;
+    template <class V>
+        requires syntax_converts<V, AttributeList>
+    AttributeList(V v) : SyntaxExtra<AttributeList>(v.context(), v.index())
+    {
+    }
     static bool accepts(syntax_kind k);
-    Attribute attribute() const;
-    AttributeList attribute_list() const;
+    template <class F> decltype(auto) visit(F &&f) const;
+    template <class T, class... M>
+    decltype(auto) visit(T *self, M... members) const
+    {
+        return visit(Overloaded{bind_member(self, members)...});
+    }
 };
 
 /* the attribute-scoped-token node */
@@ -2349,18 +3122,42 @@ struct AttributeSpecifier : SyntaxExtra<AttributeSpecifier> {
     }
 };
 
-/* the attribute-specifier-seq node */
+/* attribute-specifier-seq: one of alignment_specifier, attribute_specifier, attribute_specifier_seq, gnu_attribute_specifier */
 struct AttributeSpecifierSeq : SyntaxExtra<AttributeSpecifierSeq> {
     using SyntaxExtra<AttributeSpecifierSeq>::SyntaxExtra;
+    AttributeSpecifierSeq() = default;
+    template <class V>
+        requires syntax_converts<V, AttributeSpecifierSeq>
+    AttributeSpecifierSeq(V v) : SyntaxExtra<AttributeSpecifierSeq>(v.context(), v.index())
+    {
+    }
     static bool accepts(syntax_kind k);
-    AttributeSpecifier attribute_specifier() const;
-    AttributeSpecifierSeq attribute_specifier_seq() const;
+    template <class F> decltype(auto) visit(F &&f) const;
+    template <class T, class... M>
+    decltype(auto) visit(T *self, M... members) const
+    {
+        return visit(Overloaded{bind_member(self, members)...});
+    }
+};
+
+/* the attribute-specifier-seq node */
+struct AttributeSpecifiers : SyntaxExtra<AttributeSpecifiers> {
+    using SyntaxExtra<AttributeSpecifiers>::SyntaxExtra;
+    static bool accepts(syntax_kind k);
 };
 
 /* the attribute-using-prefix node */
 struct AttributeUsingPrefix : SyntaxExtra<AttributeUsingPrefix> {
     using SyntaxExtra<AttributeUsingPrefix>::SyntaxExtra;
     static bool accepts(syntax_kind k);
+};
+
+/* the attribute node */
+struct AttributeWithArguments : SyntaxExtra<AttributeWithArguments> {
+    using SyntaxExtra<AttributeWithArguments>::SyntaxExtra;
+    static bool accepts(syntax_kind k);
+    AttributeArgumentClause attribute_argument_clause() const;
+    AttributeScopedToken attribute_token() const;
 };
 
 /* the statement node */
@@ -2374,6 +3171,12 @@ struct AttributedStatement : SyntaxExtra<AttributedStatement> {
     JumpStatement jump_statement() const;
     SelectionStatement selection_statement() const;
     TryBlock try_block() const;
+};
+
+/* the attribute-list node */
+struct Attributes : SyntaxExtra<Attributes> {
+    using SyntaxExtra<Attributes>::SyntaxExtra;
+    static bool accepts(syntax_kind k);
 };
 
 /* the await-expression node */
@@ -2422,20 +3225,46 @@ struct BaseClause : SyntaxExtra<BaseClause> {
     BaseSpecifierList base_specifier_list() const;
 };
 
-/* the base-specifier node */
+/* base-specifier: one of base_specifier, class_or_decltype, decltype_specifier, simple_template_id */
 struct BaseSpecifier : SyntaxExtra<BaseSpecifier> {
     using SyntaxExtra<BaseSpecifier>::SyntaxExtra;
+    BaseSpecifier() = default;
+    template <class V>
+        requires syntax_converts<V, BaseSpecifier>
+    BaseSpecifier(V v) : SyntaxExtra<BaseSpecifier>(v.context(), v.index())
+    {
+    }
     static bool accepts(syntax_kind k);
-    AttributeSpecifierSeq attribute_specifier_seq() const;
-    ClassOrDecltype class_or_decltype() const;
+    template <class F> decltype(auto) visit(F &&f) const;
+    template <class T, class... M>
+    decltype(auto) visit(T *self, M... members) const
+    {
+        return visit(Overloaded{bind_member(self, members)...});
+    }
+};
+
+/* base-specifier-list: one of base_specifier, base_specifier_list, class_or_decltype, decltype_specifier, simple_template_id */
+struct BaseSpecifierList : SyntaxExtra<BaseSpecifierList> {
+    using SyntaxExtra<BaseSpecifierList>::SyntaxExtra;
+    BaseSpecifierList() = default;
+    template <class V>
+        requires syntax_converts<V, BaseSpecifierList>
+    BaseSpecifierList(V v) : SyntaxExtra<BaseSpecifierList>(v.context(), v.index())
+    {
+    }
+    static bool accepts(syntax_kind k);
+    template <class F> decltype(auto) visit(F &&f) const;
+    template <class T, class... M>
+    decltype(auto) visit(T *self, M... members) const
+    {
+        return visit(Overloaded{bind_member(self, members)...});
+    }
 };
 
 /* the base-specifier-list node */
-struct BaseSpecifierList : SyntaxExtra<BaseSpecifierList> {
-    using SyntaxExtra<BaseSpecifierList>::SyntaxExtra;
+struct BaseSpecifiers : SyntaxExtra<BaseSpecifiers> {
+    using SyntaxExtra<BaseSpecifiers>::SyntaxExtra;
     static bool accepts(syntax_kind k);
-    BaseSpecifier base_specifier() const;
-    BaseSpecifierList base_specifier_list() const;
 };
 
 /* block-declaration: one of alias_declaration, asm_declaration, gnu_extension_declaration, namespace_alias_definition, opaque_enum_declaration, simple_declaration, static_assert_declaration, using_declaration, using_directive, using_enum_declaration */
@@ -2479,8 +3308,6 @@ struct BracedInitList : SyntaxExtra<BracedInitList> {
     using SyntaxExtra<BracedInitList>::SyntaxExtra;
     static bool accepts(syntax_kind k);
     DesignatedInitializerList designated_initializer_list() const;
-    GnuInitializerList gnu_initializer_list() const;
-    InitializerList initializer_list() const;
 };
 
 /* capture: one of init_capture, simple_capture */
@@ -2588,10 +3415,47 @@ struct ClangSourceLocationExpression : SyntaxExtra<ClangSourceLocationExpression
     static bool accepts(syntax_kind k);
 };
 
+/* clang-type-trait-argument: one of additive_expression, and_expression, assignment_expression, await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conditional_expression, conversion_function_id, delete_expression, equality_expression, exclusive_or_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, inclusive_or_expression, lambda_expression, literal_operator_id, logical_and_expression, logical_or_expression, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, throw_expression, type_id, unary_expression, unqualified_id, yield_expression */
+struct ClangTypeTraitArgument : SyntaxExtra<ClangTypeTraitArgument> {
+    using SyntaxExtra<ClangTypeTraitArgument>::SyntaxExtra;
+    ClangTypeTraitArgument() = default;
+    template <class V>
+        requires syntax_converts<V, ClangTypeTraitArgument>
+    ClangTypeTraitArgument(V v) : SyntaxExtra<ClangTypeTraitArgument>(v.context(), v.index())
+    {
+    }
+    static bool accepts(syntax_kind k);
+    template <class F> decltype(auto) visit(F &&f) const;
+    template <class T, class... M>
+    decltype(auto) visit(T *self, M... members) const
+    {
+        return visit(Overloaded{bind_member(self, members)...});
+    }
+};
+
+/* clang-type-trait-argument-list: one of additive_expression, and_expression, assignment_expression, await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conditional_expression, conversion_function_id, delete_expression, equality_expression, exclusive_or_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, inclusive_or_expression, lambda_expression, literal_operator_id, logical_and_expression, logical_or_expression, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, throw_expression, type_id, unary_expression, unqualified_id, yield_expression */
+struct ClangTypeTraitArgumentList : SyntaxExtra<ClangTypeTraitArgumentList> {
+    using SyntaxExtra<ClangTypeTraitArgumentList>::SyntaxExtra;
+    ClangTypeTraitArgumentList() = default;
+    template <class V>
+        requires syntax_converts<V, ClangTypeTraitArgumentList>
+    ClangTypeTraitArgumentList(V v) : SyntaxExtra<ClangTypeTraitArgumentList>(v.context(), v.index())
+    {
+    }
+    static bool accepts(syntax_kind k);
+    template <class F> decltype(auto) visit(F &&f) const;
+    template <class T, class... M>
+    decltype(auto) visit(T *self, M... members) const
+    {
+        return visit(Overloaded{bind_member(self, members)...});
+    }
+};
+
 /* the clang-type-trait-expression node */
 struct ClangTypeTraitExpression : SyntaxExtra<ClangTypeTraitExpression> {
     using SyntaxExtra<ClangTypeTraitExpression>::SyntaxExtra;
     static bool accepts(syntax_kind k);
+    ClangTypeTraitArgumentList clang_type_trait_argument_list() const;
 };
 
 /* the clang-type-transformation node */
@@ -2610,15 +3474,25 @@ struct ClassHead : SyntaxExtra<ClassHead> {
     ClassHeadName class_head_name() const;
 };
 
-/* the class-head-name node */
+/* class-head-name: one of class_head_name, simple_template_id */
 struct ClassHeadName : SyntaxExtra<ClassHeadName> {
     using SyntaxExtra<ClassHeadName>::SyntaxExtra;
+    ClassHeadName() = default;
+    template <class V>
+        requires syntax_converts<V, ClassHeadName>
+    ClassHeadName(V v) : SyntaxExtra<ClassHeadName>(v.context(), v.index())
+    {
+    }
     static bool accepts(syntax_kind k);
-    SimpleTemplateId class_name() const;
-    NestedNameSpecifier nested_name_specifier() const;
+    template <class F> decltype(auto) visit(F &&f) const;
+    template <class T, class... M>
+    decltype(auto) visit(T *self, M... members) const
+    {
+        return visit(Overloaded{bind_member(self, members)...});
+    }
 };
 
-/* class-or-decltype: one of class_or_decltype, decltype_specifier */
+/* class-or-decltype: one of class_or_decltype, decltype_specifier, simple_template_id */
 struct ClassOrDecltype : SyntaxExtra<ClassOrDecltype> {
     using SyntaxExtra<ClassOrDecltype>::SyntaxExtra;
     ClassOrDecltype() = default;
@@ -2826,12 +3700,22 @@ struct ConstraintLogicalOrExpression : SyntaxExtra<ConstraintLogicalOrExpression
     }
 };
 
-/* the conversion-declarator node */
+/* conversion-declarator: one of conversion_declarator, ptr_operator */
 struct ConversionDeclarator : SyntaxExtra<ConversionDeclarator> {
     using SyntaxExtra<ConversionDeclarator>::SyntaxExtra;
+    ConversionDeclarator() = default;
+    template <class V>
+        requires syntax_converts<V, ConversionDeclarator>
+    ConversionDeclarator(V v) : SyntaxExtra<ConversionDeclarator>(v.context(), v.index())
+    {
+    }
     static bool accepts(syntax_kind k);
-    ConversionDeclarator conversion_declarator() const;
-    PtrOperator ptr_operator() const;
+    template <class F> decltype(auto) visit(F &&f) const;
+    template <class T, class... M>
+    decltype(auto) visit(T *self, M... members) const
+    {
+        return visit(Overloaded{bind_member(self, members)...});
+    }
 };
 
 /* the conversion-function-id node */
@@ -2841,9 +3725,27 @@ struct ConversionFunctionId : SyntaxExtra<ConversionFunctionId> {
     ConversionTypeId conversion_type_id() const;
 };
 
-/* the conversion-type-id node */
+/* conversion-type-id: one of conversion_type_id, type_specifier_seq */
 struct ConversionTypeId : SyntaxExtra<ConversionTypeId> {
     using SyntaxExtra<ConversionTypeId>::SyntaxExtra;
+    ConversionTypeId() = default;
+    template <class V>
+        requires syntax_converts<V, ConversionTypeId>
+    ConversionTypeId(V v) : SyntaxExtra<ConversionTypeId>(v.context(), v.index())
+    {
+    }
+    static bool accepts(syntax_kind k);
+    template <class F> decltype(auto) visit(F &&f) const;
+    template <class T, class... M>
+    decltype(auto) visit(T *self, M... members) const
+    {
+        return visit(Overloaded{bind_member(self, members)...});
+    }
+};
+
+/* the conversion-type-id node */
+struct ConversionTypeWithDeclarator : SyntaxExtra<ConversionTypeWithDeclarator> {
+    using SyntaxExtra<ConversionTypeWithDeclarator>::SyntaxExtra;
     static bool accepts(syntax_kind k);
     ConversionDeclarator conversion_declarator() const;
     TypeSpecifierSeq type_specifier_seq() const;
@@ -2870,7 +3772,7 @@ struct CvQualifierSeq : SyntaxExtra<CvQualifierSeq> {
     CvQualifierSeq cv_qualifier_seq() const;
 };
 
-/* decl-specifier: one of clang_atomic_type_specifier, clang_bit_int_type_specifier, clang_type_transformation, class_specifier, decltype_specifier, elaborated_enum_specifier, elaborated_type_specifier, enum_specifier, explicit_specifier, gnu_attribute_specifier, placeholder_type_specifier, simple_type_specifier, typename_specifier */
+/* decl-specifier: one of clang_atomic_type_specifier, clang_bit_int_type_specifier, clang_type_transformation, class_specifier, decltype_specifier, elaborated_enum_specifier, elaborated_type_specifier, enum_specifier, explicit_specifier, gnu_attribute_specifier, placeholder_type_specifier, simple_template_id, simple_type_specifier, typename_specifier */
 struct DeclSpecifier : SyntaxExtra<DeclSpecifier> {
     using SyntaxExtra<DeclSpecifier>::SyntaxExtra;
     DeclSpecifier() = default;
@@ -2892,8 +3794,6 @@ struct DeclSpecifier : SyntaxExtra<DeclSpecifier> {
 struct DeclSpecifierSeq : SyntaxExtra<DeclSpecifierSeq> {
     using SyntaxExtra<DeclSpecifierSeq>::SyntaxExtra;
     static bool accepts(syntax_kind k);
-    AttributeSpecifierSeq attribute_specifier_seq() const;
-    DeclSpecifier decl_specifier() const;
     DeclSpecifierSeq decl_specifier_seq() const;
 };
 
@@ -2958,7 +3858,7 @@ struct Declarations : SyntaxExtra<Declarations> {
     static bool accepts(syntax_kind k);
 };
 
-/* declarator: one of declarator, noptr_declarator, ptr_declarator */
+/* declarator: one of conversion_function_id, declarator, declarator_id, literal_operator_id, noptr_declarator, operator_function_id, ptr_declarator, qualified_id, simple_template_id, template_id, unqualified_id */
 struct Declarator : SyntaxExtra<Declarator> {
     using SyntaxExtra<Declarator>::SyntaxExtra;
     Declarator() = default;
@@ -2976,11 +3876,31 @@ struct Declarator : SyntaxExtra<Declarator> {
     }
 };
 
-/* the declarator-id node */
+/* declarator-id: one of conversion_function_id, declarator_id, literal_operator_id, operator_function_id, qualified_id, simple_template_id, template_id, unqualified_id */
 struct DeclaratorId : SyntaxExtra<DeclaratorId> {
     using SyntaxExtra<DeclaratorId>::SyntaxExtra;
+    DeclaratorId() = default;
+    template <class V>
+        requires syntax_converts<V, DeclaratorId>
+    DeclaratorId(V v) : SyntaxExtra<DeclaratorId>(v.context(), v.index())
+    {
+    }
     static bool accepts(syntax_kind k);
-    IdExpression id_expression() const;
+    template <class F> decltype(auto) visit(F &&f) const;
+    template <class T, class... M>
+    decltype(auto) visit(T *self, M... members) const
+    {
+        return visit(Overloaded{bind_member(self, members)...});
+    }
+};
+
+/* the init-declarator node */
+struct DeclaratorWithInitializer : SyntaxExtra<DeclaratorWithInitializer> {
+    using SyntaxExtra<DeclaratorWithInitializer>::SyntaxExtra;
+    static bool accepts(syntax_kind k);
+    Declarator declarator() const;
+    Initializer initializer() const;
+    RequiresClause requires_clause() const;
 };
 
 /* the decltype-specifier node */
@@ -3015,7 +3935,7 @@ struct DefiningTypeId : SyntaxExtra<DefiningTypeId> {
     DefiningTypeSpecifierSeq defining_type_specifier_seq() const;
 };
 
-/* defining-type-specifier: one of clang_atomic_type_specifier, clang_bit_int_type_specifier, clang_type_transformation, class_specifier, decltype_specifier, elaborated_enum_specifier, elaborated_type_specifier, enum_specifier, placeholder_type_specifier, simple_type_specifier, typename_specifier */
+/* defining-type-specifier: one of clang_atomic_type_specifier, clang_bit_int_type_specifier, clang_type_transformation, class_specifier, decltype_specifier, elaborated_enum_specifier, elaborated_type_specifier, enum_specifier, placeholder_type_specifier, simple_template_id, simple_type_specifier, typename_specifier */
 struct DefiningTypeSpecifier : SyntaxExtra<DefiningTypeSpecifier> {
     using SyntaxExtra<DefiningTypeSpecifier>::SyntaxExtra;
     DefiningTypeSpecifier() = default;
@@ -3377,7 +4297,24 @@ struct Expression : SyntaxExtra<Expression> {
     {
         return visit(Overloaded{bind_member(self, members)...});
     }
-    SyntaxRange<AssignmentExpression> assignment_expressions() const;
+};
+
+/* expression-list: one of additive_expression, and_expression, assignment_expression, await_expression, braced_init_list, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conditional_expression, conversion_function_id, delete_expression, equality_expression, exclusive_or_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, inclusive_or_expression, initializer_list, lambda_expression, literal_operator_id, logical_and_expression, logical_or_expression, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, throw_expression, unary_expression, unqualified_id, yield_expression */
+struct ExpressionList : SyntaxExtra<ExpressionList> {
+    using SyntaxExtra<ExpressionList>::SyntaxExtra;
+    ExpressionList() = default;
+    template <class V>
+        requires syntax_converts<V, ExpressionList>
+    ExpressionList(V v) : SyntaxExtra<ExpressionList>(v.context(), v.index())
+    {
+    }
+    static bool accepts(syntax_kind k);
+    template <class F> decltype(auto) visit(F &&f) const;
+    template <class T, class... M>
+    decltype(auto) visit(T *self, M... members) const
+    {
+        return visit(Overloaded{bind_member(self, members)...});
+    }
 };
 
 /* the expression-statement node */
@@ -3476,15 +4413,43 @@ struct GnuAsmLabel : SyntaxExtra<GnuAsmLabel> {
 struct GnuAttribute : SyntaxExtra<GnuAttribute> {
     using SyntaxExtra<GnuAttribute>::SyntaxExtra;
     static bool accepts(syntax_kind k);
-    InitializerList gnu_attribute_arguments() const;
+    GnuAttributeArguments gnu_attribute_arguments() const;
 };
 
-/* the gnu-attribute-list node */
+/* gnu-attribute-arguments: one of additive_expression, and_expression, assignment_expression, await_expression, braced_init_list, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conditional_expression, conversion_function_id, delete_expression, equality_expression, exclusive_or_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, inclusive_or_expression, initializer_list, lambda_expression, literal_operator_id, logical_and_expression, logical_or_expression, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, throw_expression, unary_expression, unqualified_id, yield_expression */
+struct GnuAttributeArguments : SyntaxExtra<GnuAttributeArguments> {
+    using SyntaxExtra<GnuAttributeArguments>::SyntaxExtra;
+    GnuAttributeArguments() = default;
+    template <class V>
+        requires syntax_converts<V, GnuAttributeArguments>
+    GnuAttributeArguments(V v) : SyntaxExtra<GnuAttributeArguments>(v.context(), v.index())
+    {
+    }
+    static bool accepts(syntax_kind k);
+    template <class F> decltype(auto) visit(F &&f) const;
+    template <class T, class... M>
+    decltype(auto) visit(T *self, M... members) const
+    {
+        return visit(Overloaded{bind_member(self, members)...});
+    }
+};
+
+/* gnu-attribute-list: one of gnu_attribute, gnu_attribute_list */
 struct GnuAttributeList : SyntaxExtra<GnuAttributeList> {
     using SyntaxExtra<GnuAttributeList>::SyntaxExtra;
+    GnuAttributeList() = default;
+    template <class V>
+        requires syntax_converts<V, GnuAttributeList>
+    GnuAttributeList(V v) : SyntaxExtra<GnuAttributeList>(v.context(), v.index())
+    {
+    }
     static bool accepts(syntax_kind k);
-    GnuAttribute gnu_attribute() const;
-    GnuAttributeList gnu_attribute_list() const;
+    template <class F> decltype(auto) visit(F &&f) const;
+    template <class T, class... M>
+    decltype(auto) visit(T *self, M... members) const
+    {
+        return visit(Overloaded{bind_member(self, members)...});
+    }
 };
 
 /* the gnu-attribute-specifier node */
@@ -3492,6 +4457,12 @@ struct GnuAttributeSpecifier : SyntaxExtra<GnuAttributeSpecifier> {
     using SyntaxExtra<GnuAttributeSpecifier>::SyntaxExtra;
     static bool accepts(syntax_kind k);
     GnuAttributeList gnu_attribute_list() const;
+};
+
+/* the gnu-attribute-list node */
+struct GnuAttributes : SyntaxExtra<GnuAttributes> {
+    using SyntaxExtra<GnuAttributes>::SyntaxExtra;
+    static bool accepts(syntax_kind k);
 };
 
 /* the gnu-compound-literal node */
@@ -3546,12 +4517,28 @@ struct GnuExtensionExpression : SyntaxExtra<GnuExtensionExpression> {
 };
 
 /* the gnu-initializer-list node */
-struct GnuInitializerList : SyntaxExtra<GnuInitializerList> {
-    using SyntaxExtra<GnuInitializerList>::SyntaxExtra;
+struct GnuInitializerClauses : SyntaxExtra<GnuInitializerClauses> {
+    using SyntaxExtra<GnuInitializerClauses>::SyntaxExtra;
     static bool accepts(syntax_kind k);
     GnuDesignation gnu_designation() const;
-    GnuInitializerList gnu_initializer_list() const;
-    InitializerClause initializer_clause() const;
+};
+
+/* gnu-initializer-list: one of additive_expression, and_expression, assignment_expression, await_expression, braced_init_list, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conditional_expression, conversion_function_id, delete_expression, equality_expression, exclusive_or_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_initializer_list, gnu_label_address, gnu_offsetof_expression, inclusive_or_expression, lambda_expression, literal_operator_id, logical_and_expression, logical_or_expression, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, throw_expression, unary_expression, unqualified_id, yield_expression */
+struct GnuInitializerList : SyntaxExtra<GnuInitializerList> {
+    using SyntaxExtra<GnuInitializerList>::SyntaxExtra;
+    GnuInitializerList() = default;
+    template <class V>
+        requires syntax_converts<V, GnuInitializerList>
+    GnuInitializerList(V v) : SyntaxExtra<GnuInitializerList>(v.context(), v.index())
+    {
+    }
+    static bool accepts(syntax_kind k);
+    template <class F> decltype(auto) visit(F &&f) const;
+    template <class T, class... M>
+    decltype(auto) visit(T *self, M... members) const
+    {
+        return visit(Overloaded{bind_member(self, members)...});
+    }
 };
 
 /* the gnu-label-address node */
@@ -3564,6 +4551,7 @@ struct GnuLabelAddress : SyntaxExtra<GnuLabelAddress> {
 struct GnuOffsetofExpression : SyntaxExtra<GnuOffsetofExpression> {
     using SyntaxExtra<GnuOffsetofExpression>::SyntaxExtra;
     static bool accepts(syntax_kind k);
+    Expression expression() const;
     TypeId type_id() const;
 };
 
@@ -3582,12 +4570,28 @@ struct Handler : SyntaxExtra<Handler> {
     ExceptionDeclaration exception_declaration() const;
 };
 
-/* the handler-seq node */
+/* handler-seq: one of handler, handler_seq */
 struct HandlerSeq : SyntaxExtra<HandlerSeq> {
     using SyntaxExtra<HandlerSeq>::SyntaxExtra;
+    HandlerSeq() = default;
+    template <class V>
+        requires syntax_converts<V, HandlerSeq>
+    HandlerSeq(V v) : SyntaxExtra<HandlerSeq>(v.context(), v.index())
+    {
+    }
     static bool accepts(syntax_kind k);
-    Handler handler() const;
-    HandlerSeq handler_seq() const;
+    template <class F> decltype(auto) visit(F &&f) const;
+    template <class T, class... M>
+    decltype(auto) visit(T *self, M... members) const
+    {
+        return visit(Overloaded{bind_member(self, members)...});
+    }
+};
+
+/* the handler-seq node */
+struct Handlers : SyntaxExtra<Handlers> {
+    using SyntaxExtra<Handlers>::SyntaxExtra;
+    static bool accepts(syntax_kind k);
 };
 
 /* id-expression: one of conversion_function_id, literal_operator_id, operator_function_id, qualified_id, simple_template_id, template_id, unqualified_id */
@@ -3646,16 +4650,25 @@ struct InitCapture : SyntaxExtra<InitCapture> {
     Initializer initializer() const;
 };
 
-/* the init-declarator node */
+/* init-declarator: one of conversion_function_id, declarator, declarator_id, init_declarator, literal_operator_id, noptr_declarator, operator_function_id, ptr_declarator, qualified_id, simple_template_id, template_id, unqualified_id */
 struct InitDeclarator : SyntaxExtra<InitDeclarator> {
     using SyntaxExtra<InitDeclarator>::SyntaxExtra;
+    InitDeclarator() = default;
+    template <class V>
+        requires syntax_converts<V, InitDeclarator>
+    InitDeclarator(V v) : SyntaxExtra<InitDeclarator>(v.context(), v.index())
+    {
+    }
     static bool accepts(syntax_kind k);
-    Declarator declarator() const;
-    Initializer initializer() const;
-    RequiresClause requires_clause() const;
+    template <class F> decltype(auto) visit(F &&f) const;
+    template <class T, class... M>
+    decltype(auto) visit(T *self, M... members) const
+    {
+        return visit(Overloaded{bind_member(self, members)...});
+    }
 };
 
-/* init-declarator-list: one of init_declarator, init_declarator_list */
+/* init-declarator-list: one of conversion_function_id, declarator, declarator_id, init_declarator, init_declarator_list, literal_operator_id, noptr_declarator, operator_function_id, ptr_declarator, qualified_id, simple_template_id, template_id, unqualified_id */
 struct InitDeclaratorList : SyntaxExtra<InitDeclaratorList> {
     using SyntaxExtra<InitDeclaratorList>::SyntaxExtra;
     InitDeclaratorList() = default;
@@ -3735,11 +4748,27 @@ struct InitializerClause : SyntaxExtra<InitializerClause> {
 };
 
 /* the initializer-list node */
+struct InitializerClauses : SyntaxExtra<InitializerClauses> {
+    using SyntaxExtra<InitializerClauses>::SyntaxExtra;
+    static bool accepts(syntax_kind k);
+};
+
+/* initializer-list: one of additive_expression, and_expression, assignment_expression, await_expression, braced_init_list, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conditional_expression, conversion_function_id, delete_expression, equality_expression, exclusive_or_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, inclusive_or_expression, initializer_list, lambda_expression, literal_operator_id, logical_and_expression, logical_or_expression, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, throw_expression, unary_expression, unqualified_id, yield_expression */
 struct InitializerList : SyntaxExtra<InitializerList> {
     using SyntaxExtra<InitializerList>::SyntaxExtra;
+    InitializerList() = default;
+    template <class V>
+        requires syntax_converts<V, InitializerList>
+    InitializerList(V v) : SyntaxExtra<InitializerList>(v.context(), v.index())
+    {
+    }
     static bool accepts(syntax_kind k);
-    InitializerClause initializer_clause() const;
-    InitializerList initializer_list() const;
+    template <class F> decltype(auto) visit(F &&f) const;
+    template <class T, class... M>
+    decltype(auto) visit(T *self, M... members) const
+    {
+        return visit(Overloaded{bind_member(self, members)...});
+    }
 };
 
 /* the iteration-statement node */
@@ -3895,12 +4924,9 @@ struct LogicalOrOperation : SyntaxExtra<LogicalOrOperation> {
 struct MemInitializer : SyntaxExtra<MemInitializer> {
     using SyntaxExtra<MemInitializer>::SyntaxExtra;
     static bool accepts(syntax_kind k);
-    BracedInitList braced_init_list() const;
-    InitializerList expression_list() const;
-    MemInitializerId mem_initializer_id() const;
 };
 
-/* mem-initializer-id: one of class_or_decltype, decltype_specifier */
+/* mem-initializer-id: one of class_or_decltype, decltype_specifier, simple_template_id */
 struct MemInitializerId : SyntaxExtra<MemInitializerId> {
     using SyntaxExtra<MemInitializerId>::SyntaxExtra;
     MemInitializerId() = default;
@@ -3918,12 +4944,28 @@ struct MemInitializerId : SyntaxExtra<MemInitializerId> {
     }
 };
 
-/* the mem-initializer-list node */
+/* mem-initializer-list: one of mem_initializer, mem_initializer_list */
 struct MemInitializerList : SyntaxExtra<MemInitializerList> {
     using SyntaxExtra<MemInitializerList>::SyntaxExtra;
+    MemInitializerList() = default;
+    template <class V>
+        requires syntax_converts<V, MemInitializerList>
+    MemInitializerList(V v) : SyntaxExtra<MemInitializerList>(v.context(), v.index())
+    {
+    }
     static bool accepts(syntax_kind k);
-    MemInitializer mem_initializer() const;
-    MemInitializerList mem_initializer_list() const;
+    template <class F> decltype(auto) visit(F &&f) const;
+    template <class T, class... M>
+    decltype(auto) visit(T *self, M... members) const
+    {
+        return visit(Overloaded{bind_member(self, members)...});
+    }
+};
+
+/* the mem-initializer-list node */
+struct MemInitializers : SyntaxExtra<MemInitializers> {
+    using SyntaxExtra<MemInitializers>::SyntaxExtra;
+    static bool accepts(syntax_kind k);
 };
 
 /* member-declaration: one of alias_declaration, deduction_guide, empty_declaration, explicit_specialization, function_definition, member_declaration, opaque_enum_declaration, static_assert_declaration, template_declaration, using_declaration, using_enum_declaration */
@@ -3944,20 +4986,25 @@ struct MemberDeclaration : SyntaxExtra<MemberDeclaration> {
     }
 };
 
-/* the member-declarator node */
+/* member-declarator: one of conversion_function_id, declarator, declarator_id, literal_operator_id, member_declarator, noptr_declarator, operator_function_id, ptr_declarator, qualified_id, simple_template_id, template_id, unqualified_id */
 struct MemberDeclarator : SyntaxExtra<MemberDeclarator> {
     using SyntaxExtra<MemberDeclarator>::SyntaxExtra;
+    MemberDeclarator() = default;
+    template <class V>
+        requires syntax_converts<V, MemberDeclarator>
+    MemberDeclarator(V v) : SyntaxExtra<MemberDeclarator>(v.context(), v.index())
+    {
+    }
     static bool accepts(syntax_kind k);
-    AttributeSpecifierSeq attribute_specifier_seq() const;
-    BraceOrEqualInitializer brace_or_equal_initializer() const;
-    ConstantExpression constant_expression() const;
-    Declarator declarator() const;
-    PureSpecifier pure_specifier() const;
-    RequiresClause requires_clause() const;
-    VirtSpecifierSeq virt_specifier_seq() const;
+    template <class F> decltype(auto) visit(F &&f) const;
+    template <class T, class... M>
+    decltype(auto) visit(T *self, M... members) const
+    {
+        return visit(Overloaded{bind_member(self, members)...});
+    }
 };
 
-/* member-declarator-list: one of member_declarator, member_declarator_list */
+/* member-declarator-list: one of conversion_function_id, declarator, declarator_id, literal_operator_id, member_declarator, member_declarator_list, noptr_declarator, operator_function_id, ptr_declarator, qualified_id, simple_template_id, template_id, unqualified_id */
 struct MemberDeclaratorList : SyntaxExtra<MemberDeclaratorList> {
     using SyntaxExtra<MemberDeclaratorList>::SyntaxExtra;
     MemberDeclaratorList() = default;
@@ -3974,6 +5021,17 @@ struct MemberDeclaratorList : SyntaxExtra<MemberDeclaratorList> {
         return visit(Overloaded{bind_member(self, members)...});
     }
     SyntaxRange<MemberDeclarator> member_declarators() const;
+};
+
+/* the member-declarator node */
+struct MemberDeclaratorWithParts : SyntaxExtra<MemberDeclaratorWithParts> {
+    using SyntaxExtra<MemberDeclaratorWithParts>::SyntaxExtra;
+    static bool accepts(syntax_kind k);
+    AttributeSpecifierSeq attribute_specifier_seq() const;
+    BraceOrEqualInitializer brace_or_equal_initializer() const;
+    PureSpecifier pure_specifier() const;
+    RequiresClause requires_clause() const;
+    VirtSpecifierSeq virt_specifier_seq() const;
 };
 
 /* the member-declarator-list node */
@@ -4067,7 +5125,7 @@ struct MultiplicativeOperation : SyntaxExtra<MultiplicativeOperation> {
 struct NamedNamespaceDefinition : SyntaxExtra<NamedNamespaceDefinition> {
     using SyntaxExtra<NamedNamespaceDefinition>::SyntaxExtra;
     static bool accepts(syntax_kind k);
-    AttributeSpecifierSeq attribute_specifier_seq() const;
+    NamespaceBody namespace_body() const;
 };
 
 /* the namespace-alias-definition node */
@@ -4075,6 +5133,24 @@ struct NamespaceAliasDefinition : SyntaxExtra<NamespaceAliasDefinition> {
     using SyntaxExtra<NamespaceAliasDefinition>::SyntaxExtra;
     static bool accepts(syntax_kind k);
     QualifiedNamespaceSpecifier qualified_namespace_specifier() const;
+};
+
+/* namespace-body: one of alias_declaration, asm_declaration, attribute_declaration, declaration_seq, deduction_guide, empty_declaration, explicit_instantiation, explicit_specialization, export_declaration, function_definition, gnu_extension_declaration, linkage_specification, module_import_declaration, named_namespace_definition, namespace_alias_definition, nested_namespace_definition, opaque_enum_declaration, simple_declaration, static_assert_declaration, template_declaration, unnamed_namespace_definition, using_declaration, using_directive, using_enum_declaration */
+struct NamespaceBody : SyntaxExtra<NamespaceBody> {
+    using SyntaxExtra<NamespaceBody>::SyntaxExtra;
+    NamespaceBody() = default;
+    template <class V>
+        requires syntax_converts<V, NamespaceBody>
+    NamespaceBody(V v) : SyntaxExtra<NamespaceBody>(v.context(), v.index())
+    {
+    }
+    static bool accepts(syntax_kind k);
+    template <class F> decltype(auto) visit(F &&f) const;
+    template <class T, class... M>
+    decltype(auto) visit(T *self, M... members) const
+    {
+        return visit(Overloaded{bind_member(self, members)...});
+    }
 };
 
 /* namespace-definition: one of named_namespace_definition, nested_namespace_definition, unnamed_namespace_definition */
@@ -4108,6 +5184,7 @@ struct NestedNamespaceDefinition : SyntaxExtra<NestedNamespaceDefinition> {
     using SyntaxExtra<NestedNamespaceDefinition>::SyntaxExtra;
     static bool accepts(syntax_kind k);
     EnclosingNamespaceSpecifier enclosing_namespace_specifier() const;
+    NamespaceBody namespace_body() const;
 };
 
 /* the nested-requirement node */
@@ -4117,7 +5194,7 @@ struct NestedRequirement : SyntaxExtra<NestedRequirement> {
     ConstraintExpression constraint_expression() const;
 };
 
-/* new-declarator: one of new_declarator, noptr_new_declarator */
+/* new-declarator: one of new_declarator, noptr_new_declarator, ptr_operator */
 struct NewDeclarator : SyntaxExtra<NewDeclarator> {
     using SyntaxExtra<NewDeclarator>::SyntaxExtra;
     NewDeclarator() = default;
@@ -4167,7 +5244,7 @@ struct NewInitializer : SyntaxExtra<NewInitializer> {
 struct NewPlacement : SyntaxExtra<NewPlacement> {
     using SyntaxExtra<NewPlacement>::SyntaxExtra;
     static bool accepts(syntax_kind k);
-    InitializerList expression_list() const;
+    ExpressionList expression_list() const;
 };
 
 /* the new-type-id node */
@@ -4201,14 +5278,22 @@ struct NoptrAbstractDeclarator : SyntaxExtra<NoptrAbstractDeclarator> {
     ParametersAndQualifiers parameters_and_qualifiers() const;
 };
 
-/* the noptr-declarator node */
+/* noptr-declarator: one of conversion_function_id, declarator_id, literal_operator_id, noptr_declarator, operator_function_id, qualified_id, simple_template_id, template_id, unqualified_id */
 struct NoptrDeclarator : SyntaxExtra<NoptrDeclarator> {
     using SyntaxExtra<NoptrDeclarator>::SyntaxExtra;
+    NoptrDeclarator() = default;
+    template <class V>
+        requires syntax_converts<V, NoptrDeclarator>
+    NoptrDeclarator(V v) : SyntaxExtra<NoptrDeclarator>(v.context(), v.index())
+    {
+    }
     static bool accepts(syntax_kind k);
-    AttributeSpecifierSeq attribute_specifier_seq() const;
-    ConstantExpression constant_expression() const;
-    DeclaratorId declarator_id() const;
-    ParametersAndQualifiers parameters_and_qualifiers() const;
+    template <class F> decltype(auto) visit(F &&f) const;
+    template <class T, class... M>
+    decltype(auto) visit(T *self, M... members) const
+    {
+        return visit(Overloaded{bind_member(self, members)...});
+    }
 };
 
 /* the noptr-new-declarator node */
@@ -4239,9 +5324,6 @@ struct OperatorFunctionId : SyntaxExtra<OperatorFunctionId> {
 struct OperatorTemplateId : SyntaxExtra<OperatorTemplateId> {
     using SyntaxExtra<OperatorTemplateId>::SyntaxExtra;
     static bool accepts(syntax_kind k);
-    LiteralOperatorId literal_operator_id() const;
-    OperatorFunctionId operator_function_id() const;
-    TemplateArgumentList template_argument_list() const;
 };
 
 /* the function-body node */
@@ -4252,6 +5334,20 @@ struct OrdinaryFunctionBody : SyntaxExtra<OrdinaryFunctionBody> {
     CtorInitializer ctor_initializer() const;
 };
 
+/* the declarator-id node */
+struct PackDeclaratorId : SyntaxExtra<PackDeclaratorId> {
+    using SyntaxExtra<PackDeclaratorId>::SyntaxExtra;
+    static bool accepts(syntax_kind k);
+    IdExpression id_expression() const;
+};
+
+/* the parameter-declaration-clause node */
+struct ParameterClause : SyntaxExtra<ParameterClause> {
+    using SyntaxExtra<ParameterClause>::SyntaxExtra;
+    static bool accepts(syntax_kind k);
+    ParameterDeclarationList parameter_declaration_list() const;
+};
+
 /* the parameter-declaration node */
 struct ParameterDeclaration : SyntaxExtra<ParameterDeclaration> {
     using SyntaxExtra<ParameterDeclaration>::SyntaxExtra;
@@ -4259,15 +5355,24 @@ struct ParameterDeclaration : SyntaxExtra<ParameterDeclaration> {
     AbstractDeclarator abstract_declarator() const;
     AttributeSpecifierSeq attribute_specifier_seq() const;
     DeclSpecifierSeq decl_specifier_seq() const;
-    Declarator declarator() const;
-    InitializerClause initializer_clause() const;
 };
 
-/* the parameter-declaration-clause node */
+/* parameter-declaration-clause: one of parameter_declaration, parameter_declaration_clause, parameter_declaration_list */
 struct ParameterDeclarationClause : SyntaxExtra<ParameterDeclarationClause> {
     using SyntaxExtra<ParameterDeclarationClause>::SyntaxExtra;
+    ParameterDeclarationClause() = default;
+    template <class V>
+        requires syntax_converts<V, ParameterDeclarationClause>
+    ParameterDeclarationClause(V v) : SyntaxExtra<ParameterDeclarationClause>(v.context(), v.index())
+    {
+    }
     static bool accepts(syntax_kind k);
-    ParameterDeclarationList parameter_declaration_list() const;
+    template <class F> decltype(auto) visit(F &&f) const;
+    template <class T, class... M>
+    decltype(auto) visit(T *self, M... members) const
+    {
+        return visit(Overloaded{bind_member(self, members)...});
+    }
 };
 
 /* parameter-declaration-list: one of parameter_declaration, parameter_declaration_list */
@@ -4309,14 +5414,14 @@ struct ParametersAndQualifiers : SyntaxExtra<ParametersAndQualifiers> {
 struct ParenthesizedInitializer : SyntaxExtra<ParenthesizedInitializer> {
     using SyntaxExtra<ParenthesizedInitializer>::SyntaxExtra;
     static bool accepts(syntax_kind k);
-    InitializerList expression_list() const;
+    ExpressionList expression_list() const;
 };
 
 /* the new-initializer node */
 struct ParenthesizedNewInitializer : SyntaxExtra<ParenthesizedNewInitializer> {
     using SyntaxExtra<ParenthesizedNewInitializer>::SyntaxExtra;
     static bool accepts(syntax_kind k);
-    InitializerList expression_list() const;
+    ExpressionList expression_list() const;
 };
 
 /* the primary-expression node */
@@ -4355,8 +5460,12 @@ struct PmExpression : SyntaxExtra<PmExpression> {
 struct PointerAbstractDeclarator : SyntaxExtra<PointerAbstractDeclarator> {
     using SyntaxExtra<PointerAbstractDeclarator>::SyntaxExtra;
     static bool accepts(syntax_kind k);
-    PtrAbstractDeclarator ptr_abstract_declarator() const;
-    PtrOperator ptr_operator() const;
+};
+
+/* the conversion-declarator node */
+struct PointerConversionDeclarator : SyntaxExtra<PointerConversionDeclarator> {
+    using SyntaxExtra<PointerConversionDeclarator>::SyntaxExtra;
+    static bool accepts(syntax_kind k);
 };
 
 /* the ptr-declarator node */
@@ -4371,8 +5480,6 @@ struct PointerDeclarator : SyntaxExtra<PointerDeclarator> {
 struct PointerNewDeclarator : SyntaxExtra<PointerNewDeclarator> {
     using SyntaxExtra<PointerNewDeclarator>::SyntaxExtra;
     static bool accepts(syntax_kind k);
-    NewDeclarator new_declarator() const;
-    PtrOperator ptr_operator() const;
 };
 
 /* the pm-expression node */
@@ -4403,8 +5510,6 @@ struct PostfixExpression : SyntaxExtra<PostfixExpression> {
 struct PostfixOperation : SyntaxExtra<PostfixOperation> {
     using SyntaxExtra<PostfixOperation>::SyntaxExtra;
     static bool accepts(syntax_kind k);
-    InitializerList expression_list() const;
-    SimpleTypeSpecifier simple_type_specifier() const;
     TypeId type_id() const;
     TypenameSpecifier typename_specifier() const;
 };
@@ -4434,7 +5539,7 @@ struct PrivateModuleFragment : SyntaxExtra<PrivateModuleFragment> {
     DeclarationSeq declaration_seq() const;
 };
 
-/* ptr-abstract-declarator: one of noptr_abstract_declarator, ptr_abstract_declarator */
+/* ptr-abstract-declarator: one of noptr_abstract_declarator, ptr_abstract_declarator, ptr_operator */
 struct PtrAbstractDeclarator : SyntaxExtra<PtrAbstractDeclarator> {
     using SyntaxExtra<PtrAbstractDeclarator>::SyntaxExtra;
     PtrAbstractDeclarator() = default;
@@ -4452,7 +5557,7 @@ struct PtrAbstractDeclarator : SyntaxExtra<PtrAbstractDeclarator> {
     }
 };
 
-/* ptr-declarator: one of noptr_declarator, ptr_declarator */
+/* ptr-declarator: one of conversion_function_id, declarator_id, literal_operator_id, noptr_declarator, operator_function_id, ptr_declarator, qualified_id, simple_template_id, template_id, unqualified_id */
 struct PtrDeclarator : SyntaxExtra<PtrDeclarator> {
     using SyntaxExtra<PtrDeclarator>::SyntaxExtra;
     PtrDeclarator() = default;
@@ -4483,6 +5588,14 @@ struct PtrOperator : SyntaxExtra<PtrOperator> {
 struct PureSpecifier : SyntaxExtra<PureSpecifier> {
     using SyntaxExtra<PureSpecifier>::SyntaxExtra;
     static bool accepts(syntax_kind k);
+};
+
+/* the class-head-name node */
+struct QualifiedClassHeadName : SyntaxExtra<QualifiedClassHeadName> {
+    using SyntaxExtra<QualifiedClassHeadName>::SyntaxExtra;
+    static bool accepts(syntax_kind k);
+    SimpleTemplateId class_name() const;
+    NestedNameSpecifier nested_name_specifier() const;
 };
 
 /* the class-or-decltype node */
@@ -4679,7 +5792,7 @@ struct SimpleTypeName : SyntaxExtra<SimpleTypeName> {
     NestedNameSpecifier nested_name_specifier() const;
 };
 
-/* simple-type-specifier: one of clang_atomic_type_specifier, clang_bit_int_type_specifier, clang_type_transformation, decltype_specifier, placeholder_type_specifier, simple_type_specifier */
+/* simple-type-specifier: one of clang_atomic_type_specifier, clang_bit_int_type_specifier, clang_type_transformation, decltype_specifier, placeholder_type_specifier, simple_template_id, simple_type_specifier */
 struct SimpleTypeSpecifier : SyntaxExtra<SimpleTypeSpecifier> {
     using SyntaxExtra<SimpleTypeSpecifier>::SyntaxExtra;
     SimpleTypeSpecifier() = default;
@@ -4705,7 +5818,7 @@ struct StandardAttributeSpecifier : SyntaxExtra<StandardAttributeSpecifier> {
     AttributeUsingPrefix attribute_using_prefix() const;
 };
 
-/* statement: one of alias_declaration, asm_declaration, gnu_extension_declaration, labeled_statement, namespace_alias_definition, opaque_enum_declaration, simple_declaration, statement, static_assert_declaration, using_declaration, using_directive, using_enum_declaration */
+/* statement: one of alias_declaration, asm_declaration, compound_statement, coroutine_return_statement, expression_statement, gnu_computed_goto, gnu_extension_declaration, iteration_statement, jump_statement, labeled_statement, namespace_alias_definition, opaque_enum_declaration, selection_statement, simple_declaration, statement, static_assert_declaration, try_block, using_declaration, using_directive, using_enum_declaration */
 struct Statement : SyntaxExtra<Statement> {
     using SyntaxExtra<Statement>::SyntaxExtra;
     Statement() = default;
@@ -4723,7 +5836,7 @@ struct Statement : SyntaxExtra<Statement> {
     }
 };
 
-/* statement-seq: one of alias_declaration, asm_declaration, gnu_extension_declaration, labeled_statement, namespace_alias_definition, opaque_enum_declaration, simple_declaration, statement, statement_seq, static_assert_declaration, using_declaration, using_directive, using_enum_declaration */
+/* statement-seq: one of alias_declaration, asm_declaration, compound_statement, coroutine_return_statement, expression_statement, gnu_computed_goto, gnu_extension_declaration, iteration_statement, jump_statement, labeled_statement, namespace_alias_definition, opaque_enum_declaration, selection_statement, simple_declaration, statement, statement_seq, static_assert_declaration, try_block, using_declaration, using_directive, using_enum_declaration */
 struct StatementSeq : SyntaxExtra<StatementSeq> {
     using SyntaxExtra<StatementSeq>::SyntaxExtra;
     StatementSeq() = default;
@@ -4755,6 +5868,14 @@ struct StaticAssertDeclaration : SyntaxExtra<StaticAssertDeclaration> {
     ConstantExpression constant_expression() const;
 };
 
+/* the noptr-declarator node */
+struct SuffixedDeclarator : SyntaxExtra<SuffixedDeclarator> {
+    using SyntaxExtra<SuffixedDeclarator>::SyntaxExtra;
+    static bool accepts(syntax_kind k);
+    AttributeSpecifierSeq attribute_specifier_seq() const;
+    ParametersAndQualifiers parameters_and_qualifiers() const;
+};
+
 /* template-argument: one of additive_expression, and_expression, await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conditional_expression, conversion_function_id, delete_expression, equality_expression, exclusive_or_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, inclusive_or_expression, lambda_expression, literal_operator_id, logical_and_expression, logical_or_expression, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, type_id, unary_expression, unqualified_id */
 struct TemplateArgument : SyntaxExtra<TemplateArgument> {
     using SyntaxExtra<TemplateArgument>::SyntaxExtra;
@@ -4773,12 +5894,28 @@ struct TemplateArgument : SyntaxExtra<TemplateArgument> {
     }
 };
 
-/* the template-argument-list node */
+/* template-argument-list: one of additive_expression, and_expression, await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conditional_expression, conversion_function_id, delete_expression, equality_expression, exclusive_or_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, inclusive_or_expression, lambda_expression, literal_operator_id, logical_and_expression, logical_or_expression, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_argument_list, template_id, type_id, unary_expression, unqualified_id */
 struct TemplateArgumentList : SyntaxExtra<TemplateArgumentList> {
     using SyntaxExtra<TemplateArgumentList>::SyntaxExtra;
+    TemplateArgumentList() = default;
+    template <class V>
+        requires syntax_converts<V, TemplateArgumentList>
+    TemplateArgumentList(V v) : SyntaxExtra<TemplateArgumentList>(v.context(), v.index())
+    {
+    }
     static bool accepts(syntax_kind k);
-    TemplateArgument template_argument() const;
-    TemplateArgumentList template_argument_list() const;
+    template <class F> decltype(auto) visit(F &&f) const;
+    template <class T, class... M>
+    decltype(auto) visit(T *self, M... members) const
+    {
+        return visit(Overloaded{bind_member(self, members)...});
+    }
+};
+
+/* the template-argument-list node */
+struct TemplateArguments : SyntaxExtra<TemplateArguments> {
+    using SyntaxExtra<TemplateArguments>::SyntaxExtra;
+    static bool accepts(syntax_kind k);
 };
 
 /* the template-declaration node */
@@ -4886,6 +6023,7 @@ struct TrailingReturnDeclarator : SyntaxExtra<TrailingReturnDeclarator> {
     using SyntaxExtra<TrailingReturnDeclarator>::SyntaxExtra;
     static bool accepts(syntax_kind k);
     GnuAsmLabel gnu_asm_label() const;
+    GnuAttributeSpecifier gnu_attribute_specifier_seq() const;
     ParametersAndQualifiers parameters_and_qualifiers() const;
     TrailingReturnType trailing_return_type() const;
 };
@@ -4955,7 +6093,7 @@ struct TypeRequirement : SyntaxExtra<TypeRequirement> {
     SimpleTemplateId type_name() const;
 };
 
-/* type-specifier: one of clang_atomic_type_specifier, clang_bit_int_type_specifier, clang_type_transformation, decltype_specifier, elaborated_enum_specifier, elaborated_type_specifier, placeholder_type_specifier, simple_type_specifier, typename_specifier */
+/* type-specifier: one of clang_atomic_type_specifier, clang_bit_int_type_specifier, clang_type_transformation, decltype_specifier, elaborated_enum_specifier, elaborated_type_specifier, placeholder_type_specifier, simple_template_id, simple_type_specifier, typename_specifier */
 struct TypeSpecifier : SyntaxExtra<TypeSpecifier> {
     using SyntaxExtra<TypeSpecifier>::SyntaxExtra;
     TypeSpecifier() = default;
@@ -5019,7 +6157,7 @@ struct UnaryOperation : SyntaxExtra<UnaryOperation> {
 struct UnnamedNamespaceDefinition : SyntaxExtra<UnnamedNamespaceDefinition> {
     using SyntaxExtra<UnnamedNamespaceDefinition>::SyntaxExtra;
     static bool accepts(syntax_kind k);
-    AttributeSpecifierSeq attribute_specifier_seq() const;
+    NamespaceBody namespace_body() const;
 };
 
 /* the (unparsed) node */
@@ -5061,12 +6199,28 @@ struct UsingDeclarator : SyntaxExtra<UsingDeclarator> {
     UnqualifiedId unqualified_id() const;
 };
 
-/* the using-declarator-list node */
+/* using-declarator-list: one of using_declarator, using_declarator_list */
 struct UsingDeclaratorList : SyntaxExtra<UsingDeclaratorList> {
     using SyntaxExtra<UsingDeclaratorList>::SyntaxExtra;
+    UsingDeclaratorList() = default;
+    template <class V>
+        requires syntax_converts<V, UsingDeclaratorList>
+    UsingDeclaratorList(V v) : SyntaxExtra<UsingDeclaratorList>(v.context(), v.index())
+    {
+    }
     static bool accepts(syntax_kind k);
-    UsingDeclarator using_declarator() const;
-    UsingDeclaratorList using_declarator_list() const;
+    template <class F> decltype(auto) visit(F &&f) const;
+    template <class T, class... M>
+    decltype(auto) visit(T *self, M... members) const
+    {
+        return visit(Overloaded{bind_member(self, members)...});
+    }
+};
+
+/* the using-declarator-list node */
+struct UsingDeclarators : SyntaxExtra<UsingDeclarators> {
+    using SyntaxExtra<UsingDeclarators>::SyntaxExtra;
+    static bool accepts(syntax_kind k);
 };
 
 /* the using-directive node */
@@ -5102,7 +6256,7 @@ struct YieldExpression : SyntaxExtra<YieldExpression> {
 
 inline bool AbstractDeclarator::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0x0u, 0x1c000u, 0x0u, 0x0u};
+    static const uint64_t kinds[] = {0x0u, 0x1c100u, 0x0u, 0x0u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -5173,6 +6327,21 @@ inline bool AndOperation::accepts(syntax_kind k)
     return k == syntax_kind::and_expression;
 }
 
+inline bool AnnotatedBaseSpecifier::accepts(syntax_kind k)
+{
+    return k == syntax_kind::base_specifier;
+}
+
+inline AttributeSpecifierSeq AnnotatedBaseSpecifier::attribute_specifier_seq() const
+{
+    return first<AttributeSpecifierSeq>();
+}
+
+inline ClassOrDecltype AnnotatedBaseSpecifier::class_or_decltype() const
+{
+    return first<ClassOrDecltype>();
+}
+
 inline bool AsmDeclaration::accepts(syntax_kind k)
 {
     return k == syntax_kind::asm_declaration;
@@ -5201,17 +6370,13 @@ template <class F> decltype(auto) AssignmentExpression::visit(F &&f) const
 
 inline bool Attribute::accepts(syntax_kind k)
 {
-    return k == syntax_kind::attribute;
+    static const uint64_t kinds[] = {0x0u, 0x0u, 0x1800000u, 0x0u};
+    return syntax_kind_in(k, kinds);
 }
 
-inline AttributeArgumentClause Attribute::attribute_argument_clause() const
+template <class F> decltype(auto) Attribute::visit(F &&f) const
 {
-    return first<AttributeArgumentClause>();
-}
-
-inline AttributeScopedToken Attribute::attribute_token() const
-{
-    return first<AttributeScopedToken>();
+    return syntax_visit(*this, f);
 }
 
 inline bool AttributeArgumentClause::accepts(syntax_kind k)
@@ -5236,17 +6401,13 @@ inline AttributeSpecifierSeq AttributeDeclaration::attribute_specifier_seq() con
 
 inline bool AttributeList::accepts(syntax_kind k)
 {
-    return k == syntax_kind::attribute_list;
+    static const uint64_t kinds[] = {0x0u, 0x0u, 0x1c00000u, 0x0u};
+    return syntax_kind_in(k, kinds);
 }
 
-inline Attribute AttributeList::attribute() const
+template <class F> decltype(auto) AttributeList::visit(F &&f) const
 {
-    return first<Attribute>();
-}
-
-inline AttributeList AttributeList::attribute_list() const
-{
-    return first<AttributeList>();
+    return syntax_visit(*this, f);
 }
 
 inline bool AttributeScopedToken::accepts(syntax_kind k)
@@ -5267,22 +6428,38 @@ template <class F> decltype(auto) AttributeSpecifier::visit(F &&f) const
 
 inline bool AttributeSpecifierSeq::accepts(syntax_kind k)
 {
+    static const uint64_t kinds[] = {0x0u, 0x0u, 0x40000000001c0000u, 0x0u};
+    return syntax_kind_in(k, kinds);
+}
+
+template <class F> decltype(auto) AttributeSpecifierSeq::visit(F &&f) const
+{
+    return syntax_visit(*this, f);
+}
+
+inline bool AttributeSpecifiers::accepts(syntax_kind k)
+{
     return k == syntax_kind::attribute_specifier_seq;
-}
-
-inline AttributeSpecifier AttributeSpecifierSeq::attribute_specifier() const
-{
-    return first<AttributeSpecifier>();
-}
-
-inline AttributeSpecifierSeq AttributeSpecifierSeq::attribute_specifier_seq() const
-{
-    return first<AttributeSpecifierSeq>();
 }
 
 inline bool AttributeUsingPrefix::accepts(syntax_kind k)
 {
     return k == syntax_kind::attribute_using_prefix;
+}
+
+inline bool AttributeWithArguments::accepts(syntax_kind k)
+{
+    return k == syntax_kind::attribute;
+}
+
+inline AttributeArgumentClause AttributeWithArguments::attribute_argument_clause() const
+{
+    return first<AttributeArgumentClause>();
+}
+
+inline AttributeScopedToken AttributeWithArguments::attribute_token() const
+{
+    return first<AttributeScopedToken>();
 }
 
 inline bool AttributedStatement::accepts(syntax_kind k)
@@ -5323,6 +6500,11 @@ inline SelectionStatement AttributedStatement::selection_statement() const
 inline TryBlock AttributedStatement::try_block() const
 {
     return first<TryBlock>();
+}
+
+inline bool Attributes::accepts(syntax_kind k)
+{
+    return k == syntax_kind::attribute_list;
 }
 
 inline bool AwaitExpression::accepts(syntax_kind k)
@@ -5382,32 +6564,29 @@ inline BaseSpecifierList BaseClause::base_specifier_list() const
 
 inline bool BaseSpecifier::accepts(syntax_kind k)
 {
-    return k == syntax_kind::base_specifier;
+    static const uint64_t kinds[] = {0x2000u, 0x300000000000u, 0x1000000000u, 0x0u};
+    return syntax_kind_in(k, kinds);
 }
 
-inline AttributeSpecifierSeq BaseSpecifier::attribute_specifier_seq() const
+template <class F> decltype(auto) BaseSpecifier::visit(F &&f) const
 {
-    return first<AttributeSpecifierSeq>();
-}
-
-inline ClassOrDecltype BaseSpecifier::class_or_decltype() const
-{
-    return first<ClassOrDecltype>();
+    return syntax_visit(*this, f);
 }
 
 inline bool BaseSpecifierList::accepts(syntax_kind k)
 {
+    static const uint64_t kinds[] = {0x2000u, 0x380000000000u, 0x1000000000u, 0x0u};
+    return syntax_kind_in(k, kinds);
+}
+
+template <class F> decltype(auto) BaseSpecifierList::visit(F &&f) const
+{
+    return syntax_visit(*this, f);
+}
+
+inline bool BaseSpecifiers::accepts(syntax_kind k)
+{
     return k == syntax_kind::base_specifier_list;
-}
-
-inline BaseSpecifier BaseSpecifierList::base_specifier() const
-{
-    return first<BaseSpecifier>();
-}
-
-inline BaseSpecifierList BaseSpecifierList::base_specifier_list() const
-{
-    return first<BaseSpecifierList>();
 }
 
 inline bool BlockDeclaration::accepts(syntax_kind k)
@@ -5440,16 +6619,6 @@ inline bool BracedInitList::accepts(syntax_kind k)
 inline DesignatedInitializerList BracedInitList::designated_initializer_list() const
 {
     return first<DesignatedInitializerList>();
-}
-
-inline GnuInitializerList BracedInitList::gnu_initializer_list() const
-{
-    return first<GnuInitializerList>();
-}
-
-inline InitializerList BracedInitList::initializer_list() const
-{
-    return first<InitializerList>();
 }
 
 inline bool Capture::accepts(syntax_kind k)
@@ -5569,9 +6738,36 @@ inline bool ClangSourceLocationExpression::accepts(syntax_kind k)
     return k == syntax_kind::clang_source_location_expression;
 }
 
+inline bool ClangTypeTraitArgument::accepts(syntax_kind k)
+{
+    static const uint64_t kinds[] = {0xfffe081ff8000000u, 0x1c000000001001u, 0x30003000000000u, 0xec70u};
+    return syntax_kind_in(k, kinds);
+}
+
+template <class F> decltype(auto) ClangTypeTraitArgument::visit(F &&f) const
+{
+    return syntax_visit(*this, f);
+}
+
+inline bool ClangTypeTraitArgumentList::accepts(syntax_kind k)
+{
+    static const uint64_t kinds[] = {0xfffe081ff8000000u, 0x1c000000001001u, 0x30003000000000u, 0xec70u};
+    return syntax_kind_in(k, kinds);
+}
+
+template <class F> decltype(auto) ClangTypeTraitArgumentList::visit(F &&f) const
+{
+    return syntax_visit(*this, f);
+}
+
 inline bool ClangTypeTraitExpression::accepts(syntax_kind k)
 {
     return k == syntax_kind::clang_type_trait_expression;
+}
+
+inline ClangTypeTraitArgumentList ClangTypeTraitExpression::clang_type_trait_argument_list() const
+{
+    return first<ClangTypeTraitArgumentList>();
 }
 
 inline bool ClangTypeTransformation::accepts(syntax_kind k)
@@ -5606,22 +6802,18 @@ inline ClassHeadName ClassHead::class_head_name() const
 
 inline bool ClassHeadName::accepts(syntax_kind k)
 {
-    return k == syntax_kind::class_head_name;
+    static const uint64_t kinds[] = {0x0u, 0x800000000u, 0x1000000000u, 0x0u};
+    return syntax_kind_in(k, kinds);
 }
 
-inline SimpleTemplateId ClassHeadName::class_name() const
+template <class F> decltype(auto) ClassHeadName::visit(F &&f) const
 {
-    return first<SimpleTemplateId>();
-}
-
-inline NestedNameSpecifier ClassHeadName::nested_name_specifier() const
-{
-    return first<NestedNameSpecifier>();
+    return syntax_visit(*this, f);
 }
 
 inline bool ClassOrDecltype::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0x2000u, 0x200000000000u, 0x0u, 0x0u};
+    static const uint64_t kinds[] = {0x2000u, 0x200000000000u, 0x1000000000u, 0x0u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -5804,17 +6996,13 @@ template <class F> decltype(auto) ConstraintLogicalOrExpression::visit(F &&f) co
 
 inline bool ConversionDeclarator::accepts(syntax_kind k)
 {
-    return k == syntax_kind::conversion_declarator;
+    static const uint64_t kinds[] = {0x0u, 0x40000000000100u, 0x0u, 0x0u};
+    return syntax_kind_in(k, kinds);
 }
 
-inline ConversionDeclarator ConversionDeclarator::conversion_declarator() const
+template <class F> decltype(auto) ConversionDeclarator::visit(F &&f) const
 {
-    return first<ConversionDeclarator>();
-}
-
-inline PtrOperator ConversionDeclarator::ptr_operator() const
-{
-    return first<PtrOperator>();
+    return syntax_visit(*this, f);
 }
 
 inline bool ConversionFunctionId::accepts(syntax_kind k)
@@ -5829,15 +7017,26 @@ inline ConversionTypeId ConversionFunctionId::conversion_type_id() const
 
 inline bool ConversionTypeId::accepts(syntax_kind k)
 {
+    static const uint64_t kinds[] = {0x100u, 0x20000000000000u, 0x0u, 0x0u};
+    return syntax_kind_in(k, kinds);
+}
+
+template <class F> decltype(auto) ConversionTypeId::visit(F &&f) const
+{
+    return syntax_visit(*this, f);
+}
+
+inline bool ConversionTypeWithDeclarator::accepts(syntax_kind k)
+{
     return k == syntax_kind::conversion_type_id;
 }
 
-inline ConversionDeclarator ConversionTypeId::conversion_declarator() const
+inline ConversionDeclarator ConversionTypeWithDeclarator::conversion_declarator() const
 {
     return first<ConversionDeclarator>();
 }
 
-inline TypeSpecifierSeq ConversionTypeId::type_specifier_seq() const
+inline TypeSpecifierSeq ConversionTypeWithDeclarator::type_specifier_seq() const
 {
     return first<TypeSpecifierSeq>();
 }
@@ -5874,7 +7073,7 @@ inline CvQualifierSeq CvQualifierSeq::cv_qualifier_seq() const
 
 inline bool DeclSpecifier::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0x1fc00u, 0x2000000000000u, 0x4000008000000000u, 0x31000u};
+    static const uint64_t kinds[] = {0x1fc00u, 0x2000000000000u, 0x4000009000000000u, 0x31000u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -5886,16 +7085,6 @@ template <class F> decltype(auto) DeclSpecifier::visit(F &&f) const
 inline bool DeclSpecifierSeq::accepts(syntax_kind k)
 {
     return k == syntax_kind::decl_specifier_seq;
-}
-
-inline AttributeSpecifierSeq DeclSpecifierSeq::attribute_specifier_seq() const
-{
-    return first<AttributeSpecifierSeq>();
-}
-
-inline DeclSpecifier DeclSpecifierSeq::decl_specifier() const
-{
-    return first<DeclSpecifier>();
 }
 
 inline DeclSpecifierSeq DeclSpecifierSeq::decl_specifier_seq() const
@@ -5952,7 +7141,7 @@ inline bool Declarations::accepts(syntax_kind k)
 
 inline bool Declarator::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0x0u, 0x70u, 0x0u, 0x0u};
+    static const uint64_t kinds[] = {0x18000000u, 0x1c0000000000f0u, 0x3000000000u, 0x0u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -5963,12 +7152,33 @@ template <class F> decltype(auto) Declarator::visit(F &&f) const
 
 inline bool DeclaratorId::accepts(syntax_kind k)
 {
-    return k == syntax_kind::declarator_id;
+    static const uint64_t kinds[] = {0x18000000u, 0x1c000000000080u, 0x3000000000u, 0x0u};
+    return syntax_kind_in(k, kinds);
 }
 
-inline IdExpression DeclaratorId::id_expression() const
+template <class F> decltype(auto) DeclaratorId::visit(F &&f) const
 {
-    return first<IdExpression>();
+    return syntax_visit(*this, f);
+}
+
+inline bool DeclaratorWithInitializer::accepts(syntax_kind k)
+{
+    return k == syntax_kind::init_declarator;
+}
+
+inline Declarator DeclaratorWithInitializer::declarator() const
+{
+    return first<Declarator>();
+}
+
+inline Initializer DeclaratorWithInitializer::initializer() const
+{
+    return first<Initializer>();
+}
+
+inline RequiresClause DeclaratorWithInitializer::requires_clause() const
+{
+    return first<RequiresClause>();
 }
 
 inline bool DecltypeSpecifier::accepts(syntax_kind k)
@@ -6033,7 +7243,7 @@ inline DefiningTypeSpecifierSeq DefiningTypeId::defining_type_specifier_seq() co
 
 inline bool DefiningTypeSpecifier::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0x1fc00u, 0x0u, 0x8000000000u, 0x31000u};
+    static const uint64_t kinds[] = {0x1fc00u, 0x0u, 0x9000000000u, 0x31000u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -6448,13 +7658,15 @@ template <class F> decltype(auto) Expression::visit(F &&f) const
     return syntax_visit(*this, f);
 }
 
-inline SyntaxRange<AssignmentExpression> Expression::assignment_expressions() const
+inline bool ExpressionList::accepts(syntax_kind k)
 {
-    if (!*this)
-        return {};
-    if (is(syntax_kind::expression))
-        return SyntaxRange<AssignmentExpression>(context(), children(), size());
-    return SyntaxRange<AssignmentExpression>(context(), child());
+    static const uint64_t kinds[] = {0xfffe081ff8000000u, 0x1c000006000001u, 0x30003000000000u, 0xec70u};
+    return syntax_kind_in(k, kinds);
+}
+
+template <class F> decltype(auto) ExpressionList::visit(F &&f) const
+{
+    return syntax_visit(*this, f);
 }
 
 inline bool ExpressionStatement::accepts(syntax_kind k)
@@ -6589,24 +7801,31 @@ inline bool GnuAttribute::accepts(syntax_kind k)
     return k == syntax_kind::gnu_attribute;
 }
 
-inline InitializerList GnuAttribute::gnu_attribute_arguments() const
+inline GnuAttributeArguments GnuAttribute::gnu_attribute_arguments() const
 {
-    return first<InitializerList>();
+    return first<GnuAttributeArguments>();
+}
+
+inline bool GnuAttributeArguments::accepts(syntax_kind k)
+{
+    static const uint64_t kinds[] = {0xfffe081ff8000000u, 0x1c000006000001u, 0x30003000000000u, 0xec70u};
+    return syntax_kind_in(k, kinds);
+}
+
+template <class F> decltype(auto) GnuAttributeArguments::visit(F &&f) const
+{
+    return syntax_visit(*this, f);
 }
 
 inline bool GnuAttributeList::accepts(syntax_kind k)
 {
-    return k == syntax_kind::gnu_attribute_list;
+    static const uint64_t kinds[] = {0x0u, 0x0u, 0x8000000000000000u, 0x1u};
+    return syntax_kind_in(k, kinds);
 }
 
-inline GnuAttribute GnuAttributeList::gnu_attribute() const
+template <class F> decltype(auto) GnuAttributeList::visit(F &&f) const
 {
-    return first<GnuAttribute>();
-}
-
-inline GnuAttributeList GnuAttributeList::gnu_attribute_list() const
-{
-    return first<GnuAttributeList>();
+    return syntax_visit(*this, f);
 }
 
 inline bool GnuAttributeSpecifier::accepts(syntax_kind k)
@@ -6617,6 +7836,11 @@ inline bool GnuAttributeSpecifier::accepts(syntax_kind k)
 inline GnuAttributeList GnuAttributeSpecifier::gnu_attribute_list() const
 {
     return first<GnuAttributeList>();
+}
+
+inline bool GnuAttributes::accepts(syntax_kind k)
+{
+    return k == syntax_kind::gnu_attribute_list;
 }
 
 inline bool GnuCompoundLiteral::accepts(syntax_kind k)
@@ -6670,24 +7894,25 @@ inline bool GnuExtensionExpression::accepts(syntax_kind k)
     return k == syntax_kind::gnu_extension_expression;
 }
 
-inline bool GnuInitializerList::accepts(syntax_kind k)
+inline bool GnuInitializerClauses::accepts(syntax_kind k)
 {
     return k == syntax_kind::gnu_initializer_list;
 }
 
-inline GnuDesignation GnuInitializerList::gnu_designation() const
+inline GnuDesignation GnuInitializerClauses::gnu_designation() const
 {
     return first<GnuDesignation>();
 }
 
-inline GnuInitializerList GnuInitializerList::gnu_initializer_list() const
+inline bool GnuInitializerList::accepts(syntax_kind k)
 {
-    return first<GnuInitializerList>();
+    static const uint64_t kinds[] = {0xfffe081ff8000000u, 0x1c000002000001u, 0x30003000000000u, 0xed70u};
+    return syntax_kind_in(k, kinds);
 }
 
-inline InitializerClause GnuInitializerList::initializer_clause() const
+template <class F> decltype(auto) GnuInitializerList::visit(F &&f) const
 {
-    return first<InitializerClause>();
+    return syntax_visit(*this, f);
 }
 
 inline bool GnuLabelAddress::accepts(syntax_kind k)
@@ -6698,6 +7923,11 @@ inline bool GnuLabelAddress::accepts(syntax_kind k)
 inline bool GnuOffsetofExpression::accepts(syntax_kind k)
 {
     return k == syntax_kind::gnu_offsetof_expression;
+}
+
+inline Expression GnuOffsetofExpression::expression() const
+{
+    return first<Expression>();
 }
 
 inline TypeId GnuOffsetofExpression::type_id() const
@@ -6732,17 +7962,18 @@ inline ExceptionDeclaration Handler::exception_declaration() const
 
 inline bool HandlerSeq::accepts(syntax_kind k)
 {
+    static const uint64_t kinds[] = {0x0u, 0x0u, 0x18u, 0x0u};
+    return syntax_kind_in(k, kinds);
+}
+
+template <class F> decltype(auto) HandlerSeq::visit(F &&f) const
+{
+    return syntax_visit(*this, f);
+}
+
+inline bool Handlers::accepts(syntax_kind k)
+{
     return k == syntax_kind::handler_seq;
-}
-
-inline Handler HandlerSeq::handler() const
-{
-    return first<Handler>();
-}
-
-inline HandlerSeq HandlerSeq::handler_seq() const
-{
-    return first<HandlerSeq>();
 }
 
 inline bool IdExpression::accepts(syntax_kind k)
@@ -6794,27 +8025,18 @@ inline Initializer InitCapture::initializer() const
 
 inline bool InitDeclarator::accepts(syntax_kind k)
 {
-    return k == syntax_kind::init_declarator;
+    static const uint64_t kinds[] = {0x18000000u, 0x1c0000000000f8u, 0x3000000000u, 0x0u};
+    return syntax_kind_in(k, kinds);
 }
 
-inline Declarator InitDeclarator::declarator() const
+template <class F> decltype(auto) InitDeclarator::visit(F &&f) const
 {
-    return first<Declarator>();
-}
-
-inline Initializer InitDeclarator::initializer() const
-{
-    return first<Initializer>();
-}
-
-inline RequiresClause InitDeclarator::requires_clause() const
-{
-    return first<RequiresClause>();
+    return syntax_visit(*this, f);
 }
 
 inline bool InitDeclaratorList::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0x0u, 0xcu, 0x0u, 0x0u};
+    static const uint64_t kinds[] = {0x18000000u, 0x1c0000000000fcu, 0x3000000000u, 0x0u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -6870,19 +8092,20 @@ template <class F> decltype(auto) InitializerClause::visit(F &&f) const
     return syntax_visit(*this, f);
 }
 
-inline bool InitializerList::accepts(syntax_kind k)
+inline bool InitializerClauses::accepts(syntax_kind k)
 {
     return k == syntax_kind::initializer_list;
 }
 
-inline InitializerClause InitializerList::initializer_clause() const
+inline bool InitializerList::accepts(syntax_kind k)
 {
-    return first<InitializerClause>();
+    static const uint64_t kinds[] = {0xfffe081ff8000000u, 0x1c000006000001u, 0x30003000000000u, 0xec70u};
+    return syntax_kind_in(k, kinds);
 }
 
-inline InitializerList InitializerList::initializer_list() const
+template <class F> decltype(auto) InitializerList::visit(F &&f) const
 {
-    return first<InitializerList>();
+    return syntax_visit(*this, f);
 }
 
 inline bool IterationStatement::accepts(syntax_kind k)
@@ -7069,24 +8292,9 @@ inline bool MemInitializer::accepts(syntax_kind k)
     return k == syntax_kind::mem_initializer;
 }
 
-inline BracedInitList MemInitializer::braced_init_list() const
-{
-    return first<BracedInitList>();
-}
-
-inline InitializerList MemInitializer::expression_list() const
-{
-    return first<InitializerList>();
-}
-
-inline MemInitializerId MemInitializer::mem_initializer_id() const
-{
-    return first<MemInitializerId>();
-}
-
 inline bool MemInitializerId::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0x2000u, 0x200000000000u, 0x0u, 0x0u};
+    static const uint64_t kinds[] = {0x2000u, 0x200000000000u, 0x1000000000u, 0x0u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -7097,17 +8305,18 @@ template <class F> decltype(auto) MemInitializerId::visit(F &&f) const
 
 inline bool MemInitializerList::accepts(syntax_kind k)
 {
+    static const uint64_t kinds[] = {0x0u, 0x1800000000000u, 0x0u, 0x0u};
+    return syntax_kind_in(k, kinds);
+}
+
+template <class F> decltype(auto) MemInitializerList::visit(F &&f) const
+{
+    return syntax_visit(*this, f);
+}
+
+inline bool MemInitializers::accepts(syntax_kind k)
+{
     return k == syntax_kind::mem_initializer_list;
-}
-
-inline MemInitializer MemInitializerList::mem_initializer() const
-{
-    return first<MemInitializer>();
-}
-
-inline MemInitializerList MemInitializerList::mem_initializer_list() const
-{
-    return first<MemInitializerList>();
 }
 
 inline bool MemberDeclaration::accepts(syntax_kind k)
@@ -7123,47 +8332,18 @@ template <class F> decltype(auto) MemberDeclaration::visit(F &&f) const
 
 inline bool MemberDeclarator::accepts(syntax_kind k)
 {
-    return k == syntax_kind::member_declarator;
+    static const uint64_t kinds[] = {0x18000000u, 0x1c0080000000f0u, 0x3000000000u, 0x0u};
+    return syntax_kind_in(k, kinds);
 }
 
-inline AttributeSpecifierSeq MemberDeclarator::attribute_specifier_seq() const
+template <class F> decltype(auto) MemberDeclarator::visit(F &&f) const
 {
-    return first<AttributeSpecifierSeq>();
-}
-
-inline BraceOrEqualInitializer MemberDeclarator::brace_or_equal_initializer() const
-{
-    return first<BraceOrEqualInitializer>();
-}
-
-inline ConstantExpression MemberDeclarator::constant_expression() const
-{
-    return first<ConstantExpression>();
-}
-
-inline Declarator MemberDeclarator::declarator() const
-{
-    return first<Declarator>();
-}
-
-inline PureSpecifier MemberDeclarator::pure_specifier() const
-{
-    return first<PureSpecifier>();
-}
-
-inline RequiresClause MemberDeclarator::requires_clause() const
-{
-    return first<RequiresClause>();
-}
-
-inline VirtSpecifierSeq MemberDeclarator::virt_specifier_seq() const
-{
-    return first<VirtSpecifierSeq>();
+    return syntax_visit(*this, f);
 }
 
 inline bool MemberDeclaratorList::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0x0u, 0xc000000000u, 0x0u, 0x0u};
+    static const uint64_t kinds[] = {0x18000000u, 0x1c00c0000000f0u, 0x3000000000u, 0x0u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -7179,6 +8359,36 @@ inline SyntaxRange<MemberDeclarator> MemberDeclaratorList::member_declarators() 
     if (is(syntax_kind::member_declarator_list))
         return SyntaxRange<MemberDeclarator>(context(), children(), size());
     return SyntaxRange<MemberDeclarator>(context(), child());
+}
+
+inline bool MemberDeclaratorWithParts::accepts(syntax_kind k)
+{
+    return k == syntax_kind::member_declarator;
+}
+
+inline AttributeSpecifierSeq MemberDeclaratorWithParts::attribute_specifier_seq() const
+{
+    return first<AttributeSpecifierSeq>();
+}
+
+inline BraceOrEqualInitializer MemberDeclaratorWithParts::brace_or_equal_initializer() const
+{
+    return first<BraceOrEqualInitializer>();
+}
+
+inline PureSpecifier MemberDeclaratorWithParts::pure_specifier() const
+{
+    return first<PureSpecifier>();
+}
+
+inline RequiresClause MemberDeclaratorWithParts::requires_clause() const
+{
+    return first<RequiresClause>();
+}
+
+inline VirtSpecifierSeq MemberDeclaratorWithParts::virt_specifier_seq() const
+{
+    return first<VirtSpecifierSeq>();
 }
 
 inline bool MemberDeclarators::accepts(syntax_kind k)
@@ -7317,9 +8527,9 @@ inline bool NamedNamespaceDefinition::accepts(syntax_kind k)
     return k == syntax_kind::named_namespace_definition;
 }
 
-inline AttributeSpecifierSeq NamedNamespaceDefinition::attribute_specifier_seq() const
+inline NamespaceBody NamedNamespaceDefinition::namespace_body() const
 {
-    return first<AttributeSpecifierSeq>();
+    return first<NamespaceBody>();
 }
 
 inline bool NamespaceAliasDefinition::accepts(syntax_kind k)
@@ -7330,6 +8540,17 @@ inline bool NamespaceAliasDefinition::accepts(syntax_kind k)
 inline QualifiedNamespaceSpecifier NamespaceAliasDefinition::qualified_namespace_specifier() const
 {
     return first<QualifiedNamespaceSpecifier>();
+}
+
+inline bool NamespaceBody::accepts(syntax_kind k)
+{
+    static const uint64_t kinds[] = {0x208007eu, 0x40000000u, 0x30e00100275c0u, 0x8u};
+    return syntax_kind_in(k, kinds);
+}
+
+template <class F> decltype(auto) NamespaceBody::visit(F &&f) const
+{
+    return syntax_visit(*this, f);
 }
 
 inline bool NamespaceDefinition::accepts(syntax_kind k)
@@ -7368,6 +8589,11 @@ inline EnclosingNamespaceSpecifier NestedNamespaceDefinition::enclosing_namespac
     return first<EnclosingNamespaceSpecifier>();
 }
 
+inline NamespaceBody NestedNamespaceDefinition::namespace_body() const
+{
+    return first<NamespaceBody>();
+}
+
 inline bool NestedRequirement::accepts(syntax_kind k)
 {
     return k == syntax_kind::nested_requirement;
@@ -7380,7 +8606,7 @@ inline ConstraintExpression NestedRequirement::constraint_expression() const
 
 inline bool NewDeclarator::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0xc00000000000u, 0x0u, 0x0u, 0x0u};
+    static const uint64_t kinds[] = {0xc00000000000u, 0x100u, 0x0u, 0x0u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -7430,9 +8656,9 @@ inline bool NewPlacement::accepts(syntax_kind k)
     return k == syntax_kind::new_placement;
 }
 
-inline InitializerList NewPlacement::expression_list() const
+inline ExpressionList NewPlacement::expression_list() const
 {
-    return first<InitializerList>();
+    return first<ExpressionList>();
 }
 
 inline bool NewTypeId::accepts(syntax_kind k)
@@ -7492,27 +8718,13 @@ inline ParametersAndQualifiers NoptrAbstractDeclarator::parameters_and_qualifier
 
 inline bool NoptrDeclarator::accepts(syntax_kind k)
 {
-    return k == syntax_kind::noptr_declarator;
+    static const uint64_t kinds[] = {0x18000000u, 0x1c0000000000c0u, 0x3000000000u, 0x0u};
+    return syntax_kind_in(k, kinds);
 }
 
-inline AttributeSpecifierSeq NoptrDeclarator::attribute_specifier_seq() const
+template <class F> decltype(auto) NoptrDeclarator::visit(F &&f) const
 {
-    return first<AttributeSpecifierSeq>();
-}
-
-inline ConstantExpression NoptrDeclarator::constant_expression() const
-{
-    return first<ConstantExpression>();
-}
-
-inline DeclaratorId NoptrDeclarator::declarator_id() const
-{
-    return first<DeclaratorId>();
-}
-
-inline ParametersAndQualifiers NoptrDeclarator::parameters_and_qualifiers() const
-{
-    return first<ParametersAndQualifiers>();
+    return syntax_visit(*this, f);
 }
 
 inline bool NoptrNewDeclarator::accepts(syntax_kind k)
@@ -7565,21 +8777,6 @@ inline bool OperatorTemplateId::accepts(syntax_kind k)
     return k == syntax_kind::template_id;
 }
 
-inline LiteralOperatorId OperatorTemplateId::literal_operator_id() const
-{
-    return first<LiteralOperatorId>();
-}
-
-inline OperatorFunctionId OperatorTemplateId::operator_function_id() const
-{
-    return first<OperatorFunctionId>();
-}
-
-inline TemplateArgumentList OperatorTemplateId::template_argument_list() const
-{
-    return first<TemplateArgumentList>();
-}
-
 inline bool OrdinaryFunctionBody::accepts(syntax_kind k)
 {
     return k == syntax_kind::function_body;
@@ -7593,6 +8790,26 @@ inline CompoundStatement OrdinaryFunctionBody::compound_statement() const
 inline CtorInitializer OrdinaryFunctionBody::ctor_initializer() const
 {
     return first<CtorInitializer>();
+}
+
+inline bool PackDeclaratorId::accepts(syntax_kind k)
+{
+    return k == syntax_kind::declarator_id;
+}
+
+inline IdExpression PackDeclaratorId::id_expression() const
+{
+    return first<IdExpression>();
+}
+
+inline bool ParameterClause::accepts(syntax_kind k)
+{
+    return k == syntax_kind::parameter_declaration_clause;
+}
+
+inline ParameterDeclarationList ParameterClause::parameter_declaration_list() const
+{
+    return first<ParameterDeclarationList>();
 }
 
 inline bool ParameterDeclaration::accepts(syntax_kind k)
@@ -7615,24 +8832,15 @@ inline DeclSpecifierSeq ParameterDeclaration::decl_specifier_seq() const
     return first<DeclSpecifierSeq>();
 }
 
-inline Declarator ParameterDeclaration::declarator() const
-{
-    return first<Declarator>();
-}
-
-inline InitializerClause ParameterDeclaration::initializer_clause() const
-{
-    return first<InitializerClause>();
-}
-
 inline bool ParameterDeclarationClause::accepts(syntax_kind k)
 {
-    return k == syntax_kind::parameter_declaration_clause;
+    static const uint64_t kinds[] = {0x0u, 0xe0000u, 0x0u, 0x0u};
+    return syntax_kind_in(k, kinds);
 }
 
-inline ParameterDeclarationList ParameterDeclarationClause::parameter_declaration_list() const
+template <class F> decltype(auto) ParameterDeclarationClause::visit(F &&f) const
 {
-    return first<ParameterDeclarationList>();
+    return syntax_visit(*this, f);
 }
 
 inline bool ParameterDeclarationList::accepts(syntax_kind k)
@@ -7690,9 +8898,9 @@ inline bool ParenthesizedInitializer::accepts(syntax_kind k)
     return k == syntax_kind::initializer;
 }
 
-inline InitializerList ParenthesizedInitializer::expression_list() const
+inline ExpressionList ParenthesizedInitializer::expression_list() const
 {
-    return first<InitializerList>();
+    return first<ExpressionList>();
 }
 
 inline bool ParenthesizedNewInitializer::accepts(syntax_kind k)
@@ -7700,9 +8908,9 @@ inline bool ParenthesizedNewInitializer::accepts(syntax_kind k)
     return k == syntax_kind::new_initializer;
 }
 
-inline InitializerList ParenthesizedNewInitializer::expression_list() const
+inline ExpressionList ParenthesizedNewInitializer::expression_list() const
 {
-    return first<InitializerList>();
+    return first<ExpressionList>();
 }
 
 inline bool ParenthesizedOrThis::accepts(syntax_kind k)
@@ -7741,14 +8949,9 @@ inline bool PointerAbstractDeclarator::accepts(syntax_kind k)
     return k == syntax_kind::ptr_abstract_declarator;
 }
 
-inline PtrAbstractDeclarator PointerAbstractDeclarator::ptr_abstract_declarator() const
+inline bool PointerConversionDeclarator::accepts(syntax_kind k)
 {
-    return first<PtrAbstractDeclarator>();
-}
-
-inline PtrOperator PointerAbstractDeclarator::ptr_operator() const
-{
-    return first<PtrOperator>();
+    return k == syntax_kind::conversion_declarator;
 }
 
 inline bool PointerDeclarator::accepts(syntax_kind k)
@@ -7771,16 +8974,6 @@ inline bool PointerNewDeclarator::accepts(syntax_kind k)
     return k == syntax_kind::new_declarator;
 }
 
-inline NewDeclarator PointerNewDeclarator::new_declarator() const
-{
-    return first<NewDeclarator>();
-}
-
-inline PtrOperator PointerNewDeclarator::ptr_operator() const
-{
-    return first<PtrOperator>();
-}
-
 inline bool PointerToMemberOperation::accepts(syntax_kind k)
 {
     return k == syntax_kind::pm_expression;
@@ -7800,16 +8993,6 @@ template <class F> decltype(auto) PostfixExpression::visit(F &&f) const
 inline bool PostfixOperation::accepts(syntax_kind k)
 {
     return k == syntax_kind::postfix_expression;
-}
-
-inline InitializerList PostfixOperation::expression_list() const
-{
-    return first<InitializerList>();
-}
-
-inline SimpleTypeSpecifier PostfixOperation::simple_type_specifier() const
-{
-    return first<SimpleTypeSpecifier>();
 }
 
 inline TypeId PostfixOperation::type_id() const
@@ -7845,7 +9028,7 @@ inline DeclarationSeq PrivateModuleFragment::declaration_seq() const
 
 inline bool PtrAbstractDeclarator::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0x0u, 0x18000u, 0x0u, 0x0u};
+    static const uint64_t kinds[] = {0x0u, 0x18100u, 0x0u, 0x0u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -7856,7 +9039,7 @@ template <class F> decltype(auto) PtrAbstractDeclarator::visit(F &&f) const
 
 inline bool PtrDeclarator::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0x0u, 0x60u, 0x0u, 0x0u};
+    static const uint64_t kinds[] = {0x18000000u, 0x1c0000000000e0u, 0x3000000000u, 0x0u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -7888,6 +9071,21 @@ inline NestedNameSpecifier PtrOperator::nested_name_specifier() const
 inline bool PureSpecifier::accepts(syntax_kind k)
 {
     return k == syntax_kind::pure_specifier;
+}
+
+inline bool QualifiedClassHeadName::accepts(syntax_kind k)
+{
+    return k == syntax_kind::class_head_name;
+}
+
+inline SimpleTemplateId QualifiedClassHeadName::class_name() const
+{
+    return first<SimpleTemplateId>();
+}
+
+inline NestedNameSpecifier QualifiedClassHeadName::nested_name_specifier() const
+{
+    return first<NestedNameSpecifier>();
 }
 
 inline bool QualifiedClassName::accepts(syntax_kind k)
@@ -8125,7 +9323,7 @@ inline NestedNameSpecifier SimpleTypeName::nested_name_specifier() const
 
 inline bool SimpleTypeSpecifier::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0x6400u, 0x0u, 0x0u, 0x31000u};
+    static const uint64_t kinds[] = {0x6400u, 0x0u, 0x1000000000u, 0x31000u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -8151,7 +9349,7 @@ inline AttributeUsingPrefix StandardAttributeSpecifier::attribute_using_prefix()
 
 inline bool Statement::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0x2080034u, 0x280000000000000u, 0x25400u, 0x8u};
+    static const uint64_t kinds[] = {0x2080034u, 0x6e80000000000000u, 0x25407u, 0x88u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -8162,7 +9360,7 @@ template <class F> decltype(auto) Statement::visit(F &&f) const
 
 inline bool StatementSeq::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0x2080034u, 0x1280000000000000u, 0x25400u, 0x8u};
+    static const uint64_t kinds[] = {0x2080034u, 0x7e80000000000000u, 0x25407u, 0x88u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -8195,6 +9393,21 @@ inline ConstantExpression StaticAssertDeclaration::constant_expression() const
     return first<ConstantExpression>();
 }
 
+inline bool SuffixedDeclarator::accepts(syntax_kind k)
+{
+    return k == syntax_kind::noptr_declarator;
+}
+
+inline AttributeSpecifierSeq SuffixedDeclarator::attribute_specifier_seq() const
+{
+    return first<AttributeSpecifierSeq>();
+}
+
+inline ParametersAndQualifiers SuffixedDeclarator::parameters_and_qualifiers() const
+{
+    return first<ParametersAndQualifiers>();
+}
+
 inline bool TemplateArgument::accepts(syntax_kind k)
 {
     static const uint64_t kinds[] = {0xfffe0813f8000000u, 0x1c000000001000u, 0x30003000000000u, 0xec70u};
@@ -8208,17 +9421,18 @@ template <class F> decltype(auto) TemplateArgument::visit(F &&f) const
 
 inline bool TemplateArgumentList::accepts(syntax_kind k)
 {
+    static const uint64_t kinds[] = {0xfffe0813f8000000u, 0x1c000000001000u, 0x30007000000000u, 0xec70u};
+    return syntax_kind_in(k, kinds);
+}
+
+template <class F> decltype(auto) TemplateArgumentList::visit(F &&f) const
+{
+    return syntax_visit(*this, f);
+}
+
+inline bool TemplateArguments::accepts(syntax_kind k)
+{
     return k == syntax_kind::template_argument_list;
-}
-
-inline TemplateArgument TemplateArgumentList::template_argument() const
-{
-    return first<TemplateArgument>();
-}
-
-inline TemplateArgumentList TemplateArgumentList::template_argument_list() const
-{
-    return first<TemplateArgumentList>();
 }
 
 inline bool TemplateDeclaration::accepts(syntax_kind k)
@@ -8346,6 +9560,11 @@ inline bool TrailingReturnDeclarator::accepts(syntax_kind k)
 inline GnuAsmLabel TrailingReturnDeclarator::gnu_asm_label() const
 {
     return first<GnuAsmLabel>();
+}
+
+inline GnuAttributeSpecifier TrailingReturnDeclarator::gnu_attribute_specifier_seq() const
+{
+    return first<GnuAttributeSpecifier>();
 }
 
 inline ParametersAndQualifiers TrailingReturnDeclarator::parameters_and_qualifiers() const
@@ -8485,7 +9704,7 @@ inline SimpleTemplateId TypeRequirement::type_name() const
 
 inline bool TypeSpecifier::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0x7c00u, 0x0u, 0x8000000000u, 0x31000u};
+    static const uint64_t kinds[] = {0x7c00u, 0x0u, 0x9000000000u, 0x31000u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -8555,9 +9774,9 @@ inline bool UnnamedNamespaceDefinition::accepts(syntax_kind k)
     return k == syntax_kind::unnamed_namespace_definition;
 }
 
-inline AttributeSpecifierSeq UnnamedNamespaceDefinition::attribute_specifier_seq() const
+inline NamespaceBody UnnamedNamespaceDefinition::namespace_body() const
 {
-    return first<AttributeSpecifierSeq>();
+    return first<NamespaceBody>();
 }
 
 inline bool Unparsed::accepts(syntax_kind k)
@@ -8603,17 +9822,18 @@ inline UnqualifiedId UsingDeclarator::unqualified_id() const
 
 inline bool UsingDeclaratorList::accepts(syntax_kind k)
 {
+    static const uint64_t kinds[] = {0x0u, 0x0u, 0x18000u, 0x0u};
+    return syntax_kind_in(k, kinds);
+}
+
+template <class F> decltype(auto) UsingDeclaratorList::visit(F &&f) const
+{
+    return syntax_visit(*this, f);
+}
+
+inline bool UsingDeclarators::accepts(syntax_kind k)
+{
     return k == syntax_kind::using_declarator_list;
-}
-
-inline UsingDeclarator UsingDeclaratorList::using_declarator() const
-{
-    return first<UsingDeclarator>();
-}
-
-inline UsingDeclaratorList UsingDeclaratorList::using_declarator_list() const
-{
-    return first<UsingDeclaratorList>();
 }
 
 inline bool UsingDirective::accepts(syntax_kind k)
@@ -8941,8 +10161,8 @@ template <class S, class F> decltype(auto) syntax_visit(const S &s, F &f)
             return f(InitDeclarators(s.context(), s.index()));
         break;
     case syntax_kind::init_declarator:
-        if constexpr (syntax_converts<InitDeclarator, S>)
-            return f(InitDeclarator(s.context(), s.index()));
+        if constexpr (syntax_converts<DeclaratorWithInitializer, S>)
+            return f(DeclaratorWithInitializer(s.context(), s.index()));
         break;
     case syntax_kind::declarator:
         if constexpr (syntax_converts<TrailingReturnDeclarator, S>)
@@ -8953,12 +10173,12 @@ template <class S, class F> decltype(auto) syntax_visit(const S &s, F &f)
             return f(PointerDeclarator(s.context(), s.index()));
         break;
     case syntax_kind::noptr_declarator:
-        if constexpr (syntax_converts<NoptrDeclarator, S>)
-            return f(NoptrDeclarator(s.context(), s.index()));
+        if constexpr (syntax_converts<SuffixedDeclarator, S>)
+            return f(SuffixedDeclarator(s.context(), s.index()));
         break;
     case syntax_kind::declarator_id:
-        if constexpr (syntax_converts<DeclaratorId, S>)
-            return f(DeclaratorId(s.context(), s.index()));
+        if constexpr (syntax_converts<PackDeclaratorId, S>)
+            return f(PackDeclaratorId(s.context(), s.index()));
         break;
     case syntax_kind::ptr_operator:
         if constexpr (syntax_converts<PtrOperator, S>)
@@ -8997,8 +10217,8 @@ template <class S, class F> decltype(auto) syntax_visit(const S &s, F &f)
             return f(NoptrAbstractDeclarator(s.context(), s.index()));
         break;
     case syntax_kind::parameter_declaration_clause:
-        if constexpr (syntax_converts<ParameterDeclarationClause, S>)
-            return f(ParameterDeclarationClause(s.context(), s.index()));
+        if constexpr (syntax_converts<ParameterClause, S>)
+            return f(ParameterClause(s.context(), s.index()));
         break;
     case syntax_kind::parameter_declaration_list:
         if constexpr (syntax_converts<ParameterDeclarations, S>)
@@ -9033,8 +10253,8 @@ template <class S, class F> decltype(auto) syntax_visit(const S &s, F &f)
             return f(BracedInitList(s.context(), s.index()));
         break;
     case syntax_kind::initializer_list:
-        if constexpr (syntax_converts<InitializerList, S>)
-            return f(InitializerList(s.context(), s.index()));
+        if constexpr (syntax_converts<InitializerClauses, S>)
+            return f(InitializerClauses(s.context(), s.index()));
         break;
     case syntax_kind::designated_initializer_list:
         if constexpr (syntax_converts<DesignatedInitializers, S>)
@@ -9069,8 +10289,8 @@ template <class S, class F> decltype(auto) syntax_visit(const S &s, F &f)
             return f(ClassHead(s.context(), s.index()));
         break;
     case syntax_kind::class_head_name:
-        if constexpr (syntax_converts<ClassHeadName, S>)
-            return f(ClassHeadName(s.context(), s.index()));
+        if constexpr (syntax_converts<QualifiedClassHeadName, S>)
+            return f(QualifiedClassHeadName(s.context(), s.index()));
         break;
     case syntax_kind::member_specification:
         if constexpr (syntax_converts<MemberSpecification, S>)
@@ -9085,8 +10305,8 @@ template <class S, class F> decltype(auto) syntax_visit(const S &s, F &f)
             return f(MemberDeclarators(s.context(), s.index()));
         break;
     case syntax_kind::member_declarator:
-        if constexpr (syntax_converts<MemberDeclarator, S>)
-            return f(MemberDeclarator(s.context(), s.index()));
+        if constexpr (syntax_converts<MemberDeclaratorWithParts, S>)
+            return f(MemberDeclaratorWithParts(s.context(), s.index()));
         break;
     case syntax_kind::virt_specifier_seq:
         if constexpr (syntax_converts<VirtSpecifierSeq, S>)
@@ -9101,12 +10321,12 @@ template <class S, class F> decltype(auto) syntax_visit(const S &s, F &f)
             return f(BaseClause(s.context(), s.index()));
         break;
     case syntax_kind::base_specifier_list:
-        if constexpr (syntax_converts<BaseSpecifierList, S>)
-            return f(BaseSpecifierList(s.context(), s.index()));
+        if constexpr (syntax_converts<BaseSpecifiers, S>)
+            return f(BaseSpecifiers(s.context(), s.index()));
         break;
     case syntax_kind::base_specifier:
-        if constexpr (syntax_converts<BaseSpecifier, S>)
-            return f(BaseSpecifier(s.context(), s.index()));
+        if constexpr (syntax_converts<AnnotatedBaseSpecifier, S>)
+            return f(AnnotatedBaseSpecifier(s.context(), s.index()));
         break;
     case syntax_kind::class_or_decltype:
         if constexpr (syntax_converts<QualifiedClassName, S>)
@@ -9117,8 +10337,8 @@ template <class S, class F> decltype(auto) syntax_visit(const S &s, F &f)
             return f(CtorInitializer(s.context(), s.index()));
         break;
     case syntax_kind::mem_initializer_list:
-        if constexpr (syntax_converts<MemInitializerList, S>)
-            return f(MemInitializerList(s.context(), s.index()));
+        if constexpr (syntax_converts<MemInitializers, S>)
+            return f(MemInitializers(s.context(), s.index()));
         break;
     case syntax_kind::mem_initializer:
         if constexpr (syntax_converts<MemInitializer, S>)
@@ -9141,12 +10361,12 @@ template <class S, class F> decltype(auto) syntax_visit(const S &s, F &f)
             return f(ConversionFunctionId(s.context(), s.index()));
         break;
     case syntax_kind::conversion_type_id:
-        if constexpr (syntax_converts<ConversionTypeId, S>)
-            return f(ConversionTypeId(s.context(), s.index()));
+        if constexpr (syntax_converts<ConversionTypeWithDeclarator, S>)
+            return f(ConversionTypeWithDeclarator(s.context(), s.index()));
         break;
     case syntax_kind::conversion_declarator:
-        if constexpr (syntax_converts<ConversionDeclarator, S>)
-            return f(ConversionDeclarator(s.context(), s.index()));
+        if constexpr (syntax_converts<PointerConversionDeclarator, S>)
+            return f(PointerConversionDeclarator(s.context(), s.index()));
         break;
     case syntax_kind::statement:
         if constexpr (syntax_converts<AttributedStatement, S>)
@@ -9197,8 +10417,8 @@ template <class S, class F> decltype(auto) syntax_visit(const S &s, F &f)
             return f(TryBlock(s.context(), s.index()));
         break;
     case syntax_kind::handler_seq:
-        if constexpr (syntax_converts<HandlerSeq, S>)
-            return f(HandlerSeq(s.context(), s.index()));
+        if constexpr (syntax_converts<Handlers, S>)
+            return f(Handlers(s.context(), s.index()));
         break;
     case syntax_kind::handler:
         if constexpr (syntax_converts<Handler, S>)
@@ -9245,8 +10465,8 @@ template <class S, class F> decltype(auto) syntax_visit(const S &s, F &f)
             return f(UsingDeclaration(s.context(), s.index()));
         break;
     case syntax_kind::using_declarator_list:
-        if constexpr (syntax_converts<UsingDeclaratorList, S>)
-            return f(UsingDeclaratorList(s.context(), s.index()));
+        if constexpr (syntax_converts<UsingDeclarators, S>)
+            return f(UsingDeclarators(s.context(), s.index()));
         break;
     case syntax_kind::using_declarator:
         if constexpr (syntax_converts<UsingDeclarator, S>)
@@ -9257,8 +10477,8 @@ template <class S, class F> decltype(auto) syntax_visit(const S &s, F &f)
             return f(AsmDeclaration(s.context(), s.index()));
         break;
     case syntax_kind::attribute_specifier_seq:
-        if constexpr (syntax_converts<AttributeSpecifierSeq, S>)
-            return f(AttributeSpecifierSeq(s.context(), s.index()));
+        if constexpr (syntax_converts<AttributeSpecifiers, S>)
+            return f(AttributeSpecifiers(s.context(), s.index()));
         break;
     case syntax_kind::attribute_specifier:
         if constexpr (syntax_converts<StandardAttributeSpecifier, S>)
@@ -9273,12 +10493,12 @@ template <class S, class F> decltype(auto) syntax_visit(const S &s, F &f)
             return f(AttributeUsingPrefix(s.context(), s.index()));
         break;
     case syntax_kind::attribute_list:
-        if constexpr (syntax_converts<AttributeList, S>)
-            return f(AttributeList(s.context(), s.index()));
+        if constexpr (syntax_converts<Attributes, S>)
+            return f(Attributes(s.context(), s.index()));
         break;
     case syntax_kind::attribute:
-        if constexpr (syntax_converts<Attribute, S>)
-            return f(Attribute(s.context(), s.index()));
+        if constexpr (syntax_converts<AttributeWithArguments, S>)
+            return f(AttributeWithArguments(s.context(), s.index()));
         break;
     case syntax_kind::attribute_scoped_token:
         if constexpr (syntax_converts<AttributeScopedToken, S>)
@@ -9337,8 +10557,8 @@ template <class S, class F> decltype(auto) syntax_visit(const S &s, F &f)
             return f(OperatorTemplateId(s.context(), s.index()));
         break;
     case syntax_kind::template_argument_list:
-        if constexpr (syntax_converts<TemplateArgumentList, S>)
-            return f(TemplateArgumentList(s.context(), s.index()));
+        if constexpr (syntax_converts<TemplateArguments, S>)
+            return f(TemplateArguments(s.context(), s.index()));
         break;
     case syntax_kind::typename_specifier:
         if constexpr (syntax_converts<TypenameSpecifier, S>)
@@ -9437,8 +10657,8 @@ template <class S, class F> decltype(auto) syntax_visit(const S &s, F &f)
             return f(GnuAttributeSpecifier(s.context(), s.index()));
         break;
     case syntax_kind::gnu_attribute_list:
-        if constexpr (syntax_converts<GnuAttributeList, S>)
-            return f(GnuAttributeList(s.context(), s.index()));
+        if constexpr (syntax_converts<GnuAttributes, S>)
+            return f(GnuAttributes(s.context(), s.index()));
         break;
     case syntax_kind::gnu_attribute:
         if constexpr (syntax_converts<GnuAttribute, S>)
@@ -9473,8 +10693,8 @@ template <class S, class F> decltype(auto) syntax_visit(const S &s, F &f)
             return f(GnuComputedGoto(s.context(), s.index()));
         break;
     case syntax_kind::gnu_initializer_list:
-        if constexpr (syntax_converts<GnuInitializerList, S>)
-            return f(GnuInitializerList(s.context(), s.index()));
+        if constexpr (syntax_converts<GnuInitializerClauses, S>)
+            return f(GnuInitializerClauses(s.context(), s.index()));
         break;
     case syntax_kind::gnu_designation:
         if constexpr (syntax_converts<GnuOldDesignation, S>)
@@ -9690,6 +10910,16 @@ inline ClangConvertvectorExpression SyntaxRef::clang_convertvector_expression() 
 inline ClangSourceLocationExpression SyntaxRef::clang_source_location_expression() const
 {
     return as<ClangSourceLocationExpression>();
+}
+
+inline ClangTypeTraitArgument SyntaxRef::clang_type_trait_argument() const
+{
+    return as<ClangTypeTraitArgument>();
+}
+
+inline ClangTypeTraitArgumentList SyntaxRef::clang_type_trait_argument_list() const
+{
+    return as<ClangTypeTraitArgumentList>();
 }
 
 inline ClangTypeTraitExpression SyntaxRef::clang_type_trait_expression() const
@@ -10002,9 +11232,9 @@ inline Expression SyntaxRef::expression() const
     return as<Expression>();
 }
 
-inline InitializerList SyntaxRef::expression_list() const
+inline ExpressionList SyntaxRef::expression_list() const
 {
-    return as<InitializerList>();
+    return as<ExpressionList>();
 }
 
 inline ExpressionStatement SyntaxRef::expression_statement() const
@@ -10062,9 +11292,9 @@ inline GnuAttribute SyntaxRef::gnu_attribute() const
     return as<GnuAttribute>();
 }
 
-inline InitializerList SyntaxRef::gnu_attribute_arguments() const
+inline GnuAttributeArguments SyntaxRef::gnu_attribute_arguments() const
 {
-    return as<InitializerList>();
+    return as<GnuAttributeArguments>();
 }
 
 inline GnuAttributeList SyntaxRef::gnu_attribute_list() const
@@ -10073,6 +11303,11 @@ inline GnuAttributeList SyntaxRef::gnu_attribute_list() const
 }
 
 inline GnuAttributeSpecifier SyntaxRef::gnu_attribute_specifier() const
+{
+    return as<GnuAttributeSpecifier>();
+}
+
+inline GnuAttributeSpecifier SyntaxRef::gnu_attribute_specifier_seq() const
 {
     return as<GnuAttributeSpecifier>();
 }
@@ -10315,6 +11550,11 @@ inline NamedNamespaceDefinition SyntaxRef::named_namespace_definition() const
 inline NamespaceAliasDefinition SyntaxRef::namespace_alias_definition() const
 {
     return as<NamespaceAliasDefinition>();
+}
+
+inline NamespaceBody SyntaxRef::namespace_body() const
+{
+    return as<NamespaceBody>();
 }
 
 inline NamespaceDefinition SyntaxRef::namespace_definition() const
@@ -10742,14 +11982,39 @@ inline Assignment SyntaxRef::assignment() const
     return as<Assignment>();
 }
 
+inline AttributeWithArguments SyntaxRef::attribute_with_arguments() const
+{
+    return as<AttributeWithArguments>();
+}
+
+inline Attributes SyntaxRef::attributes() const
+{
+    return as<Attributes>();
+}
+
 inline StandardAttributeSpecifier SyntaxRef::standard_attribute_specifier() const
 {
     return as<StandardAttributeSpecifier>();
 }
 
+inline AttributeSpecifiers SyntaxRef::attribute_specifiers() const
+{
+    return as<AttributeSpecifiers>();
+}
+
 inline BalancedTokens SyntaxRef::balanced_tokens() const
 {
     return as<BalancedTokens>();
+}
+
+inline AnnotatedBaseSpecifier SyntaxRef::annotated_base_specifier() const
+{
+    return as<AnnotatedBaseSpecifier>();
+}
+
+inline BaseSpecifiers SyntaxRef::base_specifiers() const
+{
+    return as<BaseSpecifiers>();
 }
 
 inline EqualInitializer SyntaxRef::equal_initializer() const
@@ -10765,6 +12030,11 @@ inline Captures SyntaxRef::captures() const
 inline CastNotation SyntaxRef::cast_notation() const
 {
     return as<CastNotation>();
+}
+
+inline QualifiedClassHeadName SyntaxRef::qualified_class_head_name() const
+{
+    return as<QualifiedClassHeadName>();
 }
 
 inline QualifiedClassName SyntaxRef::qualified_class_name() const
@@ -10797,6 +12067,16 @@ inline ConstraintDisjunction SyntaxRef::constraint_disjunction() const
     return as<ConstraintDisjunction>();
 }
 
+inline PointerConversionDeclarator SyntaxRef::pointer_conversion_declarator() const
+{
+    return as<PointerConversionDeclarator>();
+}
+
+inline ConversionTypeWithDeclarator SyntaxRef::conversion_type_with_declarator() const
+{
+    return as<ConversionTypeWithDeclarator>();
+}
+
 inline Declarations SyntaxRef::declarations() const
 {
     return as<Declarations>();
@@ -10805,6 +12085,11 @@ inline Declarations SyntaxRef::declarations() const
 inline TrailingReturnDeclarator SyntaxRef::trailing_return_declarator() const
 {
     return as<TrailingReturnDeclarator>();
+}
+
+inline PackDeclaratorId SyntaxRef::pack_declarator_id() const
+{
+    return as<PackDeclaratorId>();
 }
 
 inline DesignatedInitializers SyntaxRef::designated_initializers() const
@@ -10847,14 +12132,34 @@ inline OrdinaryFunctionBody SyntaxRef::ordinary_function_body() const
     return as<OrdinaryFunctionBody>();
 }
 
+inline GnuAttributes SyntaxRef::gnu_attributes() const
+{
+    return as<GnuAttributes>();
+}
+
 inline GnuOldDesignation SyntaxRef::gnu_old_designation() const
 {
     return as<GnuOldDesignation>();
 }
 
+inline GnuInitializerClauses SyntaxRef::gnu_initializer_clauses() const
+{
+    return as<GnuInitializerClauses>();
+}
+
+inline Handlers SyntaxRef::handlers() const
+{
+    return as<Handlers>();
+}
+
 inline InclusiveOrOperation SyntaxRef::inclusive_or_operation() const
 {
     return as<InclusiveOrOperation>();
+}
+
+inline DeclaratorWithInitializer SyntaxRef::declarator_with_initializer() const
+{
+    return as<DeclaratorWithInitializer>();
 }
 
 inline InitDeclarators SyntaxRef::init_declarators() const
@@ -10865,6 +12170,11 @@ inline InitDeclarators SyntaxRef::init_declarators() const
 inline ParenthesizedInitializer SyntaxRef::parenthesized_initializer() const
 {
     return as<ParenthesizedInitializer>();
+}
+
+inline InitializerClauses SyntaxRef::initializer_clauses() const
+{
+    return as<InitializerClauses>();
 }
 
 inline Jump SyntaxRef::jump() const
@@ -10887,9 +12197,19 @@ inline LogicalOrOperation SyntaxRef::logical_or_operation() const
     return as<LogicalOrOperation>();
 }
 
+inline MemInitializers SyntaxRef::mem_initializers() const
+{
+    return as<MemInitializers>();
+}
+
 inline MemberSimpleDeclaration SyntaxRef::member_simple_declaration() const
 {
     return as<MemberSimpleDeclaration>();
+}
+
+inline MemberDeclaratorWithParts SyntaxRef::member_declarator_with_parts() const
+{
+    return as<MemberDeclaratorWithParts>();
 }
 
 inline MemberDeclarators SyntaxRef::member_declarators() const
@@ -10910,6 +12230,16 @@ inline PointerNewDeclarator SyntaxRef::pointer_new_declarator() const
 inline ParenthesizedNewInitializer SyntaxRef::parenthesized_new_initializer() const
 {
     return as<ParenthesizedNewInitializer>();
+}
+
+inline SuffixedDeclarator SyntaxRef::suffixed_declarator() const
+{
+    return as<SuffixedDeclarator>();
+}
+
+inline ParameterClause SyntaxRef::parameter_clause() const
+{
+    return as<ParameterClause>();
 }
 
 inline ParameterDeclarations SyntaxRef::parameter_declarations() const
@@ -10972,6 +12302,11 @@ inline Statements SyntaxRef::statements() const
     return as<Statements>();
 }
 
+inline TemplateArguments SyntaxRef::template_arguments() const
+{
+    return as<TemplateArguments>();
+}
+
 inline OperatorTemplateId SyntaxRef::operator_template_id() const
 {
     return as<OperatorTemplateId>();
@@ -10991,4 +12326,230 @@ inline DestructorTypeId SyntaxRef::destructor_type_id() const
 {
     return as<DestructorTypeId>();
 }
+
+inline UsingDeclarators SyntaxRef::using_declarators() const
+{
+    return as<UsingDeclarators>();
+}
+#endif
+
+#ifdef SYNTAX_VIEWS_CONFORMANCE
+/* per node kind, the kinds its productions allow as a child node
+   ((unparsed) and (erroneous) anywhere) */
+static const uint64_t syntax_allowed_children[][4] = {
+    {0x208007eu, 0x40000000u, 0xf1e00100275c0u, 0xc0008u}, /* translation_unit */
+    {0x208007eu, 0x40000000u, 0x30e00100275c0u, 0xc0008u}, /* declaration_seq */
+    {0x18000080u, 0x1c0002038000fcu, 0x40000030801c0000u, 0xc0004u}, /* simple_declaration */
+    {0x0u, 0x0u, 0x0u, 0xc0000u}, /* empty_declaration */
+    {0xfffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xcec70u}, /* static_assert_declaration */
+    {0x0u, 0x2000u, 0x40000000001c0000u, 0xc0000u}, /* alias_declaration */
+    {0x0u, 0x0u, 0x40000000001c0000u, 0xc0000u}, /* attribute_declaration */
+    {0x1fc80u, 0x2000000000000u, 0x40000090001c0000u, 0xf1000u}, /* decl_specifier_seq */
+    {0x7d00u, 0x0u, 0x40000090001c0000u, 0xf1000u}, /* type_specifier_seq */
+    {0x1fe00u, 0x0u, 0x40000090001c0000u, 0xf1000u}, /* defining_type_specifier_seq */
+    {0x4000000u, 0x0u, 0x1000000000u, 0xc0000u}, /* simple_type_specifier */
+    {0x4000000u, 0x0u, 0x40000010001c0000u, 0xc0000u}, /* elaborated_type_specifier */
+    {0x4040000u, 0x0u, 0x0u, 0xc0000u}, /* elaborated_enum_specifier */
+    {0xfffe081ff8000000u, 0x1c000000000003u, 0x30003000000000u, 0xcec70u}, /* decltype_specifier */
+    {0x4000u, 0x0u, 0x800000000u, 0xc0000u}, /* placeholder_type_specifier */
+    {0x0u, 0x1400000000u, 0x0u, 0xc0000u}, /* class_specifier */
+    {0x1c20000u, 0x0u, 0x0u, 0xc0000u}, /* enum_specifier */
+    {0x340000u, 0x0u, 0x40000000001c0000u, 0xc0000u}, /* enum_head */
+    {0x4000000u, 0x0u, 0x0u, 0xc0000u}, /* enum_head_name */
+    {0x340000u, 0x0u, 0x40000000001c0000u, 0xc0000u}, /* opaque_enum_declaration */
+    {0x0u, 0x0u, 0x0u, 0xc0000u}, /* enum_key */
+    {0x100u, 0x0u, 0x0u, 0xc0000u}, /* enum_base */
+    {0x1c00000u, 0x0u, 0x0u, 0xc0000u}, /* enumerator_list */
+    {0xfffe0813f9000000u, 0x1c000000000000u, 0x30003000000000u, 0xcec70u}, /* enumerator_definition */
+    {0x0u, 0x0u, 0x40000000001c0000u, 0xc0000u}, /* enumerator */
+    {0x1000u, 0x0u, 0x0u, 0xc0000u}, /* using_enum_declaration */
+    {0x4002000u, 0x0u, 0x1000000000u, 0xc0000u}, /* nested_name_specifier */
+    {0x14000000u, 0x1c000000000000u, 0x3000000000u, 0xc0000u}, /* qualified_id */
+    {0x6000u, 0x0u, 0x1000000000u, 0xc0000u}, /* unqualified_id */
+    {0xfffe081ff8000000u, 0x1c000000000003u, 0x30003000000000u, 0xcec70u}, /* primary_expression */
+    {0xfffe081ff8006400u, 0x1c000006001003u, 0x3000b000000000u, 0xffc70u}, /* postfix_expression */
+    {0x60813f8000000u, 0x1c000000001000u, 0x30003000000000u, 0xcec70u}, /* unary_expression */
+    {0xfffe081ff8000000u, 0x1c000000000003u, 0x30003000000000u, 0xcec70u}, /* noexcept_expression */
+    {0x60813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xcec70u}, /* await_expression */
+    {0xfffe081ff8000000u, 0x1c000002000001u, 0x30003000000000u, 0xcec70u}, /* yield_expression */
+    {0xfffe081ff8000000u, 0x1c000000000001u, 0x30003000000000u, 0xcec70u}, /* throw_expression */
+    {0x6000000000u, 0x800000000080000u, 0x4c0000000u, 0xc0000u}, /* lambda_expression */
+    {0x78000000000u, 0x0u, 0x0u, 0xc0000u}, /* lambda_introducer */
+    {0x80u, 0x1e0800u, 0x40000000801c0000u, 0xc0000u}, /* lambda_declarator */
+    {0x70000000000u, 0x0u, 0x0u, 0xc0000u}, /* lambda_capture */
+    {0x70000000000u, 0x0u, 0x0u, 0xc0000u}, /* capture_list */
+    {0x0u, 0x0u, 0x0u, 0xc0000u}, /* simple_capture */
+    {0x0u, 0x3800000u, 0x0u, 0xc0000u}, /* init_capture */
+    {0x1300000000000u, 0x2001000u, 0x0u, 0xc0000u}, /* new_expression */
+    {0xfffe081ff8000000u, 0x1c000006000001u, 0x30003000000000u, 0xcec70u}, /* new_placement */
+    {0xc00000000100u, 0x100u, 0x0u, 0xc0000u}, /* new_type_id */
+    {0xc00000000000u, 0x100u, 0x0u, 0xc0000u}, /* new_declarator */
+    {0xfffe881ff8000000u, 0x1c000000000003u, 0x40300030001c0000u, 0xcec70u}, /* noptr_new_declarator */
+    {0xfffe081ff8000000u, 0x1c000006000001u, 0x30003000000000u, 0xcec70u}, /* new_initializer */
+    {0x60813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xcec70u}, /* delete_expression */
+    {0x60813f8000000u, 0x1c000000001000u, 0x30003000000000u, 0xcec70u}, /* cast_expression */
+    {0xe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xcec70u}, /* pm_expression */
+    {0x1e0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xcec70u}, /* multiplicative_expression */
+    {0x3e0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xcec70u}, /* additive_expression */
+    {0x7e0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xcec70u}, /* shift_expression */
+    {0xfe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xcec70u}, /* compare_expression */
+    {0x1fe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xcec70u}, /* relational_expression */
+    {0x3fe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xcec70u}, /* equality_expression */
+    {0x7fe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xcec70u}, /* and_expression */
+    {0xffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xcec70u}, /* exclusive_or_expression */
+    {0x1ffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xcec70u}, /* inclusive_or_expression */
+    {0x3ffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xcec70u}, /* logical_and_expression */
+    {0x7ffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xcec70u}, /* logical_or_expression */
+    {0xfffe081ff8000000u, 0x1c000000000003u, 0x30003000000000u, 0xcec70u}, /* conditional_expression */
+    {0xfffe081ff8000000u, 0x1c000002000001u, 0x30003000000000u, 0xcec70u}, /* assignment_expression */
+    {0xfffe081ff8000000u, 0x1c000000000003u, 0x30003000000000u, 0xcec70u}, /* expression */
+    {0x18000000u, 0x1c0000000000fcu, 0x3000000000u, 0xc0000u}, /* init_declarator_list */
+    {0x18000000u, 0x1c0000038000f0u, 0x3080000000u, 0xc0004u}, /* init_declarator */
+    {0x18000000u, 0x1c000000000ce0u, 0x4000003000000000u, 0xc0002u}, /* declarator */
+    {0x18000000u, 0x1c0000000001e0u, 0x3000000000u, 0xc0000u}, /* ptr_declarator */
+    {0xfffe0813f8000000u, 0x1c0000000004e0u, 0x40300030001c0000u, 0xcec70u}, /* noptr_declarator */
+    {0x18000000u, 0x1c000000000000u, 0x3000000000u, 0xc0000u}, /* declarator_id */
+    {0x4000000u, 0x200u, 0x40000000001c0000u, 0xc0000u}, /* ptr_operator */
+    {0x0u, 0x200u, 0x0u, 0xc0000u}, /* cv_qualifier_seq */
+    {0x0u, 0x1e0200u, 0x40000000001c0000u, 0xc0000u}, /* parameters_and_qualifiers */
+    {0x0u, 0x1000u, 0x0u, 0xc0000u}, /* trailing_return_type */
+    {0x100u, 0x1c100u, 0x0u, 0xc0000u}, /* type_id */
+    {0x200u, 0x1c100u, 0x0u, 0xc0000u}, /* defining_type_id */
+    {0x0u, 0x10c00u, 0x0u, 0xc0000u}, /* abstract_declarator */
+    {0x0u, 0x18100u, 0x0u, 0xc0000u}, /* ptr_abstract_declarator */
+    {0xfffe0813f8000000u, 0x1c000000018500u, 0x40300030001c0000u, 0xcec70u}, /* noptr_abstract_declarator */
+    {0x0u, 0xc0000u, 0x0u, 0xc0000u}, /* parameter_declaration_clause */
+    {0x0u, 0xc0000u, 0x0u, 0xc0000u}, /* parameter_declaration_list */
+    {0xfffe081ff8000080u, 0x1c00000201c1f1u, 0x40300030001c0000u, 0xcec70u}, /* parameter_declaration */
+    {0xfffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xcec70u}, /* noexcept_specifier */
+    {0xffffffffffffffffu, 0xffffffffffffffffu, 0xffffffffffffffffu, 0xfffffu}, /* dynamic_exception_specification */
+    {0xffffffffffffffffu, 0xffffffffffffffffu, 0xffffffffffffffffu, 0xfffffu}, /* type_id_list */
+    {0xfffe081ff8000000u, 0x1c000006000001u, 0x30003000000000u, 0xcec70u}, /* initializer */
+    {0xfffe081ff8000000u, 0x1c000002000001u, 0x30003000000000u, 0xcec70u}, /* brace_or_equal_initializer */
+    {0xfffe081ff8000000u, 0x1c00001e000001u, 0x30003000000000u, 0xced70u}, /* braced_init_list */
+    {0xfffe081ff8000000u, 0x1c000006000001u, 0x30003000000000u, 0xcec70u}, /* initializer_list */
+    {0x0u, 0x18000000u, 0x0u, 0xc0000u}, /* designated_initializer_list */
+    {0x0u, 0x23000000u, 0x0u, 0xc0000u}, /* designated_initializer_clause */
+    {0xfffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xcec70u}, /* designator */
+    {0x18000080u, 0x1c0101800000f0u, 0x40000030801c0000u, 0xc0000u}, /* function_definition */
+    {0x0u, 0x800400000000000u, 0x0u, 0xc0000u}, /* function_body */
+    {0x0u, 0x800400000000000u, 0x18u, 0xc0000u}, /* function_try_block */
+    {0x0u, 0x200000000u, 0x0u, 0xc0000u}, /* identifier_list */
+    {0x0u, 0x40800000000u, 0x40000010001c0000u, 0xc0000u}, /* class_head */
+    {0x4000000u, 0x0u, 0x1000000000u, 0xc0000u}, /* class_head_name */
+    {0x2080038u, 0x3040000000u, 0xe0010004000u, 0xc0008u}, /* member_specification */
+    {0x1a0800b8u, 0x1c00e0400000f0u, 0x40000c30901c4000u, 0xc0000u}, /* member_declaration */
+    {0x18000000u, 0x1c00c0000000f0u, 0x3080000000u, 0xc0000u}, /* member_declarator_list */
+    {0xfffe0813f8000000u, 0x1c0300030000f0u, 0x40300030801c0000u, 0xcec70u}, /* member_declarator */
+    {0x0u, 0x10000000000u, 0x0u, 0xc0000u}, /* virt_specifier_seq */
+    {0x0u, 0x0u, 0x0u, 0xc0000u}, /* pure_specifier */
+    {0x6000u, 0x380000000000u, 0x1000000000u, 0xc0000u}, /* base_clause */
+    {0x2000u, 0x380000000000u, 0x1000000000u, 0xc0000u}, /* base_specifier_list */
+    {0x2000u, 0x200000000000u, 0x40000010001c0000u, 0xc0000u}, /* base_specifier */
+    {0x4000000u, 0x0u, 0x1000000000u, 0xc0000u}, /* class_or_decltype */
+    {0x0u, 0x1800000000000u, 0x0u, 0xc0000u}, /* ctor_initializer */
+    {0x0u, 0x1800000000000u, 0x0u, 0xc0000u}, /* mem_initializer_list */
+    {0xfffe081ff8006000u, 0x1c200006000001u, 0x30003000000000u, 0xcec70u}, /* mem_initializer */
+    {0xfffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xcec70u}, /* explicit_specifier */
+    {0x0u, 0x0u, 0x0u, 0xc0000u}, /* operator_function_id */
+    {0x0u, 0x0u, 0x0u, 0xc0000u}, /* literal_operator_id */
+    {0x100u, 0x20000000000000u, 0x0u, 0xc0000u}, /* conversion_function_id */
+    {0x100u, 0x40000000000100u, 0x0u, 0xc0000u}, /* conversion_type_id */
+    {0x0u, 0x40000000000100u, 0x0u, 0xc0000u}, /* conversion_declarator */
+    {0x0u, 0x6c00000000000000u, 0x40000000001c0007u, 0xc0080u}, /* statement */
+    {0x18000080u, 0x1c0000030000f0u, 0x40000030001c0000u, 0xc0000u}, /* condition */
+    {0xfffe0813fa080034u, 0x6e9c000000000000u, 0x40300030001e5407u, 0xcecf8u}, /* labeled_statement */
+    {0xfffe081ff8000000u, 0x1c000000000003u, 0x30003000000000u, 0xcec70u}, /* expression_statement */
+    {0x2080034u, 0x7e80000000000000u, 0x25407u, 0xc0088u}, /* compound_statement */
+    {0x2080034u, 0x7e80000000000000u, 0x25407u, 0xc0088u}, /* statement_seq */
+    {0xfffe081ffa080034u, 0x6f9c000000000003u, 0x30003000025407u, 0xcecf8u}, /* selection_statement */
+    {0xfffe081ffa080034u, 0xef9c000002000003u, 0x30003000025407u, 0xcecf8u}, /* iteration_statement */
+    {0x18000080u, 0x1c0002000000f0u, 0x40000030001c0000u, 0xc0000u}, /* for_range_declaration */
+    {0xfffe081ff8000000u, 0x1c000002000003u, 0x30003000000000u, 0xcec70u}, /* jump_statement */
+    {0xfffe081ff8000000u, 0x1c000002000003u, 0x30003000000000u, 0xcec70u}, /* coroutine_return_statement */
+    {0x0u, 0x800000000000000u, 0x18u, 0xc0000u}, /* try_block */
+    {0x0u, 0x0u, 0x18u, 0xc0000u}, /* handler_seq */
+    {0x0u, 0x800000000000000u, 0x20u, 0xc0000u}, /* handler */
+    {0x18000100u, 0x1c00000001c1f0u, 0x40000030001c0000u, 0xc0000u}, /* exception_declaration */
+    {0x208007eu, 0x40000000u, 0x40030e00101e75c0u, 0xc0008u}, /* named_namespace_definition */
+    {0x208007eu, 0x40000000u, 0x40030e00101e75c0u, 0xc0008u}, /* unnamed_namespace_definition */
+    {0x208007eu, 0x40000000u, 0x30e00100277c0u, 0xc0008u}, /* nested_namespace_definition */
+    {0x0u, 0x0u, 0x200u, 0xc0000u}, /* enclosing_namespace_specifier */
+    {0x0u, 0x0u, 0x800u, 0xc0000u}, /* namespace_alias_definition */
+    {0x4000000u, 0x0u, 0x0u, 0xc0000u}, /* qualified_namespace_specifier */
+    {0x4000000u, 0x0u, 0x40000000001c0000u, 0xc0000u}, /* using_directive */
+    {0x208007eu, 0x40000000u, 0x30e00100275c0u, 0xc0008u}, /* linkage_specification */
+    {0x0u, 0x0u, 0x4000000000018000u, 0xc0000u}, /* using_declaration */
+    {0x0u, 0x0u, 0x4000000000018000u, 0xc0000u}, /* using_declarator_list */
+    {0x14000000u, 0x1c000000000000u, 0x3000000000u, 0xc0000u}, /* using_declarator */
+    {0x0u, 0x0u, 0x40000000001c0000u, 0xc0000u}, /* asm_declaration */
+    {0x0u, 0x0u, 0x40000000001c0000u, 0xc0000u}, /* attribute_specifier_seq */
+    {0x0u, 0x0u, 0x1e00000u, 0xc0000u}, /* attribute_specifier */
+    {0xfffe0813f8000000u, 0x1c000000001000u, 0x30003000000000u, 0xcec70u}, /* alignment_specifier */
+    {0x0u, 0x0u, 0x0u, 0xc0000u}, /* attribute_using_prefix */
+    {0x0u, 0x0u, 0x1c00000u, 0xc0000u}, /* attribute_list */
+    {0x0u, 0x0u, 0x3000000u, 0xc0000u}, /* attribute */
+    {0x0u, 0x0u, 0x0u, 0xc0000u}, /* attribute_scoped_token */
+    {0x0u, 0x0u, 0xc000000u, 0xc0000u}, /* attribute_argument_clause */
+    {0x0u, 0x0u, 0xc000000u, 0xc0000u}, /* balanced_token_seq */
+    {0x0u, 0x0u, 0xc000000u, 0xc0000u}, /* balanced_token */
+    {0x208007cu, 0x2040000000u, 0x30f00300275c0u, 0xc0008u}, /* template_declaration */
+    {0x0u, 0x80000u, 0x4c0000000u, 0xc0000u}, /* template_head */
+    {0x0u, 0x80000u, 0x440000000u, 0xc0000u}, /* template_parameter_list */
+    {0x1038000000u, 0x1c000000000000u, 0x30003300000000u, 0xcec00u}, /* requires_clause */
+    {0x1038000000u, 0x1c000000000000u, 0x30003300000000u, 0xcec00u}, /* constraint_logical_or_expression */
+    {0x1038000000u, 0x1c000000000000u, 0x30003200000000u, 0xcec00u}, /* constraint_logical_and_expression */
+    {0x18000000u, 0x1c000000001000u, 0x3820000000u, 0xc0000u}, /* type_parameter */
+    {0xfffe0813fc000000u, 0x1c000000001000u, 0x30007000000000u, 0xcec70u}, /* type_constraint */
+    {0xfffe0813f8000000u, 0x1c000000001000u, 0x30007000000000u, 0xcec70u}, /* simple_template_id */
+    {0xfffe0813f8000000u, 0x1c000000001000u, 0x30007000000000u, 0xcec70u}, /* template_id */
+    {0xfffe0813f8000000u, 0x1c000000001000u, 0x30007000000000u, 0xcec70u}, /* template_argument_list */
+    {0x4000000u, 0x0u, 0x1000000000u, 0xc0000u}, /* typename_specifier */
+    {0x7ffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xcec70u}, /* concept_definition */
+    {0x208007cu, 0x2040000000u, 0x30e00100275c0u, 0xc0008u}, /* explicit_instantiation */
+    {0x208007cu, 0x2040000000u, 0x30e00100275c0u, 0xc0008u}, /* explicit_specialization */
+    {0x0u, 0x20000000e0000u, 0x40000010001c0000u, 0xc0000u}, /* deduction_guide */
+    {0x0u, 0x0u, 0x40006000001c0000u, 0xc0000u}, /* module_declaration */
+    {0x0u, 0x0u, 0x800000000000u, 0xc0000u}, /* module_name */
+    {0x0u, 0x0u, 0x800000000000u, 0xc0000u}, /* module_partition */
+    {0x0u, 0x0u, 0x800000000000u, 0xc0000u}, /* module_name_qualifier */
+    {0x208007eu, 0x40000000u, 0x30e00100275c0u, 0xc0008u}, /* export_declaration */
+    {0x0u, 0x0u, 0x40006000001c0000u, 0xc0000u}, /* module_import_declaration */
+    {0x208007eu, 0x40000000u, 0x30e00100275c0u, 0xc0008u}, /* global_module_fragment */
+    {0x208007eu, 0x40000000u, 0x30e00100275c0u, 0xc0008u}, /* private_module_fragment */
+    {0x60813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xcec70u}, /* fold_expression */
+    {0x0u, 0x0u, 0xc0000000000000u, 0xc0000u}, /* requires_expression */
+    {0x0u, 0xe0000u, 0x0u, 0xc0000u}, /* requirement_parameter_list */
+    {0x0u, 0x0u, 0x2f00000000000000u, 0xc0000u}, /* requirement_body */
+    {0x0u, 0x0u, 0x2f00000000000000u, 0xc0000u}, /* requirement_seq */
+    {0xfffe081ff8000000u, 0x1c000000000003u, 0x30003000000000u, 0xcec70u}, /* simple_requirement */
+    {0x4000000u, 0x0u, 0x1000000000u, 0xc0000u}, /* type_requirement */
+    {0xfffe081ff8000000u, 0x1c000000000003u, 0x1030003000000000u, 0xcec70u}, /* compound_requirement */
+    {0x0u, 0x0u, 0x800000000u, 0xc0000u}, /* return_type_requirement */
+    {0x7ffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xcec70u}, /* nested_requirement */
+    {0x0u, 0x0u, 0x8000000000000000u, 0xc0001u}, /* gnu_attribute_specifier */
+    {0x0u, 0x0u, 0x8000000000000000u, 0xc0001u}, /* gnu_attribute_list */
+    {0xfffe081ff8000000u, 0x1c000006000001u, 0x30003000000000u, 0xcec70u}, /* gnu_attribute */
+    {0x0u, 0x0u, 0x0u, 0xc0000u}, /* gnu_asm_label */
+    {0xffffffffffffffffu, 0xffffffffffffffffu, 0xffffffffffffffffu, 0xfffffu}, /* gnu_declarator */
+    {0xffffffffffffffffu, 0xffffffffffffffffu, 0xffffffffffffffffu, 0xfffffu}, /* gnu_extension_declaration */
+    {0xffffffffffffffffu, 0xffffffffffffffffu, 0xffffffffffffffffu, 0xfffffu}, /* gnu_extension_expression */
+    {0x0u, 0x2001000u, 0x0u, 0xc0000u}, /* gnu_compound_literal */
+    {0x0u, 0x0u, 0x0u, 0xc0000u}, /* gnu_label_address */
+    {0xfffe081ff8000000u, 0x1c000000000003u, 0x30003000000000u, 0xcec70u}, /* gnu_computed_goto */
+    {0xfffe081ff8000000u, 0x1c000022000001u, 0x30003000000000u, 0xcef70u}, /* gnu_initializer_list */
+    {0x0u, 0x20000000u, 0x0u, 0xc0000u}, /* gnu_designation */
+    {0xfffe081ff8000000u, 0x1c000000001003u, 0x30003000000000u, 0xcec70u}, /* gnu_offsetof_expression */
+    {0xfffe081ff8000000u, 0x1c000000001001u, 0x30003000000000u, 0xcec70u}, /* clang_type_trait_expression */
+    {0x0u, 0x1000u, 0x0u, 0xc0000u}, /* clang_type_transformation */
+    {0xfffe081ff8000000u, 0x1c000000001001u, 0x30003000000000u, 0xcec70u}, /* clang_bit_cast_expression */
+    {0xfffe081ff8000000u, 0x1c000000001001u, 0x30003000000000u, 0xcec70u}, /* clang_convertvector_expression */
+    {0x0u, 0x0u, 0x0u, 0xc0000u}, /* clang_source_location_expression */
+    {0x0u, 0x1000u, 0x0u, 0xc0000u}, /* clang_atomic_type_specifier */
+    {0xfffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xcec70u}, /* clang_bit_int_type_specifier */
+    {0xffffffffffffffffu, 0xffffffffffffffffu, 0xffffffffffffffffu, 0xfffffu}, /* unparsed */
+    {0xffffffffffffffffu, 0xffffffffffffffffu, 0xffffffffffffffffu, 0xfffffu}, /* erroneous */
+};
+/* the list kinds: a child of the same kind is a list not flattened */
+static const uint64_t syntax_list_kinds[4] = {0x10000400002u, 0x1000004008040004u, 0x100000044000000u, 0x0u};
 #endif

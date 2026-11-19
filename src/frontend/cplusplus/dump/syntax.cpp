@@ -266,6 +266,47 @@ static void dump_expression_claims(const syntax_tree &tree,
     }
 }
 
+#define SYNTAX_VIEWS_CONFORMANCE
+#include "frontend/cplusplus/syntax-views.inc"
+#undef SYNTAX_VIEWS_CONFORMANCE
+
+/* each child node the grammar does not allow where it is (the views read
+   the tree as the grammar has it), and a list in a list of its kind (a
+   list's range takes its children as the elements) */
+static void dump_syntax_conformance(const syntax_tree &tree,
+                                    token_stream &tokens, vbuffer *out)
+{
+    owned_array<node_index> work;
+    if (tree.root)
+        work.append(tree.root);
+    while (!work.empty()) {
+        node_index n = work.back();
+        work.resize(work.size() - 1);
+        syntax_kind parent = tree[n].kind;
+        const uint64_t *allowed =
+            syntax_allowed_children[static_cast<uint32_t>(parent)];
+        for (uint32_t i = 0; i < tree[n].child_count; i++) {
+            syntax_child c = tree.children(n)[i];
+            if (c.is_token() || !c.index())
+                continue;
+            syntax_kind kind = tree[c.index()].kind;
+            const char *why = nullptr;
+            if (!syntax_kind_in(kind, allowed))
+                why = "not-allowed";
+            else if (kind == parent && syntax_kind_in(kind, syntax_list_kinds))
+                why = "nested-list";
+            if (why) {
+                source_position at =
+                    tokens.position(tree[c.index()].first_token);
+                vbuffer_format_append(
+                    out, "%s %s %s %s:%u:%u\n", why, syntax_kind_name(parent),
+                    syntax_kind_name(kind), at.file_name, at.line, at.column);
+            }
+            work.append(c.index());
+        }
+    }
+}
+
 void dump_parsing(const dump_request &r, const syntax_tree &tree,
                   token_stream &tokens, parser &p, vbuffer *out)
 {
@@ -349,6 +390,8 @@ void dump_parsing(const dump_request &r, const syntax_tree &tree,
             }
         }
     }
+    if (r.has(dump_output::syntax_conformance))
+        dump_syntax_conformance(tree, tokens, out);
     if (r.has(dump_output::parser_stats)) {
         parser_statistics s = p.statistics();
         vbuffer_format_append(

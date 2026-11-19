@@ -93,6 +93,39 @@ OWN = {
     'template_parameter_list': 'TemplateParameters',
     'unary_expression': 'UnaryOperation',
     'unqualified_id': 'DestructorTypeId',
+    # what passes on its one part without the optional ones
+    'attribute': 'AttributeWithArguments',
+    'attribute_specifier_seq': 'AttributeSpecifiers',
+    'attribute_list': 'Attributes',
+    'declarator_id': 'PackDeclaratorId',
+    'gnu_attribute_list': 'GnuAttributes',
+    'parameter_declaration_clause': 'ParameterClause',
+    'base_specifier': 'AnnotatedBaseSpecifier',
+    'base_specifier_list': 'BaseSpecifiers',
+    'class_head_name': 'QualifiedClassHeadName',
+    'conversion_declarator': 'PointerConversionDeclarator',
+    'conversion_type_id': 'ConversionTypeWithDeclarator',
+    'gnu_initializer_list': 'GnuInitializerClauses',
+    'handler_seq': 'Handlers',
+    'init_declarator': 'DeclaratorWithInitializer',
+    'initializer_list': 'InitializerClauses',
+    'mem_initializer_list': 'MemInitializers',
+    'member_declarator': 'MemberDeclaratorWithParts',
+    'noptr_declarator': 'SuffixedDeclarator',
+    'template_argument_list': 'TemplateArguments',
+    'using_declarator_list': 'UsingDeclarators',
+}
+
+# nonterminals the parser makes a node of even where the grammar lets one
+# part pass on (an alternative of one nonterminal and optional parts);
+# -fcxx-dump=syntax-conformance shows a position that holds the part
+# itself, which is a nonterminal missing here
+ALWAYS_NODE = {
+    'decl-specifier-seq', 'defining-type-id', 'function-body',
+    'defining-type-specifier-seq', 'enum-head', 'exception-declaration',
+    'member-specification', 'new-type-id', 'noptr-abstract-declarator',
+    'parameter-declaration', 'translation-unit', 'type-id',
+    'type-parameter', 'type-specifier-seq',
 }
 
 # alternatives the pass-through rule does not see: a node of its own kind
@@ -102,6 +135,41 @@ EXTRA_MEMBERS = {
     'block-declaration': ['gnu_extension_declaration'],
     'unary-expression': ['gnu_extension_expression'],
 }
+
+
+# children the parser puts where the grammar has none of their kind, each
+# a choice of the parser: allowed by the conformance check, no accessor
+KNOWN_CHILDREN = {
+    # a member template's or member specialization's declaration is a
+    # member-declaration ([class.mem]) rather than a declaration
+    'template-declaration': ['member-declaration'],
+    'explicit-specialization': ['member-declaration'],
+    'explicit-instantiation': ['member-declaration'],
+    # GCC's attributes after a using-declarator ([ext:gnu_attributes])
+    'using-declaration': ['gnu-attribute-specifier'],
+    'using-declarator-list': ['gnu-attribute-specifier'],
+    # [ext:gnu_declarator]: a declarator with GCC's attributes inside
+    'simple-declaration': ['gnu-declarator', 'requires-clause'],
+    'init-declarator': ['gnu-declarator'],
+    # a trailing requires-clause ([dcl.decl]/4) of the one declarator, which
+    # passes through the init-declarator and member-declarator
+    'member-declaration': ['requires-clause'],
+    'member-declarator-list': ['requires-clause'],
+    # the enum-head-name of an opaque-enum-declaration's elaborated form
+    'elaborated-enum-specifier': ['enum-head-name'],
+    # a constrained placeholder's type-constraint parsed as one
+    'placeholder-type-specifier': ['placeholder-type-specifier'],
+    'unqualified-id': ['placeholder-type-specifier'],
+    'mem-initializer': ['placeholder-type-specifier'],
+    'base-clause': ['placeholder-type-specifier'],
+    # a member-specification's explicit instantiation (an error kept in
+    # the tree) and __extension__ before a member-declaration
+    'member-specification': ['explicit-instantiation', 'gnu-extension-declaration'],
+}
+
+# list nonterminals whose node nests (expression , assignment-expression:
+# the comma's left operand is an expression node): no range
+NOT_LISTS = {'expression'}
 
 
 def load_refs():
@@ -150,12 +218,46 @@ class Grammar:
         self.kind_of = {nt: k for k, nt in self.kinds}
         self.memo = {}
 
-    def single(self, alternative):
-        """the nonterminal an alternative passes on, or None"""
+    def single(self, alternative, nt=None, strict=False):
+        """the nonterminal an alternative of nt passes on, or None: one
+        nonterminal and what is optional (without the optional parts the
+        parser makes no node, unless nt is in ALWAYS_NODE), or, when all of
+        it is optional, its one nonterminal; strict: one nonterminal alone"""
         t = alternative.split()
-        if len(t) == 1 and t[0] in self.g:
-            return t[0]
+        if strict or nt in ALWAYS_NODE:
+            if len(t) == 1 and t[0] in self.g:
+                return t[0]
+            return None
+        required = [x for x in t if not x.endswith('_opt')]
+        if not required:
+            required = [base(x) for x in t if base(x) in self.g]
+        if len(required) == 1 and required[0] in self.g:
+            return required[0]
         return None
+
+    def symbols(self, alternatives, stack=()):
+        """the nonterminals of the alternatives that make nodes, a
+        nonterminal that makes none ([temp.names]' template-argument)
+        replaced by its own symbols, as the tree has them"""
+        out = []
+        for a in alternatives:
+            row = []
+            for sym in a.split():
+                b = base(sym)
+                if b not in self.g:
+                    continue
+                if b in self.kind_of or b in stack or self.member_kinds(b) and not self.transparent(b):
+                    row.append(b)
+                    continue
+                for inner in self.symbols(self.g[b], stack + (b,)):
+                    row.extend(inner)
+            out.append(row)
+        return out
+
+    def transparent(self, nt):
+        """a nonterminal that makes no node and passes none on
+        (clang-type-trait-argument-list): its parts stand in the parent"""
+        return nt not in self.kind_of and not self.member_kinds(nt)
 
     def member_kinds(self, nt, stack=()):
         """the node kinds a position of nonterminal nt can hold"""
@@ -169,7 +271,7 @@ class Grammar:
         for k in EXTRA_MEMBERS.get(nt, ()):
             out.add(k)
         for a in self.g.get(nt, ()):
-            s = self.single(a)
+            s = self.single(a, nt)
             if s:
                 out |= self.member_kinds(s, stack + (nt,))
         if not stack:
@@ -177,13 +279,13 @@ class Grammar:
         return out
 
     def own_alternatives(self, nt):
-        return sorted(a for a in self.g.get(nt, ()) if not self.single(a))
+        return sorted(a for a in self.g.get(nt, ()) if not self.single(a, nt, strict=True))
 
     def list_element(self, nt):
         """the element of a list nonterminal (X-seq: X | X-seq X, X-list:
         X | X-list , X), or None"""
         alternatives = self.g.get(nt, set())
-        singles = [self.single(a) for a in alternatives if self.single(a)]
+        singles = [self.single(a, nt) for a in alternatives if self.single(a, nt)]
         if len(singles) != 1:
             return None
         e = singles[0]
@@ -210,14 +312,17 @@ def generate():
     sums = {}  # type -> sorted kinds
     nt_type = {}
     lists = {}  # type -> element nonterminal
+    missing = []
     for k, nt in G.kinds:
         kinds = G.member_kinds(nt) if nt in G.g else {k}
         if len(kinds) > 1:
             if k not in OWN:
-                sys.exit('gen-syntax-views.py: %s is a sum and its own node: name it in OWN' % k)
-            kind_type[k] = OWN[k]
+                missing.append(k)
+            kind_type[k] = OWN.get(k, k)
         else:
             kind_type[k] = camel(k)
+    if missing:
+        sys.exit('gen-syntax-views.py: sums with a node of their own, name it in OWN: %s' % ' '.join(missing))
     for k in OWN:
         if k not in G.nonterminal_of or len(G.member_kinds(G.nonterminal_of[k])) < 2:
             sys.exit('gen-syntax-views.py: OWN names %s, which is no sum' % k)
@@ -232,7 +337,7 @@ def generate():
         nt_type[nt] = t
         sums[t] = sorted(kinds)
         e = G.list_element(nt)
-        if e and e in G.g and G.member_kinds(e):
+        if e and e in G.g and G.member_kinds(e) and nt in G.kind_of and nt not in NOT_LISTS:
             lists[t] = e
     for k, nt in G.kinds:
         nt_type.setdefault(nt, kind_type[k])
@@ -258,11 +363,10 @@ def generate():
             alternatives = sorted(G.g[nt])
         symbols = {}
         repeated = set()
-        for a in alternatives:
+        for row in G.symbols(alternatives):
             seen = set()
-            for s in a.split():
-                b = base(s)
-                if b not in G.g or not G.member_kinds(b):
+            for b in row:
+                if not G.member_kinds(b):
                     continue
                 if b in seen:
                     repeated.add(b)
@@ -429,6 +533,42 @@ def generate():
         w('{')
         w('    return as<%s>();' % t)
         w('}')
+    w('#endif')
+    w('')
+    # the conformance check's tables (dump/syntax.cpp)
+    order = [k for k, _ in G.kinds]
+    words = (len(order) + 63) // 64
+
+    def bits(ks):
+        v = [0] * words
+        for k in ks:
+            i = order.index(k)
+            v[i // 64] |= 1 << (i % 64)
+        return '{%s}' % ', '.join('0x%xu' % x for x in v)
+
+    w('#ifdef SYNTAX_VIEWS_CONFORMANCE')
+    w('/* per node kind, the kinds its productions allow as a child node')
+    w('   ((unparsed) and (erroneous) anywhere) */')
+    w('static const uint64_t syntax_allowed_children[][%d] = {' % words)
+    for k, nt in G.kinds:
+        allowed = {'unparsed', 'erroneous'}
+        if nt in G.g:
+            alternatives = G.g[nt]
+            if len(G.member_kinds(nt)) > 1:
+                alternatives = G.own_alternatives(nt)
+            for row in G.symbols(alternatives):
+                for b in row:
+                    allowed |= G.member_kinds(b)
+            for b in KNOWN_CHILDREN.get(nt, ()):
+                allowed |= G.member_kinds(b)
+        else:
+            allowed = set(order)
+        w('    %s, /* %s */' % (bits(allowed), k))
+    w('};')
+    w('/* the list kinds: a child of the same kind is a list not flattened */')
+    list_kinds = sorted(G.kind_of[nt] for nt, t in nt_type.items()
+                        if t in lists and nt in G.kind_of)
+    w('static const uint64_t syntax_list_kinds[%d] = %s;' % (words, bits(list_kinds)))
     w('#endif')
     return '\n'.join(lines) + '\n'
 
