@@ -157,8 +157,7 @@ analysis_result semantic_analysis::using_declaration(node_index n)
             any = true;
         } else if (syntax_is(tree, d, syntax_kind::gnu_attribute_specifier)) {
             continue; /* the using-declarator's before it */
-        } else if (!syntax_is_punctuator(tokens, d,
-                                         preprocessing_op_or_punc::COMMA)) {
+        } else if (!syntax(d).is(preprocessing_op_or_punc::COMMA)) {
             /* a pack expansion */
             result = worse(result, not_supported(n, "temp.variadic"));
         }

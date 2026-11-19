@@ -345,8 +345,7 @@ analysis_result semantic_analysis::builtin_template_arguments(
 {
     const syntax_child *parts = tree.children(id);
     for (uint32_t i = 2; i + 1 < tree[id].child_count; i++) {
-        if (syntax_is_punctuator(tokens, parts[i],
-                                 preprocessing_op_or_punc::ELLIPSIS)) {
+        if (syntax(parts[i]).is(preprocessing_op_or_punc::ELLIPSIS)) {
             if (written.empty() || expansion.back())
                 return not_supported(id, "temp.variadic");
             expansion.back() = true;
@@ -363,8 +362,8 @@ analysis_result semantic_analysis::builtin_template_arguments(
     for (size_t w = 0; w < written.size(); w++)
         if (syntax_is(tree, written[w], syntax_kind::type_id) &&
             tree[written[w].index()].child_count == 2 &&
-            syntax_is_punctuator(tokens, tree.children(written[w].index())[1],
-                                 preprocessing_op_or_punc::ELLIPSIS))
+            syntax(tree.children(written[w].index())[1])
+                .is(preprocessing_op_or_punc::ELLIPSIS))
             expansion[w] = true;
     return analysis_result::well_formed;
 }
@@ -385,9 +384,8 @@ analysis_result semantic_analysis::builtin_template_types(
         if (expansion[w]) {
             token_index first = first_token(a);
             token_index end = tree[a.index()].end_token;
-            if (end > first + 1 &&
-                syntax_is_punctuator(tokens, syntax_child::token(end - 1),
-                                     preprocessing_op_or_punc::ELLIPSIS))
+            if (end > first + 1 && syntax(syntax_child::token(end - 1))
+                                       .is(preprocessing_op_or_punc::ELLIPSIS))
                 end--;
             /* a template's own pack, not bound to elements: a dependent
                template-id */

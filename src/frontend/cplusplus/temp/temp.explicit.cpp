@@ -32,8 +32,7 @@ analysis_result semantic_analysis::explicit_specialization(node_index n)
             tree.children(only)[0].is_token() &&
             syntax_is(tree, tree.children(only)[1],
                       syntax_kind::simple_template_id) &&
-            syntax_is_punctuator(tokens, dc[1],
-                                 preprocessing_op_or_punc::SEMICOLON) &&
+            syntax(dc[1]).is(preprocessing_op_or_punc::SEMICOLON) &&
             !leading_gnu_attributes(d)) {
             standard_keyword key =
                 p.keyword_of(tokens[tree.children(only)[0].index()]);
@@ -135,8 +134,7 @@ analysis_result semantic_analysis::explicit_instantiation(node_index n)
     if (tree[d].child_count != 3 ||
         !syntax_is(tree, dc[0], syntax_kind::decl_specifier_seq) ||
         dc[1].is_token() ||
-        !syntax_is_punctuator(tokens, dc[2],
-                              preprocessing_op_or_punc::SEMICOLON))
+        !syntax(dc[2]).is(preprocessing_op_or_punc::SEMICOLON))
         return not_supported(n, "temp.explicit");
     /* a member function of a class template's specialization:
        S<A>::f(...) */
@@ -301,8 +299,7 @@ semantic_analysis::named_specialization(node_index n, node_index declaration,
         !syntax(declaration).function_definition().plain())
         return not_supported(n, rule);
     if (d.kind == syntax_kind::simple_declaration &&
-        !syntax_is_punctuator(tokens, dc[2],
-                              preprocessing_op_or_punc::SEMICOLON))
+        !syntax(dc[2]).is(preprocessing_op_or_punc::SEMICOLON))
         return not_supported(n, rule);
     if (!is_namespace(current_scope) || defining_class || function_state.active)
         return not_supported(n, rule);

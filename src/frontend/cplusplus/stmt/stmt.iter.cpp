@@ -203,20 +203,17 @@ analysis_result semantic_analysis::iteration_statement(node_index n,
         syntax_child init_syntax = children[2], cond, step;
         bool has_cond = false, has_step = false;
         uint32_t i = 3;
-        if (!syntax_is_punctuator(tokens, children[i],
-                                  preprocessing_op_or_punc::SEMICOLON)) {
+        if (!syntax(children[i]).is(preprocessing_op_or_punc::SEMICOLON)) {
             cond = children[i++];
             has_cond = true;
         }
         if (i >= node.child_count ||
-            !syntax_is_punctuator(tokens, children[i],
-                                  preprocessing_op_or_punc::SEMICOLON))
+            !syntax(children[i]).is(preprocessing_op_or_punc::SEMICOLON))
             return not_supported(n, "stmt.for");
         i++;
         if (i < node.child_count &&
-            !syntax_is_punctuator(
-                tokens, children[i],
-                preprocessing_op_or_punc::RIGHT_PARENTHESIS)) {
+            !syntax(children[i])
+                 .is(preprocessing_op_or_punc::RIGHT_PARENTHESIS)) {
             step = children[i++];
             has_step = true;
         }
@@ -541,12 +538,9 @@ analysis_result semantic_analysis::for_range_declaration(
     /* the second form: a structured binding ([dcl.struct.bind]) */
     bool binding =
         node.child_count > 2 &&
-        (syntax_is_punctuator(tokens, children[1],
-                              preprocessing_op_or_punc::LEFT_BRACKET) ||
-         syntax_is_punctuator(tokens, children[1],
-                              preprocessing_op_or_punc::AMPERSAND) ||
-         syntax_is_punctuator(tokens, children[1],
-                              preprocessing_op_or_punc::AMPERSAND_AMPERSAND));
+        (syntax(children[1]).is(preprocessing_op_or_punc::LEFT_BRACKET) ||
+         syntax(children[1]).is(preprocessing_op_or_punc::AMPERSAND) ||
+         syntax(children[1]).is(preprocessing_op_or_punc::AMPERSAND_AMPERSAND));
     if ((node.child_count != 2 && !binding) ||
         !syntax_is(tree, children[0], syntax_kind::decl_specifier_seq) ||
         tree[at].first_token != first_token(children[0]))

@@ -875,8 +875,7 @@ analysis_result semantic_analysis::comma(node_index n, expression_meaning &m)
     constness so_far = constness::constant;
     bool any = false;
     for (uint32_t i = 0; i < node.child_count; i++) {
-        if (syntax_is_punctuator(tokens, children[i],
-                                 preprocessing_op_or_punc::COMMA))
+        if (syntax(children[i]).is(preprocessing_op_or_punc::COMMA))
             continue;
         expression_meaning e;
         analysis_result r = expression(children[i], e);

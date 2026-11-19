@@ -532,13 +532,11 @@ analysis_result semantic_analysis::structured_binding_declaration(
     const syntax_child *children = tree.children(declaration);
     uint32_t i = first;
     bool reference = false, rvalue = false;
-    if (syntax_is_punctuator(tokens, children[i],
-                             preprocessing_op_or_punc::AMPERSAND)) {
+    if (syntax(children[i]).is(preprocessing_op_or_punc::AMPERSAND)) {
         reference = true;
         i++;
-    } else if (syntax_is_punctuator(
-                   tokens, children[i],
-                   preprocessing_op_or_punc::AMPERSAND_AMPERSAND)) {
+    } else if (syntax(children[i])
+                   .is(preprocessing_op_or_punc::AMPERSAND_AMPERSAND)) {
         reference = rvalue = true;
         i++;
     }

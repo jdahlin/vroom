@@ -199,8 +199,7 @@ analysis_result semantic_analysis::parenthesized(node_index n,
     const syntax_node &node = tree[n];
     const syntax_child *children = tree.children(n);
     if (node.child_count != 3 ||
-        !syntax_is_punctuator(tokens, children[0],
-                              preprocessing_op_or_punc::LEFT_PARENTHESIS))
+        !syntax(children[0]).is(preprocessing_op_or_punc::LEFT_PARENTHESIS))
         return not_supported(n, "expr.prim");
     return expression(children[1], m);
 }

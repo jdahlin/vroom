@@ -530,9 +530,7 @@ semantic_analysis::lambda_call_type(node_index n, node_index d,
              i < tree[d].child_count && r == analysis_result::well_formed;
              i++) {
             syntax_child part = tree.children(d)[i];
-            if (syntax_is_punctuator(
-                    tokens, part,
-                    preprocessing_op_or_punc::RIGHT_PARENTHESIS)) {
+            if (syntax(part).is(preprocessing_op_or_punc::RIGHT_PARENTHESIS)) {
                 closed = true;
                 continue;
             }

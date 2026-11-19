@@ -596,8 +596,7 @@ analysis_result semantic_analysis::class_definition(node_index n,
                 default:
                     break;
                 }
-                if (syntax_is_punctuator(tokens, member,
-                                         preprocessing_op_or_punc::COLON))
+                if (syntax(member).is(preprocessing_op_or_punc::COLON))
                     continue;
                 result = worse(result, not_supported(n, "class.mem"));
                 continue;
@@ -1214,8 +1213,8 @@ semantic_analysis::member_declaration(entity_index c, syntax_child member,
         }
         if (node.kind == syntax_kind::member_declaration) {
             if (node.child_count != at + 2 ||
-                !syntax_is_punctuator(tokens, children[at + 1],
-                                      preprocessing_op_or_punc::SEMICOLON))
+                !syntax(children[at + 1])
+                     .is(preprocessing_op_or_punc::SEMICOLON))
                 /* = default, = delete, a pure-specifier */
                 return not_supported(n, "dcl.fct.def");
             virt_override = override_;
@@ -1254,8 +1253,7 @@ semantic_analysis::member_declaration(entity_index c, syntax_child member,
        class */
     sole_elaborated = 0;
     if (node.kind == syntax_kind::member_declaration && count == 2 &&
-        syntax_is_punctuator(tokens, children[1],
-                             preprocessing_op_or_punc::SEMICOLON) &&
+        syntax(children[1]).is(preprocessing_op_or_punc::SEMICOLON) &&
         tree[children[0].index()].child_count == 1 &&
         syntax_is(tree, tree.children(children[0].index())[0],
                   syntax_kind::elaborated_type_specifier))
@@ -1314,15 +1312,13 @@ analysis_result semantic_analysis::member_declarators(
     owned_array<syntax_child> declarators;
     for (uint32_t i = first; i < node.child_count; i++) {
         syntax_child d = children[i];
-        if (syntax_is_punctuator(tokens, d,
-                                 preprocessing_op_or_punc::SEMICOLON))
+        if (syntax(d).is(preprocessing_op_or_punc::SEMICOLON))
             continue;
         if (syntax_is(tree, d, syntax_kind::member_declarator_list)) {
             const syntax_node &list = tree[d.index()];
             for (uint32_t k = 0; k < list.child_count; k++) {
                 syntax_child item = tree.children(d.index())[k];
-                if (!syntax_is_punctuator(tokens, item,
-                                          preprocessing_op_or_punc::COMMA))
+                if (!syntax(item).is(preprocessing_op_or_punc::COMMA))
                     declarators.append(item);
             }
             continue;
@@ -1374,8 +1370,8 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
         /* identifier_opt attribute-specifier-seq_opt : constant-expression */
         const syntax_node &node = tree[d.index()];
         for (uint32_t i = 0; i < node.child_count; i++)
-            if (syntax_is_punctuator(tokens, tree.children(d.index())[i],
-                                     preprocessing_op_or_punc::COLON))
+            if (syntax(tree.children(d.index())[i])
+                    .is(preprocessing_op_or_punc::COLON))
                 return member_bit_field(c, declaration, d, s, access);
         /* declarator virt-specifier-seq_opt pure-specifier_opt */
         {

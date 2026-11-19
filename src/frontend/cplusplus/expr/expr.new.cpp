@@ -286,8 +286,7 @@ analysis_result semantic_analysis::new_expression(node_index n,
        scope." */
     bool global = false;
     if (i < count &&
-        syntax_is_punctuator(tokens, children[i],
-                             preprocessing_op_or_punc::COLON_COLON)) {
+        syntax(children[i]).is(preprocessing_op_or_punc::COLON_COLON)) {
         global = true;
         i++;
     }

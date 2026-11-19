@@ -333,8 +333,7 @@ analysis_result semantic_analysis::namespace_definition(node_index n)
         if (!c.is_token())
             /* an attribute-specifier-seq */
             return not_supported(n, "dcl.attr");
-        if (syntax_is_punctuator(tokens, c,
-                                 preprocessing_op_or_punc::LEFT_BRACE))
+        if (syntax(c).is(preprocessing_op_or_punc::LEFT_BRACE))
             body = true;
         else
             head.append(c);

@@ -304,17 +304,15 @@ analysis_result semantic_analysis::postfix(node_index n, expression_meaning &m)
             return named_cast(n, k, m);
     }
     if (node.child_count == 3 &&
-        (syntax_is_punctuator(tokens, children[1],
-                              preprocessing_op_or_punc::DOT) ||
-         syntax_is_punctuator(tokens, children[1],
-                              preprocessing_op_or_punc::ARROW)))
+        (syntax(children[1]).is(preprocessing_op_or_punc::DOT) ||
+         syntax(children[1]).is(preprocessing_op_or_punc::ARROW)))
         return member_reference(n, m);
     /* [expr.type.conv]/1: "A simple-type-specifier or typename-specifier
        followed by a parenthesized optional expression-list or by a
        braced-init-list (the initializer) constructs a value of the
        specified type given the initializer." */
-    bool parenthesized = syntax_is_punctuator(
-        tokens, children[1], preprocessing_op_or_punc::LEFT_PARENTHESIS);
+    bool parenthesized =
+        syntax(children[1]).is(preprocessing_op_or_punc::LEFT_PARENTHESIS);
     bool braced = syntax_is(tree, children[1], syntax_kind::braced_init_list);
     type_index named = 0;
     /* [dcl.type.simple]/1: nested-name-specifier(opt) type-name */
@@ -501,8 +499,7 @@ analysis_result semantic_analysis::postfix(node_index n, expression_meaning &m)
     if (parenthesized)
         return call(n, m);
     if (node.child_count == 4 &&
-        syntax_is_punctuator(tokens, children[1],
-                             preprocessing_op_or_punc::LEFT_BRACKET)) {
+        syntax(children[1]).is(preprocessing_op_or_punc::LEFT_BRACKET)) {
         /* [expr.sub]/1: "One of the expressions shall be a glvalue of type
            "array of T" or a prvalue of type "pointer to T" and the other
            shall be a prvalue of unscoped enumeration or integral type.  The
@@ -973,8 +970,7 @@ analysis_result semantic_analysis::template_callee_parts(
                 for (uint32_t k = 0; k < tree[parts[i].index()].child_count;
                      k++) {
                     syntax_child a = tree.children(parts[i].index())[k];
-                    if (!syntax_is_punctuator(tokens, a,
-                                              preprocessing_op_or_punc::COMMA))
+                    if (!syntax(a).is(preprocessing_op_or_punc::COMMA))
                         written.append(a);
                 }
             } else {
@@ -1503,10 +1499,10 @@ analysis_result semantic_analysis::call_with(
         if (!name.is_token() &&
             syntax_is(tree, name, syntax_kind::postfix_expression) &&
             tree[name.index()].child_count == 3 &&
-            (syntax_is_punctuator(tokens, tree.children(name.index())[1],
-                                  preprocessing_op_or_punc::DOT) ||
-             syntax_is_punctuator(tokens, tree.children(name.index())[1],
-                                  preprocessing_op_or_punc::ARROW)))
+            (syntax(tree.children(name.index())[1])
+                 .is(preprocessing_op_or_punc::DOT) ||
+             syntax(tree.children(name.index())[1])
+                 .is(preprocessing_op_or_punc::ARROW)))
             name = tree.children(name.index())[2];
         if (name.is_token() &&
             tokens[name.index()].kind == token_kind::identifier)

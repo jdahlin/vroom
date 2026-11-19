@@ -34,8 +34,7 @@ bool semantic_analysis::explicit_body(syntax_child body,
         tree[body.index()].child_count < 3)
         return false;
     const syntax_child *children = tree.children(body.index());
-    return syntax_is_punctuator(tokens, children[0],
-                                preprocessing_op_or_punc::EQUAL) &&
+    return syntax(children[0]).is(preprocessing_op_or_punc::EQUAL) &&
            children[1].is_token() &&
            p.keyword_of(tokens[children[1].index()]) == k;
 }

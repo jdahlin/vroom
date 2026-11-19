@@ -67,8 +67,7 @@ analysis_result semantic_analysis::type_id(node_index n, qualified_type &type)
     bool expansion = type_id_expansion;
     type_id_expansion = false;
     if (expansion && count == 2 &&
-        syntax_is_punctuator(tokens, children[1],
-                             preprocessing_op_or_punc::ELLIPSIS))
+        syntax(children[1]).is(preprocessing_op_or_punc::ELLIPSIS))
         count = 1;
     specified s;
     analysis_result r = decl_specifier_seq(children[0].index(), s, false);

@@ -314,8 +314,7 @@ bool semantic_analysis::initializer_form(syntax_child init,
                node.child_count == 3 &&
                !syntax_is(tree, children[1], syntax_kind::initializer_list) &&
                !syntax_is(tree, children[1], syntax_kind::braced_init_list) &&
-               !syntax_is_punctuator(tokens, children[1],
-                                     preprocessing_op_or_punc::RIGHT_BRACE)) {
+               !syntax(children[1]).is(preprocessing_op_or_punc::RIGHT_BRACE)) {
         clause = children[1];
         direct = true;
         list = true;

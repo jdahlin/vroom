@@ -209,8 +209,7 @@ semantic_analysis::friend_function(entity_index c, node_index n,
         if (!body.defaulted() && !body.plain())
             return not_supported(n, "dcl.fct.def.general");
     } else if (node.kind != syntax_kind::member_declaration || count != 3 ||
-               !syntax_is_punctuator(tokens, children[2],
-                                     preprocessing_op_or_punc::SEMICOLON) ||
+               !syntax(children[2]).is(preprocessing_op_or_punc::SEMICOLON) ||
                syntax_is(tree, children[1], syntax_kind::member_declarator) ||
                syntax_is(tree, children[1],
                          syntax_kind::member_declarator_list)) {

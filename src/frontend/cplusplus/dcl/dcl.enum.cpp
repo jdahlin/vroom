@@ -464,8 +464,7 @@ analysis_result semantic_analysis::enum_specifier_rules(node_index n,
         i = 1;
     } else {
         for (; i < node.child_count &&
-               !syntax_is_punctuator(tokens, children[i],
-                                     preprocessing_op_or_punc::LEFT_BRACE);
+               !syntax(children[i]).is(preprocessing_op_or_punc::LEFT_BRACE);
              i++)
             head.append(children[i]);
     }
@@ -485,8 +484,7 @@ analysis_result semantic_analysis::enum_specifier_rules(node_index n,
         if (c.is_token() &&
             p.keyword_of(tokens[c.index()]) == standard_keyword::enum_)
             continue;
-        if (opaque && syntax_is_punctuator(tokens, c,
-                                           preprocessing_op_or_punc::SEMICOLON))
+        if (opaque && syntax(c).is(preprocessing_op_or_punc::SEMICOLON))
             continue;
         if (c.is_token() && tokens[c.index()].kind == token_kind::identifier) {
             name = tokens.identifier(c.index());
@@ -498,8 +496,7 @@ analysis_result semantic_analysis::enum_specifier_rules(node_index n,
     }
     if (!opaque &&
         (i >= node.child_count ||
-         !syntax_is_punctuator(tokens, children[i],
-                               preprocessing_op_or_punc::LEFT_BRACE)))
+         !syntax(children[i]).is(preprocessing_op_or_punc::LEFT_BRACE)))
         return not_supported(n, "dcl.enum");
     owned_array<syntax_child> enumerators;
     for (i++; i < node.child_count; i++) {
@@ -508,15 +505,13 @@ analysis_result semantic_analysis::enum_specifier_rules(node_index n,
             const syntax_node &list = tree[c.index()];
             for (uint32_t k = 0; k < list.child_count; k++) {
                 syntax_child item = tree.children(c.index())[k];
-                if (!syntax_is_punctuator(tokens, item,
-                                          preprocessing_op_or_punc::COMMA))
+                if (!syntax(item).is(preprocessing_op_or_punc::COMMA))
                     enumerators.append(item);
             }
             continue;
         }
-        if (syntax_is_punctuator(tokens, c, preprocessing_op_or_punc::COMMA) ||
-            syntax_is_punctuator(tokens, c,
-                                 preprocessing_op_or_punc::RIGHT_BRACE))
+        if (syntax(c).is(preprocessing_op_or_punc::COMMA) ||
+            syntax(c).is(preprocessing_op_or_punc::RIGHT_BRACE))
             continue;
         enumerators.append(c);
     }

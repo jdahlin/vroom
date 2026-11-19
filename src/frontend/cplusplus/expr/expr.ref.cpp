@@ -293,8 +293,7 @@ analysis_result semantic_analysis::member_reference(node_index n,
                                                     expression_meaning &m)
 {
     const syntax_child *children = tree.children(n);
-    bool arrow = syntax_is_punctuator(tokens, children[1],
-                                      preprocessing_op_or_punc::ARROW);
+    bool arrow = syntax(children[1]).is(preprocessing_op_or_punc::ARROW);
     if (!children[2].is_token() ||
         tokens[children[2].index()].kind != token_kind::identifier)
         /* template, a qualified-id, a destructor's name, an operator

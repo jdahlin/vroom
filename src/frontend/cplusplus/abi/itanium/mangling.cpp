@@ -141,7 +141,7 @@ class itanium_mangler
     bool dependent_expression(syntax_child c);
     bool punctuator(syntax_child c, preprocessing_op_or_punc op) const
     {
-        return analysis.punctuator_is(c, op);
+        return analysis.syntax(c).is(op);
     }
     bool class_template_args(entity_index c);
     bool template_args(entity_index c, entity_index function = 0);

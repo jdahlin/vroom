@@ -230,8 +230,7 @@ analysis_result semantic_analysis::constraint_satisfied(syntax_child e,
            is the normal form of E." */
         if (node.kind == syntax_kind::primary_expression &&
             node.child_count == 3 &&
-            syntax_is_punctuator(tokens, parts[0],
-                                 preprocessing_op_or_punc::LEFT_PARENTHESIS))
+            syntax(parts[0]).is(preprocessing_op_or_punc::LEFT_PARENTHESIS))
             return constraint_satisfied(parts[1], scope, horizon, satisfied);
     }
     /* [temp.constr.atomic]/3: "To determine if an atomic constraint is

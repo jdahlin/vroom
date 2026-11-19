@@ -108,8 +108,7 @@ analysis_result semantic_analysis::deduction_guide(node_index n)
     node_index id = 0;
     for (uint32_t i = 1; i < node.child_count; i++) {
         syntax_child c = tree.children(n)[i];
-        if (!name && syntax_is_punctuator(
-                         tokens, c, preprocessing_op_or_punc::LEFT_PARENTHESIS))
+        if (!name && syntax(c).is(preprocessing_op_or_punc::LEFT_PARENTHESIS))
             name = tree.children(n)[i - 1].index();
         if (syntax_is(tree, c, syntax_kind::simple_template_id))
             id = c.index();
@@ -386,8 +385,7 @@ semantic_analysis::function_template_definition(node_index n,
         dc[1].is_token() ||
         (defines &&
          !syntax_is(tree, dc[2 + trailing], syntax_kind::function_body)) ||
-        (!defines && (!syntax_is_punctuator(
-                          tokens, dc[2], preprocessing_op_or_punc::SEMICOLON) ||
+        (!defines && (!syntax(dc[2]).is(preprocessing_op_or_punc::SEMICOLON) ||
                       (!syntax_is(tree, dc[1], syntax_kind::noptr_declarator) &&
                        !syntax_is(tree, dc[1], syntax_kind::ptr_declarator)))))
         return not_supported(n, "temp.fct");
@@ -1571,10 +1569,9 @@ bool semantic_analysis::expansion_list(node_index list,
 {
     for (uint32_t k = 0; k < tree[list].child_count; k++) {
         syntax_child a = tree.children(list)[k];
-        if (syntax_is_punctuator(tokens, a, preprocessing_op_or_punc::COMMA))
+        if (syntax(a).is(preprocessing_op_or_punc::COMMA))
             continue;
-        if (syntax_is_punctuator(tokens, a,
-                                 preprocessing_op_or_punc::ELLIPSIS)) {
+        if (syntax(a).is(preprocessing_op_or_punc::ELLIPSIS)) {
             if (written.empty() || expansion.back())
                 return false;
             expansion.back() = true;
@@ -2222,8 +2219,7 @@ analysis_result semantic_analysis::template_id_arguments(
     owned_array<syntax_child> written;
     owned_array<bool> expansion;
     for (uint32_t i = 2; i + 1 < tree[id].child_count; i++) {
-        if (syntax_is_punctuator(tokens, parts[i],
-                                 preprocessing_op_or_punc::ELLIPSIS)) {
+        if (syntax(parts[i]).is(preprocessing_op_or_punc::ELLIPSIS)) {
             if (written.empty() || expansion.back())
                 return not_supported(id, "temp.variadic");
             expansion.back() = true;
@@ -2242,8 +2238,8 @@ analysis_result semantic_analysis::template_id_arguments(
     for (size_t w = 0; w < written.size(); w++)
         if (syntax_is(tree, written[w], syntax_kind::type_id) &&
             tree[written[w].index()].child_count == 2 &&
-            syntax_is_punctuator(tokens, tree.children(written[w].index())[1],
-                                 preprocessing_op_or_punc::ELLIPSIS)) {
+            syntax(tree.children(written[w].index())[1])
+                .is(preprocessing_op_or_punc::ELLIPSIS)) {
             if (expansion[w])
                 return not_supported(id, "temp.variadic");
             expansion[w] = true;
@@ -2261,8 +2257,8 @@ analysis_result semantic_analysis::template_id_arguments(
                 if (!a.is_token())
                     end = tree[a.index()].end_token;
                 if (end > first + 1 &&
-                    syntax_is_punctuator(tokens, syntax_child::token(end - 1),
-                                         preprocessing_op_or_punc::ELLIPSIS))
+                    syntax(syntax_child::token(end - 1))
+                        .is(preprocessing_op_or_punc::ELLIPSIS))
                     end--;
                 /* a partial specialization's own pack, In... (its
                    pattern the pack's name alone): the rest of the
@@ -2754,7 +2750,7 @@ bool semantic_analysis::pack_only_expanded(uint32_t name, token_index first,
                                            token_index end) const
 {
     auto is = [&](token_index t, preprocessing_op_or_punc op) {
-        return syntax_is_punctuator(tokens, syntax_child::token(t), op);
+        return syntax(syntax_child::token(t)).is(op);
     };
     for (token_index t = first; t < end; t++) {
         if (tokens[t].kind != token_kind::identifier ||

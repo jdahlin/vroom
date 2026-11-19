@@ -34,11 +34,9 @@ semantic_analysis::lambda_captures_of(node_index n,
 {
     for (uint32_t i = 0; i < tree[n].child_count; i++) {
         syntax_child c = tree.children(n)[i];
-        if (syntax_is_punctuator(tokens, c, preprocessing_op_or_punc::COMMA) ||
-            syntax_is_punctuator(tokens, c,
-                                 preprocessing_op_or_punc::LEFT_BRACKET) ||
-            syntax_is_punctuator(tokens, c,
-                                 preprocessing_op_or_punc::RIGHT_BRACKET))
+        if (syntax(c).is(preprocessing_op_or_punc::COMMA) ||
+            syntax(c).is(preprocessing_op_or_punc::LEFT_BRACKET) ||
+            syntax(c).is(preprocessing_op_or_punc::RIGHT_BRACKET))
             continue;
         if (syntax_is(tree, c, syntax_kind::lambda_capture) ||
             syntax_is(tree, c, syntax_kind::capture_list)) {
@@ -179,14 +177,10 @@ analysis_result semantic_analysis::lambda_introducer(node_index n,
         token_index name = 0;
         if (c.is_token()) {
             const token &t = tokens[c.index()];
-            if (i == 0 &&
-                (syntax_is_punctuator(tokens, c,
-                                      preprocessing_op_or_punc::EQUAL) ||
-                 syntax_is_punctuator(tokens, c,
-                                      preprocessing_op_or_punc::AMPERSAND))) {
+            if (i == 0 && (syntax(c).is(preprocessing_op_or_punc::EQUAL) ||
+                           syntax(c).is(preprocessing_op_or_punc::AMPERSAND))) {
                 l.default_capture = capture_default::copy;
-                if (syntax_is_punctuator(tokens, c,
-                                         preprocessing_op_or_punc::AMPERSAND))
+                if (syntax(c).is(preprocessing_op_or_punc::AMPERSAND))
                     l.default_capture = capture_default::reference;
                 /* [expr.prim.lambda.capture]/3: "A lambda-expression shall
                    not have a capture-default or simple-capture in its
@@ -228,14 +222,12 @@ analysis_result semantic_analysis::lambda_introducer(node_index n,
             const syntax_node &sc = tree[c.index()];
             const syntax_child *parts = tree.children(c.index());
             if (sc.child_count == 2 &&
-                syntax_is_punctuator(tokens, parts[0],
-                                     preprocessing_op_or_punc::STAR)) {
+                syntax(parts[0]).is(preprocessing_op_or_punc::STAR)) {
                 /* * this: *this captured by copy (/10) */
                 record.at = parts[1].index();
                 record.star_this = true;
             } else if (sc.child_count == 2 &&
-                       syntax_is_punctuator(
-                           tokens, parts[0],
+                       syntax(parts[0]).is(
                            preprocessing_op_or_punc::AMPERSAND) &&
                        parts[1].is_token() &&
                        tokens[parts[1].index()].kind ==
@@ -351,8 +343,8 @@ analysis_result semantic_analysis::init_capture(node_index n, lambda_context &l,
     const syntax_node &node = tree[n];
     const syntax_child *parts = tree.children(n);
     uint32_t i = 0;
-    bool by_reference = syntax_is_punctuator(
-        tokens, parts[0], preprocessing_op_or_punc::AMPERSAND);
+    bool by_reference =
+        syntax(parts[0]).is(preprocessing_op_or_punc::AMPERSAND);
     if (by_reference)
         i = 1;
     if (node.child_count != i + 2 || !parts[i].is_token() ||

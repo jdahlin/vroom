@@ -79,11 +79,10 @@ analysis_result semantic_analysis::gnu_offsetof(node_index n,
     /* children[4 .. child_count - 1): the member-designator */
     for (uint32_t i = 4; i + 1 < node.child_count; i++) {
         syntax_child c = children[i];
-        if (syntax_is_punctuator(tokens, c, preprocessing_op_or_punc::DOT))
+        if (syntax(c).is(preprocessing_op_or_punc::DOT))
             continue;
         const struct type record = type_table[t.unqualified()];
-        if (syntax_is_punctuator(tokens, c,
-                                 preprocessing_op_or_punc::LEFT_BRACKET)) {
+        if (syntax(c).is(preprocessing_op_or_punc::LEFT_BRACKET)) {
             if (record.kind != type_kind::array)
                 return ill_formed(n,
                                   "a subscript in the member-designator "

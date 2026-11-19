@@ -341,8 +341,7 @@ analysis_result semantic_analysis::size_of(node_index n, bool alignment,
             return not_supported(n, "class.bit");
         operand = e.type;
     } else if (!alignment && node.child_count == 5 &&
-               syntax_is_punctuator(tokens, children[1],
-                                    preprocessing_op_or_punc::ELLIPSIS) &&
+               syntax(children[1]).is(preprocessing_op_or_punc::ELLIPSIS) &&
                children[3].is_token() &&
                tokens[children[3].index()].kind == token_kind::identifier) {
         /* [expr.sizeof]/4: "The identifier in a sizeof... expression shall

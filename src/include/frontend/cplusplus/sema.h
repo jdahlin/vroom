@@ -30,23 +30,6 @@ inline bool syntax_is(const syntax_tree &tree, syntax_child c, syntax_kind kind)
     return !c.is_token() && tree[c.index()].kind == kind;
 }
 
-inline bool syntax_is_attribute(const syntax_tree &tree, syntax_child c)
-{
-    return syntax_is(tree, c, syntax_kind::attribute_specifier) ||
-           syntax_is(tree, c, syntax_kind::attribute_specifier_seq) ||
-           syntax_is(tree, c, syntax_kind::alignment_specifier);
-}
-
-inline bool syntax_is_punctuator(token_stream &tokens, syntax_child c,
-                                 preprocessing_op_or_punc op)
-{
-    if (!c.is_token())
-        return false;
-    const token &t = tokens[c.index()];
-    return t.kind == token_kind::operator_or_punctuator &&
-           preprocessing_op_or_punc_primary(t.op_or_punc) == op;
-}
-
 /* ---- types -------------------------------------------------------------- */
 
 /* a type of the translation unit's type table; 0 is no type */
@@ -4014,10 +3997,6 @@ class semantic_analysis
     /* [abi:mangle.function-param]: the position plus one of function
        template t's parameter named by token i (0: none) */
     uint32_t function_parameter_position(entity_index t, token_index i) const;
-    bool punctuator_is(syntax_child c, preprocessing_op_or_punc op) const
-    {
-        return syntax_is_punctuator(tokens, c, op);
-    }
     uint32_t token_identifier(token_index i) const
     {
         return tokens.identifier(i);

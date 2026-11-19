@@ -53,8 +53,7 @@ bool semantic_analysis::declares_special_member(entity_index c,
     if (syntax_is(tree, head, syntax_kind::unqualified_id)) {
         const syntax_child *parts = tree.children(head.index());
         if (tree[head.index()].child_count != 2 ||
-            !syntax_is_punctuator(tokens, parts[0],
-                                  preprocessing_op_or_punc::TILDE))
+            !syntax(parts[0]).is(preprocessing_op_or_punc::TILDE))
             return false;
         head = parts[1];
     }
@@ -787,8 +786,7 @@ analysis_result semantic_analysis::expression_list_meanings(
     if (syntax_is(tree, list, syntax_kind::initializer_list)) {
         for (uint32_t i = 0; i < tree[list.index()].child_count; i++) {
             syntax_child a = tree.children(list.index())[i];
-            if (syntax_is_punctuator(tokens, a,
-                                     preprocessing_op_or_punc::COMMA))
+            if (syntax(a).is(preprocessing_op_or_punc::COMMA))
                 continue;
             items.append(a);
         }
@@ -797,7 +795,7 @@ analysis_result semantic_analysis::expression_list_meanings(
     }
     for (syntax_child a : items) {
         if (syntax_is(tree, a, syntax_kind::braced_init_list) ||
-            syntax_is_punctuator(tokens, a, preprocessing_op_or_punc::ELLIPSIS))
+            syntax(a).is(preprocessing_op_or_punc::ELLIPSIS))
             return not_supported(node_of(a), "over.match.list");
         expression_meaning e;
         analysis_result r = expression(a, e);
@@ -1060,8 +1058,7 @@ analysis_result semantic_analysis::ctor_initializer(syntax_child list,
                 syntax_child one = tree.children(item.index())[k];
                 if (syntax_is(tree, one, syntax_kind::mem_initializer))
                     items.append(one);
-                else if (!syntax_is_punctuator(tokens, one,
-                                               preprocessing_op_or_punc::COMMA))
+                else if (!syntax(one).is(preprocessing_op_or_punc::COMMA))
                     return not_supported(list.index(), "class.base.init");
             }
         } else if (syntax_is(tree, item, syntax_kind::mem_initializer)) {

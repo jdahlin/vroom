@@ -100,8 +100,7 @@ analysis_result semantic_analysis::selection_statement(node_index n,
     const syntax_node &node = tree[n];
     const syntax_child *children = tree.children(n);
     if (node.child_count < 5 || !children[0].is_token() ||
-        !syntax_is_punctuator(tokens, children[1],
-                              preprocessing_op_or_punc::LEFT_PARENTHESIS))
+        !syntax(children[1]).is(preprocessing_op_or_punc::LEFT_PARENTHESIS))
         /* if constexpr, if consteval */
         return not_supported(n, "stmt.if");
     bool is_switch =
@@ -110,8 +109,7 @@ analysis_result semantic_analysis::selection_statement(node_index n,
     uint32_t i = 2;
     owned_array<syntax_child> inside;
     for (; i < node.child_count; i++) {
-        if (syntax_is_punctuator(tokens, children[i],
-                                 preprocessing_op_or_punc::RIGHT_PARENTHESIS))
+        if (syntax(children[i]).is(preprocessing_op_or_punc::RIGHT_PARENTHESIS))
             break;
         inside.append(children[i]);
     }

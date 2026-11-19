@@ -46,8 +46,7 @@ analysis_result semantic_analysis::member_bit_field(entity_index c,
         tokens[children[k].index()].kind == token_kind::identifier)
         id = children[k++].index();
     if (k + 2 != node.child_count ||
-        !syntax_is_punctuator(tokens, children[k],
-                              preprocessing_op_or_punc::COLON))
+        !syntax(children[k]).is(preprocessing_op_or_punc::COLON))
         /* attributes, a brace-or-equal-initializer */
         return not_supported(d.index(), "class.bit");
     syntax_child width_expression = children[k + 1];

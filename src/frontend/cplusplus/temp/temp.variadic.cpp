@@ -75,8 +75,7 @@ bool semantic_analysis::template_parameter_form(
         return false;
     }
     if (k < x.child_count &&
-        syntax_is_punctuator(tokens, c[k],
-                             preprocessing_op_or_punc::ELLIPSIS)) {
+        syntax(c[k]).is(preprocessing_op_or_punc::ELLIPSIS)) {
         out.pack = true;
         k++;
     }
@@ -88,8 +87,8 @@ bool semantic_analysis::template_parameter_form(
     } else if (!out.type && !out.pack && k < x.child_count &&
                syntax_is(tree, c[k], syntax_kind::noptr_declarator) &&
                tree[c[k].index()].child_count == 2 &&
-               syntax_is_punctuator(tokens, tree.children(c[k].index())[0],
-                                    preprocessing_op_or_punc::ELLIPSIS) &&
+               syntax(tree.children(c[k].index())[0])
+                   .is(preprocessing_op_or_punc::ELLIPSIS) &&
                tree.children(c[k].index())[1].is_token() &&
                tokens[tree.children(c[k].index())[1].index()].kind ==
                    token_kind::identifier) {
@@ -107,7 +106,7 @@ bool semantic_analysis::template_parameter_form(
         k++;
     }
     if (k + 2 == x.child_count &&
-        syntax_is_punctuator(tokens, c[k], preprocessing_op_or_punc::EQUAL)) {
+        syntax(c[k]).is(preprocessing_op_or_punc::EQUAL)) {
         out.has_default = true;
         out.default_argument = c[k + 1];
         k += 2;
@@ -223,7 +222,7 @@ entity_index semantic_analysis::find_pack(uint32_t name) const
 static bool token_is(token_stream &tokens, token_index t,
                      preprocessing_op_or_punc op)
 {
-    return syntax_is_punctuator(tokens, syntax_child::token(t), op);
+    return is_operator(tokens[t], op);
 }
 
 /* [temp.variadic]/7: "All of the packs expanded by a pack expansion shall
@@ -300,8 +299,8 @@ bool semantic_analysis::has_pack_expansion(syntax_child list) const
     if (list.is_token())
         return false;
     for (uint32_t i = 0; i < tree[list.index()].child_count; i++)
-        if (syntax_is_punctuator(tokens, tree.children(list.index())[i],
-                                 preprocessing_op_or_punc::ELLIPSIS))
+        if (syntax(tree.children(list.index())[i])
+                .is(preprocessing_op_or_punc::ELLIPSIS))
             return true;
     return false;
 }
@@ -357,8 +356,7 @@ analysis_result semantic_analysis::fold(node_index n, expression_meaning &m)
     bool right = false, has_init = false;
     token_index at = 0;
     auto ellipsis = [&](uint32_t i) {
-        return syntax_is_punctuator(tokens, c[i],
-                                    preprocessing_op_or_punc::ELLIPSIS);
+        return syntax(c[i]).is(preprocessing_op_or_punc::ELLIPSIS);
     };
     uint32_t count = 0;
     if (node.child_count == 5 && ellipsis(3)) {

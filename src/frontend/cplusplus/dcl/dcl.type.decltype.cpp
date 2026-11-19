@@ -24,8 +24,8 @@ bool semantic_analysis::names_entity(syntax_child operand) const
     if (node.kind != syntax_kind::postfix_expression || node.child_count != 3)
         return false;
     syntax_child op = tree.children(operand.index())[1];
-    return syntax_is_punctuator(tokens, op, preprocessing_op_or_punc::DOT) ||
-           syntax_is_punctuator(tokens, op, preprocessing_op_or_punc::ARROW);
+    return syntax(op).is(preprocessing_op_or_punc::DOT) ||
+           syntax(op).is(preprocessing_op_or_punc::ARROW);
 }
 
 /*

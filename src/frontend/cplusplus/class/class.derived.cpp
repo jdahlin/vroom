@@ -237,11 +237,9 @@ analysis_result semantic_analysis::base_clause(entity_index c, node_index n,
         }
         for (uint32_t k = 0; k < tree[item.index()].child_count; k++) {
             syntax_child one = tree.children(item.index())[k];
-            if (syntax_is_punctuator(tokens, one,
-                                     preprocessing_op_or_punc::COMMA))
+            if (syntax(one).is(preprocessing_op_or_punc::COMMA))
                 continue;
-            if (syntax_is_punctuator(tokens, one,
-                                     preprocessing_op_or_punc::ELLIPSIS)) {
+            if (syntax(one).is(preprocessing_op_or_punc::ELLIPSIS)) {
                 if (expanded.empty())
                     return not_supported(n, "temp.variadic");
                 expanded[expanded.size() - 1] = true;

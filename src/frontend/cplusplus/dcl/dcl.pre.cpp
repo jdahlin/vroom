@@ -905,8 +905,7 @@ analysis_result semantic_analysis::init_declarators(node_index declaration,
                 after = true;
                 continue;
             }
-            if (after && !syntax_is_punctuator(
-                             tokens, c, preprocessing_op_or_punc::SEMICOLON))
+            if (after && !syntax(c).is(preprocessing_op_or_punc::SEMICOLON))
                 declarators = true;
         }
         if (!declarators)
@@ -943,12 +942,9 @@ analysis_result semantic_analysis::init_declarators(node_index declaration,
         if (instantiating && syntax_is(tree, c, syntax_kind::requires_clause))
             continue;
         /* [dcl.struct.bind]/1: ref-qualifier_opt [ identifier-list ] */
-        if (syntax_is_punctuator(tokens, c,
-                                 preprocessing_op_or_punc::LEFT_BRACKET) ||
-            syntax_is_punctuator(tokens, c,
-                                 preprocessing_op_or_punc::AMPERSAND) ||
-            syntax_is_punctuator(tokens, c,
-                                 preprocessing_op_or_punc::AMPERSAND_AMPERSAND))
+        if (syntax(c).is(preprocessing_op_or_punc::LEFT_BRACKET) ||
+            syntax(c).is(preprocessing_op_or_punc::AMPERSAND) ||
+            syntax(c).is(preprocessing_op_or_punc::AMPERSAND_AMPERSAND))
             return structured_binding_declaration(declaration, i, s, nullptr);
         /* a declarator that is only its identifier is the token */
         if (c.is_token()) {

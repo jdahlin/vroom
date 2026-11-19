@@ -123,8 +123,8 @@ entity_index semantic_analysis::dependent_value_entity(syntax_child written)
     bool negated = false;
     if (syntax_is(tree, written, syntax_kind::unary_expression) &&
         tree[written.index()].child_count == 2 &&
-        syntax_is_punctuator(tokens, tree.children(written.index())[0],
-                             preprocessing_op_or_punc::EXCLAMATION)) {
+        syntax(tree.children(written.index())[0])
+            .is(preprocessing_op_or_punc::EXCLAMATION)) {
         negated = true;
         written = tree.children(written.index())[1];
     }
@@ -493,8 +493,8 @@ analysis_result semantic_analysis::address_argument(node_index at,
     bool address_of = false;
     if (syntax_is(tree, written, syntax_kind::unary_expression) &&
         tree[written.index()].child_count == 2 &&
-        syntax_is_punctuator(tokens, tree.children(written.index())[0],
-                             preprocessing_op_or_punc::AMPERSAND)) {
+        syntax(tree.children(written.index())[0])
+            .is(preprocessing_op_or_punc::AMPERSAND)) {
         operand = tree.children(written.index())[1];
         address_of = true;
     }

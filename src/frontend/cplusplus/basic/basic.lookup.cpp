@@ -715,8 +715,7 @@ analysis_result semantic_analysis::nested_name_specifier(node_index n,
     bool qualified = false;
     scope = nominated_scope();
     if (node.child_count &&
-        syntax_is_punctuator(tokens, parts[0],
-                             preprocessing_op_or_punc::COLON_COLON)) {
+        syntax(parts[0]).is(preprocessing_op_or_punc::COLON_COLON)) {
         scope.global = true;
         qualified = true;
         i = 1;
@@ -730,8 +729,7 @@ analysis_result semantic_analysis::nested_name_specifier(node_index n,
             if (!parts[i].is_token() ||
                 tokens[parts[i].index()].kind != token_kind::identifier ||
                 i + 1 >= node.child_count ||
-                !syntax_is_punctuator(tokens, parts[i + 1],
-                                      preprocessing_op_or_punc::COLON_COLON))
+                !syntax(parts[i + 1]).is(preprocessing_op_or_punc::COLON_COLON))
                 return not_supported(n, "temp.res");
             scope.dependent = dependent_member_type(
                 scope.dependent, tokens.identifier(parts[i].index()));
@@ -740,8 +738,7 @@ analysis_result semantic_analysis::nested_name_specifier(node_index n,
         if (!parts[i].is_token() &&
             syntax_is(tree, parts[i], syntax_kind::simple_template_id) &&
             i + 1 < node.child_count &&
-            syntax_is_punctuator(tokens, parts[i + 1],
-                                 preprocessing_op_or_punc::COLON_COLON)) {
+            syntax(parts[i + 1]).is(preprocessing_op_or_punc::COLON_COLON)) {
             /* [temp.names]/1: a simple-template-id naming a class template
                names the specialization ([temp.spec]/4), a class; its
                members are looked up there ([class.qual]/1) */
@@ -776,8 +773,7 @@ analysis_result semantic_analysis::nested_name_specifier(node_index n,
         if (!parts[i].is_token() ||
             tokens[parts[i].index()].kind != token_kind::identifier ||
             i + 1 >= node.child_count ||
-            !syntax_is_punctuator(tokens, parts[i + 1],
-                                  preprocessing_op_or_punc::COLON_COLON)) {
+            !syntax(parts[i + 1]).is(preprocessing_op_or_punc::COLON_COLON)) {
             /* [temp.names]: template before a simple-template-id */
             if (!parts[i].is_token() &&
                 syntax_is(tree, parts[i], syntax_kind::simple_template_id))

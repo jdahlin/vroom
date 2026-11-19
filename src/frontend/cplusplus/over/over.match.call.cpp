@@ -42,10 +42,8 @@ token_index semantic_analysis::callee_name(syntax_child c) const
         tokens[children[1].index()].kind == token_kind::identifier)
         return children[1].index();
     if (node.kind == syntax_kind::postfix_expression && node.child_count == 3 &&
-        (syntax_is_punctuator(tokens, children[1],
-                              preprocessing_op_or_punc::DOT) ||
-         syntax_is_punctuator(tokens, children[1],
-                              preprocessing_op_or_punc::ARROW)) &&
+        (syntax(children[1]).is(preprocessing_op_or_punc::DOT) ||
+         syntax(children[1]).is(preprocessing_op_or_punc::ARROW)) &&
         children[2].is_token() &&
         tokens[children[2].index()].kind == token_kind::identifier)
         return children[2].index();

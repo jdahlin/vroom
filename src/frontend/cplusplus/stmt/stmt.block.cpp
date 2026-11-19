@@ -66,10 +66,8 @@ analysis_result semantic_analysis::block_items(node_index n, uint32_t &built)
     const syntax_node &node = tree[n];
     for (uint32_t i = 0; i < node.child_count; i++) {
         syntax_child c = tree.children(n)[i];
-        if (syntax_is_punctuator(tokens, c,
-                                 preprocessing_op_or_punc::LEFT_BRACE) ||
-            syntax_is_punctuator(tokens, c,
-                                 preprocessing_op_or_punc::RIGHT_BRACE))
+        if (syntax(c).is(preprocessing_op_or_punc::LEFT_BRACE) ||
+            syntax(c).is(preprocessing_op_or_punc::RIGHT_BRACE))
             continue;
         if (syntax_is(tree, c, syntax_kind::statement_seq)) {
             for (uint32_t k = 0; k < tree[c.index()].child_count; k++)
