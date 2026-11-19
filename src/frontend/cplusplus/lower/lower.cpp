@@ -1054,8 +1054,10 @@ void c_lowering::symbol_linkage(entity_index e, int &storage,
     /* [class.local]: a member of a local class has no linkage
        ([basic.link]/8); [impl.clang] its symbol is local unless the
        outermost function the class is in is inline or templated (then
-       its copies link as one) */
-    if (local_class_function(e) &&
+       its copies link as one); so is a member of a closure type of
+       namespace scope, unless an inline variable's initializer has it */
+    if ((local_class_function(e) ||
+         (x.enclosing && analysis.entity_table[x.enclosing].lambda)) &&
         !visible_local_class(analysis.entity_table, x.enclosing)) {
         storage = AST_STORAGE_STATIC;
         flags = AST_SYMBOL_FLAG_GLOBAL;

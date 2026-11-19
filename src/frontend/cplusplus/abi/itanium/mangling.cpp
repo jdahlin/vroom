@@ -43,6 +43,8 @@ entity_index next_enclosing_function(const entities &table, entity_index f)
 
 bool visible_local_class(const entities &table, entity_index c)
 {
+    if (table[c].closure_variable)
+        return true;
     /* (a class nested in a local class: as a member of it) */
     entity_index f = next_enclosing_function(table, c);
     if (!f)
@@ -519,7 +521,8 @@ bool itanium_mangler::name(entity_index e)
 {
     const entities &table = analysis.entity_table;
     entity_index scope = table[e].enclosing;
-    if (scope == 0 || is_std(scope))
+    /* (a closure type with a <data-member-prefix> is a <nested-name>) */
+    if ((scope == 0 || is_std(scope)) && !table[e].closure_variable)
         return unscoped_name(e);
     entity_index local = local_function(e);
     if (local && table[scope].kind == entity_kind::class_type) {
@@ -1526,6 +1529,8 @@ bool itanium_mangler::local_name(entity_index e, entity_index function)
 bool itanium_mangler::closure_numbered(entity_index c) const
 {
     const entities &table = analysis.entity_table;
+    if (table[c].closure_variable)
+        return true;
     /* (a member function of a local class: its enclosing function's
        too) */
     for (entity_index f = enclosing_function(table, c); f;
@@ -1578,6 +1583,17 @@ bool itanium_mangler::closure_type_name(entity_index c)
         vbuffer_append(out, written.data(), written.size());
         return true;
     }
+    /* <data-member-prefix> ::= <member source-name> [<template-args>] M,
+       the context of a closure type in an inline variable's initializer */
+    entity_index variable = table[c].closure_variable;
+    if (variable) {
+        if (!source_name(table[variable].name))
+            return false;
+        text("M");
+        candidate x;
+        x.scope = variable;
+        candidates.append(x);
+    }
     text("Ul");
     qualified_type signature = table[call].type;
     if (!bare_function_type(signature))
@@ -1588,7 +1604,8 @@ bool itanium_mangler::closure_type_name(entity_index c)
     for (entity_index other = 1; other < c; other++) {
         const entity &k = table[other];
         if (k.kind != entity_kind::class_type || !k.lambda ||
-            !k.call_operator || enclosing_function(table, other) != context)
+            !k.call_operator || enclosing_function(table, other) != context ||
+            k.closure_variable != variable)
             continue;
         const struct type &a = record(table[k.call_operator].type);
         const struct type &b = record(signature);

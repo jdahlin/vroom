@@ -341,9 +341,25 @@ analysis_result semantic_analysis::deduced_initialization(
     entity_table[e].type = type;
     /* [basic.link]/8: the linkage a variable's type implies (declare's
        rules) was not known when its name was declared */
-    if (entity_table[e].linkage_of_name == linkage::external &&
-        (type_without_external_linkage(type) || unnamed_class_object(type)))
-        return not_supported(n, "basic.link");
+    entity_index closure = 0;
+    if (type_table[type.unqualified()].kind == type_kind::class_type &&
+        entity_table[type_table[type.unqualified()].entity].lambda)
+        closure = type_table[type.unqualified()].entity;
+    if (closure && entity_table[closure].closure_variable == e) {
+        /* [abi:closure-types]: a closure type of an inline variable's
+           initializer is named after the variable in every translation
+           unit */
+    } else if (entity_table[e].linkage_of_name == linkage::external &&
+               (type_without_external_linkage(type) ||
+                unnamed_class_object(type))) {
+        /* [impl.clang] a closure type unique to the translation unit: the
+           variable's symbol is local, as declare() makes one of an unnamed
+           class's */
+        if (!closure)
+            return not_supported(n, "basic.link");
+        entity_table[e].linkage_of_name = linkage::internal;
+        entity_table[e].unnamed_type_linkage = true;
+    }
     r = deduced_type_supported(n, type);
     if (r != analysis_result::well_formed)
         return r;

@@ -344,11 +344,11 @@ analysis_result semantic_analysis::lambda_expression(node_index n,
 {
     const syntax_node &node = tree[n];
     const syntax_child *children = tree.children(n);
-    /* a lambda outside a function body (a namespace-scope variable's
-       initializer, a default argument or member initializer), in an
-       unevaluated operand or while a candidate template is substituted */
-    if (!function_state.active || unevaluated || substituting ||
-        node.child_count < 2)
+    /* a lambda in a default argument or member initializer, in an
+       unevaluated operand or while a candidate template is substituted;
+       outside a function body only at namespace scope */
+    if ((!function_state.active && !is_namespace(current_scope)) ||
+        unevaluated || substituting || node.child_count < 2)
         return not_supported(n, "expr.prim.lambda");
     syntax_child declarator;
     for (uint32_t i = 1; i + 1 < node.child_count; i++) {
@@ -406,6 +406,9 @@ analysis_result semantic_analysis::lambda_expression(node_index n,
     entity_table[c].type = qualified_type::make(
         type_table.of_entity(type_kind::class_type, c), cv_none);
     entity_table[c].lambda = n;
+    if (!function_state.active && deducing_variable &&
+        entity_table[deducing_variable].inline_)
+        entity_table[c].closure_variable = deducing_variable;
     entity_table[c].defined = true;
     entity_table[c].first_member = static_cast<uint32_t>(class_members.size());
     entity_table[c].first_base = static_cast<uint32_t>(class_bases.size());

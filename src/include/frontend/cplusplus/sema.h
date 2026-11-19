@@ -627,6 +627,9 @@ struct entity {
        (0: the class is no closure) and its function call operator */
     node_index lambda = 0;
     entity_index call_operator = 0;
+    /* a closure type of an inline variable's initializer: the variable,
+       the closure's context ([abi:closure-types]) */
+    entity_index closure_variable = 0;
     /* an init-capture's name ([expr.prim.lambda.capture]/6): the variable
        is the closure's non-static data member this names */
     entity_index capture_member = 0;
