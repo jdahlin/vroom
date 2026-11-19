@@ -167,6 +167,11 @@ PRODUCTION(clang_atomic, "clang-atomic-type-specifier", "_Atomic ( type-id )")
 PRODUCTION(clang_bit_int, "simple-type-specifier", "clang-bit-int-type-specifier")
 PRODUCTION(clang_bit_int, "clang-bit-int-type-specifier", "_BitInt ( constant-expression )")
 
+/* ---- clang Language Extensions, Source location builtins ---- */
+
+PRODUCTION(clang_source_location, "primary-expression", "clang-source-location-expression")
+PRODUCTION(clang_source_location, "clang-source-location-expression", "__builtin_source_location ( )")
+
 /* ---- clang Language Extensions, Type Trait Primitives ---- */
 
 PRODUCTION(clang_type_traits, "primary-expression", "clang-type-trait-expression")

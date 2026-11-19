@@ -458,6 +458,7 @@ enum class extension_keyword : uint8_t {
     bit_cast,
     atomic,
     bit_int,
+    source_location,
 };
 
 /*
@@ -886,6 +887,8 @@ class parser
     node_index gnu_offsetof_expression();
     /* ---- ext/clang/bit_cast.cpp: __builtin_bit_cast(T, e) */
     node_index clang_bit_cast_expression();
+    /* ---- ext/clang/source_location.cpp: __builtin_source_location() */
+    node_index clang_source_location_expression();
     /* ---- ext/clang/atomic.cpp: _Atomic(T) */
     node_index clang_atomic_type_specifier();
     /* ---- ext/clang/bit_int.cpp: _BitInt(N) */
