@@ -71,14 +71,27 @@ semantic_analysis::instantiate(node_index at, entity_index template_entity,
         specified s;
         declarator_meaning m;
         placeholder_allowed = true;
-        analysis_result r = decl_specifier_seq(d[0].index(), s, false);
+        /* (a constructor template's: no type, the decl-specifier-seq
+           optional, [class.ctor]/1) */
+        bool specifiers =
+            syntax_is(tree, d[0], syntax_kind::decl_specifier_seq);
+        bool constructor = t.special == special_member::constructor;
+        analysis_result r = analysis_result::well_formed;
+        if (constructor && specifiers)
+            r = constructor_specifiers(d[0].index(), s);
+        else if (specifiers)
+            r = decl_specifier_seq(d[0].index(), s, false);
         qualified_type type = s.type;
         if (r == analysis_result::well_formed) {
             function_cv = 0;
             /* (a member function template's cv-qualifier-seq,
                [temp.mem]) */
             member_template_declarator(2 * !is_namespace(t.enclosing));
-            r = declarator(ft.declarator, d[1], type, m);
+            if (constructor)
+                r = constructor_template_declarator(ft.declarator,
+                                                    d[specifiers], type, m);
+            else
+                r = declarator(ft.declarator, d[specifiers], type, m);
             member_template_declarator(0);
         }
         entity_index e = 0;
@@ -185,7 +198,26 @@ analysis_result semantic_analysis::instantiate_definition(node_index at,
        ([temp.mem]): its declarator's cv-qualifier-seq the member's */
     member_template_declarator(
         2 * !is_namespace(entity_table[template_entity].enclosing));
-    analysis_result r = function_definition(ft.definition);
+    analysis_result r = analysis_result::well_formed;
+    if (entity_table[template_entity].special == special_member::constructor) {
+        /* a constructor template's ([temp.mem]/1): its declarator again
+           (the parameters), then its function-body */
+        const syntax_child *d = tree.children(ft.definition) +
+                                leading_gnu_attributes(ft.definition);
+        bool specifiers =
+            syntax_is(tree, d[0], syntax_kind::decl_specifier_seq);
+        qualified_type type;
+        declarator_meaning m;
+        function_cv = 0;
+        function_parameters.clear();
+        r = constructor_template_declarator(ft.definition, d[specifiers], type,
+                                            m);
+        last_declared = instantiations[index].specialization;
+        if (r == analysis_result::well_formed)
+            r = special_member_body(ft.definition, d[specifiers + 1]);
+    } else {
+        r = function_definition(ft.definition);
+    }
     member_template_declarator(0);
     instantiations[index].defining = false;
     leave_instantiation(context);
@@ -460,6 +492,8 @@ analysis_result semantic_analysis::declare_specialization(
     entity_table[e].nonstatic_member = t.nonstatic_member;
     entity_table[e].member_cv = t.member_cv;
     entity_table[e].access = t.access;
+    entity_table[e].special = t.special;
+    entity_table[e].explicit_ = t.explicit_;
     entity_table.add_declaration(e, declaration);
     const function_template ft = function_templates[t.instantiation - 1];
     entity_table[e].gnu_flags = ft.gnu_flags;

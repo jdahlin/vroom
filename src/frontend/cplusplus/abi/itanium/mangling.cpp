@@ -332,7 +332,12 @@ bool itanium_mangler::specialization_encoding(entity_index e)
         return true;
     qualified_type pattern = table[pattern_of].type;
     encoding_template = pattern_of;
-    return type(record(pattern).operand) && bare_function_type(pattern);
+    /* (a constructor template's has none: [abi:mangle.function-type]'s
+       exception for constructors) */
+    if (table[e].special == special_member::none &&
+        !type(record(pattern).operand))
+        return false;
+    return bare_function_type(pattern);
 }
 
 /*

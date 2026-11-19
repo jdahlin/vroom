@@ -228,14 +228,20 @@ static bool depends(const types &table, qualified_type t,
  * A function template's decl-specifier-seq, after the lead GNU attributes
  * of definition (its specializations'), and declarator, in the
  * template-parameters' scope; what they record for claims is the
- * template's, which clang has no claim for.  member: a member function
- * template's, whose cv-qualifier-seq is the member's ([dcl.fct]/6).
+ * template's, which clang has no claim for.  member_of: a member function
+ * template's class, whose cv-qualifier-seq is the member's ([dcl.fct]/6);
+ * a constructor template's declarator ([temp.mem]/1) declares no type
+ * ([class.ctor]/4), its decl-specifier-seq optional.
  */
 analysis_result semantic_analysis::function_template_declarator(
-    node_index definition, uint32_t lead, entity_index scope, bool member,
-    specified &s, declarator_meaning &m, qualified_type &type)
+    node_index definition, uint32_t lead, entity_index member_of,
+    entity_index scope, specified &s, declarator_meaning &m,
+    qualified_type &type)
 {
     const syntax_child *dc = tree.children(definition) + lead;
+    bool specifiers = syntax_is(tree, dc[0], syntax_kind::decl_specifier_seq);
+    bool constructor =
+        member_of && declares_special_member(member_of, dc[specifiers]);
     size_t expressions_before = expressions.size();
     size_t uses_before = name_uses.size();
     entity_index outer = current_scope;
@@ -243,17 +249,25 @@ analysis_result semantic_analysis::function_template_declarator(
     /* [dcl.spec.auto]/3: a declared return type with a placeholder,
        deduced per specialization (instantiate) */
     placeholder_allowed = true;
-    analysis_result r = decl_specifier_seq(dc[0].index(), s, false);
+    analysis_result r = analysis_result::well_formed;
+    if (constructor && specifiers)
+        r = constructor_specifiers(dc[0].index(), s);
+    else if (specifiers)
+        r = decl_specifier_seq(dc[0].index(), s, false);
     for (uint32_t i = 0; i < lead && r == analysis_result::well_formed; i++)
         r = gnu_attribute_specifier(tree.children(definition)[i].index(), s);
     if (r == analysis_result::well_formed) {
         type = s.type;
         function_cv = 0;
         function_parameters.clear();
-        if (member)
+        if (member_of)
             member_template_declarator(1);
-        r = declarator(definition, dc[1], type, m);
-        if (member)
+        if (constructor)
+            r = constructor_template_declarator(definition, dc[specifiers],
+                                                type, m);
+        else
+            r = declarator(definition, dc[specifiers], type, m);
+        if (member_of)
             member_template_declarator(0);
     }
     current_scope = outer;
@@ -334,8 +348,8 @@ semantic_analysis::function_template_definition(node_index n,
     specified s;
     declarator_meaning m;
     qualified_type type;
-    analysis_result r = function_template_declarator(definition, lead, scope,
-                                                     false, s, m, type);
+    analysis_result r =
+        function_template_declarator(definition, lead, 0, scope, s, m, type);
     if (r != analysis_result::well_formed)
         return r;
     /* an operator function template (libc++'s byte& operator<<=(byte&,

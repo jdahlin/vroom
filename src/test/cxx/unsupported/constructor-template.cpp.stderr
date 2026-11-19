@@ -1,2 +1,0 @@
-constructor-template.cpp:6:8: error: the rules of [temp.mem] are not implemented yet
-constructor-template.cpp:6:8: note: refused by vcc's frontend/cplusplus/class/class.ctor.cpp:N (construct)
