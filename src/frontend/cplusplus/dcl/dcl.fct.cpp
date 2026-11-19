@@ -357,7 +357,7 @@ analysis_result semantic_analysis::function(node_index parameters,
                 continue;
             /* [ext:gnu_attributes] after the parameters: the
                declarator's (declarator takes them) */
-            if (syntax_is(tree, c, syntax_kind::gnu_attribute_specifier))
+            if (!c.is_token() && only_gnu_attributes(tree, c.index()))
                 continue;
             /* [dcl.fct]/1: the cv-qualifier-seq of a member function's
                declarator ([class.mfct.non-static]/5) */
