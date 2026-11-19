@@ -33,7 +33,8 @@ analysis_result semantic_analysis::member_function_template(
     /* (the template-head's rules are a namespace-scope template's) */
     entity_index saved_class = defining_class;
     defining_class = 0;
-    analysis_result head = template_head_parameters(n, parameters);
+    analysis_result head =
+        template_head_parameters(n, parameters, false, true, false, true);
     defining_class = saved_class;
     if (head != analysis_result::well_formed)
         return head;
@@ -71,7 +72,9 @@ analysis_result semantic_analysis::member_function_template(
         function_cv = 0;
         function_parameters.clear();
         in_member_declarator = true;
+        in_member_template_declarator = 1;
         r = declarator(definition, dc[1], type, m);
+        in_member_template_declarator = 0;
         in_member_declarator = false;
     }
     current_scope = outer;

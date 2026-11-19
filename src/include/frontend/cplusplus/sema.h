@@ -1968,6 +1968,9 @@ class semantic_analysis
     /* a declarator analysed now may have a cv-qualifier-seq: a member
        declarator, or one whose declarator-id is a qualified-id */
     bool in_member_declarator = false;
+    /* in a member function template's declarator: 1 the template's own
+       (temp.mem.cpp), 2 a specialization's (instantiation.cpp) */
+    uint8_t in_member_template_declarator = 0;
     /* [dcl.fct.spec]/2: virtual is analysed on a member-declaration's
        decl-specifier-seq only; a member-declarator's virt-specifiers and
        pure-specifier ([class.mem]/1) for the declarator it holds */
@@ -3277,7 +3280,8 @@ class semantic_analysis
     analysis_result
     template_head_parameters(node_index n, owned_array<node_index> &parameters,
                              bool packs = false, bool constrained = false,
-                             bool pack_anywhere = false);
+                             bool pack_anywhere = false,
+                             bool type_constraints = false);
     syntax_child head_constraint(node_index n) const;
     /* [temp.constr.atomic]/3: the satisfaction of a concept-id, once per
        concept and arguments (a later different result would be ill-formed,
@@ -3315,6 +3319,8 @@ class semantic_analysis
         bool type = false, template_template = false, pack = false;
         bool named = false, has_default = false, has_declarator = false;
         token_index id = 0;
+        /* a type-parameter's type-constraint ([temp.param]/1), or 0 */
+        node_index constraint = 0;
         node_index head = 0;
         syntax_child default_argument, declarator;
     };
@@ -3803,6 +3809,10 @@ class semantic_analysis
        argument */
     bool dependent_parameter_type(entity_index t, uint32_t i,
                                   qualified_type &type) const;
+    /* the concept-name of the function template t's template-parameter
+       at i, a type-parameter with a type-constraint ([temp.param]/1),
+       or 0 */
+    token_index parameter_type_constraint(entity_index t, uint32_t i) const;
     /* whether the argument is a template ([temp.arg.template]/1): the
        class template, or in a template's own declaration the template
        template-parameter it names (also its position plus one in

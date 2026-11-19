@@ -87,7 +87,7 @@ analysis_result semantic_analysis::member_template_declaration(entity_index c,
         return not_supported(n, "temp.mem");
     owned_array<node_index> parameters;
     if (!template_head_list(tree.children(n)[0].index(), parameters) ||
-        parameters.empty() || head_constraint(n).bits)
+        parameters.empty())
         return not_supported(n, "temp.mem");
     node_index inner = tree.children(n)[1].index();
     const syntax_node &d = tree[inner];
@@ -107,6 +107,9 @@ analysis_result semantic_analysis::member_template_declaration(entity_index c,
           syntax_is(tree, dc[at], syntax_kind::decl_specifier_seq) &&
           declares_special_member(c, dc[at + 1])))
         return member_function_template(c, n, inner, access);
+    /* a constrained constructor template ([temp.constr.decl]) */
+    if (head_constraint(n).bits)
+        return not_supported(n, "temp.constr");
     if (at < d.child_count &&
         syntax_is(tree, dc[at], syntax_kind::decl_specifier_seq)) {
         node_index seq = dc[at].index();

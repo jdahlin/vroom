@@ -143,7 +143,7 @@ syntax_child semantic_analysis::head_constraint(node_index n) const
 
 analysis_result semantic_analysis::template_head_parameters(
     node_index n, owned_array<node_index> &parameters, bool packs,
-    bool constrained, bool pack_anywhere)
+    bool constrained, bool pack_anywhere, bool type_constraints)
 {
     const syntax_node &node = tree[n];
     if (node.child_count != 2 ||
@@ -167,6 +167,12 @@ analysis_result semantic_analysis::template_head_parameters(
         node_index p = parameters[i];
         template_parameter_parts x;
         if (!template_parameter_form(p, x))
+            return not_supported(p, "temp.param");
+        /* [temp.param]/4: a type-constraint's immediately-declared
+           constraint is one of the template's associated constraints
+           ([temp.constr.decl]/3), checked with its requires-clause
+           (template_constraints_satisfied): a function template's */
+        if (x.constraint && (!type_constraints || x.pack))
             return not_supported(p, "temp.param");
         /* [temp.param]/18: "If a template-parameter is a type-parameter
            with an ellipsis prior to its optional identifier ... then the
@@ -231,7 +237,7 @@ semantic_analysis::function_template_definition(node_index n,
     /* [temp.param]/14: a function template's pack may be followed by
        parameters that are deduced or have defaults */
     analysis_result head =
-        template_head_parameters(n, parameters, true, true, true);
+        template_head_parameters(n, parameters, true, true, true, true);
     if (head != analysis_result::well_formed)
         return head;
     const syntax_node &d = tree[definition];

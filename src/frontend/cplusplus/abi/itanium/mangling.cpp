@@ -377,10 +377,20 @@ bool itanium_mangler::constraint_expression(entity_index t, syntax_child c)
         if (!source_name(analysis.token_identifier(parts[0].index())))
             return false;
         text("I");
+        /* (more than one argument: a template-argument-list) */
+        owned_array<syntax_child> written;
         for (uint32_t i = 2; i + 1 < node.child_count; i++) {
-            if (punctuator(parts[i], preprocessing_op_or_punc::COMMA))
+            if (!parts[i].is_token() && tree[parts[i].index()].kind ==
+                                            syntax_kind::template_argument_list)
+                for (uint32_t k = 0; k < tree[parts[i].index()].child_count;
+                     k++)
+                    written.append(tree.children(parts[i].index())[k]);
+            else
+                written.append(parts[i]);
+        }
+        for (syntax_child a : written) {
+            if (punctuator(a, preprocessing_op_or_punc::COMMA))
                 continue;
-            syntax_child a = parts[i];
             /* a type-id that is one template parameter's name */
             while (!a.is_token() && tree[a.index()].child_count == 1 &&
                    (tree[a.index()].kind == syntax_kind::type_id ||
@@ -760,6 +770,19 @@ bool itanium_mangler::template_args(entity_index c, entity_index function)
                 return false;
             text("Tn");
             if (!type(declared))
+                return false;
+        }
+        /* [impl.clang]: a type-parameter with a type-constraint, "Tk"
+           and the concept's name before the argument (clang 17 and later,
+           as Tn) */
+        token_index q = 0;
+        if (function)
+            q = analysis.parameter_type_constraint(function, i);
+        if (q) {
+            if (pack)
+                return false;
+            text("Tk");
+            if (!source_name(analysis.token_identifier(q)))
                 return false;
         }
         if (!pack) {

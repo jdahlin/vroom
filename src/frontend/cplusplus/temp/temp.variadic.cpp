@@ -48,7 +48,9 @@ bool semantic_analysis::template_parameter_form(
     out.type =
         syntax_is(tree, syntax_child::node(p), syntax_kind::type_parameter);
     if (out.type) {
-        if (!c[0].is_token()) {
+        if (syntax_is(tree, c[0], syntax_kind::type_constraint)) {
+            out.constraint = c[0].index();
+        } else if (!c[0].is_token()) {
             if (!syntax_is(tree, c[0], syntax_kind::template_head) ||
                 x.child_count < 2 || !c[1].is_token())
                 return false;

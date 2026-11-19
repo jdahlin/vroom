@@ -77,7 +77,9 @@ semantic_analysis::instantiate(node_index at, entity_index template_entity,
             /* (a member function template's cv-qualifier-seq,
                [temp.mem]) */
             in_member_declarator = !is_namespace(t.enclosing);
+            in_member_template_declarator = in_member_declarator * 2;
             r = declarator(ft.declarator, d[1], type, m);
+            in_member_template_declarator = 0;
             in_member_declarator = false;
         }
         entity_index e = 0;
@@ -160,7 +162,9 @@ analysis_result semantic_analysis::instantiate_definition(node_index at,
        ([temp.mem]): its declarator's cv-qualifier-seq the member's */
     bool member = !is_namespace(entity_table[template_entity].enclosing);
     in_member_declarator = member;
+    in_member_template_declarator = member * 2;
     analysis_result r = function_definition(ft.definition);
+    in_member_template_declarator = 0;
     in_member_declarator = false;
     instantiations[index].defining = false;
     leave_instantiation(context);
@@ -567,6 +571,23 @@ bool semantic_analysis::dependent_parameter_type(entity_index t, uint32_t i,
         return true;
     }
     return false;
+}
+
+token_index semantic_analysis::parameter_type_constraint(entity_index t,
+                                                         uint32_t i) const
+{
+    for (const function_template &ft : function_templates) {
+        if (ft.entity != t || i >= ft.parameter_count)
+            continue;
+        template_parameter_parts x;
+        if (!template_parameter_form(
+                template_parameter_nodes[ft.first_parameter + i], x) ||
+            !x.constraint || tree[x.constraint].child_count != 1 ||
+            !tree.children(x.constraint)[0].is_token())
+            return 0;
+        return tree.children(x.constraint)[0].index();
+    }
+    return 0;
 }
 
 bool semantic_analysis::specialization_template_name(entity_index e, uint32_t i,
