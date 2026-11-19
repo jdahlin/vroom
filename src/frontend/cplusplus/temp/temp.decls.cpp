@@ -1645,8 +1645,8 @@ semantic_analysis::class_template_definition(node_index n, node_index specifier)
     bool specialization =
         head_name.bits &&
         syntax_is(tree, head_name, syntax_kind::simple_template_id);
-    analysis_result r = template_head_parameters(
-        n, parameters, true, true, specialization, specialization);
+    analysis_result r = template_head_parameters(n, parameters, true, true,
+                                                 specialization, true);
     if (r != analysis_result::well_formed)
         return r;
     /* a partial specialization's requires-clause is checked where it is
@@ -2447,7 +2447,8 @@ semantic_analysis::class_template_declaration(node_index n,
         return not_supported(n, "temp.class");
     owned_array<node_index> parameters;
     /* [temp.pre]/9: a requires-clause in its template-head */
-    analysis_result r = template_head_parameters(n, parameters, true, true);
+    analysis_result r =
+        template_head_parameters(n, parameters, true, true, false, true);
     if (r != analysis_result::well_formed)
         return r;
     uint32_t name = tokens.identifier(parts[1].index());
