@@ -2947,7 +2947,7 @@ struct AbstractDeclarator : SyntaxExtra<AbstractDeclarator> {
     AbstractDeclarator() = default;
     template <class V>
         requires syntax_converts<V, AbstractDeclarator>
-    AbstractDeclarator(V v) : SyntaxExtra<AbstractDeclarator>(v.context(), v.index())
+    AbstractDeclarator(V v) : SyntaxExtra<AbstractDeclarator>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -2978,7 +2978,7 @@ struct AdditiveExpression : SyntaxExtra<AdditiveExpression> {
     AdditiveExpression() = default;
     template <class V>
         requires syntax_converts<V, AdditiveExpression>
-    AdditiveExpression(V v) : SyntaxExtra<AdditiveExpression>(v.context(), v.index())
+    AdditiveExpression(V v) : SyntaxExtra<AdditiveExpression>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -3075,7 +3075,7 @@ struct AndExpression : SyntaxExtra<AndExpression> {
     AndExpression() = default;
     template <class V>
         requires syntax_converts<V, AndExpression>
-    AndExpression(V v) : SyntaxExtra<AndExpression>(v.context(), v.index())
+    AndExpression(V v) : SyntaxExtra<AndExpression>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -3191,7 +3191,7 @@ struct AssignmentExpression : SyntaxExtra<AssignmentExpression> {
     AssignmentExpression() = default;
     template <class V>
         requires syntax_converts<V, AssignmentExpression>
-    AssignmentExpression(V v) : SyntaxExtra<AssignmentExpression>(v.context(), v.index())
+    AssignmentExpression(V v) : SyntaxExtra<AssignmentExpression>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -3222,7 +3222,7 @@ struct Attribute : SyntaxExtra<Attribute> {
     Attribute() = default;
     template <class V>
         requires syntax_converts<V, Attribute>
-    Attribute(V v) : SyntaxExtra<Attribute>(v.context(), v.index())
+    Attribute(V v) : SyntaxExtra<Attribute>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -3295,7 +3295,7 @@ struct AttributeList : SyntaxExtra<AttributeList> {
     AttributeList() = default;
     template <class V>
         requires syntax_converts<V, AttributeList>
-    AttributeList(V v) : SyntaxExtra<AttributeList>(v.context(), v.index())
+    AttributeList(V v) : SyntaxExtra<AttributeList>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -3346,7 +3346,7 @@ struct AttributeSpecifier : SyntaxExtra<AttributeSpecifier> {
     AttributeSpecifier() = default;
     template <class V>
         requires syntax_converts<V, AttributeSpecifier>
-    AttributeSpecifier(V v) : SyntaxExtra<AttributeSpecifier>(v.context(), v.index())
+    AttributeSpecifier(V v) : SyntaxExtra<AttributeSpecifier>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -3377,7 +3377,7 @@ struct AttributeSpecifierSeq : SyntaxExtra<AttributeSpecifierSeq> {
     AttributeSpecifierSeq() = default;
     template <class V>
         requires syntax_converts<V, AttributeSpecifierSeq>
-    AttributeSpecifierSeq(V v) : SyntaxExtra<AttributeSpecifierSeq>(v.context(), v.index())
+    AttributeSpecifierSeq(V v) : SyntaxExtra<AttributeSpecifierSeq>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -3563,7 +3563,7 @@ struct BalancedTokenSeq : SyntaxExtra<BalancedTokenSeq> {
     BalancedTokenSeq() = default;
     template <class V>
         requires syntax_converts<V, BalancedTokenSeq>
-    BalancedTokenSeq(V v) : SyntaxExtra<BalancedTokenSeq>(v.context(), v.index())
+    BalancedTokenSeq(V v) : SyntaxExtra<BalancedTokenSeq>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -3637,7 +3637,7 @@ struct BaseSpecifier : SyntaxExtra<BaseSpecifier> {
     BaseSpecifier() = default;
     template <class V>
         requires syntax_converts<V, BaseSpecifier>
-    BaseSpecifier(V v) : SyntaxExtra<BaseSpecifier>(v.context(), v.index())
+    BaseSpecifier(V v) : SyntaxExtra<BaseSpecifier>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -3668,7 +3668,7 @@ struct BaseSpecifierList : SyntaxExtra<BaseSpecifierList> {
     BaseSpecifierList() = default;
     template <class V>
         requires syntax_converts<V, BaseSpecifierList>
-    BaseSpecifierList(V v) : SyntaxExtra<BaseSpecifierList>(v.context(), v.index())
+    BaseSpecifierList(V v) : SyntaxExtra<BaseSpecifierList>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -3719,7 +3719,7 @@ struct BlockDeclaration : SyntaxExtra<BlockDeclaration> {
     BlockDeclaration() = default;
     template <class V>
         requires syntax_converts<V, BlockDeclaration>
-    BlockDeclaration(V v) : SyntaxExtra<BlockDeclaration>(v.context(), v.index())
+    BlockDeclaration(V v) : SyntaxExtra<BlockDeclaration>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -3750,7 +3750,7 @@ struct BraceOrEqualInitializer : SyntaxExtra<BraceOrEqualInitializer> {
     BraceOrEqualInitializer() = default;
     template <class V>
         requires syntax_converts<V, BraceOrEqualInitializer>
-    BraceOrEqualInitializer(V v) : SyntaxExtra<BraceOrEqualInitializer>(v.context(), v.index())
+    BraceOrEqualInitializer(V v) : SyntaxExtra<BraceOrEqualInitializer>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -3803,7 +3803,7 @@ struct Capture : SyntaxExtra<Capture> {
     Capture() = default;
     template <class V>
         requires syntax_converts<V, Capture>
-    Capture(V v) : SyntaxExtra<Capture>(v.context(), v.index())
+    Capture(V v) : SyntaxExtra<Capture>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -3834,7 +3834,7 @@ struct CaptureList : SyntaxExtra<CaptureList> {
     CaptureList() = default;
     template <class V>
         requires syntax_converts<V, CaptureList>
-    CaptureList(V v) : SyntaxExtra<CaptureList>(v.context(), v.index())
+    CaptureList(V v) : SyntaxExtra<CaptureList>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -3886,7 +3886,7 @@ struct CastExpression : SyntaxExtra<CastExpression> {
     CastExpression() = default;
     template <class V>
         requires syntax_converts<V, CastExpression>
-    CastExpression(V v) : SyntaxExtra<CastExpression>(v.context(), v.index())
+    CastExpression(V v) : SyntaxExtra<CastExpression>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -4049,7 +4049,7 @@ struct ClangTypeTraitArgument : SyntaxExtra<ClangTypeTraitArgument> {
     ClangTypeTraitArgument() = default;
     template <class V>
         requires syntax_converts<V, ClangTypeTraitArgument>
-    ClangTypeTraitArgument(V v) : SyntaxExtra<ClangTypeTraitArgument>(v.context(), v.index())
+    ClangTypeTraitArgument(V v) : SyntaxExtra<ClangTypeTraitArgument>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -4080,7 +4080,7 @@ struct ClangTypeTraitArgumentList : SyntaxExtra<ClangTypeTraitArgumentList> {
     ClangTypeTraitArgumentList() = default;
     template <class V>
         requires syntax_converts<V, ClangTypeTraitArgumentList>
-    ClangTypeTraitArgumentList(V v) : SyntaxExtra<ClangTypeTraitArgumentList>(v.context(), v.index())
+    ClangTypeTraitArgumentList(V v) : SyntaxExtra<ClangTypeTraitArgumentList>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -4178,7 +4178,7 @@ struct ClassHeadName : SyntaxExtra<ClassHeadName> {
     ClassHeadName() = default;
     template <class V>
         requires syntax_converts<V, ClassHeadName>
-    ClassHeadName(V v) : SyntaxExtra<ClassHeadName>(v.context(), v.index())
+    ClassHeadName(V v) : SyntaxExtra<ClassHeadName>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -4209,7 +4209,7 @@ struct ClassOrDecltype : SyntaxExtra<ClassOrDecltype> {
     ClassOrDecltype() = default;
     template <class V>
         requires syntax_converts<V, ClassOrDecltype>
-    ClassOrDecltype(V v) : SyntaxExtra<ClassOrDecltype>(v.context(), v.index())
+    ClassOrDecltype(V v) : SyntaxExtra<ClassOrDecltype>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -4282,7 +4282,7 @@ struct CompareExpression : SyntaxExtra<CompareExpression> {
     CompareExpression() = default;
     template <class V>
         requires syntax_converts<V, CompareExpression>
-    CompareExpression(V v) : SyntaxExtra<CompareExpression>(v.context(), v.index())
+    CompareExpression(V v) : SyntaxExtra<CompareExpression>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -4378,7 +4378,7 @@ struct Condition : SyntaxExtra<Condition> {
     Condition() = default;
     template <class V>
         requires syntax_converts<V, Condition>
-    Condition(V v) : SyntaxExtra<Condition>(v.context(), v.index())
+    Condition(V v) : SyntaxExtra<Condition>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -4434,7 +4434,7 @@ struct ConditionalExpression : SyntaxExtra<ConditionalExpression> {
     ConditionalExpression() = default;
     template <class V>
         requires syntax_converts<V, ConditionalExpression>
-    ConditionalExpression(V v) : SyntaxExtra<ConditionalExpression>(v.context(), v.index())
+    ConditionalExpression(V v) : SyntaxExtra<ConditionalExpression>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -4485,7 +4485,7 @@ struct ConstantExpression : SyntaxExtra<ConstantExpression> {
     ConstantExpression() = default;
     template <class V>
         requires syntax_converts<V, ConstantExpression>
-    ConstantExpression(V v) : SyntaxExtra<ConstantExpression>(v.context(), v.index())
+    ConstantExpression(V v) : SyntaxExtra<ConstantExpression>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -4556,7 +4556,7 @@ struct ConstraintExpression : SyntaxExtra<ConstraintExpression> {
     ConstraintExpression() = default;
     template <class V>
         requires syntax_converts<V, ConstraintExpression>
-    ConstraintExpression(V v) : SyntaxExtra<ConstraintExpression>(v.context(), v.index())
+    ConstraintExpression(V v) : SyntaxExtra<ConstraintExpression>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -4587,7 +4587,7 @@ struct ConstraintLogicalAndExpression : SyntaxExtra<ConstraintLogicalAndExpressi
     ConstraintLogicalAndExpression() = default;
     template <class V>
         requires syntax_converts<V, ConstraintLogicalAndExpression>
-    ConstraintLogicalAndExpression(V v) : SyntaxExtra<ConstraintLogicalAndExpression>(v.context(), v.index())
+    ConstraintLogicalAndExpression(V v) : SyntaxExtra<ConstraintLogicalAndExpression>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -4618,7 +4618,7 @@ struct ConstraintLogicalOrExpression : SyntaxExtra<ConstraintLogicalOrExpression
     ConstraintLogicalOrExpression() = default;
     template <class V>
         requires syntax_converts<V, ConstraintLogicalOrExpression>
-    ConstraintLogicalOrExpression(V v) : SyntaxExtra<ConstraintLogicalOrExpression>(v.context(), v.index())
+    ConstraintLogicalOrExpression(V v) : SyntaxExtra<ConstraintLogicalOrExpression>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -4649,7 +4649,7 @@ struct ConversionDeclarator : SyntaxExtra<ConversionDeclarator> {
     ConversionDeclarator() = default;
     template <class V>
         requires syntax_converts<V, ConversionDeclarator>
-    ConversionDeclarator(V v) : SyntaxExtra<ConversionDeclarator>(v.context(), v.index())
+    ConversionDeclarator(V v) : SyntaxExtra<ConversionDeclarator>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -4701,7 +4701,7 @@ struct ConversionTypeId : SyntaxExtra<ConversionTypeId> {
     ConversionTypeId() = default;
     template <class V>
         requires syntax_converts<V, ConversionTypeId>
-    ConversionTypeId(V v) : SyntaxExtra<ConversionTypeId>(v.context(), v.index())
+    ConversionTypeId(V v) : SyntaxExtra<ConversionTypeId>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -4818,7 +4818,7 @@ struct DeclSpecifier : SyntaxExtra<DeclSpecifier> {
     DeclSpecifier() = default;
     template <class V>
         requires syntax_converts<V, DeclSpecifier>
-    DeclSpecifier(V v) : SyntaxExtra<DeclSpecifier>(v.context(), v.index())
+    DeclSpecifier(V v) : SyntaxExtra<DeclSpecifier>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -4871,7 +4871,7 @@ struct Declaration : SyntaxExtra<Declaration> {
     Declaration() = default;
     template <class V>
         requires syntax_converts<V, Declaration>
-    Declaration(V v) : SyntaxExtra<Declaration>(v.context(), v.index())
+    Declaration(V v) : SyntaxExtra<Declaration>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -4902,7 +4902,7 @@ struct DeclarationSeq : SyntaxExtra<DeclarationSeq> {
     DeclarationSeq() = default;
     template <class V>
         requires syntax_converts<V, DeclarationSeq>
-    DeclarationSeq(V v) : SyntaxExtra<DeclarationSeq>(v.context(), v.index())
+    DeclarationSeq(V v) : SyntaxExtra<DeclarationSeq>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -4934,7 +4934,7 @@ struct DeclarationStatement : SyntaxExtra<DeclarationStatement> {
     DeclarationStatement() = default;
     template <class V>
         requires syntax_converts<V, DeclarationStatement>
-    DeclarationStatement(V v) : SyntaxExtra<DeclarationStatement>(v.context(), v.index())
+    DeclarationStatement(V v) : SyntaxExtra<DeclarationStatement>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -4985,7 +4985,7 @@ struct Declarator : SyntaxExtra<Declarator> {
     Declarator() = default;
     template <class V>
         requires syntax_converts<V, Declarator>
-    Declarator(V v) : SyntaxExtra<Declarator>(v.context(), v.index())
+    Declarator(V v) : SyntaxExtra<Declarator>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -5016,7 +5016,7 @@ struct DeclaratorId : SyntaxExtra<DeclaratorId> {
     DeclaratorId() = default;
     template <class V>
         requires syntax_converts<V, DeclaratorId>
-    DeclaratorId(V v) : SyntaxExtra<DeclaratorId>(v.context(), v.index())
+    DeclaratorId(V v) : SyntaxExtra<DeclaratorId>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -5162,7 +5162,7 @@ struct DefiningTypeSpecifier : SyntaxExtra<DefiningTypeSpecifier> {
     DefiningTypeSpecifier() = default;
     template <class V>
         requires syntax_converts<V, DefiningTypeSpecifier>
-    DefiningTypeSpecifier(V v) : SyntaxExtra<DefiningTypeSpecifier>(v.context(), v.index())
+    DefiningTypeSpecifier(V v) : SyntaxExtra<DefiningTypeSpecifier>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -5261,7 +5261,7 @@ struct DesignatedInitializerList : SyntaxExtra<DesignatedInitializerList> {
     DesignatedInitializerList() = default;
     template <class V>
         requires syntax_converts<V, DesignatedInitializerList>
-    DesignatedInitializerList(V v) : SyntaxExtra<DesignatedInitializerList>(v.context(), v.index())
+    DesignatedInitializerList(V v) : SyntaxExtra<DesignatedInitializerList>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -5422,7 +5422,7 @@ struct ElaboratedTypeSpecifier : SyntaxExtra<ElaboratedTypeSpecifier> {
     ElaboratedTypeSpecifier() = default;
     template <class V>
         requires syntax_converts<V, ElaboratedTypeSpecifier>
-    ElaboratedTypeSpecifier(V v) : SyntaxExtra<ElaboratedTypeSpecifier>(v.context(), v.index())
+    ElaboratedTypeSpecifier(V v) : SyntaxExtra<ElaboratedTypeSpecifier>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -5627,7 +5627,7 @@ struct EnumeratorDefinition : SyntaxExtra<EnumeratorDefinition> {
     EnumeratorDefinition() = default;
     template <class V>
         requires syntax_converts<V, EnumeratorDefinition>
-    EnumeratorDefinition(V v) : SyntaxExtra<EnumeratorDefinition>(v.context(), v.index())
+    EnumeratorDefinition(V v) : SyntaxExtra<EnumeratorDefinition>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -5658,7 +5658,7 @@ struct EnumeratorList : SyntaxExtra<EnumeratorList> {
     EnumeratorList() = default;
     template <class V>
         requires syntax_converts<V, EnumeratorList>
-    EnumeratorList(V v) : SyntaxExtra<EnumeratorList>(v.context(), v.index())
+    EnumeratorList(V v) : SyntaxExtra<EnumeratorList>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -5754,7 +5754,7 @@ struct EqualityExpression : SyntaxExtra<EqualityExpression> {
     EqualityExpression() = default;
     template <class V>
         requires syntax_converts<V, EqualityExpression>
-    EqualityExpression(V v) : SyntaxExtra<EqualityExpression>(v.context(), v.index())
+    EqualityExpression(V v) : SyntaxExtra<EqualityExpression>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -5850,7 +5850,7 @@ struct ExclusiveOrExpression : SyntaxExtra<ExclusiveOrExpression> {
     ExclusiveOrExpression() = default;
     template <class V>
         requires syntax_converts<V, ExclusiveOrExpression>
-    ExclusiveOrExpression(V v) : SyntaxExtra<ExclusiveOrExpression>(v.context(), v.index())
+    ExclusiveOrExpression(V v) : SyntaxExtra<ExclusiveOrExpression>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -5985,7 +5985,7 @@ struct ExprOrBracedInitList : SyntaxExtra<ExprOrBracedInitList> {
     ExprOrBracedInitList() = default;
     template <class V>
         requires syntax_converts<V, ExprOrBracedInitList>
-    ExprOrBracedInitList(V v) : SyntaxExtra<ExprOrBracedInitList>(v.context(), v.index())
+    ExprOrBracedInitList(V v) : SyntaxExtra<ExprOrBracedInitList>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -6016,7 +6016,7 @@ struct Expression : SyntaxExtra<Expression> {
     Expression() = default;
     template <class V>
         requires syntax_converts<V, Expression>
-    Expression(V v) : SyntaxExtra<Expression>(v.context(), v.index())
+    Expression(V v) : SyntaxExtra<Expression>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -6047,7 +6047,7 @@ struct ExpressionList : SyntaxExtra<ExpressionList> {
     ExpressionList() = default;
     template <class V>
         requires syntax_converts<V, ExpressionList>
-    ExpressionList(V v) : SyntaxExtra<ExpressionList>(v.context(), v.index())
+    ExpressionList(V v) : SyntaxExtra<ExpressionList>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -6145,7 +6145,7 @@ struct ForRangeInitializer : SyntaxExtra<ForRangeInitializer> {
     ForRangeInitializer() = default;
     template <class V>
         requires syntax_converts<V, ForRangeInitializer>
-    ForRangeInitializer(V v) : SyntaxExtra<ForRangeInitializer>(v.context(), v.index())
+    ForRangeInitializer(V v) : SyntaxExtra<ForRangeInitializer>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -6176,7 +6176,7 @@ struct FunctionBody : SyntaxExtra<FunctionBody> {
     FunctionBody() = default;
     template <class V>
         requires syntax_converts<V, FunctionBody>
-    FunctionBody(V v) : SyntaxExtra<FunctionBody>(v.context(), v.index())
+    FunctionBody(V v) : SyntaxExtra<FunctionBody>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -6319,7 +6319,7 @@ struct GnuAttributeArguments : SyntaxExtra<GnuAttributeArguments> {
     GnuAttributeArguments() = default;
     template <class V>
         requires syntax_converts<V, GnuAttributeArguments>
-    GnuAttributeArguments(V v) : SyntaxExtra<GnuAttributeArguments>(v.context(), v.index())
+    GnuAttributeArguments(V v) : SyntaxExtra<GnuAttributeArguments>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -6350,7 +6350,7 @@ struct GnuAttributeList : SyntaxExtra<GnuAttributeList> {
     GnuAttributeList() = default;
     template <class V>
         requires syntax_converts<V, GnuAttributeList>
-    GnuAttributeList(V v) : SyntaxExtra<GnuAttributeList>(v.context(), v.index())
+    GnuAttributeList(V v) : SyntaxExtra<GnuAttributeList>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -6487,7 +6487,7 @@ struct GnuDesignation : SyntaxExtra<GnuDesignation> {
     GnuDesignation() = default;
     template <class V>
         requires syntax_converts<V, GnuDesignation>
-    GnuDesignation(V v) : SyntaxExtra<GnuDesignation>(v.context(), v.index())
+    GnuDesignation(V v) : SyntaxExtra<GnuDesignation>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -6579,7 +6579,7 @@ struct GnuInitializerList : SyntaxExtra<GnuInitializerList> {
     GnuInitializerList() = default;
     template <class V>
         requires syntax_converts<V, GnuInitializerList>
-    GnuInitializerList(V v) : SyntaxExtra<GnuInitializerList>(v.context(), v.index())
+    GnuInitializerList(V v) : SyntaxExtra<GnuInitializerList>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -6698,7 +6698,7 @@ struct HandlerSeq : SyntaxExtra<HandlerSeq> {
     HandlerSeq() = default;
     template <class V>
         requires syntax_converts<V, HandlerSeq>
-    HandlerSeq(V v) : SyntaxExtra<HandlerSeq>(v.context(), v.index())
+    HandlerSeq(V v) : SyntaxExtra<HandlerSeq>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -6749,7 +6749,7 @@ struct IdExpression : SyntaxExtra<IdExpression> {
     IdExpression() = default;
     template <class V>
         requires syntax_converts<V, IdExpression>
-    IdExpression(V v) : SyntaxExtra<IdExpression>(v.context(), v.index())
+    IdExpression(V v) : SyntaxExtra<IdExpression>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -6801,7 +6801,7 @@ struct InclusiveOrExpression : SyntaxExtra<InclusiveOrExpression> {
     InclusiveOrExpression() = default;
     template <class V>
         requires syntax_converts<V, InclusiveOrExpression>
-    InclusiveOrExpression(V v) : SyntaxExtra<InclusiveOrExpression>(v.context(), v.index())
+    InclusiveOrExpression(V v) : SyntaxExtra<InclusiveOrExpression>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -6874,7 +6874,7 @@ struct InitDeclarator : SyntaxExtra<InitDeclarator> {
     InitDeclarator() = default;
     template <class V>
         requires syntax_converts<V, InitDeclarator>
-    InitDeclarator(V v) : SyntaxExtra<InitDeclarator>(v.context(), v.index())
+    InitDeclarator(V v) : SyntaxExtra<InitDeclarator>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -6905,7 +6905,7 @@ struct InitDeclaratorList : SyntaxExtra<InitDeclaratorList> {
     InitDeclaratorList() = default;
     template <class V>
         requires syntax_converts<V, InitDeclaratorList>
-    InitDeclaratorList(V v) : SyntaxExtra<InitDeclaratorList>(v.context(), v.index())
+    InitDeclaratorList(V v) : SyntaxExtra<InitDeclaratorList>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -6957,7 +6957,7 @@ struct InitStatement : SyntaxExtra<InitStatement> {
     InitStatement() = default;
     template <class V>
         requires syntax_converts<V, InitStatement>
-    InitStatement(V v) : SyntaxExtra<InitStatement>(v.context(), v.index())
+    InitStatement(V v) : SyntaxExtra<InitStatement>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -6988,7 +6988,7 @@ struct Initializer : SyntaxExtra<Initializer> {
     Initializer() = default;
     template <class V>
         requires syntax_converts<V, Initializer>
-    Initializer(V v) : SyntaxExtra<Initializer>(v.context(), v.index())
+    Initializer(V v) : SyntaxExtra<Initializer>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -7019,7 +7019,7 @@ struct InitializerClause : SyntaxExtra<InitializerClause> {
     InitializerClause() = default;
     template <class V>
         requires syntax_converts<V, InitializerClause>
-    InitializerClause(V v) : SyntaxExtra<InitializerClause>(v.context(), v.index())
+    InitializerClause(V v) : SyntaxExtra<InitializerClause>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -7070,7 +7070,7 @@ struct InitializerList : SyntaxExtra<InitializerList> {
     InitializerList() = default;
     template <class V>
         requires syntax_converts<V, InitializerList>
-    InitializerList(V v) : SyntaxExtra<InitializerList>(v.context(), v.index())
+    InitializerList(V v) : SyntaxExtra<InitializerList>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -7144,7 +7144,7 @@ struct JumpStatement : SyntaxExtra<JumpStatement> {
     JumpStatement() = default;
     template <class V>
         requires syntax_converts<V, JumpStatement>
-    JumpStatement(V v) : SyntaxExtra<JumpStatement>(v.context(), v.index())
+    JumpStatement(V v) : SyntaxExtra<JumpStatement>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -7199,7 +7199,7 @@ struct LambdaCapture : SyntaxExtra<LambdaCapture> {
     LambdaCapture() = default;
     template <class V>
         requires syntax_converts<V, LambdaCapture>
-    LambdaCapture(V v) : SyntaxExtra<LambdaCapture>(v.context(), v.index())
+    LambdaCapture(V v) : SyntaxExtra<LambdaCapture>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -7346,7 +7346,7 @@ struct LogicalAndExpression : SyntaxExtra<LogicalAndExpression> {
     LogicalAndExpression() = default;
     template <class V>
         requires syntax_converts<V, LogicalAndExpression>
-    LogicalAndExpression(V v) : SyntaxExtra<LogicalAndExpression>(v.context(), v.index())
+    LogicalAndExpression(V v) : SyntaxExtra<LogicalAndExpression>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -7397,7 +7397,7 @@ struct LogicalOrExpression : SyntaxExtra<LogicalOrExpression> {
     LogicalOrExpression() = default;
     template <class V>
         requires syntax_converts<V, LogicalOrExpression>
-    LogicalOrExpression(V v) : SyntaxExtra<LogicalOrExpression>(v.context(), v.index())
+    LogicalOrExpression(V v) : SyntaxExtra<LogicalOrExpression>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -7468,7 +7468,7 @@ struct MemInitializerId : SyntaxExtra<MemInitializerId> {
     MemInitializerId() = default;
     template <class V>
         requires syntax_converts<V, MemInitializerId>
-    MemInitializerId(V v) : SyntaxExtra<MemInitializerId>(v.context(), v.index())
+    MemInitializerId(V v) : SyntaxExtra<MemInitializerId>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -7499,7 +7499,7 @@ struct MemInitializerList : SyntaxExtra<MemInitializerList> {
     MemInitializerList() = default;
     template <class V>
         requires syntax_converts<V, MemInitializerList>
-    MemInitializerList(V v) : SyntaxExtra<MemInitializerList>(v.context(), v.index())
+    MemInitializerList(V v) : SyntaxExtra<MemInitializerList>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -7550,7 +7550,7 @@ struct MemberDeclaration : SyntaxExtra<MemberDeclaration> {
     MemberDeclaration() = default;
     template <class V>
         requires syntax_converts<V, MemberDeclaration>
-    MemberDeclaration(V v) : SyntaxExtra<MemberDeclaration>(v.context(), v.index())
+    MemberDeclaration(V v) : SyntaxExtra<MemberDeclaration>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -7581,7 +7581,7 @@ struct MemberDeclarator : SyntaxExtra<MemberDeclarator> {
     MemberDeclarator() = default;
     template <class V>
         requires syntax_converts<V, MemberDeclarator>
-    MemberDeclarator(V v) : SyntaxExtra<MemberDeclarator>(v.context(), v.index())
+    MemberDeclarator(V v) : SyntaxExtra<MemberDeclarator>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -7612,7 +7612,7 @@ struct MemberDeclaratorList : SyntaxExtra<MemberDeclaratorList> {
     MemberDeclaratorList() = default;
     template <class V>
         requires syntax_converts<V, MemberDeclaratorList>
-    MemberDeclaratorList(V v) : SyntaxExtra<MemberDeclaratorList>(v.context(), v.index())
+    MemberDeclaratorList(V v) : SyntaxExtra<MemberDeclaratorList>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -7850,7 +7850,7 @@ struct MultiplicativeExpression : SyntaxExtra<MultiplicativeExpression> {
     MultiplicativeExpression() = default;
     template <class V>
         requires syntax_converts<V, MultiplicativeExpression>
-    MultiplicativeExpression(V v) : SyntaxExtra<MultiplicativeExpression>(v.context(), v.index())
+    MultiplicativeExpression(V v) : SyntaxExtra<MultiplicativeExpression>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -7944,7 +7944,7 @@ struct NamespaceBody : SyntaxExtra<NamespaceBody> {
     NamespaceBody() = default;
     template <class V>
         requires syntax_converts<V, NamespaceBody>
-    NamespaceBody(V v) : SyntaxExtra<NamespaceBody>(v.context(), v.index())
+    NamespaceBody(V v) : SyntaxExtra<NamespaceBody>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -7975,7 +7975,7 @@ struct NamespaceDefinition : SyntaxExtra<NamespaceDefinition> {
     NamespaceDefinition() = default;
     template <class V>
         requires syntax_converts<V, NamespaceDefinition>
-    NamespaceDefinition(V v) : SyntaxExtra<NamespaceDefinition>(v.context(), v.index())
+    NamespaceDefinition(V v) : SyntaxExtra<NamespaceDefinition>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -8073,7 +8073,7 @@ struct NewDeclarator : SyntaxExtra<NewDeclarator> {
     NewDeclarator() = default;
     template <class V>
         requires syntax_converts<V, NewDeclarator>
-    NewDeclarator(V v) : SyntaxExtra<NewDeclarator>(v.context(), v.index())
+    NewDeclarator(V v) : SyntaxExtra<NewDeclarator>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -8128,7 +8128,7 @@ struct NewInitializer : SyntaxExtra<NewInitializer> {
     NewInitializer() = default;
     template <class V>
         requires syntax_converts<V, NewInitializer>
-    NewInitializer(V v) : SyntaxExtra<NewInitializer>(v.context(), v.index())
+    NewInitializer(V v) : SyntaxExtra<NewInitializer>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -8271,7 +8271,7 @@ struct NoptrDeclarator : SyntaxExtra<NoptrDeclarator> {
     NoptrDeclarator() = default;
     template <class V>
         requires syntax_converts<V, NoptrDeclarator>
-    NoptrDeclarator(V v) : SyntaxExtra<NoptrDeclarator>(v.context(), v.index())
+    NoptrDeclarator(V v) : SyntaxExtra<NoptrDeclarator>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -8480,7 +8480,7 @@ struct ParameterDeclarationClause : SyntaxExtra<ParameterDeclarationClause> {
     ParameterDeclarationClause() = default;
     template <class V>
         requires syntax_converts<V, ParameterDeclarationClause>
-    ParameterDeclarationClause(V v) : SyntaxExtra<ParameterDeclarationClause>(v.context(), v.index())
+    ParameterDeclarationClause(V v) : SyntaxExtra<ParameterDeclarationClause>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -8511,7 +8511,7 @@ struct ParameterDeclarationList : SyntaxExtra<ParameterDeclarationList> {
     ParameterDeclarationList() = default;
     template <class V>
         requires syntax_converts<V, ParameterDeclarationList>
-    ParameterDeclarationList(V v) : SyntaxExtra<ParameterDeclarationList>(v.context(), v.index())
+    ParameterDeclarationList(V v) : SyntaxExtra<ParameterDeclarationList>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -8675,7 +8675,7 @@ struct PmExpression : SyntaxExtra<PmExpression> {
     PmExpression() = default;
     template <class V>
         requires syntax_converts<V, PmExpression>
-    PmExpression(V v) : SyntaxExtra<PmExpression>(v.context(), v.index())
+    PmExpression(V v) : SyntaxExtra<PmExpression>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -8809,7 +8809,7 @@ struct PostfixExpression : SyntaxExtra<PostfixExpression> {
     PostfixExpression() = default;
     template <class V>
         requires syntax_converts<V, PostfixExpression>
-    PostfixExpression(V v) : SyntaxExtra<PostfixExpression>(v.context(), v.index())
+    PostfixExpression(V v) : SyntaxExtra<PostfixExpression>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -8862,7 +8862,7 @@ struct PrimaryExpression : SyntaxExtra<PrimaryExpression> {
     PrimaryExpression() = default;
     template <class V>
         requires syntax_converts<V, PrimaryExpression>
-    PrimaryExpression(V v) : SyntaxExtra<PrimaryExpression>(v.context(), v.index())
+    PrimaryExpression(V v) : SyntaxExtra<PrimaryExpression>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -8914,7 +8914,7 @@ struct PtrAbstractDeclarator : SyntaxExtra<PtrAbstractDeclarator> {
     PtrAbstractDeclarator() = default;
     template <class V>
         requires syntax_converts<V, PtrAbstractDeclarator>
-    PtrAbstractDeclarator(V v) : SyntaxExtra<PtrAbstractDeclarator>(v.context(), v.index())
+    PtrAbstractDeclarator(V v) : SyntaxExtra<PtrAbstractDeclarator>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -8945,7 +8945,7 @@ struct PtrDeclarator : SyntaxExtra<PtrDeclarator> {
     PtrDeclarator() = default;
     template <class V>
         requires syntax_converts<V, PtrDeclarator>
-    PtrDeclarator(V v) : SyntaxExtra<PtrDeclarator>(v.context(), v.index())
+    PtrDeclarator(V v) : SyntaxExtra<PtrDeclarator>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -9109,7 +9109,7 @@ struct RelationalExpression : SyntaxExtra<RelationalExpression> {
     RelationalExpression() = default;
     template <class V>
         requires syntax_converts<V, RelationalExpression>
-    RelationalExpression(V v) : SyntaxExtra<RelationalExpression>(v.context(), v.index())
+    RelationalExpression(V v) : SyntaxExtra<RelationalExpression>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -9160,7 +9160,7 @@ struct Requirement : SyntaxExtra<Requirement> {
     Requirement() = default;
     template <class V>
         requires syntax_converts<V, Requirement>
-    Requirement(V v) : SyntaxExtra<Requirement>(v.context(), v.index())
+    Requirement(V v) : SyntaxExtra<Requirement>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -9233,7 +9233,7 @@ struct RequirementSeq : SyntaxExtra<RequirementSeq> {
     RequirementSeq() = default;
     template <class V>
         requires syntax_converts<V, RequirementSeq>
-    RequirementSeq(V v) : SyntaxExtra<RequirementSeq>(v.context(), v.index())
+    RequirementSeq(V v) : SyntaxExtra<RequirementSeq>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -9373,7 +9373,7 @@ struct ShiftExpression : SyntaxExtra<ShiftExpression> {
     ShiftExpression() = default;
     template <class V>
         requires syntax_converts<V, ShiftExpression>
-    ShiftExpression(V v) : SyntaxExtra<ShiftExpression>(v.context(), v.index())
+    ShiftExpression(V v) : SyntaxExtra<ShiftExpression>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -9536,7 +9536,7 @@ struct SimpleTypeSpecifier : SyntaxExtra<SimpleTypeSpecifier> {
     SimpleTypeSpecifier() = default;
     template <class V>
         requires syntax_converts<V, SimpleTypeSpecifier>
-    SimpleTypeSpecifier(V v) : SyntaxExtra<SimpleTypeSpecifier>(v.context(), v.index())
+    SimpleTypeSpecifier(V v) : SyntaxExtra<SimpleTypeSpecifier>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -9590,7 +9590,7 @@ struct Statement : SyntaxExtra<Statement> {
     Statement() = default;
     template <class V>
         requires syntax_converts<V, Statement>
-    Statement(V v) : SyntaxExtra<Statement>(v.context(), v.index())
+    Statement(V v) : SyntaxExtra<Statement>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -9621,7 +9621,7 @@ struct StatementSeq : SyntaxExtra<StatementSeq> {
     StatementSeq() = default;
     template <class V>
         requires syntax_converts<V, StatementSeq>
-    StatementSeq(V v) : SyntaxExtra<StatementSeq>(v.context(), v.index())
+    StatementSeq(V v) : SyntaxExtra<StatementSeq>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -9718,7 +9718,7 @@ struct TemplateArgument : SyntaxExtra<TemplateArgument> {
     TemplateArgument() = default;
     template <class V>
         requires syntax_converts<V, TemplateArgument>
-    TemplateArgument(V v) : SyntaxExtra<TemplateArgument>(v.context(), v.index())
+    TemplateArgument(V v) : SyntaxExtra<TemplateArgument>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -9749,7 +9749,7 @@ struct TemplateArgumentList : SyntaxExtra<TemplateArgumentList> {
     TemplateArgumentList() = default;
     template <class V>
         requires syntax_converts<V, TemplateArgumentList>
-    TemplateArgumentList(V v) : SyntaxExtra<TemplateArgumentList>(v.context(), v.index())
+    TemplateArgumentList(V v) : SyntaxExtra<TemplateArgumentList>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -9845,7 +9845,7 @@ struct TemplateId : SyntaxExtra<TemplateId> {
     TemplateId() = default;
     template <class V>
         requires syntax_converts<V, TemplateId>
-    TemplateId(V v) : SyntaxExtra<TemplateId>(v.context(), v.index())
+    TemplateId(V v) : SyntaxExtra<TemplateId>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -9876,7 +9876,7 @@ struct TemplateParameter : SyntaxExtra<TemplateParameter> {
     TemplateParameter() = default;
     template <class V>
         requires syntax_converts<V, TemplateParameter>
-    TemplateParameter(V v) : SyntaxExtra<TemplateParameter>(v.context(), v.index())
+    TemplateParameter(V v) : SyntaxExtra<TemplateParameter>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -9907,7 +9907,7 @@ struct TemplateParameterList : SyntaxExtra<TemplateParameterList> {
     TemplateParameterList() = default;
     template <class V>
         requires syntax_converts<V, TemplateParameterList>
-    TemplateParameterList(V v) : SyntaxExtra<TemplateParameterList>(v.context(), v.index())
+    TemplateParameterList(V v) : SyntaxExtra<TemplateParameterList>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -10227,7 +10227,7 @@ struct TypeSpecifier : SyntaxExtra<TypeSpecifier> {
     TypeSpecifier() = default;
     template <class V>
         requires syntax_converts<V, TypeSpecifier>
-    TypeSpecifier(V v) : SyntaxExtra<TypeSpecifier>(v.context(), v.index())
+    TypeSpecifier(V v) : SyntaxExtra<TypeSpecifier>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -10305,7 +10305,7 @@ struct UnaryExpression : SyntaxExtra<UnaryExpression> {
     UnaryExpression() = default;
     template <class V>
         requires syntax_converts<V, UnaryExpression>
-    UnaryExpression(V v) : SyntaxExtra<UnaryExpression>(v.context(), v.index())
+    UnaryExpression(V v) : SyntaxExtra<UnaryExpression>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -10399,7 +10399,7 @@ struct UnqualifiedId : SyntaxExtra<UnqualifiedId> {
     UnqualifiedId() = default;
     template <class V>
         requires syntax_converts<V, UnqualifiedId>
-    UnqualifiedId(V v) : SyntaxExtra<UnqualifiedId>(v.context(), v.index())
+    UnqualifiedId(V v) : SyntaxExtra<UnqualifiedId>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -10474,7 +10474,7 @@ struct UsingDeclaratorList : SyntaxExtra<UsingDeclaratorList> {
     UsingDeclaratorList() = default;
     template <class V>
         requires syntax_converts<V, UsingDeclaratorList>
-    UsingDeclaratorList(V v) : SyntaxExtra<UsingDeclaratorList>(v.context(), v.index())
+    UsingDeclaratorList(V v) : SyntaxExtra<UsingDeclaratorList>(v.index())
     {
     }
     static bool accepts(syntax_kind k);
@@ -10924,8 +10924,8 @@ inline SyntaxRange<BalancedToken> BalancedTokenSeq::balanced_tokens() const
     if (!*this)
         return {};
     if (is(syntax_kind::balanced_token_seq))
-        return SyntaxRange<BalancedToken>(context(), children(), size());
-    return SyntaxRange<BalancedToken>(context(), child());
+        return SyntaxRange<BalancedToken>(children(), size());
+    return SyntaxRange<BalancedToken>(child());
 }
 
 inline bool BalancedTokens::accepts(syntax_kind k)
@@ -11039,8 +11039,8 @@ inline SyntaxRange<Capture> CaptureList::captures() const
     if (!*this)
         return {};
     if (is(syntax_kind::capture_list))
-        return SyntaxRange<Capture>(context(), children(), size());
-    return SyntaxRange<Capture>(context(), child());
+        return SyntaxRange<Capture>(children(), size());
+    return SyntaxRange<Capture>(child());
 }
 
 inline bool Captures::accepts(syntax_kind k)
@@ -11560,8 +11560,8 @@ inline SyntaxRange<Declaration> DeclarationSeq::declarations() const
     if (!*this)
         return {};
     if (is(syntax_kind::declaration_seq))
-        return SyntaxRange<Declaration>(context(), children(), size());
-    return SyntaxRange<Declaration>(context(), child());
+        return SyntaxRange<Declaration>(children(), size());
+    return SyntaxRange<Declaration>(child());
 }
 
 inline bool DeclarationStatement::accepts(syntax_kind k)
@@ -11784,8 +11784,8 @@ inline SyntaxRange<DesignatedInitializerClause> DesignatedInitializerList::desig
     if (!*this)
         return {};
     if (is(syntax_kind::designated_initializer_list))
-        return SyntaxRange<DesignatedInitializerClause>(context(), children(), size());
-    return SyntaxRange<DesignatedInitializerClause>(context(), child());
+        return SyntaxRange<DesignatedInitializerClause>(children(), size());
+    return SyntaxRange<DesignatedInitializerClause>(child());
 }
 
 inline bool DesignatedInitializers::accepts(syntax_kind k)
@@ -12011,8 +12011,8 @@ inline SyntaxRange<EnumeratorDefinition> EnumeratorList::enumerator_definitions(
     if (!*this)
         return {};
     if (is(syntax_kind::enumerator_list))
-        return SyntaxRange<EnumeratorDefinition>(context(), children(), size());
-    return SyntaxRange<EnumeratorDefinition>(context(), child());
+        return SyntaxRange<EnumeratorDefinition>(children(), size());
+    return SyntaxRange<EnumeratorDefinition>(child());
 }
 
 inline bool EnumeratorWithValue::accepts(syntax_kind k)
@@ -12621,8 +12621,8 @@ inline SyntaxRange<InitDeclarator> InitDeclaratorList::init_declarators() const
     if (!*this)
         return {};
     if (is(syntax_kind::init_declarator_list))
-        return SyntaxRange<InitDeclarator>(context(), children(), size());
-    return SyntaxRange<InitDeclarator>(context(), child());
+        return SyntaxRange<InitDeclarator>(children(), size());
+    return SyntaxRange<InitDeclarator>(child());
 }
 
 inline bool InitDeclarators::accepts(syntax_kind k)
@@ -12958,8 +12958,8 @@ inline SyntaxRange<MemberDeclarator> MemberDeclaratorList::member_declarators() 
     if (!*this)
         return {};
     if (is(syntax_kind::member_declarator_list))
-        return SyntaxRange<MemberDeclarator>(context(), children(), size());
-    return SyntaxRange<MemberDeclarator>(context(), child());
+        return SyntaxRange<MemberDeclarator>(children(), size());
+    return SyntaxRange<MemberDeclarator>(child());
 }
 
 inline bool MemberDeclaratorWithParts::accepts(syntax_kind k)
@@ -13550,8 +13550,8 @@ inline SyntaxRange<ParameterDeclaration> ParameterDeclarationList::parameter_dec
     if (!*this)
         return {};
     if (is(syntax_kind::parameter_declaration_list))
-        return SyntaxRange<ParameterDeclaration>(context(), children(), size());
-    return SyntaxRange<ParameterDeclaration>(context(), child());
+        return SyntaxRange<ParameterDeclaration>(children(), size());
+    return SyntaxRange<ParameterDeclaration>(child());
 }
 
 inline bool ParameterDeclarations::accepts(syntax_kind k)
@@ -13922,8 +13922,8 @@ inline SyntaxRange<Requirement> RequirementSeq::requirements() const
     if (!*this)
         return {};
     if (is(syntax_kind::requirement_seq))
-        return SyntaxRange<Requirement>(context(), children(), size());
-    return SyntaxRange<Requirement>(context(), child());
+        return SyntaxRange<Requirement>(children(), size());
+    return SyntaxRange<Requirement>(child());
 }
 
 inline bool Requirements::accepts(syntax_kind k)
@@ -14150,8 +14150,8 @@ inline SyntaxRange<Statement> StatementSeq::statements() const
     if (!*this)
         return {};
     if (is(syntax_kind::statement_seq))
-        return SyntaxRange<Statement>(context(), children(), size());
-    return SyntaxRange<Statement>(context(), child());
+        return SyntaxRange<Statement>(children(), size());
+    return SyntaxRange<Statement>(child());
 }
 
 inline bool Statements::accepts(syntax_kind k)
@@ -14294,8 +14294,8 @@ inline SyntaxRange<TemplateParameter> TemplateParameterList::template_parameters
     if (!*this)
         return {};
     if (is(syntax_kind::template_parameter_list))
-        return SyntaxRange<TemplateParameter>(context(), children(), size());
-    return SyntaxRange<TemplateParameter>(context(), child());
+        return SyntaxRange<TemplateParameter>(children(), size());
+    return SyntaxRange<TemplateParameter>(child());
 }
 
 inline bool TemplateParameters::accepts(syntax_kind k)
@@ -14725,851 +14725,851 @@ template <class S, class F> decltype(auto) syntax_visit(const S &s, F &f)
     switch (s.kind()) {
     case syntax_kind::translation_unit:
         if constexpr (syntax_converts<TranslationUnit, S>)
-            return syntax_call<>(f, TranslationUnit(s.context(), s.index()));
+            return syntax_call<>(f, TranslationUnit(s.index()));
         break;
     case syntax_kind::declaration_seq:
         if constexpr (syntax_converts<Declarations, S>)
-            return syntax_call<DeclarationSeq, NamespaceBody>(f, Declarations(s.context(), s.index()));
+            return syntax_call<DeclarationSeq, NamespaceBody>(f, Declarations(s.index()));
         break;
     case syntax_kind::simple_declaration:
         if constexpr (syntax_converts<SimpleDeclaration, S>)
-            return syntax_call<InitStatement, BlockDeclaration, DeclarationStatement, Statement, StatementSeq, Declaration, DeclarationSeq, NamespaceBody>(f, SimpleDeclaration(s.context(), s.index()));
+            return syntax_call<InitStatement, BlockDeclaration, DeclarationStatement, Statement, StatementSeq, Declaration, DeclarationSeq, NamespaceBody>(f, SimpleDeclaration(s.index()));
         break;
     case syntax_kind::empty_declaration:
         if constexpr (syntax_converts<EmptyDeclaration, S>)
-            return syntax_call<MemberDeclaration, Declaration, DeclarationSeq, NamespaceBody>(f, EmptyDeclaration(s.context(), s.index()));
+            return syntax_call<MemberDeclaration, Declaration, DeclarationSeq, NamespaceBody>(f, EmptyDeclaration(s.index()));
         break;
     case syntax_kind::static_assert_declaration:
         if constexpr (syntax_converts<StaticAssertDeclaration, S>)
-            return syntax_call<BlockDeclaration, DeclarationStatement, MemberDeclaration, Statement, StatementSeq, Declaration, DeclarationSeq, NamespaceBody>(f, StaticAssertDeclaration(s.context(), s.index()));
+            return syntax_call<BlockDeclaration, DeclarationStatement, MemberDeclaration, Statement, StatementSeq, Declaration, DeclarationSeq, NamespaceBody>(f, StaticAssertDeclaration(s.index()));
         break;
     case syntax_kind::alias_declaration:
         if constexpr (syntax_converts<AliasDeclaration, S>)
-            return syntax_call<BlockDeclaration, DeclarationStatement, MemberDeclaration, Statement, StatementSeq, Declaration, DeclarationSeq, NamespaceBody>(f, AliasDeclaration(s.context(), s.index()));
+            return syntax_call<BlockDeclaration, DeclarationStatement, MemberDeclaration, Statement, StatementSeq, Declaration, DeclarationSeq, NamespaceBody>(f, AliasDeclaration(s.index()));
         break;
     case syntax_kind::attribute_declaration:
         if constexpr (syntax_converts<AttributeDeclaration, S>)
-            return syntax_call<Declaration, DeclarationSeq, NamespaceBody>(f, AttributeDeclaration(s.context(), s.index()));
+            return syntax_call<Declaration, DeclarationSeq, NamespaceBody>(f, AttributeDeclaration(s.index()));
         break;
     case syntax_kind::decl_specifier_seq:
         if constexpr (syntax_converts<DeclSpecifierSeq, S>)
-            return syntax_call<>(f, DeclSpecifierSeq(s.context(), s.index()));
+            return syntax_call<>(f, DeclSpecifierSeq(s.index()));
         break;
     case syntax_kind::type_specifier_seq:
         if constexpr (syntax_converts<TypeSpecifierSeq, S>)
-            return syntax_call<ConversionTypeId>(f, TypeSpecifierSeq(s.context(), s.index()));
+            return syntax_call<ConversionTypeId>(f, TypeSpecifierSeq(s.index()));
         break;
     case syntax_kind::defining_type_specifier_seq:
         if constexpr (syntax_converts<DefiningTypeSpecifierSeq, S>)
-            return syntax_call<>(f, DefiningTypeSpecifierSeq(s.context(), s.index()));
+            return syntax_call<>(f, DefiningTypeSpecifierSeq(s.index()));
         break;
     case syntax_kind::simple_type_specifier:
         if constexpr (syntax_converts<SimpleTypeName, S>)
-            return syntax_call<SimpleTypeSpecifier, TypeSpecifier, DefiningTypeSpecifier, DeclSpecifier>(f, SimpleTypeName(s.context(), s.index()));
+            return syntax_call<SimpleTypeSpecifier, TypeSpecifier, DefiningTypeSpecifier, DeclSpecifier>(f, SimpleTypeName(s.index()));
         break;
     case syntax_kind::elaborated_type_specifier:
         if constexpr (syntax_converts<ElaboratedClassSpecifier, S>)
-            return syntax_call<ElaboratedTypeSpecifier, TypeSpecifier, DefiningTypeSpecifier, DeclSpecifier>(f, ElaboratedClassSpecifier(s.context(), s.index()));
+            return syntax_call<ElaboratedTypeSpecifier, TypeSpecifier, DefiningTypeSpecifier, DeclSpecifier>(f, ElaboratedClassSpecifier(s.index()));
         break;
     case syntax_kind::elaborated_enum_specifier:
         if constexpr (syntax_converts<ElaboratedEnumSpecifier, S>)
-            return syntax_call<ElaboratedTypeSpecifier, TypeSpecifier, DefiningTypeSpecifier, DeclSpecifier>(f, ElaboratedEnumSpecifier(s.context(), s.index()));
+            return syntax_call<ElaboratedTypeSpecifier, TypeSpecifier, DefiningTypeSpecifier, DeclSpecifier>(f, ElaboratedEnumSpecifier(s.index()));
         break;
     case syntax_kind::decltype_specifier:
         if constexpr (syntax_converts<DecltypeSpecifier, S>)
-            return syntax_call<ClassOrDecltype, MemInitializerId, BaseSpecifier, BaseSpecifierList, SimpleTypeSpecifier, TypeSpecifier, DefiningTypeSpecifier, DeclSpecifier>(f, DecltypeSpecifier(s.context(), s.index()));
+            return syntax_call<ClassOrDecltype, MemInitializerId, BaseSpecifier, BaseSpecifierList, SimpleTypeSpecifier, TypeSpecifier, DefiningTypeSpecifier, DeclSpecifier>(f, DecltypeSpecifier(s.index()));
         break;
     case syntax_kind::placeholder_type_specifier:
         if constexpr (syntax_converts<PlaceholderTypeSpecifier, S>)
-            return syntax_call<SimpleTypeSpecifier, TypeSpecifier, DefiningTypeSpecifier, DeclSpecifier>(f, PlaceholderTypeSpecifier(s.context(), s.index()));
+            return syntax_call<SimpleTypeSpecifier, TypeSpecifier, DefiningTypeSpecifier, DeclSpecifier>(f, PlaceholderTypeSpecifier(s.index()));
         break;
     case syntax_kind::class_specifier:
         if constexpr (syntax_converts<ClassSpecifier, S>)
-            return syntax_call<DefiningTypeSpecifier, DeclSpecifier>(f, ClassSpecifier(s.context(), s.index()));
+            return syntax_call<DefiningTypeSpecifier, DeclSpecifier>(f, ClassSpecifier(s.index()));
         break;
     case syntax_kind::enum_specifier:
         if constexpr (syntax_converts<EnumSpecifier, S>)
-            return syntax_call<DefiningTypeSpecifier, DeclSpecifier>(f, EnumSpecifier(s.context(), s.index()));
+            return syntax_call<DefiningTypeSpecifier, DeclSpecifier>(f, EnumSpecifier(s.index()));
         break;
     case syntax_kind::enum_head:
         if constexpr (syntax_converts<EnumHead, S>)
-            return syntax_call<>(f, EnumHead(s.context(), s.index()));
+            return syntax_call<>(f, EnumHead(s.index()));
         break;
     case syntax_kind::enum_head_name:
         if constexpr (syntax_converts<EnumHeadName, S>)
-            return syntax_call<>(f, EnumHeadName(s.context(), s.index()));
+            return syntax_call<>(f, EnumHeadName(s.index()));
         break;
     case syntax_kind::opaque_enum_declaration:
         if constexpr (syntax_converts<OpaqueEnumDeclaration, S>)
-            return syntax_call<BlockDeclaration, DeclarationStatement, MemberDeclaration, Statement, StatementSeq, Declaration, DeclarationSeq, NamespaceBody>(f, OpaqueEnumDeclaration(s.context(), s.index()));
+            return syntax_call<BlockDeclaration, DeclarationStatement, MemberDeclaration, Statement, StatementSeq, Declaration, DeclarationSeq, NamespaceBody>(f, OpaqueEnumDeclaration(s.index()));
         break;
     case syntax_kind::enum_key:
         if constexpr (syntax_converts<EnumKey, S>)
-            return syntax_call<>(f, EnumKey(s.context(), s.index()));
+            return syntax_call<>(f, EnumKey(s.index()));
         break;
     case syntax_kind::enum_base:
         if constexpr (syntax_converts<EnumBase, S>)
-            return syntax_call<>(f, EnumBase(s.context(), s.index()));
+            return syntax_call<>(f, EnumBase(s.index()));
         break;
     case syntax_kind::enumerator_list:
         if constexpr (syntax_converts<Enumerators, S>)
-            return syntax_call<EnumeratorList>(f, Enumerators(s.context(), s.index()));
+            return syntax_call<EnumeratorList>(f, Enumerators(s.index()));
         break;
     case syntax_kind::enumerator_definition:
         if constexpr (syntax_converts<EnumeratorWithValue, S>)
-            return syntax_call<EnumeratorDefinition, EnumeratorList>(f, EnumeratorWithValue(s.context(), s.index()));
+            return syntax_call<EnumeratorDefinition, EnumeratorList>(f, EnumeratorWithValue(s.index()));
         break;
     case syntax_kind::enumerator:
         if constexpr (syntax_converts<Enumerator, S>)
-            return syntax_call<EnumeratorDefinition, EnumeratorList>(f, Enumerator(s.context(), s.index()));
+            return syntax_call<EnumeratorDefinition, EnumeratorList>(f, Enumerator(s.index()));
         break;
     case syntax_kind::using_enum_declaration:
         if constexpr (syntax_converts<UsingEnumDeclaration, S>)
-            return syntax_call<BlockDeclaration, DeclarationStatement, MemberDeclaration, Statement, StatementSeq, Declaration, DeclarationSeq, NamespaceBody>(f, UsingEnumDeclaration(s.context(), s.index()));
+            return syntax_call<BlockDeclaration, DeclarationStatement, MemberDeclaration, Statement, StatementSeq, Declaration, DeclarationSeq, NamespaceBody>(f, UsingEnumDeclaration(s.index()));
         break;
     case syntax_kind::nested_name_specifier:
         if constexpr (syntax_converts<NestedNameSpecifier, S>)
-            return syntax_call<>(f, NestedNameSpecifier(s.context(), s.index()));
+            return syntax_call<>(f, NestedNameSpecifier(s.index()));
         break;
     case syntax_kind::qualified_id:
         if constexpr (syntax_converts<QualifiedId, S>)
-            return syntax_call<IdExpression, DeclaratorId, NoptrDeclarator, PtrDeclarator, Declarator, InitDeclarator, MemberDeclarator, InitDeclaratorList, MemberDeclaratorList, PrimaryExpression, ConstraintLogicalAndExpression, ConstraintLogicalOrExpression, PostfixExpression, UnaryExpression, CastExpression, PmExpression, MultiplicativeExpression, AdditiveExpression, ShiftExpression, CompareExpression, RelationalExpression, EqualityExpression, AndExpression, ExclusiveOrExpression, InclusiveOrExpression, LogicalAndExpression, ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, QualifiedId(s.context(), s.index()));
+            return syntax_call<IdExpression, DeclaratorId, NoptrDeclarator, PtrDeclarator, Declarator, InitDeclarator, MemberDeclarator, InitDeclaratorList, MemberDeclaratorList, PrimaryExpression, ConstraintLogicalAndExpression, ConstraintLogicalOrExpression, PostfixExpression, UnaryExpression, CastExpression, PmExpression, MultiplicativeExpression, AdditiveExpression, ShiftExpression, CompareExpression, RelationalExpression, EqualityExpression, AndExpression, ExclusiveOrExpression, InclusiveOrExpression, LogicalAndExpression, ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, QualifiedId(s.index()));
         break;
     case syntax_kind::unqualified_id:
         if constexpr (syntax_converts<DestructorTypeId, S>)
-            return syntax_call<UnqualifiedId, IdExpression, DeclaratorId, NoptrDeclarator, PtrDeclarator, Declarator, InitDeclarator, MemberDeclarator, InitDeclaratorList, MemberDeclaratorList, PrimaryExpression, ConstraintLogicalAndExpression, ConstraintLogicalOrExpression, PostfixExpression, UnaryExpression, CastExpression, PmExpression, MultiplicativeExpression, AdditiveExpression, ShiftExpression, CompareExpression, RelationalExpression, EqualityExpression, AndExpression, ExclusiveOrExpression, InclusiveOrExpression, LogicalAndExpression, ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, DestructorTypeId(s.context(), s.index()));
+            return syntax_call<UnqualifiedId, IdExpression, DeclaratorId, NoptrDeclarator, PtrDeclarator, Declarator, InitDeclarator, MemberDeclarator, InitDeclaratorList, MemberDeclaratorList, PrimaryExpression, ConstraintLogicalAndExpression, ConstraintLogicalOrExpression, PostfixExpression, UnaryExpression, CastExpression, PmExpression, MultiplicativeExpression, AdditiveExpression, ShiftExpression, CompareExpression, RelationalExpression, EqualityExpression, AndExpression, ExclusiveOrExpression, InclusiveOrExpression, LogicalAndExpression, ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, DestructorTypeId(s.index()));
         break;
     case syntax_kind::primary_expression:
         if constexpr (syntax_converts<ParenthesizedOrThis, S>)
-            return syntax_call<PrimaryExpression, ConstraintLogicalAndExpression, ConstraintLogicalOrExpression, PostfixExpression, UnaryExpression, CastExpression, PmExpression, MultiplicativeExpression, AdditiveExpression, ShiftExpression, CompareExpression, RelationalExpression, EqualityExpression, AndExpression, ExclusiveOrExpression, InclusiveOrExpression, LogicalAndExpression, ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, ParenthesizedOrThis(s.context(), s.index()));
+            return syntax_call<PrimaryExpression, ConstraintLogicalAndExpression, ConstraintLogicalOrExpression, PostfixExpression, UnaryExpression, CastExpression, PmExpression, MultiplicativeExpression, AdditiveExpression, ShiftExpression, CompareExpression, RelationalExpression, EqualityExpression, AndExpression, ExclusiveOrExpression, InclusiveOrExpression, LogicalAndExpression, ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, ParenthesizedOrThis(s.index()));
         break;
     case syntax_kind::postfix_expression:
         if constexpr (syntax_converts<PostfixOperation, S>)
-            return syntax_call<PostfixExpression, UnaryExpression, CastExpression, PmExpression, MultiplicativeExpression, AdditiveExpression, ShiftExpression, CompareExpression, RelationalExpression, EqualityExpression, AndExpression, ExclusiveOrExpression, InclusiveOrExpression, LogicalAndExpression, ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, PostfixOperation(s.context(), s.index()));
+            return syntax_call<PostfixExpression, UnaryExpression, CastExpression, PmExpression, MultiplicativeExpression, AdditiveExpression, ShiftExpression, CompareExpression, RelationalExpression, EqualityExpression, AndExpression, ExclusiveOrExpression, InclusiveOrExpression, LogicalAndExpression, ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, PostfixOperation(s.index()));
         break;
     case syntax_kind::unary_expression:
         if constexpr (syntax_converts<UnaryOperation, S>)
-            return syntax_call<UnaryExpression, CastExpression, PmExpression, MultiplicativeExpression, AdditiveExpression, ShiftExpression, CompareExpression, RelationalExpression, EqualityExpression, AndExpression, ExclusiveOrExpression, InclusiveOrExpression, LogicalAndExpression, ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, UnaryOperation(s.context(), s.index()));
+            return syntax_call<UnaryExpression, CastExpression, PmExpression, MultiplicativeExpression, AdditiveExpression, ShiftExpression, CompareExpression, RelationalExpression, EqualityExpression, AndExpression, ExclusiveOrExpression, InclusiveOrExpression, LogicalAndExpression, ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, UnaryOperation(s.index()));
         break;
     case syntax_kind::noexcept_expression:
         if constexpr (syntax_converts<NoexceptExpression, S>)
-            return syntax_call<UnaryExpression, CastExpression, PmExpression, MultiplicativeExpression, AdditiveExpression, ShiftExpression, CompareExpression, RelationalExpression, EqualityExpression, AndExpression, ExclusiveOrExpression, InclusiveOrExpression, LogicalAndExpression, ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, NoexceptExpression(s.context(), s.index()));
+            return syntax_call<UnaryExpression, CastExpression, PmExpression, MultiplicativeExpression, AdditiveExpression, ShiftExpression, CompareExpression, RelationalExpression, EqualityExpression, AndExpression, ExclusiveOrExpression, InclusiveOrExpression, LogicalAndExpression, ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, NoexceptExpression(s.index()));
         break;
     case syntax_kind::await_expression:
         if constexpr (syntax_converts<AwaitExpression, S>)
-            return syntax_call<UnaryExpression, CastExpression, PmExpression, MultiplicativeExpression, AdditiveExpression, ShiftExpression, CompareExpression, RelationalExpression, EqualityExpression, AndExpression, ExclusiveOrExpression, InclusiveOrExpression, LogicalAndExpression, ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, AwaitExpression(s.context(), s.index()));
+            return syntax_call<UnaryExpression, CastExpression, PmExpression, MultiplicativeExpression, AdditiveExpression, ShiftExpression, CompareExpression, RelationalExpression, EqualityExpression, AndExpression, ExclusiveOrExpression, InclusiveOrExpression, LogicalAndExpression, ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, AwaitExpression(s.index()));
         break;
     case syntax_kind::yield_expression:
         if constexpr (syntax_converts<YieldExpression, S>)
-            return syntax_call<AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, YieldExpression(s.context(), s.index()));
+            return syntax_call<AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, YieldExpression(s.index()));
         break;
     case syntax_kind::throw_expression:
         if constexpr (syntax_converts<ThrowExpression, S>)
-            return syntax_call<AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, ThrowExpression(s.context(), s.index()));
+            return syntax_call<AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, ThrowExpression(s.index()));
         break;
     case syntax_kind::lambda_expression:
         if constexpr (syntax_converts<LambdaExpression, S>)
-            return syntax_call<PrimaryExpression, ConstraintLogicalAndExpression, ConstraintLogicalOrExpression, PostfixExpression, UnaryExpression, CastExpression, PmExpression, MultiplicativeExpression, AdditiveExpression, ShiftExpression, CompareExpression, RelationalExpression, EqualityExpression, AndExpression, ExclusiveOrExpression, InclusiveOrExpression, LogicalAndExpression, ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, LambdaExpression(s.context(), s.index()));
+            return syntax_call<PrimaryExpression, ConstraintLogicalAndExpression, ConstraintLogicalOrExpression, PostfixExpression, UnaryExpression, CastExpression, PmExpression, MultiplicativeExpression, AdditiveExpression, ShiftExpression, CompareExpression, RelationalExpression, EqualityExpression, AndExpression, ExclusiveOrExpression, InclusiveOrExpression, LogicalAndExpression, ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, LambdaExpression(s.index()));
         break;
     case syntax_kind::lambda_introducer:
         if constexpr (syntax_converts<LambdaIntroducer, S>)
-            return syntax_call<>(f, LambdaIntroducer(s.context(), s.index()));
+            return syntax_call<>(f, LambdaIntroducer(s.index()));
         break;
     case syntax_kind::lambda_declarator:
         if constexpr (syntax_converts<LambdaDeclarator, S>)
-            return syntax_call<>(f, LambdaDeclarator(s.context(), s.index()));
+            return syntax_call<>(f, LambdaDeclarator(s.index()));
         break;
     case syntax_kind::lambda_capture:
         if constexpr (syntax_converts<DefaultAndCaptures, S>)
-            return syntax_call<LambdaCapture>(f, DefaultAndCaptures(s.context(), s.index()));
+            return syntax_call<LambdaCapture>(f, DefaultAndCaptures(s.index()));
         break;
     case syntax_kind::capture_list:
         if constexpr (syntax_converts<Captures, S>)
-            return syntax_call<CaptureList, LambdaCapture>(f, Captures(s.context(), s.index()));
+            return syntax_call<CaptureList, LambdaCapture>(f, Captures(s.index()));
         break;
     case syntax_kind::simple_capture:
         if constexpr (syntax_converts<SimpleCapture, S>)
-            return syntax_call<Capture, CaptureList, LambdaCapture>(f, SimpleCapture(s.context(), s.index()));
+            return syntax_call<Capture, CaptureList, LambdaCapture>(f, SimpleCapture(s.index()));
         break;
     case syntax_kind::init_capture:
         if constexpr (syntax_converts<InitCapture, S>)
-            return syntax_call<Capture, CaptureList, LambdaCapture>(f, InitCapture(s.context(), s.index()));
+            return syntax_call<Capture, CaptureList, LambdaCapture>(f, InitCapture(s.index()));
         break;
     case syntax_kind::new_expression:
         if constexpr (syntax_converts<NewExpression, S>)
-            return syntax_call<UnaryExpression, CastExpression, PmExpression, MultiplicativeExpression, AdditiveExpression, ShiftExpression, CompareExpression, RelationalExpression, EqualityExpression, AndExpression, ExclusiveOrExpression, InclusiveOrExpression, LogicalAndExpression, ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, NewExpression(s.context(), s.index()));
+            return syntax_call<UnaryExpression, CastExpression, PmExpression, MultiplicativeExpression, AdditiveExpression, ShiftExpression, CompareExpression, RelationalExpression, EqualityExpression, AndExpression, ExclusiveOrExpression, InclusiveOrExpression, LogicalAndExpression, ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, NewExpression(s.index()));
         break;
     case syntax_kind::new_placement:
         if constexpr (syntax_converts<NewPlacement, S>)
-            return syntax_call<>(f, NewPlacement(s.context(), s.index()));
+            return syntax_call<>(f, NewPlacement(s.index()));
         break;
     case syntax_kind::new_type_id:
         if constexpr (syntax_converts<NewTypeId, S>)
-            return syntax_call<>(f, NewTypeId(s.context(), s.index()));
+            return syntax_call<>(f, NewTypeId(s.index()));
         break;
     case syntax_kind::new_declarator:
         if constexpr (syntax_converts<PointerNewDeclarator, S>)
-            return syntax_call<NewDeclarator>(f, PointerNewDeclarator(s.context(), s.index()));
+            return syntax_call<NewDeclarator>(f, PointerNewDeclarator(s.index()));
         break;
     case syntax_kind::noptr_new_declarator:
         if constexpr (syntax_converts<NoptrNewDeclarator, S>)
-            return syntax_call<NewDeclarator>(f, NoptrNewDeclarator(s.context(), s.index()));
+            return syntax_call<NewDeclarator>(f, NoptrNewDeclarator(s.index()));
         break;
     case syntax_kind::new_initializer:
         if constexpr (syntax_converts<ParenthesizedNewInitializer, S>)
-            return syntax_call<NewInitializer>(f, ParenthesizedNewInitializer(s.context(), s.index()));
+            return syntax_call<NewInitializer>(f, ParenthesizedNewInitializer(s.index()));
         break;
     case syntax_kind::delete_expression:
         if constexpr (syntax_converts<DeleteExpression, S>)
-            return syntax_call<UnaryExpression, CastExpression, PmExpression, MultiplicativeExpression, AdditiveExpression, ShiftExpression, CompareExpression, RelationalExpression, EqualityExpression, AndExpression, ExclusiveOrExpression, InclusiveOrExpression, LogicalAndExpression, ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, DeleteExpression(s.context(), s.index()));
+            return syntax_call<UnaryExpression, CastExpression, PmExpression, MultiplicativeExpression, AdditiveExpression, ShiftExpression, CompareExpression, RelationalExpression, EqualityExpression, AndExpression, ExclusiveOrExpression, InclusiveOrExpression, LogicalAndExpression, ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, DeleteExpression(s.index()));
         break;
     case syntax_kind::cast_expression:
         if constexpr (syntax_converts<CastNotation, S>)
-            return syntax_call<CastExpression, PmExpression, MultiplicativeExpression, AdditiveExpression, ShiftExpression, CompareExpression, RelationalExpression, EqualityExpression, AndExpression, ExclusiveOrExpression, InclusiveOrExpression, LogicalAndExpression, ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, CastNotation(s.context(), s.index()));
+            return syntax_call<CastExpression, PmExpression, MultiplicativeExpression, AdditiveExpression, ShiftExpression, CompareExpression, RelationalExpression, EqualityExpression, AndExpression, ExclusiveOrExpression, InclusiveOrExpression, LogicalAndExpression, ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, CastNotation(s.index()));
         break;
     case syntax_kind::pm_expression:
         if constexpr (syntax_converts<PointerToMemberOperation, S>)
-            return syntax_call<PmExpression, MultiplicativeExpression, AdditiveExpression, ShiftExpression, CompareExpression, RelationalExpression, EqualityExpression, AndExpression, ExclusiveOrExpression, InclusiveOrExpression, LogicalAndExpression, ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, PointerToMemberOperation(s.context(), s.index()));
+            return syntax_call<PmExpression, MultiplicativeExpression, AdditiveExpression, ShiftExpression, CompareExpression, RelationalExpression, EqualityExpression, AndExpression, ExclusiveOrExpression, InclusiveOrExpression, LogicalAndExpression, ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, PointerToMemberOperation(s.index()));
         break;
     case syntax_kind::multiplicative_expression:
         if constexpr (syntax_converts<MultiplicativeOperation, S>)
-            return syntax_call<MultiplicativeExpression, AdditiveExpression, ShiftExpression, CompareExpression, RelationalExpression, EqualityExpression, AndExpression, ExclusiveOrExpression, InclusiveOrExpression, LogicalAndExpression, ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, MultiplicativeOperation(s.context(), s.index()));
+            return syntax_call<MultiplicativeExpression, AdditiveExpression, ShiftExpression, CompareExpression, RelationalExpression, EqualityExpression, AndExpression, ExclusiveOrExpression, InclusiveOrExpression, LogicalAndExpression, ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, MultiplicativeOperation(s.index()));
         break;
     case syntax_kind::additive_expression:
         if constexpr (syntax_converts<AdditiveOperation, S>)
-            return syntax_call<AdditiveExpression, ShiftExpression, CompareExpression, RelationalExpression, EqualityExpression, AndExpression, ExclusiveOrExpression, InclusiveOrExpression, LogicalAndExpression, ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, AdditiveOperation(s.context(), s.index()));
+            return syntax_call<AdditiveExpression, ShiftExpression, CompareExpression, RelationalExpression, EqualityExpression, AndExpression, ExclusiveOrExpression, InclusiveOrExpression, LogicalAndExpression, ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, AdditiveOperation(s.index()));
         break;
     case syntax_kind::shift_expression:
         if constexpr (syntax_converts<ShiftOperation, S>)
-            return syntax_call<ShiftExpression, CompareExpression, RelationalExpression, EqualityExpression, AndExpression, ExclusiveOrExpression, InclusiveOrExpression, LogicalAndExpression, ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, ShiftOperation(s.context(), s.index()));
+            return syntax_call<ShiftExpression, CompareExpression, RelationalExpression, EqualityExpression, AndExpression, ExclusiveOrExpression, InclusiveOrExpression, LogicalAndExpression, ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, ShiftOperation(s.index()));
         break;
     case syntax_kind::compare_expression:
         if constexpr (syntax_converts<ThreeWayComparison, S>)
-            return syntax_call<CompareExpression, RelationalExpression, EqualityExpression, AndExpression, ExclusiveOrExpression, InclusiveOrExpression, LogicalAndExpression, ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, ThreeWayComparison(s.context(), s.index()));
+            return syntax_call<CompareExpression, RelationalExpression, EqualityExpression, AndExpression, ExclusiveOrExpression, InclusiveOrExpression, LogicalAndExpression, ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, ThreeWayComparison(s.index()));
         break;
     case syntax_kind::relational_expression:
         if constexpr (syntax_converts<RelationalOperation, S>)
-            return syntax_call<RelationalExpression, EqualityExpression, AndExpression, ExclusiveOrExpression, InclusiveOrExpression, LogicalAndExpression, ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, RelationalOperation(s.context(), s.index()));
+            return syntax_call<RelationalExpression, EqualityExpression, AndExpression, ExclusiveOrExpression, InclusiveOrExpression, LogicalAndExpression, ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, RelationalOperation(s.index()));
         break;
     case syntax_kind::equality_expression:
         if constexpr (syntax_converts<EqualityOperation, S>)
-            return syntax_call<EqualityExpression, AndExpression, ExclusiveOrExpression, InclusiveOrExpression, LogicalAndExpression, ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, EqualityOperation(s.context(), s.index()));
+            return syntax_call<EqualityExpression, AndExpression, ExclusiveOrExpression, InclusiveOrExpression, LogicalAndExpression, ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, EqualityOperation(s.index()));
         break;
     case syntax_kind::and_expression:
         if constexpr (syntax_converts<AndOperation, S>)
-            return syntax_call<AndExpression, ExclusiveOrExpression, InclusiveOrExpression, LogicalAndExpression, ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, AndOperation(s.context(), s.index()));
+            return syntax_call<AndExpression, ExclusiveOrExpression, InclusiveOrExpression, LogicalAndExpression, ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, AndOperation(s.index()));
         break;
     case syntax_kind::exclusive_or_expression:
         if constexpr (syntax_converts<ExclusiveOrOperation, S>)
-            return syntax_call<ExclusiveOrExpression, InclusiveOrExpression, LogicalAndExpression, ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, ExclusiveOrOperation(s.context(), s.index()));
+            return syntax_call<ExclusiveOrExpression, InclusiveOrExpression, LogicalAndExpression, ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, ExclusiveOrOperation(s.index()));
         break;
     case syntax_kind::inclusive_or_expression:
         if constexpr (syntax_converts<InclusiveOrOperation, S>)
-            return syntax_call<InclusiveOrExpression, LogicalAndExpression, ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, InclusiveOrOperation(s.context(), s.index()));
+            return syntax_call<InclusiveOrExpression, LogicalAndExpression, ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, InclusiveOrOperation(s.index()));
         break;
     case syntax_kind::logical_and_expression:
         if constexpr (syntax_converts<LogicalAndOperation, S>)
-            return syntax_call<LogicalAndExpression, ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, LogicalAndOperation(s.context(), s.index()));
+            return syntax_call<LogicalAndExpression, ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, LogicalAndOperation(s.index()));
         break;
     case syntax_kind::logical_or_expression:
         if constexpr (syntax_converts<LogicalOrOperation, S>)
-            return syntax_call<ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, LogicalOrOperation(s.context(), s.index()));
+            return syntax_call<ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, LogicalOrOperation(s.index()));
         break;
     case syntax_kind::conditional_expression:
         if constexpr (syntax_converts<ConditionalOperation, S>)
-            return syntax_call<ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, ConditionalOperation(s.context(), s.index()));
+            return syntax_call<ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, ConditionalOperation(s.index()));
         break;
     case syntax_kind::assignment_expression:
         if constexpr (syntax_converts<Assignment, S>)
-            return syntax_call<AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, Assignment(s.context(), s.index()));
+            return syntax_call<AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, Assignment(s.index()));
         break;
     case syntax_kind::expression:
         if constexpr (syntax_converts<CommaExpression, S>)
-            return syntax_call<Expression, Condition, ExprOrBracedInitList, ForRangeInitializer>(f, CommaExpression(s.context(), s.index()));
+            return syntax_call<Expression, Condition, ExprOrBracedInitList, ForRangeInitializer>(f, CommaExpression(s.index()));
         break;
     case syntax_kind::init_declarator_list:
         if constexpr (syntax_converts<InitDeclarators, S>)
-            return syntax_call<InitDeclaratorList>(f, InitDeclarators(s.context(), s.index()));
+            return syntax_call<InitDeclaratorList>(f, InitDeclarators(s.index()));
         break;
     case syntax_kind::init_declarator:
         if constexpr (syntax_converts<DeclaratorWithInitializer, S>)
-            return syntax_call<InitDeclarator, InitDeclaratorList>(f, DeclaratorWithInitializer(s.context(), s.index()));
+            return syntax_call<InitDeclarator, InitDeclaratorList>(f, DeclaratorWithInitializer(s.index()));
         break;
     case syntax_kind::declarator:
         if constexpr (syntax_converts<TrailingReturnDeclarator, S>)
-            return syntax_call<Declarator, InitDeclarator, MemberDeclarator, InitDeclaratorList, MemberDeclaratorList>(f, TrailingReturnDeclarator(s.context(), s.index()));
+            return syntax_call<Declarator, InitDeclarator, MemberDeclarator, InitDeclaratorList, MemberDeclaratorList>(f, TrailingReturnDeclarator(s.index()));
         break;
     case syntax_kind::ptr_declarator:
         if constexpr (syntax_converts<PointerDeclarator, S>)
-            return syntax_call<PtrDeclarator, Declarator, InitDeclarator, MemberDeclarator, InitDeclaratorList, MemberDeclaratorList>(f, PointerDeclarator(s.context(), s.index()));
+            return syntax_call<PtrDeclarator, Declarator, InitDeclarator, MemberDeclarator, InitDeclaratorList, MemberDeclaratorList>(f, PointerDeclarator(s.index()));
         break;
     case syntax_kind::noptr_declarator:
         if constexpr (syntax_converts<SuffixedDeclarator, S>)
-            return syntax_call<NoptrDeclarator, PtrDeclarator, Declarator, InitDeclarator, MemberDeclarator, InitDeclaratorList, MemberDeclaratorList>(f, SuffixedDeclarator(s.context(), s.index()));
+            return syntax_call<NoptrDeclarator, PtrDeclarator, Declarator, InitDeclarator, MemberDeclarator, InitDeclaratorList, MemberDeclaratorList>(f, SuffixedDeclarator(s.index()));
         break;
     case syntax_kind::declarator_id:
         if constexpr (syntax_converts<PackDeclaratorId, S>)
-            return syntax_call<DeclaratorId, NoptrDeclarator, PtrDeclarator, Declarator, InitDeclarator, MemberDeclarator, InitDeclaratorList, MemberDeclaratorList>(f, PackDeclaratorId(s.context(), s.index()));
+            return syntax_call<DeclaratorId, NoptrDeclarator, PtrDeclarator, Declarator, InitDeclarator, MemberDeclarator, InitDeclaratorList, MemberDeclaratorList>(f, PackDeclaratorId(s.index()));
         break;
     case syntax_kind::ptr_operator:
         if constexpr (syntax_converts<PtrOperator, S>)
-            return syntax_call<ConversionDeclarator, NewDeclarator, PtrAbstractDeclarator, AbstractDeclarator>(f, PtrOperator(s.context(), s.index()));
+            return syntax_call<ConversionDeclarator, NewDeclarator, PtrAbstractDeclarator, AbstractDeclarator>(f, PtrOperator(s.index()));
         break;
     case syntax_kind::cv_qualifier_seq:
         if constexpr (syntax_converts<CvQualifierSeq, S>)
-            return syntax_call<>(f, CvQualifierSeq(s.context(), s.index()));
+            return syntax_call<>(f, CvQualifierSeq(s.index()));
         break;
     case syntax_kind::parameters_and_qualifiers:
         if constexpr (syntax_converts<ParametersAndQualifiers, S>)
-            return syntax_call<>(f, ParametersAndQualifiers(s.context(), s.index()));
+            return syntax_call<>(f, ParametersAndQualifiers(s.index()));
         break;
     case syntax_kind::trailing_return_type:
         if constexpr (syntax_converts<TrailingReturnType, S>)
-            return syntax_call<>(f, TrailingReturnType(s.context(), s.index()));
+            return syntax_call<>(f, TrailingReturnType(s.index()));
         break;
     case syntax_kind::type_id:
         if constexpr (syntax_converts<TypeId, S>)
-            return syntax_call<TemplateArgument, TemplateArgumentList, ClangTypeTraitArgument, ClangTypeTraitArgumentList>(f, TypeId(s.context(), s.index()));
+            return syntax_call<TemplateArgument, TemplateArgumentList, ClangTypeTraitArgument, ClangTypeTraitArgumentList>(f, TypeId(s.index()));
         break;
     case syntax_kind::defining_type_id:
         if constexpr (syntax_converts<DefiningTypeId, S>)
-            return syntax_call<>(f, DefiningTypeId(s.context(), s.index()));
+            return syntax_call<>(f, DefiningTypeId(s.index()));
         break;
     case syntax_kind::abstract_declarator:
         if constexpr (syntax_converts<TrailingAbstractDeclarator, S>)
-            return syntax_call<AbstractDeclarator>(f, TrailingAbstractDeclarator(s.context(), s.index()));
+            return syntax_call<AbstractDeclarator>(f, TrailingAbstractDeclarator(s.index()));
         break;
     case syntax_kind::ptr_abstract_declarator:
         if constexpr (syntax_converts<PointerAbstractDeclarator, S>)
-            return syntax_call<PtrAbstractDeclarator, AbstractDeclarator>(f, PointerAbstractDeclarator(s.context(), s.index()));
+            return syntax_call<PtrAbstractDeclarator, AbstractDeclarator>(f, PointerAbstractDeclarator(s.index()));
         break;
     case syntax_kind::noptr_abstract_declarator:
         if constexpr (syntax_converts<NoptrAbstractDeclarator, S>)
-            return syntax_call<PtrAbstractDeclarator, AbstractDeclarator>(f, NoptrAbstractDeclarator(s.context(), s.index()));
+            return syntax_call<PtrAbstractDeclarator, AbstractDeclarator>(f, NoptrAbstractDeclarator(s.index()));
         break;
     case syntax_kind::parameter_declaration_clause:
         if constexpr (syntax_converts<ParameterClause, S>)
-            return syntax_call<ParameterDeclarationClause>(f, ParameterClause(s.context(), s.index()));
+            return syntax_call<ParameterDeclarationClause>(f, ParameterClause(s.index()));
         break;
     case syntax_kind::parameter_declaration_list:
         if constexpr (syntax_converts<ParameterDeclarations, S>)
-            return syntax_call<ParameterDeclarationList, ParameterDeclarationClause>(f, ParameterDeclarations(s.context(), s.index()));
+            return syntax_call<ParameterDeclarationList, ParameterDeclarationClause>(f, ParameterDeclarations(s.index()));
         break;
     case syntax_kind::parameter_declaration:
         if constexpr (syntax_converts<ParameterDeclaration, S>)
-            return syntax_call<ParameterDeclarationList, TemplateParameter, ParameterDeclarationClause, TemplateParameterList>(f, ParameterDeclaration(s.context(), s.index()));
+            return syntax_call<ParameterDeclarationList, TemplateParameter, ParameterDeclarationClause, TemplateParameterList>(f, ParameterDeclaration(s.index()));
         break;
     case syntax_kind::noexcept_specifier:
         if constexpr (syntax_converts<NoexceptSpecifier, S>)
-            return syntax_call<>(f, NoexceptSpecifier(s.context(), s.index()));
+            return syntax_call<>(f, NoexceptSpecifier(s.index()));
         break;
     case syntax_kind::dynamic_exception_specification:
         if constexpr (syntax_converts<DynamicExceptionSpecification, S>)
-            return syntax_call<>(f, DynamicExceptionSpecification(s.context(), s.index()));
+            return syntax_call<>(f, DynamicExceptionSpecification(s.index()));
         break;
     case syntax_kind::type_id_list:
         if constexpr (syntax_converts<TypeIdList, S>)
-            return syntax_call<>(f, TypeIdList(s.context(), s.index()));
+            return syntax_call<>(f, TypeIdList(s.index()));
         break;
     case syntax_kind::initializer:
         if constexpr (syntax_converts<ParenthesizedInitializer, S>)
-            return syntax_call<Initializer>(f, ParenthesizedInitializer(s.context(), s.index()));
+            return syntax_call<Initializer>(f, ParenthesizedInitializer(s.index()));
         break;
     case syntax_kind::brace_or_equal_initializer:
         if constexpr (syntax_converts<EqualInitializer, S>)
-            return syntax_call<BraceOrEqualInitializer, Initializer>(f, EqualInitializer(s.context(), s.index()));
+            return syntax_call<BraceOrEqualInitializer, Initializer>(f, EqualInitializer(s.index()));
         break;
     case syntax_kind::braced_init_list:
         if constexpr (syntax_converts<BracedInitList, S>)
-            return syntax_call<BraceOrEqualInitializer, NewInitializer, Initializer, InitializerClause, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, BracedInitList(s.context(), s.index()));
+            return syntax_call<BraceOrEqualInitializer, NewInitializer, Initializer, InitializerClause, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, BracedInitList(s.index()));
         break;
     case syntax_kind::initializer_list:
         if constexpr (syntax_converts<InitializerClauses, S>)
-            return syntax_call<ExpressionList, GnuAttributeArguments, InitializerList>(f, InitializerClauses(s.context(), s.index()));
+            return syntax_call<ExpressionList, GnuAttributeArguments, InitializerList>(f, InitializerClauses(s.index()));
         break;
     case syntax_kind::designated_initializer_list:
         if constexpr (syntax_converts<DesignatedInitializers, S>)
-            return syntax_call<DesignatedInitializerList>(f, DesignatedInitializers(s.context(), s.index()));
+            return syntax_call<DesignatedInitializerList>(f, DesignatedInitializers(s.index()));
         break;
     case syntax_kind::designated_initializer_clause:
         if constexpr (syntax_converts<DesignatedInitializerClause, S>)
-            return syntax_call<DesignatedInitializerList>(f, DesignatedInitializerClause(s.context(), s.index()));
+            return syntax_call<DesignatedInitializerList>(f, DesignatedInitializerClause(s.index()));
         break;
     case syntax_kind::designator:
         if constexpr (syntax_converts<Designator, S>)
-            return syntax_call<GnuDesignation>(f, Designator(s.context(), s.index()));
+            return syntax_call<GnuDesignation>(f, Designator(s.index()));
         break;
     case syntax_kind::function_definition:
         if constexpr (syntax_converts<FunctionDefinition, S>)
-            return syntax_call<MemberDeclaration, Declaration, DeclarationSeq, NamespaceBody>(f, FunctionDefinition(s.context(), s.index()));
+            return syntax_call<MemberDeclaration, Declaration, DeclarationSeq, NamespaceBody>(f, FunctionDefinition(s.index()));
         break;
     case syntax_kind::function_body:
         if constexpr (syntax_converts<OrdinaryFunctionBody, S>)
-            return syntax_call<FunctionBody>(f, OrdinaryFunctionBody(s.context(), s.index()));
+            return syntax_call<FunctionBody>(f, OrdinaryFunctionBody(s.index()));
         break;
     case syntax_kind::function_try_block:
         if constexpr (syntax_converts<FunctionTryBlock, S>)
-            return syntax_call<FunctionBody>(f, FunctionTryBlock(s.context(), s.index()));
+            return syntax_call<FunctionBody>(f, FunctionTryBlock(s.index()));
         break;
     case syntax_kind::identifier_list:
         if constexpr (syntax_converts<IdentifierList, S>)
-            return syntax_call<>(f, IdentifierList(s.context(), s.index()));
+            return syntax_call<>(f, IdentifierList(s.index()));
         break;
     case syntax_kind::class_head:
         if constexpr (syntax_converts<ClassHead, S>)
-            return syntax_call<>(f, ClassHead(s.context(), s.index()));
+            return syntax_call<>(f, ClassHead(s.index()));
         break;
     case syntax_kind::class_head_name:
         if constexpr (syntax_converts<QualifiedClassHeadName, S>)
-            return syntax_call<ClassHeadName>(f, QualifiedClassHeadName(s.context(), s.index()));
+            return syntax_call<ClassHeadName>(f, QualifiedClassHeadName(s.index()));
         break;
     case syntax_kind::member_specification:
         if constexpr (syntax_converts<MemberSpecification, S>)
-            return syntax_call<>(f, MemberSpecification(s.context(), s.index()));
+            return syntax_call<>(f, MemberSpecification(s.index()));
         break;
     case syntax_kind::member_declaration:
         if constexpr (syntax_converts<MemberSimpleDeclaration, S>)
-            return syntax_call<MemberDeclaration>(f, MemberSimpleDeclaration(s.context(), s.index()));
+            return syntax_call<MemberDeclaration>(f, MemberSimpleDeclaration(s.index()));
         break;
     case syntax_kind::member_declarator_list:
         if constexpr (syntax_converts<MemberDeclarators, S>)
-            return syntax_call<MemberDeclaratorList>(f, MemberDeclarators(s.context(), s.index()));
+            return syntax_call<MemberDeclaratorList>(f, MemberDeclarators(s.index()));
         break;
     case syntax_kind::member_declarator:
         if constexpr (syntax_converts<MemberDeclaratorWithParts, S>)
-            return syntax_call<MemberDeclarator, MemberDeclaratorList>(f, MemberDeclaratorWithParts(s.context(), s.index()));
+            return syntax_call<MemberDeclarator, MemberDeclaratorList>(f, MemberDeclaratorWithParts(s.index()));
         break;
     case syntax_kind::virt_specifier_seq:
         if constexpr (syntax_converts<VirtSpecifierSeq, S>)
-            return syntax_call<>(f, VirtSpecifierSeq(s.context(), s.index()));
+            return syntax_call<>(f, VirtSpecifierSeq(s.index()));
         break;
     case syntax_kind::pure_specifier:
         if constexpr (syntax_converts<PureSpecifier, S>)
-            return syntax_call<>(f, PureSpecifier(s.context(), s.index()));
+            return syntax_call<>(f, PureSpecifier(s.index()));
         break;
     case syntax_kind::base_clause:
         if constexpr (syntax_converts<BaseClause, S>)
-            return syntax_call<>(f, BaseClause(s.context(), s.index()));
+            return syntax_call<>(f, BaseClause(s.index()));
         break;
     case syntax_kind::base_specifier_list:
         if constexpr (syntax_converts<BaseSpecifiers, S>)
-            return syntax_call<BaseSpecifierList>(f, BaseSpecifiers(s.context(), s.index()));
+            return syntax_call<BaseSpecifierList>(f, BaseSpecifiers(s.index()));
         break;
     case syntax_kind::base_specifier:
         if constexpr (syntax_converts<AnnotatedBaseSpecifier, S>)
-            return syntax_call<BaseSpecifier, BaseSpecifierList>(f, AnnotatedBaseSpecifier(s.context(), s.index()));
+            return syntax_call<BaseSpecifier, BaseSpecifierList>(f, AnnotatedBaseSpecifier(s.index()));
         break;
     case syntax_kind::class_or_decltype:
         if constexpr (syntax_converts<QualifiedClassName, S>)
-            return syntax_call<ClassOrDecltype, MemInitializerId, BaseSpecifier, BaseSpecifierList>(f, QualifiedClassName(s.context(), s.index()));
+            return syntax_call<ClassOrDecltype, MemInitializerId, BaseSpecifier, BaseSpecifierList>(f, QualifiedClassName(s.index()));
         break;
     case syntax_kind::ctor_initializer:
         if constexpr (syntax_converts<CtorInitializer, S>)
-            return syntax_call<>(f, CtorInitializer(s.context(), s.index()));
+            return syntax_call<>(f, CtorInitializer(s.index()));
         break;
     case syntax_kind::mem_initializer_list:
         if constexpr (syntax_converts<MemInitializers, S>)
-            return syntax_call<MemInitializerList>(f, MemInitializers(s.context(), s.index()));
+            return syntax_call<MemInitializerList>(f, MemInitializers(s.index()));
         break;
     case syntax_kind::mem_initializer:
         if constexpr (syntax_converts<MemInitializer, S>)
-            return syntax_call<MemInitializerList>(f, MemInitializer(s.context(), s.index()));
+            return syntax_call<MemInitializerList>(f, MemInitializer(s.index()));
         break;
     case syntax_kind::explicit_specifier:
         if constexpr (syntax_converts<ExplicitSpecifier, S>)
-            return syntax_call<DeclSpecifier>(f, ExplicitSpecifier(s.context(), s.index()));
+            return syntax_call<DeclSpecifier>(f, ExplicitSpecifier(s.index()));
         break;
     case syntax_kind::operator_function_id:
         if constexpr (syntax_converts<OperatorFunctionId, S>)
-            return syntax_call<UnqualifiedId, IdExpression, DeclaratorId, NoptrDeclarator, PtrDeclarator, Declarator, InitDeclarator, MemberDeclarator, InitDeclaratorList, MemberDeclaratorList, PrimaryExpression, ConstraintLogicalAndExpression, ConstraintLogicalOrExpression, PostfixExpression, UnaryExpression, CastExpression, PmExpression, MultiplicativeExpression, AdditiveExpression, ShiftExpression, CompareExpression, RelationalExpression, EqualityExpression, AndExpression, ExclusiveOrExpression, InclusiveOrExpression, LogicalAndExpression, ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, OperatorFunctionId(s.context(), s.index()));
+            return syntax_call<UnqualifiedId, IdExpression, DeclaratorId, NoptrDeclarator, PtrDeclarator, Declarator, InitDeclarator, MemberDeclarator, InitDeclaratorList, MemberDeclaratorList, PrimaryExpression, ConstraintLogicalAndExpression, ConstraintLogicalOrExpression, PostfixExpression, UnaryExpression, CastExpression, PmExpression, MultiplicativeExpression, AdditiveExpression, ShiftExpression, CompareExpression, RelationalExpression, EqualityExpression, AndExpression, ExclusiveOrExpression, InclusiveOrExpression, LogicalAndExpression, ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, OperatorFunctionId(s.index()));
         break;
     case syntax_kind::literal_operator_id:
         if constexpr (syntax_converts<LiteralOperatorId, S>)
-            return syntax_call<UnqualifiedId, IdExpression, DeclaratorId, NoptrDeclarator, PtrDeclarator, Declarator, InitDeclarator, MemberDeclarator, InitDeclaratorList, MemberDeclaratorList, PrimaryExpression, ConstraintLogicalAndExpression, ConstraintLogicalOrExpression, PostfixExpression, UnaryExpression, CastExpression, PmExpression, MultiplicativeExpression, AdditiveExpression, ShiftExpression, CompareExpression, RelationalExpression, EqualityExpression, AndExpression, ExclusiveOrExpression, InclusiveOrExpression, LogicalAndExpression, ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, LiteralOperatorId(s.context(), s.index()));
+            return syntax_call<UnqualifiedId, IdExpression, DeclaratorId, NoptrDeclarator, PtrDeclarator, Declarator, InitDeclarator, MemberDeclarator, InitDeclaratorList, MemberDeclaratorList, PrimaryExpression, ConstraintLogicalAndExpression, ConstraintLogicalOrExpression, PostfixExpression, UnaryExpression, CastExpression, PmExpression, MultiplicativeExpression, AdditiveExpression, ShiftExpression, CompareExpression, RelationalExpression, EqualityExpression, AndExpression, ExclusiveOrExpression, InclusiveOrExpression, LogicalAndExpression, ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, LiteralOperatorId(s.index()));
         break;
     case syntax_kind::conversion_function_id:
         if constexpr (syntax_converts<ConversionFunctionId, S>)
-            return syntax_call<UnqualifiedId, IdExpression, DeclaratorId, NoptrDeclarator, PtrDeclarator, Declarator, InitDeclarator, MemberDeclarator, InitDeclaratorList, MemberDeclaratorList, PrimaryExpression, ConstraintLogicalAndExpression, ConstraintLogicalOrExpression, PostfixExpression, UnaryExpression, CastExpression, PmExpression, MultiplicativeExpression, AdditiveExpression, ShiftExpression, CompareExpression, RelationalExpression, EqualityExpression, AndExpression, ExclusiveOrExpression, InclusiveOrExpression, LogicalAndExpression, ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, ConversionFunctionId(s.context(), s.index()));
+            return syntax_call<UnqualifiedId, IdExpression, DeclaratorId, NoptrDeclarator, PtrDeclarator, Declarator, InitDeclarator, MemberDeclarator, InitDeclaratorList, MemberDeclaratorList, PrimaryExpression, ConstraintLogicalAndExpression, ConstraintLogicalOrExpression, PostfixExpression, UnaryExpression, CastExpression, PmExpression, MultiplicativeExpression, AdditiveExpression, ShiftExpression, CompareExpression, RelationalExpression, EqualityExpression, AndExpression, ExclusiveOrExpression, InclusiveOrExpression, LogicalAndExpression, ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, ConversionFunctionId(s.index()));
         break;
     case syntax_kind::conversion_type_id:
         if constexpr (syntax_converts<ConversionTypeWithDeclarator, S>)
-            return syntax_call<ConversionTypeId>(f, ConversionTypeWithDeclarator(s.context(), s.index()));
+            return syntax_call<ConversionTypeId>(f, ConversionTypeWithDeclarator(s.index()));
         break;
     case syntax_kind::conversion_declarator:
         if constexpr (syntax_converts<PointerConversionDeclarator, S>)
-            return syntax_call<ConversionDeclarator>(f, PointerConversionDeclarator(s.context(), s.index()));
+            return syntax_call<ConversionDeclarator>(f, PointerConversionDeclarator(s.index()));
         break;
     case syntax_kind::statement:
         if constexpr (syntax_converts<AttributedStatement, S>)
-            return syntax_call<Statement, StatementSeq>(f, AttributedStatement(s.context(), s.index()));
+            return syntax_call<Statement, StatementSeq>(f, AttributedStatement(s.index()));
         break;
     case syntax_kind::condition:
         if constexpr (syntax_converts<ConditionDeclaration, S>)
-            return syntax_call<Condition>(f, ConditionDeclaration(s.context(), s.index()));
+            return syntax_call<Condition>(f, ConditionDeclaration(s.index()));
         break;
     case syntax_kind::labeled_statement:
         if constexpr (syntax_converts<LabeledStatement, S>)
-            return syntax_call<Statement, StatementSeq>(f, LabeledStatement(s.context(), s.index()));
+            return syntax_call<Statement, StatementSeq>(f, LabeledStatement(s.index()));
         break;
     case syntax_kind::expression_statement:
         if constexpr (syntax_converts<ExpressionStatement, S>)
-            return syntax_call<InitStatement, Statement, StatementSeq>(f, ExpressionStatement(s.context(), s.index()));
+            return syntax_call<InitStatement, Statement, StatementSeq>(f, ExpressionStatement(s.index()));
         break;
     case syntax_kind::compound_statement:
         if constexpr (syntax_converts<CompoundStatement, S>)
-            return syntax_call<Statement, StatementSeq>(f, CompoundStatement(s.context(), s.index()));
+            return syntax_call<Statement, StatementSeq>(f, CompoundStatement(s.index()));
         break;
     case syntax_kind::statement_seq:
         if constexpr (syntax_converts<Statements, S>)
-            return syntax_call<StatementSeq>(f, Statements(s.context(), s.index()));
+            return syntax_call<StatementSeq>(f, Statements(s.index()));
         break;
     case syntax_kind::selection_statement:
         if constexpr (syntax_converts<SelectionStatement, S>)
-            return syntax_call<Statement, StatementSeq>(f, SelectionStatement(s.context(), s.index()));
+            return syntax_call<Statement, StatementSeq>(f, SelectionStatement(s.index()));
         break;
     case syntax_kind::iteration_statement:
         if constexpr (syntax_converts<IterationStatement, S>)
-            return syntax_call<Statement, StatementSeq>(f, IterationStatement(s.context(), s.index()));
+            return syntax_call<Statement, StatementSeq>(f, IterationStatement(s.index()));
         break;
     case syntax_kind::for_range_declaration:
         if constexpr (syntax_converts<ForRangeDeclaration, S>)
-            return syntax_call<>(f, ForRangeDeclaration(s.context(), s.index()));
+            return syntax_call<>(f, ForRangeDeclaration(s.index()));
         break;
     case syntax_kind::jump_statement:
         if constexpr (syntax_converts<Jump, S>)
-            return syntax_call<JumpStatement, Statement, StatementSeq>(f, Jump(s.context(), s.index()));
+            return syntax_call<JumpStatement, Statement, StatementSeq>(f, Jump(s.index()));
         break;
     case syntax_kind::coroutine_return_statement:
         if constexpr (syntax_converts<CoroutineReturnStatement, S>)
-            return syntax_call<JumpStatement, Statement, StatementSeq>(f, CoroutineReturnStatement(s.context(), s.index()));
+            return syntax_call<JumpStatement, Statement, StatementSeq>(f, CoroutineReturnStatement(s.index()));
         break;
     case syntax_kind::try_block:
         if constexpr (syntax_converts<TryBlock, S>)
-            return syntax_call<Statement, StatementSeq>(f, TryBlock(s.context(), s.index()));
+            return syntax_call<Statement, StatementSeq>(f, TryBlock(s.index()));
         break;
     case syntax_kind::handler_seq:
         if constexpr (syntax_converts<Handlers, S>)
-            return syntax_call<HandlerSeq>(f, Handlers(s.context(), s.index()));
+            return syntax_call<HandlerSeq>(f, Handlers(s.index()));
         break;
     case syntax_kind::handler:
         if constexpr (syntax_converts<Handler, S>)
-            return syntax_call<HandlerSeq>(f, Handler(s.context(), s.index()));
+            return syntax_call<HandlerSeq>(f, Handler(s.index()));
         break;
     case syntax_kind::exception_declaration:
         if constexpr (syntax_converts<ExceptionDeclaration, S>)
-            return syntax_call<>(f, ExceptionDeclaration(s.context(), s.index()));
+            return syntax_call<>(f, ExceptionDeclaration(s.index()));
         break;
     case syntax_kind::named_namespace_definition:
         if constexpr (syntax_converts<NamedNamespaceDefinition, S>)
-            return syntax_call<NamespaceDefinition, Declaration, DeclarationSeq, NamespaceBody>(f, NamedNamespaceDefinition(s.context(), s.index()));
+            return syntax_call<NamespaceDefinition, Declaration, DeclarationSeq, NamespaceBody>(f, NamedNamespaceDefinition(s.index()));
         break;
     case syntax_kind::unnamed_namespace_definition:
         if constexpr (syntax_converts<UnnamedNamespaceDefinition, S>)
-            return syntax_call<NamespaceDefinition, Declaration, DeclarationSeq, NamespaceBody>(f, UnnamedNamespaceDefinition(s.context(), s.index()));
+            return syntax_call<NamespaceDefinition, Declaration, DeclarationSeq, NamespaceBody>(f, UnnamedNamespaceDefinition(s.index()));
         break;
     case syntax_kind::nested_namespace_definition:
         if constexpr (syntax_converts<NestedNamespaceDefinition, S>)
-            return syntax_call<NamespaceDefinition, Declaration, DeclarationSeq, NamespaceBody>(f, NestedNamespaceDefinition(s.context(), s.index()));
+            return syntax_call<NamespaceDefinition, Declaration, DeclarationSeq, NamespaceBody>(f, NestedNamespaceDefinition(s.index()));
         break;
     case syntax_kind::enclosing_namespace_specifier:
         if constexpr (syntax_converts<EnclosingNamespaceSpecifier, S>)
-            return syntax_call<>(f, EnclosingNamespaceSpecifier(s.context(), s.index()));
+            return syntax_call<>(f, EnclosingNamespaceSpecifier(s.index()));
         break;
     case syntax_kind::namespace_alias_definition:
         if constexpr (syntax_converts<NamespaceAliasDefinition, S>)
-            return syntax_call<BlockDeclaration, DeclarationStatement, Statement, StatementSeq, Declaration, DeclarationSeq, NamespaceBody>(f, NamespaceAliasDefinition(s.context(), s.index()));
+            return syntax_call<BlockDeclaration, DeclarationStatement, Statement, StatementSeq, Declaration, DeclarationSeq, NamespaceBody>(f, NamespaceAliasDefinition(s.index()));
         break;
     case syntax_kind::qualified_namespace_specifier:
         if constexpr (syntax_converts<QualifiedNamespaceSpecifier, S>)
-            return syntax_call<>(f, QualifiedNamespaceSpecifier(s.context(), s.index()));
+            return syntax_call<>(f, QualifiedNamespaceSpecifier(s.index()));
         break;
     case syntax_kind::using_directive:
         if constexpr (syntax_converts<UsingDirective, S>)
-            return syntax_call<BlockDeclaration, DeclarationStatement, Statement, StatementSeq, Declaration, DeclarationSeq, NamespaceBody>(f, UsingDirective(s.context(), s.index()));
+            return syntax_call<BlockDeclaration, DeclarationStatement, Statement, StatementSeq, Declaration, DeclarationSeq, NamespaceBody>(f, UsingDirective(s.index()));
         break;
     case syntax_kind::linkage_specification:
         if constexpr (syntax_converts<LinkageSpecification, S>)
-            return syntax_call<Declaration, DeclarationSeq, NamespaceBody>(f, LinkageSpecification(s.context(), s.index()));
+            return syntax_call<Declaration, DeclarationSeq, NamespaceBody>(f, LinkageSpecification(s.index()));
         break;
     case syntax_kind::using_declaration:
         if constexpr (syntax_converts<UsingDeclaration, S>)
-            return syntax_call<BlockDeclaration, DeclarationStatement, MemberDeclaration, Statement, StatementSeq, Declaration, DeclarationSeq, NamespaceBody>(f, UsingDeclaration(s.context(), s.index()));
+            return syntax_call<BlockDeclaration, DeclarationStatement, MemberDeclaration, Statement, StatementSeq, Declaration, DeclarationSeq, NamespaceBody>(f, UsingDeclaration(s.index()));
         break;
     case syntax_kind::using_declarator_list:
         if constexpr (syntax_converts<UsingDeclarators, S>)
-            return syntax_call<UsingDeclaratorList>(f, UsingDeclarators(s.context(), s.index()));
+            return syntax_call<UsingDeclaratorList>(f, UsingDeclarators(s.index()));
         break;
     case syntax_kind::using_declarator:
         if constexpr (syntax_converts<UsingDeclarator, S>)
-            return syntax_call<UsingDeclaratorList>(f, UsingDeclarator(s.context(), s.index()));
+            return syntax_call<UsingDeclaratorList>(f, UsingDeclarator(s.index()));
         break;
     case syntax_kind::asm_declaration:
         if constexpr (syntax_converts<AsmDeclaration, S>)
-            return syntax_call<BlockDeclaration, DeclarationStatement, Statement, StatementSeq, Declaration, DeclarationSeq, NamespaceBody>(f, AsmDeclaration(s.context(), s.index()));
+            return syntax_call<BlockDeclaration, DeclarationStatement, Statement, StatementSeq, Declaration, DeclarationSeq, NamespaceBody>(f, AsmDeclaration(s.index()));
         break;
     case syntax_kind::attribute_specifier_seq:
         if constexpr (syntax_converts<AttributeSpecifiers, S>)
-            return syntax_call<AttributeSpecifierSeq>(f, AttributeSpecifiers(s.context(), s.index()));
+            return syntax_call<AttributeSpecifierSeq>(f, AttributeSpecifiers(s.index()));
         break;
     case syntax_kind::attribute_specifier:
         if constexpr (syntax_converts<StandardAttributeSpecifier, S>)
-            return syntax_call<AttributeSpecifier, AttributeSpecifierSeq>(f, StandardAttributeSpecifier(s.context(), s.index()));
+            return syntax_call<AttributeSpecifier, AttributeSpecifierSeq>(f, StandardAttributeSpecifier(s.index()));
         break;
     case syntax_kind::alignment_specifier:
         if constexpr (syntax_converts<AlignmentSpecifier, S>)
-            return syntax_call<AttributeSpecifier, AttributeSpecifierSeq>(f, AlignmentSpecifier(s.context(), s.index()));
+            return syntax_call<AttributeSpecifier, AttributeSpecifierSeq>(f, AlignmentSpecifier(s.index()));
         break;
     case syntax_kind::attribute_using_prefix:
         if constexpr (syntax_converts<AttributeUsingPrefix, S>)
-            return syntax_call<>(f, AttributeUsingPrefix(s.context(), s.index()));
+            return syntax_call<>(f, AttributeUsingPrefix(s.index()));
         break;
     case syntax_kind::attribute_list:
         if constexpr (syntax_converts<Attributes, S>)
-            return syntax_call<AttributeList>(f, Attributes(s.context(), s.index()));
+            return syntax_call<AttributeList>(f, Attributes(s.index()));
         break;
     case syntax_kind::attribute:
         if constexpr (syntax_converts<AttributeWithArguments, S>)
-            return syntax_call<Attribute, AttributeList>(f, AttributeWithArguments(s.context(), s.index()));
+            return syntax_call<Attribute, AttributeList>(f, AttributeWithArguments(s.index()));
         break;
     case syntax_kind::attribute_scoped_token:
         if constexpr (syntax_converts<AttributeScopedToken, S>)
-            return syntax_call<Attribute, AttributeList>(f, AttributeScopedToken(s.context(), s.index()));
+            return syntax_call<Attribute, AttributeList>(f, AttributeScopedToken(s.index()));
         break;
     case syntax_kind::attribute_argument_clause:
         if constexpr (syntax_converts<AttributeArgumentClause, S>)
-            return syntax_call<>(f, AttributeArgumentClause(s.context(), s.index()));
+            return syntax_call<>(f, AttributeArgumentClause(s.index()));
         break;
     case syntax_kind::balanced_token_seq:
         if constexpr (syntax_converts<BalancedTokens, S>)
-            return syntax_call<BalancedTokenSeq>(f, BalancedTokens(s.context(), s.index()));
+            return syntax_call<BalancedTokenSeq>(f, BalancedTokens(s.index()));
         break;
     case syntax_kind::balanced_token:
         if constexpr (syntax_converts<BalancedToken, S>)
-            return syntax_call<BalancedTokenSeq>(f, BalancedToken(s.context(), s.index()));
+            return syntax_call<BalancedTokenSeq>(f, BalancedToken(s.index()));
         break;
     case syntax_kind::template_declaration:
         if constexpr (syntax_converts<TemplateDeclaration, S>)
-            return syntax_call<MemberDeclaration, Declaration, DeclarationSeq, NamespaceBody>(f, TemplateDeclaration(s.context(), s.index()));
+            return syntax_call<MemberDeclaration, Declaration, DeclarationSeq, NamespaceBody>(f, TemplateDeclaration(s.index()));
         break;
     case syntax_kind::template_head:
         if constexpr (syntax_converts<TemplateHead, S>)
-            return syntax_call<>(f, TemplateHead(s.context(), s.index()));
+            return syntax_call<>(f, TemplateHead(s.index()));
         break;
     case syntax_kind::template_parameter_list:
         if constexpr (syntax_converts<TemplateParameters, S>)
-            return syntax_call<TemplateParameterList>(f, TemplateParameters(s.context(), s.index()));
+            return syntax_call<TemplateParameterList>(f, TemplateParameters(s.index()));
         break;
     case syntax_kind::requires_clause:
         if constexpr (syntax_converts<RequiresClause, S>)
-            return syntax_call<>(f, RequiresClause(s.context(), s.index()));
+            return syntax_call<>(f, RequiresClause(s.index()));
         break;
     case syntax_kind::constraint_logical_or_expression:
         if constexpr (syntax_converts<ConstraintDisjunction, S>)
-            return syntax_call<ConstraintLogicalOrExpression>(f, ConstraintDisjunction(s.context(), s.index()));
+            return syntax_call<ConstraintLogicalOrExpression>(f, ConstraintDisjunction(s.index()));
         break;
     case syntax_kind::constraint_logical_and_expression:
         if constexpr (syntax_converts<ConstraintConjunction, S>)
-            return syntax_call<ConstraintLogicalAndExpression, ConstraintLogicalOrExpression>(f, ConstraintConjunction(s.context(), s.index()));
+            return syntax_call<ConstraintLogicalAndExpression, ConstraintLogicalOrExpression>(f, ConstraintConjunction(s.index()));
         break;
     case syntax_kind::type_parameter:
         if constexpr (syntax_converts<TypeParameter, S>)
-            return syntax_call<TemplateParameter, TemplateParameterList>(f, TypeParameter(s.context(), s.index()));
+            return syntax_call<TemplateParameter, TemplateParameterList>(f, TypeParameter(s.index()));
         break;
     case syntax_kind::type_constraint:
         if constexpr (syntax_converts<TypeConstraint, S>)
-            return syntax_call<>(f, TypeConstraint(s.context(), s.index()));
+            return syntax_call<>(f, TypeConstraint(s.index()));
         break;
     case syntax_kind::simple_template_id:
         if constexpr (syntax_converts<SimpleTemplateId, S>)
-            return syntax_call<ClassHeadName, TemplateId, ClassOrDecltype, MemInitializerId, BaseSpecifier, BaseSpecifierList, UnqualifiedId, IdExpression, SimpleTypeSpecifier, DeclaratorId, NoptrDeclarator, PtrDeclarator, TypeSpecifier, Declarator, DefiningTypeSpecifier, InitDeclarator, MemberDeclarator, InitDeclaratorList, MemberDeclaratorList, DeclSpecifier, PrimaryExpression, ConstraintLogicalAndExpression, ConstraintLogicalOrExpression, PostfixExpression, UnaryExpression, CastExpression, PmExpression, MultiplicativeExpression, AdditiveExpression, ShiftExpression, CompareExpression, RelationalExpression, EqualityExpression, AndExpression, ExclusiveOrExpression, InclusiveOrExpression, LogicalAndExpression, ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, SimpleTemplateId(s.context(), s.index()));
+            return syntax_call<ClassHeadName, TemplateId, ClassOrDecltype, MemInitializerId, BaseSpecifier, BaseSpecifierList, UnqualifiedId, IdExpression, SimpleTypeSpecifier, DeclaratorId, NoptrDeclarator, PtrDeclarator, TypeSpecifier, Declarator, DefiningTypeSpecifier, InitDeclarator, MemberDeclarator, InitDeclaratorList, MemberDeclaratorList, DeclSpecifier, PrimaryExpression, ConstraintLogicalAndExpression, ConstraintLogicalOrExpression, PostfixExpression, UnaryExpression, CastExpression, PmExpression, MultiplicativeExpression, AdditiveExpression, ShiftExpression, CompareExpression, RelationalExpression, EqualityExpression, AndExpression, ExclusiveOrExpression, InclusiveOrExpression, LogicalAndExpression, ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, SimpleTemplateId(s.index()));
         break;
     case syntax_kind::template_id:
         if constexpr (syntax_converts<OperatorTemplateId, S>)
-            return syntax_call<TemplateId, UnqualifiedId, IdExpression, DeclaratorId, NoptrDeclarator, PtrDeclarator, Declarator, InitDeclarator, MemberDeclarator, InitDeclaratorList, MemberDeclaratorList, PrimaryExpression, ConstraintLogicalAndExpression, ConstraintLogicalOrExpression, PostfixExpression, UnaryExpression, CastExpression, PmExpression, MultiplicativeExpression, AdditiveExpression, ShiftExpression, CompareExpression, RelationalExpression, EqualityExpression, AndExpression, ExclusiveOrExpression, InclusiveOrExpression, LogicalAndExpression, ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, OperatorTemplateId(s.context(), s.index()));
+            return syntax_call<TemplateId, UnqualifiedId, IdExpression, DeclaratorId, NoptrDeclarator, PtrDeclarator, Declarator, InitDeclarator, MemberDeclarator, InitDeclaratorList, MemberDeclaratorList, PrimaryExpression, ConstraintLogicalAndExpression, ConstraintLogicalOrExpression, PostfixExpression, UnaryExpression, CastExpression, PmExpression, MultiplicativeExpression, AdditiveExpression, ShiftExpression, CompareExpression, RelationalExpression, EqualityExpression, AndExpression, ExclusiveOrExpression, InclusiveOrExpression, LogicalAndExpression, ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, OperatorTemplateId(s.index()));
         break;
     case syntax_kind::template_argument_list:
         if constexpr (syntax_converts<TemplateArguments, S>)
-            return syntax_call<TemplateArgumentList>(f, TemplateArguments(s.context(), s.index()));
+            return syntax_call<TemplateArgumentList>(f, TemplateArguments(s.index()));
         break;
     case syntax_kind::typename_specifier:
         if constexpr (syntax_converts<TypenameSpecifier, S>)
-            return syntax_call<TypeSpecifier, DefiningTypeSpecifier, DeclSpecifier>(f, TypenameSpecifier(s.context(), s.index()));
+            return syntax_call<TypeSpecifier, DefiningTypeSpecifier, DeclSpecifier>(f, TypenameSpecifier(s.index()));
         break;
     case syntax_kind::concept_definition:
         if constexpr (syntax_converts<ConceptDefinition, S>)
-            return syntax_call<>(f, ConceptDefinition(s.context(), s.index()));
+            return syntax_call<>(f, ConceptDefinition(s.index()));
         break;
     case syntax_kind::explicit_instantiation:
         if constexpr (syntax_converts<ExplicitInstantiation, S>)
-            return syntax_call<Declaration, DeclarationSeq, NamespaceBody>(f, ExplicitInstantiation(s.context(), s.index()));
+            return syntax_call<Declaration, DeclarationSeq, NamespaceBody>(f, ExplicitInstantiation(s.index()));
         break;
     case syntax_kind::explicit_specialization:
         if constexpr (syntax_converts<ExplicitSpecialization, S>)
-            return syntax_call<MemberDeclaration, Declaration, DeclarationSeq, NamespaceBody>(f, ExplicitSpecialization(s.context(), s.index()));
+            return syntax_call<MemberDeclaration, Declaration, DeclarationSeq, NamespaceBody>(f, ExplicitSpecialization(s.index()));
         break;
     case syntax_kind::deduction_guide:
         if constexpr (syntax_converts<DeductionGuide, S>)
-            return syntax_call<MemberDeclaration, Declaration, DeclarationSeq, NamespaceBody>(f, DeductionGuide(s.context(), s.index()));
+            return syntax_call<MemberDeclaration, Declaration, DeclarationSeq, NamespaceBody>(f, DeductionGuide(s.index()));
         break;
     case syntax_kind::module_declaration:
         if constexpr (syntax_converts<ModuleDeclaration, S>)
-            return syntax_call<>(f, ModuleDeclaration(s.context(), s.index()));
+            return syntax_call<>(f, ModuleDeclaration(s.index()));
         break;
     case syntax_kind::module_name:
         if constexpr (syntax_converts<ModuleName, S>)
-            return syntax_call<>(f, ModuleName(s.context(), s.index()));
+            return syntax_call<>(f, ModuleName(s.index()));
         break;
     case syntax_kind::module_partition:
         if constexpr (syntax_converts<ModulePartition, S>)
-            return syntax_call<>(f, ModulePartition(s.context(), s.index()));
+            return syntax_call<>(f, ModulePartition(s.index()));
         break;
     case syntax_kind::module_name_qualifier:
         if constexpr (syntax_converts<ModuleNameQualifier, S>)
-            return syntax_call<>(f, ModuleNameQualifier(s.context(), s.index()));
+            return syntax_call<>(f, ModuleNameQualifier(s.index()));
         break;
     case syntax_kind::export_declaration:
         if constexpr (syntax_converts<ExportDeclaration, S>)
-            return syntax_call<Declaration, DeclarationSeq, NamespaceBody>(f, ExportDeclaration(s.context(), s.index()));
+            return syntax_call<Declaration, DeclarationSeq, NamespaceBody>(f, ExportDeclaration(s.index()));
         break;
     case syntax_kind::module_import_declaration:
         if constexpr (syntax_converts<ModuleImportDeclaration, S>)
-            return syntax_call<Declaration, DeclarationSeq, NamespaceBody>(f, ModuleImportDeclaration(s.context(), s.index()));
+            return syntax_call<Declaration, DeclarationSeq, NamespaceBody>(f, ModuleImportDeclaration(s.index()));
         break;
     case syntax_kind::global_module_fragment:
         if constexpr (syntax_converts<GlobalModuleFragment, S>)
-            return syntax_call<>(f, GlobalModuleFragment(s.context(), s.index()));
+            return syntax_call<>(f, GlobalModuleFragment(s.index()));
         break;
     case syntax_kind::private_module_fragment:
         if constexpr (syntax_converts<PrivateModuleFragment, S>)
-            return syntax_call<>(f, PrivateModuleFragment(s.context(), s.index()));
+            return syntax_call<>(f, PrivateModuleFragment(s.index()));
         break;
     case syntax_kind::fold_expression:
         if constexpr (syntax_converts<FoldExpression, S>)
-            return syntax_call<PrimaryExpression, ConstraintLogicalAndExpression, ConstraintLogicalOrExpression, PostfixExpression, UnaryExpression, CastExpression, PmExpression, MultiplicativeExpression, AdditiveExpression, ShiftExpression, CompareExpression, RelationalExpression, EqualityExpression, AndExpression, ExclusiveOrExpression, InclusiveOrExpression, LogicalAndExpression, ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, FoldExpression(s.context(), s.index()));
+            return syntax_call<PrimaryExpression, ConstraintLogicalAndExpression, ConstraintLogicalOrExpression, PostfixExpression, UnaryExpression, CastExpression, PmExpression, MultiplicativeExpression, AdditiveExpression, ShiftExpression, CompareExpression, RelationalExpression, EqualityExpression, AndExpression, ExclusiveOrExpression, InclusiveOrExpression, LogicalAndExpression, ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, FoldExpression(s.index()));
         break;
     case syntax_kind::requires_expression:
         if constexpr (syntax_converts<RequiresExpression, S>)
-            return syntax_call<PrimaryExpression, ConstraintLogicalAndExpression, ConstraintLogicalOrExpression, PostfixExpression, UnaryExpression, CastExpression, PmExpression, MultiplicativeExpression, AdditiveExpression, ShiftExpression, CompareExpression, RelationalExpression, EqualityExpression, AndExpression, ExclusiveOrExpression, InclusiveOrExpression, LogicalAndExpression, ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, RequiresExpression(s.context(), s.index()));
+            return syntax_call<PrimaryExpression, ConstraintLogicalAndExpression, ConstraintLogicalOrExpression, PostfixExpression, UnaryExpression, CastExpression, PmExpression, MultiplicativeExpression, AdditiveExpression, ShiftExpression, CompareExpression, RelationalExpression, EqualityExpression, AndExpression, ExclusiveOrExpression, InclusiveOrExpression, LogicalAndExpression, ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, RequiresExpression(s.index()));
         break;
     case syntax_kind::requirement_parameter_list:
         if constexpr (syntax_converts<RequirementParameterList, S>)
-            return syntax_call<>(f, RequirementParameterList(s.context(), s.index()));
+            return syntax_call<>(f, RequirementParameterList(s.index()));
         break;
     case syntax_kind::requirement_body:
         if constexpr (syntax_converts<RequirementBody, S>)
-            return syntax_call<>(f, RequirementBody(s.context(), s.index()));
+            return syntax_call<>(f, RequirementBody(s.index()));
         break;
     case syntax_kind::requirement_seq:
         if constexpr (syntax_converts<Requirements, S>)
-            return syntax_call<RequirementSeq>(f, Requirements(s.context(), s.index()));
+            return syntax_call<RequirementSeq>(f, Requirements(s.index()));
         break;
     case syntax_kind::simple_requirement:
         if constexpr (syntax_converts<SimpleRequirement, S>)
-            return syntax_call<Requirement, RequirementSeq>(f, SimpleRequirement(s.context(), s.index()));
+            return syntax_call<Requirement, RequirementSeq>(f, SimpleRequirement(s.index()));
         break;
     case syntax_kind::type_requirement:
         if constexpr (syntax_converts<TypeRequirement, S>)
-            return syntax_call<Requirement, RequirementSeq>(f, TypeRequirement(s.context(), s.index()));
+            return syntax_call<Requirement, RequirementSeq>(f, TypeRequirement(s.index()));
         break;
     case syntax_kind::compound_requirement:
         if constexpr (syntax_converts<CompoundRequirement, S>)
-            return syntax_call<Requirement, RequirementSeq>(f, CompoundRequirement(s.context(), s.index()));
+            return syntax_call<Requirement, RequirementSeq>(f, CompoundRequirement(s.index()));
         break;
     case syntax_kind::return_type_requirement:
         if constexpr (syntax_converts<ReturnTypeRequirement, S>)
-            return syntax_call<>(f, ReturnTypeRequirement(s.context(), s.index()));
+            return syntax_call<>(f, ReturnTypeRequirement(s.index()));
         break;
     case syntax_kind::nested_requirement:
         if constexpr (syntax_converts<NestedRequirement, S>)
-            return syntax_call<Requirement, RequirementSeq>(f, NestedRequirement(s.context(), s.index()));
+            return syntax_call<Requirement, RequirementSeq>(f, NestedRequirement(s.index()));
         break;
     case syntax_kind::gnu_attribute_specifier:
         if constexpr (syntax_converts<GnuAttributeSpecifier, S>)
-            return syntax_call<AttributeSpecifier, AttributeSpecifierSeq, DeclSpecifier>(f, GnuAttributeSpecifier(s.context(), s.index()));
+            return syntax_call<AttributeSpecifier, AttributeSpecifierSeq, DeclSpecifier>(f, GnuAttributeSpecifier(s.index()));
         break;
     case syntax_kind::gnu_attribute_list:
         if constexpr (syntax_converts<GnuAttributes, S>)
-            return syntax_call<GnuAttributeList>(f, GnuAttributes(s.context(), s.index()));
+            return syntax_call<GnuAttributeList>(f, GnuAttributes(s.index()));
         break;
     case syntax_kind::gnu_attribute:
         if constexpr (syntax_converts<GnuAttribute, S>)
-            return syntax_call<GnuAttributeList>(f, GnuAttribute(s.context(), s.index()));
+            return syntax_call<GnuAttributeList>(f, GnuAttribute(s.index()));
         break;
     case syntax_kind::gnu_asm_label:
         if constexpr (syntax_converts<GnuAsmLabel, S>)
-            return syntax_call<>(f, GnuAsmLabel(s.context(), s.index()));
+            return syntax_call<>(f, GnuAsmLabel(s.index()));
         break;
     case syntax_kind::gnu_declarator:
         if constexpr (syntax_converts<GnuDeclarator, S>)
-            return syntax_call<>(f, GnuDeclarator(s.context(), s.index()));
+            return syntax_call<>(f, GnuDeclarator(s.index()));
         break;
     case syntax_kind::gnu_extension_declaration:
         if constexpr (syntax_converts<GnuExtensionDeclaration, S>)
-            return syntax_call<BlockDeclaration, DeclarationStatement, MemberDeclaration, Statement, StatementSeq, Declaration, DeclarationSeq, NamespaceBody>(f, GnuExtensionDeclaration(s.context(), s.index()));
+            return syntax_call<BlockDeclaration, DeclarationStatement, MemberDeclaration, Statement, StatementSeq, Declaration, DeclarationSeq, NamespaceBody>(f, GnuExtensionDeclaration(s.index()));
         break;
     case syntax_kind::gnu_extension_expression:
         if constexpr (syntax_converts<GnuExtensionExpression, S>)
-            return syntax_call<UnaryExpression, CastExpression, PmExpression, MultiplicativeExpression, AdditiveExpression, ShiftExpression, CompareExpression, RelationalExpression, EqualityExpression, AndExpression, ExclusiveOrExpression, InclusiveOrExpression, LogicalAndExpression, ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, GnuExtensionExpression(s.context(), s.index()));
+            return syntax_call<UnaryExpression, CastExpression, PmExpression, MultiplicativeExpression, AdditiveExpression, ShiftExpression, CompareExpression, RelationalExpression, EqualityExpression, AndExpression, ExclusiveOrExpression, InclusiveOrExpression, LogicalAndExpression, ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, GnuExtensionExpression(s.index()));
         break;
     case syntax_kind::gnu_compound_literal:
         if constexpr (syntax_converts<GnuCompoundLiteral, S>)
-            return syntax_call<PostfixExpression, UnaryExpression, CastExpression, PmExpression, MultiplicativeExpression, AdditiveExpression, ShiftExpression, CompareExpression, RelationalExpression, EqualityExpression, AndExpression, ExclusiveOrExpression, InclusiveOrExpression, LogicalAndExpression, ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, GnuCompoundLiteral(s.context(), s.index()));
+            return syntax_call<PostfixExpression, UnaryExpression, CastExpression, PmExpression, MultiplicativeExpression, AdditiveExpression, ShiftExpression, CompareExpression, RelationalExpression, EqualityExpression, AndExpression, ExclusiveOrExpression, InclusiveOrExpression, LogicalAndExpression, ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, GnuCompoundLiteral(s.index()));
         break;
     case syntax_kind::gnu_label_address:
         if constexpr (syntax_converts<GnuLabelAddress, S>)
-            return syntax_call<UnaryExpression, CastExpression, PmExpression, MultiplicativeExpression, AdditiveExpression, ShiftExpression, CompareExpression, RelationalExpression, EqualityExpression, AndExpression, ExclusiveOrExpression, InclusiveOrExpression, LogicalAndExpression, ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, GnuLabelAddress(s.context(), s.index()));
+            return syntax_call<UnaryExpression, CastExpression, PmExpression, MultiplicativeExpression, AdditiveExpression, ShiftExpression, CompareExpression, RelationalExpression, EqualityExpression, AndExpression, ExclusiveOrExpression, InclusiveOrExpression, LogicalAndExpression, ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, GnuLabelAddress(s.index()));
         break;
     case syntax_kind::gnu_computed_goto:
         if constexpr (syntax_converts<GnuComputedGoto, S>)
-            return syntax_call<JumpStatement, Statement, StatementSeq>(f, GnuComputedGoto(s.context(), s.index()));
+            return syntax_call<JumpStatement, Statement, StatementSeq>(f, GnuComputedGoto(s.index()));
         break;
     case syntax_kind::gnu_initializer_list:
         if constexpr (syntax_converts<GnuInitializerClauses, S>)
-            return syntax_call<GnuInitializerList>(f, GnuInitializerClauses(s.context(), s.index()));
+            return syntax_call<GnuInitializerList>(f, GnuInitializerClauses(s.index()));
         break;
     case syntax_kind::gnu_designation:
         if constexpr (syntax_converts<GnuOldDesignation, S>)
-            return syntax_call<GnuDesignation>(f, GnuOldDesignation(s.context(), s.index()));
+            return syntax_call<GnuDesignation>(f, GnuOldDesignation(s.index()));
         break;
     case syntax_kind::gnu_offsetof_expression:
         if constexpr (syntax_converts<GnuOffsetofExpression, S>)
-            return syntax_call<PrimaryExpression, ConstraintLogicalAndExpression, ConstraintLogicalOrExpression, PostfixExpression, UnaryExpression, CastExpression, PmExpression, MultiplicativeExpression, AdditiveExpression, ShiftExpression, CompareExpression, RelationalExpression, EqualityExpression, AndExpression, ExclusiveOrExpression, InclusiveOrExpression, LogicalAndExpression, ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, GnuOffsetofExpression(s.context(), s.index()));
+            return syntax_call<PrimaryExpression, ConstraintLogicalAndExpression, ConstraintLogicalOrExpression, PostfixExpression, UnaryExpression, CastExpression, PmExpression, MultiplicativeExpression, AdditiveExpression, ShiftExpression, CompareExpression, RelationalExpression, EqualityExpression, AndExpression, ExclusiveOrExpression, InclusiveOrExpression, LogicalAndExpression, ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, GnuOffsetofExpression(s.index()));
         break;
     case syntax_kind::clang_type_trait_expression:
         if constexpr (syntax_converts<ClangTypeTraitExpression, S>)
-            return syntax_call<PrimaryExpression, ConstraintLogicalAndExpression, ConstraintLogicalOrExpression, PostfixExpression, UnaryExpression, CastExpression, PmExpression, MultiplicativeExpression, AdditiveExpression, ShiftExpression, CompareExpression, RelationalExpression, EqualityExpression, AndExpression, ExclusiveOrExpression, InclusiveOrExpression, LogicalAndExpression, ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, ClangTypeTraitExpression(s.context(), s.index()));
+            return syntax_call<PrimaryExpression, ConstraintLogicalAndExpression, ConstraintLogicalOrExpression, PostfixExpression, UnaryExpression, CastExpression, PmExpression, MultiplicativeExpression, AdditiveExpression, ShiftExpression, CompareExpression, RelationalExpression, EqualityExpression, AndExpression, ExclusiveOrExpression, InclusiveOrExpression, LogicalAndExpression, ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, ClangTypeTraitExpression(s.index()));
         break;
     case syntax_kind::clang_type_transformation:
         if constexpr (syntax_converts<ClangTypeTransformation, S>)
-            return syntax_call<SimpleTypeSpecifier, TypeSpecifier, DefiningTypeSpecifier, DeclSpecifier>(f, ClangTypeTransformation(s.context(), s.index()));
+            return syntax_call<SimpleTypeSpecifier, TypeSpecifier, DefiningTypeSpecifier, DeclSpecifier>(f, ClangTypeTransformation(s.index()));
         break;
     case syntax_kind::clang_bit_cast_expression:
         if constexpr (syntax_converts<ClangBitCastExpression, S>)
-            return syntax_call<PrimaryExpression, ConstraintLogicalAndExpression, ConstraintLogicalOrExpression, PostfixExpression, UnaryExpression, CastExpression, PmExpression, MultiplicativeExpression, AdditiveExpression, ShiftExpression, CompareExpression, RelationalExpression, EqualityExpression, AndExpression, ExclusiveOrExpression, InclusiveOrExpression, LogicalAndExpression, ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, ClangBitCastExpression(s.context(), s.index()));
+            return syntax_call<PrimaryExpression, ConstraintLogicalAndExpression, ConstraintLogicalOrExpression, PostfixExpression, UnaryExpression, CastExpression, PmExpression, MultiplicativeExpression, AdditiveExpression, ShiftExpression, CompareExpression, RelationalExpression, EqualityExpression, AndExpression, ExclusiveOrExpression, InclusiveOrExpression, LogicalAndExpression, ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, ClangBitCastExpression(s.index()));
         break;
     case syntax_kind::clang_convertvector_expression:
         if constexpr (syntax_converts<ClangConvertvectorExpression, S>)
-            return syntax_call<PrimaryExpression, ConstraintLogicalAndExpression, ConstraintLogicalOrExpression, PostfixExpression, UnaryExpression, CastExpression, PmExpression, MultiplicativeExpression, AdditiveExpression, ShiftExpression, CompareExpression, RelationalExpression, EqualityExpression, AndExpression, ExclusiveOrExpression, InclusiveOrExpression, LogicalAndExpression, ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, ClangConvertvectorExpression(s.context(), s.index()));
+            return syntax_call<PrimaryExpression, ConstraintLogicalAndExpression, ConstraintLogicalOrExpression, PostfixExpression, UnaryExpression, CastExpression, PmExpression, MultiplicativeExpression, AdditiveExpression, ShiftExpression, CompareExpression, RelationalExpression, EqualityExpression, AndExpression, ExclusiveOrExpression, InclusiveOrExpression, LogicalAndExpression, ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, ClangConvertvectorExpression(s.index()));
         break;
     case syntax_kind::clang_source_location_expression:
         if constexpr (syntax_converts<ClangSourceLocationExpression, S>)
-            return syntax_call<PrimaryExpression, ConstraintLogicalAndExpression, ConstraintLogicalOrExpression, PostfixExpression, UnaryExpression, CastExpression, PmExpression, MultiplicativeExpression, AdditiveExpression, ShiftExpression, CompareExpression, RelationalExpression, EqualityExpression, AndExpression, ExclusiveOrExpression, InclusiveOrExpression, LogicalAndExpression, ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, ClangSourceLocationExpression(s.context(), s.index()));
+            return syntax_call<PrimaryExpression, ConstraintLogicalAndExpression, ConstraintLogicalOrExpression, PostfixExpression, UnaryExpression, CastExpression, PmExpression, MultiplicativeExpression, AdditiveExpression, ShiftExpression, CompareExpression, RelationalExpression, EqualityExpression, AndExpression, ExclusiveOrExpression, InclusiveOrExpression, LogicalAndExpression, ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, ClangSourceLocationExpression(s.index()));
         break;
     case syntax_kind::clang_atomic_type_specifier:
         if constexpr (syntax_converts<ClangAtomicTypeSpecifier, S>)
-            return syntax_call<SimpleTypeSpecifier, TypeSpecifier, DefiningTypeSpecifier, DeclSpecifier>(f, ClangAtomicTypeSpecifier(s.context(), s.index()));
+            return syntax_call<SimpleTypeSpecifier, TypeSpecifier, DefiningTypeSpecifier, DeclSpecifier>(f, ClangAtomicTypeSpecifier(s.index()));
         break;
     case syntax_kind::clang_bit_int_type_specifier:
         if constexpr (syntax_converts<ClangBitIntTypeSpecifier, S>)
-            return syntax_call<SimpleTypeSpecifier, TypeSpecifier, DefiningTypeSpecifier, DeclSpecifier>(f, ClangBitIntTypeSpecifier(s.context(), s.index()));
+            return syntax_call<SimpleTypeSpecifier, TypeSpecifier, DefiningTypeSpecifier, DeclSpecifier>(f, ClangBitIntTypeSpecifier(s.index()));
         break;
     case syntax_kind::unparsed:
         if constexpr (syntax_converts<Unparsed, S>)
-            return syntax_call<>(f, Unparsed(s.context(), s.index()));
+            return syntax_call<>(f, Unparsed(s.index()));
         break;
     case syntax_kind::erroneous:
         if constexpr (syntax_converts<Erroneous, S>)
-            return syntax_call<>(f, Erroneous(s.context(), s.index()));
+            return syntax_call<>(f, Erroneous(s.index()));
         break;
     default:
         break;

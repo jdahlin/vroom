@@ -441,12 +441,12 @@ analysis_result semantic_analysis::clang_type_trait(SyntaxRef n,
     bool same = spelled(name, written.size(), "__is_same") ||
                 spelled(name, written.size(), "__is_same_as");
     /* ( type-id ): a trait of the type's category */
-    if (!same && node.size() == 4 && node[2].is(syntax_kind::type_id)) {
+    if (!same && n.size() == 4 && n[2].is(syntax_kind::type_id)) {
         int which = unary_trait_named(name, written.size());
         if (which < 0)
             return not_supported(n, "ext.clang");
         qualified_type t;
-        analysis_result r = type_id(node[2], t);
+        analysis_result r = type_id(n[2], t);
         if (r != analysis_result::well_formed)
             return r;
         if (depends_on_template_parameter(t))
@@ -457,7 +457,7 @@ analysis_result semantic_analysis::clang_type_trait(SyntaxRef n,
         fundamental_type result = fundamental_type::bool_;
         if (which == int(unary_trait_kind::array_rank))
             result = fundamental_type::unsigned_long_int;
-        m = integer_constant(result, value, node.first_token());
+        m = integer_constant(result, value, n.first_token());
         return analysis_result::well_formed;
     }
     /* ( type-id , type-id ) */

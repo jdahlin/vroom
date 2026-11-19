@@ -858,7 +858,7 @@ analysis_result semantic_analysis::declarator(SyntaxRef declaration,
     uint32_t i = 0;
     bool has_head = false;
     SyntaxElement head = {};
-    auto parts = NoptrDeclaratorParts(e.context(), n);
+    auto parts = NoptrDeclaratorParts(n);
     auto id = parts.declarator_id();
     if (e[0].is(LEFT_PARENTHESIS)) {
         auto inner = parts.parenthesized();

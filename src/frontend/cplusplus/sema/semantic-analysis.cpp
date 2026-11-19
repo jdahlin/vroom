@@ -161,46 +161,41 @@ analysis_result semantic_analysis::declaration_by_kind(SyntaxRef n)
 {
     /* (a node the grammar does not place among declarations, (unparsed)
        or an extension's, goes to the default case) */
-    return Declaration(syntax_cx, n)
-        .visit(Overloaded{
-            [&](FunctionDefinition f) {
-                /* [dcl.fct]/18: an abbreviated function template */
-                if (abbreviated_function(f) && !out_of_class_member(f))
-                    return function_template_definition(f, f);
-                return function_definition(f);
-            },
-            [&](TemplateDeclaration t) { return template_declaration(t); },
-            [&](SimpleDeclaration d) { return simple_declaration(d); },
-            [&](AliasDeclaration a) { return alias_declaration(a); },
-            [&](StaticAssertDeclaration a) {
-                return static_assert_declaration(a);
-            },
-            [&](EmptyDeclaration e) { return empty_declaration(e); },
-            [&](ExplicitSpecialization s) {
-                return explicit_specialization(s);
-            },
-            [&](ExplicitInstantiation i) { return explicit_instantiation(i); },
-            [&](DeductionGuide g) { return deduction_guide(g); },
-            [&](LinkageSpecification l) { return linkage_specification(l); },
-            [&](NamespaceDefinition d) {
-                /* in a linkage-specification */
-                return namespace_definition(d);
-            },
-            [&](UsingDirective u) { return using_directive(u); },
-            [&](NamespaceAliasDefinition a) {
-                return namespace_alias_definition(a);
-            },
-            [&](UsingDeclaration u) { return using_declaration(u); },
-            [&](OpaqueEnumDeclaration e) {
-                type_index type = 0;
-                return enum_specifier(e, type);
-            },
-            [&](GnuExtensionDeclaration e) {
-                /* [ext:gnu_extension_keyword]: __extension__ changes no
+    return Declaration(n).visit(Overloaded{
+        [&](FunctionDefinition f) {
+            /* [dcl.fct]/18: an abbreviated function template */
+            if (abbreviated_function(f) && !out_of_class_member(f))
+                return function_template_definition(f, f);
+            return function_definition(f);
+        },
+        [&](TemplateDeclaration t) { return template_declaration(t); },
+        [&](SimpleDeclaration d) { return simple_declaration(d); },
+        [&](AliasDeclaration a) { return alias_declaration(a); },
+        [&](StaticAssertDeclaration a) { return static_assert_declaration(a); },
+        [&](EmptyDeclaration e) { return empty_declaration(e); },
+        [&](ExplicitSpecialization s) { return explicit_specialization(s); },
+        [&](ExplicitInstantiation i) { return explicit_instantiation(i); },
+        [&](DeductionGuide g) { return deduction_guide(g); },
+        [&](LinkageSpecification l) { return linkage_specification(l); },
+        [&](NamespaceDefinition d) {
+            /* in a linkage-specification */
+            return namespace_definition(d);
+        },
+        [&](UsingDirective u) { return using_directive(u); },
+        [&](NamespaceAliasDefinition a) {
+            return namespace_alias_definition(a);
+        },
+        [&](UsingDeclaration u) { return using_declaration(u); },
+        [&](OpaqueEnumDeclaration e) {
+            type_index type = 0;
+            return enum_specifier(e, type);
+        },
+        [&](GnuExtensionDeclaration e) {
+            /* [ext:gnu_extension_keyword]: __extension__ changes no
                    meaning */
-                return declaration_by_kind(e[1]);
-            },
-            [&](Declaration d) { return not_supported(d); }});
+            return declaration_by_kind(e[1]);
+        },
+        [&](Declaration d) { return not_supported(d); }});
 }
 
 void semantic_analysis::translation_unit()

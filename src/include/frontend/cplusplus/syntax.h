@@ -109,19 +109,11 @@ class SyntaxRef
         if (!c.is_token())
             n = node_index(c.index());
     }
-    SyntaxRef(const SyntaxContext &, syntax_child c)
-    {
-        if (!c.is_token())
-            n = node_index(c.index());
-    }
     /* a node of the thread's tree (or none: 0) */
     SyntaxRef(node_index n) : n(n)
     {
     }
     SyntaxRef(decltype(nullptr))
-    {
-    }
-    SyntaxRef(const SyntaxContext &, node_index n) : n(n)
     {
     }
 
@@ -177,10 +169,6 @@ class SyntaxRef
         if (!n)
             return {};
         return syntax_child::node(n);
-    }
-    const SyntaxContext &context() const
-    {
-        return *syntax_ambient;
     }
     syntax_kind kind() const
     {
@@ -259,7 +247,7 @@ class SyntaxRef
     {
         if (!n || !T::accepts(node().kind))
             return {};
-        return T(*syntax_ambient, n);
+        return T(n);
     }
     /* the first child that is a node of view T, {} if none */
     template <class T> T first() const
@@ -268,7 +256,7 @@ class SyntaxRef
             syntax_child c = children()[i];
             if (!c.is_token() && c.index() &&
                 T::accepts(syntax_ambient->nodes[c.index()].kind))
-                return T(*syntax_ambient, node_index(c.index()));
+                return T(node_index(c.index()));
         }
         return {};
     }
@@ -285,10 +273,6 @@ class SyntaxElement : public SyntaxRef
 {
   public:
     SyntaxElement() = default;
-    SyntaxElement(const SyntaxContext &cx, syntax_child c)
-        : SyntaxRef(cx, c), c(c)
-    {
-    }
     /* a child of the thread's tree */
     SyntaxElement(syntax_child c) : SyntaxRef(c), c(c)
     {
@@ -381,13 +365,12 @@ class SyntaxElements
     class iterator
     {
       public:
-        iterator(const SyntaxContext *cx, const syntax_child *at)
-            : cx(cx), at(at)
+        explicit iterator(const syntax_child *at) : at(at)
         {
         }
         SyntaxElement operator*() const
         {
-            return SyntaxElement(*cx, *at);
+            return SyntaxElement(*at);
         }
         iterator &operator++()
         {
@@ -400,26 +383,23 @@ class SyntaxElements
         }
 
       private:
-        const SyntaxContext *cx;
         const syntax_child *at;
     };
     SyntaxElements() = default;
-    SyntaxElements(const SyntaxContext &cx, const syntax_child *first,
-                   uint32_t count)
-        : cx(&cx), first(first), count(count)
+    SyntaxElements(const syntax_child *first, uint32_t count)
+        : first(first), count(count)
     {
     }
     iterator begin() const
     {
-        return iterator(cx, first);
+        return iterator(first);
     }
     iterator end() const
     {
-        return iterator(cx, first + count);
+        return iterator(first + count);
     }
 
   private:
-    const SyntaxContext *cx = nullptr;
     const syntax_child *first = nullptr;
     uint32_t count = 0;
 };
@@ -428,7 +408,7 @@ inline SyntaxElement SyntaxRef::operator[](uint32_t i) const
 {
     if (i >= size())
         return {};
-    return SyntaxElement(*syntax_ambient, children()[i]);
+    return SyntaxElement(children()[i]);
 }
 
 inline SyntaxElement SyntaxRef::back() const
@@ -443,7 +423,7 @@ inline SyntaxElement SyntaxRef::token_of_kind(token_kind k) const
     for (uint32_t i = 0; i < size(); i++) {
         syntax_child c = children()[i];
         if (c.is_token() && syntax_ambient->tokens[c.index()].kind == k)
-            return SyntaxElement(*syntax_ambient, c);
+            return SyntaxElement(c);
     }
     return {};
 }
@@ -452,14 +432,14 @@ inline SyntaxElements SyntaxRef::elements() const
 {
     if (!n)
         return {};
-    return SyntaxElements(*syntax_ambient, children(), size());
+    return SyntaxElements(children(), size());
 }
 
 inline SyntaxElements SyntaxRef::elements(uint32_t first) const
 {
     if (!n || first >= size())
         return {};
-    return SyntaxElements(*syntax_ambient, children() + first, size() - first);
+    return SyntaxElements(children() + first, size() - first);
 }
 
 /* the node children of a node, each as a view of type T (tokens are
@@ -470,15 +450,14 @@ template <class T> class SyntaxRange
     class iterator
     {
       public:
-        iterator(const SyntaxContext *cx, const syntax_child *at,
-                 const syntax_child *end)
-            : cx(cx), at(at), end(end)
+        iterator(const syntax_child *at, const syntax_child *end)
+            : at(at), end(end)
         {
             skip();
         }
         T operator*() const
         {
-            return T(*cx, at->node());
+            return T(at->node());
         }
         iterator &operator++()
         {
@@ -497,30 +476,27 @@ template <class T> class SyntaxRange
             while (at != end && (at->is_token() || !at->index()))
                 at++;
         }
-        const SyntaxContext *cx;
         const syntax_child *at;
         const syntax_child *end;
     };
     SyntaxRange() = default;
-    SyntaxRange(const SyntaxContext &cx, const syntax_child *first,
-                uint32_t count)
-        : cx(&cx), first(first), count(count)
+    SyntaxRange(const syntax_child *first, uint32_t count)
+        : first(first), count(count)
     {
     }
     /* the one element c */
-    SyntaxRange(const SyntaxContext &cx, syntax_child c)
-        : cx(&cx), single(c), count(1)
+    explicit SyntaxRange(syntax_child c) : single(c), count(1)
     {
     }
     iterator begin() const
     {
         const syntax_child *at = start();
-        return iterator(cx, at, at + count);
+        return iterator(at, at + count);
     }
     iterator end() const
     {
         const syntax_child *at = start();
-        return iterator(cx, at + count, at + count);
+        return iterator(at + count, at + count);
     }
 
   private:
@@ -530,7 +506,6 @@ template <class T> class SyntaxRange
             return first;
         return &single;
     }
-    const SyntaxContext *cx = nullptr;
     const syntax_child *first = nullptr;
     syntax_child single = {};
     uint32_t count = 0;

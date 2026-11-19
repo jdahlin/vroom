@@ -450,7 +450,8 @@ semantic_analysis::function_template_definition(SyntaxRef n,
                     !pack_only_expanded(
                         entity_table[template_parameter_entities[first + i]]
                             .name,
-                        d[lead].first_token(), d[lead + 1].end_token()))
+                        definition[lead].first_token(),
+                        definition[lead + 1].end_token()))
                     return not_supported(n, "temp.variadic");
             packs = 0;
         }
