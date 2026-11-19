@@ -36,7 +36,7 @@ analysis_result semantic_analysis::member_function_template(
     entity_index saved_class = defining_class;
     defining_class = 0;
     analysis_result head =
-        template_head_parameters(n, parameters, false, true, false, true);
+        template_head_parameters(n, parameters, true, true, true, true);
     defining_class = saved_class;
     if (head != analysis_result::well_formed)
         return head;
@@ -60,9 +60,6 @@ analysis_result semantic_analysis::member_function_template(
     entity_index scope = 0;
     VTRY(declared,
          template_parameter_scope(n, parameters, c, 0, index, scope, first));
-    for (uint32_t i = 0; i < parameters.size(); i++)
-        if (template_parameter_is_pack(first + i))
-            return not_supported(n, "temp.variadic");
     /* the declarator, in the template-parameters' scope (whose enclosing
        scope is the class, [basic.scope.class]) */
     specified s;
