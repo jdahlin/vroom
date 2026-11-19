@@ -709,21 +709,17 @@ analysis_result semantic_analysis::nested_name_specifier(NestedNameSpecifier n,
                                                          nominated_scope &scope,
                                                          bool dependent_allowed)
 {
-    uint32_t i = 0;
     bool qualified = false;
     scope = nominated_scope();
-    if (n.size() && n[0].is(preprocessing_op_or_punc::COLON_COLON)) {
+    if (n.global()) {
         scope.global = true;
         qualified = true;
-        i = 1;
     }
-    for (; i < n.size(); i += 2) {
+    for (auto part : n.parts()) {
         /* [temp.names]/4: template before a simple-template-id after a
            nested-name-specifier */
-        if (qualified && n[i].is(standard_keyword::template_) &&
-            i + 1 < n.size() && !n[i + 1].is_token() &&
-            n[i + 1].is(syntax_kind::simple_template_id))
-            i++;
+        if (part.has_template && !qualified)
+            return not_supported(n, "basic.lookup.qual");
         if (scope.dependent) {
             /* [temp.dep.type]/6: "A qualified-id in which the
                nested-name-specifier names a dependent type that is not the
@@ -732,20 +728,17 @@ analysis_result semantic_analysis::nested_name_specifier(NestedNameSpecifier n,
                a member template of it specialized, is one too, known by
                how the nested-name-specifier is written (an instantiation
                analyses it again in the substituted class) */
-            if (!n[i].is_token() && n[i].is(syntax_kind::simple_template_id)) {
+            if (part.name.is(syntax_kind::simple_template_id)) {
                 scope.dependent = dependent_written_type(n);
                 break;
             }
-            if (!n[i].is_identifier() || i + 1 >= n.size() ||
-                !n[i + 1].is(preprocessing_op_or_punc::COLON_COLON))
+            if (!part.name.is_identifier() || !part.scoped)
                 return not_supported(n, "temp.res");
             scope.dependent = dependent_member_type(
-                scope.dependent, tokens.identifier(n[i].token()));
+                scope.dependent, tokens.identifier(part.name.token()));
             continue;
         }
-        if (!n[i].is_token() && n[i].is(syntax_kind::simple_template_id) &&
-            i + 1 < n.size() &&
-            n[i + 1].is(preprocessing_op_or_punc::COLON_COLON)) {
+        if (part.name.is(syntax_kind::simple_template_id) && part.scoped) {
             /* [temp.names]/1: a simple-template-id naming a class template
                names the specialization ([temp.spec]/4), a class; its
                members are looked up there ([class.qual]/1) */
@@ -755,7 +748,7 @@ analysis_result semantic_analysis::nested_name_specifier(NestedNameSpecifier n,
             uint32_t declaring = declaring_specializations;
             declaring_specializations = 0;
             analysis_result r =
-                template_type(n[i], scope.entity, qualified, named);
+                template_type(part.name, scope.entity, qualified, named);
             declaring_specializations = declaring;
             if (r != analysis_result::well_formed)
                 return r;
@@ -777,14 +770,13 @@ analysis_result semantic_analysis::nested_name_specifier(NestedNameSpecifier n,
             qualified = true;
             continue;
         }
-        if (!n[i].is_identifier() || i + 1 >= n.size() ||
-            !n[i + 1].is(preprocessing_op_or_punc::COLON_COLON)) {
+        if (!part.name.is_identifier() || !part.scoped) {
             /* [temp.names]: template before a simple-template-id */
-            if (!n[i].is_token() && n[i].is(syntax_kind::simple_template_id))
+            if (part.name.is(syntax_kind::simple_template_id))
                 return not_supported(n, "temp.names");
             return not_supported(n, "basic.lookup.qual");
         }
-        token_index t = n[i].token();
+        token_index t = part.name.token();
         uint32_t name = tokens.identifier(t);
         lookup_result r;
         if (qualified)

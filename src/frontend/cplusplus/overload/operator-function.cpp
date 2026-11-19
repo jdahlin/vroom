@@ -219,12 +219,10 @@ analysis_result semantic_analysis::operator_function_id(OperatorFunctionId id,
                                                         declarator_meaning &m)
 {
     operators_held = true;
-    if ((id.size() == 2 || id.size() == 4) && id[1].is_token() &&
-        tokens[id[1].token()].kind == token_kind::keyword &&
-        (id[1].keyword() == standard_keyword::new_ ||
-         id[1].keyword() == standard_keyword::delete_)) {
-        bool is_new = id[1].keyword() == standard_keyword::new_;
-        bool array = id.size() == 4;
+    if ((id.size() == 2 || id.size() == 4) &&
+        id.symbol().is(standard_keyword::new_, standard_keyword::delete_)) {
+        bool is_new = id.symbol().is(standard_keyword::new_);
+        bool array = id.is_array_form();
         allocation_function kind = allocation_function::delete_;
         if (is_new && array)
             kind = allocation_function::new_array;
@@ -237,19 +235,19 @@ analysis_result semantic_analysis::operator_function_id(OperatorFunctionId id,
         implicit_allocation_functions();
         operators_held = false;
         m.has_id = true;
-        m.id = id[0].token();
+        m.id = id.operator_keyword().token();
         m.operator_function = true;
         m.allocation = kind;
         tokens.name_token(m.id, allocation_function_name(kind));
         return analysis_result::well_formed;
     }
-    if (id.size() < 2 || id.size() > 3 || !id[0].is_token() ||
-        !id[1].is_token() ||
-        tokens[id[1].token()].kind != token_kind::operator_or_punctuator)
+    if (id.size() < 2 || id.size() > 3 || !id.operator_keyword().is_token() ||
+        !id.symbol().is_token() ||
+        tokens[id.symbol().token()].kind != token_kind::operator_or_punctuator)
         /* co_await */
         return not_supported(id, "over.oper");
-    preprocessing_op_or_punc op =
-        preprocessing_op_or_punc_primary(tokens[id[1].token()].op_or_punc);
+    preprocessing_op_or_punc op = preprocessing_op_or_punc_primary(
+        tokens[id.symbol().token()].op_or_punc);
     if (id.size() == 3 && op != preprocessing_op_or_punc::LEFT_PARENTHESIS &&
         op != preprocessing_op_or_punc::LEFT_BRACKET)
         return not_supported(id, "over.oper");
@@ -264,7 +262,7 @@ analysis_result semantic_analysis::operator_function_id(OperatorFunctionId id,
     }
     operators_held = false;
     m.has_id = true;
-    m.id = id[0].token();
+    m.id = id.operator_keyword().token();
     m.operator_function = true;
     m.implemented = op;
     tokens.name_token(m.id, operator_name(op));

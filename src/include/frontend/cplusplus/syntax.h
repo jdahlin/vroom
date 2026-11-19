@@ -372,6 +372,12 @@ class SyntaxElement : public SyntaxRef
     {
         return is_keyword(c, k);
     }
+    /* whether the child is one of the keywords */
+    template <class... K>
+    bool is(standard_keyword k, standard_keyword k2, K... more) const
+    {
+        return is(k) || is(k2, more...);
+    }
 
   private:
     syntax_child c = {};
@@ -924,6 +930,155 @@ template <> struct SyntaxExtra<IterationStatement> : SyntaxExtraBase {
         if (!(*this)[i].is(preprocessing_op_or_punc::SEMICOLON))
             i++;
         return i + 1;
+    }
+};
+
+/*
+ * [expr.prim.id.qual]/1:
+ *
+ *     nested-name-specifier:
+ *         ::
+ *         type-name ::
+ *         namespace-name ::
+ *         decltype-specifier ::
+ *         nested-name-specifier identifier ::
+ *         nested-name-specifier template_opt simple-template-id ::
+ *
+ * The parser makes one node of a leading :: and each name with the :: after
+ * it (the last one's may be missing in a node that is cut short).
+ */
+template <> struct SyntaxExtra<NestedNameSpecifier> : SyntaxExtraBase {
+    using SyntaxExtraBase::SyntaxExtraBase;
+    /* a name, whether a template keyword came before it (before a
+       simple-template-id), and whether the :: follows it */
+    struct Part {
+        SyntaxElement name;
+        bool has_template;
+        bool scoped;
+    };
+    class Parts
+    {
+      public:
+        class iterator
+        {
+          public:
+            iterator(SyntaxRef node, uint32_t at) : node(node), at(at)
+            {
+            }
+            Part operator*() const
+            {
+                uint32_t i = at;
+                bool has_template = template_before();
+                if (has_template)
+                    i++;
+                return {node[i], has_template,
+                        node[i + 1].is(preprocessing_op_or_punc::COLON_COLON)};
+            }
+            iterator &operator++()
+            {
+                at += 2;
+                if (template_before())
+                    at++;
+                return *this;
+            }
+            /* (compared with end(): whether the names are not all seen) */
+            bool operator!=(const iterator &) const
+            {
+                return at < node.size();
+            }
+
+          private:
+            bool template_before() const
+            {
+                return node[at].is(standard_keyword::template_) &&
+                       node[at + 1].is(syntax_kind::simple_template_id);
+            }
+            SyntaxRef node;
+            uint32_t at;
+        };
+        Parts(SyntaxRef node, uint32_t first) : node(node), first(first)
+        {
+        }
+        iterator begin() const
+        {
+            return iterator(node, first);
+        }
+        iterator end() const
+        {
+            return iterator(node, node.size());
+        }
+
+      private:
+        SyntaxRef node;
+        uint32_t first;
+    };
+    /* begins with the :: of the global namespace */
+    bool global() const
+    {
+        return size() && (*this)[0].is(preprocessing_op_or_punc::COLON_COLON);
+    }
+    /* the names, each with whether its :: follows */
+    Parts parts() const
+    {
+        if (global())
+            return Parts(*this, 1);
+        return Parts(*this, 0);
+    }
+};
+
+/*
+ * [over.oper.general]/1:
+ *
+ *     operator-function-id:
+ *         operator operator
+ *
+ * where the operator is a punctuator, new or delete (with [ ] after it for
+ * the array forms), or ( ) or [ ] (the second token of a pair is a child).
+ */
+template <> struct SyntaxExtra<OperatorFunctionId> : SyntaxExtraBase {
+    using SyntaxExtraBase::SyntaxExtraBase;
+    /* the operator keyword: the name's token */
+    SyntaxElement operator_keyword() const
+    {
+        return (*this)[0];
+    }
+    /* the operator: a punctuator, new or delete */
+    SyntaxElement symbol() const
+    {
+        return (*this)[1];
+    }
+    /* new[] and delete[] */
+    bool is_array_form() const
+    {
+        return size() == 4;
+    }
+};
+
+/*
+ * [over.literal]/1:
+ *
+ *     literal-operator-id:
+ *         operator string-literal identifier
+ *         operator user-defined-string-literal
+ */
+template <> struct SyntaxExtra<LiteralOperatorId> : SyntaxExtraBase {
+    using SyntaxExtraBase::SyntaxExtraBase;
+    SyntaxElement operator_keyword() const
+    {
+        return (*this)[0];
+    }
+    /* the string-literal (which has no characters), or the
+       user-defined-string-literal that has the suffix after its quotes */
+    SyntaxElement literal() const
+    {
+        return (*this)[1];
+    }
+    /* the suffix identifier of the first form ({} for the second) */
+    SyntaxElement suffix_identifier() const
+    {
+        if (size() != 3)
+            return {};
+        return (*this)[2];
     }
 };
 
