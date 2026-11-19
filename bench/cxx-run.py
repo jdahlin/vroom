@@ -17,7 +17,11 @@ them with it.
     bench/cxx-run.py [-j N] [-O LEVELS] [-v] [PATTERN]
 
 -O takes the levels as one argument (default 0123).  A program that vcc
-does not compile is a failure with its reason.
+does not compile is a failure with its reason.  A program named in
+src/test/cxx/run/xfail.txt (NAME, a tab, vcc's first error) is expected to
+fail at some level: it is counted, not a failure, and passing at every level
+is an error (XPASS), so the fix removes its line.  old-*.cpp are the first
+C++ front end's run programs (removed in 7283c431), most of them listed there.
 """
 import importlib.util, os, re, shlex, subprocess, sys
 from multiprocessing import Pool
@@ -168,9 +172,25 @@ def main():
     names = sorted([f[:-4] for f in os.listdir(TESTS)
                     if f.endswith('.cpp') and re.search(pattern, f)] +
                    [n for n in GENERATED if re.search(pattern, n + '.cpp')])
-    passed = failed = 0
+    xfail = {}
+    with open(f'{TESTS}/xfail.txt') as f:
+        for line in f:
+            if line.strip() and not line.startswith('#'):
+                n, _, why = line.rstrip('\n').partition('\t')
+                xfail[n] = why
+    passed = failed = expected = 0
     with Pool(jobs) as pool:
         for name, results in pool.imap(one, [(n, levels) for n in names]):
+            if name in xfail:
+                bad = [(lv, w) for lv, w in results if w is not None]
+                if bad:
+                    expected += 1
+                    if verbose:
+                        print(f'XFAIL {name} -O{bad[0][0]}: {bad[0][1]}')
+                else:
+                    failed += 1
+                    print(f'XPASS {name}: remove it from xfail.txt')
+                continue
             for level, why in results:
                 if why is None:
                     passed += 1
@@ -179,7 +199,7 @@ def main():
                 else:
                     failed += 1
                     print(f'FAIL {name} -O{level}: {why}')
-    print(f'cxx-run: {passed} passed, {failed} failed ({len(names)} programs, -O{levels})')
+    print(f'cxx-run: {passed} passed, {failed} failed, {expected} programs expected to fail ({len(names)} programs, -O{levels})')
     sys.exit(1 if failed else 0)
 
 
