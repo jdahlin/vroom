@@ -722,11 +722,27 @@ analysis_result semantic_analysis::nested_name_specifier(node_index n,
         i = 1;
     }
     for (; i < node.child_count; i += 2) {
+        /* [temp.names]/4: template before a simple-template-id after a
+           nested-name-specifier */
+        if (qualified && parts[i].is_token() &&
+            p.keyword_of(tokens[parts[i].index()]) ==
+                standard_keyword::template_ &&
+            i + 1 < node.child_count && !parts[i + 1].is_token() &&
+            syntax_is(tree, parts[i + 1], syntax_kind::simple_template_id))
+            i++;
         if (scope.dependent) {
             /* [temp.dep.type]/6: "A qualified-id in which the
                nested-name-specifier names a dependent type that is not the
                current instantiation" is a member of an unknown
-               specialization, a dependent type (/9): Q::name */
+               specialization, a dependent type (/9): Q::name.  Q::X<A>,
+               a member template of it specialized, is one too, known by
+               how the nested-name-specifier is written (an instantiation
+               analyses it again in the substituted class) */
+            if (!parts[i].is_token() &&
+                syntax_is(tree, parts[i], syntax_kind::simple_template_id)) {
+                scope.dependent = dependent_written_type(n);
+                break;
+            }
             if (!parts[i].is_token() ||
                 tokens[parts[i].index()].kind != token_kind::identifier ||
                 i + 1 >= node.child_count ||
