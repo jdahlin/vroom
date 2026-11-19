@@ -1192,14 +1192,10 @@ semantic_analysis::member_declaration(entity_index c, syntax_child member,
             virt_override = virt_final = false;
             return r;
         }
-        if (node.child_count != at + 2 ||
-            !syntax_is(tree, children[at + 1], syntax_kind::function_body))
+        auto body = syntax(n).function_definition().body();
+        if (node.child_count != at + 2 || !body || body.function_try_block())
             return not_supported(n, "dcl.fct.def.general");
-        const syntax_node &b = tree[children[at + 1].index()];
-        if (b.child_count &&
-            syntax_is_punctuator(tokens,
-                                 tree.children(children[at + 1].index())[0],
-                                 preprocessing_op_or_punc::EQUAL)) {
+        if (body.defaulted() || body.deleted()) {
             /* = default, = delete: no user-provided function
                ([dcl.fct.def.default]/5), which the layout ([abi:pod]) and
                triviality need to know before the class is complete */
@@ -1262,10 +1258,10 @@ analysis_result semantic_analysis::member_declarators(
         while (body_at < node.child_count &&
                virt_specifier(children[body_at], override_, final_))
             body_at++;
-        if (node.child_count != body_at + 1 ||
-            !syntax_is(tree, children[body_at], syntax_kind::function_body))
+        auto body = syntax(n).function_definition().body();
+        if (node.child_count != body_at + 1 || !body ||
+            body.function_try_block())
             return not_supported(n, "dcl.fct.def.general");
-        auto body = syntax(children[body_at]).function_body();
         if (body_at == first + 1 && body.defaulted())
             return defaulted_copy_assignment(c, n, children[first], s, access);
         /* = delete: member_function_definition's deleted_definition */

@@ -319,7 +319,7 @@ semantic_analysis::function_template_definition(node_index n,
     if (d.child_count != lead + 3 ||
         !syntax_is(tree, dc[0], syntax_kind::decl_specifier_seq) ||
         dc[1].is_token() ||
-        (defines && !syntax_is(tree, dc[2], syntax_kind::function_body)) ||
+        (defines && !syntax(definition).function_definition().plain()) ||
         (!defines && (!syntax_is_punctuator(
                           tokens, dc[2], preprocessing_op_or_punc::SEMICOLON) ||
                       (!syntax_is(tree, dc[1], syntax_kind::noptr_declarator) &&

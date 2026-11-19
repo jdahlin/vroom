@@ -296,7 +296,7 @@ semantic_analysis::named_specialization(node_index n, node_index declaration,
          !syntax_is(tree, dc[1], syntax_kind::ptr_declarator)))
         return not_supported(n, rule);
     if (d.kind == syntax_kind::function_definition &&
-        !syntax_is(tree, dc[2], syntax_kind::function_body))
+        !syntax(declaration).function_definition().plain())
         return not_supported(n, rule);
     if (d.kind == syntax_kind::simple_declaration &&
         !syntax_is_punctuator(tokens, dc[2],

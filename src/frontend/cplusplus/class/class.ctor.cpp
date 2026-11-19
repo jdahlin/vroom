@@ -1942,8 +1942,8 @@ analysis_result semantic_analysis::special_member_definition(node_index n,
     /* a decl-specifier-seq before the declarator holds constexpr alone
        (function_specifiers_only) */
     bool constexpr_specified = at == 1;
-    if (node.child_count != at + 2 ||
-        !syntax_is(tree, children[at + 1], syntax_kind::function_body) ||
+    auto body = syntax(n).function_definition().body();
+    if (node.child_count != at + 2 || !body || body.function_try_block() ||
         at_block_scope() || function_state.active)
         return not_supported(n, "dcl.fct.def.general");
     qualified_type type = qualified_type::make(

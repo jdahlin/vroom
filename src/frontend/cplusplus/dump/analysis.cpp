@@ -203,11 +203,9 @@ static void dump_declaration_claims(const semantic_analysis &analysis,
             !write_type_claim(analysis.type_table, d.type, claim.get()))
             continue;
         token_index last = node.end_token - 1;
-        for (uint32_t i = 0; i < node.child_count; i++) {
-            syntax_child c = tree.children(d.declaration)[i];
-            if (syntax_is(tree, c, syntax_kind::function_body))
-                last = tree[c.index()].first_token - 1;
-        }
+        auto body = analysis.syntax(d.declaration).function_definition().body();
+        if (body && !body.function_try_block())
+            last = tree[body.index()].first_token - 1;
         source_position end = tokens.position(node.end_token - 1);
         uint32_t extent = tokens[node.end_token - 1].preprocessing.extent;
         vbuffer_format_append(out, "%s\t%u-%u\t%u:%u\t", end.file_name,

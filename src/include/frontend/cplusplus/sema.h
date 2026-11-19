@@ -3966,6 +3966,16 @@ class semantic_analysis
                                       entity_index &named, uint32_t &parameter,
                                       uint32_t element = 0) const;
 
+    /* the typed view of a node of the syntax tree (syntax.h) */
+    syntax_ref syntax(node_index n) const
+    {
+        return syntax_ref(syntax_cx, n);
+    }
+    syntax_ref syntax(syntax_child c) const
+    {
+        return syntax_ref(syntax_cx, c);
+    }
+
   private:
     const template_argument &
     specialization_template_argument(entity_index e, uint32_t i,
@@ -4154,15 +4164,6 @@ class semantic_analysis
        is, and the call's callee f made the best viable function of the
        set (its implied object argument's address object, 0 if none) */
     token_index callee_name(syntax_child c) const;
-    /* the typed view of a node of the syntax tree (syntax.h) */
-    syntax_ref syntax(node_index n) const
-    {
-        return syntax_ref(syntax_cx, n);
-    }
-    syntax_ref syntax(syntax_child c) const
-    {
-        return syntax_ref(syntax_cx, c);
-    }
     /* [dcl.fct.def.delete]: the function f defined as deleted by the
        definition n, and (ill-formed) a reference to f if it is deleted */
     analysis_result deleted_definition(node_index n, entity_index f);
