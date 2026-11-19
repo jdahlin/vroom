@@ -299,6 +299,64 @@ typedef struct vir_function {
         valid; /* VIR_VALID_*: the analyses whose results in blk[] are current (vir_analyses_invalidate) */
 } vir_function;
 
+/* ---- a switch's cases (SPEC 6: extra[c] = n, then per case lo, hi, block; an i64 selector's
+   bounds are two words each, low first) ---- */
+static inline uint32_t vir_switch_stride(uint32_t selector_type)
+{
+    return selector_type == VIR_TYPE_I64 ? 5 : 3;
+}
+
+typedef struct vir_switch_case {
+    uint64_t lo, hi; /* inclusive */
+    uint32_t block;
+} vir_switch_case;
+
+static inline uint32_t vir_switch_count(const vir_function *f,
+                                        const vir_insn *in)
+{
+    return f->extra[in->c];
+}
+
+static inline vir_switch_case
+vir_switch_case_get(const vir_function *f, const vir_insn *in, uint32_t k)
+{
+    vir_switch_case r;
+    bool wide = f->insns[in->a].type == VIR_TYPE_I64;
+    const uint32_t *w = &f->extra[in->c + 1 + (size_t)k * (wide ? 5 : 3)];
+
+    r.lo = wide ? (uint64_t)w[1] << 32 | w[0] : w[0];
+    r.hi = wide ? (uint64_t)w[3] << 32 | w[2] : w[1];
+    r.block = w[wide ? 4 : 2];
+    return r;
+}
+
+/* The lowerings' rule for a jump table: six cases or more, a span under 4096 that the cases
+   fill to at least a quarter (a range counts at most 64).  *low and *span: the table's first
+   value and its last minus its first. */
+static inline bool vir_switch_is_dense(const vir_function *f,
+                                       const vir_insn *in, uint64_t *low,
+                                       uint64_t *span)
+{
+    uint32_t n = vir_switch_count(f, in);
+    uint64_t lo = 0, sp = 0, count = 0;
+
+    if (n) {
+        lo = vir_switch_case_get(f, in, 0).lo;
+        sp = vir_switch_case_get(f, in, n - 1).hi - lo;
+        for (uint32_t k = 0; k < n; k++) {
+            vir_switch_case c = vir_switch_case_get(f, in, k);
+
+            /* (hi - lo + 1 wraps to 0 for a range of all 2^64 values) */
+            count += c.hi - c.lo >= 64 ? 64 : c.hi - c.lo + 1;
+        }
+    }
+    if (low)
+        *low = lo;
+    if (span)
+        *span = sp;
+    return n >= 6 && sp < 4096 && sp + 1 <= 4 * count;
+}
+
 /* ---- 9: signatures ---- */
 enum { VIR_GROUP_NONE, VIR_GROUP_REG, VIR_GROUP_MEM, VIR_GROUP_SRET };
 enum {

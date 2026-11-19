@@ -73,8 +73,6 @@ VPRIV codegen_lvalue x64_vir_memory_operand(x64_vir_context *L, uint32_t value,
                                             int reg);
 VPRIV bool x64_vir_memory_block_is_small(const vir_function *f,
                                          const vir_insn *i);
-VPRIV bool x64_vir_switch_is_dense(const vir_function *f, const vir_insn *in,
-                                   uint64_t *low, uint64_t *range);
 VPRIV void x64_vir_fixed_registers_get(const vir_function *f, uint32_t v,
                                        vir_register_constraint *x, void *ctx);
 VPRIV void x64_vir_text_append(x64_vir_context *L, const char *s);

@@ -115,8 +115,7 @@ VPRIV void x64_vir_fixed_registers_get(const vir_function *f, uint32_t v,
     } else if (i->op == VIR_OP_SWITCH && r10) {
         /* A private dense selector can be produced directly in the dispatch
 		 * register. Range chains and shared selectors keep their original. */
-        if (target->uses[i->a] == 1 &&
-            x64_vir_switch_is_dense(f, i, NULL, NULL)) {
+        if (target->uses[i->a] == 1 && vir_switch_is_dense(f, i, NULL, NULL)) {
             x->operand_count = 1;
             x->operands[0] = R10;
             x->clobbered[0] = UINT64_C(1) << R10;
