@@ -177,6 +177,31 @@ bool semantic_analysis::trivial_class(entity_index c) const
     return copies_bytes(c) && !destroys(c);
 }
 
+/*
+ * [class.union]/4 Note 3: "Absent default member initializers, if any
+ * non-static data member of a union has a non-trivial default
+ * constructor, copy constructor, move constructor,
+ * copy assignment operator, move assignment operator, or destructor, the
+ * corresponding member function of the union must be user-provided or it
+ * will be implicitly deleted for the union."  Whether class c has none:
+ * a non-trivial constructor is an entity (implicit_special_members), and
+ * so is a destructor.
+ */
+bool semantic_analysis::trivial_special_members(entity_index c) const
+{
+    const entity &x = entity_table[c];
+    if (x.first_constructor && !trivial_defaulted_default_constructor(c))
+        return false;
+    if (x.dynamic || x.destructor || x.user_copy_assignments)
+        return false;
+    owned_array<entity_index> classes;
+    subobject_classes(c, classes);
+    for (entity_index k : classes)
+        if (!trivial_special_members(k))
+            return false;
+    return true;
+}
+
 /* whether the copy constructor of class c is the implicit one and
    trivial: no subobject's class declares one either */
 /* whether constructor k of class c is a copy constructor X(cv X&)
