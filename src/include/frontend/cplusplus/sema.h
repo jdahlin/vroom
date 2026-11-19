@@ -1843,7 +1843,8 @@ class semantic_analysis
         uint32_t name = 0;
     };
     owned_array<friend_record> friends;
-    analysis_result friend_member_declaration(entity_index c, Declaration d,
+    analysis_result friend_member_declaration(entity_index c,
+                                              MemberSimpleDeclaration d,
                                               owned_array<node_index> &bodies);
     analysis_result friend_declaration(entity_index c, node_index n,
                                        owned_array<node_index> &bodies);

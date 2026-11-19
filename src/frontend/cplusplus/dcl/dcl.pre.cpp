@@ -871,7 +871,7 @@ semantic_analysis::function_definition(FunctionDefinition definition)
         return not_supported(n, "dcl.fct.def.general");
     /* function-body: compound-statement, = delete ; a ctor-initializer, a
        function-try-block and = default are not analysed yet */
-    auto body = definition.body();
+    auto body = definition.function_body();
     if (body.deleted())
         return deleted_definition(n, f);
     if (!body.plain())

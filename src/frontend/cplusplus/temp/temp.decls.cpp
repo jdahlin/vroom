@@ -24,6 +24,10 @@ namespace cplusplus
  */
 analysis_result semantic_analysis::template_declaration(TemplateDeclaration t)
 {
+    /* [temp.concept]/1: "A concept is a template that defines constraints
+       on its template arguments." */
+    if (auto c = t.concept_definition())
+        return concept_definition(t, c);
     return t.declaration().visit(Overloaded{
         /* [temp.fct]/1: "A function template defines an unbounded set of
            related functions." */
@@ -39,9 +43,6 @@ analysis_result semantic_analysis::template_declaration(TemplateDeclaration t)
            outside its class definition or class template definition"
            (template<...> template<...> ...) */
         [&](TemplateDeclaration) { return not_supported(t, "temp.mem"); },
-        /* [temp.concept]/1: "A concept is a template that defines
-           constraints on its template arguments." */
-        [&](ConceptDefinition c) { return concept_definition(t, c); },
         /* [temp.alias]/1: "A template-declaration in which the declaration
            is an alias-declaration declares the identifier to be an alias
            template." */
@@ -59,7 +60,7 @@ semantic_analysis::template_simple_declaration(TemplateDeclaration t,
 {
     /* a function template's declaration or a variable template of several
        declarators: which needs the declarator's type */
-    if (s.init_declarator_list().bits)
+    if (s.init_declarator_list().is(syntax_kind::init_declarator_list))
         return not_supported(t, "temp.pre");
     /* [temp.class]/1: "A class template defines the layout and operations
        for an unbounded set of related types." (a declaration with no

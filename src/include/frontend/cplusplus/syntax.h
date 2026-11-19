@@ -2,19 +2,30 @@
  * syntax.h: typed views of the syntax tree (parse.h's syntax_tree).
  *
  * The tree stores every node the same way: a kind, and its children in the
- * order of the alternative of the grammar that matched.  A view decodes
- * that order in one place, so that the code reading a nonterminal names
- * its parts after the standard's grammar instead of indexing children:
+ * order of the alternative of the grammar that matched.  A view names a
+ * node's parts after the standard's grammar instead of indexing children:
  *
- *     auto body = syntax(n).function_definition().body();
+ *     auto body = syntax(n).function_definition().function_body();
  *     if (body.deleted()) ...
  *
  * A view is a handle (the tree's context and a node index) built where it
  * is used; nothing is stored in the tree or allocated.  SyntaxRef is the
- * untyped handle, with one accessor per nonterminal that has a view
- * (SYNTAX_VIEW below) which gives that view, or an empty one when the node
- * is of another kind.  An empty view answers every question with "none"
- * (no child, false), so a chain needs no test between its steps.
+ * untyped handle.  The views are generated (syntax-views.inc, by
+ * src/tools/gen-syntax-views.py, from the grammar):
+ *
+ *   - one per node kind, CamelCase (FunctionDefinition), with an accessor
+ *     per nonterminal of its productions whose kind tells its position
+ *     (decl_specifier_seq(), declarator(), function_body());
+ *   - one per nonterminal whose positions hold nodes of several kinds (a
+ *     sum: Declaration is a FunctionDefinition, a SimpleDeclaration, ...),
+ *     with visit(), and a range of the elements for a list (X-seq, X-list);
+ *   - SyntaxRef::name() per nonterminal: the node as that view.
+ *
+ * An empty view (the node is of another kind, or absent) answers every
+ * question with "none" (no child, false), so a chain needs no test between
+ * its steps.  What the grammar does not tell (questions about tokens, a
+ * position two nonterminals of one kind share) is hand-written below, in
+ * SyntaxExtra<View>, which each generated view derives from.
  */
 #ifndef VCC_CPLUSPLUS_SYNTAX_H
 #define VCC_CPLUSPLUS_SYNTAX_H
@@ -32,23 +43,19 @@ struct SyntaxContext {
     const parser &p;
 };
 
-/* the nonterminals with a view: SYNTAX_VIEW(name, Type): the view's type
-   is Type, the nonterminal's name in CamelCase, and SyntaxRef::name()
-   gives it */
-#define SYNTAX_VIEWS(SYNTAX_VIEW)                                              \
-    SYNTAX_VIEW(declaration_seq, DeclarationSeq)                               \
-    SYNTAX_VIEW(declaration, Declaration)                                      \
-    SYNTAX_VIEW(function_definition, FunctionDefinition)                       \
-    SYNTAX_VIEW(template_declaration, TemplateDeclaration)                     \
-    SYNTAX_VIEW(concept_definition, ConceptDefinition)                         \
-    SYNTAX_VIEW(alias_declaration, AliasDeclaration)                           \
-    SYNTAX_VIEW(simple_declaration, SimpleDeclaration)                         \
-    SYNTAX_VIEW(deduction_guide, DeductionGuide)                               \
-    SYNTAX_VIEW(function_body, FunctionBody)
+/* whether a view of type From converts to the sum To (syntax-views.inc) */
+template <class From, class To> inline constexpr bool syntax_converts = false;
 
-#define SYNTAX_VIEW_DECLARE(name, Type) struct Type;
-SYNTAX_VIEWS(SYNTAX_VIEW_DECLARE)
-#undef SYNTAX_VIEW_DECLARE
+/* whether kind k is in the set of kinds bits (one bit per syntax_kind) */
+inline bool syntax_kind_in(syntax_kind k, const uint64_t *bits)
+{
+    uint32_t i = static_cast<uint32_t>(k);
+    return (bits[i / 64] >> (i % 64)) & 1;
+}
+
+#define SYNTAX_VIEWS_DECLARE
+#include "frontend/cplusplus/syntax-views.inc"
+#undef SYNTAX_VIEWS_DECLARE
 
 class SyntaxRef
 {
@@ -83,6 +90,10 @@ class SyntaxRef
         if (!n)
             return {};
         return syntax_child::node(n);
+    }
+    const SyntaxContext &context() const
+    {
+        return *cx;
     }
     syntax_kind kind() const
     {
@@ -124,17 +135,140 @@ class SyntaxRef
                preprocessing_op_or_punc_primary(t.op_or_punc) == op;
     }
 
-#define SYNTAX_VIEW_ACCESSOR(name, Type) Type name() const;
-    SYNTAX_VIEWS(SYNTAX_VIEW_ACCESSOR)
-#undef SYNTAX_VIEW_ACCESSOR
+#define SYNTAX_VIEWS_ACCESSORS
+#include "frontend/cplusplus/syntax-views.inc"
+#undef SYNTAX_VIEWS_ACCESSORS
 
   protected:
     const syntax_node &node() const
     {
         return cx->tree[n];
     }
+    const syntax_child *children() const
+    {
+        return cx->tree.children(n);
+    }
+    /* this node as view T, {} if it is of another kind */
+    template <class T> T as() const
+    {
+        if (!n || !T::accepts(node().kind))
+            return {};
+        return T(*cx, n);
+    }
+    /* the first child that is a node of view T, {} if none */
+    template <class T> T first() const
+    {
+        for (uint32_t i = 0; i < size(); i++) {
+            syntax_child c = children()[i];
+            if (!c.is_token() && c.index() &&
+                T::accepts(cx->tree[c.index()].kind))
+                return T(*cx, c.index());
+        }
+        return {};
+    }
     const SyntaxContext *cx = nullptr;
     node_index n = 0;
+};
+
+/* the node children of a node, each as a view of type T (tokens are
+   skipped), or one node as the only element: for (auto d : seq.declarations()) */
+template <class T> class SyntaxRange
+{
+  public:
+    class iterator
+    {
+      public:
+        iterator(const SyntaxContext *cx, const syntax_child *at,
+                 const syntax_child *end)
+            : cx(cx), at(at), end(end)
+        {
+            skip();
+        }
+        T operator*() const
+        {
+            return T(*cx, at->index());
+        }
+        iterator &operator++()
+        {
+            at++;
+            skip();
+            return *this;
+        }
+        bool operator!=(const iterator &o) const
+        {
+            return at != o.at;
+        }
+
+      private:
+        void skip()
+        {
+            while (at != end && (at->is_token() || !at->index()))
+                at++;
+        }
+        const SyntaxContext *cx;
+        const syntax_child *at;
+        const syntax_child *end;
+    };
+    SyntaxRange() = default;
+    SyntaxRange(const SyntaxContext &cx, const syntax_child *first,
+                uint32_t count)
+        : cx(&cx), first(first), count(count)
+    {
+    }
+    /* the one element c */
+    SyntaxRange(const SyntaxContext &cx, syntax_child c)
+        : cx(&cx), single(c), count(1)
+    {
+    }
+    iterator begin() const
+    {
+        const syntax_child *at = start();
+        return iterator(cx, at, at + count);
+    }
+    iterator end() const
+    {
+        const syntax_child *at = start();
+        return iterator(cx, at + count, at + count);
+    }
+
+  private:
+    const syntax_child *start() const
+    {
+        if (first)
+            return first;
+        return &single;
+    }
+    const SyntaxContext *cx = nullptr;
+    const syntax_child *first = nullptr;
+    syntax_child single = {};
+    uint32_t count = 0;
+};
+
+/* one callable from several lambdas, for visit:
+   d.visit(Overloaded{[&](FunctionDefinition f) {...},
+                      [&](Declaration other) {...}}) */
+template <class... F> struct Overloaded : F... {
+    using F::operator()...;
+};
+template <class... F> Overloaded(F...) -> Overloaded<F...>;
+
+/* a member function of self as a callable for visit */
+template <class T, class R, class A>
+auto bind_member(T *self, R (T::*member)(A))
+{
+    return [self, member](A a) { return (self->*member)(a); };
+}
+
+/*
+ * What a view adds to the generated one: SyntaxExtra<View> is its base.
+ * A sum's visit calls f with the view of the alternative the node is, or
+ * with the sum itself for a node the grammar does not place there
+ * ((unparsed), (erroneous)).  Each alternative's view converts to the sum,
+ * so a case taking the sum is the visitor's default; a visitor without one
+ * needs a case for every alternative, or it does not compile.
+ */
+template <class View> struct SyntaxExtra : SyntaxRef {
+    using SyntaxRef::SyntaxRef;
 };
 
 /*
@@ -148,21 +282,10 @@ class SyntaxRef
  *
  * with [dcl.fct.def.delete]'s = delete ( string-literal ) ; and, in the
  * first pass over a member-specification, a body kept as its tokens
- * (unparsed).  The parser makes a function-try-block its own node, which
- * stands in a function-definition in place of a function-body; it is a
- * FunctionBody too.
+ * (unparsed).
  */
-struct FunctionBody : SyntaxRef {
+template <> struct SyntaxExtra<FunctionBody> : SyntaxRef {
     using SyntaxRef::SyntaxRef;
-    static bool accepts(syntax_kind k)
-    {
-        return k == syntax_kind::function_body ||
-               k == syntax_kind::function_try_block;
-    }
-    bool function_try_block() const
-    {
-        return is(syntax_kind::function_try_block);
-    }
     bool unparsed() const
     {
         return is(syntax_kind::function_body) && size() == 1 &&
@@ -215,30 +338,10 @@ struct FunctionBody : SyntaxRef {
  *         attribute-specifier-seq_opt decl-specifier-seq_opt declarator
  *             requires-clause function-body
  *
- * ([ext:gnu_attributes] may come first too.)  The function-body is the
- * last child.
+ * ([ext:gnu_attributes] may come first too.)
  */
-struct FunctionDefinition : SyntaxRef {
+template <> struct SyntaxExtra<FunctionDefinition> : SyntaxRef {
     using SyntaxRef::SyntaxRef;
-    static bool accepts(syntax_kind k)
-    {
-        return k == syntax_kind::function_definition;
-    }
-    FunctionBody body() const
-    {
-        if (!*this)
-            return {};
-        SyntaxRef last(*cx, (*this)[size() - 1]);
-        return last.function_body();
-    }
-    /* the decl-specifier-seq ({} without one) */
-    syntax_child decl_specifier_seq() const
-    {
-        for (uint32_t i = 0; i < size(); i++)
-            if (is((*this)[i], syntax_kind::decl_specifier_seq))
-                return (*this)[i];
-        return {};
-    }
     /* the declarator after the decl-specifier-seq ({} without one; a
        declarator that is only its identifier is that token) */
     syntax_child declarator() const
@@ -259,248 +362,9 @@ struct FunctionDefinition : SyntaxRef {
     }
 };
 
-/* the node children of a node, each as a view of type T (tokens are
-   skipped): for (auto d : seq.declarations()) */
-template <class T> class SyntaxRange
-{
-  public:
-    class iterator
-    {
-      public:
-        iterator(const SyntaxContext *cx, const syntax_child *at,
-                 const syntax_child *end)
-            : cx(cx), at(at), end(end)
-        {
-            skip();
-        }
-        T operator*() const
-        {
-            return T(*cx, at->index());
-        }
-        iterator &operator++()
-        {
-            at++;
-            skip();
-            return *this;
-        }
-        bool operator!=(const iterator &o) const
-        {
-            return at != o.at;
-        }
-
-      private:
-        void skip()
-        {
-            while (at != end && (at->is_token() || !at->index()))
-                at++;
-        }
-        const SyntaxContext *cx;
-        const syntax_child *at;
-        const syntax_child *end;
-    };
-    SyntaxRange() = default;
-    SyntaxRange(const SyntaxContext &cx, const syntax_child *first,
-                uint32_t count)
-        : cx(&cx), first(first), count(count)
-    {
-    }
-    iterator begin() const
-    {
-        return iterator(cx, first, first + count);
-    }
-    iterator end() const
-    {
-        return iterator(cx, first + count, first + count);
-    }
-
-  private:
-    const SyntaxContext *cx = nullptr;
-    const syntax_child *first = nullptr;
-    uint32_t count = 0;
-};
-
-/* one callable from several lambdas, for visit:
-   d.visit(Overloaded{[&](FunctionDefinition f) {...},
-                      [&](Declaration other) {...}}) */
-template <class... F> struct Overloaded : F... {
-    using F::operator()...;
-};
-template <class... F> Overloaded(F...) -> Overloaded<F...>;
-
-/* a member function of self as a callable for visit */
-template <class T, class R, class A>
-auto bind_member(T *self, R (T::*member)(A))
-{
-    return [self, member](A a) { return (self->*member)(a); };
-}
-
-/*
- * [temp.pre]/1:
- *
- *     template-declaration:
- *         template-head declaration
- *         template-head concept-definition
- *
- * The declaration (or concept-definition) is the last child.
- */
-struct TemplateDeclaration : SyntaxRef {
-    using SyntaxRef::SyntaxRef;
-    static bool accepts(syntax_kind k)
-    {
-        return k == syntax_kind::template_declaration;
-    }
-    /* the declaration after the template-head ({} if there is none) */
-    Declaration declaration() const;
-};
-
-/* [temp.concept]/1: concept-definition: concept concept-name
-   attribute-specifier-seq_opt = constraint-expression ; */
-struct ConceptDefinition : SyntaxRef {
-    using SyntaxRef::SyntaxRef;
-    static bool accepts(syntax_kind k)
-    {
-        return k == syntax_kind::concept_definition;
-    }
-};
-
-/* [dcl.pre]/1: alias-declaration: using identifier
-   attribute-specifier-seq_opt = defining-type-id ; */
-struct AliasDeclaration : SyntaxRef {
-    using SyntaxRef::SyntaxRef;
-    static bool accepts(syntax_kind k)
-    {
-        return k == syntax_kind::alias_declaration;
-    }
-};
-
-/*
- * [dcl.pre]/1:
- *
- *     simple-declaration:
- *         decl-specifier-seq init-declarator-list_opt ;
- *         attribute-specifier-seq decl-specifier-seq init-declarator-list ;
- *         attribute-specifier-seq_opt decl-specifier-seq ref-qualifier_opt
- *             [ identifier-list ] initializer ;
- */
-struct SimpleDeclaration : SyntaxRef {
-    using SyntaxRef::SyntaxRef;
-    static bool accepts(syntax_kind k)
-    {
-        return k == syntax_kind::simple_declaration;
-    }
-    /* the init-declarator-list ({} without one; one declarator that is
-       not in a list is not one) */
-    syntax_child init_declarator_list() const
-    {
-        for (uint32_t i = 0; i < size(); i++)
-            if (is((*this)[i], syntax_kind::init_declarator_list))
-                return (*this)[i];
-        return {};
-    }
-};
-
-/* [temp.deduct.guide]/1: deduction-guide: explicit-specifier_opt
-   template-name ( parameter-declaration-clause ) -> simple-template-id ; */
-struct DeductionGuide : SyntaxRef {
-    using SyntaxRef::SyntaxRef;
-    static bool accepts(syntax_kind k)
-    {
-        return k == syntax_kind::deduction_guide;
-    }
-};
-
-/*
- * [dcl.pre]/1:
- *
- *     declaration-seq:
- *         declaration declaration-seq_opt
- */
-struct DeclarationSeq : SyntaxRef {
-    using SyntaxRef::SyntaxRef;
-    static bool accepts(syntax_kind k)
-    {
-        return k == syntax_kind::declaration_seq;
-    }
-    SyntaxRange<Declaration> declarations() const;
-};
-
-/* the alternatives of a declaration that have a view, for visit */
-#define DECLARATION_ALTERNATIVES(ALTERNATIVE)                                  \
-    ALTERNATIVE(function_definition, FunctionDefinition)                       \
-    ALTERNATIVE(template_declaration, TemplateDeclaration)                     \
-    ALTERNATIVE(concept_definition, ConceptDefinition)                         \
-    ALTERNATIVE(alias_declaration, AliasDeclaration)                           \
-    ALTERNATIVE(simple_declaration, SimpleDeclaration)                         \
-    ALTERNATIVE(deduction_guide, DeductionGuide)
-
-/*
- * [dcl.pre]/1: a declaration is one of its alternatives
- * (block-declaration, function-definition, template-declaration, ...).
- * visit calls f with the view of the alternative it is, for the
- * alternatives that have one (DECLARATION_ALTERNATIVES), and with the
- * Declaration itself for the others.  Each alternative's view converts to
- * a Declaration, so a case taking a Declaration is the visitor's default:
- * it gets the alternatives the visitor has no case of their own for.  A
- * visitor without a default needs a case for every alternative, or it
- * does not compile.
- */
-struct Declaration : SyntaxRef {
-    using SyntaxRef::SyntaxRef;
-#define DECLARATION_FROM(name, Type)                                           \
-    Declaration(Type alternative) : SyntaxRef(alternative)                     \
-    {                                                                          \
-    }
-    DECLARATION_ALTERNATIVES(DECLARATION_FROM)
-#undef DECLARATION_FROM
-    Declaration() = default;
-    static bool accepts(syntax_kind)
-    {
-        return true;
-    }
-    /* the same with member functions of self, one per alternative:
-       d.visit(this, &analysis::function_definition, &analysis::other) */
-    template <class T, class... M>
-    decltype(auto) visit(T *self, M... members) const
-    {
-        return visit(Overloaded{bind_member(self, members)...});
-    }
-    template <class F> decltype(auto) visit(F &&f) const
-    {
-        switch (kind()) {
-#define DECLARATION_CASE(name, Type)                                           \
-    case syntax_kind::name:                                                    \
-        return f(Type(*cx, n));
-            DECLARATION_ALTERNATIVES(DECLARATION_CASE)
-#undef DECLARATION_CASE
-        default:
-            return f(*this);
-        }
-    }
-};
-
-inline Declaration TemplateDeclaration::declaration() const
-{
-    if (!*this)
-        return {};
-    return Declaration(*cx, (*this)[size() - 1]);
-}
-
-inline SyntaxRange<Declaration> DeclarationSeq::declarations() const
-{
-    if (!*this)
-        return {};
-    return SyntaxRange<Declaration>(*cx, cx->tree.children(n), size());
-}
-
-#define SYNTAX_VIEW_ACCESSOR(name, Type)                                       \
-    inline Type SyntaxRef::name() const                                        \
-    {                                                                          \
-        if (!n || !Type::accepts(node().kind))                                 \
-            return {};                                                         \
-        return Type(*cx, n);                                                   \
-    }
-SYNTAX_VIEWS(SYNTAX_VIEW_ACCESSOR)
-#undef SYNTAX_VIEW_ACCESSOR
+#define SYNTAX_VIEWS_DEFINE
+#include "frontend/cplusplus/syntax-views.inc"
+#undef SYNTAX_VIEWS_DEFINE
 
 } // namespace cplusplus
 

@@ -154,15 +154,18 @@ analysis_result semantic_analysis::declaration(node_index n)
 
 analysis_result semantic_analysis::declaration_by_kind(node_index n)
 {
-    return syntax(n).declaration().visit(Overloaded{
-        [&](FunctionDefinition f) {
-            /* [dcl.fct]/18: an abbreviated function template */
-            if (abbreviated_function(f) && !out_of_class_member(f))
-                return function_template_definition(f, f);
-            return function_definition(f);
-        },
-        [&](TemplateDeclaration t) { return template_declaration(t); },
-        [&](Declaration d) { return other_declaration(d); }});
+    /* (a node the grammar does not place among declarations, (unparsed)
+       or an extension's, goes to the default case) */
+    return Declaration(syntax_cx, n)
+        .visit(Overloaded{
+            [&](FunctionDefinition f) {
+                /* [dcl.fct]/18: an abbreviated function template */
+                if (abbreviated_function(f) && !out_of_class_member(f))
+                    return function_template_definition(f, f);
+                return function_definition(f);
+            },
+            [&](TemplateDeclaration t) { return template_declaration(t); },
+            [&](Declaration d) { return other_declaration(d); }});
 }
 
 /* a declaration of an alternative without a view of its own */

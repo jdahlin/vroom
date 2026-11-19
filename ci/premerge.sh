@@ -78,6 +78,8 @@ arm64)
 	step memory-cells-generated python3 src/tools/gen-memory-cells.py --check
 	# the C++ front end's citations and quoted grammar against docs/cxx-spec
 	step cxx-spec-refs python3 bench/cxx-spec-refs.py
+	# the syntax views generated from the grammar (syntax-views.inc)
+	step cxx-syntax-views python3 src/tools/gen-syntax-views.py --check
 	# each file of the C++ front end alone, with its flags (no RTTI, no C++ library, -Werror)
 	step cxx-files-alone make -C src -k -j "$J" cplusplus-check
 	# the C++ front end's tables and the claims' encoding (-fcxx-dump=selftest, dump/dump.h)

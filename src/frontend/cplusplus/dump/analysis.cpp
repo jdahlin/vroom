@@ -203,7 +203,9 @@ static void dump_declaration_claims(const semantic_analysis &analysis,
             !write_type_claim(analysis.type_table, d.type, claim.get()))
             continue;
         token_index last = node.end_token - 1;
-        auto body = analysis.syntax(d.declaration).function_definition().body();
+        auto body = analysis.syntax(d.declaration)
+                        .function_definition()
+                        .function_body();
         if (body && !body.function_try_block())
             last = tree[body.index()].first_token - 1;
         source_position end = tokens.position(node.end_token - 1);

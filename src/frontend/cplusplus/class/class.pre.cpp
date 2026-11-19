@@ -1226,7 +1226,7 @@ semantic_analysis::member_declaration(entity_index c, syntax_child member,
             virt_override = virt_final = false;
             return r;
         }
-        auto body = syntax(n).function_definition().body();
+        auto body = syntax(n).function_definition().function_body();
         if (node.child_count != at + 2 || !body || body.function_try_block())
             return not_supported(n, "dcl.fct.def.general");
         if (body.defaulted() || body.deleted()) {
@@ -1292,7 +1292,7 @@ analysis_result semantic_analysis::member_declarators(
         while (body_at < node.child_count &&
                virt_specifier(children[body_at], override_, final_))
             body_at++;
-        auto body = syntax(n).function_definition().body();
+        auto body = syntax(n).function_definition().function_body();
         if (node.child_count != body_at + 1 || !body ||
             body.function_try_block())
             return not_supported(n, "dcl.fct.def.general");
@@ -1645,9 +1645,10 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
             /* (one deleted on this, its first, declaration: not counted,
                layout's pod_for_layout reads the count at the class's end,
                before the bodies) */
-            bool deleted_here =
-                definition &&
-                syntax(declaration).function_definition().body().deleted();
+            bool deleted_here = definition && syntax(declaration)
+                                                  .function_definition()
+                                                  .function_body()
+                                                  .deleted();
             if (copy_assignment_operator(e, entity_table[e].enclosing) &&
                 !deleted_here)
                 entity_table[entity_table[e].enclosing].user_copy_assignments++;
@@ -1891,7 +1892,7 @@ semantic_analysis::member_function_definition(entity_index c,
        declarator to bind, its body the function-body */
     if (entity_index f = conversion_function_declared_by(c, definition)) {
         last_declared = f;
-        auto body = definition.body();
+        auto body = definition.function_body();
         if (body.deleted())
             return deleted_definition(definition, f);
         if (!body.plain())
@@ -1906,14 +1907,13 @@ semantic_analysis::member_function_definition(entity_index c,
     bool constexpr_specified = false, body_virtual = false,
          body_explicit = false;
     uint32_t at = 0;
-    syntax_child seq = definition.decl_specifier_seq();
-    if (seq.bits &&
-        definition.size() > leading_gnu_attributes(definition) + 2 &&
+    auto seq = definition.decl_specifier_seq();
+    if (seq && definition.size() > leading_gnu_attributes(definition) + 2 &&
         function_specifiers_only(seq.index(), constexpr_specified,
                                  &body_virtual, &body_explicit) &&
         declares_special_member(c, definition.declarator()))
         at = 1;
-    if (at || !seq.bits) {
+    if (at || !seq) {
         /* a constructor or destructor: the one this definition declared */
         qualified_type type = qualified_type::make(
             type_table.fundamental(fundamental_type::void_), cv_none);
@@ -1972,7 +1972,7 @@ semantic_analysis::member_function_definition(entity_index c,
     if (!last_declared)
         return not_supported(definition, "class.mfct");
     /* the function-body after any virt-specifier-seq */
-    auto body = definition.body();
+    auto body = definition.function_body();
     if (body.deleted())
         return deleted_definition(definition, last_declared);
     if (!body.plain())
