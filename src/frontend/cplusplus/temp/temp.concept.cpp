@@ -57,14 +57,22 @@ node_index parser::concept_definition()
  * decl-specifier-seq without its arguments in a declaration followed by a
  * trailing-return-type, which needs a placeholder, [dcl.fct]/2).  P0091R3
  * (C++17).
+ *
+ * [ext:clang_deduction_guide_attributes] clang accepts an
+ * attribute-specifier-seq before a deduction-guide, as before other
+ * declarations (libc++'s _LIBCPP_CTAD_SUPPORTED_FOR_TYPE writes
+ * [[maybe_unused]] there):
+ *
+ *     deduction-guide:
+ *         attribute-specifier-seq explicit-specifier_opt template-name ( parameter-declaration-clause ) -> simple-template-id ;
  */
 bool parser::deduction_guide_follows()
 {
-    unsigned i = 0;
-    if (at(standard_keyword::explicit_)) {
-        i = 1;
-        if (at(preprocessing_op_or_punc::LEFT_PARENTHESIS, 1))
-            i = group_end(1);
+    unsigned i = attribute_specifier_seq_end(0);
+    if (at(standard_keyword::explicit_, i)) {
+        i++;
+        if (at(preprocessing_op_or_punc::LEFT_PARENTHESIS, i))
+            i = group_end(i);
     }
     if (!at_identifier(i) ||
         !at(preprocessing_op_or_punc::LEFT_PARENTHESIS, i + 1))
@@ -82,6 +90,9 @@ node_index parser::deduction_guide()
         return beyond_this_step();
     size_t mark = begin_node();
     token_index first = position;
+    attribute_specifier_seq();
+    if (failed())
+        return 0;
     if (at(standard_keyword::explicit_)) {
         if (at(preprocessing_op_or_punc::LEFT_PARENTHESIS, 1))
             explicit_specifier();

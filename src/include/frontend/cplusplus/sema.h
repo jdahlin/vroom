@@ -114,6 +114,8 @@ enum class type_kind : uint8_t {
     pack_expansion,
     /* [ext:clang_atomic] _Atomic(T): operand T */
     atomic,
+    /* [ext:clang_blocks] a block pointer to operand (a function type) */
+    block_pointer,
     /* [ext:clang_bit_int] _BitInt(N): bound N, or entity the non-type
        template-parameter N names in a template's own declaration */
     bit_int,
@@ -175,6 +177,7 @@ class types
     type_index pointer_to_member(uint32_t class_entity, qualified_type member);
     type_index pack_expansion_of(qualified_type pattern);
     type_index atomic_of(qualified_type value);
+    type_index block_pointer_to(qualified_type function);
     type_index bit_int(uint64_t width, uint32_t parameter);
 
     const type &operator[](type_index t) const

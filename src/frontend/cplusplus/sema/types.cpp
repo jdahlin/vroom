@@ -220,6 +220,15 @@ type_index types::bit_int(uint64_t width, uint32_t parameter)
     return intern(t, nullptr);
 }
 
+/* [ext:clang_blocks] T (^)(...): a block pointer to a function type */
+type_index types::block_pointer_to(qualified_type function)
+{
+    type t;
+    t.kind = type_kind::block_pointer;
+    t.operand = function;
+    return intern(t, nullptr);
+}
+
 /* [ext:clang_atomic] _Atomic(T) */
 type_index types::atomic_of(qualified_type value)
 {

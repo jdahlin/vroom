@@ -125,6 +125,7 @@ bool semantic_analysis::type_without_external_linkage(qualified_type t,
     case type_kind::array:
     case type_kind::lvalue_reference:
     case type_kind::rvalue_reference:
+    case type_kind::block_pointer:
         return type_without_external_linkage(record.operand, visible);
     case type_kind::function: {
         const qualified_type *parameters =

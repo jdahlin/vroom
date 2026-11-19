@@ -341,8 +341,10 @@ node_index parser::member_declaration_alternative()
         return finish_node(syntax_kind::function_definition, mark, first);
     /* [dcl.attr.grammar]/5: "If an attribute-specifier-seq appertains to a
        friend declaration ([class.friend]), that declaration shall be a
-       definition." */
-    if (attributes && specifiers.friend_)
+       definition."  [ext:gnu_attributes] GCC's attributes are allowed there
+       (libc++'s _LIBCPP_HIDE_FROM_ABI friend noop_coroutine) */
+    if (attributes && specifiers.friend_ &&
+        !only_gnu_attributes(tree, attributes))
         return violates("attributes of a friend declaration only on a "
                         "definition",
                         "dcl.attr.grammar", attributes_at);

@@ -446,6 +446,12 @@ bool parser::parenthesis_could_be_initializer()
  *         & attribute-specifier-seq_opt
  *         && attribute-specifier-seq_opt
  *         nested-name-specifier * attribute-specifier-seq_opt cv-qualifier-seq_opt
+ *
+ * [ext:clang_blocks] a block pointer (clang Language Extensions, Blocks;
+ * Darwin's SDK declares functions taking blocks under __BLOCKS__):
+ *
+ *     ptr-operator:
+ *         ^ attribute-specifier-seq_opt cv-qualifier-seq_opt
  */
 bool parser::at_ptr_operator_at(unsigned ahead)
 {
@@ -458,6 +464,7 @@ bool parser::at_ptr_operator_at(unsigned ahead)
 bool parser::at_ptr_operator()
 {
     if (at(preprocessing_op_or_punc::STAR) ||
+        at(preprocessing_op_or_punc::CARET) ||
         at(preprocessing_op_or_punc::AMPERSAND) ||
         at(preprocessing_op_or_punc::AMPERSAND_AMPERSAND))
         return true;
@@ -486,7 +493,8 @@ node_index parser::ptr_operator(derivation *kind)
     size_t mark = begin_node();
     token_index first = position;
     bool qualifiers = true;
-    if (at(preprocessing_op_or_punc::STAR)) {
+    if (at(preprocessing_op_or_punc::STAR) ||
+        at(preprocessing_op_or_punc::CARET)) {
         *kind = derivation::pointer;
         add_token();
     } else if (at(preprocessing_op_or_punc::AMPERSAND) ||
