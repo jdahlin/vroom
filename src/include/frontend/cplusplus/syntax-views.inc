@@ -2975,6 +2975,7 @@ struct AliasDeclaration : SyntaxExtra<AliasDeclaration> {
     static bool accepts(syntax_kind k);
     AttributeSpecifierSeq attribute_specifier_seq() const;
     DefiningTypeId defining_type_id() const;
+    SyntaxElement identifier() const;
 };
 
 /* the alignment-specifier node */
@@ -2983,6 +2984,7 @@ struct AlignmentSpecifier : SyntaxExtra<AlignmentSpecifier> {
     static bool accepts(syntax_kind k);
     ConstantExpression constant_expression() const;
     TypeId type_id() const;
+    SyntaxElement identifier() const;
 };
 
 /* and-expression: one of additive_expression, and_expression, await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conversion_function_id, delete_expression, equality_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, lambda_expression, literal_operator_id, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, unary_expression, unqualified_id */
@@ -3015,6 +3017,7 @@ struct AnnotatedBaseSpecifier : SyntaxExtra<AnnotatedBaseSpecifier> {
     static bool accepts(syntax_kind k);
     AttributeSpecifierSeq attribute_specifier_seq() const;
     ClassOrDecltype class_or_decltype() const;
+    SyntaxElement identifier() const;
 };
 
 /* the asm-declaration node */
@@ -3022,6 +3025,7 @@ struct AsmDeclaration : SyntaxExtra<AsmDeclaration> {
     using SyntaxExtra<AsmDeclaration>::SyntaxExtra;
     static bool accepts(syntax_kind k);
     AttributeSpecifierSeq attribute_specifier_seq() const;
+    SyntaxElement string_literal() const;
 };
 
 /* the assignment-expression node */
@@ -3150,6 +3154,7 @@ struct AttributeSpecifiers : SyntaxExtra<AttributeSpecifiers> {
 struct AttributeUsingPrefix : SyntaxExtra<AttributeUsingPrefix> {
     using SyntaxExtra<AttributeUsingPrefix>::SyntaxExtra;
     static bool accepts(syntax_kind k);
+    SyntaxElement identifier() const;
 };
 
 /* the attribute node */
@@ -3158,6 +3163,7 @@ struct AttributeWithArguments : SyntaxExtra<AttributeWithArguments> {
     static bool accepts(syntax_kind k);
     AttributeArgumentClause attribute_argument_clause() const;
     AttributeScopedToken attribute_token() const;
+    SyntaxElement identifier() const;
 };
 
 /* the statement node */
@@ -3184,6 +3190,7 @@ struct AwaitExpression : SyntaxExtra<AwaitExpression> {
     using SyntaxExtra<AwaitExpression>::SyntaxExtra;
     static bool accepts(syntax_kind k);
     CastExpression cast_expression() const;
+    SyntaxElement identifier() const;
 };
 
 /* the balanced-token node */
@@ -3191,6 +3198,7 @@ struct BalancedToken : SyntaxExtra<BalancedToken> {
     using SyntaxExtra<BalancedToken>::SyntaxExtra;
     static bool accepts(syntax_kind k);
     BalancedTokenSeq balanced_token_seq() const;
+    SyntaxElement identifier() const;
 };
 
 /* balanced-token-seq: one of balanced_token, balanced_token_seq */
@@ -3223,6 +3231,7 @@ struct BaseClause : SyntaxExtra<BaseClause> {
     using SyntaxExtra<BaseClause>::SyntaxExtra;
     static bool accepts(syntax_kind k);
     BaseSpecifierList base_specifier_list() const;
+    SyntaxElement identifier() const;
 };
 
 /* base-specifier: one of base_specifier, class_or_decltype, decltype_specifier, simple_template_id */
@@ -3308,6 +3317,7 @@ struct BracedInitList : SyntaxExtra<BracedInitList> {
     using SyntaxExtra<BracedInitList>::SyntaxExtra;
     static bool accepts(syntax_kind k);
     DesignatedInitializerList designated_initializer_list() const;
+    SyntaxElement identifier() const;
 };
 
 /* capture: one of init_capture, simple_capture */
@@ -3377,6 +3387,7 @@ struct CastNotation : SyntaxExtra<CastNotation> {
     static bool accepts(syntax_kind k);
     CastExpression cast_expression() const;
     TypeId type_id() const;
+    SyntaxElement identifier() const;
 };
 
 /* the clang-atomic-type-specifier node */
@@ -3392,6 +3403,7 @@ struct ClangBitCastExpression : SyntaxExtra<ClangBitCastExpression> {
     static bool accepts(syntax_kind k);
     AssignmentExpression assignment_expression() const;
     TypeId type_id() const;
+    SyntaxElement identifier() const;
 };
 
 /* the clang-bit-int-type-specifier node */
@@ -3399,6 +3411,7 @@ struct ClangBitIntTypeSpecifier : SyntaxExtra<ClangBitIntTypeSpecifier> {
     using SyntaxExtra<ClangBitIntTypeSpecifier>::SyntaxExtra;
     static bool accepts(syntax_kind k);
     ConstantExpression constant_expression() const;
+    SyntaxElement identifier() const;
 };
 
 /* the clang-convertvector-expression node */
@@ -3407,6 +3420,7 @@ struct ClangConvertvectorExpression : SyntaxExtra<ClangConvertvectorExpression> 
     static bool accepts(syntax_kind k);
     AssignmentExpression assignment_expression() const;
     TypeId type_id() const;
+    SyntaxElement identifier() const;
 };
 
 /* the clang-source-location-expression node */
@@ -3456,6 +3470,7 @@ struct ClangTypeTraitExpression : SyntaxExtra<ClangTypeTraitExpression> {
     using SyntaxExtra<ClangTypeTraitExpression>::SyntaxExtra;
     static bool accepts(syntax_kind k);
     ClangTypeTraitArgumentList clang_type_trait_argument_list() const;
+    SyntaxElement identifier() const;
 };
 
 /* the clang-type-transformation node */
@@ -3472,6 +3487,7 @@ struct ClassHead : SyntaxExtra<ClassHead> {
     AttributeSpecifierSeq attribute_specifier_seq() const;
     BaseClause base_clause() const;
     ClassHeadName class_head_name() const;
+    SyntaxElement identifier() const;
 };
 
 /* class-head-name: one of class_head_name, simple_template_id */
@@ -3548,6 +3564,7 @@ struct CompoundRequirement : SyntaxExtra<CompoundRequirement> {
     static bool accepts(syntax_kind k);
     Expression expression() const;
     ReturnTypeRequirement return_type_requirement() const;
+    SyntaxElement identifier() const;
 };
 
 /* the compound-statement node */
@@ -3590,6 +3607,7 @@ struct ConditionDeclaration : SyntaxExtra<ConditionDeclaration> {
     BraceOrEqualInitializer brace_or_equal_initializer() const;
     DeclSpecifierSeq decl_specifier_seq() const;
     Declarator declarator() const;
+    SyntaxElement identifier() const;
 };
 
 /* conditional-expression: one of additive_expression, and_expression, await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conditional_expression, conversion_function_id, delete_expression, equality_expression, exclusive_or_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, inclusive_or_expression, lambda_expression, literal_operator_id, logical_and_expression, logical_or_expression, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, unary_expression, unqualified_id */
@@ -3756,6 +3774,7 @@ struct CoroutineReturnStatement : SyntaxExtra<CoroutineReturnStatement> {
     using SyntaxExtra<CoroutineReturnStatement>::SyntaxExtra;
     static bool accepts(syntax_kind k);
     ExprOrBracedInitList expr_or_braced_init_list() const;
+    SyntaxElement identifier() const;
 };
 
 /* the ctor-initializer node */
@@ -3795,6 +3814,7 @@ struct DeclSpecifierSeq : SyntaxExtra<DeclSpecifierSeq> {
     using SyntaxExtra<DeclSpecifierSeq>::SyntaxExtra;
     static bool accepts(syntax_kind k);
     DeclSpecifierSeq decl_specifier_seq() const;
+    SyntaxElement identifier() const;
 };
 
 /* declaration: one of alias_declaration, asm_declaration, attribute_declaration, deduction_guide, empty_declaration, explicit_instantiation, explicit_specialization, export_declaration, function_definition, gnu_extension_declaration, linkage_specification, module_import_declaration, named_namespace_definition, namespace_alias_definition, nested_namespace_definition, opaque_enum_declaration, simple_declaration, static_assert_declaration, template_declaration, unnamed_namespace_definition, using_declaration, using_directive, using_enum_declaration */
@@ -3901,6 +3921,7 @@ struct DeclaratorWithInitializer : SyntaxExtra<DeclaratorWithInitializer> {
     Declarator declarator() const;
     Initializer initializer() const;
     RequiresClause requires_clause() const;
+    SyntaxElement identifier() const;
 };
 
 /* the decltype-specifier node */
@@ -3908,6 +3929,7 @@ struct DecltypeSpecifier : SyntaxExtra<DecltypeSpecifier> {
     using SyntaxExtra<DecltypeSpecifier>::SyntaxExtra;
     static bool accepts(syntax_kind k);
     Expression expression() const;
+    SyntaxElement identifier() const;
 };
 
 /* the deduction-guide node */
@@ -3918,6 +3940,7 @@ struct DeductionGuide : SyntaxExtra<DeductionGuide> {
     ExplicitSpecifier explicit_specifier() const;
     ParameterDeclarationClause parameter_declaration_clause() const;
     SimpleTemplateId simple_template_id() const;
+    SyntaxElement identifier() const;
 };
 
 /* the lambda-capture node */
@@ -3925,6 +3948,7 @@ struct DefaultAndCaptures : SyntaxExtra<DefaultAndCaptures> {
     using SyntaxExtra<DefaultAndCaptures>::SyntaxExtra;
     static bool accepts(syntax_kind k);
     CaptureList capture_list() const;
+    SyntaxElement identifier() const;
 };
 
 /* the defining-type-id node */
@@ -3960,6 +3984,7 @@ struct DefiningTypeSpecifierSeq : SyntaxExtra<DefiningTypeSpecifierSeq> {
     AttributeSpecifierSeq attribute_specifier_seq() const;
     DefiningTypeSpecifier defining_type_specifier() const;
     DefiningTypeSpecifierSeq defining_type_specifier_seq() const;
+    SyntaxElement identifier() const;
 };
 
 /* the delete-expression node */
@@ -3967,6 +3992,7 @@ struct DeleteExpression : SyntaxExtra<DeleteExpression> {
     using SyntaxExtra<DeleteExpression>::SyntaxExtra;
     static bool accepts(syntax_kind k);
     CastExpression cast_expression() const;
+    SyntaxElement identifier() const;
 };
 
 /* the designated-initializer-clause node */
@@ -4014,6 +4040,7 @@ struct DestructorTypeId : SyntaxExtra<DestructorTypeId> {
     static bool accepts(syntax_kind k);
     DecltypeSpecifier decltype_specifier() const;
     SimpleTemplateId type_name() const;
+    SyntaxElement identifier() const;
 };
 
 /* the dynamic-exception-specification node */
@@ -4029,6 +4056,7 @@ struct ElaboratedClassSpecifier : SyntaxExtra<ElaboratedClassSpecifier> {
     AttributeSpecifierSeq attribute_specifier_seq() const;
     NestedNameSpecifier nested_name_specifier() const;
     SimpleTemplateId simple_template_id() const;
+    SyntaxElement identifier() const;
 };
 
 /* the elaborated-enum-specifier node */
@@ -4036,6 +4064,7 @@ struct ElaboratedEnumSpecifier : SyntaxExtra<ElaboratedEnumSpecifier> {
     using SyntaxExtra<ElaboratedEnumSpecifier>::SyntaxExtra;
     static bool accepts(syntax_kind k);
     NestedNameSpecifier nested_name_specifier() const;
+    SyntaxElement identifier() const;
 };
 
 /* elaborated-type-specifier: one of elaborated_enum_specifier, elaborated_type_specifier */
@@ -4084,6 +4113,7 @@ struct EnumHead : SyntaxExtra<EnumHead> {
     EnumBase enum_base() const;
     EnumHeadName enum_head_name() const;
     EnumKey enum_key() const;
+    SyntaxElement identifier() const;
 };
 
 /* the enum-head-name node */
@@ -4091,6 +4121,7 @@ struct EnumHeadName : SyntaxExtra<EnumHeadName> {
     using SyntaxExtra<EnumHeadName>::SyntaxExtra;
     static bool accepts(syntax_kind k);
     NestedNameSpecifier nested_name_specifier() const;
+    SyntaxElement identifier() const;
 };
 
 /* the enum-key node */
@@ -4105,6 +4136,7 @@ struct EnumSpecifier : SyntaxExtra<EnumSpecifier> {
     static bool accepts(syntax_kind k);
     EnumHead enum_head() const;
     EnumeratorList enumerator_list() const;
+    SyntaxElement identifier() const;
 };
 
 /* the enumerator node */
@@ -4112,6 +4144,7 @@ struct Enumerator : SyntaxExtra<Enumerator> {
     using SyntaxExtra<Enumerator>::SyntaxExtra;
     static bool accepts(syntax_kind k);
     AttributeSpecifierSeq attribute_specifier_seq() const;
+    SyntaxElement identifier() const;
 };
 
 /* enumerator-definition: one of enumerator, enumerator_definition */
@@ -4170,6 +4203,7 @@ struct EqualInitializer : SyntaxExtra<EqualInitializer> {
     using SyntaxExtra<EqualInitializer>::SyntaxExtra;
     static bool accepts(syntax_kind k);
     InitializerClause initializer_clause() const;
+    SyntaxElement identifier() const;
 };
 
 /* equality-expression: one of additive_expression, await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conversion_function_id, delete_expression, equality_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, lambda_expression, literal_operator_id, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, unary_expression, unqualified_id */
@@ -4210,6 +4244,7 @@ struct ExceptionDeclaration : SyntaxExtra<ExceptionDeclaration> {
     AttributeSpecifierSeq attribute_specifier_seq() const;
     Declarator declarator() const;
     TypeSpecifierSeq type_specifier_seq() const;
+    SyntaxElement identifier() const;
 };
 
 /* exclusive-or-expression: one of additive_expression, and_expression, await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conversion_function_id, delete_expression, equality_expression, exclusive_or_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, lambda_expression, literal_operator_id, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, unary_expression, unqualified_id */
@@ -4255,6 +4290,7 @@ struct ExplicitSpecifier : SyntaxExtra<ExplicitSpecifier> {
     using SyntaxExtra<ExplicitSpecifier>::SyntaxExtra;
     static bool accepts(syntax_kind k);
     ConstantExpression constant_expression() const;
+    SyntaxElement identifier() const;
 };
 
 /* the export-declaration node */
@@ -4322,6 +4358,7 @@ struct ExpressionStatement : SyntaxExtra<ExpressionStatement> {
     using SyntaxExtra<ExpressionStatement>::SyntaxExtra;
     static bool accepts(syntax_kind k);
     Expression expression() const;
+    SyntaxElement identifier() const;
 };
 
 /* the fold-expression node */
@@ -4338,6 +4375,7 @@ struct ForRangeDeclaration : SyntaxExtra<ForRangeDeclaration> {
     DeclSpecifierSeq decl_specifier_seq() const;
     Declarator declarator() const;
     IdentifierList identifier_list() const;
+    SyntaxElement identifier() const;
 };
 
 /* for-range-initializer: one of additive_expression, and_expression, assignment_expression, await_expression, braced_init_list, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conditional_expression, conversion_function_id, delete_expression, equality_expression, exclusive_or_expression, expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, inclusive_or_expression, lambda_expression, literal_operator_id, logical_and_expression, logical_or_expression, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, throw_expression, unary_expression, unqualified_id, yield_expression */
@@ -4385,6 +4423,7 @@ struct FunctionDefinition : SyntaxExtra<FunctionDefinition> {
     FunctionBody function_body() const;
     RequiresClause requires_clause() const;
     VirtSpecifierSeq virt_specifier_seq() const;
+    SyntaxElement identifier() const;
 };
 
 /* the function-try-block node */
@@ -4407,6 +4446,7 @@ struct GlobalModuleFragment : SyntaxExtra<GlobalModuleFragment> {
 struct GnuAsmLabel : SyntaxExtra<GnuAsmLabel> {
     using SyntaxExtra<GnuAsmLabel>::SyntaxExtra;
     static bool accepts(syntax_kind k);
+    SyntaxElement string_literal() const;
 };
 
 /* the gnu-attribute node */
@@ -4457,6 +4497,7 @@ struct GnuAttributeSpecifier : SyntaxExtra<GnuAttributeSpecifier> {
     using SyntaxExtra<GnuAttributeSpecifier>::SyntaxExtra;
     static bool accepts(syntax_kind k);
     GnuAttributeList gnu_attribute_list() const;
+    SyntaxElement identifier() const;
 };
 
 /* the gnu-attribute-list node */
@@ -4478,6 +4519,7 @@ struct GnuComputedGoto : SyntaxExtra<GnuComputedGoto> {
     using SyntaxExtra<GnuComputedGoto>::SyntaxExtra;
     static bool accepts(syntax_kind k);
     Expression expression() const;
+    SyntaxElement identifier() const;
 };
 
 /* the gnu-declarator node */
@@ -4545,6 +4587,7 @@ struct GnuInitializerList : SyntaxExtra<GnuInitializerList> {
 struct GnuLabelAddress : SyntaxExtra<GnuLabelAddress> {
     using SyntaxExtra<GnuLabelAddress>::SyntaxExtra;
     static bool accepts(syntax_kind k);
+    SyntaxElement identifier() const;
 };
 
 /* the gnu-offsetof-expression node */
@@ -4553,6 +4596,7 @@ struct GnuOffsetofExpression : SyntaxExtra<GnuOffsetofExpression> {
     static bool accepts(syntax_kind k);
     Expression expression() const;
     TypeId type_id() const;
+    SyntaxElement identifier() const;
 };
 
 /* the gnu-designation node */
@@ -4560,6 +4604,7 @@ struct GnuOldDesignation : SyntaxExtra<GnuOldDesignation> {
     using SyntaxExtra<GnuOldDesignation>::SyntaxExtra;
     static bool accepts(syntax_kind k);
     Designator gnu_designator_list() const;
+    SyntaxElement identifier() const;
 };
 
 /* the handler node */
@@ -4648,6 +4693,7 @@ struct InitCapture : SyntaxExtra<InitCapture> {
     using SyntaxExtra<InitCapture>::SyntaxExtra;
     static bool accepts(syntax_kind k);
     Initializer initializer() const;
+    SyntaxElement identifier() const;
 };
 
 /* init-declarator: one of conversion_function_id, declarator, declarator_id, init_declarator, literal_operator_id, noptr_declarator, operator_function_id, ptr_declarator, qualified_id, simple_template_id, template_id, unqualified_id */
@@ -4783,6 +4829,7 @@ struct Jump : SyntaxExtra<Jump> {
     using SyntaxExtra<Jump>::SyntaxExtra;
     static bool accepts(syntax_kind k);
     ExprOrBracedInitList expr_or_braced_init_list() const;
+    SyntaxElement identifier() const;
 };
 
 /* jump-statement: one of coroutine_return_statement, gnu_computed_goto, jump_statement */
@@ -4810,6 +4857,7 @@ struct LabeledStatement : SyntaxExtra<LabeledStatement> {
     AttributeSpecifierSeq attribute_specifier_seq() const;
     ConstantExpression constant_expression() const;
     Statement statement() const;
+    SyntaxElement identifier() const;
 };
 
 /* lambda-capture: one of capture_list, init_capture, lambda_capture, simple_capture */
@@ -4858,18 +4906,22 @@ struct LambdaIntroducer : SyntaxExtra<LambdaIntroducer> {
     using SyntaxExtra<LambdaIntroducer>::SyntaxExtra;
     static bool accepts(syntax_kind k);
     LambdaCapture lambda_capture() const;
+    SyntaxElement identifier() const;
 };
 
 /* the linkage-specification node */
 struct LinkageSpecification : SyntaxExtra<LinkageSpecification> {
     using SyntaxExtra<LinkageSpecification>::SyntaxExtra;
     static bool accepts(syntax_kind k);
+    SyntaxElement string_literal() const;
 };
 
 /* the literal-operator-id node */
 struct LiteralOperatorId : SyntaxExtra<LiteralOperatorId> {
     using SyntaxExtra<LiteralOperatorId>::SyntaxExtra;
     static bool accepts(syntax_kind k);
+    SyntaxElement identifier() const;
+    SyntaxElement string_literal() const;
 };
 
 /* logical-and-expression: one of additive_expression, and_expression, await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conversion_function_id, delete_expression, equality_expression, exclusive_or_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, inclusive_or_expression, lambda_expression, literal_operator_id, logical_and_expression, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, unary_expression, unqualified_id */
@@ -5048,6 +5100,7 @@ struct MemberSimpleDeclaration : SyntaxExtra<MemberSimpleDeclaration> {
     DeclSpecifierSeq decl_specifier_seq() const;
     MemberDeclaration member_declaration() const;
     MemberDeclaratorList member_declarator_list() const;
+    SyntaxElement identifier() const;
 };
 
 /* the member-specification node */
@@ -5065,6 +5118,7 @@ struct ModuleDeclaration : SyntaxExtra<ModuleDeclaration> {
     AttributeSpecifierSeq attribute_specifier_seq() const;
     ModuleName module_name() const;
     ModulePartition module_partition() const;
+    SyntaxElement identifier() const;
 };
 
 /* the module-import-declaration node */
@@ -5074,6 +5128,7 @@ struct ModuleImportDeclaration : SyntaxExtra<ModuleImportDeclaration> {
     AttributeSpecifierSeq attribute_specifier_seq() const;
     ModuleName module_name() const;
     ModulePartition module_partition() const;
+    SyntaxElement identifier() const;
 };
 
 /* the module-name node */
@@ -5081,6 +5136,7 @@ struct ModuleName : SyntaxExtra<ModuleName> {
     using SyntaxExtra<ModuleName>::SyntaxExtra;
     static bool accepts(syntax_kind k);
     ModuleNameQualifier module_name_qualifier() const;
+    SyntaxElement identifier() const;
 };
 
 /* the module-name-qualifier node */
@@ -5088,6 +5144,7 @@ struct ModuleNameQualifier : SyntaxExtra<ModuleNameQualifier> {
     using SyntaxExtra<ModuleNameQualifier>::SyntaxExtra;
     static bool accepts(syntax_kind k);
     ModuleNameQualifier module_name_qualifier() const;
+    SyntaxElement identifier() const;
 };
 
 /* the module-partition node */
@@ -5095,6 +5152,7 @@ struct ModulePartition : SyntaxExtra<ModulePartition> {
     using SyntaxExtra<ModulePartition>::SyntaxExtra;
     static bool accepts(syntax_kind k);
     ModuleNameQualifier module_name_qualifier() const;
+    SyntaxElement identifier() const;
 };
 
 /* multiplicative-expression: one of await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, conversion_function_id, delete_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, lambda_expression, literal_operator_id, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, requires_expression, simple_template_id, template_id, unary_expression, unqualified_id */
@@ -5126,6 +5184,7 @@ struct NamedNamespaceDefinition : SyntaxExtra<NamedNamespaceDefinition> {
     using SyntaxExtra<NamedNamespaceDefinition>::SyntaxExtra;
     static bool accepts(syntax_kind k);
     NamespaceBody namespace_body() const;
+    SyntaxElement identifier() const;
 };
 
 /* the namespace-alias-definition node */
@@ -5177,6 +5236,7 @@ struct NestedNameSpecifier : SyntaxExtra<NestedNameSpecifier> {
     static bool accepts(syntax_kind k);
     DecltypeSpecifier decltype_specifier() const;
     NestedNameSpecifier nested_name_specifier() const;
+    SyntaxElement identifier() const;
 };
 
 /* the nested-namespace-definition node */
@@ -5192,6 +5252,7 @@ struct NestedRequirement : SyntaxExtra<NestedRequirement> {
     using SyntaxExtra<NestedRequirement>::SyntaxExtra;
     static bool accepts(syntax_kind k);
     ConstraintExpression constraint_expression() const;
+    SyntaxElement identifier() const;
 };
 
 /* new-declarator: one of new_declarator, noptr_new_declarator, ptr_operator */
@@ -5245,6 +5306,7 @@ struct NewPlacement : SyntaxExtra<NewPlacement> {
     using SyntaxExtra<NewPlacement>::SyntaxExtra;
     static bool accepts(syntax_kind k);
     ExpressionList expression_list() const;
+    SyntaxElement identifier() const;
 };
 
 /* the new-type-id node */
@@ -5260,6 +5322,7 @@ struct NoexceptExpression : SyntaxExtra<NoexceptExpression> {
     using SyntaxExtra<NoexceptExpression>::SyntaxExtra;
     static bool accepts(syntax_kind k);
     Expression expression() const;
+    SyntaxElement identifier() const;
 };
 
 /* the noexcept-specifier node */
@@ -5267,6 +5330,7 @@ struct NoexceptSpecifier : SyntaxExtra<NoexceptSpecifier> {
     using SyntaxExtra<NoexceptSpecifier>::SyntaxExtra;
     static bool accepts(syntax_kind k);
     ConstantExpression constant_expression() const;
+    SyntaxElement identifier() const;
 };
 
 /* the noptr-abstract-declarator node */
@@ -5276,6 +5340,7 @@ struct NoptrAbstractDeclarator : SyntaxExtra<NoptrAbstractDeclarator> {
     AttributeSpecifierSeq attribute_specifier_seq() const;
     ConstantExpression constant_expression() const;
     ParametersAndQualifiers parameters_and_qualifiers() const;
+    SyntaxElement identifier() const;
 };
 
 /* noptr-declarator: one of conversion_function_id, declarator_id, literal_operator_id, noptr_declarator, operator_function_id, qualified_id, simple_template_id, template_id, unqualified_id */
@@ -5302,6 +5367,7 @@ struct NoptrNewDeclarator : SyntaxExtra<NoptrNewDeclarator> {
     static bool accepts(syntax_kind k);
     AttributeSpecifierSeq attribute_specifier_seq() const;
     NoptrNewDeclarator noptr_new_declarator() const;
+    SyntaxElement identifier() const;
 };
 
 /* the opaque-enum-declaration node */
@@ -5312,6 +5378,7 @@ struct OpaqueEnumDeclaration : SyntaxExtra<OpaqueEnumDeclaration> {
     EnumBase enum_base() const;
     EnumHeadName enum_head_name() const;
     EnumKey enum_key() const;
+    SyntaxElement identifier() const;
 };
 
 /* the operator-function-id node */
@@ -5324,6 +5391,7 @@ struct OperatorFunctionId : SyntaxExtra<OperatorFunctionId> {
 struct OperatorTemplateId : SyntaxExtra<OperatorTemplateId> {
     using SyntaxExtra<OperatorTemplateId>::SyntaxExtra;
     static bool accepts(syntax_kind k);
+    SyntaxElement identifier() const;
 };
 
 /* the function-body node */
@@ -5332,6 +5400,7 @@ struct OrdinaryFunctionBody : SyntaxExtra<OrdinaryFunctionBody> {
     static bool accepts(syntax_kind k);
     CompoundStatement compound_statement() const;
     CtorInitializer ctor_initializer() const;
+    SyntaxElement string_literal() const;
 };
 
 /* the declarator-id node */
@@ -5339,6 +5408,7 @@ struct PackDeclaratorId : SyntaxExtra<PackDeclaratorId> {
     using SyntaxExtra<PackDeclaratorId>::SyntaxExtra;
     static bool accepts(syntax_kind k);
     IdExpression id_expression() const;
+    SyntaxElement identifier() const;
 };
 
 /* the parameter-declaration-clause node */
@@ -5415,6 +5485,7 @@ struct ParenthesizedInitializer : SyntaxExtra<ParenthesizedInitializer> {
     using SyntaxExtra<ParenthesizedInitializer>::SyntaxExtra;
     static bool accepts(syntax_kind k);
     ExpressionList expression_list() const;
+    SyntaxElement identifier() const;
 };
 
 /* the new-initializer node */
@@ -5422,6 +5493,7 @@ struct ParenthesizedNewInitializer : SyntaxExtra<ParenthesizedNewInitializer> {
     using SyntaxExtra<ParenthesizedNewInitializer>::SyntaxExtra;
     static bool accepts(syntax_kind k);
     ExpressionList expression_list() const;
+    SyntaxElement identifier() const;
 };
 
 /* the primary-expression node */
@@ -5429,6 +5501,7 @@ struct ParenthesizedOrThis : SyntaxExtra<ParenthesizedOrThis> {
     using SyntaxExtra<ParenthesizedOrThis>::SyntaxExtra;
     static bool accepts(syntax_kind k);
     Expression expression() const;
+    SyntaxElement identifier() const;
 };
 
 /* the placeholder-type-specifier node */
@@ -5436,6 +5509,7 @@ struct PlaceholderTypeSpecifier : SyntaxExtra<PlaceholderTypeSpecifier> {
     using SyntaxExtra<PlaceholderTypeSpecifier>::SyntaxExtra;
     static bool accepts(syntax_kind k);
     TypeConstraint type_constraint() const;
+    SyntaxElement identifier() const;
 };
 
 /* pm-expression: one of await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, conversion_function_id, delete_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, lambda_expression, literal_operator_id, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, requires_expression, simple_template_id, template_id, unary_expression, unqualified_id */
@@ -5474,6 +5548,7 @@ struct PointerDeclarator : SyntaxExtra<PointerDeclarator> {
     static bool accepts(syntax_kind k);
     PtrDeclarator ptr_declarator() const;
     PtrOperator ptr_operator() const;
+    SyntaxElement identifier() const;
 };
 
 /* the new-declarator node */
@@ -5596,6 +5671,7 @@ struct QualifiedClassHeadName : SyntaxExtra<QualifiedClassHeadName> {
     static bool accepts(syntax_kind k);
     SimpleTemplateId class_name() const;
     NestedNameSpecifier nested_name_specifier() const;
+    SyntaxElement identifier() const;
 };
 
 /* the class-or-decltype node */
@@ -5603,6 +5679,7 @@ struct QualifiedClassName : SyntaxExtra<QualifiedClassName> {
     using SyntaxExtra<QualifiedClassName>::SyntaxExtra;
     static bool accepts(syntax_kind k);
     NestedNameSpecifier nested_name_specifier() const;
+    SyntaxElement identifier() const;
 };
 
 /* the qualified-id node */
@@ -5611,6 +5688,7 @@ struct QualifiedId : SyntaxExtra<QualifiedId> {
     static bool accepts(syntax_kind k);
     NestedNameSpecifier nested_name_specifier() const;
     UnqualifiedId unqualified_id() const;
+    SyntaxElement identifier() const;
 };
 
 /* the qualified-namespace-specifier node */
@@ -5618,6 +5696,7 @@ struct QualifiedNamespaceSpecifier : SyntaxExtra<QualifiedNamespaceSpecifier> {
     using SyntaxExtra<QualifiedNamespaceSpecifier>::SyntaxExtra;
     static bool accepts(syntax_kind k);
     NestedNameSpecifier nested_name_specifier() const;
+    SyntaxElement identifier() const;
 };
 
 /* relational-expression: one of additive_expression, await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conversion_function_id, delete_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, lambda_expression, literal_operator_id, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, unary_expression, unqualified_id */
@@ -5706,6 +5785,7 @@ struct RequiresClause : SyntaxExtra<RequiresClause> {
     using SyntaxExtra<RequiresClause>::SyntaxExtra;
     static bool accepts(syntax_kind k);
     ConstraintLogicalOrExpression constraint_logical_or_expression() const;
+    SyntaxElement identifier() const;
 };
 
 /* the requires-expression node */
@@ -5721,6 +5801,7 @@ struct ReturnTypeRequirement : SyntaxExtra<ReturnTypeRequirement> {
     using SyntaxExtra<ReturnTypeRequirement>::SyntaxExtra;
     static bool accepts(syntax_kind k);
     TypeConstraint type_constraint() const;
+    SyntaxElement identifier() const;
 };
 
 /* the selection-statement node */
@@ -5728,6 +5809,7 @@ struct SelectionStatement : SyntaxExtra<SelectionStatement> {
     using SyntaxExtra<SelectionStatement>::SyntaxExtra;
     static bool accepts(syntax_kind k);
     Condition condition() const;
+    SyntaxElement identifier() const;
 };
 
 /* shift-expression: one of additive_expression, await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, conversion_function_id, delete_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, lambda_expression, literal_operator_id, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, requires_expression, shift_expression, simple_template_id, template_id, unary_expression, unqualified_id */
@@ -5758,6 +5840,7 @@ struct ShiftOperation : SyntaxExtra<ShiftOperation> {
 struct SimpleCapture : SyntaxExtra<SimpleCapture> {
     using SyntaxExtra<SimpleCapture>::SyntaxExtra;
     static bool accepts(syntax_kind k);
+    SyntaxElement identifier() const;
 };
 
 /* the simple-declaration node */
@@ -5769,6 +5852,7 @@ struct SimpleDeclaration : SyntaxExtra<SimpleDeclaration> {
     IdentifierList identifier_list() const;
     InitDeclaratorList init_declarator_list() const;
     Initializer initializer() const;
+    SyntaxElement identifier() const;
 };
 
 /* the simple-requirement node */
@@ -5776,6 +5860,7 @@ struct SimpleRequirement : SyntaxExtra<SimpleRequirement> {
     using SyntaxExtra<SimpleRequirement>::SyntaxExtra;
     static bool accepts(syntax_kind k);
     Expression expression() const;
+    SyntaxElement identifier() const;
 };
 
 /* the simple-template-id node */
@@ -5790,6 +5875,7 @@ struct SimpleTypeName : SyntaxExtra<SimpleTypeName> {
     using SyntaxExtra<SimpleTypeName>::SyntaxExtra;
     static bool accepts(syntax_kind k);
     NestedNameSpecifier nested_name_specifier() const;
+    SyntaxElement identifier() const;
 };
 
 /* simple-type-specifier: one of clang_atomic_type_specifier, clang_bit_int_type_specifier, clang_type_transformation, decltype_specifier, placeholder_type_specifier, simple_template_id, simple_type_specifier */
@@ -5816,6 +5902,7 @@ struct StandardAttributeSpecifier : SyntaxExtra<StandardAttributeSpecifier> {
     static bool accepts(syntax_kind k);
     AttributeList attribute_list() const;
     AttributeUsingPrefix attribute_using_prefix() const;
+    SyntaxElement identifier() const;
 };
 
 /* statement: one of alias_declaration, asm_declaration, compound_statement, coroutine_return_statement, expression_statement, gnu_computed_goto, gnu_extension_declaration, iteration_statement, jump_statement, labeled_statement, namespace_alias_definition, opaque_enum_declaration, selection_statement, simple_declaration, statement, static_assert_declaration, try_block, using_declaration, using_directive, using_enum_declaration */
@@ -5866,6 +5953,8 @@ struct StaticAssertDeclaration : SyntaxExtra<StaticAssertDeclaration> {
     using SyntaxExtra<StaticAssertDeclaration>::SyntaxExtra;
     static bool accepts(syntax_kind k);
     ConstantExpression constant_expression() const;
+    SyntaxElement identifier() const;
+    SyntaxElement string_literal() const;
 };
 
 /* the noptr-declarator node */
@@ -6007,6 +6096,7 @@ struct ThrowExpression : SyntaxExtra<ThrowExpression> {
     using SyntaxExtra<ThrowExpression>::SyntaxExtra;
     static bool accepts(syntax_kind k);
     AssignmentExpression assignment_expression() const;
+    SyntaxElement identifier() const;
 };
 
 /* the abstract-declarator node */
@@ -6026,6 +6116,7 @@ struct TrailingReturnDeclarator : SyntaxExtra<TrailingReturnDeclarator> {
     GnuAttributeSpecifier gnu_attribute_specifier_seq() const;
     ParametersAndQualifiers parameters_and_qualifiers() const;
     TrailingReturnType trailing_return_type() const;
+    SyntaxElement identifier() const;
 };
 
 /* the trailing-return-type node */
@@ -6091,6 +6182,7 @@ struct TypeRequirement : SyntaxExtra<TypeRequirement> {
     static bool accepts(syntax_kind k);
     NestedNameSpecifier nested_name_specifier() const;
     SimpleTemplateId type_name() const;
+    SyntaxElement identifier() const;
 };
 
 /* type-specifier: one of clang_atomic_type_specifier, clang_bit_int_type_specifier, clang_type_transformation, decltype_specifier, elaborated_enum_specifier, elaborated_type_specifier, placeholder_type_specifier, simple_template_id, simple_type_specifier, typename_specifier */
@@ -6118,6 +6210,7 @@ struct TypeSpecifierSeq : SyntaxExtra<TypeSpecifierSeq> {
     AttributeSpecifierSeq attribute_specifier_seq() const;
     TypeSpecifier type_specifier() const;
     TypeSpecifierSeq type_specifier_seq() const;
+    SyntaxElement identifier() const;
 };
 
 /* the typename-specifier node */
@@ -6126,6 +6219,7 @@ struct TypenameSpecifier : SyntaxExtra<TypenameSpecifier> {
     static bool accepts(syntax_kind k);
     NestedNameSpecifier nested_name_specifier() const;
     SimpleTemplateId simple_template_id() const;
+    SyntaxElement identifier() const;
 };
 
 /* unary-expression: one of await_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, conversion_function_id, delete_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, lambda_expression, literal_operator_id, new_expression, noexcept_expression, operator_function_id, postfix_expression, primary_expression, qualified_id, requires_expression, simple_template_id, template_id, unary_expression, unqualified_id */
@@ -6151,6 +6245,7 @@ struct UnaryOperation : SyntaxExtra<UnaryOperation> {
     using SyntaxExtra<UnaryOperation>::SyntaxExtra;
     static bool accepts(syntax_kind k);
     TypeId type_id() const;
+    SyntaxElement identifier() const;
 };
 
 /* the unnamed-namespace-definition node */
@@ -6197,6 +6292,7 @@ struct UsingDeclarator : SyntaxExtra<UsingDeclarator> {
     static bool accepts(syntax_kind k);
     NestedNameSpecifier nested_name_specifier() const;
     UnqualifiedId unqualified_id() const;
+    SyntaxElement identifier() const;
 };
 
 /* using-declarator-list: one of using_declarator, using_declarator_list */
@@ -6229,6 +6325,7 @@ struct UsingDirective : SyntaxExtra<UsingDirective> {
     static bool accepts(syntax_kind k);
     AttributeSpecifierSeq attribute_specifier_seq() const;
     NestedNameSpecifier nested_name_specifier() const;
+    SyntaxElement identifier() const;
 };
 
 /* the using-enum-declaration node */
@@ -6251,6 +6348,7 @@ struct YieldExpression : SyntaxExtra<YieldExpression> {
     static bool accepts(syntax_kind k);
     AssignmentExpression assignment_expression() const;
     BracedInitList braced_init_list() const;
+    SyntaxElement identifier() const;
 };
 
 
@@ -6296,6 +6394,11 @@ inline DefiningTypeId AliasDeclaration::defining_type_id() const
     return first<DefiningTypeId>();
 }
 
+inline SyntaxElement AliasDeclaration::identifier() const
+{
+    return first_token(token_kind::identifier);
+}
+
 inline bool AlignmentSpecifier::accepts(syntax_kind k)
 {
     return k == syntax_kind::alignment_specifier;
@@ -6309,6 +6412,11 @@ inline ConstantExpression AlignmentSpecifier::constant_expression() const
 inline TypeId AlignmentSpecifier::type_id() const
 {
     return first<TypeId>();
+}
+
+inline SyntaxElement AlignmentSpecifier::identifier() const
+{
+    return first_token(token_kind::identifier);
 }
 
 inline bool AndExpression::accepts(syntax_kind k)
@@ -6342,6 +6450,11 @@ inline ClassOrDecltype AnnotatedBaseSpecifier::class_or_decltype() const
     return first<ClassOrDecltype>();
 }
 
+inline SyntaxElement AnnotatedBaseSpecifier::identifier() const
+{
+    return first_token(token_kind::identifier);
+}
+
 inline bool AsmDeclaration::accepts(syntax_kind k)
 {
     return k == syntax_kind::asm_declaration;
@@ -6350,6 +6463,11 @@ inline bool AsmDeclaration::accepts(syntax_kind k)
 inline AttributeSpecifierSeq AsmDeclaration::attribute_specifier_seq() const
 {
     return first<AttributeSpecifierSeq>();
+}
+
+inline SyntaxElement AsmDeclaration::string_literal() const
+{
+    return first_token(token_kind::literal);
 }
 
 inline bool Assignment::accepts(syntax_kind k)
@@ -6447,6 +6565,11 @@ inline bool AttributeUsingPrefix::accepts(syntax_kind k)
     return k == syntax_kind::attribute_using_prefix;
 }
 
+inline SyntaxElement AttributeUsingPrefix::identifier() const
+{
+    return first_token(token_kind::identifier);
+}
+
 inline bool AttributeWithArguments::accepts(syntax_kind k)
 {
     return k == syntax_kind::attribute;
@@ -6460,6 +6583,11 @@ inline AttributeArgumentClause AttributeWithArguments::attribute_argument_clause
 inline AttributeScopedToken AttributeWithArguments::attribute_token() const
 {
     return first<AttributeScopedToken>();
+}
+
+inline SyntaxElement AttributeWithArguments::identifier() const
+{
+    return first_token(token_kind::identifier);
 }
 
 inline bool AttributedStatement::accepts(syntax_kind k)
@@ -6517,6 +6645,11 @@ inline CastExpression AwaitExpression::cast_expression() const
     return first<CastExpression>();
 }
 
+inline SyntaxElement AwaitExpression::identifier() const
+{
+    return first_token(token_kind::identifier);
+}
+
 inline bool BalancedToken::accepts(syntax_kind k)
 {
     return k == syntax_kind::balanced_token;
@@ -6525,6 +6658,11 @@ inline bool BalancedToken::accepts(syntax_kind k)
 inline BalancedTokenSeq BalancedToken::balanced_token_seq() const
 {
     return first<BalancedTokenSeq>();
+}
+
+inline SyntaxElement BalancedToken::identifier() const
+{
+    return first_token(token_kind::identifier);
 }
 
 inline bool BalancedTokenSeq::accepts(syntax_kind k)
@@ -6560,6 +6698,11 @@ inline bool BaseClause::accepts(syntax_kind k)
 inline BaseSpecifierList BaseClause::base_specifier_list() const
 {
     return first<BaseSpecifierList>();
+}
+
+inline SyntaxElement BaseClause::identifier() const
+{
+    return first_token(token_kind::identifier);
 }
 
 inline bool BaseSpecifier::accepts(syntax_kind k)
@@ -6619,6 +6762,11 @@ inline bool BracedInitList::accepts(syntax_kind k)
 inline DesignatedInitializerList BracedInitList::designated_initializer_list() const
 {
     return first<DesignatedInitializerList>();
+}
+
+inline SyntaxElement BracedInitList::identifier() const
+{
+    return first_token(token_kind::identifier);
 }
 
 inline bool Capture::accepts(syntax_kind k)
@@ -6683,6 +6831,11 @@ inline TypeId CastNotation::type_id() const
     return first<TypeId>();
 }
 
+inline SyntaxElement CastNotation::identifier() const
+{
+    return first_token(token_kind::identifier);
+}
+
 inline bool ClangAtomicTypeSpecifier::accepts(syntax_kind k)
 {
     return k == syntax_kind::clang_atomic_type_specifier;
@@ -6708,6 +6861,11 @@ inline TypeId ClangBitCastExpression::type_id() const
     return first<TypeId>();
 }
 
+inline SyntaxElement ClangBitCastExpression::identifier() const
+{
+    return first_token(token_kind::identifier);
+}
+
 inline bool ClangBitIntTypeSpecifier::accepts(syntax_kind k)
 {
     return k == syntax_kind::clang_bit_int_type_specifier;
@@ -6716,6 +6874,11 @@ inline bool ClangBitIntTypeSpecifier::accepts(syntax_kind k)
 inline ConstantExpression ClangBitIntTypeSpecifier::constant_expression() const
 {
     return first<ConstantExpression>();
+}
+
+inline SyntaxElement ClangBitIntTypeSpecifier::identifier() const
+{
+    return first_token(token_kind::identifier);
 }
 
 inline bool ClangConvertvectorExpression::accepts(syntax_kind k)
@@ -6731,6 +6894,11 @@ inline AssignmentExpression ClangConvertvectorExpression::assignment_expression(
 inline TypeId ClangConvertvectorExpression::type_id() const
 {
     return first<TypeId>();
+}
+
+inline SyntaxElement ClangConvertvectorExpression::identifier() const
+{
+    return first_token(token_kind::identifier);
 }
 
 inline bool ClangSourceLocationExpression::accepts(syntax_kind k)
@@ -6770,6 +6938,11 @@ inline ClangTypeTraitArgumentList ClangTypeTraitExpression::clang_type_trait_arg
     return first<ClangTypeTraitArgumentList>();
 }
 
+inline SyntaxElement ClangTypeTraitExpression::identifier() const
+{
+    return first_token(token_kind::identifier);
+}
+
 inline bool ClangTypeTransformation::accepts(syntax_kind k)
 {
     return k == syntax_kind::clang_type_transformation;
@@ -6798,6 +6971,11 @@ inline BaseClause ClassHead::base_clause() const
 inline ClassHeadName ClassHead::class_head_name() const
 {
     return first<ClassHeadName>();
+}
+
+inline SyntaxElement ClassHead::identifier() const
+{
+    return first_token(token_kind::identifier);
 }
 
 inline bool ClassHeadName::accepts(syntax_kind k)
@@ -6868,6 +7046,11 @@ inline ReturnTypeRequirement CompoundRequirement::return_type_requirement() cons
     return first<ReturnTypeRequirement>();
 }
 
+inline SyntaxElement CompoundRequirement::identifier() const
+{
+    return first_token(token_kind::identifier);
+}
+
 inline bool CompoundStatement::accepts(syntax_kind k)
 {
     return k == syntax_kind::compound_statement;
@@ -6922,6 +7105,11 @@ inline DeclSpecifierSeq ConditionDeclaration::decl_specifier_seq() const
 inline Declarator ConditionDeclaration::declarator() const
 {
     return first<Declarator>();
+}
+
+inline SyntaxElement ConditionDeclaration::identifier() const
+{
+    return first_token(token_kind::identifier);
 }
 
 inline bool ConditionalExpression::accepts(syntax_kind k)
@@ -7051,6 +7239,11 @@ inline ExprOrBracedInitList CoroutineReturnStatement::expr_or_braced_init_list()
     return first<ExprOrBracedInitList>();
 }
 
+inline SyntaxElement CoroutineReturnStatement::identifier() const
+{
+    return first_token(token_kind::identifier);
+}
+
 inline bool CtorInitializer::accepts(syntax_kind k)
 {
     return k == syntax_kind::ctor_initializer;
@@ -7090,6 +7283,11 @@ inline bool DeclSpecifierSeq::accepts(syntax_kind k)
 inline DeclSpecifierSeq DeclSpecifierSeq::decl_specifier_seq() const
 {
     return first<DeclSpecifierSeq>();
+}
+
+inline SyntaxElement DeclSpecifierSeq::identifier() const
+{
+    return first_token(token_kind::identifier);
 }
 
 inline bool Declaration::accepts(syntax_kind k)
@@ -7181,6 +7379,11 @@ inline RequiresClause DeclaratorWithInitializer::requires_clause() const
     return first<RequiresClause>();
 }
 
+inline SyntaxElement DeclaratorWithInitializer::identifier() const
+{
+    return first_token(token_kind::identifier);
+}
+
 inline bool DecltypeSpecifier::accepts(syntax_kind k)
 {
     return k == syntax_kind::decltype_specifier;
@@ -7189,6 +7392,11 @@ inline bool DecltypeSpecifier::accepts(syntax_kind k)
 inline Expression DecltypeSpecifier::expression() const
 {
     return first<Expression>();
+}
+
+inline SyntaxElement DecltypeSpecifier::identifier() const
+{
+    return first_token(token_kind::identifier);
 }
 
 inline bool DeductionGuide::accepts(syntax_kind k)
@@ -7216,6 +7424,11 @@ inline SimpleTemplateId DeductionGuide::simple_template_id() const
     return first<SimpleTemplateId>();
 }
 
+inline SyntaxElement DeductionGuide::identifier() const
+{
+    return first_token(token_kind::identifier);
+}
+
 inline bool DefaultAndCaptures::accepts(syntax_kind k)
 {
     return k == syntax_kind::lambda_capture;
@@ -7224,6 +7437,11 @@ inline bool DefaultAndCaptures::accepts(syntax_kind k)
 inline CaptureList DefaultAndCaptures::capture_list() const
 {
     return first<CaptureList>();
+}
+
+inline SyntaxElement DefaultAndCaptures::identifier() const
+{
+    return first_token(token_kind::identifier);
 }
 
 inline bool DefiningTypeId::accepts(syntax_kind k)
@@ -7272,6 +7490,11 @@ inline DefiningTypeSpecifierSeq DefiningTypeSpecifierSeq::defining_type_specifie
     return first<DefiningTypeSpecifierSeq>();
 }
 
+inline SyntaxElement DefiningTypeSpecifierSeq::identifier() const
+{
+    return first_token(token_kind::identifier);
+}
+
 inline bool DeleteExpression::accepts(syntax_kind k)
 {
     return k == syntax_kind::delete_expression;
@@ -7280,6 +7503,11 @@ inline bool DeleteExpression::accepts(syntax_kind k)
 inline CastExpression DeleteExpression::cast_expression() const
 {
     return first<CastExpression>();
+}
+
+inline SyntaxElement DeleteExpression::identifier() const
+{
+    return first_token(token_kind::identifier);
 }
 
 inline bool DesignatedInitializerClause::accepts(syntax_kind k)
@@ -7342,6 +7570,11 @@ inline SimpleTemplateId DestructorTypeId::type_name() const
     return first<SimpleTemplateId>();
 }
 
+inline SyntaxElement DestructorTypeId::identifier() const
+{
+    return first_token(token_kind::identifier);
+}
+
 inline bool DynamicExceptionSpecification::accepts(syntax_kind k)
 {
     return k == syntax_kind::dynamic_exception_specification;
@@ -7367,6 +7600,11 @@ inline SimpleTemplateId ElaboratedClassSpecifier::simple_template_id() const
     return first<SimpleTemplateId>();
 }
 
+inline SyntaxElement ElaboratedClassSpecifier::identifier() const
+{
+    return first_token(token_kind::identifier);
+}
+
 inline bool ElaboratedEnumSpecifier::accepts(syntax_kind k)
 {
     return k == syntax_kind::elaborated_enum_specifier;
@@ -7375,6 +7613,11 @@ inline bool ElaboratedEnumSpecifier::accepts(syntax_kind k)
 inline NestedNameSpecifier ElaboratedEnumSpecifier::nested_name_specifier() const
 {
     return first<NestedNameSpecifier>();
+}
+
+inline SyntaxElement ElaboratedEnumSpecifier::identifier() const
+{
+    return first_token(token_kind::identifier);
 }
 
 inline bool ElaboratedTypeSpecifier::accepts(syntax_kind k)
@@ -7438,6 +7681,11 @@ inline EnumKey EnumHead::enum_key() const
     return first<EnumKey>();
 }
 
+inline SyntaxElement EnumHead::identifier() const
+{
+    return first_token(token_kind::identifier);
+}
+
 inline bool EnumHeadName::accepts(syntax_kind k)
 {
     return k == syntax_kind::enum_head_name;
@@ -7446,6 +7694,11 @@ inline bool EnumHeadName::accepts(syntax_kind k)
 inline NestedNameSpecifier EnumHeadName::nested_name_specifier() const
 {
     return first<NestedNameSpecifier>();
+}
+
+inline SyntaxElement EnumHeadName::identifier() const
+{
+    return first_token(token_kind::identifier);
 }
 
 inline bool EnumKey::accepts(syntax_kind k)
@@ -7468,6 +7721,11 @@ inline EnumeratorList EnumSpecifier::enumerator_list() const
     return first<EnumeratorList>();
 }
 
+inline SyntaxElement EnumSpecifier::identifier() const
+{
+    return first_token(token_kind::identifier);
+}
+
 inline bool Enumerator::accepts(syntax_kind k)
 {
     return k == syntax_kind::enumerator;
@@ -7476,6 +7734,11 @@ inline bool Enumerator::accepts(syntax_kind k)
 inline AttributeSpecifierSeq Enumerator::attribute_specifier_seq() const
 {
     return first<AttributeSpecifierSeq>();
+}
+
+inline SyntaxElement Enumerator::identifier() const
+{
+    return first_token(token_kind::identifier);
 }
 
 inline bool EnumeratorDefinition::accepts(syntax_kind k)
@@ -7539,6 +7802,11 @@ inline InitializerClause EqualInitializer::initializer_clause() const
     return first<InitializerClause>();
 }
 
+inline SyntaxElement EqualInitializer::identifier() const
+{
+    return first_token(token_kind::identifier);
+}
+
 inline bool EqualityExpression::accepts(syntax_kind k)
 {
     static const uint64_t kinds[] = {0x3fe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xec70u};
@@ -7585,6 +7853,11 @@ inline TypeSpecifierSeq ExceptionDeclaration::type_specifier_seq() const
     return first<TypeSpecifierSeq>();
 }
 
+inline SyntaxElement ExceptionDeclaration::identifier() const
+{
+    return first_token(token_kind::identifier);
+}
+
 inline bool ExclusiveOrExpression::accepts(syntax_kind k)
 {
     static const uint64_t kinds[] = {0xffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xec70u};
@@ -7629,6 +7902,11 @@ inline bool ExplicitSpecifier::accepts(syntax_kind k)
 inline ConstantExpression ExplicitSpecifier::constant_expression() const
 {
     return first<ConstantExpression>();
+}
+
+inline SyntaxElement ExplicitSpecifier::identifier() const
+{
+    return first_token(token_kind::identifier);
 }
 
 inline bool ExportDeclaration::accepts(syntax_kind k)
@@ -7679,6 +7957,11 @@ inline Expression ExpressionStatement::expression() const
     return first<Expression>();
 }
 
+inline SyntaxElement ExpressionStatement::identifier() const
+{
+    return first_token(token_kind::identifier);
+}
+
 inline bool FoldExpression::accepts(syntax_kind k)
 {
     return k == syntax_kind::fold_expression;
@@ -7707,6 +7990,11 @@ inline Declarator ForRangeDeclaration::declarator() const
 inline IdentifierList ForRangeDeclaration::identifier_list() const
 {
     return first<IdentifierList>();
+}
+
+inline SyntaxElement ForRangeDeclaration::identifier() const
+{
+    return first_token(token_kind::identifier);
 }
 
 inline bool ForRangeInitializer::accepts(syntax_kind k)
@@ -7761,6 +8049,11 @@ inline VirtSpecifierSeq FunctionDefinition::virt_specifier_seq() const
     return first<VirtSpecifierSeq>();
 }
 
+inline SyntaxElement FunctionDefinition::identifier() const
+{
+    return first_token(token_kind::identifier);
+}
+
 inline bool FunctionTryBlock::accepts(syntax_kind k)
 {
     return k == syntax_kind::function_try_block;
@@ -7794,6 +8087,11 @@ inline DeclarationSeq GlobalModuleFragment::declaration_seq() const
 inline bool GnuAsmLabel::accepts(syntax_kind k)
 {
     return k == syntax_kind::gnu_asm_label;
+}
+
+inline SyntaxElement GnuAsmLabel::string_literal() const
+{
+    return first_token(token_kind::literal);
 }
 
 inline bool GnuAttribute::accepts(syntax_kind k)
@@ -7838,6 +8136,11 @@ inline GnuAttributeList GnuAttributeSpecifier::gnu_attribute_list() const
     return first<GnuAttributeList>();
 }
 
+inline SyntaxElement GnuAttributeSpecifier::identifier() const
+{
+    return first_token(token_kind::identifier);
+}
+
 inline bool GnuAttributes::accepts(syntax_kind k)
 {
     return k == syntax_kind::gnu_attribute_list;
@@ -7866,6 +8169,11 @@ inline bool GnuComputedGoto::accepts(syntax_kind k)
 inline Expression GnuComputedGoto::expression() const
 {
     return first<Expression>();
+}
+
+inline SyntaxElement GnuComputedGoto::identifier() const
+{
+    return first_token(token_kind::identifier);
 }
 
 inline bool GnuDeclarator::accepts(syntax_kind k)
@@ -7920,6 +8228,11 @@ inline bool GnuLabelAddress::accepts(syntax_kind k)
     return k == syntax_kind::gnu_label_address;
 }
 
+inline SyntaxElement GnuLabelAddress::identifier() const
+{
+    return first_token(token_kind::identifier);
+}
+
 inline bool GnuOffsetofExpression::accepts(syntax_kind k)
 {
     return k == syntax_kind::gnu_offsetof_expression;
@@ -7935,6 +8248,11 @@ inline TypeId GnuOffsetofExpression::type_id() const
     return first<TypeId>();
 }
 
+inline SyntaxElement GnuOffsetofExpression::identifier() const
+{
+    return first_token(token_kind::identifier);
+}
+
 inline bool GnuOldDesignation::accepts(syntax_kind k)
 {
     return k == syntax_kind::gnu_designation;
@@ -7943,6 +8261,11 @@ inline bool GnuOldDesignation::accepts(syntax_kind k)
 inline Designator GnuOldDesignation::gnu_designator_list() const
 {
     return first<Designator>();
+}
+
+inline SyntaxElement GnuOldDesignation::identifier() const
+{
+    return first_token(token_kind::identifier);
 }
 
 inline bool Handler::accepts(syntax_kind k)
@@ -8021,6 +8344,11 @@ inline bool InitCapture::accepts(syntax_kind k)
 inline Initializer InitCapture::initializer() const
 {
     return first<Initializer>();
+}
+
+inline SyntaxElement InitCapture::identifier() const
+{
+    return first_token(token_kind::identifier);
 }
 
 inline bool InitDeclarator::accepts(syntax_kind k)
@@ -8128,6 +8456,11 @@ inline ExprOrBracedInitList Jump::expr_or_braced_init_list() const
     return first<ExprOrBracedInitList>();
 }
 
+inline SyntaxElement Jump::identifier() const
+{
+    return first_token(token_kind::identifier);
+}
+
 inline bool JumpStatement::accepts(syntax_kind k)
 {
     static const uint64_t kinds[] = {0x0u, 0x0u, 0x3u, 0x80u};
@@ -8157,6 +8490,11 @@ inline ConstantExpression LabeledStatement::constant_expression() const
 inline Statement LabeledStatement::statement() const
 {
     return first<Statement>();
+}
+
+inline SyntaxElement LabeledStatement::identifier() const
+{
+    return first_token(token_kind::identifier);
 }
 
 inline bool LambdaCapture::accepts(syntax_kind k)
@@ -8245,14 +8583,34 @@ inline LambdaCapture LambdaIntroducer::lambda_capture() const
     return first<LambdaCapture>();
 }
 
+inline SyntaxElement LambdaIntroducer::identifier() const
+{
+    return first_token(token_kind::identifier);
+}
+
 inline bool LinkageSpecification::accepts(syntax_kind k)
 {
     return k == syntax_kind::linkage_specification;
 }
 
+inline SyntaxElement LinkageSpecification::string_literal() const
+{
+    return first_token(token_kind::literal);
+}
+
 inline bool LiteralOperatorId::accepts(syntax_kind k)
 {
     return k == syntax_kind::literal_operator_id;
+}
+
+inline SyntaxElement LiteralOperatorId::identifier() const
+{
+    return first_token(token_kind::identifier);
+}
+
+inline SyntaxElement LiteralOperatorId::string_literal() const
+{
+    return first_token(token_kind::literal);
 }
 
 inline bool LogicalAndExpression::accepts(syntax_kind k)
@@ -8421,6 +8779,11 @@ inline MemberDeclaratorList MemberSimpleDeclaration::member_declarator_list() co
     return first<MemberDeclaratorList>();
 }
 
+inline SyntaxElement MemberSimpleDeclaration::identifier() const
+{
+    return first_token(token_kind::identifier);
+}
+
 inline bool MemberSpecification::accepts(syntax_kind k)
 {
     return k == syntax_kind::member_specification;
@@ -8456,6 +8819,11 @@ inline ModulePartition ModuleDeclaration::module_partition() const
     return first<ModulePartition>();
 }
 
+inline SyntaxElement ModuleDeclaration::identifier() const
+{
+    return first_token(token_kind::identifier);
+}
+
 inline bool ModuleImportDeclaration::accepts(syntax_kind k)
 {
     return k == syntax_kind::module_import_declaration;
@@ -8476,6 +8844,11 @@ inline ModulePartition ModuleImportDeclaration::module_partition() const
     return first<ModulePartition>();
 }
 
+inline SyntaxElement ModuleImportDeclaration::identifier() const
+{
+    return first_token(token_kind::identifier);
+}
+
 inline bool ModuleName::accepts(syntax_kind k)
 {
     return k == syntax_kind::module_name;
@@ -8484,6 +8857,11 @@ inline bool ModuleName::accepts(syntax_kind k)
 inline ModuleNameQualifier ModuleName::module_name_qualifier() const
 {
     return first<ModuleNameQualifier>();
+}
+
+inline SyntaxElement ModuleName::identifier() const
+{
+    return first_token(token_kind::identifier);
 }
 
 inline bool ModuleNameQualifier::accepts(syntax_kind k)
@@ -8496,6 +8874,11 @@ inline ModuleNameQualifier ModuleNameQualifier::module_name_qualifier() const
     return first<ModuleNameQualifier>();
 }
 
+inline SyntaxElement ModuleNameQualifier::identifier() const
+{
+    return first_token(token_kind::identifier);
+}
+
 inline bool ModulePartition::accepts(syntax_kind k)
 {
     return k == syntax_kind::module_partition;
@@ -8504,6 +8887,11 @@ inline bool ModulePartition::accepts(syntax_kind k)
 inline ModuleNameQualifier ModulePartition::module_name_qualifier() const
 {
     return first<ModuleNameQualifier>();
+}
+
+inline SyntaxElement ModulePartition::identifier() const
+{
+    return first_token(token_kind::identifier);
 }
 
 inline bool MultiplicativeExpression::accepts(syntax_kind k)
@@ -8530,6 +8918,11 @@ inline bool NamedNamespaceDefinition::accepts(syntax_kind k)
 inline NamespaceBody NamedNamespaceDefinition::namespace_body() const
 {
     return first<NamespaceBody>();
+}
+
+inline SyntaxElement NamedNamespaceDefinition::identifier() const
+{
+    return first_token(token_kind::identifier);
 }
 
 inline bool NamespaceAliasDefinition::accepts(syntax_kind k)
@@ -8579,6 +8972,11 @@ inline NestedNameSpecifier NestedNameSpecifier::nested_name_specifier() const
     return first<NestedNameSpecifier>();
 }
 
+inline SyntaxElement NestedNameSpecifier::identifier() const
+{
+    return first_token(token_kind::identifier);
+}
+
 inline bool NestedNamespaceDefinition::accepts(syntax_kind k)
 {
     return k == syntax_kind::nested_namespace_definition;
@@ -8602,6 +9000,11 @@ inline bool NestedRequirement::accepts(syntax_kind k)
 inline ConstraintExpression NestedRequirement::constraint_expression() const
 {
     return first<ConstraintExpression>();
+}
+
+inline SyntaxElement NestedRequirement::identifier() const
+{
+    return first_token(token_kind::identifier);
 }
 
 inline bool NewDeclarator::accepts(syntax_kind k)
@@ -8661,6 +9064,11 @@ inline ExpressionList NewPlacement::expression_list() const
     return first<ExpressionList>();
 }
 
+inline SyntaxElement NewPlacement::identifier() const
+{
+    return first_token(token_kind::identifier);
+}
+
 inline bool NewTypeId::accepts(syntax_kind k)
 {
     return k == syntax_kind::new_type_id;
@@ -8686,6 +9094,11 @@ inline Expression NoexceptExpression::expression() const
     return first<Expression>();
 }
 
+inline SyntaxElement NoexceptExpression::identifier() const
+{
+    return first_token(token_kind::identifier);
+}
+
 inline bool NoexceptSpecifier::accepts(syntax_kind k)
 {
     return k == syntax_kind::noexcept_specifier;
@@ -8694,6 +9107,11 @@ inline bool NoexceptSpecifier::accepts(syntax_kind k)
 inline ConstantExpression NoexceptSpecifier::constant_expression() const
 {
     return first<ConstantExpression>();
+}
+
+inline SyntaxElement NoexceptSpecifier::identifier() const
+{
+    return first_token(token_kind::identifier);
 }
 
 inline bool NoptrAbstractDeclarator::accepts(syntax_kind k)
@@ -8714,6 +9132,11 @@ inline ConstantExpression NoptrAbstractDeclarator::constant_expression() const
 inline ParametersAndQualifiers NoptrAbstractDeclarator::parameters_and_qualifiers() const
 {
     return first<ParametersAndQualifiers>();
+}
+
+inline SyntaxElement NoptrAbstractDeclarator::identifier() const
+{
+    return first_token(token_kind::identifier);
 }
 
 inline bool NoptrDeclarator::accepts(syntax_kind k)
@@ -8742,6 +9165,11 @@ inline NoptrNewDeclarator NoptrNewDeclarator::noptr_new_declarator() const
     return first<NoptrNewDeclarator>();
 }
 
+inline SyntaxElement NoptrNewDeclarator::identifier() const
+{
+    return first_token(token_kind::identifier);
+}
+
 inline bool OpaqueEnumDeclaration::accepts(syntax_kind k)
 {
     return k == syntax_kind::opaque_enum_declaration;
@@ -8767,6 +9195,11 @@ inline EnumKey OpaqueEnumDeclaration::enum_key() const
     return first<EnumKey>();
 }
 
+inline SyntaxElement OpaqueEnumDeclaration::identifier() const
+{
+    return first_token(token_kind::identifier);
+}
+
 inline bool OperatorFunctionId::accepts(syntax_kind k)
 {
     return k == syntax_kind::operator_function_id;
@@ -8775,6 +9208,11 @@ inline bool OperatorFunctionId::accepts(syntax_kind k)
 inline bool OperatorTemplateId::accepts(syntax_kind k)
 {
     return k == syntax_kind::template_id;
+}
+
+inline SyntaxElement OperatorTemplateId::identifier() const
+{
+    return first_token(token_kind::identifier);
 }
 
 inline bool OrdinaryFunctionBody::accepts(syntax_kind k)
@@ -8792,6 +9230,11 @@ inline CtorInitializer OrdinaryFunctionBody::ctor_initializer() const
     return first<CtorInitializer>();
 }
 
+inline SyntaxElement OrdinaryFunctionBody::string_literal() const
+{
+    return first_token(token_kind::literal);
+}
+
 inline bool PackDeclaratorId::accepts(syntax_kind k)
 {
     return k == syntax_kind::declarator_id;
@@ -8800,6 +9243,11 @@ inline bool PackDeclaratorId::accepts(syntax_kind k)
 inline IdExpression PackDeclaratorId::id_expression() const
 {
     return first<IdExpression>();
+}
+
+inline SyntaxElement PackDeclaratorId::identifier() const
+{
+    return first_token(token_kind::identifier);
 }
 
 inline bool ParameterClause::accepts(syntax_kind k)
@@ -8903,6 +9351,11 @@ inline ExpressionList ParenthesizedInitializer::expression_list() const
     return first<ExpressionList>();
 }
 
+inline SyntaxElement ParenthesizedInitializer::identifier() const
+{
+    return first_token(token_kind::identifier);
+}
+
 inline bool ParenthesizedNewInitializer::accepts(syntax_kind k)
 {
     return k == syntax_kind::new_initializer;
@@ -8911,6 +9364,11 @@ inline bool ParenthesizedNewInitializer::accepts(syntax_kind k)
 inline ExpressionList ParenthesizedNewInitializer::expression_list() const
 {
     return first<ExpressionList>();
+}
+
+inline SyntaxElement ParenthesizedNewInitializer::identifier() const
+{
+    return first_token(token_kind::identifier);
 }
 
 inline bool ParenthesizedOrThis::accepts(syntax_kind k)
@@ -8923,6 +9381,11 @@ inline Expression ParenthesizedOrThis::expression() const
     return first<Expression>();
 }
 
+inline SyntaxElement ParenthesizedOrThis::identifier() const
+{
+    return first_token(token_kind::identifier);
+}
+
 inline bool PlaceholderTypeSpecifier::accepts(syntax_kind k)
 {
     return k == syntax_kind::placeholder_type_specifier;
@@ -8931,6 +9394,11 @@ inline bool PlaceholderTypeSpecifier::accepts(syntax_kind k)
 inline TypeConstraint PlaceholderTypeSpecifier::type_constraint() const
 {
     return first<TypeConstraint>();
+}
+
+inline SyntaxElement PlaceholderTypeSpecifier::identifier() const
+{
+    return first_token(token_kind::identifier);
 }
 
 inline bool PmExpression::accepts(syntax_kind k)
@@ -8967,6 +9435,11 @@ inline PtrDeclarator PointerDeclarator::ptr_declarator() const
 inline PtrOperator PointerDeclarator::ptr_operator() const
 {
     return first<PtrOperator>();
+}
+
+inline SyntaxElement PointerDeclarator::identifier() const
+{
+    return first_token(token_kind::identifier);
 }
 
 inline bool PointerNewDeclarator::accepts(syntax_kind k)
@@ -9088,6 +9561,11 @@ inline NestedNameSpecifier QualifiedClassHeadName::nested_name_specifier() const
     return first<NestedNameSpecifier>();
 }
 
+inline SyntaxElement QualifiedClassHeadName::identifier() const
+{
+    return first_token(token_kind::identifier);
+}
+
 inline bool QualifiedClassName::accepts(syntax_kind k)
 {
     return k == syntax_kind::class_or_decltype;
@@ -9096,6 +9574,11 @@ inline bool QualifiedClassName::accepts(syntax_kind k)
 inline NestedNameSpecifier QualifiedClassName::nested_name_specifier() const
 {
     return first<NestedNameSpecifier>();
+}
+
+inline SyntaxElement QualifiedClassName::identifier() const
+{
+    return first_token(token_kind::identifier);
 }
 
 inline bool QualifiedId::accepts(syntax_kind k)
@@ -9113,6 +9596,11 @@ inline UnqualifiedId QualifiedId::unqualified_id() const
     return first<UnqualifiedId>();
 }
 
+inline SyntaxElement QualifiedId::identifier() const
+{
+    return first_token(token_kind::identifier);
+}
+
 inline bool QualifiedNamespaceSpecifier::accepts(syntax_kind k)
 {
     return k == syntax_kind::qualified_namespace_specifier;
@@ -9121,6 +9609,11 @@ inline bool QualifiedNamespaceSpecifier::accepts(syntax_kind k)
 inline NestedNameSpecifier QualifiedNamespaceSpecifier::nested_name_specifier() const
 {
     return first<NestedNameSpecifier>();
+}
+
+inline SyntaxElement QualifiedNamespaceSpecifier::identifier() const
+{
+    return first_token(token_kind::identifier);
 }
 
 inline bool RelationalExpression::accepts(syntax_kind k)
@@ -9205,6 +9698,11 @@ inline ConstraintLogicalOrExpression RequiresClause::constraint_logical_or_expre
     return first<ConstraintLogicalOrExpression>();
 }
 
+inline SyntaxElement RequiresClause::identifier() const
+{
+    return first_token(token_kind::identifier);
+}
+
 inline bool RequiresExpression::accepts(syntax_kind k)
 {
     return k == syntax_kind::requires_expression;
@@ -9230,6 +9728,11 @@ inline TypeConstraint ReturnTypeRequirement::type_constraint() const
     return first<TypeConstraint>();
 }
 
+inline SyntaxElement ReturnTypeRequirement::identifier() const
+{
+    return first_token(token_kind::identifier);
+}
+
 inline bool SelectionStatement::accepts(syntax_kind k)
 {
     return k == syntax_kind::selection_statement;
@@ -9238,6 +9741,11 @@ inline bool SelectionStatement::accepts(syntax_kind k)
 inline Condition SelectionStatement::condition() const
 {
     return first<Condition>();
+}
+
+inline SyntaxElement SelectionStatement::identifier() const
+{
+    return first_token(token_kind::identifier);
 }
 
 inline bool ShiftExpression::accepts(syntax_kind k)
@@ -9259,6 +9767,11 @@ inline bool ShiftOperation::accepts(syntax_kind k)
 inline bool SimpleCapture::accepts(syntax_kind k)
 {
     return k == syntax_kind::simple_capture;
+}
+
+inline SyntaxElement SimpleCapture::identifier() const
+{
+    return first_token(token_kind::identifier);
 }
 
 inline bool SimpleDeclaration::accepts(syntax_kind k)
@@ -9291,6 +9804,11 @@ inline Initializer SimpleDeclaration::initializer() const
     return first<Initializer>();
 }
 
+inline SyntaxElement SimpleDeclaration::identifier() const
+{
+    return first_token(token_kind::identifier);
+}
+
 inline bool SimpleRequirement::accepts(syntax_kind k)
 {
     return k == syntax_kind::simple_requirement;
@@ -9299,6 +9817,11 @@ inline bool SimpleRequirement::accepts(syntax_kind k)
 inline Expression SimpleRequirement::expression() const
 {
     return first<Expression>();
+}
+
+inline SyntaxElement SimpleRequirement::identifier() const
+{
+    return first_token(token_kind::identifier);
 }
 
 inline bool SimpleTemplateId::accepts(syntax_kind k)
@@ -9319,6 +9842,11 @@ inline bool SimpleTypeName::accepts(syntax_kind k)
 inline NestedNameSpecifier SimpleTypeName::nested_name_specifier() const
 {
     return first<NestedNameSpecifier>();
+}
+
+inline SyntaxElement SimpleTypeName::identifier() const
+{
+    return first_token(token_kind::identifier);
 }
 
 inline bool SimpleTypeSpecifier::accepts(syntax_kind k)
@@ -9345,6 +9873,11 @@ inline AttributeList StandardAttributeSpecifier::attribute_list() const
 inline AttributeUsingPrefix StandardAttributeSpecifier::attribute_using_prefix() const
 {
     return first<AttributeUsingPrefix>();
+}
+
+inline SyntaxElement StandardAttributeSpecifier::identifier() const
+{
+    return first_token(token_kind::identifier);
 }
 
 inline bool Statement::accepts(syntax_kind k)
@@ -9391,6 +9924,16 @@ inline bool StaticAssertDeclaration::accepts(syntax_kind k)
 inline ConstantExpression StaticAssertDeclaration::constant_expression() const
 {
     return first<ConstantExpression>();
+}
+
+inline SyntaxElement StaticAssertDeclaration::identifier() const
+{
+    return first_token(token_kind::identifier);
+}
+
+inline SyntaxElement StaticAssertDeclaration::string_literal() const
+{
+    return first_token(token_kind::literal);
 }
 
 inline bool SuffixedDeclarator::accepts(syntax_kind k)
@@ -9532,6 +10075,11 @@ inline AssignmentExpression ThrowExpression::assignment_expression() const
     return first<AssignmentExpression>();
 }
 
+inline SyntaxElement ThrowExpression::identifier() const
+{
+    return first_token(token_kind::identifier);
+}
+
 inline bool TrailingAbstractDeclarator::accepts(syntax_kind k)
 {
     return k == syntax_kind::abstract_declarator;
@@ -9575,6 +10123,11 @@ inline ParametersAndQualifiers TrailingReturnDeclarator::parameters_and_qualifie
 inline TrailingReturnType TrailingReturnDeclarator::trailing_return_type() const
 {
     return first<TrailingReturnType>();
+}
+
+inline SyntaxElement TrailingReturnDeclarator::identifier() const
+{
+    return first_token(token_kind::identifier);
 }
 
 inline bool TrailingReturnType::accepts(syntax_kind k)
@@ -9702,6 +10255,11 @@ inline SimpleTemplateId TypeRequirement::type_name() const
     return first<SimpleTemplateId>();
 }
 
+inline SyntaxElement TypeRequirement::identifier() const
+{
+    return first_token(token_kind::identifier);
+}
+
 inline bool TypeSpecifier::accepts(syntax_kind k)
 {
     static const uint64_t kinds[] = {0x7c00u, 0x0u, 0x9000000000u, 0x31000u};
@@ -9733,6 +10291,11 @@ inline TypeSpecifierSeq TypeSpecifierSeq::type_specifier_seq() const
     return first<TypeSpecifierSeq>();
 }
 
+inline SyntaxElement TypeSpecifierSeq::identifier() const
+{
+    return first_token(token_kind::identifier);
+}
+
 inline bool TypenameSpecifier::accepts(syntax_kind k)
 {
     return k == syntax_kind::typename_specifier;
@@ -9746,6 +10309,11 @@ inline NestedNameSpecifier TypenameSpecifier::nested_name_specifier() const
 inline SimpleTemplateId TypenameSpecifier::simple_template_id() const
 {
     return first<SimpleTemplateId>();
+}
+
+inline SyntaxElement TypenameSpecifier::identifier() const
+{
+    return first_token(token_kind::identifier);
 }
 
 inline bool UnaryExpression::accepts(syntax_kind k)
@@ -9767,6 +10335,11 @@ inline bool UnaryOperation::accepts(syntax_kind k)
 inline TypeId UnaryOperation::type_id() const
 {
     return first<TypeId>();
+}
+
+inline SyntaxElement UnaryOperation::identifier() const
+{
+    return first_token(token_kind::identifier);
 }
 
 inline bool UnnamedNamespaceDefinition::accepts(syntax_kind k)
@@ -9820,6 +10393,11 @@ inline UnqualifiedId UsingDeclarator::unqualified_id() const
     return first<UnqualifiedId>();
 }
 
+inline SyntaxElement UsingDeclarator::identifier() const
+{
+    return first_token(token_kind::identifier);
+}
+
 inline bool UsingDeclaratorList::accepts(syntax_kind k)
 {
     static const uint64_t kinds[] = {0x0u, 0x0u, 0x18000u, 0x0u};
@@ -9849,6 +10427,11 @@ inline AttributeSpecifierSeq UsingDirective::attribute_specifier_seq() const
 inline NestedNameSpecifier UsingDirective::nested_name_specifier() const
 {
     return first<NestedNameSpecifier>();
+}
+
+inline SyntaxElement UsingDirective::identifier() const
+{
+    return first_token(token_kind::identifier);
 }
 
 inline bool UsingEnumDeclaration::accepts(syntax_kind k)
@@ -9884,6 +10467,11 @@ inline AssignmentExpression YieldExpression::assignment_expression() const
 inline BracedInitList YieldExpression::braced_init_list() const
 {
     return first<BracedInitList>();
+}
+
+inline SyntaxElement YieldExpression::identifier() const
+{
+    return first_token(token_kind::identifier);
 }
 
 /* the view of s's kind if that kind is a member of S, else s itself */

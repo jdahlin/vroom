@@ -20,9 +20,11 @@ nonterminal (X-seq: X | X-seq X, X-list: X | X-list , X) gets a range of
 its elements whether it is a node or the one element.  A node's child
 accessors come from its productions: one for each nonterminal whose kinds
 no other nonterminal of the production shares (the first child of those
-kinds), so that a position is known by the kind of what is there; the
-others are hand-written in syntax.h (SyntaxExtra<T>), as are questions
-about tokens.
+kinds), so that a position is known by the kind of what is there, and
+identifier() and string_literal() where an alternative has at most one
+of that token (an identifier also through a nonterminal that can be one,
+type-name, unqualified-id); the others are hand-written in syntax.h
+(SyntaxExtra<T>), as are other questions about tokens.
 
 Usage: src/tools/gen-syntax-views.py [--check]
 """
@@ -278,6 +280,35 @@ class Grammar:
             self.memo[nt] = out
         return out
 
+    def derives_identifier(self, nt, stack=()):
+        """whether a position of nt can be a bare identifier token
+        (type-name, unqualified-id): the parser makes no node of it then"""
+        if nt == 'identifier':
+            return True
+        if nt in stack or nt not in self.g:
+            return False
+        for a in self.g[nt]:
+            t = [x for x in a.split() if not x.endswith('_opt')]
+            if t == ['identifier']:
+                return True
+            s = self.single(a, nt)
+            if s and self.derives_identifier(s, stack + (nt,)):
+                return True
+        return False
+
+    def tokens(self, alternative):
+        """the token positions of an alternative that get an accessor:
+        identifier (also through a nonterminal that can be one) and
+        string-literal"""
+        out = []
+        for sym in alternative.split():
+            b = base(sym)
+            if b == 'string-literal':
+                out.append('string_literal')
+            elif b == 'identifier' or (b in self.g and self.derives_identifier(b)):
+                out.append('identifier')
+        return out
+
     def own_alternatives(self, nt):
         return sorted(a for a in self.g.get(nt, ()) if not self.single(a, nt, strict=True))
 
@@ -353,6 +384,7 @@ def generate():
 
     # child accessors of each node kind
     accessors = {}  # type -> [(name, type)]
+    tokens = {}  # type -> [identifier, string_literal]
     for k, nt in G.kinds:
         t = kind_type[k]
         if nt not in G.g:
@@ -383,6 +415,15 @@ def generate():
                 continue
             out.append((name, nt_type[b]))
         accessors[t] = out
+        # token accessors: a token kind at most once in each alternative
+        counts = {}
+        for a in alternatives:
+            row = G.tokens(a)
+            for tok in set(row):
+                counts[tok] = max(counts.get(tok, 0), row.count(tok))
+        tokens[t] = [tok for tok, c in sorted(counts.items())
+                     if c == 1 and tok not in extra.get(t, ())
+                     and tok not in {n for n, _ in out}]
 
     lines = []
     w = lines.append
@@ -450,6 +491,8 @@ def generate():
             w('    SyntaxRange<%s> %s() const;' % (nt_type[e], plural(snake(e))))
         for name, rt in accessors.get(t, []):
             w('    %s %s() const;' % (rt, name))
+        for tok in tokens.get(t, []):
+            w('    SyntaxElement %s() const;' % tok)
         w('};')
     w('')
     # definitions
@@ -493,6 +536,12 @@ def generate():
             w('inline %s %s::%s() const' % (rt, t, name))
             w('{')
             w('    return first<%s>();' % rt)
+            w('}')
+        for tok in tokens.get(t, []):
+            w('')
+            w('inline SyntaxElement %s::%s() const' % (t, tok))
+            w('{')
+            w('    return first_token(token_kind::%s);' % {'identifier': 'identifier', 'string_literal': 'literal'}[tok])
             w('}')
     w('')
     w("/* the view of s's kind if that kind is a member of S, else s itself */")

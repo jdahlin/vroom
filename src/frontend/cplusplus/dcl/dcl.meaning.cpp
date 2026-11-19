@@ -156,7 +156,7 @@ analysis_result semantic_analysis::pointer_operator(node_index op,
     for (auto c : syntax(op).elements()) {
         if (syntax_is_attribute(tree, c))
             return not_supported(op, "dcl.attr");
-        if (c.is(syntax_kind::nested_name_specifier)) {
+        if (c.nested_name_specifier()) {
             /* [dcl.mptr]/1: "In a declaration T D where D has the form
                    nested-name-specifier * attribute-specifier-seq_opt
                    cv-qualifier-seq_opt D1
@@ -230,7 +230,7 @@ analysis_result semantic_analysis::pointer_operator(node_index op,
             analysis_result r = reference(op, true, type, m);
             if (r != analysis_result::well_formed)
                 return r;
-        } else if (c.is(syntax_kind::cv_qualifier_seq)) {
+        } else if (c.cv_qualifier_seq()) {
             /* [dcl.ptr]/1: the cv-qualifiers apply to the pointer */
             for (auto q : c.elements()) {
                 if (!q.is_token())
@@ -390,9 +390,8 @@ token_index semantic_analysis::declarator_id(syntax_child d) const
         return e.token();
     if (e.is_token())
         return 0;
-    if (!e.is(syntax_kind::init_declarator) && !e.is(syntax_kind::declarator) &&
-        !e.is(syntax_kind::ptr_declarator) &&
-        !e.is(syntax_kind::noptr_declarator))
+    if (!e.is(syntax_kind::init_declarator, syntax_kind::declarator,
+              syntax_kind::ptr_declarator, syntax_kind::noptr_declarator))
         return 0;
     for (auto c : e.elements()) {
         if (c.is_token()) {
@@ -401,8 +400,7 @@ token_index semantic_analysis::declarator_id(syntax_child d) const
             continue;
         }
         token_index id = declarator_id(c);
-        if (id || c.is(syntax_kind::qualified_id) ||
-            c.is(syntax_kind::unqualified_id))
+        if (id || c.qualified_id() || c.is(syntax_kind::unqualified_id))
             return id;
     }
     return 0;
@@ -413,18 +411,16 @@ token_index semantic_analysis::declarator_id(syntax_child d) const
    or the one declarator of a function template's declaration) */
 static bool declares_by_declarator(SyntaxRef d)
 {
-    while ((d.is(syntax_kind::template_declaration) ||
-            d.is(syntax_kind::explicit_specialization)) &&
+    while ((d.template_declaration() || d.explicit_specialization()) &&
            d.back().is_node())
         d = d.back();
-    if (d.is(syntax_kind::function_definition))
+    if (d.function_definition())
         return true;
-    if (!d.is(syntax_kind::simple_declaration))
+    if (!d.simple_declaration())
         return false;
     for (auto c : d.elements())
-        if (c.is(syntax_kind::init_declarator_list) ||
-            c.is(syntax_kind::noptr_declarator) ||
-            c.is(syntax_kind::ptr_declarator))
+        if (c.is(syntax_kind::init_declarator_list,
+                 syntax_kind::noptr_declarator, syntax_kind::ptr_declarator))
             return true;
     return false;
 }
@@ -468,7 +464,7 @@ void semantic_analysis::hold_names(node_index declaration)
             if (c.is(syntax_kind::init_declarator_list)) {
                 for (auto i : c.elements())
                     ids.append(declarator_id(i));
-            } else if (c.is(syntax_kind::identifier_list)) {
+            } else if (c.identifier_list()) {
                 /* [dcl.struct.bind]/1: a structured binding declaration's
                    identifiers */
                 for (auto i : c.elements())
@@ -779,7 +775,7 @@ analysis_result semantic_analysis::declarator(node_index declaration,
     case syntax_kind::ptr_declarator:
     case syntax_kind::ptr_abstract_declarator: {
         /* ptr-operator ptr-declarator */
-        if (!e[0].is(syntax_kind::ptr_operator))
+        if (!e[0].ptr_operator())
             return not_supported(n, "dcl.decl");
         analysis_result r = pointer_operator(e[0], type, m);
         if (r != analysis_result::well_formed || e.size() == 1)
@@ -798,14 +794,14 @@ analysis_result semantic_analysis::declarator(node_index declaration,
         /* [dcl.meaning]/1: a member of a class declared again, the
            declarator-id alone (a static data member's definition,
            [class.static.data]): class-name :: identifier */
-        if (e.size() != 2 || !e[0].is(syntax_kind::nested_name_specifier) ||
-            !e[1].is_identifier())
+        auto q = e.qualified_id();
+        if (q.size() != 2 || !q.nested_name_specifier() || !q.identifier())
             return not_supported(n, "dcl.meaning");
-        analysis_result r = declarator_qualifier(e[0], m);
+        analysis_result r = declarator_qualifier(q.nested_name_specifier(), m);
         if (r != analysis_result::well_formed)
             return r;
         m.has_id = true;
-        m.id = e[1].token();
+        m.id = q.identifier().token();
         return analysis_result::well_formed;
     }
     case syntax_kind::declarator:
@@ -817,18 +813,18 @@ analysis_result semantic_analysis::declarator(node_index declaration,
            sequences here */
         for (uint32_t k = 1; k < e.size(); k++) {
             auto c = e[k];
-            if (c.is(syntax_kind::gnu_attribute_specifier)) {
+            if (c.gnu_attribute_specifier()) {
                 analysis_result r = gnu_attribute_specifier(c, m);
                 if (r != analysis_result::well_formed)
                     return r;
                 continue;
             }
-            if (!c.is(syntax_kind::gnu_asm_label) || c.size() != 4)
+            auto literal = c.gnu_asm_label().string_literal();
+            if (c.size() != 4 || !literal)
                 return not_supported(n, "ext.gnu");
-            auto literal = c[2];
             owned_buffer written;
-            tokens.spelling(syntax_child(literal).index(), written.get());
-            if (!literal.is_token() || written.size() < 2 ||
+            tokens.spelling(literal.token(), written.get());
+            if (written.size() < 2 ||
                 memchr(written.data(), '\\', written.size()))
                 return not_supported(n, "ext.gnu");
             m.asm_label = literal.token();
@@ -896,9 +892,8 @@ analysis_result semantic_analysis::declarator(node_index declaration,
             head = e[1];
             i = 2;
         }
-    } else if (declarator_template_id &&
-               e[0].is(syntax_kind::simple_template_id) && e[0].size() >= 3 &&
-               e[0][0].is_identifier()) {
+    } else if (declarator_template_id && e[0].simple_template_id() &&
+               e[0].size() >= 3 && e[0][0].is_identifier()) {
         /* [temp.expl.spec]/1, [temp.explicit]/3: a specialization's
            template-id (its template-name the declarator-id's name) */
         m.template_id = e[0];
@@ -906,36 +901,34 @@ analysis_result semantic_analysis::declarator(node_index declaration,
         has_head = true;
         head = e[0][0];
         i = 1;
-    } else if (e[0].is(syntax_kind::operator_function_id) ||
-               e[0].is(syntax_kind::literal_operator_id) ||
-               e[0].is(syntax_kind::conversion_function_id)) {
+    } else if (e[0].operator_function_id() || e[0].literal_operator_id() ||
+               e[0].conversion_function_id()) {
         /* [over.oper]/1, [over.literal]/1: an operator function's name */
         has_head = true;
         head = e[0];
         i = 1;
-    } else if (e[0].is(syntax_kind::qualified_id)) {
+    } else if (e[0].qualified_id()) {
         /* [dcl.meaning]/1: "When the declarator-id is qualified, the
            declaration shall refer to a previously declared member of the
            class or namespace to which the qualifier refers": a
            nested-name-specifier that is one class-name of the global
            namespace */
-        auto q = e[0];
+        auto q = e[0].qualified_id();
         SyntaxElement name;
         if (q.size() == 2)
             name = q[1];
-        if (q.size() == 2 && name.is(syntax_kind::unqualified_id) &&
-            name.size() == 2 && name[0].is(TILDE)) {
+        if (auto dtor = name.destructor_type_id();
+            q.size() == 2 && dtor.size() == 2 && dtor.identifier()) {
             /* [class.dtor]/1: ~ class-name */
             m.destructor = true;
-            name = name[1];
+            name = dtor.identifier();
         }
         /* [over.oper]/1: an operator function's name, X::operator@ */
-        bool operator_name =
-            !m.destructor && name.is(syntax_kind::operator_function_id);
-        if (q.size() != 2 || !q[0].is(syntax_kind::nested_name_specifier) ||
+        bool operator_name = !m.destructor && name.operator_function_id();
+        if (q.size() != 2 || !q.nested_name_specifier() ||
             (!operator_name && !name.is_identifier()))
             return not_supported(q, "dcl.meaning");
-        analysis_result r = declarator_qualifier(q[0], m);
+        analysis_result r = declarator_qualifier(q.nested_name_specifier(), m);
         if (r != analysis_result::well_formed)
             return r;
         if (m.destructor && !m.qualifier)
@@ -957,13 +950,12 @@ analysis_result semantic_analysis::declarator(node_index declaration,
             current_scope = m.namespace_qualifier;
     } else if (e[0].is(syntax_kind::unqualified_id)) {
         /* [class.dtor]/1: ~ class-name, in its class */
-        auto u = e[0];
-        if (!in_member_declarator || u.size() != 2 || !u[0].is(TILDE) ||
-            !u[1].is_identifier())
-            return not_supported(u, "dcl.meaning");
+        auto u = e[0].destructor_type_id();
+        if (!in_member_declarator || u.size() != 2 || !u.identifier())
+            return not_supported(e[0], "dcl.meaning");
         m.destructor = true;
         has_head = true;
-        head = u[1];
+        head = u.identifier();
         i = 1;
     }
     struct suffix {
@@ -984,7 +976,7 @@ analysis_result semantic_analysis::declarator(node_index declaration,
     owned_array<suffix> suffixes;
     while (i < e.size()) {
         auto c = e[i];
-        if (c.is(syntax_kind::gnu_attribute_specifier)) {
+        if (c.gnu_attribute_specifier()) {
             analysis_result r = gnu_attribute_specifier(c, m);
             if (r != analysis_result::well_formed)
                 return r;
@@ -993,7 +985,7 @@ analysis_result semantic_analysis::declarator(node_index declaration,
         }
         if (syntax_is_attribute(tree, c))
             return not_supported(n, "dcl.attr");
-        if (c.is(syntax_kind::parameters_and_qualifiers)) {
+        if (c.parameters_and_qualifiers()) {
             /* [ext:gnu_attributes] after the parameters */
             for (auto a : c.elements())
                 if (a.is_node() && only_gnu_attributes(tree, a)) {

@@ -118,6 +118,12 @@ class SyntaxRef
     {
         return n && node().kind == k;
     }
+    /* whether the node is of one of the kinds */
+    template <class... K>
+    bool is(syntax_kind k, syntax_kind k2, K... more) const
+    {
+        return is(k) || is(k2, more...);
+    }
     /* whether child c is a node of kind k */
     bool is(syntax_child c, syntax_kind k) const
     {
@@ -168,6 +174,8 @@ class SyntaxRef
         }
         return {};
     }
+    /* the first child that is a token of kind k, {} if none */
+    SyntaxElement first_token(token_kind k) const;
     const SyntaxContext *cx = nullptr;
     node_index n = 0;
 };
@@ -289,6 +297,16 @@ inline SyntaxElement SyntaxRef::back() const
     if (!size())
         return {};
     return (*this)[size() - 1];
+}
+
+inline SyntaxElement SyntaxRef::first_token(token_kind k) const
+{
+    for (uint32_t i = 0; i < size(); i++) {
+        syntax_child c = children()[i];
+        if (c.is_token() && cx->tokens[c.index()].kind == k)
+            return SyntaxElement(*cx, c);
+    }
+    return {};
 }
 
 inline SyntaxElements SyntaxRef::elements() const
