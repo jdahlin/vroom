@@ -2885,6 +2885,7 @@ uint32_t c_lowering::call(const semantic_node &n)
     bool here = at_result_object;
     qualified_type function_type = node(n.a).type;
     uint32_t callee = 0;
+    uint32_t builtin = 0;
     owned_array<uint32_t> arguments;
     /* a call through a pointer to member function: its statements
        first ([expr.mptr.oper]/6) */
@@ -2934,14 +2935,23 @@ uint32_t c_lowering::call(const semantic_node &n)
                 AST_QUALIFIED_TYPE_UNQUALIFIED(
                     type(record(function_type).operand, n.at)),
                 0);
-        callee = expression(n.a);
-        if (!callee)
-            return 0;
-        if (record(function_type).kind == type_kind::pointer)
-            function_type = record(function_type).operand;
-        else
-            callee = cast(callee, ast_builder_type_pointer(c, type_of(callee)),
-                          AST_CAST_FUNCTION_DECAY);
+        if (node(named).kind == semantic_kind::entity &&
+            (analysis.entity_table[node(named).a].gnu_flags &
+             gnu_compiler_builtin))
+            /* [ext:gnu_library_builtins] no function: the C front end's
+               builtin node, made below */
+            builtin = analysis.entity_table[node(named).a].name;
+        else {
+            callee = expression(n.a);
+            if (!callee)
+                return 0;
+            if (record(function_type).kind == type_kind::pointer)
+                function_type = record(function_type).operand;
+            else
+                callee =
+                    cast(callee, ast_builder_type_pointer(c, type_of(callee)),
+                         AST_CAST_FUNCTION_DECAY);
+        }
         if (n.b) {
             /* the implicit object argument: the object's address, the
                function's first parameter */
@@ -2973,9 +2983,17 @@ uint32_t c_lowering::call(const semantic_node &n)
     ast_qualified_type t = AST_QUALIFIED_TYPE_UNQUALIFIED(type(result, n.at));
     uint32_t count = static_cast<uint32_t>(arguments.size());
     bool initializes = here;
-    uint32_t made =
-        make(AST_NODE_CALL, t, callee,
-             ast_builder_list(c, arguments.data(), count), count, 0, 0);
+    uint32_t made = 0;
+    if (builtin) {
+        size_t length = 0;
+        const char *spelling =
+            tokens.pp.identifier_spelling(builtin - 1, &length);
+        made = ast_builder_builtin_call(c, spelling, length, t,
+                                        arguments.data(), count);
+    } else {
+        made = make(AST_NODE_CALL, t, callee,
+                    ast_builder_list(c, arguments.data(), count), count, 0, 0);
+    }
     if (member_pointer_call) {
         through.append(
             ast_builder_node(c, AST_NODE_EXPRESSION, t, made, 0, 0, 0, 0));

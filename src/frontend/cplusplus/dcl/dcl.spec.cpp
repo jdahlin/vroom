@@ -96,6 +96,11 @@ name_class classify(parser &p, unsigned ahead, unsigned *length,
             else
                 kind =
                     p.names.lookup_unqualified(name, &found, &found_dependent);
+            /* [ext:gnu_library_builtins] a builtin function clang declares
+               at its first use: a function's name, no type */
+            if (!qualified && kind == name_kind::not_declared &&
+                p.names_compiler_builtin(name))
+                kind = name_kind::function;
         }
         unsigned after = i + 1;
         bool arguments = false;

@@ -282,6 +282,37 @@ uint32_t ast_builder_list(cc *c, const uint32_t *items, uint32_t count)
     return cc_id_list_freeze(c, &l);
 }
 
+/* a builtin the table's own node is (a library builtin is a call of the
+   library function: not one) */
+static const cc_builtin *ast_builder_builtin(const char *name, size_t length)
+{
+    for (const cc_builtin *b = cc_builtin_table_get(); b->name; b++)
+        if (b->id != CC_BUILTIN_LIBRARY && strlen(b->name) == length &&
+            !memcmp(b->name, name, length))
+            return b;
+    return NULL;
+}
+
+const char *ast_builder_builtin_signature(const char *name, size_t length)
+{
+    const cc_builtin *b = ast_builder_builtin(name, length);
+    return b ? b->sig : NULL;
+}
+
+uint32_t ast_builder_builtin_call(cc *c, const char *name, size_t length,
+                                  ast_qualified_type t, const uint32_t *args,
+                                  uint32_t count)
+{
+    const cc_builtin *b = ast_builder_builtin(name, length);
+    if (!b)
+        return 0;
+    cc_id_list list;
+    cc_id_list_init(&list);
+    for (uint32_t i = 0; i < count; i++)
+        cc_id_list_append(c, &list, args[i]);
+    return cc_builtin_node_new(c, b->id, t, 0, &list);
+}
+
 uint32_t ast_builder_atomic_load(cc *c, ast_qualified_type t, uint32_t pointer,
                                  uint32_t order)
 {
