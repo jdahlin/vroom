@@ -1913,8 +1913,8 @@ uint32_t semantic_analysis::subobject_destructions(entity_index c,
  * constructors take base initializers").
  */
 analysis_result
-semantic_analysis::special_member_body(function_definition_syntax definition,
-                                       function_body_syntax body)
+semantic_analysis::special_member_body(FunctionDefinition definition,
+                                       FunctionBody body)
 {
     syntax_child init = body.ctor_initializer();
     if (!body.compound_statement().bits)

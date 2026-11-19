@@ -154,13 +154,13 @@ analysis_result semantic_analysis::declaration(node_index n)
 
 analysis_result semantic_analysis::declaration_by_kind(node_index n)
 {
-    return syntax(n).declaration().visit(overloaded{
-        [&](function_definition_syntax f) { return function_definition(f); },
-        [&](declaration_syntax d) { return other_declaration(d); }});
+    return syntax(n).declaration().visit(
+        this, &semantic_analysis::function_definition,
+        &semantic_analysis::other_declaration);
 }
 
 /* a declaration of an alternative without a view of its own */
-analysis_result semantic_analysis::other_declaration(declaration_syntax d)
+analysis_result semantic_analysis::other_declaration(Declaration d)
 {
     node_index n = d;
     switch (d.kind()) {

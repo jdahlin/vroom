@@ -10,7 +10,7 @@
  *     if (body.deleted()) ...
  *
  * A view is a handle (the tree's context and a node index) built where it
- * is used; nothing is stored in the tree or allocated.  syntax_ref is the
+ * is used; nothing is stored in the tree or allocated.  SyntaxRef is the
  * untyped handle, with one accessor per nonterminal that has a view
  * (SYNTAX_VIEW below) which gives that view, or an empty one when the node
  * is of another kind.  An empty view answers every question with "none"
@@ -26,34 +26,35 @@ namespace cplusplus
 
 /* what a view reads: the tree, its tokens, and the parser's keyword
    table (parser::keyword_of) */
-struct syntax_context {
+struct SyntaxContext {
     const syntax_tree &tree;
     token_stream &tokens;
     const parser &p;
 };
 
-/* the nonterminals with a view: SYNTAX_VIEW(name), the view's type is
-   name_syntax and syntax_ref::name() gives it */
+/* the nonterminals with a view: SYNTAX_VIEW(name, Type): the view's type
+   is Type, the nonterminal's name in CamelCase, and SyntaxRef::name()
+   gives it */
 #define SYNTAX_VIEWS(SYNTAX_VIEW)                                              \
-    SYNTAX_VIEW(declaration_seq)                                               \
-    SYNTAX_VIEW(declaration)                                                   \
-    SYNTAX_VIEW(function_definition)                                           \
-    SYNTAX_VIEW(function_body)
+    SYNTAX_VIEW(declaration_seq, DeclarationSeq)                               \
+    SYNTAX_VIEW(declaration, Declaration)                                      \
+    SYNTAX_VIEW(function_definition, FunctionDefinition)                       \
+    SYNTAX_VIEW(function_body, FunctionBody)
 
-#define SYNTAX_VIEW_DECLARE(name) struct name##_syntax;
+#define SYNTAX_VIEW_DECLARE(name, Type) struct Type;
 SYNTAX_VIEWS(SYNTAX_VIEW_DECLARE)
 #undef SYNTAX_VIEW_DECLARE
 
-class syntax_ref
+class SyntaxRef
 {
   public:
-    syntax_ref() = default;
-    syntax_ref(const syntax_context &cx, syntax_child c) : cx(&cx)
+    SyntaxRef() = default;
+    SyntaxRef(const SyntaxContext &cx, syntax_child c) : cx(&cx)
     {
         if (!c.is_token())
             n = c.index();
     }
-    syntax_ref(const syntax_context &cx, node_index n) : cx(&cx), n(n)
+    SyntaxRef(const SyntaxContext &cx, node_index n) : cx(&cx), n(n)
     {
     }
 
@@ -118,7 +119,7 @@ class syntax_ref
                preprocessing_op_or_punc_primary(t.op_or_punc) == op;
     }
 
-#define SYNTAX_VIEW_ACCESSOR(name) name##_syntax name() const;
+#define SYNTAX_VIEW_ACCESSOR(name, Type) Type name() const;
     SYNTAX_VIEWS(SYNTAX_VIEW_ACCESSOR)
 #undef SYNTAX_VIEW_ACCESSOR
 
@@ -127,7 +128,7 @@ class syntax_ref
     {
         return cx->tree[n];
     }
-    const syntax_context *cx = nullptr;
+    const SyntaxContext *cx = nullptr;
     node_index n = 0;
 };
 
@@ -144,10 +145,10 @@ class syntax_ref
  * first pass over a member-specification, a body kept as its tokens
  * (unparsed).  The parser makes a function-try-block its own node, which
  * stands in a function-definition in place of a function-body; it is a
- * function_body_syntax too.
+ * FunctionBody too.
  */
-struct function_body_syntax : syntax_ref {
-    using syntax_ref::syntax_ref;
+struct FunctionBody : SyntaxRef {
+    using SyntaxRef::SyntaxRef;
     static bool accepts(syntax_kind k)
     {
         return k == syntax_kind::function_body ||
@@ -212,17 +213,17 @@ struct function_body_syntax : syntax_ref {
  * ([ext:gnu_attributes] may come first too.)  The function-body is the
  * last child.
  */
-struct function_definition_syntax : syntax_ref {
-    using syntax_ref::syntax_ref;
+struct FunctionDefinition : SyntaxRef {
+    using SyntaxRef::SyntaxRef;
     static bool accepts(syntax_kind k)
     {
         return k == syntax_kind::function_definition;
     }
-    function_body_syntax body() const
+    FunctionBody body() const
     {
         if (!*this)
             return {};
-        syntax_ref last(*cx, (*this)[size() - 1]);
+        SyntaxRef last(*cx, (*this)[size() - 1]);
         return last.function_body();
     }
     /* the decl-specifier-seq ({} without one) */
@@ -255,13 +256,13 @@ struct function_definition_syntax : syntax_ref {
 
 /* the node children of a node, each as a view of type T (tokens are
    skipped): for (auto d : seq.declarations()) */
-template <class T> class syntax_range
+template <class T> class SyntaxRange
 {
   public:
     class iterator
     {
       public:
-        iterator(const syntax_context *cx, const syntax_child *at,
+        iterator(const SyntaxContext *cx, const syntax_child *at,
                  const syntax_child *end)
             : cx(cx), at(at), end(end)
         {
@@ -288,13 +289,13 @@ template <class T> class syntax_range
             while (at != end && (at->is_token() || !at->index()))
                 at++;
         }
-        const syntax_context *cx;
+        const SyntaxContext *cx;
         const syntax_child *at;
         const syntax_child *end;
     };
-    syntax_range() = default;
-    syntax_range(const syntax_context &cx, const syntax_child *first,
-                 uint32_t count)
+    SyntaxRange() = default;
+    SyntaxRange(const SyntaxContext &cx, const syntax_child *first,
+                uint32_t count)
         : cx(&cx), first(first), count(count)
     {
     }
@@ -308,18 +309,25 @@ template <class T> class syntax_range
     }
 
   private:
-    const syntax_context *cx = nullptr;
+    const SyntaxContext *cx = nullptr;
     const syntax_child *first = nullptr;
     uint32_t count = 0;
 };
 
 /* one callable from several lambdas, for visit:
-   d.visit(overloaded{[&](function_definition_syntax f) {...},
-                      [&](declaration_syntax other) {...}}) */
-template <class... F> struct overloaded : F... {
+   d.visit(Overloaded{[&](FunctionDefinition f) {...},
+                      [&](Declaration other) {...}}) */
+template <class... F> struct Overloaded : F... {
     using F::operator()...;
 };
-template <class... F> overloaded(F...) -> overloaded<F...>;
+template <class... F> Overloaded(F...) -> Overloaded<F...>;
+
+/* a member function of self as a callable for visit */
+template <class T, class R, class A>
+auto bind_member(T *self, R (T::*member)(A))
+{
+    return [self, member](A a) { return (self->*member)(a); };
+}
 
 /*
  * [dcl.pre]/1:
@@ -327,54 +335,60 @@ template <class... F> overloaded(F...) -> overloaded<F...>;
  *     declaration-seq:
  *         declaration declaration-seq_opt
  */
-struct declaration_seq_syntax : syntax_ref {
-    using syntax_ref::syntax_ref;
+struct DeclarationSeq : SyntaxRef {
+    using SyntaxRef::SyntaxRef;
     static bool accepts(syntax_kind k)
     {
         return k == syntax_kind::declaration_seq;
     }
-    syntax_range<declaration_syntax> declarations() const;
+    SyntaxRange<Declaration> declarations() const;
 };
 
 /*
  * [dcl.pre]/1: a declaration is one of its alternatives
  * (block-declaration, function-definition, template-declaration, ...).
  * visit calls f with the view of the alternative it is, for the
- * alternatives that have one, and with the declaration_syntax itself for
+ * alternatives that have one, and with the Declaration itself for
  * the others: a visitor without a case for an alternative with a view
  * does not compile.
  */
-struct declaration_syntax : syntax_ref {
-    using syntax_ref::syntax_ref;
+struct Declaration : SyntaxRef {
+    using SyntaxRef::SyntaxRef;
     static bool accepts(syntax_kind)
     {
         return true;
+    }
+    /* the same with member functions of self, one per alternative:
+       d.visit(this, &analysis::function_definition, &analysis::other) */
+    template <class T, class... M>
+    decltype(auto) visit(T *self, M... members) const
+    {
+        return visit(Overloaded{bind_member(self, members)...});
     }
     template <class F> decltype(auto) visit(F &&f) const
     {
         switch (kind()) {
         case syntax_kind::function_definition:
-            return f(function_definition_syntax(*cx, n));
+            return f(FunctionDefinition(*cx, n));
         default:
             return f(*this);
         }
     }
 };
 
-inline syntax_range<declaration_syntax>
-declaration_seq_syntax::declarations() const
+inline SyntaxRange<Declaration> DeclarationSeq::declarations() const
 {
     if (!*this)
         return {};
-    return syntax_range<declaration_syntax>(*cx, cx->tree.children(n), size());
+    return SyntaxRange<Declaration>(*cx, cx->tree.children(n), size());
 }
 
-#define SYNTAX_VIEW_ACCESSOR(name)                                             \
-    inline name##_syntax syntax_ref::name() const                              \
+#define SYNTAX_VIEW_ACCESSOR(name, Type)                                       \
+    inline Type SyntaxRef::name() const                                        \
     {                                                                          \
-        if (!n || !name##_syntax::accepts(node().kind))                        \
+        if (!n || !Type::accepts(node().kind))                                 \
             return {};                                                         \
-        return name##_syntax(*cx, n);                                          \
+        return Type(*cx, n);                                                   \
     }
 SYNTAX_VIEWS(SYNTAX_VIEW_ACCESSOR)
 #undef SYNTAX_VIEW_ACCESSOR

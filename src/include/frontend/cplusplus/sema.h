@@ -1539,12 +1539,12 @@ class semantic_analysis
     bool declarator_template_id = false;
     analysis_result deduction_guide(node_index n);
     analysis_result simple_declaration(node_index n);
-    analysis_result function_definition(function_definition_syntax definition);
+    analysis_result function_definition(FunctionDefinition definition);
     /* [dcl.link]: extern "C" or extern "C++", and the declarations in it */
     analysis_result linkage_specification(node_index n);
     /* a declaration of the kinds analysis has (declaration's switch) */
     analysis_result declaration_by_kind(node_index n);
-    analysis_result other_declaration(declaration_syntax d);
+    analysis_result other_declaration(Declaration d);
     /* [dcl.link]/5: the language linkage of the declarations analysed
        now: "C" (true) or "C++"; and whether the linkage-specification is
        the declaration's own, without braces ([dcl.link]/7) */
@@ -1830,7 +1830,7 @@ class semantic_analysis
        ([basic.lookup.unqual]/1) */
     entity_index lexical_parent(entity_index s) const;
     analysis_result friend_function_body(entity_index c,
-                                         function_definition_syntax definition,
+                                         FunctionDefinition definition,
                                          entity_index f);
     bool friend_names(const friend_record &f, entity_index e) const;
     bool grants(entity_index k, entity_index e) const;
@@ -2825,9 +2825,8 @@ class semantic_analysis
     /* the body of a member function defined in its class, analysed at the
        end of the class ([class.mem]/6: a complete-class context) */
     analysis_result member_function_body(entity_index c, node_index definition);
-    analysis_result
-    member_function_definition(entity_index c,
-                               function_definition_syntax definition);
+    analysis_result member_function_definition(entity_index c,
+                                               FunctionDefinition definition);
     /* [expr.ref]: the member e of the object m (a glvalue of class type) */
     analysis_result member_access(token_index at, entity_index e,
                                   expression_meaning &m);
@@ -2985,8 +2984,8 @@ class semantic_analysis
                                   bool *explicit_specified = nullptr) const;
     /* the function-body of a constructor or destructor definition
        (last_declared): ctor-initializer_opt compound-statement */
-    analysis_result special_member_body(function_definition_syntax definition,
-                                        function_body_syntax body);
+    analysis_result special_member_body(FunctionDefinition definition,
+                                        FunctionBody body);
     /* [dcl.meaning]/1: Class::Class or Class::~Class defined outside the
        class: the function-definition n without a decl-specifier-seq */
     analysis_result special_member_definition(node_index n, uint32_t at);
@@ -3969,13 +3968,13 @@ class semantic_analysis
                                       uint32_t element = 0) const;
 
     /* the typed view of a node of the syntax tree (syntax.h) */
-    syntax_ref syntax(node_index n) const
+    SyntaxRef syntax(node_index n) const
     {
-        return syntax_ref(syntax_cx, n);
+        return SyntaxRef(syntax_cx, n);
     }
-    syntax_ref syntax(syntax_child c) const
+    SyntaxRef syntax(syntax_child c) const
     {
-        return syntax_ref(syntax_cx, c);
+        return SyntaxRef(syntax_cx, c);
     }
 
   private:
@@ -4351,7 +4350,7 @@ class semantic_analysis
     token_stream &tokens;
     const parser &p;
     diagnostic_consumer &diagnostics;
-    const syntax_context syntax_cx;
+    const SyntaxContext syntax_cx;
 };
 
 /* ---- the Itanium C++ ABI (abi/itanium/) ---- */

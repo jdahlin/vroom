@@ -819,7 +819,7 @@ bool semantic_analysis::gnu_or_without_effect(node_index n) const
  * function-body is not yet ([stmt]).
  */
 analysis_result
-semantic_analysis::function_definition(function_definition_syntax definition)
+semantic_analysis::function_definition(FunctionDefinition definition)
 {
     if (!definition)
         return not_supported(current_declaration, "dcl.fct.def.general");

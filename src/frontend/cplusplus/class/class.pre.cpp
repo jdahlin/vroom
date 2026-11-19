@@ -1846,8 +1846,9 @@ analysis_result semantic_analysis::member_function_body(entity_index c,
     return r;
 }
 
-analysis_result semantic_analysis::member_function_definition(
-    entity_index c, function_definition_syntax definition)
+analysis_result
+semantic_analysis::member_function_definition(entity_index c,
+                                              FunctionDefinition definition)
 {
     /* [ext:gnu_attributes] before it all: member_declaration took them */
     const syntax_child *children =

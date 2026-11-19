@@ -330,7 +330,7 @@ entity_index semantic_analysis::friend_defined_by(node_index n) const
 /* [class.friend]/7: the body of a friend defined in class c, in the
    class's scope: its declarator again for the parameters, then the body */
 analysis_result semantic_analysis::friend_function_body(
-    entity_index c, function_definition_syntax definition, entity_index f)
+    entity_index c, FunctionDefinition definition, entity_index f)
 {
     current_declaration = definition;
     entity_index scope = current_scope;
