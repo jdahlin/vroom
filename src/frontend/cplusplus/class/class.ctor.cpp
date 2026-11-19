@@ -1436,8 +1436,13 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
            deleted when a subobject's copy constructor is deleted or not
            accessible: none is declared, and a copy of the class, which
            does not copy its bytes, is refused where it is used */
-        if (!copy_ok && !declares_copy)
+        if (!copy_ok && !declares_copy) {
+            /* C++03 has no deleted functions: clang reports the
+               implicit copy constructor's definition at the class */
+            if (!tokens.files.behavior.has(language_feature::rvalue_references))
+                return not_supported(n, "class.default.ctor");
             copy_deleted = true;
+        }
         /* [class.copy.ctor]/10.2, [class.default.ctor]/2.7: an
            implicit constructor beside a subobject's inaccessible
            destructor is deleted */
