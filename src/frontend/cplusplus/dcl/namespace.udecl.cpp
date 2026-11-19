@@ -140,7 +140,7 @@ analysis_result semantic_analysis::using_declaration(UsingDeclaration n)
             gnu_attributes g;
             for (size_t k = i + 1;
                  k < items.size() &&
-                 syntax(items[k]).is(syntax_kind::gnu_attribute_specifier);
+                 items[k].is(syntax_kind::gnu_attribute_specifier);
                  k++) {
                 analysis_result r =
                     gnu_attribute_specifier(items[k].index(), g);

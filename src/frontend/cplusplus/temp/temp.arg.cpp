@@ -533,26 +533,24 @@ analysis_result semantic_analysis::template_template_argument(
     /* the written name: identifier, or nested-name-specifier identifier */
     SyntaxElement name = written;
     node_index qualifier = 0;
-    if (syntax(name).is(syntax_kind::type_id)) {
-        if (syntax(name).size() != 1 ||
-            !syntax(name)[0].is(syntax_kind::type_specifier_seq))
+    if (name.is(syntax_kind::type_id)) {
+        if (name.size() != 1 || !name[0].is(syntax_kind::type_specifier_seq))
             return not_supported(at, "temp.arg.template");
-        name = syntax(name)[0];
-        if (syntax(name).size() != 1)
+        name = name[0];
+        if (name.size() != 1)
             return not_supported(at, "temp.arg.template");
-        name = syntax(name)[0];
-        if (syntax(name).is(syntax_kind::simple_type_specifier)) {
-            auto c = syntax(name);
-            if (syntax(name).size() != 2 ||
+        name = name[0];
+        if (name.is(syntax_kind::simple_type_specifier)) {
+            auto c = name;
+            if (name.size() != 2 ||
                 !c[0].is(syntax_kind::nested_name_specifier))
                 return not_supported(at, "temp.arg.template");
             qualifier = c[0].index();
             name = c[1];
         }
-    } else if (syntax(name).is(syntax_kind::qualified_id)) {
-        auto c = syntax(name);
-        if (syntax(name).size() != 2 ||
-            !c[0].is(syntax_kind::nested_name_specifier))
+    } else if (name.is(syntax_kind::qualified_id)) {
+        auto c = name;
+        if (name.size() != 2 || !c[0].is(syntax_kind::nested_name_specifier))
             return not_supported(at, "temp.arg.template");
         qualifier = c[0].index();
         name = c[1];

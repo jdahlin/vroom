@@ -945,7 +945,7 @@ analysis_result semantic_analysis::list_initialization_of(
                           "element, or from no element; otherwise, the "
                           "program is ill-formed",
                           "dcl.init.list");
-    if (syntax(clauses[0]).is(syntax_kind::braced_init_list))
+    if (clauses[0].is(syntax_kind::braced_init_list))
         /* braces around a scalar's initializer: clang's warning */
         return not_supported(list, "dcl.init.list");
     return initialize_from(list, clauses[0], type, direct, true, result);
@@ -1105,8 +1105,7 @@ analysis_result semantic_analysis::class_list_initialization(
         return constructor_list_initialization(list, clauses, type, direct,
                                                result);
     }
-    if (clauses.size() == 1 &&
-        !syntax(clauses[0]).is(syntax_kind::braced_init_list)) {
+    if (clauses.size() == 1 && !clauses[0].is(syntax_kind::braced_init_list)) {
         /* (3.2): an element of the class's own type */
         expression_meaning e;
         analysis_result r = expression(clauses[0], e);
@@ -1158,7 +1157,7 @@ analysis_result semantic_analysis::constructor_list_initialization(
     }
     owned_array<expression_meaning> arguments;
     for (SyntaxElement clause : clauses) {
-        if (syntax(clause).is(syntax_kind::braced_init_list))
+        if (clause.is(syntax_kind::braced_init_list))
             return not_supported(list, "over.match.list");
         expression_meaning e;
         analysis_result r = expression(clause, e);

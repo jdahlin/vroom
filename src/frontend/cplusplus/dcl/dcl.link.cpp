@@ -24,7 +24,7 @@ namespace cplusplus
 
 analysis_result semantic_analysis::linkage_specification(LinkageSpecification n)
 {
-    auto node = syntax(n);
+    auto node = n;
     if (node.size() < 3 || !node[1].is_token())
         return not_supported(n, "dcl.link");
     /* [dcl.link]/4: "A linkage-specification shall inhabit a namespace
@@ -46,8 +46,8 @@ analysis_result semantic_analysis::linkage_specification(LinkageSpecification n)
             braces = true;
             continue;
         }
-        if (syntax(x).is(syntax_kind::declaration_seq)) {
-            for (SyntaxElement y : syntax(x).elements()) {
+        if (x.is(syntax_kind::declaration_seq)) {
+            for (SyntaxElement y : x.elements()) {
                 if (!y.is_token())
                     inner.append(y.index());
             }

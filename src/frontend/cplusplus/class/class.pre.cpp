@@ -249,7 +249,7 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
     node_index head_qualifier = 0;
     SyntaxElement name_syntax;
     if (!unnamed)
-        name_syntax = syntax(head_children[1]);
+        name_syntax = head_children[1];
     if (name_syntax.is_identifier()) {
         head_name = name_syntax.token();
     } else if (class_instantiating && name_syntax.simple_template_id()) {
@@ -271,7 +271,7 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
         return not_supported(n, "class.pre");
     }
     bool has_bases =
-        head_count == 3 && !unnamed && syntax(head_children[2]).base_clause();
+        head_count == 3 && !unnamed && head_children[2].base_clause();
     if (head_count > 2 && !has_bases)
         /* a class-virt-specifier, a base-clause of an unnamed class */
         return not_supported(n, "class.derived");

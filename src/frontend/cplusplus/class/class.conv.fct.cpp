@@ -214,8 +214,8 @@ node_index semantic_analysis::conversion_function_id_of(SyntaxRef n) const
 {
     owned_array<node_index> work;
     for (SyntaxElement x : n.elements()) {
-        if (!x.is_token() && !syntax(x).is(syntax_kind::decl_specifier_seq) &&
-            !syntax(x).is(syntax_kind::function_body))
+        if (!x.is_token() && !x.is(syntax_kind::decl_specifier_seq) &&
+            !x.is(syntax_kind::function_body))
             work.append(x.index());
     }
     while (!work.empty()) {

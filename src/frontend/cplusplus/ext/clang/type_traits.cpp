@@ -359,8 +359,7 @@ analysis_result semantic_analysis::builtin_template_arguments(
         }
     }
     for (size_t w = 0; w < written.size(); w++)
-        if (syntax(written[w]).is(syntax_kind::type_id) &&
-            written[w].size() == 2 &&
+        if (written[w].is(syntax_kind::type_id) && written[w].size() == 2 &&
             syntax(written[w].index())[1].is(
                 preprocessing_op_or_punc::ELLIPSIS))
             expansion[w] = true;
@@ -450,7 +449,7 @@ analysis_result semantic_analysis::builtin_common_type(SyntaxRef id,
         templates[i] = e;
     }
     qualified_type empty;
-    if (!syntax(written[2]).is(syntax_kind::type_id))
+    if (!written[2].is(syntax_kind::type_id))
         return not_supported(id, "ext.clang");
     r = type_id(written[2], empty);
     if (r != analysis_result::well_formed)
@@ -500,8 +499,7 @@ analysis_result semantic_analysis::builtin_type_pack_element(SyntaxRef id,
     analysis_result r = builtin_template_arguments(id, written, expansion);
     if (r != analysis_result::well_formed)
         return r;
-    if (written.empty() || expansion[0] ||
-        syntax(written[0]).is(syntax_kind::type_id))
+    if (written.empty() || expansion[0] || written[0].is(syntax_kind::type_id))
         return not_supported(id, "ext.clang");
     owned_array<qualified_type> types;
     bool dependent = false;
@@ -569,7 +567,7 @@ analysis_result semantic_analysis::builtin_make_integer_seq(SyntaxRef id,
     if (r != analysis_result::well_formed)
         return r;
     if (written.size() != 3 || expansion[0] || expansion[1] || expansion[2] ||
-        syntax(written[2]).is(syntax_kind::type_id))
+        written[2].is(syntax_kind::type_id))
         return not_supported(id, "ext.clang");
     /* B, by name */
     token_index first = first_token(written[0]);
@@ -586,7 +584,7 @@ analysis_result semantic_analysis::builtin_make_integer_seq(SyntaxRef id,
         t = alias_template_of(b);
     if (!t)
         return not_supported(id, "ext.clang");
-    if (!syntax(written[1]).is(syntax_kind::type_id))
+    if (!written[1].is(syntax_kind::type_id))
         return not_supported(id, "ext.clang");
     qualified_type element;
     r = type_id(written[1], element);

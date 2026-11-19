@@ -75,7 +75,7 @@ bool semantic_analysis::declares_special_member(entity_index c,
 analysis_result semantic_analysis::member_template_declaration(
     entity_index c, TemplateDeclaration n, uint8_t access)
 {
-    auto node = syntax(n);
+    auto node = n;
     if (node.size() != 2 || !node[0].is(syntax_kind::template_head) ||
         node[1].is_token())
         return not_supported(n, "temp.mem");
@@ -1039,16 +1039,16 @@ analysis_result semantic_analysis::ctor_initializer(SyntaxElement list,
     entity_index c = current_class();
     token_index at = syntax(current_declaration).first_token();
     owned_array<SyntaxElement> items;
-    for (uint32_t i = 0; list && i < syntax(list).size(); i++) {
-        SyntaxElement item = syntax(list)[i];
-        if (syntax(item).is(syntax_kind::mem_initializer_list)) {
-            for (SyntaxElement one : syntax(item).elements()) {
-                if (syntax(one).is(syntax_kind::mem_initializer))
+    for (uint32_t i = 0; list && i < list.size(); i++) {
+        SyntaxElement item = list[i];
+        if (item.is(syntax_kind::mem_initializer_list)) {
+            for (SyntaxElement one : item.elements()) {
+                if (one.is(syntax_kind::mem_initializer))
                     items.append(one);
-                else if (!syntax(one).is(preprocessing_op_or_punc::COMMA))
+                else if (!one.is(preprocessing_op_or_punc::COMMA))
                     return not_supported(list.index(), "class.base.init");
             }
-        } else if (syntax(item).is(syntax_kind::mem_initializer)) {
+        } else if (item.is(syntax_kind::mem_initializer)) {
             items.append(item);
         }
     }
@@ -1211,7 +1211,7 @@ analysis_result semantic_analysis::ctor_initializer(SyntaxElement list,
                 expression_node(semantic_kind::zero, zero, first_token(item));
         } else if (node.size() == 4) {
             SyntaxElement init = node[2];
-            if (syntax(init).is(syntax_kind::initializer_list)) {
+            if (init.is(syntax_kind::initializer_list)) {
                 if (has_pack_expansion(init))
                     return not_supported(n, "temp.variadic");
                 if (record.kind != type_kind::class_type)

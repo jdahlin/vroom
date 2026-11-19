@@ -103,14 +103,14 @@ semantic_analysis::template_simple_declaration(TemplateDeclaration t,
 analysis_result semantic_analysis::deduction_guide(DeductionGuide n)
 {
     /* the template-name: the token before the parameters' '(' */
-    auto node = syntax(n);
+    auto node = n;
     token_index name = 0;
     node_index id = 0;
     for (uint32_t i = 1; i < node.size(); i++) {
         SyntaxElement c = node[i];
-        if (!name && syntax(c).is(preprocessing_op_or_punc::LEFT_PARENTHESIS))
+        if (!name && c.is(preprocessing_op_or_punc::LEFT_PARENTHESIS))
             name = node[i - 1].token();
-        if (syntax(c).is(syntax_kind::simple_template_id))
+        if (c.is(syntax_kind::simple_template_id))
             id = c.index();
     }
     /* [temp.deduct.guide]/3: "The template-name shall be the same
@@ -2220,8 +2220,7 @@ analysis_result semantic_analysis::template_id_arguments(
     /* a type-id that ends in the ellipsis: its pattern the type-id before
        it */
     for (size_t w = 0; w < written.size(); w++)
-        if (syntax(written[w]).is(syntax_kind::type_id) &&
-            written[w].size() == 2 &&
+        if (written[w].is(syntax_kind::type_id) && written[w].size() == 2 &&
             syntax(written[w].index())[1].is(
                 preprocessing_op_or_punc::ELLIPSIS)) {
             if (expansion[w])

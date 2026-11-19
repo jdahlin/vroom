@@ -508,7 +508,7 @@ analysis_result semantic_analysis::named_namespace(node_index at,
  */
 analysis_result semantic_analysis::using_directive(UsingDirective n)
 {
-    auto node = syntax(n);
+    auto node = n;
     entity_index scope = current_scope;
     /* until the directive is analysed, what it makes visible is not
        known */
@@ -522,7 +522,7 @@ analysis_result semantic_analysis::using_directive(UsingDirective n)
     node_index qualifier = 0;
     token_index name = 0;
     for (auto c : node.elements()) {
-        if (syntax(c).is(syntax_kind::nested_name_specifier)) {
+        if (c.is(syntax_kind::nested_name_specifier)) {
             qualifier = c.index();
             continue;
         }
@@ -564,16 +564,16 @@ analysis_result semantic_analysis::using_directive(UsingDirective n)
 analysis_result
 semantic_analysis::namespace_alias_definition(NamespaceAliasDefinition n)
 {
-    auto node = syntax(n);
+    auto node = n;
     if (defining_class || node.size() < 4 || !node[1].is_identifier())
         return not_supported(n, "namespace.alias");
     token_index alias = node[1].token();
     node_index qualifier = 0;
     token_index name = 0;
     SyntaxElement named = node[3];
-    if (syntax(named).is(syntax_kind::qualified_namespace_specifier)) {
-        auto parts = syntax(named);
-        if (syntax(named).size() != 2 ||
+    if (named.is(syntax_kind::qualified_namespace_specifier)) {
+        auto parts = named;
+        if (named.size() != 2 ||
             !parts[0].is(syntax_kind::nested_name_specifier) ||
             !parts[1].is_token())
             return not_supported(n, "namespace.alias");

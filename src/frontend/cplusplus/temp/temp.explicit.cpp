@@ -17,7 +17,7 @@ semantic_analysis::explicit_specialization(ExplicitSpecialization n)
 {
     /* template < > declaration: a class's definition, its class-head
        a simple-template-id */
-    auto x = syntax(n);
+    auto x = n;
     if (x.size() == 4 && x[3].is(syntax_kind::simple_declaration)) {
         node_index only = sole_decl_specifier(syntax(x[3].index()));
         if (only && syntax(only).is(syntax_kind::class_specifier)) {
