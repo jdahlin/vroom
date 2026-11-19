@@ -1350,6 +1350,9 @@ static bool depends(const types &table, qualified_type t,
                     cv_none),
                 parameters, from);
         return true;
+    case type_kind::bit_int:
+        return r.entity &&
+               (!parameters || (*parameters)[r.entity].value >= from);
     case type_kind::array:
         /* T[N]: N a non-type template-parameter */
         if (r.entity && (!parameters || (*parameters)[r.entity].value >= from))

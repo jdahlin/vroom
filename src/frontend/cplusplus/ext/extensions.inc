@@ -98,6 +98,8 @@ EXTENSION(clang_atomic, clang,
 EXTENSION(clang_availability, clang,
           "clang Attributes, availability: availability(platform, introduced=version, ...), "
           "a version a pp-number such as 10.12.1")
+EXTENSION(clang_bit_int, clang,
+          "clang Language Extensions, _BitInt (C23 6.2.5) in C++: _BitInt(N) a type-specifier")
 EXTENSION(clang_bit_cast, clang,
           "clang Language Extensions: __builtin_bit_cast (type, expression), "
           "std::bit_cast ([bit.cast]) as a primitive")

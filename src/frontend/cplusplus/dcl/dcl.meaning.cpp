@@ -230,6 +230,24 @@ analysis_result semantic_analysis::pointer_operator(node_index op,
     return analysis_result::well_formed;
 }
 
+/* [temp.dep.constexpr]/2: in a template's own declaration, the non-type
+   template-parameter e names (0 if e is no such name) */
+entity_index semantic_analysis::value_parameter_named(syntax_child e)
+{
+    if (!e.is_token() || tokens[e.index()].kind != token_kind::identifier)
+        return 0;
+    lookup_result x =
+        lookup_unqualified(tokens.identifier(e.index()), lookup_filter::any);
+    entity_index named = x.entity;
+    if (!named)
+        named = x.unknown_entity;
+    if (named && entity_table[named].kind == entity_kind::none &&
+        entity_table[named].instantiation &&
+        !entity_table[named].held_by_template)
+        return named;
+    return 0;
+}
+
 /*
  * [dcl.array]/1: "In a declaration T D where D has the form
  *     D1 [ constant-expression_opt ] attribute-specifier-seq_opt
@@ -276,22 +294,12 @@ analysis_result semantic_analysis::array(node_index at,
        value-dependent: the type records the parameter, which deduction
        ([temp.deduct.type]/8's T[i]) gives a value; each instantiation
        analyses the declarator again with the parameter bound to it */
-    if (bound->is_token() &&
-        tokens[bound->index()].kind == token_kind::identifier) {
-        lookup_result x = lookup_unqualified(tokens.identifier(bound->index()),
-                                             lookup_filter::any);
-        entity_index named = x.entity;
-        if (!named)
-            named = x.unknown_entity;
-        if (named && entity_table[named].kind == entity_kind::none &&
-            entity_table[named].instantiation &&
-            !entity_table[named].held_by_template) {
-            if (!is_integral(entity_table[named].type))
-                return not_supported(at, "temp.dep.constexpr");
-            type = qualified_type::make(
-                type_table.array_of_parameter_bound(type, named), cv_none);
-            return analysis_result::well_formed;
-        }
+    if (entity_index named = value_parameter_named(*bound)) {
+        if (!is_integral(entity_table[named].type))
+            return not_supported(at, "temp.dep.constexpr");
+        type = qualified_type::make(
+            type_table.array_of_parameter_bound(type, named), cv_none);
+        return analysis_result::well_formed;
     }
     expression_meaning m;
     analysis_result r = expression(*bound, m);

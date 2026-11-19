@@ -21,9 +21,10 @@ analysis_result semantic_analysis::expression(syntax_child e,
     analysis_result r = expression_kind(e, m);
     if (r != analysis_result::well_formed)
         return r;
-    /* [ext:clang_atomic] the operations on an atomic object are not
-       analysed yet */
-    if (type_table[m.type.unqualified()].kind == type_kind::atomic) {
+    /* [ext:clang_atomic], [ext:clang_bit_int] the operations on an atomic
+       object or a _BitInt are not analysed yet */
+    type_kind k = type_table[m.type.unqualified()].kind;
+    if (k == type_kind::atomic || k == type_kind::bit_int) {
         if (e.is_token())
             return not_supported(current_declaration, "ext.clang");
         return not_supported(e.index(), "ext.clang");

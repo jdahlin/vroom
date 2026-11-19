@@ -162,6 +162,11 @@ PRODUCTION(clang_bit_cast, "clang-bit-cast-expression", "__builtin_bit_cast ( ty
 PRODUCTION(clang_atomic, "simple-type-specifier", "clang-atomic-type-specifier")
 PRODUCTION(clang_atomic, "clang-atomic-type-specifier", "_Atomic ( type-id )")
 
+/* ---- clang Language Extensions, _BitInt in C++ ---- */
+
+PRODUCTION(clang_bit_int, "simple-type-specifier", "clang-bit-int-type-specifier")
+PRODUCTION(clang_bit_int, "clang-bit-int-type-specifier", "_BitInt ( constant-expression )")
+
 /* ---- clang Language Extensions, Type Trait Primitives ---- */
 
 PRODUCTION(clang_type_traits, "primary-expression", "clang-type-trait-expression")

@@ -510,11 +510,16 @@ node_index parser::decl_specifier_seq(decl_specifier_facts &facts,
             if (failed())
                 return 0;
             facts.has_defining_type_specifier = true;
-        } else if (at(extension_keyword::atomic)) {
-            /* [ext:clang_atomic] a simple-type-specifier */
+        } else if (at(extension_keyword::atomic) ||
+                   at(extension_keyword::bit_int)) {
+            /* [ext:clang_atomic], [ext:clang_bit_int] a
+               simple-type-specifier */
             if (facts.has_defining_type_specifier)
                 break;
-            clang_atomic_type_specifier();
+            if (at(extension_keyword::atomic))
+                clang_atomic_type_specifier();
+            else
+                clang_bit_int_type_specifier();
             if (failed())
                 return 0;
             facts.has_defining_type_specifier = true;
@@ -1051,6 +1056,7 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
             syntax_is(tree, c, syntax_kind::decltype_specifier) ||
             syntax_is(tree, c, syntax_kind::clang_type_transformation) ||
             syntax_is(tree, c, syntax_kind::clang_atomic_type_specifier) ||
+            syntax_is(tree, c, syntax_kind::clang_bit_int_type_specifier) ||
             syntax_is(tree, c, syntax_kind::placeholder_type_specifier))
             continue;
         /* an attribute specifier has rules unless a class-specifier is
@@ -1164,6 +1170,12 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
                 r = clang_atomic_type(c.index(), denoted);
                 class_type = denoted.unqualified();
             } else if (syntax_is(tree, c,
+                                 syntax_kind::clang_bit_int_type_specifier)) {
+                /* [ext:clang_bit_int] */
+                qualified_type denoted;
+                r = clang_bit_int_type(c.index(), denoted);
+                class_type = denoted.unqualified();
+            } else if (syntax_is(tree, c,
                                  syntax_kind::placeholder_type_specifier)) {
                 /* [dcl.spec.auto]: decltype(auto); a type-constraint is
                    [temp.param]'s */
@@ -1204,6 +1216,8 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
                 !syntax_is(tree, c, syntax_kind::decltype_specifier) &&
                 !syntax_is(tree, c, syntax_kind::clang_type_transformation) &&
                 !syntax_is(tree, c, syntax_kind::clang_atomic_type_specifier) &&
+                !syntax_is(tree, c,
+                           syntax_kind::clang_bit_int_type_specifier) &&
                 !syntax_is(tree, c, syntax_kind::placeholder_type_specifier))
                 declares_class = true;
             continue;

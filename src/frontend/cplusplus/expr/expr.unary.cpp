@@ -227,6 +227,8 @@ uint64_t semantic_analysis::size_of_type(qualified_type t) const
         return size_of_type(record.operand);
     case type_kind::atomic:
         return atomic_layout(record.operand, false);
+    case type_kind::bit_int:
+        return bit_int_layout(record.bound, false);
     case type_kind::array:
         if (!record.bound_known)
             return 0;
@@ -246,6 +248,14 @@ uint64_t semantic_analysis::size_of_type(qualified_type t) const
     }
 }
 
+uint64_t power_of_two_at_least(uint64_t n)
+{
+    uint64_t p = 1;
+    while (p < n)
+        p <<= 1;
+    return p;
+}
+
 /* [ext:clang_atomic] [impl.clang] _Atomic(T)'s size, or alignment: a T
    of up to 16 bytes is widened to the next power of two, aligned to it
    (C11's atomic types as clang lays them out) */
@@ -258,10 +268,7 @@ uint64_t semantic_analysis::atomic_layout(qualified_type value,
             return alignment_of_type(value);
         return size;
     }
-    uint64_t widened = 1;
-    while (widened < size)
-        widened <<= 1;
-    return widened;
+    return power_of_two_at_least(size);
 }
 
 uint64_t semantic_analysis::alignment_of_type(qualified_type t) const
@@ -270,6 +277,8 @@ uint64_t semantic_analysis::alignment_of_type(qualified_type t) const
     switch (record.kind) {
     case type_kind::atomic:
         return atomic_layout(record.operand, true);
+    case type_kind::bit_int:
+        return bit_int_layout(record.bound, true);
     case type_kind::lvalue_reference:
     case type_kind::rvalue_reference:
     case type_kind::array:

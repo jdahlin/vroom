@@ -457,6 +457,7 @@ enum class extension_keyword : uint8_t {
     offsetof_,
     bit_cast,
     atomic,
+    bit_int,
 };
 
 /*
@@ -887,6 +888,8 @@ class parser
     node_index clang_bit_cast_expression();
     /* ---- ext/clang/atomic.cpp: _Atomic(T) */
     node_index clang_atomic_type_specifier();
+    /* ---- ext/clang/bit_int.cpp: _BitInt(N) */
+    node_index clang_bit_int_type_specifier();
     /* ---- ext/gnu/asm_label.cpp: declarator asm ( "name" ) attributes */
     bool gnu_declarator_suffix_follows(const declarator_facts &facts);
     node_index gnu_declarator_suffix(size_t mark, token_index first,

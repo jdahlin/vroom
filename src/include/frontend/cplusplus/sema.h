@@ -112,6 +112,9 @@ enum class type_kind : uint8_t {
     pack_expansion,
     /* [ext:clang_atomic] _Atomic(T): operand T */
     atomic,
+    /* [ext:clang_bit_int] _BitInt(N): bound N, or entity the non-type
+       template-parameter N names in a template's own declaration */
+    bit_int,
 };
 
 struct type {
@@ -170,6 +173,7 @@ class types
     type_index pointer_to_member(uint32_t class_entity, qualified_type member);
     type_index pack_expansion_of(qualified_type pattern);
     type_index atomic_of(qualified_type value);
+    type_index bit_int(uint64_t width, uint32_t parameter);
 
     const type &operator[](type_index t) const
     {
@@ -887,6 +891,8 @@ constness combined_constness(constness a, constness b);
 /* a floating-point value as an expression_meaning keeps it */
 double floating_value(uint64_t kept);
 uint64_t floating_kept(double v);
+/* the least power of two that is n or more (1 for 0) */
+uint64_t power_of_two_at_least(uint64_t n);
 /* [bit.cast]/1 of a value as an expression_meaning keeps it, from one
    arithmetic type to another of the same size: false where analysis does
    not know the object representation (long double, 128-bit integers) or
@@ -2329,6 +2335,9 @@ class semantic_analysis
     analysis_result clang_bit_cast(node_index n, expression_meaning &m);
     analysis_result clang_atomic_type(node_index n, qualified_type &type);
     uint64_t atomic_layout(qualified_type value, bool alignment) const;
+    analysis_result clang_bit_int_type(node_index n, qualified_type &type);
+    uint64_t bit_int_layout(uint64_t width, bool alignment) const;
+    entity_index value_parameter_named(syntax_child e);
     analysis_result potentially_throwing(node_index n, uint32_t x,
                                          bool &throwing);
     analysis_result conditional_operands(node_index n,

@@ -1710,6 +1710,15 @@ bool itanium_mangler::type(qualified_type t)
            mangles _Atomic(T) ([ext:clang_atomic]) */
         text("U7_Atomic");
         done = type(r.operand);
+    } else if (r.kind == type_kind::bit_int && !r.entity) {
+        /* [abi:mangling-builtin]:
+
+               <builtin-type> ::= DB <number> _
+        */
+        text("DB");
+        number(r.bound);
+        text("_");
+        done = true;
     } else if (r.kind == type_kind::pack_expansion) {
         /* [abi:mangle.function-type]: a pack expansion,
 
@@ -1809,8 +1818,7 @@ bool itanium_mangler::type(qualified_type t)
  * unsigned long, long long, unsigned long long, float, double, long double,
  * char32_t, char16_t, char8_t, std::nullptr_t, __int128, unsigned
  * __int128.  _Float16 is DF16_ (the
- * DF <number> _ form below); _BitInt(N)'s DB <number> _ needs N, which the
- * type does not keep yet.
+ * DF <number> _ form below); _BitInt(N) is type_kind::bit_int's (type()).
  *
  *     <builtin-type> ::= DF <number> _
  */

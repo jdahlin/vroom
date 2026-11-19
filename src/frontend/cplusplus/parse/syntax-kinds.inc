@@ -236,6 +236,7 @@ SYNTAX_NODE(clang_type_trait_expression, "clang-type-trait-expression", "ext.cla
 SYNTAX_NODE(clang_type_transformation, "clang-type-transformation", "ext.clang")
 SYNTAX_NODE(clang_bit_cast_expression, "clang-bit-cast-expression", "ext.clang")
 SYNTAX_NODE(clang_atomic_type_specifier, "clang-atomic-type-specifier", "ext.clang")
+SYNTAX_NODE(clang_bit_int_type_specifier, "clang-bit-int-type-specifier", "ext.clang")
 
 /*
  * Scaffolding, not grammar: both are counted, and both are at zero on
