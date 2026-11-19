@@ -1977,6 +1977,10 @@ class semantic_analysis
     entity_index library_builtin(uint32_t name);
     entity_index compiler_builtin(uint32_t name, const char *spelling,
                                   size_t length);
+    entity_index declare_builtin(uint32_t name, uint32_t symbol,
+                                 qualified_type result,
+                                 const qualified_type *parameters, size_t count,
+                                 bool variadic, uint32_t flags);
     qualified_type builtin_parameter_type(uint8_t t);
     /* the parameters of the function declarator analysed last: a function
        definition's, with the types they have in its body ([dcl.fct]/5's

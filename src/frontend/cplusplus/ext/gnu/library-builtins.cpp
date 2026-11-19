@@ -154,39 +154,6 @@ qualified_type semantic_analysis::builtin_parameter_type(uint8_t t)
     return qualified_type::make(type_table.pointer_to(q), cv_none);
 }
 
-/* a scalar type of the C front end's builtin signatures, in its letters
-   (frontend/c/builtin-table.cpp, cc_builtin_signature_type); false for
-   another */
-static bool signature_scalar(char letter, fundamental_type &f)
-{
-    static const struct {
-        char letter;
-        fundamental_type type;
-    } scalars[] = {
-        {'v', fundamental_type::void_},
-        {'b', fundamental_type::bool_},
-        {'c', fundamental_type::char_},
-        {'C', fundamental_type::unsigned_char},
-        {'h', fundamental_type::unsigned_short_int},
-        {'i', fundamental_type::int_},
-        {'u', fundamental_type::unsigned_int},
-        {'l', fundamental_type::long_int},
-        {'L', fundamental_type::unsigned_long_int},
-        {'w', fundamental_type::long_long_int},
-        {'W', fundamental_type::unsigned_long_long_int},
-        {'z', fundamental_type::unsigned_long_int},
-        {'f', fundamental_type::float_},
-        {'d', fundamental_type::double_},
-        {'D', fundamental_type::long_double},
-    };
-    for (const auto &s : scalars)
-        if (s.letter == letter) {
-            f = s.type;
-            return true;
-        }
-    return false;
-}
-
 /* name is a builtin of vcc's C front end, which clang declares at its
    first use (a function's name to the parser) */
 bool parser::names_compiler_builtin(uint32_t name)
@@ -197,41 +164,64 @@ bool parser::names_compiler_builtin(uint32_t name)
     return ast_builder_builtin_signature(spelling, length) != nullptr;
 }
 
-/* a builtin of vcc's C front end (clang's Builtins.td, as
-   frontend/c/builtin-table.cpp has it) whose signature has scalar types
-   only: declared at its first use, as clang does, and lowered to the C
-   front end's builtin node (gnu_compiler_builtin) */
+/* the function name names, declared at its first use with C language
+   linkage and the GNU flags given */
+entity_index
+semantic_analysis::declare_builtin(uint32_t name, uint32_t symbol,
+                                   qualified_type result,
+                                   const qualified_type *parameters,
+                                   size_t count, bool variadic, uint32_t flags)
+{
+    entity_index e = entity_table.make(entity_kind::function, symbol, 0);
+    entity_table[e].type = qualified_type::make(
+        type_table.function(result, parameters, count, variadic), cv_none);
+    entity_table[e].linkage_of_name = linkage::external;
+    entity_table[e].c_language_linkage = true;
+    entity_table[e].gnu_flags = flags;
+    entity_table.bind(0, name, e);
+    return e;
+}
+
+/* a builtin of vcc's C front end (frontend/c/builtin-table.cpp) whose
+   signature has scalar types only, in the table's letters: lowered to
+   the C front end's builtin node (gnu_compiler_builtin) */
 entity_index semantic_analysis::compiler_builtin(uint32_t name,
                                                  const char *spelling,
                                                  size_t length)
 {
+    static const char letters[] = "vbcChiulLwWzfdD";
+    static const fundamental_type types[] = {
+        fundamental_type::void_,
+        fundamental_type::bool_,
+        fundamental_type::char_,
+        fundamental_type::unsigned_char,
+        fundamental_type::unsigned_short_int,
+        fundamental_type::int_,
+        fundamental_type::unsigned_int,
+        fundamental_type::long_int,
+        fundamental_type::unsigned_long_int,
+        fundamental_type::long_long_int,
+        fundamental_type::unsigned_long_long_int,
+        fundamental_type::unsigned_long_int,
+        fundamental_type::float_,
+        fundamental_type::double_,
+        fundamental_type::long_double,
+    };
     const char *signature = ast_builder_builtin_signature(spelling, length);
     if (!signature)
         return 0;
-    fundamental_type types[16];
-    size_t count = strlen(signature);
-    if (count > 16)
-        return 0;
-    for (size_t i = 0; i < count; i++)
-        if (!signature_scalar(signature[i], types[i]) ||
-            (i && types[i] == fundamental_type::void_))
+    owned_array<qualified_type> types_of;
+    for (const char *s = signature; *s; s++) {
+        const char *at = strchr(letters, *s);
+        /* a parameter of type void is no scalar */
+        if (!at || (s != signature && *s == 'v'))
             return 0;
-    owned_array<qualified_type> parameters;
-    for (size_t i = 1; i < count; i++)
-        parameters.append(
-            qualified_type::make(type_table.fundamental(types[i]), cv_none));
-    qualified_type result =
-        qualified_type::make(type_table.fundamental(types[0]), cv_none);
-    entity_index e = entity_table.make(entity_kind::function, name, 0);
-    entity_table[e].type =
-        qualified_type::make(type_table.function(result, parameters.data(),
-                                                 parameters.size(), false),
-                             cv_none);
-    entity_table[e].linkage_of_name = linkage::external;
-    entity_table[e].c_language_linkage = true;
-    entity_table[e].gnu_flags = gnu_compiler_builtin;
-    entity_table.bind(0, name, e);
-    return e;
+        types_of.append(qualified_type::make(
+            type_table.fundamental(types[at - letters]), cv_none));
+    }
+    /* the result, then the parameters */
+    return declare_builtin(name, name, types_of[0], types_of.data() + 1,
+                           types_of.size() - 1, false, gnu_compiler_builtin);
 }
 
 entity_index semantic_analysis::library_builtin(uint32_t name)
@@ -251,18 +241,10 @@ entity_index semantic_analysis::library_builtin(uint32_t name)
        expression or conversion that is manifestly constant-evaluated"; no
        library function: the evaluator answers true, lowering false */
     if (length == 21 && !memcmp(spelling, "is_constant_evaluated", 21)) {
-        qualified_type type = qualified_type::make(
-            type_table.function(builtin_parameter_type(
-                                    static_cast<uint8_t>(builtin_type::bool_)),
-                                nullptr, 0, false),
-            cv_none);
-        entity_index e = entity_table.make(entity_kind::function, name, 0);
-        entity_table[e].type = type;
-        entity_table[e].linkage_of_name = linkage::external;
-        entity_table[e].c_language_linkage = true;
-        entity_table[e].gnu_flags = gnu_is_constant_evaluated;
-        entity_table.bind(0, name, e);
-        return e;
+        return declare_builtin(
+            name, name,
+            builtin_parameter_type(static_cast<uint8_t>(builtin_type::bool_)),
+            nullptr, 0, false, gnu_is_constant_evaluated);
     }
     const library_builtin_rule *found = nullptr;
     for (const library_builtin_rule &b : library_builtins)
@@ -281,21 +263,14 @@ entity_index semantic_analysis::library_builtin(uint32_t name)
             parameters.append(
                 builtin_parameter_type(static_cast<uint8_t>(found->types[i])));
     }
-    qualified_type type =
-        qualified_type::make(type_table.function(result, parameters.data(),
-                                                 parameters.size(), variadic),
-                             cv_none);
     uint32_t library = tokens.pp.identifier(spelling, length) + 1;
-    entity_index e = entity_table.make(entity_kind::function, library, 0);
-    entity_table[e].type = type;
-    entity_table[e].linkage_of_name = linkage::external;
-    entity_table[e].c_language_linkage = true;
+    uint32_t flags = 0;
     if (found->noreturn)
-        entity_table[e].gnu_flags = gnu_noreturn;
+        flags = gnu_noreturn;
     /* bound under its __builtin_ name: the program's own declaration of
        the library function is another */
-    entity_table.bind(0, name, e);
-    return e;
+    return declare_builtin(name, library, result, parameters.data(),
+                           parameters.size(), variadic, flags);
 }
 
 } // namespace cplusplus
