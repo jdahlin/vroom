@@ -746,8 +746,13 @@ analysis_result semantic_analysis::nested_name_specifier(node_index n,
                names the specialization ([temp.spec]/4), a class; its
                members are looked up there ([class.qual]/1) */
             type_index named = 0;
+            /* (its class is looked into: defined, even in a
+               specialization's head) */
+            uint32_t declaring = declaring_specializations;
+            declaring_specializations = 0;
             analysis_result r =
                 template_type(parts[i].index(), scope.entity, qualified, named);
+            declaring_specializations = declaring;
             if (r != analysis_result::well_formed)
                 return r;
             const struct type &st = type_table[named];

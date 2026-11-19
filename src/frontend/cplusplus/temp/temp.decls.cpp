@@ -1003,8 +1003,10 @@ analysis_result semantic_analysis::variable_partial_specialization(
         return r;
     owned_array<template_argument> arguments;
     partial_arguments++;
+    declaring_specializations++;
     r = template_id_arguments_in(id, vt, scope, arguments);
     partial_arguments--;
+    declaring_specializations--;
     if (r != analysis_result::well_formed)
         return r;
     bool dependent = dependent_arguments(arguments);
@@ -1811,10 +1813,12 @@ analysis_result semantic_analysis::class_specialization_definition(
        program ill-formed (no diagnostic required); any instantiation
        before it is not analysed.  One of an explicit specialization is
        that specialization's own (declared, it is defined at its next
-       use), never another's */
+       use), never another's.  One named but not defined yet (a
+       specialization's head, instantiate_class) is not instantiated */
     for (const instantiation_record &r : instantiations)
         if (r.template_entity == primary.entity && r.specialization &&
             entity_table[r.specialization].kind == entity_kind::class_type &&
+            (entity_table[r.specialization].defined || r.defining) &&
             !(r.pattern && !function_templates[r.pattern - 1].parameter_count))
             return not_supported(n, rule);
     uint32_t index = 0, first = 0;
@@ -1827,8 +1831,10 @@ analysis_result semantic_analysis::class_specialization_definition(
        claims is the template's */
     owned_array<template_argument> arguments;
     partial_arguments++;
+    declaring_specializations++;
     r = template_id_arguments_in(id, ct, scope, arguments);
     partial_arguments--;
+    declaring_specializations--;
     if (r != analysis_result::well_formed)
         return r;
     bool dependent = dependent_arguments(arguments);
@@ -1930,8 +1936,10 @@ analysis_result semantic_analysis::substitute_specialization(
     lookup_horizon = tree[s.declaration].first_token;
     substituting++;
     partial_arguments++;
+    declaring_specializations++;
     analysis_result r = template_id_arguments_in(id, s.primary, scope, again);
     partial_arguments--;
+    declaring_specializations--;
     substituting--;
     lookup_horizon = saved_horizon;
     if (r == analysis_result::ill_formed && undo_substitution(mark))

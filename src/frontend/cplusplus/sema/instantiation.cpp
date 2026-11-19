@@ -287,17 +287,34 @@ semantic_analysis::instantiate_class(node_index at, uint32_t class_template,
     const function_template ft = function_templates[class_template - 1];
     if (uint32_t prior = find_instantiation(ft.entity, arguments, count)) {
         uint32_t k = prior - 1;
-        const instantiation_record &x = instantiations[k];
+        const instantiation_record x = instantiations[k];
         c = x.specialization;
         if (!c || entity_table[c].kind != entity_kind::class_type)
             return not_supported(at, "temp.inst");
         /* a specialization named before its template was defined
            ([temp.inst]/2's "declared specialization" is not one): defined
            now that the template is */
+        if (entity_table[c].defined || x.defining)
+            return analysis_result::well_formed;
+        /* the pattern again: a specialization declared since it was
+           named ([temp.class.spec.match]) */
+        uint32_t pattern = 0;
+        owned_array<template_argument> deduced;
+        analysis_result matched = matching_specialization(
+            at, class_template, arguments, count, pattern, deduced);
+        if (matched != analysis_result::well_formed)
+            return matched;
+        if (pattern != x.pattern) {
+            instantiation_record &y = instantiations[k];
+            y.pattern = pattern;
+            y.first_deduced = static_cast<uint32_t>(template_arguments.size());
+            for (const template_argument &a : deduced)
+                template_arguments.append(a);
+        }
         node_index defined_by = ft.definition;
-        if (x.pattern)
-            defined_by = function_templates[x.pattern - 1].definition;
-        if (!entity_table[c].defined && !x.defining && defined_by)
+        if (pattern)
+            defined_by = function_templates[pattern - 1].definition;
+        if (defined_by && !declaring_specializations)
             return define_class_outside(at, k, c);
         return analysis_result::well_formed;
     }
@@ -342,11 +359,15 @@ semantic_analysis::instantiate_class(node_index at, uint32_t class_template,
     node_index defined_by = ft.definition;
     if (pattern)
         defined_by = function_templates[pattern - 1].definition;
-    if (!defined_by) {
+    if (!defined_by || declaring_specializations) {
         /* [temp.class]/1's template, or [temp.expl.spec]/1's explicit
            specialization, declared, not yet defined: the specialization
            is an incomplete class ([basic.types]/5), which a later use
-           defines */
+           defines.  So is one named in a specialization's head (an argument,
+           not a nested-name-specifier's class), which
+           needs no completely-defined type ([temp.inst]/2; libc++'s
+           __desugars_to_v<__plus_tag, plus<void>, ...> before
+           plus<void>'s explicit specialization, [temp.expl.spec]/7) */
         entity_index scope = entity_table[ft.entity].enclosing;
         c = entity_table.make(entity_kind::class_type,
                               entity_table[ft.entity].name, scope);

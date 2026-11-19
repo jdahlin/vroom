@@ -3625,6 +3625,12 @@ class semantic_analysis
     /* analysing a partial specialization's template arguments, which
        matching substitutes again (substitute_specialization) */
     uint32_t partial_arguments = 0;
+    /* analysing a specialization's head (with partial_arguments, or an
+       explicit specialization's template-id; not in a
+       nested-name-specifier, whose class is looked into): a class
+       template-id there is declared, not defined ([temp.inst]/2: no completely-defined type
+       is needed; instantiate_class) */
+    uint32_t declaring_specializations = 0;
     /* deducing a partial specialization's arguments from a use's
        (matching_specialization): a decltype is a non-deduced context
        whose substitution substitute_specialization checks */
