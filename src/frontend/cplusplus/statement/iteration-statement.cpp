@@ -172,12 +172,12 @@ analysis_result semantic_analysis::iteration_statement(IterationStatement n,
             return not_supported(n, "stmt.do");
         function_state.loops++;
         function_state.breakable++;
-        result = substatement(n[1], 0, body);
+        result = substatement(n.body(), 0, body);
         function_state.loops--;
         function_state.breakable--;
         /* [stmt.do]/1: "The expression is contextually converted to bool;
            if that conversion is ill-formed, the program is ill-formed." */
-        analysis_result r = expression(n[4], m);
+        analysis_result r = expression(n.do_expression(), m);
         if (r == analysis_result::well_formed)
             r = contextual_bool(n, m);
         built = statement_node(semantic_kind::do_statement, at, body, m.node);
@@ -186,9 +186,9 @@ analysis_result semantic_analysis::iteration_statement(IterationStatement n,
     if (k == standard_keyword::while_) {
         if (n.size() != 5)
             return not_supported(n, "stmt.while");
-        if (n[2].is(syntax_kind::condition))
+        if (n.while_condition().is(syntax_kind::condition))
             statement_scope = open_scope(0, false);
-        result = condition(n[2], false, m);
+        result = condition(n.while_condition(), false, m);
     } else if (k == standard_keyword::for_) {
         if (n.size() < 6)
             return not_supported(n, "stmt.for");
@@ -197,23 +197,12 @@ analysis_result semantic_analysis::iteration_statement(IterationStatement n,
                 return range_based_for(n, i, built);
         /* for ( init-statement condition_opt ; expression_opt ) statement:
            the init-statement ends with its own ; */
-        SyntaxElement init_syntax = n[2], cond, step;
-        bool has_cond = false, has_step = false;
-        uint32_t i = 3;
-        if (!n[i].is(preprocessing_op_or_punc::SEMICOLON)) {
-            cond = n[i++];
-            has_cond = true;
-        }
-        if (i >= n.size() || !n[i].is(preprocessing_op_or_punc::SEMICOLON))
+        if (!n.for_shaped())
             return not_supported(n, "stmt.for");
-        i++;
-        if (i < n.size() &&
-            !n[i].is(preprocessing_op_or_punc::RIGHT_PARENTHESIS)) {
-            step = n[i++];
-            has_step = true;
-        }
-        if (i + 2 != n.size())
-            return not_supported(n, "stmt.for");
+        SyntaxElement init_syntax = n.for_init_statement();
+        SyntaxElement cond = n.for_condition(), step = n.for_expression();
+        bool has_cond = static_cast<bool>(cond),
+             has_step = static_cast<bool>(step);
         if (!init_syntax.is(syntax_kind::expression_statement) ||
             (has_cond && cond.is(syntax_kind::condition)))
             statement_scope = open_scope(0, false);
@@ -233,8 +222,7 @@ analysis_result semantic_analysis::iteration_statement(IterationStatement n,
     }
     function_state.loops++;
     function_state.breakable++;
-    result =
-        worse(result, substatement(n[n.size() - 1], statement_scope, body));
+    result = worse(result, substatement(n.body(), statement_scope, body));
     function_state.loops--;
     function_state.breakable--;
     current_scope = outer;

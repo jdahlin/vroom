@@ -678,18 +678,19 @@ auto bind_member(T *self, R (T::*member)(A))
  * so a case taking the sum is the visitor's default; a visitor without one
  * needs a case for every alternative, or it does not compile.
  */
-template <class View> struct SyntaxExtra : SyntaxRef {
+/* what every SyntaxExtra<View> has: SyntaxRef's constructors, a view made
+   from a node of any kind, and narrow(), which an empty view is made by when
+   the node is of another kind (with -DVCC_CHECK_SYNTAX_VIEWS, a bug at the
+   caller's line: a view is asked for where a node of its kind is known, and
+   x.kind_name() tests) */
+struct SyntaxExtraBase : SyntaxRef {
     using SyntaxRef::SyntaxRef;
-    SyntaxExtra() = default;
-    SyntaxExtra(const SyntaxRef &r) : SyntaxRef(r)
+    SyntaxExtraBase() = default;
+    SyntaxExtraBase(const SyntaxRef &r) : SyntaxRef(r)
     {
     }
 
   protected:
-    /* the view made from a node (or an element, or another view) that is
-       not of its kinds is empty; with -DVCC_CHECK_SYNTAX_VIEWS it is a
-       bug at the caller's line: a view is asked for where a node of its
-       kind is known, and x.kind_name() tests */
     void narrow(bool accepted, const char *file, int line)
     {
         if (accepted)
@@ -699,6 +700,10 @@ template <class View> struct SyntaxExtra : SyntaxRef {
 #endif
         n = 0;
     }
+};
+
+template <class View> struct SyntaxExtra : SyntaxExtraBase {
+    using SyntaxExtraBase::SyntaxExtraBase;
 };
 
 /*
@@ -714,21 +719,8 @@ template <class View> struct SyntaxExtra : SyntaxRef {
  * first pass over a member-specification, a body kept as its tokens
  * (unparsed).
  */
-template <> struct SyntaxExtra<FunctionBody> : SyntaxRef {
-    using SyntaxRef::SyntaxRef;
-    SyntaxExtra() = default;
-    SyntaxExtra(const SyntaxRef &r) : SyntaxRef(r)
-    {
-    }
-    void narrow(bool accepted, const char *file, int line)
-    {
-        if (accepted)
-            return;
-#ifdef VCC_CHECK_SYNTAX_VIEWS
-        vbug(file, line, "a node converted to a view of another kind");
-#endif
-        n = 0;
-    }
+template <> struct SyntaxExtra<FunctionBody> : SyntaxExtraBase {
+    using SyntaxExtraBase::SyntaxExtraBase;
     bool unparsed() const
     {
         return is(syntax_kind::function_body) && size() == 1 &&
@@ -783,21 +775,8 @@ template <> struct SyntaxExtra<FunctionBody> : SyntaxRef {
  *
  * ([ext:gnu_attributes] may come first too.)
  */
-template <> struct SyntaxExtra<FunctionDefinition> : SyntaxRef {
-    using SyntaxRef::SyntaxRef;
-    SyntaxExtra() = default;
-    SyntaxExtra(const SyntaxRef &r) : SyntaxRef(r)
-    {
-    }
-    void narrow(bool accepted, const char *file, int line)
-    {
-        if (accepted)
-            return;
-#ifdef VCC_CHECK_SYNTAX_VIEWS
-        vbug(file, line, "a node converted to a view of another kind");
-#endif
-        n = 0;
-    }
+template <> struct SyntaxExtra<FunctionDefinition> : SyntaxExtraBase {
+    using SyntaxExtraBase::SyntaxExtraBase;
     /* the declarator after the decl-specifier-seq ({} without one; a
        declarator that is only its identifier is that token) */
     SyntaxElement declarator() const
@@ -862,6 +841,89 @@ struct NoptrDeclaratorParts : SyntaxRef {
             id.is(syntax_kind::parameters_and_qualifiers))
             return {};
         return id;
+    }
+};
+
+/*
+ * [stmt.iter]/1:
+ *
+ *     iteration-statement:
+ *         while ( condition ) statement
+ *         do statement while ( expression ) ;
+ *         for ( init-statement condition_opt ; expression_opt ) statement
+ *         for ( init-statement_opt for-range-declaration : for-range-initializer ) statement
+ *
+ * (the init-statement ends with its own ;).  The grammar names each part
+ * but the kinds of the condition and the expression overlap, so the
+ * parts are named here by their position in each form.
+ */
+template <> struct SyntaxExtra<IterationStatement> : SyntaxExtraBase {
+    using SyntaxExtraBase::SyntaxExtraBase;
+    /* the keyword the statement begins with: while, do or for */
+    standard_keyword keyword() const
+    {
+        return (*this)[0].keyword();
+    }
+    /* the statement: the do's second child, else the last */
+    SyntaxElement body() const
+    {
+        if (keyword() == standard_keyword::do_)
+            return (*this)[1];
+        return back();
+    }
+    /* while ( condition ) statement */
+    SyntaxElement while_condition() const
+    {
+        return (*this)[2];
+    }
+    /* do statement while ( expression ) ; */
+    SyntaxElement do_expression() const
+    {
+        return (*this)[4];
+    }
+    /* for ( init-statement condition_opt ; expression_opt ) statement */
+    SyntaxElement for_init_statement() const
+    {
+        return (*this)[2];
+    }
+    SyntaxElement for_condition() const
+    {
+        auto c = (*this)[3];
+        if (c.is(preprocessing_op_or_punc::SEMICOLON))
+            return {};
+        return c;
+    }
+    SyntaxElement for_expression() const
+    {
+        auto c = (*this)[after_for_condition()];
+        if (c.is(preprocessing_op_or_punc::RIGHT_PARENTHESIS))
+            return {};
+        return c;
+    }
+    /* whether the children are the for's: the ; after the condition_opt,
+       then the expression_opt, the ) and the statement */
+    bool for_shaped() const
+    {
+        uint32_t i = 3;
+        if (!(*this)[i].is(preprocessing_op_or_punc::SEMICOLON))
+            i++;
+        if (!(*this)[i].is(preprocessing_op_or_punc::SEMICOLON))
+            return false;
+        i++;
+        if (i < size() &&
+            !(*this)[i].is(preprocessing_op_or_punc::RIGHT_PARENTHESIS))
+            i++;
+        return i + 2 == size();
+    }
+
+  private:
+    /* the index after the ; that ends the condition_opt */
+    uint32_t after_for_condition() const
+    {
+        uint32_t i = 3;
+        if (!(*this)[i].is(preprocessing_op_or_punc::SEMICOLON))
+            i++;
+        return i + 1;
     }
 };
 

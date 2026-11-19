@@ -331,7 +331,7 @@ def extras():
     """type -> names declared in syntax.h's SyntaxExtra<type>"""
     text = open(SYNTAX_H, encoding='utf-8').read()
     out = {}
-    for m in re.finditer(r'template <>\s*struct SyntaxExtra<(\w+)>\s*:\s*SyntaxRef\s*\{(.*?)\n\};', text, re.S):
+    for m in re.finditer(r'template <>\s*struct SyntaxExtra<(\w+)>\s*:\s*SyntaxExtraBase\s*\{(.*?)\n\};', text, re.S):
         out[m.group(1)] = set(re.findall(r'(\w+)\([^()]*\) const', m.group(2)))
     return out
 
