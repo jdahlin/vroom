@@ -365,20 +365,18 @@ semantic_analysis::function_template_definition(SyntaxRef n,
        [ext:gnu_attributes] before it, its specializations' */
     bool defines = definition.is(syntax_kind::function_definition);
     uint32_t lead = leading_gnu_attributes(definition);
+    SyntaxTail tail(definition, lead);
     /* [dcl.decl]/4: a trailing requires-clause (trailing_constraint),
        where the template-head has none */
     uint32_t trailing = static_cast<bool>(trailing_constraint(n));
     if (trailing && head_constraint(n))
         return not_supported(n, "temp.constr");
-    if (definition.size() != lead + 3 + trailing ||
-        !definition[lead].is(syntax_kind::decl_specifier_seq) ||
-        definition[lead + 1].is_token() ||
-        (defines &&
-         !definition[lead + 2 + trailing].is(syntax_kind::function_body)) ||
-        (!defines &&
-         (!definition[lead + 2].is(preprocessing_op_or_punc::SEMICOLON) ||
-          (!definition[lead + 1].is(syntax_kind::noptr_declarator,
-                                    syntax_kind::ptr_declarator)))))
+    if (tail.size() != 3 + trailing ||
+        !tail[0].is(syntax_kind::decl_specifier_seq) || tail[1].is_token() ||
+        (defines && !tail[2 + trailing].is(syntax_kind::function_body)) ||
+        (!defines && (!tail[2].is(preprocessing_op_or_punc::SEMICOLON) ||
+                      (!tail[1].is(syntax_kind::noptr_declarator,
+                                   syntax_kind::ptr_declarator)))))
         return not_supported(n, "temp.fct");
     uint32_t index = 0, first = 0;
     entity_index scope = 0;
@@ -463,16 +461,15 @@ semantic_analysis::function_template_definition(SyntaxRef n,
            in pack expansions (res<A...>, tuple<A...>&), each name of it
            followed by ... */
         if (pack && depends(type_table, ft.operand, &entity_table, last) &&
-            !pack_only_expanded(pack_name, definition[lead].first_token(),
-                                definition[lead].end_token()))
+            !pack_only_expanded(pack_name, tail[0].first_token(),
+                                tail[0].end_token()))
             return not_supported(n, "temp.variadic");
         for (uint32_t i = 0; i < ft.parameter_count; i++) {
             const struct type pt = type_table[list[i].unqualified()];
             if (pt.kind != type_kind::pack_expansion) {
                 if (pack && depends(type_table, list[i], &entity_table, last) &&
-                    !pack_only_expanded(pack_name,
-                                        definition[lead + 1].first_token(),
-                                        definition[lead + 1].end_token()))
+                    !pack_only_expanded(pack_name, tail[1].first_token(),
+                                        tail[1].end_token()))
                     return not_supported(n, "temp.variadic");
                 continue;
             }

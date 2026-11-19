@@ -780,9 +780,10 @@ analysis_result semantic_analysis::alias_declaration(AliasDeclaration n)
 analysis_result semantic_analysis::simple_declaration(SyntaxRef n)
 {
     uint32_t k = leading_gnu_attributes(n);
-    if (k >= n.size() || !n[k].is(syntax_kind::decl_specifier_seq))
+    SyntaxTail tail(n, k);
+    if (k >= n.size() || !tail[0].is(syntax_kind::decl_specifier_seq))
         return not_supported(n, "dcl.attr");
-    return init_declarators(n, n[k], false);
+    return init_declarators(n, tail[0], false);
 }
 
 /* [ext:gnu_attributes] the number of gnu-attribute-specifiers (or
@@ -833,9 +834,10 @@ semantic_analysis::function_definition(FunctionDefinition definition)
         return not_supported(current_declaration, "dcl.fct.def.general");
     SyntaxRef n = definition;
     uint32_t k = leading_gnu_attributes(n);
-    if (k && (k >= n.size() || !n[k].is(syntax_kind::decl_specifier_seq)))
+    SyntaxTail tail(n, k);
+    if (k && (k >= n.size() || !tail[0].is(syntax_kind::decl_specifier_seq)))
         return not_supported(n, "dcl.fct.def.general");
-    if (n.size() && !n[k].is(syntax_kind::decl_specifier_seq))
+    if (n.size() && !tail[0].is(syntax_kind::decl_specifier_seq))
         /* [class.mem]/12: a constructor or destructor (or a conversion
            function) defined outside its class */
         return special_member_definition(n, 0);
@@ -847,7 +849,7 @@ semantic_analysis::function_definition(FunctionDefinition definition)
         return special_member_definition(n, 1);
     if (!n.size())
         return not_supported(n, "dcl.fct.def.general");
-    analysis_result r = init_declarators(n, n[k], true);
+    analysis_result r = init_declarators(n, tail[0], true);
     if (r != analysis_result::well_formed)
         return r;
     entity_index f = last_declared;

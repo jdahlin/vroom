@@ -492,6 +492,34 @@ class SyntaxItems
     uint32_t count = 0;
 };
 
+/* a node's children from the first-th on (after its leading attributes):
+   [] and size() count from there, as the grammar names the rest */
+class SyntaxTail
+{
+  public:
+    SyntaxTail(SyntaxRef node, uint32_t first) : node(node), first(first)
+    {
+    }
+    SyntaxElement operator[](uint32_t i) const
+    {
+        return node[first + i];
+    }
+    uint32_t size() const
+    {
+        if (node.size() < first)
+            return 0;
+        return node.size() - first;
+    }
+    SyntaxElements elements() const
+    {
+        return node.elements(first);
+    }
+
+  private:
+    SyntaxRef node;
+    uint32_t first;
+};
+
 inline SyntaxItems SyntaxElement::items(syntax_kind list) const
 {
     if (!c)

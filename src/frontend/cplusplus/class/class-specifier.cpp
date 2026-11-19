@@ -1124,9 +1124,9 @@ analysis_result semantic_analysis::member_declaration_with_specifiers(
     /* [ext:gnu_attributes] before it all (libc++'s _LIBCPP_HIDE_FROM_ABI
        friend ...) */
     uint32_t leading = leading_gnu_attributes(node);
-    if (leading < node.size() &&
-        node[leading].is(syntax_kind::decl_specifier_seq)) {
-        for (auto x : node[leading].elements())
+    SyntaxTail tail(node, leading);
+    if (leading < node.size() && tail[0].is(syntax_kind::decl_specifier_seq)) {
+        for (auto x : tail[0].elements())
             if (x.is(standard_keyword::friend_))
                 return friend_declaration(c, node, bodies);
     }
@@ -1842,6 +1842,7 @@ semantic_analysis::member_function_definition(entity_index c,
 {
     /* [ext:gnu_attributes] before it all: member_declaration took them */
     uint32_t lead = leading_gnu_attributes(definition);
+    SyntaxTail tail(definition, lead);
     /* a conversion function ([class.conv.fct]): no parameters for the
        declarator to bind, its body the function-body */
     if (entity_index f = conversion_function_declared_by(c, definition)) {
@@ -1876,8 +1877,7 @@ semantic_analysis::member_function_definition(entity_index c,
         in_member_declarator = true;
         entity_index saved_class = defining_class;
         defining_class = c;
-        analysis_result r =
-            declarator(definition, definition[lead + at], type, m);
+        analysis_result r = declarator(definition, tail[at], type, m);
         defining_class = saved_class;
         in_member_declarator = false;
         if (r != analysis_result::well_formed)
@@ -1893,8 +1893,7 @@ semantic_analysis::member_function_definition(entity_index c,
         }
         if (!last_declared)
             return not_supported(definition, "class.ctor");
-        return special_member_body(definition,
-                                   definition[lead + at + 1].function_body());
+        return special_member_body(definition, tail[at + 1].function_body());
     }
     /* [basic.scope.class]: the declarator's names are looked up in the
        class, as when its declaration was analysed (a class template's

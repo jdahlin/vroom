@@ -192,25 +192,26 @@ semantic_analysis::friend_function(entity_index c, SyntaxRef n,
        definition has no rules for beyond its form (visibility as the
        class's members') */
     uint32_t leading = leading_gnu_attributes(n);
+    SyntaxTail tail(n, leading);
     uint32_t count = n.size() - leading;
     bool defines = n.is(syntax_kind::function_definition);
     if (defines) {
         auto body = n.function_definition().function_body();
-        if (count != 3 || !n[leading].is(syntax_kind::decl_specifier_seq) ||
+        if (count != 3 || !tail[0].is(syntax_kind::decl_specifier_seq) ||
             !body.is(syntax_kind::function_body))
             return not_supported(n, "class.friend");
         if (!body.defaulted() && !body.plain())
             return not_supported(n, "dcl.fct.def.general");
     } else if (!n.is(syntax_kind::member_declaration) || count != 3 ||
-               !n[leading + 2].is(preprocessing_op_or_punc::SEMICOLON) ||
-               n[leading + 1].is(syntax_kind::member_declarator,
-                                 syntax_kind::member_declarator_list)) {
+               !tail[2].is(preprocessing_op_or_punc::SEMICOLON) ||
+               tail[1].is(syntax_kind::member_declarator,
+                          syntax_kind::member_declarator_list)) {
         return not_supported(n, "class.friend");
     }
     specified s;
     bool outer = friend_allowed;
     friend_allowed = true;
-    analysis_result r = decl_specifier_seq(n[leading], s, false);
+    analysis_result r = decl_specifier_seq(tail[0], s, false);
     friend_allowed = outer;
     if (r != analysis_result::well_formed)
         return r;
@@ -223,7 +224,7 @@ semantic_analysis::friend_function(entity_index c, SyntaxRef n,
     declarator_meaning m;
     function_cv = 0;
     function_parameters.clear();
-    r = declarator(n, n[leading + 1], type, m);
+    r = declarator(n, tail[1], type, m);
     if (r != analysis_result::well_formed)
         return r;
     /* an operator function only as a definition ([over.oper]: its
@@ -239,7 +240,7 @@ semantic_analysis::friend_function(entity_index c, SyntaxRef n,
         if (parameter.default_argument)
             return not_supported(n, "dcl.fct.default");
     uint32_t name = tokens.identifier(m.id);
-    if (defines && explicit_body(n[leading + 2], standard_keyword::default_) &&
+    if (defines && explicit_body(tail[2], standard_keyword::default_) &&
         !defaulted_equality_declared(c, name, type))
         return not_supported(n, "class.compare.default");
     entity_index space = enclosing_namespace(c);
@@ -472,11 +473,12 @@ analysis_result semantic_analysis::friend_member_declaration(
 {
     SyntaxRef n = d;
     uint32_t leading = leading_gnu_attributes(n);
-    if (n.size() < leading + 2)
+    SyntaxTail tail(n, leading);
+    if (tail.size() < 2)
         return not_supported(n, "class.friend");
-    if (n.size() == leading + 2) {
+    if (tail.size() == 2) {
         /* friend class-key identifier ; friend type-name ; */
-        auto seq = n[leading];
+        auto seq = tail[0];
         SyntaxElement type = {};
         unsigned friends_seen = 0, others = 0;
         for (SyntaxElement x : seq.elements()) {
