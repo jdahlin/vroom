@@ -6295,6 +6295,8 @@ bool c_lowering::translation_unit()
     for (const semantic_analysis::definition_record &d : analysis.definitions) {
         const entity &x = analysis.entity_table[d.entity];
         bool friend_ = analysis.defined_by_friend(d.entity);
+        if (!x.defined && !friend_)
+            continue;
         if (x.kind != entity_kind::function ||
             (!friend_ &&
              (!x.enclosing || analysis.entity_table[x.enclosing].kind !=

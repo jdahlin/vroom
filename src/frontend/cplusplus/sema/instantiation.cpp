@@ -468,7 +468,7 @@ void semantic_analysis::instantiate_pending()
         const postponed_body b = postponed_bodies[i];
         instantiation_context context;
         enter_instantiation(context, b.scope, b.declaration);
-        member_function_body(b.c, b.body);
+        instantiated_member_body(b.c, b.body);
         leave_instantiation(context);
     }
     postponed_bodies.clear();

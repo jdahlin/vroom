@@ -639,13 +639,21 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
         nested_bodies.resize(nested_start);
     } else {
         size_t nested_end = nested_bodies.size();
+        bool quiet = entity_table[c].instantiation != 0;
         for (SyntaxRef body : bodies) {
-            result = worse(result, member_function_body(c, body));
+            if (quiet)
+                instantiated_member_body(c, body);
+            else
+                result = worse(result, member_function_body(c, body));
             current_declaration = outer_declaration;
         }
         for (size_t i = nested_start; i < nested_end; i++) {
-            result = worse(result, member_function_body(nested_bodies[i].c,
-                                                        nested_bodies[i].body));
+            deferred_body nested = nested_bodies[i];
+            if (quiet)
+                instantiated_member_body(nested.c, nested.body);
+            else
+                result =
+                    worse(result, member_function_body(nested.c, nested.body));
             current_declaration = outer_declaration;
         }
         nested_bodies.resize(nested_start);
@@ -1809,6 +1817,20 @@ analysis_result semantic_analysis::member_function_body(entity_index c,
     analysis_result r = member_function_definition(c, definition);
     current_scope = scope;
     return r;
+}
+
+/*
+ * [temp.inst]/4: a member function of an implicit instantiation is
+ * instantiated only if used, and its being ill-formed for these arguments
+ * (r %= x with a double r) is no error of the class's instantiation.  Uses
+ * are not tracked yet: the body is analysed quietly and one that fails is
+ * left undefined, so that no code is made for it.
+ */
+void semantic_analysis::instantiated_member_body(entity_index c, SyntaxRef n)
+{
+    diagnostics_suppressed hush(diagnostics);
+    if (member_function_body(c, n) == analysis_result::ill_formed)
+        entity_table[last_declared].defined = false;
 }
 
 analysis_result

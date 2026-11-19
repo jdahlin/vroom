@@ -2929,6 +2929,7 @@ class semantic_analysis
     /* the body of a member function defined in its class, analysed at the
        end of the class ([class.mem]/6: a complete-class context) */
     analysis_result member_function_body(entity_index c, SyntaxRef definition);
+    void instantiated_member_body(entity_index c, SyntaxRef definition);
     analysis_result member_function_definition(entity_index c,
                                                FunctionDefinition definition);
     /* [expr.ref]: the member e of the object m (a glvalue of class type) */
