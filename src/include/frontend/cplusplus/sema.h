@@ -1828,7 +1828,8 @@ class semantic_analysis
        for a friend function defined in a class, the class
        ([basic.lookup.unqual]/1) */
     entity_index lexical_parent(entity_index s) const;
-    analysis_result friend_function_body(entity_index c, node_index n,
+    analysis_result friend_function_body(entity_index c,
+                                         function_definition_syntax definition,
                                          entity_index f);
     bool friend_names(const friend_record &f, entity_index e) const;
     bool grants(entity_index k, entity_index e) const;
@@ -2823,9 +2824,9 @@ class semantic_analysis
     /* the body of a member function defined in its class, analysed at the
        end of the class ([class.mem]/6: a complete-class context) */
     analysis_result member_function_body(entity_index c, node_index definition);
-    analysis_result member_function_definition(entity_index c,
-                                               node_index definition,
-                                               const syntax_child *children);
+    analysis_result
+    member_function_definition(entity_index c,
+                               function_definition_syntax definition);
     /* [expr.ref]: the member e of the object m (a glvalue of class type) */
     analysis_result member_access(token_index at, entity_index e,
                                   expression_meaning &m);
@@ -2983,8 +2984,8 @@ class semantic_analysis
                                   bool *explicit_specified = nullptr) const;
     /* the function-body of a constructor or destructor definition
        (last_declared): ctor-initializer_opt compound-statement */
-    analysis_result special_member_body(node_index definition,
-                                        syntax_child body);
+    analysis_result special_member_body(function_definition_syntax definition,
+                                        function_body_syntax body);
     /* [dcl.meaning]/1: Class::Class or Class::~Class defined outside the
        class: the function-definition n without a decl-specifier-seq */
     analysis_result special_member_definition(node_index n, uint32_t at);

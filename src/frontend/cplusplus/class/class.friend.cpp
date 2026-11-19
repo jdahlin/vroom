@@ -329,30 +329,29 @@ entity_index semantic_analysis::friend_defined_by(node_index n) const
 
 /* [class.friend]/7: the body of a friend defined in class c, in the
    class's scope: its declarator again for the parameters, then the body */
-analysis_result semantic_analysis::friend_function_body(entity_index c,
-                                                        node_index n,
-                                                        entity_index f)
+analysis_result semantic_analysis::friend_function_body(
+    entity_index c, function_definition_syntax definition, entity_index f)
 {
-    auto def = syntax(n).function_definition();
-    current_declaration = n;
+    current_declaration = definition;
     entity_index scope = current_scope;
     current_scope = c;
     specified s;
     bool outer = friend_allowed;
     friend_allowed = true;
     analysis_result r =
-        decl_specifier_seq(def.decl_specifier_seq().index(), s, false);
+        decl_specifier_seq(definition.decl_specifier_seq().index(), s, false);
     friend_allowed = outer;
     qualified_type type = s.type;
     declarator_meaning m;
     if (r == analysis_result::well_formed) {
         function_cv = 0;
         function_parameters.clear();
-        r = declarator(n, def.declarator(), type, m);
+        r = declarator(definition, definition.declarator(), type, m);
     }
     if (r == analysis_result::well_formed) {
         last_declared = f;
-        r = analyse_function_body(n, def.body().compound_statement());
+        r = analyse_function_body(definition,
+                                  definition.body().compound_statement());
     }
     current_scope = scope;
     return r;

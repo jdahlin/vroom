@@ -1912,12 +1912,12 @@ uint32_t semantic_analysis::subobject_destructions(entity_index c,
  * definition of a constructor" (else ill-formed: clang's "only
  * constructors take base initializers").
  */
-analysis_result semantic_analysis::special_member_body(node_index definition,
-                                                       syntax_child body)
+analysis_result
+semantic_analysis::special_member_body(function_definition_syntax definition,
+                                       function_body_syntax body)
 {
-    auto b = syntax(body).function_body();
-    syntax_child init = b.ctor_initializer();
-    if (!b.compound_statement().bits)
+    syntax_child init = body.ctor_initializer();
+    if (!body.compound_statement().bits)
         return not_supported(definition, "dcl.fct.def.general");
     if (init.bits &&
         entity_table[last_declared].special != special_member::constructor)
@@ -1925,7 +1925,7 @@ analysis_result semantic_analysis::special_member_body(node_index definition,
                           "a ctor-initializer shall appear only in the "
                           "definition of a constructor",
                           "class.base.init");
-    return analyse_function_body(definition, b.compound_statement(), init);
+    return analyse_function_body(definition, body.compound_statement(), init);
 }
 
 /*
@@ -1995,7 +1995,8 @@ analysis_result semantic_analysis::special_member_definition(node_index n,
     entity_table[e].defined = true;
     entity_table.add_declaration(e, n);
     last_declared = e;
-    return special_member_body(n, children[at + 1]);
+    return special_member_body(syntax(n).function_definition(),
+                               syntax(children[at + 1]).function_body());
 }
 
 /* the prvalue of class type type whose result object the node

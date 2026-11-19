@@ -60,6 +60,12 @@ class syntax_ref
     {
         return n != 0;
     }
+    /* the node (0 for an empty view): a view goes wherever a node_index
+       does, so a function can take a view before its callees do */
+    operator node_index() const
+    {
+        return n;
+    }
     node_index index() const
     {
         return n;

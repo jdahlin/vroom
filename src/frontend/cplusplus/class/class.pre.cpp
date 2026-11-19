@@ -1831,32 +1831,32 @@ analysis_result semantic_analysis::member_typedef(
  * parameters (function_body reads them), then the body.
  */
 analysis_result semantic_analysis::member_function_body(entity_index c,
-                                                        node_index definition)
+                                                        node_index n)
 {
+    auto definition = syntax(n).function_definition();
     if (entity_index f = friend_defined_by(definition))
         return friend_function_body(c, definition, f);
-    const syntax_child *children = tree.children(definition);
     current_declaration = definition;
     /* [basic.scope.class]/1: the declaration is in the class's scope, its
        names (a member type as the return type) found there */
     entity_index scope = current_scope;
     current_scope = c;
-    analysis_result r = member_function_definition(c, definition, children);
+    analysis_result r = member_function_definition(c, definition);
     current_scope = scope;
     return r;
 }
 
 analysis_result semantic_analysis::member_function_definition(
-    entity_index c, node_index definition, const syntax_child *children)
+    entity_index c, function_definition_syntax definition)
 {
     /* [ext:gnu_attributes] before it all: member_declaration took them */
-    uint32_t lead = leading_gnu_attributes(definition);
-    children += lead;
+    const syntax_child *children =
+        tree.children(definition) + leading_gnu_attributes(definition);
     /* a conversion function ([class.conv.fct]): no parameters for the
        declarator to bind, its body the function-body */
     if (entity_index f = conversion_function_declared_by(c, definition)) {
         last_declared = f;
-        auto body = syntax(definition).function_definition().body();
+        auto body = definition.body();
         if (body.deleted())
             return deleted_definition(definition, f);
         if (!body.plain())
@@ -1871,13 +1871,14 @@ analysis_result semantic_analysis::member_function_definition(
     bool constexpr_specified = false, body_virtual = false,
          body_explicit = false;
     uint32_t at = 0;
-    if (tree[definition].child_count > lead + 2 &&
-        syntax_is(tree, children[0], syntax_kind::decl_specifier_seq) &&
-        function_specifiers_only(children[0].index(), constexpr_specified,
+    syntax_child seq = definition.decl_specifier_seq();
+    if (seq.bits &&
+        definition.size() > leading_gnu_attributes(definition) + 2 &&
+        function_specifiers_only(seq.index(), constexpr_specified,
                                  &body_virtual, &body_explicit) &&
-        declares_special_member(c, children[1]))
+        declares_special_member(c, definition.declarator()))
         at = 1;
-    if (at || !syntax_is(tree, children[0], syntax_kind::decl_specifier_seq)) {
+    if (at || !seq.bits) {
         /* a constructor or destructor: the one this definition declared */
         qualified_type type = qualified_type::make(
             type_table.fundamental(fundamental_type::void_), cv_none);
@@ -1902,7 +1903,8 @@ analysis_result semantic_analysis::member_function_definition(
         }
         if (!last_declared)
             return not_supported(definition, "class.ctor");
-        return special_member_body(definition, children[at + 1]);
+        return special_member_body(definition,
+                                   syntax(children[at + 1]).function_body());
     }
     /* [basic.scope.class]: the declarator's names are looked up in the
        class, as when its declaration was analysed (a class template's
@@ -1912,14 +1914,14 @@ analysis_result semantic_analysis::member_function_definition(
     specified s;
     bool outer_virtual_allowed = virtual_allowed;
     virtual_allowed = true;
-    analysis_result r = decl_specifier_seq(children[0].index(), s, false);
+    analysis_result r = decl_specifier_seq(seq.index(), s, false);
     virtual_allowed = outer_virtual_allowed;
     qualified_type type = s.type;
     declarator_meaning m;
     if (r == analysis_result::well_formed) {
         function_cv = 0;
         in_member_declarator = true;
-        r = declarator(definition, children[1], type, m);
+        r = declarator(definition, definition.declarator(), type, m);
         in_member_declarator = false;
     }
     defining_class = saved_class;
@@ -1935,7 +1937,7 @@ analysis_result semantic_analysis::member_function_definition(
     if (!last_declared)
         return not_supported(definition, "class.mfct");
     /* the function-body after any virt-specifier-seq */
-    auto body = syntax(definition).function_definition().body();
+    auto body = definition.body();
     if (body.deleted())
         return deleted_definition(definition, last_declared);
     if (!body.plain())
