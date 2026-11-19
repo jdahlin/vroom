@@ -179,8 +179,11 @@ analysis_result semantic_analysis::best_viable_function(
             /* (an order analysis cannot tell is neither: the final check
                below makes the call unsupported) */
             bool unknown = false;
-            int order = function_template_order(x.template_index,
-                                                y.template_index, n, unknown);
+            /* (two member candidates' first argument is the object's,
+               the same class's implicit object parameter, [temp.func.order]/3) */
+            int order =
+                function_template_order(x.template_index, y.template_index,
+                                        n - (x.member && y.member), unknown);
             if (!unknown && order != 0)
                 return order > 0;
         }

@@ -1189,15 +1189,23 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
                 /* [dcl.spec.auto]: decltype(auto); a type-constraint is
                    [temp.param]'s */
                 const syntax_child *parts = tree.children(c.index());
-                if (!allow_placeholder ||
-                    !tokens.files.behavior.has(
-                        language_feature::return_type_deduction) ||
-                    !parts[0].is_token() ||
-                    p.keyword_of(tokens[parts[0].index()]) !=
-                        standard_keyword::decltype_)
+                qualified_type invented;
+                if (parameter && invented_parameter_type(seq, invented)) {
+                    /* [dcl.fct]/22: C auto's invented template-parameter */
+                    class_type = invented.unqualified();
+                    cv |= invented.cv();
+                    r = analysis_result::well_formed;
+                } else if (!allow_placeholder ||
+                           !tokens.files.behavior.has(
+                               language_feature::return_type_deduction) ||
+                           !parts[0].is_token() ||
+                           p.keyword_of(tokens[parts[0].index()]) !=
+                               standard_keyword::decltype_)
                     return not_supported(seq, "dcl.spec.auto");
-                class_type = placeholder_type(true).unqualified();
-                r = analysis_result::well_formed;
+                else {
+                    class_type = placeholder_type(true).unqualified();
+                    r = analysis_result::well_formed;
+                }
             } else if (syntax_is(tree, c,
                                  syntax_kind::gnu_attribute_specifier)) {
                 /* (after a class-specifier: the class's alignment, taken
@@ -1388,7 +1396,18 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
                 return not_supported(seq, specifier_subclause(kw));
             count(virtual_, t, "virtual");
             break;
-        case standard_keyword::auto_:
+        case standard_keyword::auto_: {
+            /* [dcl.fct]/22: a generic parameter type placeholder, the type
+               of its invented template-parameter */
+            qualified_type invented;
+            if (parameter && invented_parameter_type(seq, invented)) {
+                if (named)
+                    k.alone++;
+                named = invented.unqualified();
+                cv |= invented.cv();
+                named_at = t;
+                break;
+            }
             /* [dcl.spec.auto]/1: a placeholder-type-specifier */
             if (!allow_placeholder ||
                 !tokens.files.behavior.has(
@@ -1399,6 +1418,7 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
             named = placeholder_type(false).unqualified();
             named_at = t;
             break;
+        }
         case standard_keyword::explicit_:
             /* [dcl.fct.spec]/3: "An explicit-specifier shall be used only
                in the declaration of a constructor or conversion function
