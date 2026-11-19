@@ -271,9 +271,10 @@ node_index parser::constraint_logical_or_expression()
     auto primary = [&]() -> node_index {
         token_index at_first = position;
         unsigned length = 0;
+        /* a dependent qualified name without typename names a value
+           ([temp.res]/5), so T::v { is no braced-init-list of a type */
         bool type = at_identifier() &&
-                    (classify_name(0, &length, false) == name_class::type ||
-                     classify_name(0, &length, false) == name_class::dependent);
+                    classify_name(0, &length, false) == name_class::type;
         node_index n = primary_expression();
         if (failed())
             return 0;
