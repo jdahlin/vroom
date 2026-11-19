@@ -95,6 +95,11 @@ class SyntaxRef
     {
         return n;
     }
+    /* (while node_index and uint32_t convert both ways) */
+    operator uint32_t() const
+    {
+        return n;
+    }
     node_index index() const
     {
         return n;

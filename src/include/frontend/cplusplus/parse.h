@@ -103,8 +103,33 @@ const char *syntax_kind_subclause(syntax_kind kind);
    a node that has a value, which parentheses around it do not change */
 bool syntax_kind_is_expression(syntax_kind kind);
 
+namespace ast
+{
+/*
+ * A node of the translation unit's syntax tree: its index in the tree's
+ * node array; 0 is no node.  A strong type, so that a node and a token
+ * (token_index) cannot be mixed without saying so; it still converts
+ * to and from uint32_t implicitly while the front end moves to it.
+ */
+struct node {
+    uint32_t i = 0;
+    constexpr node() = default;
+    constexpr node(uint32_t i) : i(i)
+    {
+    }
+    constexpr operator uint32_t() const
+    {
+        return i;
+    }
+    constexpr uint32_t index() const
+    {
+        return i;
+    }
+};
+} // namespace ast
+
 /* a node of the translation unit's syntax tree; 0 is no node */
-using node_index = uint32_t;
+using node_index = ast::node;
 
 /* a child of a node: a node or a token of the alternative that matched */
 struct syntax_child {

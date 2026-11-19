@@ -641,7 +641,7 @@ bool semantic_analysis::abbreviated_parameters(
 uint32_t semantic_analysis::invented_parameter_name(node_index seq) const
 {
     char spelling[24];
-    int length = snprintf(spelling, sizeof spelling, "auto:%u", seq);
+    int length = snprintf(spelling, sizeof spelling, "auto:%u", seq.index());
     return tokens.pp.identifier(spelling, static_cast<size_t>(length)) + 1;
 }
 
