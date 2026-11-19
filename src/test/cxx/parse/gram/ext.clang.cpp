@@ -27,3 +27,11 @@ static_assert(__is_same(__make_unsigned<int>::type, unsigned));
 typedef __builtin_va_list va_list_t;
 __builtin_va_list predeclared_va_list;
 void takes_va_list(__builtin_va_list *p, va_list_t q);
+
+// [ext:clang_convertvector] __builtin_convertvector(vector, type-id), as
+// libc++'s __algorithm/simd_utils.h converts a comparison's mask; the
+// type-id's > ends a template-argument-list.
+template <class T, unsigned long N>
+using vec __attribute__((__ext_vector_type__(N))) = T;
+template <class T, unsigned long N>
+vec<long, N> as_mask(vec<T, N> v) { return __builtin_convertvector(v == v, vec<long, N>); }

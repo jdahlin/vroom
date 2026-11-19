@@ -327,6 +327,14 @@ uint32_t ast_builder_builtin_call(cc *c, const char *name, size_t length,
     return cc_builtin_node_new(c, b->id, t, 0, &list);
 }
 
+uint32_t ast_builder_convert_vector(cc *c, ast_qualified_type t,
+                                    uint32_t vector)
+{
+    return ast_builder_node(c, AST_NODE_BUILTIN, t, 0,
+                            ast_builder_list(c, &vector, 1), 1,
+                            CC_BUILTIN_CONVERTVECTOR, 0);
+}
+
 uint32_t ast_builder_atomic_load(cc *c, ast_qualified_type t, uint32_t pointer,
                                  uint32_t order)
 {
