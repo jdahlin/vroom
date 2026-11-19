@@ -1,0 +1,104 @@
+# expected failures of bench/cxx-run.py: NAME<TAB>vcc first error
+old-adl-calls	vcc: a program that refers to a deleted function, other than to declare it, is ill-formed ([dcl.fct.def.delete])
+old-adl-friend-after-conversion	vcc: the rules of [temp.mem] are not implemented yet
+old-aggregate-class-arrays	vcc: the rules of [class.ctor] are not implemented yet
+old-alias-pack-partial	vcc: the rules of [temp.variadic] are not implemented yet
+old-alignas-layout	vcc: the rules of [class.ctor] are not implemented yet
+old-anonymous-members	vcc: the rules of [class.ctor] are not implemented yet
+old-arrow-convert	vcc: the rules of [temp.mem] are not implemented yet
+old-assign-braced-list	vcc: the rules of [expr.ass] are not implemented yet
+old-auto-members	vcc: the rules of [dcl.spec.auto] are not implemented yet
+old-bitfield-const-ref	vcc: the rules of [class.bit] are not implemented yet
+old-braced-args	vcc: the rules of [class.mem] are not implemented yet
+old-braced-template-arguments	vcc: the rules of [over.match.list] are not implemented yet
+old-builtin-bit-count	vcc: the rules of [basic.lookup.unqual] are not implemented yet
+old-builtin-bit-generic	vcc: the rules of [basic.lookup.unqual] are not implemented yet
+old-builtin-common-type	vcc: the rules of [temp.arg] are not implemented yet
+old-builtins	vcc: the C++ front end does not handle a declaration the parser kept as tokens yet
+old-builtins-table	vcc: the rules of [basic.types] are not implemented yet
+old-builtins2	vcc: the C++ front end does not handle a declaration the parser kept as tokens yet
+old-class-pack-params	vcc: the rules of [temp.spec] are not implemented yet
+old-class-scalar-operand	vcc: the rules of [dcl.fct] are not implemented yet
+old-class-values	vcc: the rules of [class.temporary] are not implemented yet
+old-conditional-class-argument	vcc: C++ code generation does not handle a class argument by value in a conditional operand yet
+old-conditional-class-convert	vcc: the rules of [expr.cond] are not implemented yet
+old-conditional-temporaries	vcc: the rules of [class.temporary] are not implemented yet
+old-conditions	vcc: the rules of [class.temporary] are not implemented yet
+old-const-member-default	vcc: the rules of [class.copy.ctor] are not implemented yet
+old-const-this-members	vcc: the rules of [dcl.stc] are not implemented yet
+old-constexpr-case-array-nsdmi	vcc: the rules of [class.base.init] are not implemented yet
+old-conversion-template	vcc: the rules of [temp.mem] are not implemented yet
+old-converting-bind	vcc: the rules of [dcl.init.ref] are not implemented yet
+old-decltype-returns	vcc: the rules of [class.static.data] are not implemented yet
+old-default-args	vcc: the rules of [temp.inst] are not implemented yet
+old-defaulted-assignment	vcc: the rules of [class.mem] are not implemented yet
+old-defaulted-ctor-out-of-class	vcc: the rules of [class.copy.ctor] are not implemented yet
+old-defaulted-key-dtor	vcc: the rules of [class.copy.elision] are not implemented yet
+old-dependent-member-params	vcc: the rules of [over] are not implemented yet
+old-empty-base-assign	vcc: the C++ front end does not handle a declaration the parser kept as tokens yet
+old-empty-member-copy	vcc: the rules of [class.ctor] are not implemented yet
+old-empty-pack-constexpr	vcc: the rules of [dcl.decl] are not implemented yet
+old-enable-if-overloads	vcc: the rules of [temp.variadic] are not implemented yet
+old-enum-class-no-conversion	vcc: the rules of [expr.prim.req] are not implemented yet
+old-enumerator-prvalue	vcc: the rules of [ext.clang] are not implemented yet
+old-enums-switch	vcc: the C++ front end does not handle a declaration the parser kept as tokens yet
+old-explicit-destructor-instance	vcc: the C++ front end does not handle a declaration the parser kept as tokens yet
+old-friend-templates	vcc: the rules of [stmt.if] are not implemented yet
+old-function-pointers	vcc: the rules of [expr.type.conv] are not implemented yet
+old-function-templates	vcc: the rules of [stmt.if] are not implemented yet
+old-gnu-conditional-omitted	vcc: the C++ front end does not handle a declaration the parser kept as tokens yet
+old-ilist-ctor-not-viable	vcc: the rules of [class.mem] are not implemented yet
+old-implicit-assignment-parts	vcc: the rules of [over.match.oper] are not implemented yet
+old-implicit-assignment-requires	vcc: the rules of [expr.prim.req] are not implemented yet
+old-implicit-virtual-dtor	link: undefined symbol: operator new(unsigned long)
+old-inherited-defaults	vcc: the rules of [temp.arg] are not implemented yet
+old-initializer-list-local	vcc: the rules of [dcl.init.list] are not implemented yet
+old-initializer-lists	vcc: the rules of [class.mem] are not implemented yet
+old-inline-ns-overloads	vcc: the rules of [temp.deduct.call] are not implemented yet
+old-instantiate-at-end	vcc: the rules of [temp.names] are not implemented yet
+old-lambdas	vcc: the rules of [class.temporary] are not implemented yet
+old-local-unnamed-template-arg	vcc: C++ code generation does not handle an entity whose symbol is not mangled yet
+old-long-double	vcc: C++ code generation does not handle a constant whose value analysis does not know yet
+old-member-pointers	vcc: the rules of [temp.res] are not implemented yet
+old-member-templates	vcc: the rules of [temp.mem] are not implemented yet
+old-multiple-polymorphic-bases	link: undefined symbol: operator new(unsigned long)
+old-nested-lists	vcc: the rules of [class.mem] are not implemented yet
+old-nothrow-traits	vcc: the rules of [except.spec] are not implemented yet
+old-null-macro	vcc: the C++ front end does not handle a declaration the parser kept as tokens yet
+old-nullptr-args	vcc: the rules of [temp.deduct] are not implemented yet
+old-ooc-member-class	vcc: the rules of [temp.class] are not implemented yet
+old-ooc-member-template-overloads	vcc: the rules of [temp.mem] are not implemented yet
+old-ooc-partial-overloads	vcc: the rules of [temp.res] are not implemented yet
+old-operator-member-vs-free	vcc: the rules of [basic.lookup.argdep] are not implemented yet
+old-operators	vcc: the rules of [over.built] are not implemented yet
+old-overload-set-argument	vcc: the rules of [temp.names] are not implemented yet
+old-overloaded-comma	vcc: the rules of [expr.ref] are not implemented yet
+old-packs	vcc: the rules of [expr.sizeof] are not implemented yet
+old-partial-later	vcc: the rules of [temp.class.spec] are not implemented yet
+old-pseudo-destructor-side-effects	vcc: the rules of [expr.ref] are not implemented yet
+old-range-for-arrays	vcc: the rules of [stmt.ranged] are not implemented yet
+old-ref-param-converting-ctor	vcc: the rules of [class.copy.ctor] are not implemented yet
+old-ref-qualified-members	vcc: the rules of [dcl.fct] are not implemented yet
+old-requires-invalid-deref	vcc: the rules of [expr.prim.req] are not implemented yet
+old-requires-params	vcc: the rules of [expr.prim.req] are not implemented yet
+old-reversed-equality	vcc: the rules of [temp.mem] are not implemented yet
+old-reversed-packs	vcc: the rules of [expr.sizeof] are not implemented yet
+old-spaceship	vcc: the rules of [over.match.oper] are not implemented yet
+old-spaceship-pack-candidate	vcc: the rules of [basic.lookup.argdep] are not implemented yet
+old-spec-after-use	vcc: in the definition of an object, the type of that object shall not be an incomplete type ([basic.def])
+old-statement-expression	vcc: the C++ front end does not handle a declaration the parser kept as tokens yet
+old-static-cast-hierarchy	link: undefined symbol: operator delete(void*, unsigned long)
+old-static-local-object	symbols: missing [] extra ['_ZGVZL1gvE1u', '_ZN1UC2Ev'] binding []
+old-std-forward-fold	vcc: C++ code generation does not handle an entity whose symbol is not mangled yet
+old-template-id-as-value	vcc: the rules of [temp.names] are not implemented yet
+old-template-id-redeclared	vcc: the rules of [temp.names] are not implemented yet
+old-template-members	vcc: the rules of [class.mem] are not implemented yet
+old-this-const-out-of-class	vcc: the rules of [class.temporary] are not implemented yet
+old-tn-dependent-values	vcc: the rules of [expr.prim.id.qual] are not implemented yet
+old-tn-member-templates	vcc: C++ code generation does not handle an entity whose symbol is not mangled yet
+old-ttp-patterns-vdtor	vcc: the rules of [class.base.init] are not implemented yet
+old-union-converting-assign	vcc: the rules of [over.match.oper] are not implemented yet
+old-using-operator	vcc: the rules of [namespace.udecl] are not implemented yet
+old-value-init	vcc: the rules of [dcl.init] are not implemented yet
+old-variable-length-array	vcc: the rules of [expr.const] are not implemented yet
+old-virtual	vcc: the rules of [dcl.fct.def.general] are not implemented yet
