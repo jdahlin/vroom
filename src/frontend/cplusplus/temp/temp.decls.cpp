@@ -107,6 +107,8 @@ analysis_result semantic_analysis::template_declaration(node_index n)
            several declarators: which needs the declarator's type */
         return not_supported(n, "temp.pre");
     }
+    case syntax_kind::deduction_guide:
+        return deduction_guide(inner);
     default:
         return not_supported(n, "temp.pre");
     }
@@ -116,7 +118,32 @@ analysis_result semantic_analysis::template_declaration(node_index n)
    appears as a type specifier for a deduced class type" */
 analysis_result semantic_analysis::deduction_guide(node_index n)
 {
-    return not_supported(n, "temp.deduct.guide");
+    /* the template-name: the token before the parameters' '(' */
+    const syntax_node &node = tree[n];
+    token_index name = 0;
+    node_index id = 0;
+    for (uint32_t i = 1; i < node.child_count; i++) {
+        syntax_child c = tree.children(n)[i];
+        if (!name && syntax_is_punctuator(
+                         tokens, c, preprocessing_op_or_punc::LEFT_PARENTHESIS))
+            name = tree.children(n)[i - 1].index();
+        if (syntax_is(tree, c, syntax_kind::simple_template_id))
+            id = c.index();
+    }
+    /* [temp.deduct.guide]/3: "The template-name shall be the same
+       identifier as the template-name of the simple-template-id." */
+    if (!id ||
+        tokens.identifier(tree[id].first_token) != tokens.identifier(name))
+        return ill_formed_at_token(name,
+                                   "the template-name shall be the same "
+                                   "identifier as the template-name of the "
+                                   "simple-template-id",
+                                   "temp.deduct.guide");
+    /* [temp.deduct.guide]/1: a guide is no function and gets no code; it
+       is used only by class template argument deduction
+       ([over.match.class.deduct]), which is not implemented: a
+       placeholder for a deduced class type stays refused. */
+    return analysis_result::well_formed;
 }
 
 /*
