@@ -17,6 +17,7 @@
  * Tokens are 16 bytes.  Identifiers are interned (intern.h) while lexing, so
  * the preprocessor compares identifiers by id.
  */
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -96,6 +97,14 @@ enum {
         4, /* contains a line splice: use lex_token_spell() */
     LEX_TOKEN_FLAG_RAW_STRING = 8, /* raw string literal */
 };
+
+/* <, <=, >, >=, == or != */
+static inline bool lex_token_is_comparison(int op)
+{
+    return op == LEX_TOKEN_LESS || op == LEX_TOKEN_LESS_EQUAL ||
+           op == LEX_TOKEN_GREATER || op == LEX_TOKEN_GREATER_EQUAL ||
+           op == LEX_TOKEN_EQUAL_EQUAL || op == LEX_TOKEN_EXCLAMATION_EQUAL;
+}
 
 typedef struct lex_token {
     uint32_t off; /* byte offset in the file */

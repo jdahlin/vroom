@@ -49,16 +49,6 @@ static uint64_t cc_builtin_object_size_initializer_extent(cc *c,
     return size;
 }
 
-static uint64_t cc_builtin_object_size_element_size(cc *c,
-                                                    ast_qualified_type pointer)
-{
-    ast_qualified_type base = AST_TYPE(c, pointer)->base;
-    return AST_TYPE_KIND(c, base) == AST_TYPE_VOID ||
-                   AST_TYPE_KIND(c, base) == AST_TYPE_FUNCTION
-               ? 1
-               : cc_type_size(c, base);
-}
-
 /* Only the last array member can use the historical struct-hack bound. */
 static bool cc_builtin_object_size_is_flexible_member(cc *c, const node *x)
 {
@@ -139,8 +129,7 @@ static bool cc_builtin_object_size_lvalue_bound(cc *c, uint32_t n,
             !cc_constant_eval(c, x->b, &index) ||
             index.kind != CC_VALUE_INTEGER)
             return false;
-        b->offset += index.i *
-                     cc_builtin_object_size_element_size(c, AST_NODE(x->a)->ty);
+        b->offset += index.i * cc_pointer_element_size(c, AST_NODE(x->a)->ty);
         if (cc_type_is_record(c, x->ty) && b->storage &&
             (AST_QUALIFIED_TYPE_UNQUALIFIED(b->storage) ==
                  AST_QUALIFIED_TYPE_UNQUALIFIED(x->ty) ||
@@ -264,7 +253,7 @@ CC_PRIVATE bool cc_builtin_object_size_pointer_bound(cc *c, uint32_t n,
             !cc_constant_eval(c, i, &index) || index.kind != CC_VALUE_INTEGER)
             return false;
         b->offset += (x->aux == LEX_TOKEN_MINUS ? -index.i : index.i) *
-                     cc_builtin_object_size_element_size(c, AST_NODE(p)->ty);
+                     cc_pointer_element_size(c, AST_NODE(p)->ty);
         return true;
     }
     return false;

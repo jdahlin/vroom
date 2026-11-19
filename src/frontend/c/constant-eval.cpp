@@ -24,7 +24,8 @@ CC_PRIVATE i128 cc_constant_truncate(cc *c, i128 v, ast_qualified_type t)
     }
 }
 
-static uint64_t cc_pointer_element_size(cc *c, ast_qualified_type ptr)
+/* the size pointer arithmetic on `ptr` steps by: 1 for void and function pointers (GNU) */
+CC_PRIVATE uint64_t cc_pointer_element_size(cc *c, ast_qualified_type ptr)
 {
     ast_qualified_type b = AST_TYPE(c, ptr)->base;
     int k = AST_TYPE_KIND(c, b);

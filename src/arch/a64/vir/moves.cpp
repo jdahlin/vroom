@@ -11,17 +11,6 @@ VPRIV __attribute__((noreturn, cold)) void a64_vir_fail(a64_vir_context *L,
     _longjmp(L->context->bail_jump, 3);
 }
 
-VPRIV void *a64_vir_array_grow(void *p, uint32_t *cap, uint32_t n, size_t sz)
-{
-    if (n <= *cap)
-        return p;
-    *cap = n + n / 2 + 16;
-    p = realloc(p, (size_t)*cap * sz);
-    if (!p)
-        abort();
-    return p;
-}
-
 /* constant v into general register rd */
 static void a64_vir_constant_materialize(a64_vir_context *L, uint32_t v, int rd)
 {

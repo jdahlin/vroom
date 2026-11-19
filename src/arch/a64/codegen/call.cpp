@@ -506,43 +506,6 @@ VPRIV bool const_var(codegen_context *e, uint32_t s, const codegen_value *v)
 #endif
 
 /* a static function clang would inline: no inline asm, no locals aligned above 16 */
-static bool tiny_ok(cc *c, uint32_t n)
-{
-    const node *x;
-
-    if (!n)
-        return true;
-    x = N(n);
-    switch (x->op) {
-    case AST_NODE_ASM:
-        return false;
-    case AST_NODE_DECLARATION:
-        return c->syms[x->a].kind != AST_SYMBOL_VARIABLE ||
-               codegen_symbol_alignment(c, x->a) <= 16;
-    case AST_NODE_BLOCK:
-        for (uint32_t i = 0; i < x->c; i++)
-            if (!tiny_ok(c, c->lists[x->b + i]))
-                return false;
-        return true;
-    case AST_NODE_IF:
-        return tiny_ok(c, x->b) && tiny_ok(c, x->c);
-    case AST_NODE_WHILE:
-    case AST_NODE_DO:
-    case AST_NODE_SWITCH:
-    case AST_NODE_LABEL:
-    case AST_NODE_CASE:
-    case AST_NODE_DEFAULT:
-        return tiny_ok(c, x->op == AST_NODE_LABEL || x->op == AST_NODE_CASE ||
-                                  x->op == AST_NODE_DEFAULT
-                              ? x->c
-                              : x->b);
-    case AST_NODE_FOR:
-        return tiny_ok(c, c->lists[x->c + 1]);
-    default:
-        return true;
-    }
-}
-
 VPRIV bool can_inline(codegen_context *e, uint32_t s)
 {
     cc *c = e->compile_context;
@@ -568,7 +531,7 @@ VPRIV bool can_inline(codegen_context *e, uint32_t s)
             if (!(y->flags & AST_SYMBOL_FLAG_INLINE)) {
                 /* a plain static function: small, no inline asm or over-aligned locals */
                 if (e->unit->function_node_counts[s] > INLINE_STATIC_NODES ||
-                    !tiny_ok(c, y->body))
+                    !codegen_statement_is_tiny(c, y->body, false))
                     return false;
             }
             /*
