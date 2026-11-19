@@ -265,6 +265,8 @@ static const gnu_attribute_rule gnu_attribute_rules[] = {
        when the deployment target is older (libc++'s
        _LIBCPP_INTRODUCED_IN_LLVM_N_ATTRIBUTE) */
     {"availability", 0},
+    /* clang's enable_if(condition, message) (below) */
+    {"enable_if", gnu_enable_if},
 };
 
 /* the rule of an attribute's spelling, nullptr if analysis has none */
@@ -414,6 +416,17 @@ analysis_result semantic_analysis::gnu_attribute_specifier(node_index n,
             continue;
         if (!rule)
             return not_supported(at, "ext.gnu");
+        /* clang's enable_if: the function a candidate only where the
+           condition holds; on a constructor template's declarator
+           (enable_if_allowed: libc++'s _CmpUnspecifiedParam, which allows
+           the literal 0 alone) unchecked, so a call it would refuse is
+           accepted; elsewhere (libc++'s _LIBCPP_PREFERRED_OVERLOAD, which
+           makes an overload preferred) not analysed */
+        if (rule->flag == gnu_enable_if) {
+            if (!enable_if_allowed)
+                return not_supported(at, "ext.gnu");
+            continue;
+        }
         if (rule->flag == gnu_aligned) {
             uint64_t alignment = 16;
             if (count == 4) {

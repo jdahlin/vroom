@@ -322,6 +322,9 @@ enum gnu_attribute_flag : uint32_t {
        (__builtin_unreachable, __c11_atomic_thread_fence): lowered to its
        builtin node, no function */
     gnu_compiler_builtin = 32768,
+    /* clang's enable_if (gnu_attribute_specifier); never set in a
+       declaration's flags */
+    gnu_enable_if = 65536,
 };
 /* the GNU attributes of a function's own symbol that analysis carries to
    member functions and function templates */
@@ -526,10 +529,15 @@ struct entity {
        next_constructor) and destructor, 0 if none */
     entity_index first_constructor = 0, destructor = 0;
     /* a class: [temp.mem]/1 the first constructor template it declares
-       (its template-declaration), 0 if none.  Such a class has a
-       user-declared constructor; the template is not analysed, and a
-       construction of the class that would consider it is not either */
+       without defining it (its template-declaration), 0 if none.  Such a
+       class has a user-declared constructor; the template is not
+       analysed, and a construction of the class that would consider it is
+       not either */
     node_index constructor_template = 0;
+    /* a class: the name (not bound) its constructor templates defined in
+       it hold as function_templates (member_function_template), 0 if
+       none */
+    entity_index constructor_templates = 0;
     /* a non-static data member that is a bit-field ([class.bit]): its
        width and the offset of its first bit in the class (offset is the
        byte that bit is in); an unnamed one (name 0) is in the layout but
@@ -2133,6 +2141,9 @@ class semantic_analysis
     /* [dcl.fct.spec]/3: explicit is analysed on a conversion function's
        decl-specifier-seq only */
     bool explicit_allowed = false;
+    /* clang's enable_if accepted: in a constructor template's declarator
+       (constructor_template_declarator) */
+    bool enable_if_allowed = false;
     /* construct() is called for a base class subobject, which may be of an
        abstract class ([class.abstract]/2) */
     bool constructing_base = false;
@@ -2810,8 +2821,9 @@ class semantic_analysis
     }
     analysis_result
     function_template_declarator(node_index definition, uint32_t lead,
-                                 entity_index scope, bool member, specified &s,
-                                 declarator_meaning &m, qualified_type &type);
+                                 entity_index member_of, entity_index scope,
+                                 specified &s, declarator_meaning &m,
+                                 qualified_type &type);
     analysis_result
     function_template_attributes(node_index n, const specified &s,
                                  const declarator_meaning &m, uint32_t allowed,
@@ -4076,6 +4088,16 @@ class semantic_analysis
        is deduced (as written's are) */
     /* [temp.over]/1: the member function templates named held, as member
        candidates (temp.mem.cpp) */
+    analysis_result constructor_specifiers(node_index seq, specified &s);
+    analysis_result constructor_template_declarator(node_index definition,
+                                                    syntax_child d,
+                                                    qualified_type &type,
+                                                    declarator_meaning &m);
+    analysis_result constructor_template_candidates(
+        node_index n, entity_index c, const expression_meaning *arguments,
+        uint32_t count, bool copy, owned_array<overload_candidate> &candidates,
+        owned_array<uint32_t> *first_arguments = nullptr,
+        owned_array<template_argument> *all = nullptr);
     analysis_result member_template_candidates(
         node_index n, entity_index held, const expression_meaning *arguments,
         uint32_t count, owned_array<overload_candidate> &candidates);
