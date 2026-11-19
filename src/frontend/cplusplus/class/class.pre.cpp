@@ -207,6 +207,10 @@ analysis_result semantic_analysis::class_definition(node_index n,
        alignment-specifiers left out of head_children, kept in alignas */
     owned_array<syntax_child> head_list;
     owned_array<node_index> alignas_list;
+    /* [ext:gnu_attributes] a class's visibility("hidden") (its members'
+       symbols', c_lowering::gnu_attributes), abi_tag (its name's,
+       [abi:mangle.abi-tag]) and exclude_from_explicit_instantiation */
+    gnu_attributes gnu;
     for (uint32_t i = 0; i < h.child_count; i++) {
         syntax_child c = tree.children(head)[i];
         bool only_alignment =
@@ -222,10 +226,27 @@ analysis_result semantic_analysis::class_definition(node_index n,
             alignas_list.append(c.index());
         } else if (i && class_head_attributes_without_effect(c)) {
             /* [dcl.attr.deprecated] and the like: nothing generated */
+        } else if (i && !c.is_token() && gnu_or_without_effect(c.index())) {
+            const syntax_child *each = &c;
+            uint32_t count = 1;
+            if (syntax_is(tree, c, syntax_kind::attribute_specifier_seq)) {
+                each = tree.children(c.index());
+                count = tree[c.index()].child_count;
+            }
+            for (uint32_t k = 0; k < count; k++) {
+                analysis_result r =
+                    gnu_attribute_specifier(each[k].index(), gnu);
+                if (r != analysis_result::well_formed)
+                    return r;
+            }
         } else {
             head_list.append(c);
         }
     }
+    if (gnu.aligned || gnu.section ||
+        (gnu.flags & ~(gnu_hidden_visibility | gnu_abi_tag |
+                       gnu_exclude_from_explicit_instantiation)))
+        return not_supported(n, "ext.gnu");
     const syntax_child *head_children = head_list.data();
     uint32_t head_count = static_cast<uint32_t>(head_list.size());
     if (!head_count || !head_children[0].is_token())
@@ -504,6 +525,9 @@ analysis_result semantic_analysis::class_definition(node_index n,
         entity_table[c].access = declaration_access;
     }
     entity_table.add_declaration(c, current_declaration);
+    entity_table[c].gnu_flags |= gnu.flags;
+    if (gnu.abi_tag)
+        entity_table[c].abi_tag = gnu.abi_tag;
     entity_table[c].defined = true;
     entity_table[c].union_ = key == standard_keyword::union_;
     entity_table[c].class_key = head_children[0].index();
@@ -2188,7 +2212,7 @@ syntax_child semantic_analysis::class_head_name(node_index head) const
     for (uint32_t i = 1; i < tree[head].child_count; i++) {
         syntax_child c = tree.children(head)[i];
         if (syntax_is(tree, c, syntax_kind::alignment_specifier) ||
-            class_head_attributes_without_effect(c))
+            (!c.is_token() && gnu_or_without_effect(c.index())))
             continue;
         bool only_alignment =
             syntax_is(tree, c, syntax_kind::attribute_specifier_seq);
