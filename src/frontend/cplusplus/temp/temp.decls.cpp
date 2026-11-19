@@ -2544,7 +2544,8 @@ analysis_result semantic_analysis::define_template_member(uint32_t member,
     declaration_access = 0;
     instantiating = 0;
     class_instantiating = 0;
-    analysis_result r = function_definition(o.definition);
+    analysis_result r =
+        function_definition(syntax(o.definition).function_definition());
     leave_instantiation(context);
     /* the member defined: the class's function this definition declares
        (last_declared may be a name its body declared) */

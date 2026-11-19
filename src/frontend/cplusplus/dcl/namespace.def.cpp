@@ -618,17 +618,11 @@ analysis_result semantic_analysis::namespace_alias_definition(node_index n)
 /* the declarations between the braces of a namespace-definition */
 void semantic_analysis::declaration_seq_in(node_index container)
 {
-    const syntax_node &node = tree[container];
-    for (uint32_t i = 0; i < node.child_count; i++) {
-        syntax_child c = tree.children(container)[i];
-        if (!syntax_is(tree, c, syntax_kind::declaration_seq))
-            continue;
-        for (uint32_t k = 0; k < tree[c.index()].child_count; k++) {
-            syntax_child d = tree.children(c.index())[k];
-            if (!d.is_token())
-                declaration(d.index());
-        }
-    }
+    auto namespace_body = syntax(container);
+    for (uint32_t i = 0; i < namespace_body.size(); i++)
+        for (auto d :
+             syntax(namespace_body[i]).declaration_seq().declarations())
+            declaration(d);
 }
 
 /* [namespace.std]/1: "the namespace std" of the global namespace */

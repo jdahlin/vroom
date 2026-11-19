@@ -154,7 +154,16 @@ analysis_result semantic_analysis::declaration(node_index n)
 
 analysis_result semantic_analysis::declaration_by_kind(node_index n)
 {
-    switch (tree[n].kind) {
+    return syntax(n).declaration().visit(overloaded{
+        [&](function_definition_syntax f) { return function_definition(f); },
+        [&](declaration_syntax d) { return other_declaration(d); }});
+}
+
+/* a declaration of an alternative without a view of its own */
+analysis_result semantic_analysis::other_declaration(declaration_syntax d)
+{
+    node_index n = d;
+    switch (d.kind()) {
     case syntax_kind::gnu_extension_declaration:
         /* [ext:gnu_extension_keyword]: __extension__ changes no meaning */
         return declaration_by_kind(tree.children(n)[1].index());
@@ -174,8 +183,6 @@ analysis_result semantic_analysis::declaration_by_kind(node_index n)
         return deduction_guide(n);
     case syntax_kind::simple_declaration:
         return simple_declaration(n);
-    case syntax_kind::function_definition:
-        return function_definition(n);
     case syntax_kind::linkage_specification:
         return linkage_specification(n);
     case syntax_kind::named_namespace_definition:

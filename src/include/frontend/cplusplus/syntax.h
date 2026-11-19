@@ -35,6 +35,8 @@ struct syntax_context {
 /* the nonterminals with a view: SYNTAX_VIEW(name), the view's type is
    name_syntax and syntax_ref::name() gives it */
 #define SYNTAX_VIEWS(SYNTAX_VIEW)                                              \
+    SYNTAX_VIEW(declaration_seq)                                               \
+    SYNTAX_VIEW(declaration)                                                   \
     SYNTAX_VIEW(function_definition)                                           \
     SYNTAX_VIEW(function_body)
 
@@ -250,6 +252,122 @@ struct function_definition_syntax : syntax_ref {
                is((*this)[size() - 1], syntax_kind::function_body);
     }
 };
+
+/* the node children of a node, each as a view of type T (tokens are
+   skipped): for (auto d : seq.declarations()) */
+template <class T> class syntax_range
+{
+  public:
+    class iterator
+    {
+      public:
+        iterator(const syntax_context *cx, const syntax_child *at,
+                 const syntax_child *end)
+            : cx(cx), at(at), end(end)
+        {
+            skip();
+        }
+        T operator*() const
+        {
+            return T(*cx, at->index());
+        }
+        iterator &operator++()
+        {
+            at++;
+            skip();
+            return *this;
+        }
+        bool operator!=(const iterator &o) const
+        {
+            return at != o.at;
+        }
+
+      private:
+        void skip()
+        {
+            while (at != end && (at->is_token() || !at->index()))
+                at++;
+        }
+        const syntax_context *cx;
+        const syntax_child *at;
+        const syntax_child *end;
+    };
+    syntax_range() = default;
+    syntax_range(const syntax_context &cx, const syntax_child *first,
+                 uint32_t count)
+        : cx(&cx), first(first), count(count)
+    {
+    }
+    iterator begin() const
+    {
+        return iterator(cx, first, first + count);
+    }
+    iterator end() const
+    {
+        return iterator(cx, first + count, first + count);
+    }
+
+  private:
+    const syntax_context *cx = nullptr;
+    const syntax_child *first = nullptr;
+    uint32_t count = 0;
+};
+
+/* one callable from several lambdas, for visit:
+   d.visit(overloaded{[&](function_definition_syntax f) {...},
+                      [&](declaration_syntax other) {...}}) */
+template <class... F> struct overloaded : F... {
+    using F::operator()...;
+};
+template <class... F> overloaded(F...) -> overloaded<F...>;
+
+/*
+ * [dcl.pre]/1:
+ *
+ *     declaration-seq:
+ *         declaration declaration-seq_opt
+ */
+struct declaration_seq_syntax : syntax_ref {
+    using syntax_ref::syntax_ref;
+    static bool accepts(syntax_kind k)
+    {
+        return k == syntax_kind::declaration_seq;
+    }
+    syntax_range<declaration_syntax> declarations() const;
+};
+
+/*
+ * [dcl.pre]/1: a declaration is one of its alternatives
+ * (block-declaration, function-definition, template-declaration, ...).
+ * visit calls f with the view of the alternative it is, for the
+ * alternatives that have one, and with the declaration_syntax itself for
+ * the others: a visitor without a case for an alternative with a view
+ * does not compile.
+ */
+struct declaration_syntax : syntax_ref {
+    using syntax_ref::syntax_ref;
+    static bool accepts(syntax_kind)
+    {
+        return true;
+    }
+    template <class F> decltype(auto) visit(F &&f) const
+    {
+        switch (kind()) {
+        case syntax_kind::function_definition:
+            return f(function_definition_syntax(*cx, n));
+        default:
+            return f(*this);
+        }
+    }
+};
+
+inline syntax_range<declaration_syntax>
+declaration_seq_syntax::declarations() const
+{
+    if (!*this)
+        return {};
+    return syntax_range<declaration_syntax>(*cx, cx->tree.children(n), size());
+}
 
 #define SYNTAX_VIEW_ACCESSOR(name)                                             \
     inline name##_syntax syntax_ref::name() const                              \

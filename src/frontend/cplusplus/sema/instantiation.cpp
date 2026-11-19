@@ -185,7 +185,8 @@ analysis_result semantic_analysis::instantiate_definition(node_index at,
        ([temp.mem]): its declarator's cv-qualifier-seq the member's */
     member_template_declarator(
         2 * !is_namespace(entity_table[template_entity].enclosing));
-    analysis_result r = function_definition(ft.definition);
+    analysis_result r =
+        function_definition(syntax(ft.definition).function_definition());
     member_template_declarator(0);
     instantiations[index].defining = false;
     leave_instantiation(context);

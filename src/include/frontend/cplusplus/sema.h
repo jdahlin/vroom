@@ -1539,11 +1539,12 @@ class semantic_analysis
     bool declarator_template_id = false;
     analysis_result deduction_guide(node_index n);
     analysis_result simple_declaration(node_index n);
-    analysis_result function_definition(node_index n);
+    analysis_result function_definition(function_definition_syntax definition);
     /* [dcl.link]: extern "C" or extern "C++", and the declarations in it */
     analysis_result linkage_specification(node_index n);
     /* a declaration of the kinds analysis has (declaration's switch) */
     analysis_result declaration_by_kind(node_index n);
+    analysis_result other_declaration(declaration_syntax d);
     /* [dcl.link]/5: the language linkage of the declarations analysed
        now: "C" (true) or "C++"; and whether the linkage-specification is
        the declaration's own, without braces ([dcl.link]/7) */

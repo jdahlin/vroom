@@ -82,7 +82,7 @@ analysis_result semantic_analysis::explicit_specialization(node_index n)
     uint32_t saved_cv = function_cv;
     instantiating = index + 1;
     declarator_template_id = true;
-    r = function_definition(inner);
+    r = function_definition(syntax(inner).function_definition());
     declarator_template_id = false;
     instantiating = 0;
     function_cv = saved_cv;

@@ -818,8 +818,12 @@ bool semantic_analysis::gnu_or_without_effect(node_index n) const
  * The declarator's type and name are analysed as a declaration's; the
  * function-body is not yet ([stmt]).
  */
-analysis_result semantic_analysis::function_definition(node_index n)
+analysis_result
+semantic_analysis::function_definition(function_definition_syntax definition)
 {
+    if (!definition)
+        return not_supported(current_declaration, "dcl.fct.def.general");
+    node_index n = definition;
     const syntax_node &node = tree[n];
     uint32_t k = leading_gnu_attributes(n);
     if (k &&
@@ -848,7 +852,7 @@ analysis_result semantic_analysis::function_definition(node_index n)
         return not_supported(n, "dcl.fct.def.general");
     /* function-body: compound-statement, = delete ; a ctor-initializer, a
        function-try-block and = default are not analysed yet */
-    auto body = syntax(n).function_definition().body();
+    auto body = definition.body();
     if (body.deleted())
         return deleted_definition(n, f);
     if (!body.plain())
