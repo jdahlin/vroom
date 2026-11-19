@@ -14,6 +14,7 @@
  * under the library's name, which is its symbol.
  */
 #include "../../cplusplus-internal.h"
+#include "frontend/c/ast-builder.h"
 #include "frontend/cplusplus/sema.h"
 
 namespace cplusplus
@@ -153,6 +154,86 @@ qualified_type semantic_analysis::builtin_parameter_type(uint8_t t)
     return qualified_type::make(type_table.pointer_to(q), cv_none);
 }
 
+/* a scalar type of the C front end's builtin signatures, in its letters
+   (frontend/c/builtin-table.cpp, cc_builtin_signature_type); false for
+   another */
+static bool signature_scalar(char letter, fundamental_type &f)
+{
+    static const struct {
+        char letter;
+        fundamental_type type;
+    } scalars[] = {
+        {'v', fundamental_type::void_},
+        {'b', fundamental_type::bool_},
+        {'c', fundamental_type::char_},
+        {'C', fundamental_type::unsigned_char},
+        {'h', fundamental_type::unsigned_short_int},
+        {'i', fundamental_type::int_},
+        {'u', fundamental_type::unsigned_int},
+        {'l', fundamental_type::long_int},
+        {'L', fundamental_type::unsigned_long_int},
+        {'w', fundamental_type::long_long_int},
+        {'W', fundamental_type::unsigned_long_long_int},
+        {'z', fundamental_type::unsigned_long_int},
+        {'f', fundamental_type::float_},
+        {'d', fundamental_type::double_},
+        {'D', fundamental_type::long_double},
+    };
+    for (const auto &s : scalars)
+        if (s.letter == letter) {
+            f = s.type;
+            return true;
+        }
+    return false;
+}
+
+/* name is a builtin of vcc's C front end, which clang declares at its
+   first use (a function's name to the parser) */
+bool parser::names_compiler_builtin(uint32_t name)
+{
+    size_t length = 0;
+    /* the identifier's number is the preprocessor's plus one */
+    const char *spelling = tokens.pp.identifier_spelling(name - 1, &length);
+    return ast_builder_builtin_signature(spelling, length) != nullptr;
+}
+
+/* a builtin of vcc's C front end (clang's Builtins.td, as
+   frontend/c/builtin-table.cpp has it) whose signature has scalar types
+   only: declared at its first use, as clang does, and lowered to the C
+   front end's builtin node (gnu_compiler_builtin) */
+entity_index semantic_analysis::compiler_builtin(uint32_t name,
+                                                 const char *spelling,
+                                                 size_t length)
+{
+    const char *signature = ast_builder_builtin_signature(spelling, length);
+    if (!signature)
+        return 0;
+    fundamental_type types[16];
+    size_t count = strlen(signature);
+    if (count > 16)
+        return 0;
+    for (size_t i = 0; i < count; i++)
+        if (!signature_scalar(signature[i], types[i]) ||
+            (i && types[i] == fundamental_type::void_))
+            return 0;
+    owned_array<qualified_type> parameters;
+    for (size_t i = 1; i < count; i++)
+        parameters.append(
+            qualified_type::make(type_table.fundamental(types[i]), cv_none));
+    qualified_type result =
+        qualified_type::make(type_table.fundamental(types[0]), cv_none);
+    entity_index e = entity_table.make(entity_kind::function, name, 0);
+    entity_table[e].type =
+        qualified_type::make(type_table.function(result, parameters.data(),
+                                                 parameters.size(), false),
+                             cv_none);
+    entity_table[e].linkage_of_name = linkage::external;
+    entity_table[e].c_language_linkage = true;
+    entity_table[e].gnu_flags = gnu_compiler_builtin;
+    entity_table.bind(0, name, e);
+    return e;
+}
+
 entity_index semantic_analysis::library_builtin(uint32_t name)
 {
     if (!tokens.files.behavior.has(extension::gnu_library_builtins))
@@ -161,7 +242,7 @@ entity_index semantic_analysis::library_builtin(uint32_t name)
     /* the identifier's number is the preprocessor's plus one */
     const char *spelling = tokens.pp.identifier_spelling(name - 1, &length);
     if (length <= 10 || memcmp(spelling, "__builtin_", 10))
-        return 0;
+        return compiler_builtin(name, spelling, length);
     spelling += 10;
     length -= 10;
     /* clang's bool __builtin_is_constant_evaluated(void) (Builtins.td):
@@ -188,7 +269,7 @@ entity_index semantic_analysis::library_builtin(uint32_t name)
         if (strlen(b.name) == length && !memcmp(b.name, spelling, length))
             found = &b;
     if (!found)
-        return 0;
+        return compiler_builtin(name, spelling - 10, length + 10);
     qualified_type result =
         builtin_parameter_type(static_cast<uint8_t>(found->types[0]));
     owned_array<qualified_type> parameters;

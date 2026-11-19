@@ -316,6 +316,10 @@ enum gnu_attribute_flag : uint32_t {
     /* [ext:gnu_library_builtins] __builtin_is_constant_evaluated: a
        manifestly constant evaluation's call is true, any other false */
     gnu_is_constant_evaluated = 16384,
+    /* [ext:gnu_library_builtins] a builtin of vcc's C front end
+       (__builtin_unreachable, __c11_atomic_thread_fence): lowered to its
+       builtin node, no function */
+    gnu_compiler_builtin = 32768,
 };
 /* the GNU attributes of a function's own symbol that analysis carries to
    member functions and function templates */
@@ -1943,6 +1947,8 @@ class semantic_analysis
     /* [ext:gnu_library_builtins] the function __builtin_NAME (an
        identifier) declares at its first use, 0 if it is not one */
     entity_index library_builtin(uint32_t name);
+    entity_index compiler_builtin(uint32_t name, const char *spelling,
+                                  size_t length);
     qualified_type builtin_parameter_type(uint8_t t);
     /* the parameters of the function declarator analysed last: a function
        definition's, with the types they have in its body ([dcl.fct]/5's
