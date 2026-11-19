@@ -319,8 +319,8 @@ semantic_analysis::declare_builtin(uint32_t name, uint32_t symbol,
 
 /* the type-generic classifications and comparisons of <math.h> (C17
    7.12.3, 7.12.14) among the C front end's builtins: their arguments
-   are passed as they are, unpromoted (expr.post.cpp), as clang's custom
-   type checking does */
+   are passed as they are, unpromoted (postfix-expression.cpp), as clang's
+   custom type checking does */
 static const char *const generic_builtins[] = {
     "fpclassify", "isfinite", "isgreater",   "isgreaterequal",
     "isinf",      "isless",   "islessequal", "islessgreater",

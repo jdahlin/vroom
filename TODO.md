@@ -1069,15 +1069,15 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   no single completeness check to hook: the sites test the class's `size` or
   `defined` themselves, and each needs a non-const `complete_class(c)` that
   calls `define_class_outside`.  Sites that report an error:
-  `expr.ref.cpp:366`, `class.derived.cpp:343`, `dcl.init.cpp:572,1056`,
-  `expr.ass.cpp:277`, `expr.delete.cpp:106`, `offsetof.cpp:111`,
-  `class.ctor.cpp:2119,2154`, `basic.link.cpp:439`,
-  `dcl.struct.bind.cpp:306,494`, `basic.lookup.cpp:764,830`; the const
+  `member-access.cpp:366`, `base-clause.cpp:343`, `initializer.cpp:572,1056`,
+  `assignment-expression.cpp:277`, `delete-expression.cpp:106`, `offsetof.cpp:111`,
+  `constructor.cpp:2119,2154`, `translation-unit.cpp:439`,
+  `structured-binding.cpp:306,494`, `name-lookup.cpp:764,830`; the const
   helpers `size_of_type`, `alignment_of_type`, `literal_class`.  Sites that
   answer a silent "no" for an undefined class, where a missed call is wrong
-  code: `over.best.ics.cpp:233`, `over.match.oper.cpp:158`,
-  `expr.cast.cpp:428,592`, `conv.mem.cpp:80`, `expr.mptr.oper.cpp:99`,
-  `stmt.iter.cpp:457`.  Lowering must refuse a used class left undefined.
+  code: `implicit-conversion-sequence.cpp:233`, `operator-candidates.cpp:158`,
+  `cast-expression.cpp:428,592`, `pointer-to-member-conversions.cpp:80`, `pointer-to-member-operator.cpp:99`,
+  `iteration-statement.cpp:457`.  Lowering must refuse a used class left undefined.
   *Validate:* the repro above and a pointer/reference to a specialization
   whose members are invalid accepted as clang does; `cxx-run.py`,
   `cxx-c-suites.py` unchanged; the libc++ header count.

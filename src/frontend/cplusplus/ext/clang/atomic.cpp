@@ -9,7 +9,7 @@
  *     clang-atomic-type-specifier:
  *         _Atomic ( type-id )
  *
- * The type has C11's atomic layout (expr.unary.cpp, atomic_layout).  An
+ * The type has C11's atomic layout (unary-expression.cpp, atomic_layout).  An
  * expression of atomic type (its loads, stores and the __c11_atomic
  * builtins on it) is not analysed yet; C's _Atomic qualifier (no '(')
  * is not parsed.

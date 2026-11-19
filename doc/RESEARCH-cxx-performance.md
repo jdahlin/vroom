@@ -50,7 +50,7 @@ Heap calls, counted with an interposed `malloc` (parsing only):
 | Input | Tokens | `malloc` + `calloc` + `realloc` calls | Bytes requested |
 |---|---|---|---|
 | four C headers, vcc C++ | 9,020 | 58,613 | 227 MB |
-| `class/class.ctor.cpp`, vcc C++ | 40,103 | 102,144 (2.5 per token) | 388 MB |
+| `class/constructor.cpp`, vcc C++ | 40,103 | 102,144 (2.5 per token) | 388 MB |
 | the front end's unity TU, vcc C++ | 332,030 | 325,209 | 1,294 MB |
 | `frontend/pp/expand.cpp`, vcc C | 40,932 | 1,066 | 0.7 MB |
 
@@ -87,7 +87,7 @@ A sampling profile of the parse of the unity translation unit (`sample`,
 | 3.3 % each | `memmove`, `source_file::index_lines` |
 
 **Finding 1: one table scan is most of the time.**  For every operator or
-punctuator, `scan_preprocessing_op_or_punc` (`lex/lex.operators.cpp`) walks
+punctuator, `scan_preprocessing_op_or_punc` (`lexer/operator-or-punctuator.cpp`) walks
 all 61 rows of the operator table and calls `strlen` and `memcmp` on each.
 An experiment, not committed: one line that skips a row whose first
 character differs.
@@ -124,7 +124,7 @@ from before the change.
 allocations for the four headers ask for between 2 and 4 KB: `vbuffer`
 takes 4,096 bytes on its first append (`common/buffer.h`), and the front
 end declares a local `owned_buffer` in 81 places.  One is in
-`lexer::convert` (`lex/lex.token.cpp`), which runs for every token and
+`lexer::convert` (`lexer/token.cpp`), which runs for every token and
 fills the buffer with the spelling of every identifier, to look the keyword
 up by its characters.  That is 192 MB requested to produce 9,020 tokens.
 
@@ -307,7 +307,7 @@ N names, Y types and layout); B the benchmark gate; R review only.
 
 | # | Rule | Today | Check |
 |---|---|---|---|
-| P9 | Nothing on the per-character path searches a table by comparing strings: dispatch on the first character, lengths are constants of the table | finding 1: 36 to 42 % of all instructions | L (S, N): no `strlen`, `strcmp`, `memcmp` with a non-constant length, and no loop over a whole X-macro table, in `lex/` and `cpp/` |
+| P9 | Nothing on the per-character path searches a table by comparing strings: dispatch on the first character, lengths are constants of the table | finding 1: 36 to 42 % of all instructions | L (S, N): no `strlen`, `strcmp`, `memcmp` with a non-constant length, and no loop over a whole X-macro table, in `lexer/` and `preprocessor/` |
 | P10 | A spelling is hashed once: after the lexer, names are numbers | holds (`declared_names::find` is 5.9 %) | R |
 | P11 | No virtual call, function pointer or type-erased callable per token: a `switch` over a kind, or a callable passed as a template parameter | holds | L (S) |
 
@@ -335,7 +335,7 @@ carry these rules; three things are particular to them.
   check already (`[[clang::nonallocating]]`, section 4), and it follows
   calls.  The lint can read the same attribute for its own rules (P9, P11,
   P12), in the manner of rustc's internal lints, which are keyed off
-  attributes on rustc's own items; or go by directory (`lex/`, `cpp/`), a
+  attributes on rustc's own items; or go by directory (`lexer/`, `preprocessor/`), a
   table like the one `naming-lint.cpp` has.
 - **The reference is a number, not clang.**  For P7, P9 and P13 no clang
   check exists.  What validates the rule is the benchmark: a rule

@@ -1,2 +1,2 @@
 template-template-argument-member.cpp:13:18: error: the rules of [temp.arg.template] are not implemented yet
-template-template-argument-member.cpp:13:18: note: refused by vcc's frontend/cplusplus/temp/temp.arg.cpp:N (template_template_argument)
+template-template-argument-member.cpp:13:18: note: refused by vcc's frontend/cplusplus/template/template-argument.cpp:N (template_template_argument)

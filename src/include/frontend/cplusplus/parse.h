@@ -777,7 +777,7 @@ class parser
        declared in a part kept as tokens): if the declaration then does not
        parse, that may be for what the name is, so it is kept as tokens */
     bool unknown_name = false;
-    /* [dcl.ambig.res]/2's second reading (dcl.ambig.res.cpp): a name the
+    /* [dcl.ambig.res]/2's second reading (ambiguity-resolution.cpp): a name the
        parser cannot classify is taken for a type-name, to see whether the
        tokens could be a type-id at all */
     bool unknown_names_are_types = false;
@@ -943,34 +943,34 @@ class parser
     bool at_availability();
     node_index clang_availability_arguments();
     bool standard_attributes_first = false;
-    /* ---- ext/gnu/extension_keyword.cpp: __extension__ before a
+    /* ---- ext/gnu/extension-keyword.cpp: __extension__ before a
        declaration (alternative parses what follows) or an expression */
     node_index gnu_extension_prefixed(node_index (parser::*alternative)());
     node_index gnu_extension_expression();
-    /* ---- ext/gnu/labels_as_values.cpp: &&label, goto *p; */
+    /* ---- ext/gnu/labels-as-values.cpp: &&label, goto *p; */
     node_index gnu_label_address();
     node_index gnu_computed_goto(size_t mark, token_index first);
-    /* ---- ext/gnu/designated_initializers.cpp: { [1] = x, .a.b = y } */
+    /* ---- ext/gnu/designated-initializers.cpp: { [1] = x, .a.b = y } */
     bool gnu_initializer_list_needed();
     node_index gnu_initializer_list();
-    /* ---- ext/gnu/compound_literal.cpp: ( type-id ) { ... } */
+    /* ---- ext/gnu/compound-literal.cpp: ( type-id ) { ... } */
     node_index gnu_compound_literal(size_t mark, token_index first);
-    /* ---- ext/clang/type_traits.cpp: __is_same(T, U), __remove_cv(T) */
+    /* ---- ext/clang/type-traits.cpp: __is_same(T, U), __remove_cv(T) */
     node_index clang_type_trait_expression();
     node_index clang_type_transformation();
     /* ---- ext/gnu/offsetof.cpp: __builtin_offsetof(T, a.b[1]) */
     node_index gnu_offsetof_expression();
-    /* ---- ext/clang/bit_cast.cpp: __builtin_bit_cast(T, e) */
+    /* ---- ext/clang/bit-cast.cpp: __builtin_bit_cast(T, e) */
     node_index clang_bit_cast_expression();
     /* ---- ext/clang/convertvector.cpp: __builtin_convertvector(e, T) */
     node_index clang_convertvector_expression();
-    /* ---- ext/clang/source_location.cpp: __builtin_source_location() */
+    /* ---- ext/clang/source-location.cpp: __builtin_source_location() */
     node_index clang_source_location_expression();
     /* ---- ext/clang/atomic.cpp: _Atomic(T) */
     node_index clang_atomic_type_specifier();
-    /* ---- ext/clang/bit_int.cpp: _BitInt(N) */
+    /* ---- ext/clang/bit-int.cpp: _BitInt(N) */
     node_index clang_bit_int_type_specifier();
-    /* ---- ext/gnu/asm_label.cpp: declarator asm ( "name" ) attributes */
+    /* ---- ext/gnu/asm-label.cpp: declarator asm ( "name" ) attributes */
     bool gnu_declarator_suffix_follows(const declarator_facts &facts);
     node_index gnu_declarator_suffix(size_t mark, token_index first,
                                      declarator_facts &facts);

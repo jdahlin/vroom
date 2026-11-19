@@ -832,10 +832,10 @@ struct declared_name {
     bool claimable = true;
 };
 
-/* ---- values of constant expressions (expr/expr.const.cpp) ---- */
+/* ---- values of constant expressions (constant-expression.cpp) ---- */
 
 /* [expr.const]/11: the value a constant expression's evaluation gives, as
-   the evaluator of the semantic tree (expr/expr.const.evaluate.cpp)
+   the evaluator of the semantic tree (expression/constant-evaluation.cpp)
    computes it.  Only integer and double are filled today; the other kinds
    are the shapes [basic.types] objects have, which the evaluator answers
    unsupported ([expr.const]) for until it models them. */
@@ -918,7 +918,7 @@ bool bit_cast_kept(const implementation_defined_behavior &behavior,
                    fundamental_type from, fundamental_type to, uint64_t kept,
                    uint64_t &result);
 /* the operators of the arithmetic types on values as expression_meaning
-   keeps them (expr/folding.cpp): constant with the value in out,
+   keeps them (expression/folding.cpp): constant with the value in out,
    not_constant where [expr.pre]/4 makes the operation undefined, unknown
    for what is not folded (long double, 128 bits, a pragma's rounding).
    fold_binary: operands converted to t, a shift's right operand of type
@@ -987,7 +987,7 @@ struct expression_meaning {
     uint32_t node = 0;
 };
 
-/* ---- the semantic tree (sema/semantic_tree.cpp) ---- */
+/* ---- the semantic tree (sema/semantic-tree.cpp) ---- */
 
 /*
  * The operations the standard describes, typed, with every implicit step
@@ -1314,8 +1314,8 @@ class semantic_analysis
     analysis_result declaration(SyntaxRef n);
     /* for -fcxx-dump=type-claims: the value of each analysed prvalue that
        analysis did not fold and the evaluator of constant expressions can
-       (expr/expr.const.evaluate.cpp), into its analysed_expression, so that
-       the claims have clang check the evaluator's values too */
+       (expression/constant-evaluation.cpp), into its analysed_expression, so
+       that the claims have clang check the evaluator's values too */
     void evaluate_analysed_expressions();
 
     types type_table;
@@ -1428,7 +1428,7 @@ class semantic_analysis
        its class's ([temp.explicit]/10) */
     instantiation_kind explicitly_instantiated(entity_index f) const;
     /* [basic.types]/10: whether t is a literal type (unknown:
-       analysis cannot tell; basic/basic.types.cpp) */
+       analysis cannot tell; basic/literal-types.cpp) */
     constness literal_type(qualified_type t) const;
     constness literal_class(entity_index c) const;
     bool trivial_defaulted_default_constructor(entity_index c) const;
@@ -1520,7 +1520,7 @@ class semantic_analysis
     /* ... the type its defining-type-id denotes */
     analysis_result alias_type(SyntaxRef n, qualified_type &type);
     /* [temp.pre], [temp.expl.spec], [temp.explicit], [temp.deduct.guide]
-       (temp/): the declarations of templates and of their
+       (template/): the declarations of templates and of their
        specializations; no rules yet, each answers its subclause */
     analysis_result template_declaration(TemplateDeclaration t);
     analysis_result template_simple_declaration(TemplateDeclaration t,
@@ -1641,7 +1641,7 @@ class semantic_analysis
         token_index pack = 0;
     };
     /* [dcl.fct]/2: noptr-declarator parameters-and-qualifiers
-       trailing-return-type (dcl.spec.auto.cpp) */
+       trailing-return-type (placeholder-type-specifier.cpp) */
     analysis_result trailing_return(SyntaxRef declaration, SyntaxRef n,
                                     qualified_type &type,
                                     declarator_meaning &m);
@@ -1682,7 +1682,7 @@ class semantic_analysis
        the current scope out, 0 if none or if what it finds is not one
        entity analysis has (lookup_unqualified says which) */
     entity_index lookup(uint32_t name) const;
-    /* ---- name lookup ([basic.lookup], basic/basic.lookup.cpp) ---- */
+    /* ---- name lookup ([basic.lookup], basic/name-lookup.cpp) ---- */
     /* which declarations a lookup considers */
     enum class lookup_filter : uint8_t {
         /* all ([basic.lookup]/1) */
@@ -2058,7 +2058,7 @@ class semantic_analysis
        declarator, or one whose declarator-id is a qualified-id */
     bool in_member_declarator = false;
     /* in a member function template's declarator: 1 the template's own
-       (temp.mem.cpp), 2 a specialization's (instantiation.cpp) */
+       (member-template.cpp), 2 a specialization's (instantiation.cpp) */
     uint8_t in_member_template_declarator = 0;
     /* enters (which 1 or 2) or leaves (0) a member function template's
        declarator, a member declarator */
@@ -2074,8 +2074,8 @@ class semantic_analysis
     /* [class.friend]: friend is analysed on a friend declaration's
        decl-specifier-seq only */
     bool friend_allowed = false;
-    /* ---- placeholder types and decltype (dcl/dcl.spec.auto.cpp,
-       dcl/dcl.type.decltype.cpp) ---- */
+    /* ---- placeholder types and decltype (placeholder-type-specifier.cpp,
+       decltype-specifier.cpp) ---- */
     /* [dcl.spec.auto]/4: the decl-specifier-seq analysed next may have a
        placeholder-type-specifier (a variable's or function's declaration);
        decl_specifier_seq clears it */
@@ -2205,7 +2205,7 @@ class semantic_analysis
                             const specified &s, bool definition,
                             bool initialized, entity_index &declared_entity);
 
-    /* ---- the semantic tree (sema/semantic_tree.cpp) ---- */
+    /* ---- the semantic tree (sema/semantic-tree.cpp) ---- */
     /* a node for the expression m is now */
     uint32_t expression_node(semantic_kind kind, const expression_meaning &m,
                              token_index at, uint32_t a = 0, uint32_t b = 0,
@@ -2248,7 +2248,8 @@ class semantic_analysis
     analysis_result this_object(token_index t, expression_meaning &m,
                                 bool own = false);
 
-    /* ---- lambda expressions ([expr.prim.lambda], expr/expr.prim.lambda*.cpp) */
+    /* ---- lambda expressions ([expr.prim.lambda], lambda-*.cpp,
+       closure-type.cpp) */
     enum class capture_default : uint8_t { none, copy, reference };
     /* an entity a lambda captures ([expr.prim.lambda.capture]): a
        variable (0: this), by reference or not (*this: star_this), the
@@ -2310,7 +2311,8 @@ class semantic_analysis
        enclosing lambda's member when that lambda captures it by copy */
     qualified_type enclosing_capture_type(entity_index e, size_t count,
                                           size_t end) const;
-    /* class c's members one range of class_members again (class.pre.cpp) */
+    /* class c's members one range of class_members again
+       (class-specifier.cpp) */
     void make_members_contiguous(entity_index c);
     /* the closure's non-static data member of type type for a capture */
     entity_index capture_member_of(entity_index closure, qualified_type type);
@@ -2557,7 +2559,7 @@ class semantic_analysis
     /* [conv.bool], [expr.context]/1: contextually converted to bool */
     analysis_result contextual_bool(SyntaxRef at, expression_meaning &m);
 
-    /* ---- constant expressions ([expr.const], expr/expr.const.cpp) ----
+    /* ---- constant expressions ([expr.const], constant-expression.cpp) ----
        What every construct that requires a constant expression asks,
        after operand_value: whether m is one (constant), with its value in
        m as an expression_meaning keeps it.  Unsupported when analysis
@@ -2591,8 +2593,8 @@ class semantic_analysis
     owned_array<SyntaxRef> dependent_exception_specifications;
     bool dependent_exception_specification(entity_index t) const;
     /* [expr.const]/5: the evaluation of the semantic tree node as a core
-       constant expression (expr/expr.const.evaluate.cpp): well_formed with
-       its value in v and constant true; constant false if it is not one;
+       constant expression (expression/constant-evaluation.cpp): well_formed
+       with its value in v and constant true; constant false if it is not one;
        unsupported where the evaluator has no rules yet */
     analysis_result evaluate_constant(SyntaxRef at, uint32_t node,
                                       constant_value &v, bool &constant);
@@ -2641,7 +2643,7 @@ class semantic_analysis
            is placed ([expr.const]/5.3); 0: every body counts */
         token_index defined_before = 0;
     };
-    /* The evaluator's parts (expr/expr.const.evaluate.cpp).  Each answers
+    /* The evaluator's parts (expression/constant-evaluation.cpp).  Each answers
        constant (with the value), not_constant (not a core constant
        expression), or unknown where the evaluator has no rules (analysis's
        unsupported [expr.const]).  evaluate_object: the object a glvalue
@@ -3385,7 +3387,7 @@ class semantic_analysis
     /* [temp.alias]/2: the type a simple-template-id naming the alias
        template at denotes */
     /* [ext:clang_builtin_templates] __builtin_common_type<Template,
-       TypeIdentity, Empty, T...> (type_traits.cpp) */
+       TypeIdentity, Empty, T...> (type-traits.cpp) */
     bool is_builtin_common_type(uint32_t name) const;
     analysis_result builtin_common_type(SyntaxRef id, type_index &type);
     /* __type_pack_element<N, T...> */
@@ -3712,7 +3714,7 @@ class semantic_analysis
     /* the instantiation whose class the class-specifier analysed now
        defines (its record's index plus one) */
     uint32_t class_instantiating = 0;
-    /* a call whose name is a function template's (expr.post.cpp) */
+    /* a call whose name is a function template's (postfix-expression.cpp) */
     analysis_result template_call(SyntaxRef n, token_index name,
                                   uint32_t function_template,
                                   owned_array<template_argument> &specified,
@@ -3892,7 +3894,7 @@ class semantic_analysis
     analysis_result for_range_declaration(SyntaxElement d,
                                           const expression_meaning &element,
                                           uint32_t &built);
-    /* ---- [dcl.struct.bind] structured bindings (dcl.struct.bind.cpp) ---- */
+    /* ---- [dcl.struct.bind] structured bindings (structured-binding.cpp) */
     /* the structured binding declaration whose ref-qualifier_opt [
        identifier-list ] starts at child first of declaration, its
        decl-specifier-seq's meaning s; supplied: its initializer, analysed
@@ -4002,7 +4004,7 @@ class semantic_analysis
     }
     /* whether specialization e has internal linkage only from local
        classes or closure types other translation units name too: its
-       symbol has its template's linkage (basic/basic.link.cpp) */
+       symbol has its template's linkage (basic/translation-unit.cpp) */
     bool specialization_visible(entity_index e) const;
     uint32_t specialization_argument_count(entity_index e) const
     {
@@ -4185,7 +4187,7 @@ class semantic_analysis
     /* specified: template arguments already analysed, put before what
        is deduced (as written's are) */
     /* [temp.over]/1: the member function templates named held, as member
-       candidates (temp.mem.cpp) */
+       candidates (member-template.cpp) */
     analysis_result constructor_specifiers(SyntaxRef seq, specified &s);
     analysis_result constructor_template_declarator(SyntaxRef definition,
                                                     SyntaxElement d,
@@ -4336,7 +4338,7 @@ class semantic_analysis
        named_entity takes it for (0 elsewhere) */
     token_index overload_target_token = 0;
     entity_index overload_target_choice = 0;
-    /* ---- [over.oper] operator functions (over/over.oper.cpp) ---- */
+    /* ---- [over.oper] operator functions (operator-function.cpp) ---- */
     /* the name of the operator function of op, as an identifier number
        (operator+ for both forms of +, [over.unary]/2) */
     uint32_t operator_name(preprocessing_op_or_punc op);
@@ -4418,7 +4420,7 @@ class semantic_analysis
        assigns its members as the built-in operator does (no member's
        assignment is a user-provided operator=) */
     bool assigned_bitwise(entity_index c);
-    /* ---- [over.literal] literal operators (over/over.literal.cpp) ---- */
+    /* ---- [over.literal] literal operators (literal-operator.cpp) ---- */
     /* the name of the literal operator of the literal suffix identifier
        suffix, as an identifier number */
     uint32_t literal_operator_name(const char *suffix, size_t length);

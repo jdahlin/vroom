@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The C++ front end's preprocessor (src/frontend/cplusplus/cpp, through the
+"""The C++ front end's preprocessor (src/frontend/cplusplus/preprocessor, through the
 driver: vpp -fcxx-dump=, src/frontend/cplusplus/dump/dump.h) against clang, on clang's preprocessor tests and ours.
 
 Tests: clang/test/Preprocessor/*.{c,cpp} and clang/test/CXX/cpp of the

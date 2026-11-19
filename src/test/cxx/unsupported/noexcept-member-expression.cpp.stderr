@@ -1,2 +1,2 @@
 noexcept-member-expression.cpp:6:14: error: the rules of [except.spec] are not implemented yet
-noexcept-member-expression.cpp:6:14: note: refused by vcc's frontend/cplusplus/except/except.spec.cpp:N (noexcept_specifier)
+noexcept-member-expression.cpp:6:14: note: refused by vcc's frontend/cplusplus/exception/noexcept-specifier.cpp:N (noexcept_specifier)
