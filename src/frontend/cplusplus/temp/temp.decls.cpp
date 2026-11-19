@@ -1359,12 +1359,10 @@ analysis_result semantic_analysis::alias_template_specialization(
     /* [temp.alias]/2: "when a template-id refers to the specialization of
        an alias template, it is equivalent to the associated type", which
        [temp.names]/7 requires to satisfy the template's associated
-       constraints ([temp.constr.decl]/3); of dependent arguments, not
-       checked here (refused) */
-    if (dependent_arguments(arguments)) {
-        if (template_head_constrained(ft.declaration))
-            return not_supported(id, "temp.alias");
-    } else {
+       constraints ([temp.constr.decl]/3); of dependent arguments, they
+       cannot be checked yet, and the type is the defining-type-id with the
+       arguments substituted, itself dependent (clang mangles it so) */
+    if (!dependent_arguments(arguments)) {
         bool satisfied = true;
         r = template_constraints_satisfied(at, arguments, satisfied);
         if (r != analysis_result::well_formed)
