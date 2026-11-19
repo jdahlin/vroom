@@ -231,11 +231,11 @@ static const gnu_attribute_rule gnu_attribute_rules[] = {
     {"aligned", gnu_aligned},
     /* the attributes that change no code vcc generates: they say what a
        function or variable does (const, pure, nothrow, leaf, malloc,
-       returns_nonnull, nonnull, format, format_arg, alloc_size), ask for
-       a diagnostic (unused, maybe_unused, warn_unused_result, deprecated,
-       sentinel), or name an optimization vcc does not do (noclone, cold,
-       hot, flatten, no_icf, no_reorder, artificial,
-       no_instrument_function), or ask for an instrumentation vcc does not
+       returns_nonnull, nonnull, format, format_arg, alloc_size,
+       alloc_align), ask for a diagnostic (unused, maybe_unused,
+       warn_unused_result, deprecated, sentinel), or name an optimization
+       vcc does not do (noclone, cold, hot, flatten, no_icf, no_reorder,
+       artificial, no_instrument_function), or ask for an instrumentation vcc does not
        add (no_sanitize("cfi"): libc++'s _LIBCPP_NO_CFI) */
     {"unused", 0},
     {"maybe_unused", 0},
@@ -252,6 +252,7 @@ static const gnu_attribute_rule gnu_attribute_rules[] = {
     {"format", 0},
     {"format_arg", 0},
     {"alloc_size", 0},
+    {"alloc_align", 0},
     {"warn_unused_result", 0},
     {"deprecated", 0},
     {"sentinel", 0},

@@ -29,6 +29,16 @@ struct Plain {
 /* the SDK's __swift_nonisolated_unsafe (stdio.h's __stdinp) */
 int swift_one __attribute__((__swift_attr__("nonisolated(unsafe)"))) = 1;
 
+/* the SDK's malloc_type_aligned_alloc: __result_use_check __alloc_align(1)
+   __alloc_size(2) */
+static char pool[64] __attribute__((aligned(16)));
+__attribute__((noinline)) void *pick(unsigned long align, unsigned long size)
+    __attribute__((__warn_unused_result__)) __attribute__((alloc_align(1)))
+    __attribute__((alloc_size(2), returns_nonnull));
+void *pick(unsigned long align, unsigned long size) {
+    return pool + (align & 0) + (size & 0);
+}
+
 u128 widen(void) { return 0xfedcba9876543210ULL; }
 
 int main() {
@@ -45,6 +55,8 @@ int main() {
     p.s = 9;
     if (p.i != 0x12345678 || p.s != 9)
         return 4;
+    if (pick(16, 8) != pool)
+        return 9;
     u128 w = widen();
     if ((unsigned long long)(w >> 64) != 0 ||
         (unsigned long long)w != 0xfedcba9876543210ULL)
