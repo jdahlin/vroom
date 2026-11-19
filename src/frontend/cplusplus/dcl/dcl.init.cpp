@@ -923,7 +923,7 @@ analysis_result semantic_analysis::list_initialization_of(
         return too_many_clauses(list, clauses, next);
     }
     if (target.kind == type_kind::class_type)
-        return class_list_initialization(list, clauses, type, result);
+        return class_list_initialization(list, clauses, type, direct, result);
     if (target.kind == type_kind::lvalue_reference ||
         target.kind == type_kind::rvalue_reference)
         return not_supported(list, "dcl.init.list");
@@ -1042,7 +1042,7 @@ analysis_result semantic_analysis::initializer(syntax_child init,
  */
 analysis_result semantic_analysis::class_list_initialization(
     node_index list, const owned_array<syntax_child> &clauses,
-    qualified_type type, initialized_value &result)
+    qualified_type type, bool direct, initialized_value &result)
 {
     entity_index c = type_table[type.unqualified()].entity;
     if (entity_table[c].kind != entity_kind::class_type)
@@ -1066,17 +1066,52 @@ analysis_result semantic_analysis::class_list_initialization(
         if (clauses.empty() && entity_table[c].first_constructor) {
             owned_array<expression_meaning> none;
             analysis_result r = construct(list, type, none, 0, result);
-            /* [over.match.list]/1: an explicit default constructor in
-               copy-list-initialization is ill-formed: not told apart */
-            if (r == analysis_result::well_formed &&
+            if (r == analysis_result::well_formed && !direct &&
                 semantics[result.node].kind == semantic_kind::construct &&
                 entity_table[semantics[result.node].b].explicit_)
-                return not_supported(list, "over.match.list");
+                /* [over.match.list]/1 */
+                return ill_formed(list,
+                                  "In copy-list-initialization, if an explicit "
+                                  "constructor is chosen, the initialization "
+                                  "is ill-formed",
+                                  "over.match.list");
             return r;
+        }
+        /* (3.5) without a user-provided default constructor (X() =
+           default, or an empty base class or a private member making it
+           no aggregate): [dcl.init]/8.2: "the object is zero-initialized
+           and ... if T has a non-trivial default constructor, the object
+           is default-initialized", the elements as an empty list
+           initializes an aggregate's ([dcl.init.aggr]/5); an empty base
+           class subobject ([class.derived]/4), no element, only when
+           trivial */
+        const entity &x = entity_table[c];
+        bool trivial_empty_bases = true;
+        for (uint32_t i = 0; i < x.base_count; i++) {
+            const entity &b = entity_table[class_bases[x.first_base + i]];
+            if (b.field == UINT32_MAX &&
+                (b.virtual_base ||
+                 !trivial_special_members(
+                     type_table[b.type.unqualified()].entity)))
+                trivial_empty_bases = false;
+        }
+        if (clauses.empty() && !x.first_constructor && !x.dynamic &&
+            trivial_empty_bases && !x.constructor_template &&
+            !x.constructor_templates) {
+            if (!direct && x.explicit_default_constructor)
+                /* [over.match.list]/1 */
+                return ill_formed(list,
+                                  "In copy-list-initialization, if an explicit "
+                                  "constructor is chosen, the initialization "
+                                  "is ill-formed",
+                                  "over.match.list");
+            size_t next = 0;
+            return aggregate_elements(list, clauses, next, type, result);
         }
         if (clauses.empty() || !entity_table[c].first_constructor)
             return not_supported(list, "over.match.list");
-        return constructor_list_initialization(list, clauses, type, result);
+        return constructor_list_initialization(list, clauses, type, direct,
+                                               result);
     }
     if (clauses.size() == 1 &&
         !syntax_is(tree, clauses[0], syntax_kind::braced_init_list)) {
@@ -1106,12 +1141,12 @@ analysis_result semantic_analysis::class_list_initialization(
  * constructors of the class T and the argument list consists of the
  * elements of the initializer list".  A constructor taking a class named
  * initializer_list (3.6), and braced elements, are not analysed; explicit
- * constructors are not declared yet ([class.ctor]), so copy-list-
- * initialization never chooses one.
+ * constructors are candidates, ill-formed when chosen in copy-list-
+ * initialization ([over.match.list]/1).
  */
 analysis_result semantic_analysis::constructor_list_initialization(
     node_index list, const owned_array<syntax_child> &clauses,
-    qualified_type type, initialized_value &result)
+    qualified_type type, bool direct, initialized_value &result)
 {
     entity_index c = type_table[type.unqualified()].entity;
     for (entity_index k = entity_table[c].first_constructor; k;
@@ -1156,11 +1191,13 @@ analysis_result semantic_analysis::constructor_list_initialization(
     entity_index chosen = semantics[result.node].b;
     if (!chosen || semantics[result.node].kind != semantic_kind::construct)
         return not_supported(list, "over.match.list");
-    /* [over.match.list]/1: "In copy-list-initialization, if an explicit
-       constructor is chosen, the initialization is ill-formed": whether
-       this one is copy-list-initialization is not kept here */
-    if (entity_table[chosen].explicit_)
-        return not_supported(list, "over.match.list");
+    if (!direct && entity_table[chosen].explicit_)
+        /* [over.match.list]/1 */
+        return ill_formed(
+            list,
+            "In copy-list-initialization, if an explicit constructor is "
+            "chosen, the initialization is ill-formed",
+            "over.match.list");
     const qualified_type *parameters =
         type_table.parameters(entity_table[chosen].type.unqualified());
     uint32_t count =
