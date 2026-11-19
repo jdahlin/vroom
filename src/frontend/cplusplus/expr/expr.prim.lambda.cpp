@@ -430,7 +430,7 @@ analysis_result semantic_analysis::lambda_expression(LambdaExpression n,
     entity_table.add_declaration(c, n);
     l.closure = c;
     l.first_capture = static_cast<uint32_t>(lambda_captures.size());
-    analysis_result r = lambda_introducer(node[0].lambda_introducer(), l);
+    analysis_result r = lambda_introducer(node[0], l);
     if (r != analysis_result::well_formed) {
         lambda_captures.resize(l.first_capture);
         entity_table[c].kind = entity_kind::none;
@@ -578,8 +578,7 @@ semantic_analysis::lambda_call_type(node_index n, node_index d,
                         r = not_supported(n, "expr.prim.lambda.capture");
                 if (r != analysis_result::well_formed)
                     continue;
-                r = type_id(syntax(syntax(trailing)[1].index()).type_id(),
-                            returns);
+                r = type_id(syntax(trailing)[1], returns);
                 if (r == analysis_result::well_formed &&
                     abstract_class(returns))
                     r = not_supported(n, "class.abstract");

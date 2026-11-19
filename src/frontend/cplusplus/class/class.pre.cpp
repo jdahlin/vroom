@@ -308,8 +308,7 @@ analysis_result semantic_analysis::class_definition(node_index n,
         if (outer || at_block_scope() || function_state.active)
             return not_supported(n, "class.pre");
         nominated_scope q;
-        analysis_result qr = nested_name_specifier(
-            syntax(head_qualifier).nested_name_specifier(), q);
+        analysis_result qr = nested_name_specifier(syntax(head_qualifier), q);
         if (qr != analysis_result::well_formed)
             return qr;
         if (!is_namespace(q.entity)) {
@@ -539,14 +538,13 @@ analysis_result semantic_analysis::class_definition(node_index n,
     entity_table[c].base_count = 0;
     analysis_result result = analysis_result::well_formed;
     if (has_bases)
-        result = base_clause(c, head_children[2].base_clause(), key);
+        result = base_clause(c, head_children[2], key);
     entity_table[c].requested_alignment = trailing_class_alignment;
     trailing_class_alignment = 0;
     for (node_index a : alignas_list) {
         uint64_t alignment = 0;
         if (result == analysis_result::well_formed)
-            result =
-                alignment_specifier(syntax(a).alignment_specifier(), alignment);
+            result = alignment_specifier(syntax(a), alignment);
         if (alignment > entity_table[c].requested_alignment)
             entity_table[c].requested_alignment =
                 static_cast<uint32_t>(alignment);
@@ -712,8 +710,7 @@ semantic_analysis::elaborated_type_specifier(ElaboratedTypeSpecifier n,
            previously declared type-name, the elaborated-type-specifier is
            ill-formed." */
         nominated_scope q;
-        analysis_result r =
-            nested_name_specifier(e[at].nested_name_specifier(), q);
+        analysis_result r = nested_name_specifier(e[at], q);
         if (r != analysis_result::well_formed)
             return r;
         token_index t = e[at + 1].token();
@@ -1075,8 +1072,7 @@ semantic_analysis::member_declaration(entity_index c, MemberDeclaration m,
         [&](GnuExtensionDeclaration x) {
             /* [ext:gnu_extension_keyword]: __extension__ changes no
                meaning */
-            return member_declaration(c, x[1].member_declaration(), access,
-                                      bodies);
+            return member_declaration(c, x[1], access, bodies);
         },
         [&](EmptyDeclaration) { return analysis_result::well_formed; },
         [&](UsingDeclaration u) {
@@ -2220,7 +2216,7 @@ analysis_result semantic_analysis::alignment_specifier(AlignmentSpecifier n,
         return not_supported(n, "dcl.align");
     if (parts[2].is(syntax_kind::type_id)) {
         qualified_type t;
-        analysis_result r = type_id(parts[2].type_id(), t);
+        analysis_result r = type_id(parts[2], t);
         if (r != analysis_result::well_formed)
             return r;
         const struct type &record = type_table[t.unqualified()];

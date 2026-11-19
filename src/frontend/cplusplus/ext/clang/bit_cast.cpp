@@ -89,7 +89,7 @@ analysis_result semantic_analysis::clang_bit_cast(node_index n,
 {
     auto children = syntax(n);
     qualified_type to;
-    analysis_result r = type_id(children[2].type_id(), to);
+    analysis_result r = type_id(children[2], to);
     if (r != analysis_result::well_formed)
         return r;
     r = expression(children[4], m);

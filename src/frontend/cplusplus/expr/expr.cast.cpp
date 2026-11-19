@@ -757,7 +757,7 @@ analysis_result semantic_analysis::cast(node_index n, expression_meaning &m)
     if (node.size() != 4 || !node[1].is(syntax_kind::type_id))
         return not_supported(n, "expr.cast");
     qualified_type to;
-    analysis_result r = type_id(node[1].type_id(), to);
+    analysis_result r = type_id(node[1], to);
     /* [over.over]/1: "an explicit type conversion" */
     if (r == analysis_result::well_formed)
         r = target_expression(node[3], to, m);

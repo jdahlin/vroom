@@ -686,8 +686,7 @@ analysis_result semantic_analysis::qualified_id(QualifiedId n,
         !node[1].is_identifier())
         return not_supported(n, "expr.prim.id.qual");
     nominated_scope scope;
-    analysis_result r =
-        nested_name_specifier(node[0].nested_name_specifier(), scope);
+    analysis_result r = nested_name_specifier(node[0], scope);
     if (r != analysis_result::well_formed)
         return r;
     token_index t = node[1].token();

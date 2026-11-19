@@ -269,7 +269,7 @@ analysis_result semantic_analysis::named_cast(node_index n,
         return not_supported(n, "expr.dynamic.cast");
     auto children = syntax(n);
     qualified_type to;
-    analysis_result r = type_id(children[2].type_id(), to);
+    analysis_result r = type_id(children[2], to);
     /* [over.over]/1: "an explicit type conversion" */
     if (r == analysis_result::well_formed)
         r = target_expression(children[5], to, m);
@@ -937,8 +937,7 @@ analysis_result semantic_analysis::template_callee_parts(
         if (q.size() != 2 || !q[0].is(syntax_kind::nested_name_specifier))
             return analysis_result::well_formed;
         id = q[1];
-        analysis_result r =
-            nested_name_specifier(q[0].nested_name_specifier(), scope);
+        analysis_result r = nested_name_specifier(q[0], scope);
         if (r != analysis_result::well_formed)
             return r;
         if (!is_namespace(scope.entity))

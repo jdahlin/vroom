@@ -482,6 +482,25 @@ auto bind_member(T *self, R (T::*member)(A))
  */
 template <class View> struct SyntaxExtra : SyntaxRef {
     using SyntaxRef::SyntaxRef;
+    SyntaxExtra() = default;
+    SyntaxExtra(const SyntaxRef &r) : SyntaxRef(r)
+    {
+    }
+
+  protected:
+    /* the view made from a node (or an element, or another view) that is
+       not of its kinds is empty; with -DVCC_CHECK_SYNTAX_VIEWS it is a
+       bug at the caller's line: a view is asked for where a node of its
+       kind is known, and x.kind_name() tests */
+    void narrow(bool accepted, const char *file, int line)
+    {
+        if (accepted)
+            return;
+#ifdef VCC_CHECK_SYNTAX_VIEWS
+        vbug(file, line, "a node converted to a view of another kind");
+#endif
+        n = 0;
+    }
 };
 
 /*
@@ -499,6 +518,19 @@ template <class View> struct SyntaxExtra : SyntaxRef {
  */
 template <> struct SyntaxExtra<FunctionBody> : SyntaxRef {
     using SyntaxRef::SyntaxRef;
+    SyntaxExtra() = default;
+    SyntaxExtra(const SyntaxRef &r) : SyntaxRef(r)
+    {
+    }
+    void narrow(bool accepted, const char *file, int line)
+    {
+        if (accepted)
+            return;
+#ifdef VCC_CHECK_SYNTAX_VIEWS
+        vbug(file, line, "a node converted to a view of another kind");
+#endif
+        n = 0;
+    }
     bool unparsed() const
     {
         return is(syntax_kind::function_body) && size() == 1 &&
@@ -555,6 +587,19 @@ template <> struct SyntaxExtra<FunctionBody> : SyntaxRef {
  */
 template <> struct SyntaxExtra<FunctionDefinition> : SyntaxRef {
     using SyntaxRef::SyntaxRef;
+    SyntaxExtra() = default;
+    SyntaxExtra(const SyntaxRef &r) : SyntaxRef(r)
+    {
+    }
+    void narrow(bool accepted, const char *file, int line)
+    {
+        if (accepted)
+            return;
+#ifdef VCC_CHECK_SYNTAX_VIEWS
+        vbug(file, line, "a node converted to a view of another kind");
+#endif
+        n = 0;
+    }
     /* the declarator after the decl-specifier-seq ({} without one; a
        declarator that is only its identifier is that token) */
     SyntaxElement declarator() const

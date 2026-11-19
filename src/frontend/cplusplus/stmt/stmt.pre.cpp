@@ -586,8 +586,7 @@ analysis_result semantic_analysis::substatement(SyntaxElement s,
                                                 uint32_t &built)
 {
     if (syntax(s).is(syntax_kind::compound_statement))
-        return compound_statement(syntax(s).compound_statement(), conflicts,
-                                  built);
+        return compound_statement(syntax(s), conflicts, built);
     if (!syntax(s).is(syntax_kind::simple_declaration))
         return statement(s, built);
     entity_index outer = current_scope;

@@ -1132,16 +1132,14 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
             type_index class_type = 0;
             analysis_result r;
             if (syntax(c).is(syntax_kind::class_specifier))
-                r = class_specifier(c.class_specifier(), class_type);
+                r = class_specifier(c, class_type);
             else if (syntax(c).is(syntax_kind::elaborated_type_specifier))
-                r = elaborated_type_specifier(c.elaborated_type_specifier(),
-                                              class_type);
+                r = elaborated_type_specifier(c, class_type);
             else if (syntax(c).is(syntax_kind::enum_specifier)) {
                 r = enum_specifier(c.index(), class_type);
                 declares_enumeration = true;
             } else if (syntax(c).is(syntax_kind::elaborated_enum_specifier))
-                r = elaborated_enum_specifier(c.elaborated_enum_specifier(),
-                                              class_type);
+                r = elaborated_enum_specifier(c, class_type);
             else if (syntax(c).is(syntax_kind::simple_template_id)) {
                 uint32_t named_cv = 0;
                 r = template_type(c.index(), 0, false, class_type, &named_cv);
@@ -1163,8 +1161,7 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
             } else if (syntax(c).is(syntax_kind::clang_type_transformation)) {
                 /* [ext:clang_type_traits] */
                 qualified_type denoted;
-                r = clang_type_transformation(c.clang_type_transformation(),
-                                              denoted);
+                r = clang_type_transformation(c, denoted);
                 class_type = denoted.unqualified();
                 cv |= denoted.cv();
             } else if (syntax(c).is(syntax_kind::clang_atomic_type_specifier)) {
@@ -1568,8 +1565,7 @@ analysis_result semantic_analysis::qualified_type_name(node_index n,
             node[0].is(syntax_kind::nested_name_specifier) &&
             node[1].is(syntax_kind::simple_template_id)) {
             nominated_scope scope;
-            analysis_result r =
-                nested_name_specifier(node[0].nested_name_specifier(), scope);
+            analysis_result r = nested_name_specifier(node[0], scope);
             if (r != analysis_result::well_formed)
                 return r;
             /* a namespace's member template or a class's (a member
@@ -1583,8 +1579,7 @@ analysis_result semantic_analysis::qualified_type_name(node_index n,
         return not_supported(n, "dcl.type.simple");
     }
     nominated_scope scope;
-    analysis_result r =
-        nested_name_specifier(node[0].nested_name_specifier(), scope, true);
+    analysis_result r = nested_name_specifier(node[0], scope, true);
     if (r != analysis_result::well_formed)
         return r;
     token_index t = node[1].token();
@@ -1673,8 +1668,7 @@ analysis_result semantic_analysis::named_class(SyntaxElement name,
             /* a simple-template-id, a decltype-specifier */
             return not_supported(at, "basic.lookup.qual");
         nominated_scope scope;
-        analysis_result r =
-            nested_name_specifier(node[0].nested_name_specifier(), scope);
+        analysis_result r = nested_name_specifier(node[0], scope);
         if (r != analysis_result::well_formed)
             return r;
         id = node[1].token();

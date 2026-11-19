@@ -294,9 +294,9 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
     SyntaxElement bound{};
     analysis_result r = analysis_result::well_formed;
     if (i < count && node[i].is(syntax_kind::new_type_id)) {
-        r = new_type_id(node[i++].new_type_id(), type, bound);
+        r = new_type_id(node[i++], type, bound);
     } else if (i + 2 < count && node[i + 1].is(syntax_kind::type_id)) {
-        r = type_id(node[i + 1].type_id(), type);
+        r = type_id(node[i + 1], type);
         i += 3;
     } else {
         return not_supported(n, "expr.new");

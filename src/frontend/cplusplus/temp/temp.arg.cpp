@@ -305,7 +305,7 @@ analysis_result semantic_analysis::template_argument_for(
     if (entity_table[p].kind == entity_kind::typedef_name) {
         if (!syntax(written).is(syntax_kind::type_id))
             return not_supported(at, "temp.arg");
-        return type_id(written.type_id(), out.type);
+        return type_id(written, out.type);
     }
     if (syntax(written).is(syntax_kind::type_id))
         return not_supported(at, "temp.arg");
@@ -565,8 +565,7 @@ analysis_result semantic_analysis::template_template_argument(
     lookup_result x;
     if (qualifier) {
         nominated_scope scope;
-        analysis_result r = nested_name_specifier(
-            syntax(qualifier).nested_name_specifier(), scope);
+        analysis_result r = nested_name_specifier(syntax(qualifier), scope);
         if (r != analysis_result::well_formed)
             return r;
         if (scope.entity && !is_namespace(scope.entity))

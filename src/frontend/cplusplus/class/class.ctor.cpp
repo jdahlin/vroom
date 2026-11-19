@@ -2051,8 +2051,7 @@ analysis_result semantic_analysis::special_member_definition(node_index n,
     entity_table[e].defined = true;
     entity_table.add_declaration(e, n);
     last_declared = e;
-    return special_member_body(node.function_definition(),
-                               node[at + 1].function_body());
+    return special_member_body(node, node[at + 1].function_body());
 }
 
 /* the prvalue of class type type whose result object the node

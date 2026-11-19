@@ -449,9 +449,8 @@ analysis_result semantic_analysis::function(node_index parameters,
             for (uint32_t e = 0; e < elements; e++) {
                 expanding = true;
                 expansion_element = e;
-                r = parameter_declaration(
-                    syntax(declarations[k]).parameter_declaration(), t, unnamed,
-                    id, default_argument);
+                r = parameter_declaration(syntax(declarations[k]), t, unnamed,
+                                          id, default_argument);
                 expanding = saved;
                 expansion_element = saved_element;
                 if (r != analysis_result::well_formed)
@@ -480,9 +479,8 @@ analysis_result semantic_analysis::function(node_index parameters,
                 empty_pack = pack_name;
             continue;
         }
-        r = parameter_declaration(
-            syntax(declarations[k]).parameter_declaration(), t, unnamed, id,
-            default_argument);
+        r = parameter_declaration(syntax(declarations[k]), t, unnamed, id,
+                                  default_argument);
         if (r != analysis_result::well_formed)
             return r;
         if (declared_pack) {

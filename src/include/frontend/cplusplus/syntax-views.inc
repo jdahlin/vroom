@@ -2931,6 +2931,19 @@ UsingDeclarators using_declarators() const;
 /* abstract-declarator: one of abstract_declarator, noptr_abstract_declarator, ptr_abstract_declarator, ptr_operator */
 struct AbstractDeclarator : SyntaxExtra<AbstractDeclarator> {
     using SyntaxExtra<AbstractDeclarator>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    AbstractDeclarator(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<AbstractDeclarator>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    AbstractDeclarator(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<AbstractDeclarator>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     AbstractDeclarator() = default;
     template <class V>
         requires syntax_converts<V, AbstractDeclarator>
@@ -2949,6 +2962,19 @@ struct AbstractDeclarator : SyntaxExtra<AbstractDeclarator> {
 /* additive-expression: one of additive_expression, await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, conversion_function_id, delete_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, lambda_expression, literal_operator_id, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, requires_expression, simple_template_id, template_id, unary_expression, unqualified_id */
 struct AdditiveExpression : SyntaxExtra<AdditiveExpression> {
     using SyntaxExtra<AdditiveExpression>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    AdditiveExpression(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<AdditiveExpression>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    AdditiveExpression(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<AdditiveExpression>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     AdditiveExpression() = default;
     template <class V>
         requires syntax_converts<V, AdditiveExpression>
@@ -2967,12 +2993,40 @@ struct AdditiveExpression : SyntaxExtra<AdditiveExpression> {
 /* the additive-expression node */
 struct AdditiveOperation : SyntaxExtra<AdditiveOperation> {
     using SyntaxExtra<AdditiveOperation>::SyntaxExtra;
+    AdditiveOperation() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    AdditiveOperation(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<AdditiveOperation>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    AdditiveOperation(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<AdditiveOperation>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
 };
 
 /* the alias-declaration node */
 struct AliasDeclaration : SyntaxExtra<AliasDeclaration> {
     using SyntaxExtra<AliasDeclaration>::SyntaxExtra;
+    AliasDeclaration() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    AliasDeclaration(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<AliasDeclaration>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    AliasDeclaration(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<AliasDeclaration>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     AttributeSpecifierSeq attribute_specifier_seq() const;
     DefiningTypeId defining_type_id() const;
@@ -2982,6 +3036,20 @@ struct AliasDeclaration : SyntaxExtra<AliasDeclaration> {
 /* the alignment-specifier node */
 struct AlignmentSpecifier : SyntaxExtra<AlignmentSpecifier> {
     using SyntaxExtra<AlignmentSpecifier>::SyntaxExtra;
+    AlignmentSpecifier() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    AlignmentSpecifier(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<AlignmentSpecifier>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    AlignmentSpecifier(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<AlignmentSpecifier>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     ConstantExpression constant_expression() const;
     TypeId type_id() const;
@@ -2991,6 +3059,19 @@ struct AlignmentSpecifier : SyntaxExtra<AlignmentSpecifier> {
 /* and-expression: one of additive_expression, and_expression, await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conversion_function_id, delete_expression, equality_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, lambda_expression, literal_operator_id, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, unary_expression, unqualified_id */
 struct AndExpression : SyntaxExtra<AndExpression> {
     using SyntaxExtra<AndExpression>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    AndExpression(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<AndExpression>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    AndExpression(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<AndExpression>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     AndExpression() = default;
     template <class V>
         requires syntax_converts<V, AndExpression>
@@ -3009,12 +3090,40 @@ struct AndExpression : SyntaxExtra<AndExpression> {
 /* the and-expression node */
 struct AndOperation : SyntaxExtra<AndOperation> {
     using SyntaxExtra<AndOperation>::SyntaxExtra;
+    AndOperation() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    AndOperation(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<AndOperation>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    AndOperation(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<AndOperation>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
 };
 
 /* the base-specifier node */
 struct AnnotatedBaseSpecifier : SyntaxExtra<AnnotatedBaseSpecifier> {
     using SyntaxExtra<AnnotatedBaseSpecifier>::SyntaxExtra;
+    AnnotatedBaseSpecifier() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    AnnotatedBaseSpecifier(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<AnnotatedBaseSpecifier>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    AnnotatedBaseSpecifier(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<AnnotatedBaseSpecifier>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     AttributeSpecifierSeq attribute_specifier_seq() const;
     ClassOrDecltype class_or_decltype() const;
@@ -3024,6 +3133,20 @@ struct AnnotatedBaseSpecifier : SyntaxExtra<AnnotatedBaseSpecifier> {
 /* the asm-declaration node */
 struct AsmDeclaration : SyntaxExtra<AsmDeclaration> {
     using SyntaxExtra<AsmDeclaration>::SyntaxExtra;
+    AsmDeclaration() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    AsmDeclaration(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<AsmDeclaration>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    AsmDeclaration(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<AsmDeclaration>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     AttributeSpecifierSeq attribute_specifier_seq() const;
     SyntaxElement string_literal() const;
@@ -3032,12 +3155,39 @@ struct AsmDeclaration : SyntaxExtra<AsmDeclaration> {
 /* the assignment-expression node */
 struct Assignment : SyntaxExtra<Assignment> {
     using SyntaxExtra<Assignment>::SyntaxExtra;
+    Assignment() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    Assignment(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<Assignment>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    Assignment(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<Assignment>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
 };
 
 /* assignment-expression: one of additive_expression, and_expression, assignment_expression, await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conditional_expression, conversion_function_id, delete_expression, equality_expression, exclusive_or_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, inclusive_or_expression, lambda_expression, literal_operator_id, logical_and_expression, logical_or_expression, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, throw_expression, unary_expression, unqualified_id, yield_expression */
 struct AssignmentExpression : SyntaxExtra<AssignmentExpression> {
     using SyntaxExtra<AssignmentExpression>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    AssignmentExpression(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<AssignmentExpression>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    AssignmentExpression(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<AssignmentExpression>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     AssignmentExpression() = default;
     template <class V>
         requires syntax_converts<V, AssignmentExpression>
@@ -3056,6 +3206,19 @@ struct AssignmentExpression : SyntaxExtra<AssignmentExpression> {
 /* attribute: one of attribute, attribute_scoped_token */
 struct Attribute : SyntaxExtra<Attribute> {
     using SyntaxExtra<Attribute>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    Attribute(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<Attribute>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    Attribute(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<Attribute>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     Attribute() = default;
     template <class V>
         requires syntax_converts<V, Attribute>
@@ -3074,6 +3237,20 @@ struct Attribute : SyntaxExtra<Attribute> {
 /* the attribute-argument-clause node */
 struct AttributeArgumentClause : SyntaxExtra<AttributeArgumentClause> {
     using SyntaxExtra<AttributeArgumentClause>::SyntaxExtra;
+    AttributeArgumentClause() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    AttributeArgumentClause(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<AttributeArgumentClause>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    AttributeArgumentClause(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<AttributeArgumentClause>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     BalancedTokenSeq balanced_token_seq() const;
 };
@@ -3081,6 +3258,20 @@ struct AttributeArgumentClause : SyntaxExtra<AttributeArgumentClause> {
 /* the attribute-declaration node */
 struct AttributeDeclaration : SyntaxExtra<AttributeDeclaration> {
     using SyntaxExtra<AttributeDeclaration>::SyntaxExtra;
+    AttributeDeclaration() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    AttributeDeclaration(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<AttributeDeclaration>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    AttributeDeclaration(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<AttributeDeclaration>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     AttributeSpecifierSeq attribute_specifier_seq() const;
 };
@@ -3088,6 +3279,19 @@ struct AttributeDeclaration : SyntaxExtra<AttributeDeclaration> {
 /* attribute-list: one of attribute, attribute_list, attribute_scoped_token */
 struct AttributeList : SyntaxExtra<AttributeList> {
     using SyntaxExtra<AttributeList>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    AttributeList(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<AttributeList>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    AttributeList(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<AttributeList>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     AttributeList() = default;
     template <class V>
         requires syntax_converts<V, AttributeList>
@@ -3106,12 +3310,39 @@ struct AttributeList : SyntaxExtra<AttributeList> {
 /* the attribute-scoped-token node */
 struct AttributeScopedToken : SyntaxExtra<AttributeScopedToken> {
     using SyntaxExtra<AttributeScopedToken>::SyntaxExtra;
+    AttributeScopedToken() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    AttributeScopedToken(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<AttributeScopedToken>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    AttributeScopedToken(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<AttributeScopedToken>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
 };
 
 /* attribute-specifier: one of alignment_specifier, attribute_specifier, gnu_attribute_specifier */
 struct AttributeSpecifier : SyntaxExtra<AttributeSpecifier> {
     using SyntaxExtra<AttributeSpecifier>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    AttributeSpecifier(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<AttributeSpecifier>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    AttributeSpecifier(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<AttributeSpecifier>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     AttributeSpecifier() = default;
     template <class V>
         requires syntax_converts<V, AttributeSpecifier>
@@ -3130,6 +3361,19 @@ struct AttributeSpecifier : SyntaxExtra<AttributeSpecifier> {
 /* attribute-specifier-seq: one of alignment_specifier, attribute_specifier, attribute_specifier_seq, gnu_attribute_specifier */
 struct AttributeSpecifierSeq : SyntaxExtra<AttributeSpecifierSeq> {
     using SyntaxExtra<AttributeSpecifierSeq>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    AttributeSpecifierSeq(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<AttributeSpecifierSeq>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    AttributeSpecifierSeq(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<AttributeSpecifierSeq>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     AttributeSpecifierSeq() = default;
     template <class V>
         requires syntax_converts<V, AttributeSpecifierSeq>
@@ -3148,12 +3392,40 @@ struct AttributeSpecifierSeq : SyntaxExtra<AttributeSpecifierSeq> {
 /* the attribute-specifier-seq node */
 struct AttributeSpecifiers : SyntaxExtra<AttributeSpecifiers> {
     using SyntaxExtra<AttributeSpecifiers>::SyntaxExtra;
+    AttributeSpecifiers() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    AttributeSpecifiers(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<AttributeSpecifiers>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    AttributeSpecifiers(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<AttributeSpecifiers>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
 };
 
 /* the attribute-using-prefix node */
 struct AttributeUsingPrefix : SyntaxExtra<AttributeUsingPrefix> {
     using SyntaxExtra<AttributeUsingPrefix>::SyntaxExtra;
+    AttributeUsingPrefix() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    AttributeUsingPrefix(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<AttributeUsingPrefix>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    AttributeUsingPrefix(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<AttributeUsingPrefix>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     SyntaxElement identifier() const;
 };
@@ -3161,6 +3433,20 @@ struct AttributeUsingPrefix : SyntaxExtra<AttributeUsingPrefix> {
 /* the attribute node */
 struct AttributeWithArguments : SyntaxExtra<AttributeWithArguments> {
     using SyntaxExtra<AttributeWithArguments>::SyntaxExtra;
+    AttributeWithArguments() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    AttributeWithArguments(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<AttributeWithArguments>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    AttributeWithArguments(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<AttributeWithArguments>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     AttributeArgumentClause attribute_argument_clause() const;
     AttributeScopedToken attribute_token() const;
@@ -3170,6 +3456,20 @@ struct AttributeWithArguments : SyntaxExtra<AttributeWithArguments> {
 /* the statement node */
 struct AttributedStatement : SyntaxExtra<AttributedStatement> {
     using SyntaxExtra<AttributedStatement>::SyntaxExtra;
+    AttributedStatement() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    AttributedStatement(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<AttributedStatement>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    AttributedStatement(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<AttributedStatement>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     AttributeSpecifierSeq attribute_specifier_seq() const;
     CompoundStatement compound_statement() const;
@@ -3183,12 +3483,40 @@ struct AttributedStatement : SyntaxExtra<AttributedStatement> {
 /* the attribute-list node */
 struct Attributes : SyntaxExtra<Attributes> {
     using SyntaxExtra<Attributes>::SyntaxExtra;
+    Attributes() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    Attributes(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<Attributes>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    Attributes(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<Attributes>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
 };
 
 /* the await-expression node */
 struct AwaitExpression : SyntaxExtra<AwaitExpression> {
     using SyntaxExtra<AwaitExpression>::SyntaxExtra;
+    AwaitExpression() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    AwaitExpression(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<AwaitExpression>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    AwaitExpression(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<AwaitExpression>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     CastExpression cast_expression() const;
     SyntaxElement identifier() const;
@@ -3197,6 +3525,20 @@ struct AwaitExpression : SyntaxExtra<AwaitExpression> {
 /* the balanced-token node */
 struct BalancedToken : SyntaxExtra<BalancedToken> {
     using SyntaxExtra<BalancedToken>::SyntaxExtra;
+    BalancedToken() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    BalancedToken(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<BalancedToken>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    BalancedToken(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<BalancedToken>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     BalancedTokenSeq balanced_token_seq() const;
     SyntaxElement identifier() const;
@@ -3205,6 +3547,19 @@ struct BalancedToken : SyntaxExtra<BalancedToken> {
 /* balanced-token-seq: one of balanced_token, balanced_token_seq */
 struct BalancedTokenSeq : SyntaxExtra<BalancedTokenSeq> {
     using SyntaxExtra<BalancedTokenSeq>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    BalancedTokenSeq(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<BalancedTokenSeq>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    BalancedTokenSeq(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<BalancedTokenSeq>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     BalancedTokenSeq() = default;
     template <class V>
         requires syntax_converts<V, BalancedTokenSeq>
@@ -3224,12 +3579,40 @@ struct BalancedTokenSeq : SyntaxExtra<BalancedTokenSeq> {
 /* the balanced-token-seq node */
 struct BalancedTokens : SyntaxExtra<BalancedTokens> {
     using SyntaxExtra<BalancedTokens>::SyntaxExtra;
+    BalancedTokens() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    BalancedTokens(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<BalancedTokens>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    BalancedTokens(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<BalancedTokens>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
 };
 
 /* the base-clause node */
 struct BaseClause : SyntaxExtra<BaseClause> {
     using SyntaxExtra<BaseClause>::SyntaxExtra;
+    BaseClause() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    BaseClause(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<BaseClause>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    BaseClause(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<BaseClause>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     BaseSpecifierList base_specifier_list() const;
     SyntaxElement identifier() const;
@@ -3238,6 +3621,19 @@ struct BaseClause : SyntaxExtra<BaseClause> {
 /* base-specifier: one of base_specifier, class_or_decltype, decltype_specifier, simple_template_id */
 struct BaseSpecifier : SyntaxExtra<BaseSpecifier> {
     using SyntaxExtra<BaseSpecifier>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    BaseSpecifier(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<BaseSpecifier>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    BaseSpecifier(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<BaseSpecifier>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     BaseSpecifier() = default;
     template <class V>
         requires syntax_converts<V, BaseSpecifier>
@@ -3256,6 +3652,19 @@ struct BaseSpecifier : SyntaxExtra<BaseSpecifier> {
 /* base-specifier-list: one of base_specifier, base_specifier_list, class_or_decltype, decltype_specifier, simple_template_id */
 struct BaseSpecifierList : SyntaxExtra<BaseSpecifierList> {
     using SyntaxExtra<BaseSpecifierList>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    BaseSpecifierList(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<BaseSpecifierList>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    BaseSpecifierList(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<BaseSpecifierList>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     BaseSpecifierList() = default;
     template <class V>
         requires syntax_converts<V, BaseSpecifierList>
@@ -3274,12 +3683,39 @@ struct BaseSpecifierList : SyntaxExtra<BaseSpecifierList> {
 /* the base-specifier-list node */
 struct BaseSpecifiers : SyntaxExtra<BaseSpecifiers> {
     using SyntaxExtra<BaseSpecifiers>::SyntaxExtra;
+    BaseSpecifiers() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    BaseSpecifiers(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<BaseSpecifiers>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    BaseSpecifiers(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<BaseSpecifiers>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
 };
 
 /* block-declaration: one of alias_declaration, asm_declaration, gnu_extension_declaration, namespace_alias_definition, opaque_enum_declaration, simple_declaration, static_assert_declaration, using_declaration, using_directive, using_enum_declaration */
 struct BlockDeclaration : SyntaxExtra<BlockDeclaration> {
     using SyntaxExtra<BlockDeclaration>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    BlockDeclaration(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<BlockDeclaration>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    BlockDeclaration(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<BlockDeclaration>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     BlockDeclaration() = default;
     template <class V>
         requires syntax_converts<V, BlockDeclaration>
@@ -3298,6 +3734,19 @@ struct BlockDeclaration : SyntaxExtra<BlockDeclaration> {
 /* brace-or-equal-initializer: one of brace_or_equal_initializer, braced_init_list */
 struct BraceOrEqualInitializer : SyntaxExtra<BraceOrEqualInitializer> {
     using SyntaxExtra<BraceOrEqualInitializer>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    BraceOrEqualInitializer(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<BraceOrEqualInitializer>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    BraceOrEqualInitializer(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<BraceOrEqualInitializer>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     BraceOrEqualInitializer() = default;
     template <class V>
         requires syntax_converts<V, BraceOrEqualInitializer>
@@ -3316,6 +3765,20 @@ struct BraceOrEqualInitializer : SyntaxExtra<BraceOrEqualInitializer> {
 /* the braced-init-list node */
 struct BracedInitList : SyntaxExtra<BracedInitList> {
     using SyntaxExtra<BracedInitList>::SyntaxExtra;
+    BracedInitList() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    BracedInitList(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<BracedInitList>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    BracedInitList(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<BracedInitList>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     DesignatedInitializerList designated_initializer_list() const;
     SyntaxElement identifier() const;
@@ -3324,6 +3787,19 @@ struct BracedInitList : SyntaxExtra<BracedInitList> {
 /* capture: one of init_capture, simple_capture */
 struct Capture : SyntaxExtra<Capture> {
     using SyntaxExtra<Capture>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    Capture(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<Capture>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    Capture(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<Capture>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     Capture() = default;
     template <class V>
         requires syntax_converts<V, Capture>
@@ -3342,6 +3818,19 @@ struct Capture : SyntaxExtra<Capture> {
 /* capture-list: one of capture_list, init_capture, simple_capture */
 struct CaptureList : SyntaxExtra<CaptureList> {
     using SyntaxExtra<CaptureList>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    CaptureList(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<CaptureList>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    CaptureList(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<CaptureList>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     CaptureList() = default;
     template <class V>
         requires syntax_converts<V, CaptureList>
@@ -3361,12 +3850,39 @@ struct CaptureList : SyntaxExtra<CaptureList> {
 /* the capture-list node */
 struct Captures : SyntaxExtra<Captures> {
     using SyntaxExtra<Captures>::SyntaxExtra;
+    Captures() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    Captures(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<Captures>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    Captures(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<Captures>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
 };
 
 /* cast-expression: one of await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, conversion_function_id, delete_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, lambda_expression, literal_operator_id, new_expression, noexcept_expression, operator_function_id, postfix_expression, primary_expression, qualified_id, requires_expression, simple_template_id, template_id, unary_expression, unqualified_id */
 struct CastExpression : SyntaxExtra<CastExpression> {
     using SyntaxExtra<CastExpression>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    CastExpression(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<CastExpression>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    CastExpression(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<CastExpression>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     CastExpression() = default;
     template <class V>
         requires syntax_converts<V, CastExpression>
@@ -3385,6 +3901,20 @@ struct CastExpression : SyntaxExtra<CastExpression> {
 /* the cast-expression node */
 struct CastNotation : SyntaxExtra<CastNotation> {
     using SyntaxExtra<CastNotation>::SyntaxExtra;
+    CastNotation() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    CastNotation(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<CastNotation>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    CastNotation(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<CastNotation>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     CastExpression cast_expression() const;
     TypeId type_id() const;
@@ -3394,6 +3924,20 @@ struct CastNotation : SyntaxExtra<CastNotation> {
 /* the clang-atomic-type-specifier node */
 struct ClangAtomicTypeSpecifier : SyntaxExtra<ClangAtomicTypeSpecifier> {
     using SyntaxExtra<ClangAtomicTypeSpecifier>::SyntaxExtra;
+    ClangAtomicTypeSpecifier() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    ClangAtomicTypeSpecifier(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ClangAtomicTypeSpecifier>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    ClangAtomicTypeSpecifier(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ClangAtomicTypeSpecifier>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     TypeId type_id() const;
 };
@@ -3401,6 +3945,20 @@ struct ClangAtomicTypeSpecifier : SyntaxExtra<ClangAtomicTypeSpecifier> {
 /* the clang-bit-cast-expression node */
 struct ClangBitCastExpression : SyntaxExtra<ClangBitCastExpression> {
     using SyntaxExtra<ClangBitCastExpression>::SyntaxExtra;
+    ClangBitCastExpression() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    ClangBitCastExpression(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ClangBitCastExpression>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    ClangBitCastExpression(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ClangBitCastExpression>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     AssignmentExpression assignment_expression() const;
     TypeId type_id() const;
@@ -3410,6 +3968,20 @@ struct ClangBitCastExpression : SyntaxExtra<ClangBitCastExpression> {
 /* the clang-bit-int-type-specifier node */
 struct ClangBitIntTypeSpecifier : SyntaxExtra<ClangBitIntTypeSpecifier> {
     using SyntaxExtra<ClangBitIntTypeSpecifier>::SyntaxExtra;
+    ClangBitIntTypeSpecifier() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    ClangBitIntTypeSpecifier(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ClangBitIntTypeSpecifier>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    ClangBitIntTypeSpecifier(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ClangBitIntTypeSpecifier>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     ConstantExpression constant_expression() const;
     SyntaxElement identifier() const;
@@ -3418,6 +3990,20 @@ struct ClangBitIntTypeSpecifier : SyntaxExtra<ClangBitIntTypeSpecifier> {
 /* the clang-convertvector-expression node */
 struct ClangConvertvectorExpression : SyntaxExtra<ClangConvertvectorExpression> {
     using SyntaxExtra<ClangConvertvectorExpression>::SyntaxExtra;
+    ClangConvertvectorExpression() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    ClangConvertvectorExpression(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ClangConvertvectorExpression>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    ClangConvertvectorExpression(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ClangConvertvectorExpression>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     AssignmentExpression assignment_expression() const;
     TypeId type_id() const;
@@ -3427,12 +4013,39 @@ struct ClangConvertvectorExpression : SyntaxExtra<ClangConvertvectorExpression> 
 /* the clang-source-location-expression node */
 struct ClangSourceLocationExpression : SyntaxExtra<ClangSourceLocationExpression> {
     using SyntaxExtra<ClangSourceLocationExpression>::SyntaxExtra;
+    ClangSourceLocationExpression() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    ClangSourceLocationExpression(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ClangSourceLocationExpression>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    ClangSourceLocationExpression(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ClangSourceLocationExpression>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
 };
 
 /* clang-type-trait-argument: one of additive_expression, and_expression, assignment_expression, await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conditional_expression, conversion_function_id, delete_expression, equality_expression, exclusive_or_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, inclusive_or_expression, lambda_expression, literal_operator_id, logical_and_expression, logical_or_expression, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, throw_expression, type_id, unary_expression, unqualified_id, yield_expression */
 struct ClangTypeTraitArgument : SyntaxExtra<ClangTypeTraitArgument> {
     using SyntaxExtra<ClangTypeTraitArgument>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    ClangTypeTraitArgument(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ClangTypeTraitArgument>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    ClangTypeTraitArgument(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ClangTypeTraitArgument>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     ClangTypeTraitArgument() = default;
     template <class V>
         requires syntax_converts<V, ClangTypeTraitArgument>
@@ -3451,6 +4064,19 @@ struct ClangTypeTraitArgument : SyntaxExtra<ClangTypeTraitArgument> {
 /* clang-type-trait-argument-list: one of additive_expression, and_expression, assignment_expression, await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conditional_expression, conversion_function_id, delete_expression, equality_expression, exclusive_or_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, inclusive_or_expression, lambda_expression, literal_operator_id, logical_and_expression, logical_or_expression, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, throw_expression, type_id, unary_expression, unqualified_id, yield_expression */
 struct ClangTypeTraitArgumentList : SyntaxExtra<ClangTypeTraitArgumentList> {
     using SyntaxExtra<ClangTypeTraitArgumentList>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    ClangTypeTraitArgumentList(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ClangTypeTraitArgumentList>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    ClangTypeTraitArgumentList(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ClangTypeTraitArgumentList>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     ClangTypeTraitArgumentList() = default;
     template <class V>
         requires syntax_converts<V, ClangTypeTraitArgumentList>
@@ -3469,6 +4095,20 @@ struct ClangTypeTraitArgumentList : SyntaxExtra<ClangTypeTraitArgumentList> {
 /* the clang-type-trait-expression node */
 struct ClangTypeTraitExpression : SyntaxExtra<ClangTypeTraitExpression> {
     using SyntaxExtra<ClangTypeTraitExpression>::SyntaxExtra;
+    ClangTypeTraitExpression() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    ClangTypeTraitExpression(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ClangTypeTraitExpression>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    ClangTypeTraitExpression(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ClangTypeTraitExpression>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     ClangTypeTraitArgumentList clang_type_trait_argument_list() const;
     SyntaxElement identifier() const;
@@ -3477,6 +4117,20 @@ struct ClangTypeTraitExpression : SyntaxExtra<ClangTypeTraitExpression> {
 /* the clang-type-transformation node */
 struct ClangTypeTransformation : SyntaxExtra<ClangTypeTransformation> {
     using SyntaxExtra<ClangTypeTransformation>::SyntaxExtra;
+    ClangTypeTransformation() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    ClangTypeTransformation(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ClangTypeTransformation>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    ClangTypeTransformation(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ClangTypeTransformation>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     TypeId type_id() const;
 };
@@ -3484,6 +4138,20 @@ struct ClangTypeTransformation : SyntaxExtra<ClangTypeTransformation> {
 /* the class-head node */
 struct ClassHead : SyntaxExtra<ClassHead> {
     using SyntaxExtra<ClassHead>::SyntaxExtra;
+    ClassHead() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    ClassHead(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ClassHead>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    ClassHead(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ClassHead>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     AttributeSpecifierSeq attribute_specifier_seq() const;
     BaseClause base_clause() const;
@@ -3494,6 +4162,19 @@ struct ClassHead : SyntaxExtra<ClassHead> {
 /* class-head-name: one of class_head_name, simple_template_id */
 struct ClassHeadName : SyntaxExtra<ClassHeadName> {
     using SyntaxExtra<ClassHeadName>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    ClassHeadName(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ClassHeadName>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    ClassHeadName(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ClassHeadName>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     ClassHeadName() = default;
     template <class V>
         requires syntax_converts<V, ClassHeadName>
@@ -3512,6 +4193,19 @@ struct ClassHeadName : SyntaxExtra<ClassHeadName> {
 /* class-or-decltype: one of class_or_decltype, decltype_specifier, simple_template_id */
 struct ClassOrDecltype : SyntaxExtra<ClassOrDecltype> {
     using SyntaxExtra<ClassOrDecltype>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    ClassOrDecltype(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ClassOrDecltype>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    ClassOrDecltype(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ClassOrDecltype>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     ClassOrDecltype() = default;
     template <class V>
         requires syntax_converts<V, ClassOrDecltype>
@@ -3530,6 +4224,20 @@ struct ClassOrDecltype : SyntaxExtra<ClassOrDecltype> {
 /* the class-specifier node */
 struct ClassSpecifier : SyntaxExtra<ClassSpecifier> {
     using SyntaxExtra<ClassSpecifier>::SyntaxExtra;
+    ClassSpecifier() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    ClassSpecifier(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ClassSpecifier>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    ClassSpecifier(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ClassSpecifier>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     ClassHead class_head() const;
     MemberSpecification member_specification() const;
@@ -3538,12 +4246,39 @@ struct ClassSpecifier : SyntaxExtra<ClassSpecifier> {
 /* the expression node */
 struct CommaExpression : SyntaxExtra<CommaExpression> {
     using SyntaxExtra<CommaExpression>::SyntaxExtra;
+    CommaExpression() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    CommaExpression(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<CommaExpression>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    CommaExpression(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<CommaExpression>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
 };
 
 /* compare-expression: one of additive_expression, await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conversion_function_id, delete_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, lambda_expression, literal_operator_id, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, requires_expression, shift_expression, simple_template_id, template_id, unary_expression, unqualified_id */
 struct CompareExpression : SyntaxExtra<CompareExpression> {
     using SyntaxExtra<CompareExpression>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    CompareExpression(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<CompareExpression>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    CompareExpression(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<CompareExpression>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     CompareExpression() = default;
     template <class V>
         requires syntax_converts<V, CompareExpression>
@@ -3562,6 +4297,20 @@ struct CompareExpression : SyntaxExtra<CompareExpression> {
 /* the compound-requirement node */
 struct CompoundRequirement : SyntaxExtra<CompoundRequirement> {
     using SyntaxExtra<CompoundRequirement>::SyntaxExtra;
+    CompoundRequirement() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    CompoundRequirement(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<CompoundRequirement>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    CompoundRequirement(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<CompoundRequirement>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     Expression expression() const;
     ReturnTypeRequirement return_type_requirement() const;
@@ -3571,6 +4320,20 @@ struct CompoundRequirement : SyntaxExtra<CompoundRequirement> {
 /* the compound-statement node */
 struct CompoundStatement : SyntaxExtra<CompoundStatement> {
     using SyntaxExtra<CompoundStatement>::SyntaxExtra;
+    CompoundStatement() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    CompoundStatement(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<CompoundStatement>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    CompoundStatement(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<CompoundStatement>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     StatementSeq statement_seq() const;
 };
@@ -3578,6 +4341,20 @@ struct CompoundStatement : SyntaxExtra<CompoundStatement> {
 /* the concept-definition node */
 struct ConceptDefinition : SyntaxExtra<ConceptDefinition> {
     using SyntaxExtra<ConceptDefinition>::SyntaxExtra;
+    ConceptDefinition() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    ConceptDefinition(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ConceptDefinition>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    ConceptDefinition(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ConceptDefinition>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     ConstraintExpression constraint_expression() const;
 };
@@ -3585,6 +4362,19 @@ struct ConceptDefinition : SyntaxExtra<ConceptDefinition> {
 /* condition: one of additive_expression, and_expression, assignment_expression, await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, condition, conditional_expression, conversion_function_id, delete_expression, equality_expression, exclusive_or_expression, expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, inclusive_or_expression, lambda_expression, literal_operator_id, logical_and_expression, logical_or_expression, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, throw_expression, unary_expression, unqualified_id, yield_expression */
 struct Condition : SyntaxExtra<Condition> {
     using SyntaxExtra<Condition>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    Condition(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<Condition>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    Condition(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<Condition>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     Condition() = default;
     template <class V>
         requires syntax_converts<V, Condition>
@@ -3603,6 +4393,20 @@ struct Condition : SyntaxExtra<Condition> {
 /* the condition node */
 struct ConditionDeclaration : SyntaxExtra<ConditionDeclaration> {
     using SyntaxExtra<ConditionDeclaration>::SyntaxExtra;
+    ConditionDeclaration() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    ConditionDeclaration(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ConditionDeclaration>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    ConditionDeclaration(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ConditionDeclaration>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     AttributeSpecifierSeq attribute_specifier_seq() const;
     BraceOrEqualInitializer brace_or_equal_initializer() const;
@@ -3614,6 +4418,19 @@ struct ConditionDeclaration : SyntaxExtra<ConditionDeclaration> {
 /* conditional-expression: one of additive_expression, and_expression, await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conditional_expression, conversion_function_id, delete_expression, equality_expression, exclusive_or_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, inclusive_or_expression, lambda_expression, literal_operator_id, logical_and_expression, logical_or_expression, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, unary_expression, unqualified_id */
 struct ConditionalExpression : SyntaxExtra<ConditionalExpression> {
     using SyntaxExtra<ConditionalExpression>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    ConditionalExpression(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ConditionalExpression>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    ConditionalExpression(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ConditionalExpression>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     ConditionalExpression() = default;
     template <class V>
         requires syntax_converts<V, ConditionalExpression>
@@ -3632,12 +4449,39 @@ struct ConditionalExpression : SyntaxExtra<ConditionalExpression> {
 /* the conditional-expression node */
 struct ConditionalOperation : SyntaxExtra<ConditionalOperation> {
     using SyntaxExtra<ConditionalOperation>::SyntaxExtra;
+    ConditionalOperation() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    ConditionalOperation(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ConditionalOperation>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    ConditionalOperation(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ConditionalOperation>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
 };
 
 /* constant-expression: one of additive_expression, and_expression, await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conditional_expression, conversion_function_id, delete_expression, equality_expression, exclusive_or_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, inclusive_or_expression, lambda_expression, literal_operator_id, logical_and_expression, logical_or_expression, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, unary_expression, unqualified_id */
 struct ConstantExpression : SyntaxExtra<ConstantExpression> {
     using SyntaxExtra<ConstantExpression>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    ConstantExpression(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ConstantExpression>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    ConstantExpression(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ConstantExpression>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     ConstantExpression() = default;
     template <class V>
         requires syntax_converts<V, ConstantExpression>
@@ -3656,18 +4500,59 @@ struct ConstantExpression : SyntaxExtra<ConstantExpression> {
 /* the constraint-logical-and-expression node */
 struct ConstraintConjunction : SyntaxExtra<ConstraintConjunction> {
     using SyntaxExtra<ConstraintConjunction>::SyntaxExtra;
+    ConstraintConjunction() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    ConstraintConjunction(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ConstraintConjunction>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    ConstraintConjunction(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ConstraintConjunction>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
 };
 
 /* the constraint-logical-or-expression node */
 struct ConstraintDisjunction : SyntaxExtra<ConstraintDisjunction> {
     using SyntaxExtra<ConstraintDisjunction>::SyntaxExtra;
+    ConstraintDisjunction() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    ConstraintDisjunction(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ConstraintDisjunction>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    ConstraintDisjunction(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ConstraintDisjunction>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
 };
 
 /* constraint-expression: one of additive_expression, and_expression, await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conversion_function_id, delete_expression, equality_expression, exclusive_or_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, inclusive_or_expression, lambda_expression, literal_operator_id, logical_and_expression, logical_or_expression, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, unary_expression, unqualified_id */
 struct ConstraintExpression : SyntaxExtra<ConstraintExpression> {
     using SyntaxExtra<ConstraintExpression>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    ConstraintExpression(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ConstraintExpression>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    ConstraintExpression(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ConstraintExpression>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     ConstraintExpression() = default;
     template <class V>
         requires syntax_converts<V, ConstraintExpression>
@@ -3686,6 +4571,19 @@ struct ConstraintExpression : SyntaxExtra<ConstraintExpression> {
 /* constraint-logical-and-expression: one of clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, constraint_logical_and_expression, conversion_function_id, fold_expression, gnu_offsetof_expression, lambda_expression, literal_operator_id, operator_function_id, primary_expression, qualified_id, requires_expression, simple_template_id, template_id, unqualified_id */
 struct ConstraintLogicalAndExpression : SyntaxExtra<ConstraintLogicalAndExpression> {
     using SyntaxExtra<ConstraintLogicalAndExpression>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    ConstraintLogicalAndExpression(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ConstraintLogicalAndExpression>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    ConstraintLogicalAndExpression(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ConstraintLogicalAndExpression>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     ConstraintLogicalAndExpression() = default;
     template <class V>
         requires syntax_converts<V, ConstraintLogicalAndExpression>
@@ -3704,6 +4602,19 @@ struct ConstraintLogicalAndExpression : SyntaxExtra<ConstraintLogicalAndExpressi
 /* constraint-logical-or-expression: one of clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, constraint_logical_and_expression, constraint_logical_or_expression, conversion_function_id, fold_expression, gnu_offsetof_expression, lambda_expression, literal_operator_id, operator_function_id, primary_expression, qualified_id, requires_expression, simple_template_id, template_id, unqualified_id */
 struct ConstraintLogicalOrExpression : SyntaxExtra<ConstraintLogicalOrExpression> {
     using SyntaxExtra<ConstraintLogicalOrExpression>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    ConstraintLogicalOrExpression(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ConstraintLogicalOrExpression>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    ConstraintLogicalOrExpression(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ConstraintLogicalOrExpression>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     ConstraintLogicalOrExpression() = default;
     template <class V>
         requires syntax_converts<V, ConstraintLogicalOrExpression>
@@ -3722,6 +4633,19 @@ struct ConstraintLogicalOrExpression : SyntaxExtra<ConstraintLogicalOrExpression
 /* conversion-declarator: one of conversion_declarator, ptr_operator */
 struct ConversionDeclarator : SyntaxExtra<ConversionDeclarator> {
     using SyntaxExtra<ConversionDeclarator>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    ConversionDeclarator(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ConversionDeclarator>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    ConversionDeclarator(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ConversionDeclarator>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     ConversionDeclarator() = default;
     template <class V>
         requires syntax_converts<V, ConversionDeclarator>
@@ -3740,6 +4664,20 @@ struct ConversionDeclarator : SyntaxExtra<ConversionDeclarator> {
 /* the conversion-function-id node */
 struct ConversionFunctionId : SyntaxExtra<ConversionFunctionId> {
     using SyntaxExtra<ConversionFunctionId>::SyntaxExtra;
+    ConversionFunctionId() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    ConversionFunctionId(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ConversionFunctionId>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    ConversionFunctionId(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ConversionFunctionId>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     ConversionTypeId conversion_type_id() const;
 };
@@ -3747,6 +4685,19 @@ struct ConversionFunctionId : SyntaxExtra<ConversionFunctionId> {
 /* conversion-type-id: one of conversion_type_id, type_specifier_seq */
 struct ConversionTypeId : SyntaxExtra<ConversionTypeId> {
     using SyntaxExtra<ConversionTypeId>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    ConversionTypeId(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ConversionTypeId>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    ConversionTypeId(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ConversionTypeId>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     ConversionTypeId() = default;
     template <class V>
         requires syntax_converts<V, ConversionTypeId>
@@ -3765,6 +4716,20 @@ struct ConversionTypeId : SyntaxExtra<ConversionTypeId> {
 /* the conversion-type-id node */
 struct ConversionTypeWithDeclarator : SyntaxExtra<ConversionTypeWithDeclarator> {
     using SyntaxExtra<ConversionTypeWithDeclarator>::SyntaxExtra;
+    ConversionTypeWithDeclarator() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    ConversionTypeWithDeclarator(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ConversionTypeWithDeclarator>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    ConversionTypeWithDeclarator(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ConversionTypeWithDeclarator>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     ConversionDeclarator conversion_declarator() const;
     TypeSpecifierSeq type_specifier_seq() const;
@@ -3773,6 +4738,20 @@ struct ConversionTypeWithDeclarator : SyntaxExtra<ConversionTypeWithDeclarator> 
 /* the coroutine-return-statement node */
 struct CoroutineReturnStatement : SyntaxExtra<CoroutineReturnStatement> {
     using SyntaxExtra<CoroutineReturnStatement>::SyntaxExtra;
+    CoroutineReturnStatement() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    CoroutineReturnStatement(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<CoroutineReturnStatement>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    CoroutineReturnStatement(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<CoroutineReturnStatement>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     ExprOrBracedInitList expr_or_braced_init_list() const;
     SyntaxElement identifier() const;
@@ -3781,6 +4760,20 @@ struct CoroutineReturnStatement : SyntaxExtra<CoroutineReturnStatement> {
 /* the ctor-initializer node */
 struct CtorInitializer : SyntaxExtra<CtorInitializer> {
     using SyntaxExtra<CtorInitializer>::SyntaxExtra;
+    CtorInitializer() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    CtorInitializer(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<CtorInitializer>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    CtorInitializer(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<CtorInitializer>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     MemInitializerList mem_initializer_list() const;
 };
@@ -3788,6 +4781,20 @@ struct CtorInitializer : SyntaxExtra<CtorInitializer> {
 /* the cv-qualifier-seq node */
 struct CvQualifierSeq : SyntaxExtra<CvQualifierSeq> {
     using SyntaxExtra<CvQualifierSeq>::SyntaxExtra;
+    CvQualifierSeq() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    CvQualifierSeq(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<CvQualifierSeq>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    CvQualifierSeq(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<CvQualifierSeq>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     CvQualifierSeq cv_qualifier_seq() const;
 };
@@ -3795,6 +4802,19 @@ struct CvQualifierSeq : SyntaxExtra<CvQualifierSeq> {
 /* decl-specifier: one of clang_atomic_type_specifier, clang_bit_int_type_specifier, clang_type_transformation, class_specifier, decltype_specifier, elaborated_enum_specifier, elaborated_type_specifier, enum_specifier, explicit_specifier, gnu_attribute_specifier, placeholder_type_specifier, simple_template_id, simple_type_specifier, typename_specifier */
 struct DeclSpecifier : SyntaxExtra<DeclSpecifier> {
     using SyntaxExtra<DeclSpecifier>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    DeclSpecifier(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<DeclSpecifier>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    DeclSpecifier(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<DeclSpecifier>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     DeclSpecifier() = default;
     template <class V>
         requires syntax_converts<V, DeclSpecifier>
@@ -3813,6 +4833,20 @@ struct DeclSpecifier : SyntaxExtra<DeclSpecifier> {
 /* the decl-specifier-seq node */
 struct DeclSpecifierSeq : SyntaxExtra<DeclSpecifierSeq> {
     using SyntaxExtra<DeclSpecifierSeq>::SyntaxExtra;
+    DeclSpecifierSeq() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    DeclSpecifierSeq(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<DeclSpecifierSeq>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    DeclSpecifierSeq(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<DeclSpecifierSeq>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     DeclSpecifierSeq decl_specifier_seq() const;
     SyntaxElement identifier() const;
@@ -3821,6 +4855,19 @@ struct DeclSpecifierSeq : SyntaxExtra<DeclSpecifierSeq> {
 /* declaration: one of alias_declaration, asm_declaration, attribute_declaration, deduction_guide, empty_declaration, explicit_instantiation, explicit_specialization, export_declaration, function_definition, gnu_extension_declaration, linkage_specification, module_import_declaration, named_namespace_definition, namespace_alias_definition, nested_namespace_definition, opaque_enum_declaration, simple_declaration, static_assert_declaration, template_declaration, unnamed_namespace_definition, using_declaration, using_directive, using_enum_declaration */
 struct Declaration : SyntaxExtra<Declaration> {
     using SyntaxExtra<Declaration>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    Declaration(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<Declaration>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    Declaration(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<Declaration>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     Declaration() = default;
     template <class V>
         requires syntax_converts<V, Declaration>
@@ -3839,6 +4886,19 @@ struct Declaration : SyntaxExtra<Declaration> {
 /* declaration-seq: one of alias_declaration, asm_declaration, attribute_declaration, declaration_seq, deduction_guide, empty_declaration, explicit_instantiation, explicit_specialization, export_declaration, function_definition, gnu_extension_declaration, linkage_specification, module_import_declaration, named_namespace_definition, namespace_alias_definition, nested_namespace_definition, opaque_enum_declaration, simple_declaration, static_assert_declaration, template_declaration, unnamed_namespace_definition, using_declaration, using_directive, using_enum_declaration */
 struct DeclarationSeq : SyntaxExtra<DeclarationSeq> {
     using SyntaxExtra<DeclarationSeq>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    DeclarationSeq(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<DeclarationSeq>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    DeclarationSeq(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<DeclarationSeq>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     DeclarationSeq() = default;
     template <class V>
         requires syntax_converts<V, DeclarationSeq>
@@ -3858,6 +4918,19 @@ struct DeclarationSeq : SyntaxExtra<DeclarationSeq> {
 /* declaration-statement: one of alias_declaration, asm_declaration, gnu_extension_declaration, namespace_alias_definition, opaque_enum_declaration, simple_declaration, static_assert_declaration, using_declaration, using_directive, using_enum_declaration */
 struct DeclarationStatement : SyntaxExtra<DeclarationStatement> {
     using SyntaxExtra<DeclarationStatement>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    DeclarationStatement(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<DeclarationStatement>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    DeclarationStatement(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<DeclarationStatement>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     DeclarationStatement() = default;
     template <class V>
         requires syntax_converts<V, DeclarationStatement>
@@ -3876,12 +4949,39 @@ struct DeclarationStatement : SyntaxExtra<DeclarationStatement> {
 /* the declaration-seq node */
 struct Declarations : SyntaxExtra<Declarations> {
     using SyntaxExtra<Declarations>::SyntaxExtra;
+    Declarations() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    Declarations(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<Declarations>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    Declarations(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<Declarations>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
 };
 
 /* declarator: one of conversion_function_id, declarator, declarator_id, literal_operator_id, noptr_declarator, operator_function_id, ptr_declarator, qualified_id, simple_template_id, template_id, unqualified_id */
 struct Declarator : SyntaxExtra<Declarator> {
     using SyntaxExtra<Declarator>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    Declarator(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<Declarator>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    Declarator(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<Declarator>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     Declarator() = default;
     template <class V>
         requires syntax_converts<V, Declarator>
@@ -3900,6 +5000,19 @@ struct Declarator : SyntaxExtra<Declarator> {
 /* declarator-id: one of conversion_function_id, declarator_id, literal_operator_id, operator_function_id, qualified_id, simple_template_id, template_id, unqualified_id */
 struct DeclaratorId : SyntaxExtra<DeclaratorId> {
     using SyntaxExtra<DeclaratorId>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    DeclaratorId(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<DeclaratorId>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    DeclaratorId(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<DeclaratorId>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     DeclaratorId() = default;
     template <class V>
         requires syntax_converts<V, DeclaratorId>
@@ -3918,6 +5031,20 @@ struct DeclaratorId : SyntaxExtra<DeclaratorId> {
 /* the init-declarator node */
 struct DeclaratorWithInitializer : SyntaxExtra<DeclaratorWithInitializer> {
     using SyntaxExtra<DeclaratorWithInitializer>::SyntaxExtra;
+    DeclaratorWithInitializer() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    DeclaratorWithInitializer(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<DeclaratorWithInitializer>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    DeclaratorWithInitializer(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<DeclaratorWithInitializer>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     Declarator declarator() const;
     Initializer initializer() const;
@@ -3928,6 +5055,20 @@ struct DeclaratorWithInitializer : SyntaxExtra<DeclaratorWithInitializer> {
 /* the decltype-specifier node */
 struct DecltypeSpecifier : SyntaxExtra<DecltypeSpecifier> {
     using SyntaxExtra<DecltypeSpecifier>::SyntaxExtra;
+    DecltypeSpecifier() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    DecltypeSpecifier(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<DecltypeSpecifier>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    DecltypeSpecifier(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<DecltypeSpecifier>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     Expression expression() const;
     SyntaxElement identifier() const;
@@ -3936,6 +5077,20 @@ struct DecltypeSpecifier : SyntaxExtra<DecltypeSpecifier> {
 /* the deduction-guide node */
 struct DeductionGuide : SyntaxExtra<DeductionGuide> {
     using SyntaxExtra<DeductionGuide>::SyntaxExtra;
+    DeductionGuide() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    DeductionGuide(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<DeductionGuide>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    DeductionGuide(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<DeductionGuide>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     AttributeSpecifierSeq attribute_specifier_seq() const;
     ExplicitSpecifier explicit_specifier() const;
@@ -3947,6 +5102,20 @@ struct DeductionGuide : SyntaxExtra<DeductionGuide> {
 /* the lambda-capture node */
 struct DefaultAndCaptures : SyntaxExtra<DefaultAndCaptures> {
     using SyntaxExtra<DefaultAndCaptures>::SyntaxExtra;
+    DefaultAndCaptures() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    DefaultAndCaptures(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<DefaultAndCaptures>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    DefaultAndCaptures(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<DefaultAndCaptures>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     CaptureList capture_list() const;
     SyntaxElement identifier() const;
@@ -3955,6 +5124,20 @@ struct DefaultAndCaptures : SyntaxExtra<DefaultAndCaptures> {
 /* the defining-type-id node */
 struct DefiningTypeId : SyntaxExtra<DefiningTypeId> {
     using SyntaxExtra<DefiningTypeId>::SyntaxExtra;
+    DefiningTypeId() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    DefiningTypeId(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<DefiningTypeId>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    DefiningTypeId(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<DefiningTypeId>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     AbstractDeclarator abstract_declarator() const;
     DefiningTypeSpecifierSeq defining_type_specifier_seq() const;
@@ -3963,6 +5146,19 @@ struct DefiningTypeId : SyntaxExtra<DefiningTypeId> {
 /* defining-type-specifier: one of clang_atomic_type_specifier, clang_bit_int_type_specifier, clang_type_transformation, class_specifier, decltype_specifier, elaborated_enum_specifier, elaborated_type_specifier, enum_specifier, placeholder_type_specifier, simple_template_id, simple_type_specifier, typename_specifier */
 struct DefiningTypeSpecifier : SyntaxExtra<DefiningTypeSpecifier> {
     using SyntaxExtra<DefiningTypeSpecifier>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    DefiningTypeSpecifier(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<DefiningTypeSpecifier>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    DefiningTypeSpecifier(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<DefiningTypeSpecifier>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     DefiningTypeSpecifier() = default;
     template <class V>
         requires syntax_converts<V, DefiningTypeSpecifier>
@@ -3981,6 +5177,20 @@ struct DefiningTypeSpecifier : SyntaxExtra<DefiningTypeSpecifier> {
 /* the defining-type-specifier-seq node */
 struct DefiningTypeSpecifierSeq : SyntaxExtra<DefiningTypeSpecifierSeq> {
     using SyntaxExtra<DefiningTypeSpecifierSeq>::SyntaxExtra;
+    DefiningTypeSpecifierSeq() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    DefiningTypeSpecifierSeq(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<DefiningTypeSpecifierSeq>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    DefiningTypeSpecifierSeq(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<DefiningTypeSpecifierSeq>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     AttributeSpecifierSeq attribute_specifier_seq() const;
     DefiningTypeSpecifier defining_type_specifier() const;
@@ -3991,6 +5201,20 @@ struct DefiningTypeSpecifierSeq : SyntaxExtra<DefiningTypeSpecifierSeq> {
 /* the delete-expression node */
 struct DeleteExpression : SyntaxExtra<DeleteExpression> {
     using SyntaxExtra<DeleteExpression>::SyntaxExtra;
+    DeleteExpression() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    DeleteExpression(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<DeleteExpression>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    DeleteExpression(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<DeleteExpression>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     CastExpression cast_expression() const;
     SyntaxElement identifier() const;
@@ -3999,6 +5223,20 @@ struct DeleteExpression : SyntaxExtra<DeleteExpression> {
 /* the designated-initializer-clause node */
 struct DesignatedInitializerClause : SyntaxExtra<DesignatedInitializerClause> {
     using SyntaxExtra<DesignatedInitializerClause>::SyntaxExtra;
+    DesignatedInitializerClause() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    DesignatedInitializerClause(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<DesignatedInitializerClause>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    DesignatedInitializerClause(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<DesignatedInitializerClause>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     BraceOrEqualInitializer brace_or_equal_initializer() const;
     Designator designator() const;
@@ -4007,6 +5245,19 @@ struct DesignatedInitializerClause : SyntaxExtra<DesignatedInitializerClause> {
 /* designated-initializer-list: one of designated_initializer_clause, designated_initializer_list */
 struct DesignatedInitializerList : SyntaxExtra<DesignatedInitializerList> {
     using SyntaxExtra<DesignatedInitializerList>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    DesignatedInitializerList(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<DesignatedInitializerList>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    DesignatedInitializerList(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<DesignatedInitializerList>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     DesignatedInitializerList() = default;
     template <class V>
         requires syntax_converts<V, DesignatedInitializerList>
@@ -4026,18 +5277,60 @@ struct DesignatedInitializerList : SyntaxExtra<DesignatedInitializerList> {
 /* the designated-initializer-list node */
 struct DesignatedInitializers : SyntaxExtra<DesignatedInitializers> {
     using SyntaxExtra<DesignatedInitializers>::SyntaxExtra;
+    DesignatedInitializers() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    DesignatedInitializers(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<DesignatedInitializers>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    DesignatedInitializers(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<DesignatedInitializers>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
 };
 
 /* the designator node */
 struct Designator : SyntaxExtra<Designator> {
     using SyntaxExtra<Designator>::SyntaxExtra;
+    Designator() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    Designator(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<Designator>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    Designator(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<Designator>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
 };
 
 /* the unqualified-id node */
 struct DestructorTypeId : SyntaxExtra<DestructorTypeId> {
     using SyntaxExtra<DestructorTypeId>::SyntaxExtra;
+    DestructorTypeId() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    DestructorTypeId(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<DestructorTypeId>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    DestructorTypeId(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<DestructorTypeId>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     DecltypeSpecifier decltype_specifier() const;
     SimpleTemplateId type_name() const;
@@ -4047,12 +5340,40 @@ struct DestructorTypeId : SyntaxExtra<DestructorTypeId> {
 /* the dynamic-exception-specification node */
 struct DynamicExceptionSpecification : SyntaxExtra<DynamicExceptionSpecification> {
     using SyntaxExtra<DynamicExceptionSpecification>::SyntaxExtra;
+    DynamicExceptionSpecification() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    DynamicExceptionSpecification(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<DynamicExceptionSpecification>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    DynamicExceptionSpecification(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<DynamicExceptionSpecification>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
 };
 
 /* the elaborated-type-specifier node */
 struct ElaboratedClassSpecifier : SyntaxExtra<ElaboratedClassSpecifier> {
     using SyntaxExtra<ElaboratedClassSpecifier>::SyntaxExtra;
+    ElaboratedClassSpecifier() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    ElaboratedClassSpecifier(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ElaboratedClassSpecifier>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    ElaboratedClassSpecifier(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ElaboratedClassSpecifier>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     AttributeSpecifierSeq attribute_specifier_seq() const;
     NestedNameSpecifier nested_name_specifier() const;
@@ -4063,6 +5384,20 @@ struct ElaboratedClassSpecifier : SyntaxExtra<ElaboratedClassSpecifier> {
 /* the elaborated-enum-specifier node */
 struct ElaboratedEnumSpecifier : SyntaxExtra<ElaboratedEnumSpecifier> {
     using SyntaxExtra<ElaboratedEnumSpecifier>::SyntaxExtra;
+    ElaboratedEnumSpecifier() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    ElaboratedEnumSpecifier(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ElaboratedEnumSpecifier>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    ElaboratedEnumSpecifier(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ElaboratedEnumSpecifier>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     NestedNameSpecifier nested_name_specifier() const;
     SyntaxElement identifier() const;
@@ -4071,6 +5406,19 @@ struct ElaboratedEnumSpecifier : SyntaxExtra<ElaboratedEnumSpecifier> {
 /* elaborated-type-specifier: one of elaborated_enum_specifier, elaborated_type_specifier */
 struct ElaboratedTypeSpecifier : SyntaxExtra<ElaboratedTypeSpecifier> {
     using SyntaxExtra<ElaboratedTypeSpecifier>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    ElaboratedTypeSpecifier(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ElaboratedTypeSpecifier>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    ElaboratedTypeSpecifier(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ElaboratedTypeSpecifier>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     ElaboratedTypeSpecifier() = default;
     template <class V>
         requires syntax_converts<V, ElaboratedTypeSpecifier>
@@ -4089,12 +5437,40 @@ struct ElaboratedTypeSpecifier : SyntaxExtra<ElaboratedTypeSpecifier> {
 /* the empty-declaration node */
 struct EmptyDeclaration : SyntaxExtra<EmptyDeclaration> {
     using SyntaxExtra<EmptyDeclaration>::SyntaxExtra;
+    EmptyDeclaration() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    EmptyDeclaration(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<EmptyDeclaration>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    EmptyDeclaration(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<EmptyDeclaration>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
 };
 
 /* the enclosing-namespace-specifier node */
 struct EnclosingNamespaceSpecifier : SyntaxExtra<EnclosingNamespaceSpecifier> {
     using SyntaxExtra<EnclosingNamespaceSpecifier>::SyntaxExtra;
+    EnclosingNamespaceSpecifier() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    EnclosingNamespaceSpecifier(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<EnclosingNamespaceSpecifier>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    EnclosingNamespaceSpecifier(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<EnclosingNamespaceSpecifier>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     EnclosingNamespaceSpecifier enclosing_namespace_specifier() const;
 };
@@ -4102,6 +5478,20 @@ struct EnclosingNamespaceSpecifier : SyntaxExtra<EnclosingNamespaceSpecifier> {
 /* the enum-base node */
 struct EnumBase : SyntaxExtra<EnumBase> {
     using SyntaxExtra<EnumBase>::SyntaxExtra;
+    EnumBase() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    EnumBase(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<EnumBase>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    EnumBase(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<EnumBase>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     TypeSpecifierSeq type_specifier_seq() const;
 };
@@ -4109,6 +5499,20 @@ struct EnumBase : SyntaxExtra<EnumBase> {
 /* the enum-head node */
 struct EnumHead : SyntaxExtra<EnumHead> {
     using SyntaxExtra<EnumHead>::SyntaxExtra;
+    EnumHead() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    EnumHead(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<EnumHead>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    EnumHead(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<EnumHead>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     AttributeSpecifierSeq attribute_specifier_seq() const;
     EnumBase enum_base() const;
@@ -4120,6 +5524,20 @@ struct EnumHead : SyntaxExtra<EnumHead> {
 /* the enum-head-name node */
 struct EnumHeadName : SyntaxExtra<EnumHeadName> {
     using SyntaxExtra<EnumHeadName>::SyntaxExtra;
+    EnumHeadName() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    EnumHeadName(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<EnumHeadName>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    EnumHeadName(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<EnumHeadName>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     NestedNameSpecifier nested_name_specifier() const;
     SyntaxElement identifier() const;
@@ -4128,12 +5546,40 @@ struct EnumHeadName : SyntaxExtra<EnumHeadName> {
 /* the enum-key node */
 struct EnumKey : SyntaxExtra<EnumKey> {
     using SyntaxExtra<EnumKey>::SyntaxExtra;
+    EnumKey() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    EnumKey(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<EnumKey>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    EnumKey(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<EnumKey>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
 };
 
 /* the enum-specifier node */
 struct EnumSpecifier : SyntaxExtra<EnumSpecifier> {
     using SyntaxExtra<EnumSpecifier>::SyntaxExtra;
+    EnumSpecifier() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    EnumSpecifier(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<EnumSpecifier>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    EnumSpecifier(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<EnumSpecifier>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     EnumHead enum_head() const;
     EnumeratorList enumerator_list() const;
@@ -4143,6 +5589,20 @@ struct EnumSpecifier : SyntaxExtra<EnumSpecifier> {
 /* the enumerator node */
 struct Enumerator : SyntaxExtra<Enumerator> {
     using SyntaxExtra<Enumerator>::SyntaxExtra;
+    Enumerator() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    Enumerator(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<Enumerator>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    Enumerator(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<Enumerator>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     AttributeSpecifierSeq attribute_specifier_seq() const;
     SyntaxElement identifier() const;
@@ -4151,6 +5611,19 @@ struct Enumerator : SyntaxExtra<Enumerator> {
 /* enumerator-definition: one of enumerator, enumerator_definition */
 struct EnumeratorDefinition : SyntaxExtra<EnumeratorDefinition> {
     using SyntaxExtra<EnumeratorDefinition>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    EnumeratorDefinition(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<EnumeratorDefinition>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    EnumeratorDefinition(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<EnumeratorDefinition>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     EnumeratorDefinition() = default;
     template <class V>
         requires syntax_converts<V, EnumeratorDefinition>
@@ -4169,6 +5642,19 @@ struct EnumeratorDefinition : SyntaxExtra<EnumeratorDefinition> {
 /* enumerator-list: one of enumerator, enumerator_definition, enumerator_list */
 struct EnumeratorList : SyntaxExtra<EnumeratorList> {
     using SyntaxExtra<EnumeratorList>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    EnumeratorList(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<EnumeratorList>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    EnumeratorList(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<EnumeratorList>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     EnumeratorList() = default;
     template <class V>
         requires syntax_converts<V, EnumeratorList>
@@ -4188,6 +5674,20 @@ struct EnumeratorList : SyntaxExtra<EnumeratorList> {
 /* the enumerator-definition node */
 struct EnumeratorWithValue : SyntaxExtra<EnumeratorWithValue> {
     using SyntaxExtra<EnumeratorWithValue>::SyntaxExtra;
+    EnumeratorWithValue() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    EnumeratorWithValue(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<EnumeratorWithValue>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    EnumeratorWithValue(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<EnumeratorWithValue>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     ConstantExpression constant_expression() const;
     Enumerator enumerator() const;
@@ -4196,12 +5696,40 @@ struct EnumeratorWithValue : SyntaxExtra<EnumeratorWithValue> {
 /* the enumerator-list node */
 struct Enumerators : SyntaxExtra<Enumerators> {
     using SyntaxExtra<Enumerators>::SyntaxExtra;
+    Enumerators() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    Enumerators(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<Enumerators>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    Enumerators(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<Enumerators>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
 };
 
 /* the brace-or-equal-initializer node */
 struct EqualInitializer : SyntaxExtra<EqualInitializer> {
     using SyntaxExtra<EqualInitializer>::SyntaxExtra;
+    EqualInitializer() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    EqualInitializer(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<EqualInitializer>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    EqualInitializer(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<EqualInitializer>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     InitializerClause initializer_clause() const;
     SyntaxElement identifier() const;
@@ -4210,6 +5738,19 @@ struct EqualInitializer : SyntaxExtra<EqualInitializer> {
 /* equality-expression: one of additive_expression, await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conversion_function_id, delete_expression, equality_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, lambda_expression, literal_operator_id, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, unary_expression, unqualified_id */
 struct EqualityExpression : SyntaxExtra<EqualityExpression> {
     using SyntaxExtra<EqualityExpression>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    EqualityExpression(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<EqualityExpression>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    EqualityExpression(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<EqualityExpression>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     EqualityExpression() = default;
     template <class V>
         requires syntax_converts<V, EqualityExpression>
@@ -4228,18 +5769,60 @@ struct EqualityExpression : SyntaxExtra<EqualityExpression> {
 /* the equality-expression node */
 struct EqualityOperation : SyntaxExtra<EqualityOperation> {
     using SyntaxExtra<EqualityOperation>::SyntaxExtra;
+    EqualityOperation() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    EqualityOperation(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<EqualityOperation>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    EqualityOperation(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<EqualityOperation>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
 };
 
 /* the (erroneous) node */
 struct Erroneous : SyntaxExtra<Erroneous> {
     using SyntaxExtra<Erroneous>::SyntaxExtra;
+    Erroneous() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    Erroneous(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<Erroneous>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    Erroneous(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<Erroneous>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
 };
 
 /* the exception-declaration node */
 struct ExceptionDeclaration : SyntaxExtra<ExceptionDeclaration> {
     using SyntaxExtra<ExceptionDeclaration>::SyntaxExtra;
+    ExceptionDeclaration() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    ExceptionDeclaration(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ExceptionDeclaration>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    ExceptionDeclaration(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ExceptionDeclaration>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     AbstractDeclarator abstract_declarator() const;
     AttributeSpecifierSeq attribute_specifier_seq() const;
@@ -4251,6 +5834,19 @@ struct ExceptionDeclaration : SyntaxExtra<ExceptionDeclaration> {
 /* exclusive-or-expression: one of additive_expression, and_expression, await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conversion_function_id, delete_expression, equality_expression, exclusive_or_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, lambda_expression, literal_operator_id, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, unary_expression, unqualified_id */
 struct ExclusiveOrExpression : SyntaxExtra<ExclusiveOrExpression> {
     using SyntaxExtra<ExclusiveOrExpression>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    ExclusiveOrExpression(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ExclusiveOrExpression>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    ExclusiveOrExpression(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ExclusiveOrExpression>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     ExclusiveOrExpression() = default;
     template <class V>
         requires syntax_converts<V, ExclusiveOrExpression>
@@ -4269,12 +5865,40 @@ struct ExclusiveOrExpression : SyntaxExtra<ExclusiveOrExpression> {
 /* the exclusive-or-expression node */
 struct ExclusiveOrOperation : SyntaxExtra<ExclusiveOrOperation> {
     using SyntaxExtra<ExclusiveOrOperation>::SyntaxExtra;
+    ExclusiveOrOperation() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    ExclusiveOrOperation(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ExclusiveOrOperation>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    ExclusiveOrOperation(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ExclusiveOrOperation>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
 };
 
 /* the explicit-instantiation node */
 struct ExplicitInstantiation : SyntaxExtra<ExplicitInstantiation> {
     using SyntaxExtra<ExplicitInstantiation>::SyntaxExtra;
+    ExplicitInstantiation() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    ExplicitInstantiation(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ExplicitInstantiation>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    ExplicitInstantiation(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ExplicitInstantiation>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     Declaration declaration() const;
 };
@@ -4282,6 +5906,20 @@ struct ExplicitInstantiation : SyntaxExtra<ExplicitInstantiation> {
 /* the explicit-specialization node */
 struct ExplicitSpecialization : SyntaxExtra<ExplicitSpecialization> {
     using SyntaxExtra<ExplicitSpecialization>::SyntaxExtra;
+    ExplicitSpecialization() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    ExplicitSpecialization(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ExplicitSpecialization>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    ExplicitSpecialization(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ExplicitSpecialization>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     Declaration declaration() const;
 };
@@ -4289,6 +5927,20 @@ struct ExplicitSpecialization : SyntaxExtra<ExplicitSpecialization> {
 /* the explicit-specifier node */
 struct ExplicitSpecifier : SyntaxExtra<ExplicitSpecifier> {
     using SyntaxExtra<ExplicitSpecifier>::SyntaxExtra;
+    ExplicitSpecifier() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    ExplicitSpecifier(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ExplicitSpecifier>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    ExplicitSpecifier(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ExplicitSpecifier>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     ConstantExpression constant_expression() const;
     SyntaxElement identifier() const;
@@ -4297,12 +5949,39 @@ struct ExplicitSpecifier : SyntaxExtra<ExplicitSpecifier> {
 /* the export-declaration node */
 struct ExportDeclaration : SyntaxExtra<ExportDeclaration> {
     using SyntaxExtra<ExportDeclaration>::SyntaxExtra;
+    ExportDeclaration() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    ExportDeclaration(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ExportDeclaration>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    ExportDeclaration(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ExportDeclaration>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
 };
 
 /* expr-or-braced-init-list: one of additive_expression, and_expression, assignment_expression, await_expression, braced_init_list, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conditional_expression, conversion_function_id, delete_expression, equality_expression, exclusive_or_expression, expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, inclusive_or_expression, lambda_expression, literal_operator_id, logical_and_expression, logical_or_expression, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, throw_expression, unary_expression, unqualified_id, yield_expression */
 struct ExprOrBracedInitList : SyntaxExtra<ExprOrBracedInitList> {
     using SyntaxExtra<ExprOrBracedInitList>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    ExprOrBracedInitList(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ExprOrBracedInitList>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    ExprOrBracedInitList(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ExprOrBracedInitList>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     ExprOrBracedInitList() = default;
     template <class V>
         requires syntax_converts<V, ExprOrBracedInitList>
@@ -4321,6 +6000,19 @@ struct ExprOrBracedInitList : SyntaxExtra<ExprOrBracedInitList> {
 /* expression: one of additive_expression, and_expression, assignment_expression, await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conditional_expression, conversion_function_id, delete_expression, equality_expression, exclusive_or_expression, expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, inclusive_or_expression, lambda_expression, literal_operator_id, logical_and_expression, logical_or_expression, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, throw_expression, unary_expression, unqualified_id, yield_expression */
 struct Expression : SyntaxExtra<Expression> {
     using SyntaxExtra<Expression>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    Expression(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<Expression>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    Expression(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<Expression>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     Expression() = default;
     template <class V>
         requires syntax_converts<V, Expression>
@@ -4339,6 +6031,19 @@ struct Expression : SyntaxExtra<Expression> {
 /* expression-list: one of additive_expression, and_expression, assignment_expression, await_expression, braced_init_list, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conditional_expression, conversion_function_id, delete_expression, equality_expression, exclusive_or_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, inclusive_or_expression, initializer_list, lambda_expression, literal_operator_id, logical_and_expression, logical_or_expression, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, throw_expression, unary_expression, unqualified_id, yield_expression */
 struct ExpressionList : SyntaxExtra<ExpressionList> {
     using SyntaxExtra<ExpressionList>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    ExpressionList(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ExpressionList>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    ExpressionList(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ExpressionList>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     ExpressionList() = default;
     template <class V>
         requires syntax_converts<V, ExpressionList>
@@ -4357,6 +6062,20 @@ struct ExpressionList : SyntaxExtra<ExpressionList> {
 /* the expression-statement node */
 struct ExpressionStatement : SyntaxExtra<ExpressionStatement> {
     using SyntaxExtra<ExpressionStatement>::SyntaxExtra;
+    ExpressionStatement() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    ExpressionStatement(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ExpressionStatement>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    ExpressionStatement(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ExpressionStatement>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     Expression expression() const;
     SyntaxElement identifier() const;
@@ -4365,12 +6084,40 @@ struct ExpressionStatement : SyntaxExtra<ExpressionStatement> {
 /* the fold-expression node */
 struct FoldExpression : SyntaxExtra<FoldExpression> {
     using SyntaxExtra<FoldExpression>::SyntaxExtra;
+    FoldExpression() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    FoldExpression(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<FoldExpression>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    FoldExpression(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<FoldExpression>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
 };
 
 /* the for-range-declaration node */
 struct ForRangeDeclaration : SyntaxExtra<ForRangeDeclaration> {
     using SyntaxExtra<ForRangeDeclaration>::SyntaxExtra;
+    ForRangeDeclaration() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    ForRangeDeclaration(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ForRangeDeclaration>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    ForRangeDeclaration(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ForRangeDeclaration>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     AttributeSpecifierSeq attribute_specifier_seq() const;
     DeclSpecifierSeq decl_specifier_seq() const;
@@ -4382,6 +6129,19 @@ struct ForRangeDeclaration : SyntaxExtra<ForRangeDeclaration> {
 /* for-range-initializer: one of additive_expression, and_expression, assignment_expression, await_expression, braced_init_list, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conditional_expression, conversion_function_id, delete_expression, equality_expression, exclusive_or_expression, expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, inclusive_or_expression, lambda_expression, literal_operator_id, logical_and_expression, logical_or_expression, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, throw_expression, unary_expression, unqualified_id, yield_expression */
 struct ForRangeInitializer : SyntaxExtra<ForRangeInitializer> {
     using SyntaxExtra<ForRangeInitializer>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    ForRangeInitializer(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ForRangeInitializer>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    ForRangeInitializer(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ForRangeInitializer>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     ForRangeInitializer() = default;
     template <class V>
         requires syntax_converts<V, ForRangeInitializer>
@@ -4400,6 +6160,19 @@ struct ForRangeInitializer : SyntaxExtra<ForRangeInitializer> {
 /* function-body: one of function_body, function_try_block */
 struct FunctionBody : SyntaxExtra<FunctionBody> {
     using SyntaxExtra<FunctionBody>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    FunctionBody(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<FunctionBody>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    FunctionBody(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<FunctionBody>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     FunctionBody() = default;
     template <class V>
         requires syntax_converts<V, FunctionBody>
@@ -4418,6 +6191,20 @@ struct FunctionBody : SyntaxExtra<FunctionBody> {
 /* the function-definition node */
 struct FunctionDefinition : SyntaxExtra<FunctionDefinition> {
     using SyntaxExtra<FunctionDefinition>::SyntaxExtra;
+    FunctionDefinition() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    FunctionDefinition(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<FunctionDefinition>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    FunctionDefinition(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<FunctionDefinition>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     AttributeSpecifierSeq attribute_specifier_seq() const;
     DeclSpecifierSeq decl_specifier_seq() const;
@@ -4430,6 +6217,20 @@ struct FunctionDefinition : SyntaxExtra<FunctionDefinition> {
 /* the function-try-block node */
 struct FunctionTryBlock : SyntaxExtra<FunctionTryBlock> {
     using SyntaxExtra<FunctionTryBlock>::SyntaxExtra;
+    FunctionTryBlock() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    FunctionTryBlock(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<FunctionTryBlock>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    FunctionTryBlock(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<FunctionTryBlock>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     CompoundStatement compound_statement() const;
     CtorInitializer ctor_initializer() const;
@@ -4439,6 +6240,20 @@ struct FunctionTryBlock : SyntaxExtra<FunctionTryBlock> {
 /* the global-module-fragment node */
 struct GlobalModuleFragment : SyntaxExtra<GlobalModuleFragment> {
     using SyntaxExtra<GlobalModuleFragment>::SyntaxExtra;
+    GlobalModuleFragment() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    GlobalModuleFragment(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<GlobalModuleFragment>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    GlobalModuleFragment(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<GlobalModuleFragment>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     DeclarationSeq declaration_seq() const;
 };
@@ -4446,6 +6261,20 @@ struct GlobalModuleFragment : SyntaxExtra<GlobalModuleFragment> {
 /* the gnu-asm-label node */
 struct GnuAsmLabel : SyntaxExtra<GnuAsmLabel> {
     using SyntaxExtra<GnuAsmLabel>::SyntaxExtra;
+    GnuAsmLabel() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    GnuAsmLabel(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<GnuAsmLabel>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    GnuAsmLabel(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<GnuAsmLabel>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     SyntaxElement string_literal() const;
 };
@@ -4453,6 +6282,20 @@ struct GnuAsmLabel : SyntaxExtra<GnuAsmLabel> {
 /* the gnu-attribute node */
 struct GnuAttribute : SyntaxExtra<GnuAttribute> {
     using SyntaxExtra<GnuAttribute>::SyntaxExtra;
+    GnuAttribute() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    GnuAttribute(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<GnuAttribute>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    GnuAttribute(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<GnuAttribute>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     GnuAttributeArguments gnu_attribute_arguments() const;
 };
@@ -4460,6 +6303,19 @@ struct GnuAttribute : SyntaxExtra<GnuAttribute> {
 /* gnu-attribute-arguments: one of additive_expression, and_expression, assignment_expression, await_expression, braced_init_list, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conditional_expression, conversion_function_id, delete_expression, equality_expression, exclusive_or_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, inclusive_or_expression, initializer_list, lambda_expression, literal_operator_id, logical_and_expression, logical_or_expression, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, throw_expression, unary_expression, unqualified_id, yield_expression */
 struct GnuAttributeArguments : SyntaxExtra<GnuAttributeArguments> {
     using SyntaxExtra<GnuAttributeArguments>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    GnuAttributeArguments(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<GnuAttributeArguments>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    GnuAttributeArguments(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<GnuAttributeArguments>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     GnuAttributeArguments() = default;
     template <class V>
         requires syntax_converts<V, GnuAttributeArguments>
@@ -4478,6 +6334,19 @@ struct GnuAttributeArguments : SyntaxExtra<GnuAttributeArguments> {
 /* gnu-attribute-list: one of gnu_attribute, gnu_attribute_list */
 struct GnuAttributeList : SyntaxExtra<GnuAttributeList> {
     using SyntaxExtra<GnuAttributeList>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    GnuAttributeList(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<GnuAttributeList>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    GnuAttributeList(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<GnuAttributeList>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     GnuAttributeList() = default;
     template <class V>
         requires syntax_converts<V, GnuAttributeList>
@@ -4496,6 +6365,20 @@ struct GnuAttributeList : SyntaxExtra<GnuAttributeList> {
 /* the gnu-attribute-specifier node */
 struct GnuAttributeSpecifier : SyntaxExtra<GnuAttributeSpecifier> {
     using SyntaxExtra<GnuAttributeSpecifier>::SyntaxExtra;
+    GnuAttributeSpecifier() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    GnuAttributeSpecifier(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<GnuAttributeSpecifier>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    GnuAttributeSpecifier(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<GnuAttributeSpecifier>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     GnuAttributeList gnu_attribute_list() const;
     SyntaxElement identifier() const;
@@ -4504,12 +6387,40 @@ struct GnuAttributeSpecifier : SyntaxExtra<GnuAttributeSpecifier> {
 /* the gnu-attribute-list node */
 struct GnuAttributes : SyntaxExtra<GnuAttributes> {
     using SyntaxExtra<GnuAttributes>::SyntaxExtra;
+    GnuAttributes() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    GnuAttributes(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<GnuAttributes>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    GnuAttributes(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<GnuAttributes>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
 };
 
 /* the gnu-compound-literal node */
 struct GnuCompoundLiteral : SyntaxExtra<GnuCompoundLiteral> {
     using SyntaxExtra<GnuCompoundLiteral>::SyntaxExtra;
+    GnuCompoundLiteral() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    GnuCompoundLiteral(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<GnuCompoundLiteral>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    GnuCompoundLiteral(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<GnuCompoundLiteral>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     BracedInitList braced_init_list() const;
     TypeId type_id() const;
@@ -4518,6 +6429,20 @@ struct GnuCompoundLiteral : SyntaxExtra<GnuCompoundLiteral> {
 /* the gnu-computed-goto node */
 struct GnuComputedGoto : SyntaxExtra<GnuComputedGoto> {
     using SyntaxExtra<GnuComputedGoto>::SyntaxExtra;
+    GnuComputedGoto() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    GnuComputedGoto(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<GnuComputedGoto>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    GnuComputedGoto(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<GnuComputedGoto>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     Expression expression() const;
     SyntaxElement identifier() const;
@@ -4526,12 +6451,39 @@ struct GnuComputedGoto : SyntaxExtra<GnuComputedGoto> {
 /* the gnu-declarator node */
 struct GnuDeclarator : SyntaxExtra<GnuDeclarator> {
     using SyntaxExtra<GnuDeclarator>::SyntaxExtra;
+    GnuDeclarator() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    GnuDeclarator(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<GnuDeclarator>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    GnuDeclarator(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<GnuDeclarator>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
 };
 
 /* gnu-designation: one of designator, gnu_designation */
 struct GnuDesignation : SyntaxExtra<GnuDesignation> {
     using SyntaxExtra<GnuDesignation>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    GnuDesignation(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<GnuDesignation>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    GnuDesignation(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<GnuDesignation>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     GnuDesignation() = default;
     template <class V>
         requires syntax_converts<V, GnuDesignation>
@@ -4550,18 +6502,60 @@ struct GnuDesignation : SyntaxExtra<GnuDesignation> {
 /* the gnu-extension-declaration node */
 struct GnuExtensionDeclaration : SyntaxExtra<GnuExtensionDeclaration> {
     using SyntaxExtra<GnuExtensionDeclaration>::SyntaxExtra;
+    GnuExtensionDeclaration() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    GnuExtensionDeclaration(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<GnuExtensionDeclaration>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    GnuExtensionDeclaration(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<GnuExtensionDeclaration>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
 };
 
 /* the gnu-extension-expression node */
 struct GnuExtensionExpression : SyntaxExtra<GnuExtensionExpression> {
     using SyntaxExtra<GnuExtensionExpression>::SyntaxExtra;
+    GnuExtensionExpression() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    GnuExtensionExpression(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<GnuExtensionExpression>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    GnuExtensionExpression(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<GnuExtensionExpression>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
 };
 
 /* the gnu-initializer-list node */
 struct GnuInitializerClauses : SyntaxExtra<GnuInitializerClauses> {
     using SyntaxExtra<GnuInitializerClauses>::SyntaxExtra;
+    GnuInitializerClauses() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    GnuInitializerClauses(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<GnuInitializerClauses>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    GnuInitializerClauses(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<GnuInitializerClauses>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     GnuDesignation gnu_designation() const;
 };
@@ -4569,6 +6563,19 @@ struct GnuInitializerClauses : SyntaxExtra<GnuInitializerClauses> {
 /* gnu-initializer-list: one of additive_expression, and_expression, assignment_expression, await_expression, braced_init_list, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conditional_expression, conversion_function_id, delete_expression, equality_expression, exclusive_or_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_initializer_list, gnu_label_address, gnu_offsetof_expression, inclusive_or_expression, lambda_expression, literal_operator_id, logical_and_expression, logical_or_expression, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, throw_expression, unary_expression, unqualified_id, yield_expression */
 struct GnuInitializerList : SyntaxExtra<GnuInitializerList> {
     using SyntaxExtra<GnuInitializerList>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    GnuInitializerList(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<GnuInitializerList>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    GnuInitializerList(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<GnuInitializerList>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     GnuInitializerList() = default;
     template <class V>
         requires syntax_converts<V, GnuInitializerList>
@@ -4587,6 +6594,20 @@ struct GnuInitializerList : SyntaxExtra<GnuInitializerList> {
 /* the gnu-label-address node */
 struct GnuLabelAddress : SyntaxExtra<GnuLabelAddress> {
     using SyntaxExtra<GnuLabelAddress>::SyntaxExtra;
+    GnuLabelAddress() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    GnuLabelAddress(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<GnuLabelAddress>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    GnuLabelAddress(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<GnuLabelAddress>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     SyntaxElement identifier() const;
 };
@@ -4594,6 +6615,20 @@ struct GnuLabelAddress : SyntaxExtra<GnuLabelAddress> {
 /* the gnu-offsetof-expression node */
 struct GnuOffsetofExpression : SyntaxExtra<GnuOffsetofExpression> {
     using SyntaxExtra<GnuOffsetofExpression>::SyntaxExtra;
+    GnuOffsetofExpression() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    GnuOffsetofExpression(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<GnuOffsetofExpression>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    GnuOffsetofExpression(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<GnuOffsetofExpression>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     Expression expression() const;
     TypeId type_id() const;
@@ -4603,6 +6638,20 @@ struct GnuOffsetofExpression : SyntaxExtra<GnuOffsetofExpression> {
 /* the gnu-designation node */
 struct GnuOldDesignation : SyntaxExtra<GnuOldDesignation> {
     using SyntaxExtra<GnuOldDesignation>::SyntaxExtra;
+    GnuOldDesignation() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    GnuOldDesignation(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<GnuOldDesignation>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    GnuOldDesignation(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<GnuOldDesignation>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     Designator gnu_designator_list() const;
     SyntaxElement identifier() const;
@@ -4611,6 +6660,20 @@ struct GnuOldDesignation : SyntaxExtra<GnuOldDesignation> {
 /* the handler node */
 struct Handler : SyntaxExtra<Handler> {
     using SyntaxExtra<Handler>::SyntaxExtra;
+    Handler() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    Handler(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<Handler>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    Handler(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<Handler>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     CompoundStatement compound_statement() const;
     ExceptionDeclaration exception_declaration() const;
@@ -4619,6 +6682,19 @@ struct Handler : SyntaxExtra<Handler> {
 /* handler-seq: one of handler, handler_seq */
 struct HandlerSeq : SyntaxExtra<HandlerSeq> {
     using SyntaxExtra<HandlerSeq>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    HandlerSeq(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<HandlerSeq>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    HandlerSeq(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<HandlerSeq>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     HandlerSeq() = default;
     template <class V>
         requires syntax_converts<V, HandlerSeq>
@@ -4637,12 +6713,39 @@ struct HandlerSeq : SyntaxExtra<HandlerSeq> {
 /* the handler-seq node */
 struct Handlers : SyntaxExtra<Handlers> {
     using SyntaxExtra<Handlers>::SyntaxExtra;
+    Handlers() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    Handlers(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<Handlers>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    Handlers(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<Handlers>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
 };
 
 /* id-expression: one of conversion_function_id, literal_operator_id, operator_function_id, qualified_id, simple_template_id, template_id, unqualified_id */
 struct IdExpression : SyntaxExtra<IdExpression> {
     using SyntaxExtra<IdExpression>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    IdExpression(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<IdExpression>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    IdExpression(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<IdExpression>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     IdExpression() = default;
     template <class V>
         requires syntax_converts<V, IdExpression>
@@ -4661,6 +6764,20 @@ struct IdExpression : SyntaxExtra<IdExpression> {
 /* the identifier-list node */
 struct IdentifierList : SyntaxExtra<IdentifierList> {
     using SyntaxExtra<IdentifierList>::SyntaxExtra;
+    IdentifierList() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    IdentifierList(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<IdentifierList>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    IdentifierList(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<IdentifierList>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     IdentifierList identifier_list() const;
 };
@@ -4668,6 +6785,19 @@ struct IdentifierList : SyntaxExtra<IdentifierList> {
 /* inclusive-or-expression: one of additive_expression, and_expression, await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conversion_function_id, delete_expression, equality_expression, exclusive_or_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, inclusive_or_expression, lambda_expression, literal_operator_id, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, unary_expression, unqualified_id */
 struct InclusiveOrExpression : SyntaxExtra<InclusiveOrExpression> {
     using SyntaxExtra<InclusiveOrExpression>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    InclusiveOrExpression(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<InclusiveOrExpression>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    InclusiveOrExpression(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<InclusiveOrExpression>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     InclusiveOrExpression() = default;
     template <class V>
         requires syntax_converts<V, InclusiveOrExpression>
@@ -4686,12 +6816,40 @@ struct InclusiveOrExpression : SyntaxExtra<InclusiveOrExpression> {
 /* the inclusive-or-expression node */
 struct InclusiveOrOperation : SyntaxExtra<InclusiveOrOperation> {
     using SyntaxExtra<InclusiveOrOperation>::SyntaxExtra;
+    InclusiveOrOperation() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    InclusiveOrOperation(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<InclusiveOrOperation>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    InclusiveOrOperation(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<InclusiveOrOperation>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
 };
 
 /* the init-capture node */
 struct InitCapture : SyntaxExtra<InitCapture> {
     using SyntaxExtra<InitCapture>::SyntaxExtra;
+    InitCapture() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    InitCapture(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<InitCapture>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    InitCapture(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<InitCapture>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     Initializer initializer() const;
     SyntaxElement identifier() const;
@@ -4700,6 +6858,19 @@ struct InitCapture : SyntaxExtra<InitCapture> {
 /* init-declarator: one of conversion_function_id, declarator, declarator_id, init_declarator, literal_operator_id, noptr_declarator, operator_function_id, ptr_declarator, qualified_id, simple_template_id, template_id, unqualified_id */
 struct InitDeclarator : SyntaxExtra<InitDeclarator> {
     using SyntaxExtra<InitDeclarator>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    InitDeclarator(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<InitDeclarator>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    InitDeclarator(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<InitDeclarator>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     InitDeclarator() = default;
     template <class V>
         requires syntax_converts<V, InitDeclarator>
@@ -4718,6 +6889,19 @@ struct InitDeclarator : SyntaxExtra<InitDeclarator> {
 /* init-declarator-list: one of conversion_function_id, declarator, declarator_id, init_declarator, init_declarator_list, literal_operator_id, noptr_declarator, operator_function_id, ptr_declarator, qualified_id, simple_template_id, template_id, unqualified_id */
 struct InitDeclaratorList : SyntaxExtra<InitDeclaratorList> {
     using SyntaxExtra<InitDeclaratorList>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    InitDeclaratorList(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<InitDeclaratorList>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    InitDeclaratorList(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<InitDeclaratorList>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     InitDeclaratorList() = default;
     template <class V>
         requires syntax_converts<V, InitDeclaratorList>
@@ -4737,12 +6921,39 @@ struct InitDeclaratorList : SyntaxExtra<InitDeclaratorList> {
 /* the init-declarator-list node */
 struct InitDeclarators : SyntaxExtra<InitDeclarators> {
     using SyntaxExtra<InitDeclarators>::SyntaxExtra;
+    InitDeclarators() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    InitDeclarators(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<InitDeclarators>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    InitDeclarators(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<InitDeclarators>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
 };
 
 /* init-statement: one of expression_statement, simple_declaration */
 struct InitStatement : SyntaxExtra<InitStatement> {
     using SyntaxExtra<InitStatement>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    InitStatement(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<InitStatement>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    InitStatement(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<InitStatement>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     InitStatement() = default;
     template <class V>
         requires syntax_converts<V, InitStatement>
@@ -4761,6 +6972,19 @@ struct InitStatement : SyntaxExtra<InitStatement> {
 /* initializer: one of brace_or_equal_initializer, braced_init_list, initializer */
 struct Initializer : SyntaxExtra<Initializer> {
     using SyntaxExtra<Initializer>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    Initializer(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<Initializer>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    Initializer(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<Initializer>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     Initializer() = default;
     template <class V>
         requires syntax_converts<V, Initializer>
@@ -4779,6 +7003,19 @@ struct Initializer : SyntaxExtra<Initializer> {
 /* initializer-clause: one of additive_expression, and_expression, assignment_expression, await_expression, braced_init_list, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conditional_expression, conversion_function_id, delete_expression, equality_expression, exclusive_or_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, inclusive_or_expression, lambda_expression, literal_operator_id, logical_and_expression, logical_or_expression, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, throw_expression, unary_expression, unqualified_id, yield_expression */
 struct InitializerClause : SyntaxExtra<InitializerClause> {
     using SyntaxExtra<InitializerClause>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    InitializerClause(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<InitializerClause>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    InitializerClause(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<InitializerClause>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     InitializerClause() = default;
     template <class V>
         requires syntax_converts<V, InitializerClause>
@@ -4797,12 +7034,39 @@ struct InitializerClause : SyntaxExtra<InitializerClause> {
 /* the initializer-list node */
 struct InitializerClauses : SyntaxExtra<InitializerClauses> {
     using SyntaxExtra<InitializerClauses>::SyntaxExtra;
+    InitializerClauses() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    InitializerClauses(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<InitializerClauses>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    InitializerClauses(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<InitializerClauses>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
 };
 
 /* initializer-list: one of additive_expression, and_expression, assignment_expression, await_expression, braced_init_list, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conditional_expression, conversion_function_id, delete_expression, equality_expression, exclusive_or_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, inclusive_or_expression, initializer_list, lambda_expression, literal_operator_id, logical_and_expression, logical_or_expression, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, throw_expression, unary_expression, unqualified_id, yield_expression */
 struct InitializerList : SyntaxExtra<InitializerList> {
     using SyntaxExtra<InitializerList>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    InitializerList(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<InitializerList>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    InitializerList(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<InitializerList>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     InitializerList() = default;
     template <class V>
         requires syntax_converts<V, InitializerList>
@@ -4821,6 +7085,20 @@ struct InitializerList : SyntaxExtra<InitializerList> {
 /* the iteration-statement node */
 struct IterationStatement : SyntaxExtra<IterationStatement> {
     using SyntaxExtra<IterationStatement>::SyntaxExtra;
+    IterationStatement() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    IterationStatement(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<IterationStatement>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    IterationStatement(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<IterationStatement>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     ForRangeDeclaration for_range_declaration() const;
 };
@@ -4828,6 +7106,20 @@ struct IterationStatement : SyntaxExtra<IterationStatement> {
 /* the jump-statement node */
 struct Jump : SyntaxExtra<Jump> {
     using SyntaxExtra<Jump>::SyntaxExtra;
+    Jump() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    Jump(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<Jump>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    Jump(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<Jump>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     ExprOrBracedInitList expr_or_braced_init_list() const;
     SyntaxElement identifier() const;
@@ -4836,6 +7128,19 @@ struct Jump : SyntaxExtra<Jump> {
 /* jump-statement: one of coroutine_return_statement, gnu_computed_goto, jump_statement */
 struct JumpStatement : SyntaxExtra<JumpStatement> {
     using SyntaxExtra<JumpStatement>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    JumpStatement(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<JumpStatement>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    JumpStatement(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<JumpStatement>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     JumpStatement() = default;
     template <class V>
         requires syntax_converts<V, JumpStatement>
@@ -4854,6 +7159,20 @@ struct JumpStatement : SyntaxExtra<JumpStatement> {
 /* the labeled-statement node */
 struct LabeledStatement : SyntaxExtra<LabeledStatement> {
     using SyntaxExtra<LabeledStatement>::SyntaxExtra;
+    LabeledStatement() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    LabeledStatement(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<LabeledStatement>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    LabeledStatement(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<LabeledStatement>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     AttributeSpecifierSeq attribute_specifier_seq() const;
     ConstantExpression constant_expression() const;
@@ -4864,6 +7183,19 @@ struct LabeledStatement : SyntaxExtra<LabeledStatement> {
 /* lambda-capture: one of capture_list, init_capture, lambda_capture, simple_capture */
 struct LambdaCapture : SyntaxExtra<LambdaCapture> {
     using SyntaxExtra<LambdaCapture>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    LambdaCapture(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<LambdaCapture>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    LambdaCapture(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<LambdaCapture>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     LambdaCapture() = default;
     template <class V>
         requires syntax_converts<V, LambdaCapture>
@@ -4882,6 +7214,20 @@ struct LambdaCapture : SyntaxExtra<LambdaCapture> {
 /* the lambda-declarator node */
 struct LambdaDeclarator : SyntaxExtra<LambdaDeclarator> {
     using SyntaxExtra<LambdaDeclarator>::SyntaxExtra;
+    LambdaDeclarator() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    LambdaDeclarator(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<LambdaDeclarator>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    LambdaDeclarator(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<LambdaDeclarator>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     AttributeSpecifierSeq attribute_specifier_seq() const;
     DeclSpecifierSeq decl_specifier_seq() const;
@@ -4894,6 +7240,20 @@ struct LambdaDeclarator : SyntaxExtra<LambdaDeclarator> {
 /* the lambda-expression node */
 struct LambdaExpression : SyntaxExtra<LambdaExpression> {
     using SyntaxExtra<LambdaExpression>::SyntaxExtra;
+    LambdaExpression() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    LambdaExpression(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<LambdaExpression>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    LambdaExpression(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<LambdaExpression>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     CompoundStatement compound_statement() const;
     LambdaDeclarator lambda_declarator() const;
@@ -4905,6 +7265,20 @@ struct LambdaExpression : SyntaxExtra<LambdaExpression> {
 /* the lambda-introducer node */
 struct LambdaIntroducer : SyntaxExtra<LambdaIntroducer> {
     using SyntaxExtra<LambdaIntroducer>::SyntaxExtra;
+    LambdaIntroducer() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    LambdaIntroducer(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<LambdaIntroducer>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    LambdaIntroducer(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<LambdaIntroducer>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     LambdaCapture lambda_capture() const;
     SyntaxElement identifier() const;
@@ -4913,6 +7287,20 @@ struct LambdaIntroducer : SyntaxExtra<LambdaIntroducer> {
 /* the linkage-specification node */
 struct LinkageSpecification : SyntaxExtra<LinkageSpecification> {
     using SyntaxExtra<LinkageSpecification>::SyntaxExtra;
+    LinkageSpecification() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    LinkageSpecification(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<LinkageSpecification>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    LinkageSpecification(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<LinkageSpecification>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     SyntaxElement string_literal() const;
 };
@@ -4920,6 +7308,20 @@ struct LinkageSpecification : SyntaxExtra<LinkageSpecification> {
 /* the literal-operator-id node */
 struct LiteralOperatorId : SyntaxExtra<LiteralOperatorId> {
     using SyntaxExtra<LiteralOperatorId>::SyntaxExtra;
+    LiteralOperatorId() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    LiteralOperatorId(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<LiteralOperatorId>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    LiteralOperatorId(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<LiteralOperatorId>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     SyntaxElement identifier() const;
     SyntaxElement string_literal() const;
@@ -4928,6 +7330,19 @@ struct LiteralOperatorId : SyntaxExtra<LiteralOperatorId> {
 /* logical-and-expression: one of additive_expression, and_expression, await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conversion_function_id, delete_expression, equality_expression, exclusive_or_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, inclusive_or_expression, lambda_expression, literal_operator_id, logical_and_expression, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, unary_expression, unqualified_id */
 struct LogicalAndExpression : SyntaxExtra<LogicalAndExpression> {
     using SyntaxExtra<LogicalAndExpression>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    LogicalAndExpression(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<LogicalAndExpression>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    LogicalAndExpression(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<LogicalAndExpression>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     LogicalAndExpression() = default;
     template <class V>
         requires syntax_converts<V, LogicalAndExpression>
@@ -4946,12 +7361,39 @@ struct LogicalAndExpression : SyntaxExtra<LogicalAndExpression> {
 /* the logical-and-expression node */
 struct LogicalAndOperation : SyntaxExtra<LogicalAndOperation> {
     using SyntaxExtra<LogicalAndOperation>::SyntaxExtra;
+    LogicalAndOperation() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    LogicalAndOperation(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<LogicalAndOperation>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    LogicalAndOperation(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<LogicalAndOperation>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
 };
 
 /* logical-or-expression: one of additive_expression, and_expression, await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conversion_function_id, delete_expression, equality_expression, exclusive_or_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, inclusive_or_expression, lambda_expression, literal_operator_id, logical_and_expression, logical_or_expression, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, unary_expression, unqualified_id */
 struct LogicalOrExpression : SyntaxExtra<LogicalOrExpression> {
     using SyntaxExtra<LogicalOrExpression>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    LogicalOrExpression(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<LogicalOrExpression>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    LogicalOrExpression(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<LogicalOrExpression>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     LogicalOrExpression() = default;
     template <class V>
         requires syntax_converts<V, LogicalOrExpression>
@@ -4970,18 +7412,59 @@ struct LogicalOrExpression : SyntaxExtra<LogicalOrExpression> {
 /* the logical-or-expression node */
 struct LogicalOrOperation : SyntaxExtra<LogicalOrOperation> {
     using SyntaxExtra<LogicalOrOperation>::SyntaxExtra;
+    LogicalOrOperation() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    LogicalOrOperation(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<LogicalOrOperation>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    LogicalOrOperation(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<LogicalOrOperation>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
 };
 
 /* the mem-initializer node */
 struct MemInitializer : SyntaxExtra<MemInitializer> {
     using SyntaxExtra<MemInitializer>::SyntaxExtra;
+    MemInitializer() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    MemInitializer(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<MemInitializer>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    MemInitializer(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<MemInitializer>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
 };
 
 /* mem-initializer-id: one of class_or_decltype, decltype_specifier, simple_template_id */
 struct MemInitializerId : SyntaxExtra<MemInitializerId> {
     using SyntaxExtra<MemInitializerId>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    MemInitializerId(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<MemInitializerId>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    MemInitializerId(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<MemInitializerId>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     MemInitializerId() = default;
     template <class V>
         requires syntax_converts<V, MemInitializerId>
@@ -5000,6 +7483,19 @@ struct MemInitializerId : SyntaxExtra<MemInitializerId> {
 /* mem-initializer-list: one of mem_initializer, mem_initializer_list */
 struct MemInitializerList : SyntaxExtra<MemInitializerList> {
     using SyntaxExtra<MemInitializerList>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    MemInitializerList(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<MemInitializerList>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    MemInitializerList(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<MemInitializerList>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     MemInitializerList() = default;
     template <class V>
         requires syntax_converts<V, MemInitializerList>
@@ -5018,12 +7514,39 @@ struct MemInitializerList : SyntaxExtra<MemInitializerList> {
 /* the mem-initializer-list node */
 struct MemInitializers : SyntaxExtra<MemInitializers> {
     using SyntaxExtra<MemInitializers>::SyntaxExtra;
+    MemInitializers() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    MemInitializers(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<MemInitializers>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    MemInitializers(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<MemInitializers>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
 };
 
 /* member-declaration: one of alias_declaration, deduction_guide, empty_declaration, explicit_specialization, function_definition, gnu_extension_declaration, member_declaration, opaque_enum_declaration, static_assert_declaration, template_declaration, using_declaration, using_enum_declaration */
 struct MemberDeclaration : SyntaxExtra<MemberDeclaration> {
     using SyntaxExtra<MemberDeclaration>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    MemberDeclaration(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<MemberDeclaration>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    MemberDeclaration(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<MemberDeclaration>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     MemberDeclaration() = default;
     template <class V>
         requires syntax_converts<V, MemberDeclaration>
@@ -5042,6 +7565,19 @@ struct MemberDeclaration : SyntaxExtra<MemberDeclaration> {
 /* member-declarator: one of conversion_function_id, declarator, declarator_id, literal_operator_id, member_declarator, noptr_declarator, operator_function_id, ptr_declarator, qualified_id, simple_template_id, template_id, unqualified_id */
 struct MemberDeclarator : SyntaxExtra<MemberDeclarator> {
     using SyntaxExtra<MemberDeclarator>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    MemberDeclarator(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<MemberDeclarator>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    MemberDeclarator(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<MemberDeclarator>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     MemberDeclarator() = default;
     template <class V>
         requires syntax_converts<V, MemberDeclarator>
@@ -5060,6 +7596,19 @@ struct MemberDeclarator : SyntaxExtra<MemberDeclarator> {
 /* member-declarator-list: one of conversion_function_id, declarator, declarator_id, literal_operator_id, member_declarator, member_declarator_list, noptr_declarator, operator_function_id, ptr_declarator, qualified_id, simple_template_id, template_id, unqualified_id */
 struct MemberDeclaratorList : SyntaxExtra<MemberDeclaratorList> {
     using SyntaxExtra<MemberDeclaratorList>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    MemberDeclaratorList(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<MemberDeclaratorList>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    MemberDeclaratorList(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<MemberDeclaratorList>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     MemberDeclaratorList() = default;
     template <class V>
         requires syntax_converts<V, MemberDeclaratorList>
@@ -5079,6 +7628,20 @@ struct MemberDeclaratorList : SyntaxExtra<MemberDeclaratorList> {
 /* the member-declarator node */
 struct MemberDeclaratorWithParts : SyntaxExtra<MemberDeclaratorWithParts> {
     using SyntaxExtra<MemberDeclaratorWithParts>::SyntaxExtra;
+    MemberDeclaratorWithParts() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    MemberDeclaratorWithParts(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<MemberDeclaratorWithParts>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    MemberDeclaratorWithParts(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<MemberDeclaratorWithParts>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     AttributeSpecifierSeq attribute_specifier_seq() const;
     BraceOrEqualInitializer brace_or_equal_initializer() const;
@@ -5090,12 +7653,40 @@ struct MemberDeclaratorWithParts : SyntaxExtra<MemberDeclaratorWithParts> {
 /* the member-declarator-list node */
 struct MemberDeclarators : SyntaxExtra<MemberDeclarators> {
     using SyntaxExtra<MemberDeclarators>::SyntaxExtra;
+    MemberDeclarators() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    MemberDeclarators(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<MemberDeclarators>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    MemberDeclarators(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<MemberDeclarators>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
 };
 
 /* the member-declaration node */
 struct MemberSimpleDeclaration : SyntaxExtra<MemberSimpleDeclaration> {
     using SyntaxExtra<MemberSimpleDeclaration>::SyntaxExtra;
+    MemberSimpleDeclaration() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    MemberSimpleDeclaration(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<MemberSimpleDeclaration>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    MemberSimpleDeclaration(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<MemberSimpleDeclaration>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     AttributeSpecifierSeq attribute_specifier_seq() const;
     DeclSpecifierSeq decl_specifier_seq() const;
@@ -5107,6 +7698,20 @@ struct MemberSimpleDeclaration : SyntaxExtra<MemberSimpleDeclaration> {
 /* the member-specification node */
 struct MemberSpecification : SyntaxExtra<MemberSpecification> {
     using SyntaxExtra<MemberSpecification>::SyntaxExtra;
+    MemberSpecification() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    MemberSpecification(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<MemberSpecification>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    MemberSpecification(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<MemberSpecification>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     MemberDeclaration member_declaration() const;
     MemberSpecification member_specification() const;
@@ -5115,6 +7720,20 @@ struct MemberSpecification : SyntaxExtra<MemberSpecification> {
 /* the module-declaration node */
 struct ModuleDeclaration : SyntaxExtra<ModuleDeclaration> {
     using SyntaxExtra<ModuleDeclaration>::SyntaxExtra;
+    ModuleDeclaration() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    ModuleDeclaration(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ModuleDeclaration>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    ModuleDeclaration(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ModuleDeclaration>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     AttributeSpecifierSeq attribute_specifier_seq() const;
     ModuleName module_name() const;
@@ -5125,6 +7744,20 @@ struct ModuleDeclaration : SyntaxExtra<ModuleDeclaration> {
 /* the module-import-declaration node */
 struct ModuleImportDeclaration : SyntaxExtra<ModuleImportDeclaration> {
     using SyntaxExtra<ModuleImportDeclaration>::SyntaxExtra;
+    ModuleImportDeclaration() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    ModuleImportDeclaration(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ModuleImportDeclaration>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    ModuleImportDeclaration(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ModuleImportDeclaration>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     AttributeSpecifierSeq attribute_specifier_seq() const;
     ModuleName module_name() const;
@@ -5135,6 +7768,20 @@ struct ModuleImportDeclaration : SyntaxExtra<ModuleImportDeclaration> {
 /* the module-name node */
 struct ModuleName : SyntaxExtra<ModuleName> {
     using SyntaxExtra<ModuleName>::SyntaxExtra;
+    ModuleName() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    ModuleName(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ModuleName>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    ModuleName(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ModuleName>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     ModuleNameQualifier module_name_qualifier() const;
     SyntaxElement identifier() const;
@@ -5143,6 +7790,20 @@ struct ModuleName : SyntaxExtra<ModuleName> {
 /* the module-name-qualifier node */
 struct ModuleNameQualifier : SyntaxExtra<ModuleNameQualifier> {
     using SyntaxExtra<ModuleNameQualifier>::SyntaxExtra;
+    ModuleNameQualifier() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    ModuleNameQualifier(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ModuleNameQualifier>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    ModuleNameQualifier(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ModuleNameQualifier>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     ModuleNameQualifier module_name_qualifier() const;
     SyntaxElement identifier() const;
@@ -5151,6 +7812,20 @@ struct ModuleNameQualifier : SyntaxExtra<ModuleNameQualifier> {
 /* the module-partition node */
 struct ModulePartition : SyntaxExtra<ModulePartition> {
     using SyntaxExtra<ModulePartition>::SyntaxExtra;
+    ModulePartition() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    ModulePartition(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ModulePartition>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    ModulePartition(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ModulePartition>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     ModuleNameQualifier module_name_qualifier() const;
     SyntaxElement identifier() const;
@@ -5159,6 +7834,19 @@ struct ModulePartition : SyntaxExtra<ModulePartition> {
 /* multiplicative-expression: one of await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, conversion_function_id, delete_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, lambda_expression, literal_operator_id, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, requires_expression, simple_template_id, template_id, unary_expression, unqualified_id */
 struct MultiplicativeExpression : SyntaxExtra<MultiplicativeExpression> {
     using SyntaxExtra<MultiplicativeExpression>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    MultiplicativeExpression(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<MultiplicativeExpression>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    MultiplicativeExpression(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<MultiplicativeExpression>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     MultiplicativeExpression() = default;
     template <class V>
         requires syntax_converts<V, MultiplicativeExpression>
@@ -5177,12 +7865,40 @@ struct MultiplicativeExpression : SyntaxExtra<MultiplicativeExpression> {
 /* the multiplicative-expression node */
 struct MultiplicativeOperation : SyntaxExtra<MultiplicativeOperation> {
     using SyntaxExtra<MultiplicativeOperation>::SyntaxExtra;
+    MultiplicativeOperation() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    MultiplicativeOperation(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<MultiplicativeOperation>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    MultiplicativeOperation(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<MultiplicativeOperation>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
 };
 
 /* the named-namespace-definition node */
 struct NamedNamespaceDefinition : SyntaxExtra<NamedNamespaceDefinition> {
     using SyntaxExtra<NamedNamespaceDefinition>::SyntaxExtra;
+    NamedNamespaceDefinition() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    NamedNamespaceDefinition(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<NamedNamespaceDefinition>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    NamedNamespaceDefinition(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<NamedNamespaceDefinition>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     NamespaceBody namespace_body() const;
     SyntaxElement identifier() const;
@@ -5191,6 +7907,20 @@ struct NamedNamespaceDefinition : SyntaxExtra<NamedNamespaceDefinition> {
 /* the namespace-alias-definition node */
 struct NamespaceAliasDefinition : SyntaxExtra<NamespaceAliasDefinition> {
     using SyntaxExtra<NamespaceAliasDefinition>::SyntaxExtra;
+    NamespaceAliasDefinition() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    NamespaceAliasDefinition(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<NamespaceAliasDefinition>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    NamespaceAliasDefinition(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<NamespaceAliasDefinition>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     QualifiedNamespaceSpecifier qualified_namespace_specifier() const;
 };
@@ -5198,6 +7928,19 @@ struct NamespaceAliasDefinition : SyntaxExtra<NamespaceAliasDefinition> {
 /* namespace-body: one of alias_declaration, asm_declaration, attribute_declaration, declaration_seq, deduction_guide, empty_declaration, explicit_instantiation, explicit_specialization, export_declaration, function_definition, gnu_extension_declaration, linkage_specification, module_import_declaration, named_namespace_definition, namespace_alias_definition, nested_namespace_definition, opaque_enum_declaration, simple_declaration, static_assert_declaration, template_declaration, unnamed_namespace_definition, using_declaration, using_directive, using_enum_declaration */
 struct NamespaceBody : SyntaxExtra<NamespaceBody> {
     using SyntaxExtra<NamespaceBody>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    NamespaceBody(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<NamespaceBody>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    NamespaceBody(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<NamespaceBody>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     NamespaceBody() = default;
     template <class V>
         requires syntax_converts<V, NamespaceBody>
@@ -5216,6 +7959,19 @@ struct NamespaceBody : SyntaxExtra<NamespaceBody> {
 /* namespace-definition: one of named_namespace_definition, nested_namespace_definition, unnamed_namespace_definition */
 struct NamespaceDefinition : SyntaxExtra<NamespaceDefinition> {
     using SyntaxExtra<NamespaceDefinition>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    NamespaceDefinition(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<NamespaceDefinition>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    NamespaceDefinition(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<NamespaceDefinition>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     NamespaceDefinition() = default;
     template <class V>
         requires syntax_converts<V, NamespaceDefinition>
@@ -5234,6 +7990,20 @@ struct NamespaceDefinition : SyntaxExtra<NamespaceDefinition> {
 /* the nested-name-specifier node */
 struct NestedNameSpecifier : SyntaxExtra<NestedNameSpecifier> {
     using SyntaxExtra<NestedNameSpecifier>::SyntaxExtra;
+    NestedNameSpecifier() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    NestedNameSpecifier(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<NestedNameSpecifier>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    NestedNameSpecifier(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<NestedNameSpecifier>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     DecltypeSpecifier decltype_specifier() const;
     NestedNameSpecifier nested_name_specifier() const;
@@ -5243,6 +8013,20 @@ struct NestedNameSpecifier : SyntaxExtra<NestedNameSpecifier> {
 /* the nested-namespace-definition node */
 struct NestedNamespaceDefinition : SyntaxExtra<NestedNamespaceDefinition> {
     using SyntaxExtra<NestedNamespaceDefinition>::SyntaxExtra;
+    NestedNamespaceDefinition() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    NestedNamespaceDefinition(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<NestedNamespaceDefinition>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    NestedNamespaceDefinition(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<NestedNamespaceDefinition>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     EnclosingNamespaceSpecifier enclosing_namespace_specifier() const;
     NamespaceBody namespace_body() const;
@@ -5251,6 +8035,20 @@ struct NestedNamespaceDefinition : SyntaxExtra<NestedNamespaceDefinition> {
 /* the nested-requirement node */
 struct NestedRequirement : SyntaxExtra<NestedRequirement> {
     using SyntaxExtra<NestedRequirement>::SyntaxExtra;
+    NestedRequirement() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    NestedRequirement(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<NestedRequirement>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    NestedRequirement(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<NestedRequirement>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     ConstraintExpression constraint_expression() const;
     SyntaxElement identifier() const;
@@ -5259,6 +8057,19 @@ struct NestedRequirement : SyntaxExtra<NestedRequirement> {
 /* new-declarator: one of new_declarator, noptr_new_declarator, ptr_operator */
 struct NewDeclarator : SyntaxExtra<NewDeclarator> {
     using SyntaxExtra<NewDeclarator>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    NewDeclarator(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<NewDeclarator>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    NewDeclarator(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<NewDeclarator>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     NewDeclarator() = default;
     template <class V>
         requires syntax_converts<V, NewDeclarator>
@@ -5277,6 +8088,20 @@ struct NewDeclarator : SyntaxExtra<NewDeclarator> {
 /* the new-expression node */
 struct NewExpression : SyntaxExtra<NewExpression> {
     using SyntaxExtra<NewExpression>::SyntaxExtra;
+    NewExpression() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    NewExpression(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<NewExpression>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    NewExpression(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<NewExpression>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     NewInitializer new_initializer() const;
     NewPlacement new_placement() const;
@@ -5287,6 +8112,19 @@ struct NewExpression : SyntaxExtra<NewExpression> {
 /* new-initializer: one of braced_init_list, new_initializer */
 struct NewInitializer : SyntaxExtra<NewInitializer> {
     using SyntaxExtra<NewInitializer>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    NewInitializer(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<NewInitializer>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    NewInitializer(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<NewInitializer>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     NewInitializer() = default;
     template <class V>
         requires syntax_converts<V, NewInitializer>
@@ -5305,6 +8143,20 @@ struct NewInitializer : SyntaxExtra<NewInitializer> {
 /* the new-placement node */
 struct NewPlacement : SyntaxExtra<NewPlacement> {
     using SyntaxExtra<NewPlacement>::SyntaxExtra;
+    NewPlacement() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    NewPlacement(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<NewPlacement>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    NewPlacement(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<NewPlacement>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     ExpressionList expression_list() const;
     SyntaxElement identifier() const;
@@ -5313,6 +8165,20 @@ struct NewPlacement : SyntaxExtra<NewPlacement> {
 /* the new-type-id node */
 struct NewTypeId : SyntaxExtra<NewTypeId> {
     using SyntaxExtra<NewTypeId>::SyntaxExtra;
+    NewTypeId() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    NewTypeId(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<NewTypeId>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    NewTypeId(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<NewTypeId>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     NewDeclarator new_declarator() const;
     TypeSpecifierSeq type_specifier_seq() const;
@@ -5321,6 +8187,20 @@ struct NewTypeId : SyntaxExtra<NewTypeId> {
 /* the noexcept-expression node */
 struct NoexceptExpression : SyntaxExtra<NoexceptExpression> {
     using SyntaxExtra<NoexceptExpression>::SyntaxExtra;
+    NoexceptExpression() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    NoexceptExpression(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<NoexceptExpression>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    NoexceptExpression(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<NoexceptExpression>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     Expression expression() const;
     SyntaxElement identifier() const;
@@ -5329,6 +8209,20 @@ struct NoexceptExpression : SyntaxExtra<NoexceptExpression> {
 /* the noexcept-specifier node */
 struct NoexceptSpecifier : SyntaxExtra<NoexceptSpecifier> {
     using SyntaxExtra<NoexceptSpecifier>::SyntaxExtra;
+    NoexceptSpecifier() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    NoexceptSpecifier(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<NoexceptSpecifier>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    NoexceptSpecifier(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<NoexceptSpecifier>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     ConstantExpression constant_expression() const;
     SyntaxElement identifier() const;
@@ -5337,6 +8231,20 @@ struct NoexceptSpecifier : SyntaxExtra<NoexceptSpecifier> {
 /* the noptr-abstract-declarator node */
 struct NoptrAbstractDeclarator : SyntaxExtra<NoptrAbstractDeclarator> {
     using SyntaxExtra<NoptrAbstractDeclarator>::SyntaxExtra;
+    NoptrAbstractDeclarator() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    NoptrAbstractDeclarator(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<NoptrAbstractDeclarator>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    NoptrAbstractDeclarator(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<NoptrAbstractDeclarator>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     AttributeSpecifierSeq attribute_specifier_seq() const;
     ConstantExpression constant_expression() const;
@@ -5347,6 +8255,19 @@ struct NoptrAbstractDeclarator : SyntaxExtra<NoptrAbstractDeclarator> {
 /* noptr-declarator: one of conversion_function_id, declarator_id, literal_operator_id, noptr_declarator, operator_function_id, qualified_id, simple_template_id, template_id, unqualified_id */
 struct NoptrDeclarator : SyntaxExtra<NoptrDeclarator> {
     using SyntaxExtra<NoptrDeclarator>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    NoptrDeclarator(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<NoptrDeclarator>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    NoptrDeclarator(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<NoptrDeclarator>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     NoptrDeclarator() = default;
     template <class V>
         requires syntax_converts<V, NoptrDeclarator>
@@ -5365,6 +8286,20 @@ struct NoptrDeclarator : SyntaxExtra<NoptrDeclarator> {
 /* the noptr-new-declarator node */
 struct NoptrNewDeclarator : SyntaxExtra<NoptrNewDeclarator> {
     using SyntaxExtra<NoptrNewDeclarator>::SyntaxExtra;
+    NoptrNewDeclarator() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    NoptrNewDeclarator(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<NoptrNewDeclarator>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    NoptrNewDeclarator(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<NoptrNewDeclarator>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     AttributeSpecifierSeq attribute_specifier_seq() const;
     NoptrNewDeclarator noptr_new_declarator() const;
@@ -5374,6 +8309,20 @@ struct NoptrNewDeclarator : SyntaxExtra<NoptrNewDeclarator> {
 /* the opaque-enum-declaration node */
 struct OpaqueEnumDeclaration : SyntaxExtra<OpaqueEnumDeclaration> {
     using SyntaxExtra<OpaqueEnumDeclaration>::SyntaxExtra;
+    OpaqueEnumDeclaration() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    OpaqueEnumDeclaration(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<OpaqueEnumDeclaration>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    OpaqueEnumDeclaration(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<OpaqueEnumDeclaration>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     AttributeSpecifierSeq attribute_specifier_seq() const;
     EnumBase enum_base() const;
@@ -5385,12 +8334,40 @@ struct OpaqueEnumDeclaration : SyntaxExtra<OpaqueEnumDeclaration> {
 /* the operator-function-id node */
 struct OperatorFunctionId : SyntaxExtra<OperatorFunctionId> {
     using SyntaxExtra<OperatorFunctionId>::SyntaxExtra;
+    OperatorFunctionId() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    OperatorFunctionId(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<OperatorFunctionId>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    OperatorFunctionId(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<OperatorFunctionId>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
 };
 
 /* the template-id node */
 struct OperatorTemplateId : SyntaxExtra<OperatorTemplateId> {
     using SyntaxExtra<OperatorTemplateId>::SyntaxExtra;
+    OperatorTemplateId() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    OperatorTemplateId(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<OperatorTemplateId>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    OperatorTemplateId(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<OperatorTemplateId>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     SyntaxElement identifier() const;
 };
@@ -5398,6 +8375,20 @@ struct OperatorTemplateId : SyntaxExtra<OperatorTemplateId> {
 /* the function-body node */
 struct OrdinaryFunctionBody : SyntaxExtra<OrdinaryFunctionBody> {
     using SyntaxExtra<OrdinaryFunctionBody>::SyntaxExtra;
+    OrdinaryFunctionBody() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    OrdinaryFunctionBody(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<OrdinaryFunctionBody>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    OrdinaryFunctionBody(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<OrdinaryFunctionBody>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     CompoundStatement compound_statement() const;
     CtorInitializer ctor_initializer() const;
@@ -5407,6 +8398,20 @@ struct OrdinaryFunctionBody : SyntaxExtra<OrdinaryFunctionBody> {
 /* the declarator-id node */
 struct PackDeclaratorId : SyntaxExtra<PackDeclaratorId> {
     using SyntaxExtra<PackDeclaratorId>::SyntaxExtra;
+    PackDeclaratorId() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    PackDeclaratorId(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<PackDeclaratorId>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    PackDeclaratorId(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<PackDeclaratorId>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     IdExpression id_expression() const;
     SyntaxElement identifier() const;
@@ -5415,6 +8420,20 @@ struct PackDeclaratorId : SyntaxExtra<PackDeclaratorId> {
 /* the parameter-declaration-clause node */
 struct ParameterClause : SyntaxExtra<ParameterClause> {
     using SyntaxExtra<ParameterClause>::SyntaxExtra;
+    ParameterClause() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    ParameterClause(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ParameterClause>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    ParameterClause(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ParameterClause>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     ParameterDeclarationList parameter_declaration_list() const;
 };
@@ -5422,6 +8441,20 @@ struct ParameterClause : SyntaxExtra<ParameterClause> {
 /* the parameter-declaration node */
 struct ParameterDeclaration : SyntaxExtra<ParameterDeclaration> {
     using SyntaxExtra<ParameterDeclaration>::SyntaxExtra;
+    ParameterDeclaration() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    ParameterDeclaration(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ParameterDeclaration>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    ParameterDeclaration(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ParameterDeclaration>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     AbstractDeclarator abstract_declarator() const;
     AttributeSpecifierSeq attribute_specifier_seq() const;
@@ -5431,6 +8464,19 @@ struct ParameterDeclaration : SyntaxExtra<ParameterDeclaration> {
 /* parameter-declaration-clause: one of parameter_declaration, parameter_declaration_clause, parameter_declaration_list */
 struct ParameterDeclarationClause : SyntaxExtra<ParameterDeclarationClause> {
     using SyntaxExtra<ParameterDeclarationClause>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    ParameterDeclarationClause(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ParameterDeclarationClause>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    ParameterDeclarationClause(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ParameterDeclarationClause>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     ParameterDeclarationClause() = default;
     template <class V>
         requires syntax_converts<V, ParameterDeclarationClause>
@@ -5449,6 +8495,19 @@ struct ParameterDeclarationClause : SyntaxExtra<ParameterDeclarationClause> {
 /* parameter-declaration-list: one of parameter_declaration, parameter_declaration_list */
 struct ParameterDeclarationList : SyntaxExtra<ParameterDeclarationList> {
     using SyntaxExtra<ParameterDeclarationList>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    ParameterDeclarationList(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ParameterDeclarationList>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    ParameterDeclarationList(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ParameterDeclarationList>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     ParameterDeclarationList() = default;
     template <class V>
         requires syntax_converts<V, ParameterDeclarationList>
@@ -5468,12 +8527,40 @@ struct ParameterDeclarationList : SyntaxExtra<ParameterDeclarationList> {
 /* the parameter-declaration-list node */
 struct ParameterDeclarations : SyntaxExtra<ParameterDeclarations> {
     using SyntaxExtra<ParameterDeclarations>::SyntaxExtra;
+    ParameterDeclarations() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    ParameterDeclarations(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ParameterDeclarations>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    ParameterDeclarations(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ParameterDeclarations>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
 };
 
 /* the parameters-and-qualifiers node */
 struct ParametersAndQualifiers : SyntaxExtra<ParametersAndQualifiers> {
     using SyntaxExtra<ParametersAndQualifiers>::SyntaxExtra;
+    ParametersAndQualifiers() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    ParametersAndQualifiers(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ParametersAndQualifiers>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    ParametersAndQualifiers(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ParametersAndQualifiers>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     AttributeSpecifierSeq attribute_specifier_seq() const;
     CvQualifierSeq cv_qualifier_seq() const;
@@ -5484,6 +8571,20 @@ struct ParametersAndQualifiers : SyntaxExtra<ParametersAndQualifiers> {
 /* the initializer node */
 struct ParenthesizedInitializer : SyntaxExtra<ParenthesizedInitializer> {
     using SyntaxExtra<ParenthesizedInitializer>::SyntaxExtra;
+    ParenthesizedInitializer() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    ParenthesizedInitializer(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ParenthesizedInitializer>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    ParenthesizedInitializer(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ParenthesizedInitializer>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     ExpressionList expression_list() const;
     SyntaxElement identifier() const;
@@ -5492,6 +8593,20 @@ struct ParenthesizedInitializer : SyntaxExtra<ParenthesizedInitializer> {
 /* the new-initializer node */
 struct ParenthesizedNewInitializer : SyntaxExtra<ParenthesizedNewInitializer> {
     using SyntaxExtra<ParenthesizedNewInitializer>::SyntaxExtra;
+    ParenthesizedNewInitializer() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    ParenthesizedNewInitializer(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ParenthesizedNewInitializer>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    ParenthesizedNewInitializer(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ParenthesizedNewInitializer>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     ExpressionList expression_list() const;
     SyntaxElement identifier() const;
@@ -5500,6 +8615,20 @@ struct ParenthesizedNewInitializer : SyntaxExtra<ParenthesizedNewInitializer> {
 /* the primary-expression node */
 struct ParenthesizedOrThis : SyntaxExtra<ParenthesizedOrThis> {
     using SyntaxExtra<ParenthesizedOrThis>::SyntaxExtra;
+    ParenthesizedOrThis() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    ParenthesizedOrThis(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ParenthesizedOrThis>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    ParenthesizedOrThis(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ParenthesizedOrThis>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     Expression expression() const;
     SyntaxElement identifier() const;
@@ -5508,6 +8637,20 @@ struct ParenthesizedOrThis : SyntaxExtra<ParenthesizedOrThis> {
 /* the placeholder-type-specifier node */
 struct PlaceholderTypeSpecifier : SyntaxExtra<PlaceholderTypeSpecifier> {
     using SyntaxExtra<PlaceholderTypeSpecifier>::SyntaxExtra;
+    PlaceholderTypeSpecifier() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    PlaceholderTypeSpecifier(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<PlaceholderTypeSpecifier>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    PlaceholderTypeSpecifier(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<PlaceholderTypeSpecifier>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     TypeConstraint type_constraint() const;
     SyntaxElement identifier() const;
@@ -5516,6 +8659,19 @@ struct PlaceholderTypeSpecifier : SyntaxExtra<PlaceholderTypeSpecifier> {
 /* pm-expression: one of await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, conversion_function_id, delete_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, lambda_expression, literal_operator_id, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, requires_expression, simple_template_id, template_id, unary_expression, unqualified_id */
 struct PmExpression : SyntaxExtra<PmExpression> {
     using SyntaxExtra<PmExpression>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    PmExpression(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<PmExpression>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    PmExpression(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<PmExpression>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     PmExpression() = default;
     template <class V>
         requires syntax_converts<V, PmExpression>
@@ -5534,18 +8690,60 @@ struct PmExpression : SyntaxExtra<PmExpression> {
 /* the ptr-abstract-declarator node */
 struct PointerAbstractDeclarator : SyntaxExtra<PointerAbstractDeclarator> {
     using SyntaxExtra<PointerAbstractDeclarator>::SyntaxExtra;
+    PointerAbstractDeclarator() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    PointerAbstractDeclarator(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<PointerAbstractDeclarator>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    PointerAbstractDeclarator(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<PointerAbstractDeclarator>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
 };
 
 /* the conversion-declarator node */
 struct PointerConversionDeclarator : SyntaxExtra<PointerConversionDeclarator> {
     using SyntaxExtra<PointerConversionDeclarator>::SyntaxExtra;
+    PointerConversionDeclarator() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    PointerConversionDeclarator(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<PointerConversionDeclarator>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    PointerConversionDeclarator(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<PointerConversionDeclarator>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
 };
 
 /* the ptr-declarator node */
 struct PointerDeclarator : SyntaxExtra<PointerDeclarator> {
     using SyntaxExtra<PointerDeclarator>::SyntaxExtra;
+    PointerDeclarator() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    PointerDeclarator(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<PointerDeclarator>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    PointerDeclarator(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<PointerDeclarator>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     PtrDeclarator ptr_declarator() const;
     PtrOperator ptr_operator() const;
@@ -5555,18 +8753,59 @@ struct PointerDeclarator : SyntaxExtra<PointerDeclarator> {
 /* the new-declarator node */
 struct PointerNewDeclarator : SyntaxExtra<PointerNewDeclarator> {
     using SyntaxExtra<PointerNewDeclarator>::SyntaxExtra;
+    PointerNewDeclarator() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    PointerNewDeclarator(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<PointerNewDeclarator>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    PointerNewDeclarator(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<PointerNewDeclarator>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
 };
 
 /* the pm-expression node */
 struct PointerToMemberOperation : SyntaxExtra<PointerToMemberOperation> {
     using SyntaxExtra<PointerToMemberOperation>::SyntaxExtra;
+    PointerToMemberOperation() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    PointerToMemberOperation(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<PointerToMemberOperation>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    PointerToMemberOperation(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<PointerToMemberOperation>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
 };
 
 /* postfix-expression: one of clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, conversion_function_id, fold_expression, gnu_compound_literal, gnu_offsetof_expression, lambda_expression, literal_operator_id, operator_function_id, postfix_expression, primary_expression, qualified_id, requires_expression, simple_template_id, template_id, unqualified_id */
 struct PostfixExpression : SyntaxExtra<PostfixExpression> {
     using SyntaxExtra<PostfixExpression>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    PostfixExpression(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<PostfixExpression>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    PostfixExpression(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<PostfixExpression>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     PostfixExpression() = default;
     template <class V>
         requires syntax_converts<V, PostfixExpression>
@@ -5585,6 +8824,20 @@ struct PostfixExpression : SyntaxExtra<PostfixExpression> {
 /* the postfix-expression node */
 struct PostfixOperation : SyntaxExtra<PostfixOperation> {
     using SyntaxExtra<PostfixOperation>::SyntaxExtra;
+    PostfixOperation() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    PostfixOperation(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<PostfixOperation>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    PostfixOperation(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<PostfixOperation>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     TypeId type_id() const;
     TypenameSpecifier typename_specifier() const;
@@ -5593,6 +8846,19 @@ struct PostfixOperation : SyntaxExtra<PostfixOperation> {
 /* primary-expression: one of clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, conversion_function_id, fold_expression, gnu_offsetof_expression, lambda_expression, literal_operator_id, operator_function_id, primary_expression, qualified_id, requires_expression, simple_template_id, template_id, unqualified_id */
 struct PrimaryExpression : SyntaxExtra<PrimaryExpression> {
     using SyntaxExtra<PrimaryExpression>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    PrimaryExpression(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<PrimaryExpression>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    PrimaryExpression(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<PrimaryExpression>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     PrimaryExpression() = default;
     template <class V>
         requires syntax_converts<V, PrimaryExpression>
@@ -5611,6 +8877,20 @@ struct PrimaryExpression : SyntaxExtra<PrimaryExpression> {
 /* the private-module-fragment node */
 struct PrivateModuleFragment : SyntaxExtra<PrivateModuleFragment> {
     using SyntaxExtra<PrivateModuleFragment>::SyntaxExtra;
+    PrivateModuleFragment() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    PrivateModuleFragment(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<PrivateModuleFragment>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    PrivateModuleFragment(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<PrivateModuleFragment>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     DeclarationSeq declaration_seq() const;
 };
@@ -5618,6 +8898,19 @@ struct PrivateModuleFragment : SyntaxExtra<PrivateModuleFragment> {
 /* ptr-abstract-declarator: one of noptr_abstract_declarator, ptr_abstract_declarator, ptr_operator */
 struct PtrAbstractDeclarator : SyntaxExtra<PtrAbstractDeclarator> {
     using SyntaxExtra<PtrAbstractDeclarator>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    PtrAbstractDeclarator(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<PtrAbstractDeclarator>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    PtrAbstractDeclarator(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<PtrAbstractDeclarator>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     PtrAbstractDeclarator() = default;
     template <class V>
         requires syntax_converts<V, PtrAbstractDeclarator>
@@ -5636,6 +8929,19 @@ struct PtrAbstractDeclarator : SyntaxExtra<PtrAbstractDeclarator> {
 /* ptr-declarator: one of conversion_function_id, declarator_id, literal_operator_id, noptr_declarator, operator_function_id, ptr_declarator, qualified_id, simple_template_id, template_id, unqualified_id */
 struct PtrDeclarator : SyntaxExtra<PtrDeclarator> {
     using SyntaxExtra<PtrDeclarator>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    PtrDeclarator(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<PtrDeclarator>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    PtrDeclarator(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<PtrDeclarator>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     PtrDeclarator() = default;
     template <class V>
         requires syntax_converts<V, PtrDeclarator>
@@ -5654,6 +8960,20 @@ struct PtrDeclarator : SyntaxExtra<PtrDeclarator> {
 /* the ptr-operator node */
 struct PtrOperator : SyntaxExtra<PtrOperator> {
     using SyntaxExtra<PtrOperator>::SyntaxExtra;
+    PtrOperator() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    PtrOperator(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<PtrOperator>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    PtrOperator(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<PtrOperator>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     AttributeSpecifierSeq attribute_specifier_seq() const;
     CvQualifierSeq cv_qualifier_seq() const;
@@ -5663,12 +8983,40 @@ struct PtrOperator : SyntaxExtra<PtrOperator> {
 /* the pure-specifier node */
 struct PureSpecifier : SyntaxExtra<PureSpecifier> {
     using SyntaxExtra<PureSpecifier>::SyntaxExtra;
+    PureSpecifier() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    PureSpecifier(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<PureSpecifier>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    PureSpecifier(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<PureSpecifier>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
 };
 
 /* the class-head-name node */
 struct QualifiedClassHeadName : SyntaxExtra<QualifiedClassHeadName> {
     using SyntaxExtra<QualifiedClassHeadName>::SyntaxExtra;
+    QualifiedClassHeadName() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    QualifiedClassHeadName(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<QualifiedClassHeadName>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    QualifiedClassHeadName(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<QualifiedClassHeadName>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     SimpleTemplateId class_name() const;
     NestedNameSpecifier nested_name_specifier() const;
@@ -5678,6 +9026,20 @@ struct QualifiedClassHeadName : SyntaxExtra<QualifiedClassHeadName> {
 /* the class-or-decltype node */
 struct QualifiedClassName : SyntaxExtra<QualifiedClassName> {
     using SyntaxExtra<QualifiedClassName>::SyntaxExtra;
+    QualifiedClassName() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    QualifiedClassName(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<QualifiedClassName>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    QualifiedClassName(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<QualifiedClassName>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     NestedNameSpecifier nested_name_specifier() const;
     SyntaxElement identifier() const;
@@ -5686,6 +9048,20 @@ struct QualifiedClassName : SyntaxExtra<QualifiedClassName> {
 /* the qualified-id node */
 struct QualifiedId : SyntaxExtra<QualifiedId> {
     using SyntaxExtra<QualifiedId>::SyntaxExtra;
+    QualifiedId() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    QualifiedId(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<QualifiedId>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    QualifiedId(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<QualifiedId>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     NestedNameSpecifier nested_name_specifier() const;
     UnqualifiedId unqualified_id() const;
@@ -5695,6 +9071,20 @@ struct QualifiedId : SyntaxExtra<QualifiedId> {
 /* the qualified-namespace-specifier node */
 struct QualifiedNamespaceSpecifier : SyntaxExtra<QualifiedNamespaceSpecifier> {
     using SyntaxExtra<QualifiedNamespaceSpecifier>::SyntaxExtra;
+    QualifiedNamespaceSpecifier() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    QualifiedNamespaceSpecifier(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<QualifiedNamespaceSpecifier>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    QualifiedNamespaceSpecifier(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<QualifiedNamespaceSpecifier>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     NestedNameSpecifier nested_name_specifier() const;
     SyntaxElement identifier() const;
@@ -5703,6 +9093,19 @@ struct QualifiedNamespaceSpecifier : SyntaxExtra<QualifiedNamespaceSpecifier> {
 /* relational-expression: one of additive_expression, await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conversion_function_id, delete_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, lambda_expression, literal_operator_id, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, unary_expression, unqualified_id */
 struct RelationalExpression : SyntaxExtra<RelationalExpression> {
     using SyntaxExtra<RelationalExpression>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    RelationalExpression(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<RelationalExpression>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    RelationalExpression(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<RelationalExpression>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     RelationalExpression() = default;
     template <class V>
         requires syntax_converts<V, RelationalExpression>
@@ -5721,12 +9124,39 @@ struct RelationalExpression : SyntaxExtra<RelationalExpression> {
 /* the relational-expression node */
 struct RelationalOperation : SyntaxExtra<RelationalOperation> {
     using SyntaxExtra<RelationalOperation>::SyntaxExtra;
+    RelationalOperation() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    RelationalOperation(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<RelationalOperation>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    RelationalOperation(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<RelationalOperation>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
 };
 
 /* requirement: one of compound_requirement, nested_requirement, simple_requirement, type_requirement */
 struct Requirement : SyntaxExtra<Requirement> {
     using SyntaxExtra<Requirement>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    Requirement(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<Requirement>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    Requirement(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<Requirement>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     Requirement() = default;
     template <class V>
         requires syntax_converts<V, Requirement>
@@ -5745,6 +9175,20 @@ struct Requirement : SyntaxExtra<Requirement> {
 /* the requirement-body node */
 struct RequirementBody : SyntaxExtra<RequirementBody> {
     using SyntaxExtra<RequirementBody>::SyntaxExtra;
+    RequirementBody() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    RequirementBody(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<RequirementBody>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    RequirementBody(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<RequirementBody>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     RequirementSeq requirement_seq() const;
 };
@@ -5752,6 +9196,20 @@ struct RequirementBody : SyntaxExtra<RequirementBody> {
 /* the requirement-parameter-list node */
 struct RequirementParameterList : SyntaxExtra<RequirementParameterList> {
     using SyntaxExtra<RequirementParameterList>::SyntaxExtra;
+    RequirementParameterList() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    RequirementParameterList(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<RequirementParameterList>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    RequirementParameterList(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<RequirementParameterList>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     ParameterDeclarationClause parameter_declaration_clause() const;
 };
@@ -5759,6 +9217,19 @@ struct RequirementParameterList : SyntaxExtra<RequirementParameterList> {
 /* requirement-seq: one of compound_requirement, nested_requirement, requirement_seq, simple_requirement, type_requirement */
 struct RequirementSeq : SyntaxExtra<RequirementSeq> {
     using SyntaxExtra<RequirementSeq>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    RequirementSeq(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<RequirementSeq>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    RequirementSeq(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<RequirementSeq>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     RequirementSeq() = default;
     template <class V>
         requires syntax_converts<V, RequirementSeq>
@@ -5778,12 +9249,40 @@ struct RequirementSeq : SyntaxExtra<RequirementSeq> {
 /* the requirement-seq node */
 struct Requirements : SyntaxExtra<Requirements> {
     using SyntaxExtra<Requirements>::SyntaxExtra;
+    Requirements() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    Requirements(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<Requirements>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    Requirements(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<Requirements>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
 };
 
 /* the requires-clause node */
 struct RequiresClause : SyntaxExtra<RequiresClause> {
     using SyntaxExtra<RequiresClause>::SyntaxExtra;
+    RequiresClause() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    RequiresClause(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<RequiresClause>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    RequiresClause(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<RequiresClause>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     ConstraintLogicalOrExpression constraint_logical_or_expression() const;
     SyntaxElement identifier() const;
@@ -5792,6 +9291,20 @@ struct RequiresClause : SyntaxExtra<RequiresClause> {
 /* the requires-expression node */
 struct RequiresExpression : SyntaxExtra<RequiresExpression> {
     using SyntaxExtra<RequiresExpression>::SyntaxExtra;
+    RequiresExpression() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    RequiresExpression(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<RequiresExpression>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    RequiresExpression(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<RequiresExpression>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     RequirementBody requirement_body() const;
     RequirementParameterList requirement_parameter_list() const;
@@ -5800,6 +9313,20 @@ struct RequiresExpression : SyntaxExtra<RequiresExpression> {
 /* the return-type-requirement node */
 struct ReturnTypeRequirement : SyntaxExtra<ReturnTypeRequirement> {
     using SyntaxExtra<ReturnTypeRequirement>::SyntaxExtra;
+    ReturnTypeRequirement() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    ReturnTypeRequirement(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ReturnTypeRequirement>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    ReturnTypeRequirement(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ReturnTypeRequirement>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     TypeConstraint type_constraint() const;
     SyntaxElement identifier() const;
@@ -5808,6 +9335,20 @@ struct ReturnTypeRequirement : SyntaxExtra<ReturnTypeRequirement> {
 /* the selection-statement node */
 struct SelectionStatement : SyntaxExtra<SelectionStatement> {
     using SyntaxExtra<SelectionStatement>::SyntaxExtra;
+    SelectionStatement() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    SelectionStatement(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<SelectionStatement>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    SelectionStatement(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<SelectionStatement>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     Condition condition() const;
     SyntaxElement identifier() const;
@@ -5816,6 +9357,19 @@ struct SelectionStatement : SyntaxExtra<SelectionStatement> {
 /* shift-expression: one of additive_expression, await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, conversion_function_id, delete_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, lambda_expression, literal_operator_id, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, requires_expression, shift_expression, simple_template_id, template_id, unary_expression, unqualified_id */
 struct ShiftExpression : SyntaxExtra<ShiftExpression> {
     using SyntaxExtra<ShiftExpression>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    ShiftExpression(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ShiftExpression>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    ShiftExpression(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ShiftExpression>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     ShiftExpression() = default;
     template <class V>
         requires syntax_converts<V, ShiftExpression>
@@ -5834,12 +9388,40 @@ struct ShiftExpression : SyntaxExtra<ShiftExpression> {
 /* the shift-expression node */
 struct ShiftOperation : SyntaxExtra<ShiftOperation> {
     using SyntaxExtra<ShiftOperation>::SyntaxExtra;
+    ShiftOperation() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    ShiftOperation(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ShiftOperation>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    ShiftOperation(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ShiftOperation>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
 };
 
 /* the simple-capture node */
 struct SimpleCapture : SyntaxExtra<SimpleCapture> {
     using SyntaxExtra<SimpleCapture>::SyntaxExtra;
+    SimpleCapture() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    SimpleCapture(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<SimpleCapture>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    SimpleCapture(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<SimpleCapture>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     SyntaxElement identifier() const;
 };
@@ -5847,6 +9429,20 @@ struct SimpleCapture : SyntaxExtra<SimpleCapture> {
 /* the simple-declaration node */
 struct SimpleDeclaration : SyntaxExtra<SimpleDeclaration> {
     using SyntaxExtra<SimpleDeclaration>::SyntaxExtra;
+    SimpleDeclaration() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    SimpleDeclaration(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<SimpleDeclaration>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    SimpleDeclaration(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<SimpleDeclaration>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     AttributeSpecifierSeq attribute_specifier_seq() const;
     DeclSpecifierSeq decl_specifier_seq() const;
@@ -5859,6 +9455,20 @@ struct SimpleDeclaration : SyntaxExtra<SimpleDeclaration> {
 /* the simple-requirement node */
 struct SimpleRequirement : SyntaxExtra<SimpleRequirement> {
     using SyntaxExtra<SimpleRequirement>::SyntaxExtra;
+    SimpleRequirement() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    SimpleRequirement(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<SimpleRequirement>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    SimpleRequirement(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<SimpleRequirement>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     Expression expression() const;
     SyntaxElement identifier() const;
@@ -5867,6 +9477,20 @@ struct SimpleRequirement : SyntaxExtra<SimpleRequirement> {
 /* the simple-template-id node */
 struct SimpleTemplateId : SyntaxExtra<SimpleTemplateId> {
     using SyntaxExtra<SimpleTemplateId>::SyntaxExtra;
+    SimpleTemplateId() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    SimpleTemplateId(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<SimpleTemplateId>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    SimpleTemplateId(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<SimpleTemplateId>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     TemplateArgumentList template_argument_list() const;
 };
@@ -5874,6 +9498,20 @@ struct SimpleTemplateId : SyntaxExtra<SimpleTemplateId> {
 /* the simple-type-specifier node */
 struct SimpleTypeName : SyntaxExtra<SimpleTypeName> {
     using SyntaxExtra<SimpleTypeName>::SyntaxExtra;
+    SimpleTypeName() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    SimpleTypeName(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<SimpleTypeName>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    SimpleTypeName(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<SimpleTypeName>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     NestedNameSpecifier nested_name_specifier() const;
     SyntaxElement identifier() const;
@@ -5882,6 +9520,19 @@ struct SimpleTypeName : SyntaxExtra<SimpleTypeName> {
 /* simple-type-specifier: one of clang_atomic_type_specifier, clang_bit_int_type_specifier, clang_type_transformation, decltype_specifier, placeholder_type_specifier, simple_template_id, simple_type_specifier */
 struct SimpleTypeSpecifier : SyntaxExtra<SimpleTypeSpecifier> {
     using SyntaxExtra<SimpleTypeSpecifier>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    SimpleTypeSpecifier(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<SimpleTypeSpecifier>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    SimpleTypeSpecifier(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<SimpleTypeSpecifier>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     SimpleTypeSpecifier() = default;
     template <class V>
         requires syntax_converts<V, SimpleTypeSpecifier>
@@ -5900,6 +9551,20 @@ struct SimpleTypeSpecifier : SyntaxExtra<SimpleTypeSpecifier> {
 /* the attribute-specifier node */
 struct StandardAttributeSpecifier : SyntaxExtra<StandardAttributeSpecifier> {
     using SyntaxExtra<StandardAttributeSpecifier>::SyntaxExtra;
+    StandardAttributeSpecifier() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    StandardAttributeSpecifier(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<StandardAttributeSpecifier>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    StandardAttributeSpecifier(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<StandardAttributeSpecifier>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     AttributeList attribute_list() const;
     AttributeUsingPrefix attribute_using_prefix() const;
@@ -5909,6 +9574,19 @@ struct StandardAttributeSpecifier : SyntaxExtra<StandardAttributeSpecifier> {
 /* statement: one of alias_declaration, asm_declaration, compound_statement, coroutine_return_statement, expression_statement, gnu_computed_goto, gnu_extension_declaration, iteration_statement, jump_statement, labeled_statement, namespace_alias_definition, opaque_enum_declaration, selection_statement, simple_declaration, statement, static_assert_declaration, try_block, using_declaration, using_directive, using_enum_declaration */
 struct Statement : SyntaxExtra<Statement> {
     using SyntaxExtra<Statement>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    Statement(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<Statement>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    Statement(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<Statement>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     Statement() = default;
     template <class V>
         requires syntax_converts<V, Statement>
@@ -5927,6 +9605,19 @@ struct Statement : SyntaxExtra<Statement> {
 /* statement-seq: one of alias_declaration, asm_declaration, compound_statement, coroutine_return_statement, expression_statement, gnu_computed_goto, gnu_extension_declaration, iteration_statement, jump_statement, labeled_statement, namespace_alias_definition, opaque_enum_declaration, selection_statement, simple_declaration, statement, statement_seq, static_assert_declaration, try_block, using_declaration, using_directive, using_enum_declaration */
 struct StatementSeq : SyntaxExtra<StatementSeq> {
     using SyntaxExtra<StatementSeq>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    StatementSeq(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<StatementSeq>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    StatementSeq(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<StatementSeq>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     StatementSeq() = default;
     template <class V>
         requires syntax_converts<V, StatementSeq>
@@ -5946,12 +9637,40 @@ struct StatementSeq : SyntaxExtra<StatementSeq> {
 /* the statement-seq node */
 struct Statements : SyntaxExtra<Statements> {
     using SyntaxExtra<Statements>::SyntaxExtra;
+    Statements() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    Statements(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<Statements>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    Statements(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<Statements>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
 };
 
 /* the static_assert-declaration node */
 struct StaticAssertDeclaration : SyntaxExtra<StaticAssertDeclaration> {
     using SyntaxExtra<StaticAssertDeclaration>::SyntaxExtra;
+    StaticAssertDeclaration() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    StaticAssertDeclaration(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<StaticAssertDeclaration>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    StaticAssertDeclaration(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<StaticAssertDeclaration>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     ConstantExpression constant_expression() const;
     SyntaxElement identifier() const;
@@ -5961,6 +9680,20 @@ struct StaticAssertDeclaration : SyntaxExtra<StaticAssertDeclaration> {
 /* the noptr-declarator node */
 struct SuffixedDeclarator : SyntaxExtra<SuffixedDeclarator> {
     using SyntaxExtra<SuffixedDeclarator>::SyntaxExtra;
+    SuffixedDeclarator() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    SuffixedDeclarator(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<SuffixedDeclarator>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    SuffixedDeclarator(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<SuffixedDeclarator>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     AttributeSpecifierSeq attribute_specifier_seq() const;
     ParametersAndQualifiers parameters_and_qualifiers() const;
@@ -5969,6 +9702,19 @@ struct SuffixedDeclarator : SyntaxExtra<SuffixedDeclarator> {
 /* template-argument: one of additive_expression, and_expression, await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conditional_expression, conversion_function_id, delete_expression, equality_expression, exclusive_or_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, inclusive_or_expression, lambda_expression, literal_operator_id, logical_and_expression, logical_or_expression, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_id, type_id, unary_expression, unqualified_id */
 struct TemplateArgument : SyntaxExtra<TemplateArgument> {
     using SyntaxExtra<TemplateArgument>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    TemplateArgument(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<TemplateArgument>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    TemplateArgument(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<TemplateArgument>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     TemplateArgument() = default;
     template <class V>
         requires syntax_converts<V, TemplateArgument>
@@ -5987,6 +9733,19 @@ struct TemplateArgument : SyntaxExtra<TemplateArgument> {
 /* template-argument-list: one of additive_expression, and_expression, await_expression, cast_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, compare_expression, conditional_expression, conversion_function_id, delete_expression, equality_expression, exclusive_or_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, inclusive_or_expression, lambda_expression, literal_operator_id, logical_and_expression, logical_or_expression, multiplicative_expression, new_expression, noexcept_expression, operator_function_id, pm_expression, postfix_expression, primary_expression, qualified_id, relational_expression, requires_expression, shift_expression, simple_template_id, template_argument_list, template_id, type_id, unary_expression, unqualified_id */
 struct TemplateArgumentList : SyntaxExtra<TemplateArgumentList> {
     using SyntaxExtra<TemplateArgumentList>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    TemplateArgumentList(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<TemplateArgumentList>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    TemplateArgumentList(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<TemplateArgumentList>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     TemplateArgumentList() = default;
     template <class V>
         requires syntax_converts<V, TemplateArgumentList>
@@ -6005,12 +9764,40 @@ struct TemplateArgumentList : SyntaxExtra<TemplateArgumentList> {
 /* the template-argument-list node */
 struct TemplateArguments : SyntaxExtra<TemplateArguments> {
     using SyntaxExtra<TemplateArguments>::SyntaxExtra;
+    TemplateArguments() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    TemplateArguments(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<TemplateArguments>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    TemplateArguments(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<TemplateArguments>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
 };
 
 /* the template-declaration node */
 struct TemplateDeclaration : SyntaxExtra<TemplateDeclaration> {
     using SyntaxExtra<TemplateDeclaration>::SyntaxExtra;
+    TemplateDeclaration() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    TemplateDeclaration(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<TemplateDeclaration>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    TemplateDeclaration(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<TemplateDeclaration>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     ConceptDefinition concept_definition() const;
     Declaration declaration() const;
@@ -6020,6 +9807,20 @@ struct TemplateDeclaration : SyntaxExtra<TemplateDeclaration> {
 /* the template-head node */
 struct TemplateHead : SyntaxExtra<TemplateHead> {
     using SyntaxExtra<TemplateHead>::SyntaxExtra;
+    TemplateHead() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    TemplateHead(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<TemplateHead>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    TemplateHead(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<TemplateHead>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     RequiresClause requires_clause() const;
     TemplateParameterList template_parameter_list() const;
@@ -6028,6 +9829,19 @@ struct TemplateHead : SyntaxExtra<TemplateHead> {
 /* template-id: one of simple_template_id, template_id */
 struct TemplateId : SyntaxExtra<TemplateId> {
     using SyntaxExtra<TemplateId>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    TemplateId(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<TemplateId>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    TemplateId(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<TemplateId>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     TemplateId() = default;
     template <class V>
         requires syntax_converts<V, TemplateId>
@@ -6046,6 +9860,19 @@ struct TemplateId : SyntaxExtra<TemplateId> {
 /* template-parameter: one of parameter_declaration, type_parameter */
 struct TemplateParameter : SyntaxExtra<TemplateParameter> {
     using SyntaxExtra<TemplateParameter>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    TemplateParameter(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<TemplateParameter>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    TemplateParameter(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<TemplateParameter>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     TemplateParameter() = default;
     template <class V>
         requires syntax_converts<V, TemplateParameter>
@@ -6064,6 +9891,19 @@ struct TemplateParameter : SyntaxExtra<TemplateParameter> {
 /* template-parameter-list: one of parameter_declaration, template_parameter_list, type_parameter */
 struct TemplateParameterList : SyntaxExtra<TemplateParameterList> {
     using SyntaxExtra<TemplateParameterList>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    TemplateParameterList(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<TemplateParameterList>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    TemplateParameterList(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<TemplateParameterList>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     TemplateParameterList() = default;
     template <class V>
         requires syntax_converts<V, TemplateParameterList>
@@ -6083,18 +9923,60 @@ struct TemplateParameterList : SyntaxExtra<TemplateParameterList> {
 /* the template-parameter-list node */
 struct TemplateParameters : SyntaxExtra<TemplateParameters> {
     using SyntaxExtra<TemplateParameters>::SyntaxExtra;
+    TemplateParameters() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    TemplateParameters(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<TemplateParameters>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    TemplateParameters(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<TemplateParameters>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
 };
 
 /* the compare-expression node */
 struct ThreeWayComparison : SyntaxExtra<ThreeWayComparison> {
     using SyntaxExtra<ThreeWayComparison>::SyntaxExtra;
+    ThreeWayComparison() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    ThreeWayComparison(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ThreeWayComparison>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    ThreeWayComparison(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ThreeWayComparison>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
 };
 
 /* the throw-expression node */
 struct ThrowExpression : SyntaxExtra<ThrowExpression> {
     using SyntaxExtra<ThrowExpression>::SyntaxExtra;
+    ThrowExpression() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    ThrowExpression(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ThrowExpression>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    ThrowExpression(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<ThrowExpression>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     AssignmentExpression assignment_expression() const;
     SyntaxElement identifier() const;
@@ -6103,6 +9985,20 @@ struct ThrowExpression : SyntaxExtra<ThrowExpression> {
 /* the abstract-declarator node */
 struct TrailingAbstractDeclarator : SyntaxExtra<TrailingAbstractDeclarator> {
     using SyntaxExtra<TrailingAbstractDeclarator>::SyntaxExtra;
+    TrailingAbstractDeclarator() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    TrailingAbstractDeclarator(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<TrailingAbstractDeclarator>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    TrailingAbstractDeclarator(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<TrailingAbstractDeclarator>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     NoptrAbstractDeclarator noptr_abstract_declarator() const;
     ParametersAndQualifiers parameters_and_qualifiers() const;
@@ -6112,6 +10008,20 @@ struct TrailingAbstractDeclarator : SyntaxExtra<TrailingAbstractDeclarator> {
 /* the declarator node */
 struct TrailingReturnDeclarator : SyntaxExtra<TrailingReturnDeclarator> {
     using SyntaxExtra<TrailingReturnDeclarator>::SyntaxExtra;
+    TrailingReturnDeclarator() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    TrailingReturnDeclarator(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<TrailingReturnDeclarator>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    TrailingReturnDeclarator(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<TrailingReturnDeclarator>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     GnuAsmLabel gnu_asm_label() const;
     GnuAttributeSpecifier gnu_attribute_specifier_seq() const;
@@ -6123,6 +10033,20 @@ struct TrailingReturnDeclarator : SyntaxExtra<TrailingReturnDeclarator> {
 /* the trailing-return-type node */
 struct TrailingReturnType : SyntaxExtra<TrailingReturnType> {
     using SyntaxExtra<TrailingReturnType>::SyntaxExtra;
+    TrailingReturnType() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    TrailingReturnType(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<TrailingReturnType>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    TrailingReturnType(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<TrailingReturnType>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     TypeId type_id() const;
 };
@@ -6130,6 +10054,20 @@ struct TrailingReturnType : SyntaxExtra<TrailingReturnType> {
 /* the translation-unit node */
 struct TranslationUnit : SyntaxExtra<TranslationUnit> {
     using SyntaxExtra<TranslationUnit>::SyntaxExtra;
+    TranslationUnit() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    TranslationUnit(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<TranslationUnit>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    TranslationUnit(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<TranslationUnit>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     DeclarationSeq declaration_seq() const;
     GlobalModuleFragment global_module_fragment() const;
@@ -6140,6 +10078,20 @@ struct TranslationUnit : SyntaxExtra<TranslationUnit> {
 /* the try-block node */
 struct TryBlock : SyntaxExtra<TryBlock> {
     using SyntaxExtra<TryBlock>::SyntaxExtra;
+    TryBlock() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    TryBlock(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<TryBlock>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    TryBlock(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<TryBlock>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     CompoundStatement compound_statement() const;
     HandlerSeq handler_seq() const;
@@ -6148,6 +10100,20 @@ struct TryBlock : SyntaxExtra<TryBlock> {
 /* the type-constraint node */
 struct TypeConstraint : SyntaxExtra<TypeConstraint> {
     using SyntaxExtra<TypeConstraint>::SyntaxExtra;
+    TypeConstraint() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    TypeConstraint(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<TypeConstraint>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    TypeConstraint(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<TypeConstraint>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     NestedNameSpecifier nested_name_specifier() const;
     TemplateArgumentList template_argument_list() const;
@@ -6156,6 +10122,20 @@ struct TypeConstraint : SyntaxExtra<TypeConstraint> {
 /* the type-id node */
 struct TypeId : SyntaxExtra<TypeId> {
     using SyntaxExtra<TypeId>::SyntaxExtra;
+    TypeId() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    TypeId(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<TypeId>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    TypeId(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<TypeId>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     AbstractDeclarator abstract_declarator() const;
     TypeSpecifierSeq type_specifier_seq() const;
@@ -6164,12 +10144,40 @@ struct TypeId : SyntaxExtra<TypeId> {
 /* the type-id-list node */
 struct TypeIdList : SyntaxExtra<TypeIdList> {
     using SyntaxExtra<TypeIdList>::SyntaxExtra;
+    TypeIdList() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    TypeIdList(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<TypeIdList>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    TypeIdList(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<TypeIdList>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
 };
 
 /* the type-parameter node */
 struct TypeParameter : SyntaxExtra<TypeParameter> {
     using SyntaxExtra<TypeParameter>::SyntaxExtra;
+    TypeParameter() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    TypeParameter(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<TypeParameter>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    TypeParameter(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<TypeParameter>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     IdExpression id_expression() const;
     TemplateHead template_head() const;
@@ -6180,6 +10188,20 @@ struct TypeParameter : SyntaxExtra<TypeParameter> {
 /* the type-requirement node */
 struct TypeRequirement : SyntaxExtra<TypeRequirement> {
     using SyntaxExtra<TypeRequirement>::SyntaxExtra;
+    TypeRequirement() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    TypeRequirement(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<TypeRequirement>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    TypeRequirement(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<TypeRequirement>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     NestedNameSpecifier nested_name_specifier() const;
     SimpleTemplateId type_name() const;
@@ -6189,6 +10211,19 @@ struct TypeRequirement : SyntaxExtra<TypeRequirement> {
 /* type-specifier: one of clang_atomic_type_specifier, clang_bit_int_type_specifier, clang_type_transformation, decltype_specifier, elaborated_enum_specifier, elaborated_type_specifier, placeholder_type_specifier, simple_template_id, simple_type_specifier, typename_specifier */
 struct TypeSpecifier : SyntaxExtra<TypeSpecifier> {
     using SyntaxExtra<TypeSpecifier>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    TypeSpecifier(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<TypeSpecifier>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    TypeSpecifier(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<TypeSpecifier>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     TypeSpecifier() = default;
     template <class V>
         requires syntax_converts<V, TypeSpecifier>
@@ -6207,6 +10242,20 @@ struct TypeSpecifier : SyntaxExtra<TypeSpecifier> {
 /* the type-specifier-seq node */
 struct TypeSpecifierSeq : SyntaxExtra<TypeSpecifierSeq> {
     using SyntaxExtra<TypeSpecifierSeq>::SyntaxExtra;
+    TypeSpecifierSeq() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    TypeSpecifierSeq(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<TypeSpecifierSeq>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    TypeSpecifierSeq(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<TypeSpecifierSeq>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     AttributeSpecifierSeq attribute_specifier_seq() const;
     TypeSpecifier type_specifier() const;
@@ -6217,6 +10266,20 @@ struct TypeSpecifierSeq : SyntaxExtra<TypeSpecifierSeq> {
 /* the typename-specifier node */
 struct TypenameSpecifier : SyntaxExtra<TypenameSpecifier> {
     using SyntaxExtra<TypenameSpecifier>::SyntaxExtra;
+    TypenameSpecifier() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    TypenameSpecifier(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<TypenameSpecifier>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    TypenameSpecifier(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<TypenameSpecifier>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     NestedNameSpecifier nested_name_specifier() const;
     SimpleTemplateId simple_template_id() const;
@@ -6226,6 +10289,19 @@ struct TypenameSpecifier : SyntaxExtra<TypenameSpecifier> {
 /* unary-expression: one of await_expression, clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, conversion_function_id, delete_expression, fold_expression, gnu_compound_literal, gnu_extension_expression, gnu_label_address, gnu_offsetof_expression, lambda_expression, literal_operator_id, new_expression, noexcept_expression, operator_function_id, postfix_expression, primary_expression, qualified_id, requires_expression, simple_template_id, template_id, unary_expression, unqualified_id */
 struct UnaryExpression : SyntaxExtra<UnaryExpression> {
     using SyntaxExtra<UnaryExpression>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    UnaryExpression(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<UnaryExpression>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    UnaryExpression(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<UnaryExpression>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     UnaryExpression() = default;
     template <class V>
         requires syntax_converts<V, UnaryExpression>
@@ -6244,6 +10320,20 @@ struct UnaryExpression : SyntaxExtra<UnaryExpression> {
 /* the unary-expression node */
 struct UnaryOperation : SyntaxExtra<UnaryOperation> {
     using SyntaxExtra<UnaryOperation>::SyntaxExtra;
+    UnaryOperation() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    UnaryOperation(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<UnaryOperation>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    UnaryOperation(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<UnaryOperation>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     TypeId type_id() const;
     SyntaxElement identifier() const;
@@ -6252,6 +10342,20 @@ struct UnaryOperation : SyntaxExtra<UnaryOperation> {
 /* the unnamed-namespace-definition node */
 struct UnnamedNamespaceDefinition : SyntaxExtra<UnnamedNamespaceDefinition> {
     using SyntaxExtra<UnnamedNamespaceDefinition>::SyntaxExtra;
+    UnnamedNamespaceDefinition() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    UnnamedNamespaceDefinition(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<UnnamedNamespaceDefinition>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    UnnamedNamespaceDefinition(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<UnnamedNamespaceDefinition>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     NamespaceBody namespace_body() const;
 };
@@ -6259,12 +10363,39 @@ struct UnnamedNamespaceDefinition : SyntaxExtra<UnnamedNamespaceDefinition> {
 /* the (unparsed) node */
 struct Unparsed : SyntaxExtra<Unparsed> {
     using SyntaxExtra<Unparsed>::SyntaxExtra;
+    Unparsed() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    Unparsed(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<Unparsed>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    Unparsed(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<Unparsed>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
 };
 
 /* unqualified-id: one of conversion_function_id, literal_operator_id, operator_function_id, simple_template_id, template_id, unqualified_id */
 struct UnqualifiedId : SyntaxExtra<UnqualifiedId> {
     using SyntaxExtra<UnqualifiedId>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    UnqualifiedId(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<UnqualifiedId>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    UnqualifiedId(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<UnqualifiedId>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     UnqualifiedId() = default;
     template <class V>
         requires syntax_converts<V, UnqualifiedId>
@@ -6283,6 +10414,20 @@ struct UnqualifiedId : SyntaxExtra<UnqualifiedId> {
 /* the using-declaration node */
 struct UsingDeclaration : SyntaxExtra<UsingDeclaration> {
     using SyntaxExtra<UsingDeclaration>::SyntaxExtra;
+    UsingDeclaration() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    UsingDeclaration(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<UsingDeclaration>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    UsingDeclaration(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<UsingDeclaration>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     UsingDeclaratorList using_declarator_list() const;
 };
@@ -6290,6 +10435,20 @@ struct UsingDeclaration : SyntaxExtra<UsingDeclaration> {
 /* the using-declarator node */
 struct UsingDeclarator : SyntaxExtra<UsingDeclarator> {
     using SyntaxExtra<UsingDeclarator>::SyntaxExtra;
+    UsingDeclarator() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    UsingDeclarator(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<UsingDeclarator>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    UsingDeclarator(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<UsingDeclarator>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     NestedNameSpecifier nested_name_specifier() const;
     UnqualifiedId unqualified_id() const;
@@ -6299,6 +10458,19 @@ struct UsingDeclarator : SyntaxExtra<UsingDeclarator> {
 /* using-declarator-list: one of using_declarator, using_declarator_list */
 struct UsingDeclaratorList : SyntaxExtra<UsingDeclaratorList> {
     using SyntaxExtra<UsingDeclaratorList>::SyntaxExtra;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    UsingDeclaratorList(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<UsingDeclaratorList>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    UsingDeclaratorList(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<UsingDeclaratorList>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     UsingDeclaratorList() = default;
     template <class V>
         requires syntax_converts<V, UsingDeclaratorList>
@@ -6317,12 +10489,40 @@ struct UsingDeclaratorList : SyntaxExtra<UsingDeclaratorList> {
 /* the using-declarator-list node */
 struct UsingDeclarators : SyntaxExtra<UsingDeclarators> {
     using SyntaxExtra<UsingDeclarators>::SyntaxExtra;
+    UsingDeclarators() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    UsingDeclarators(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<UsingDeclarators>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    UsingDeclarators(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<UsingDeclarators>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
 };
 
 /* the using-directive node */
 struct UsingDirective : SyntaxExtra<UsingDirective> {
     using SyntaxExtra<UsingDirective>::SyntaxExtra;
+    UsingDirective() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    UsingDirective(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<UsingDirective>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    UsingDirective(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<UsingDirective>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     AttributeSpecifierSeq attribute_specifier_seq() const;
     NestedNameSpecifier nested_name_specifier() const;
@@ -6332,6 +10532,20 @@ struct UsingDirective : SyntaxExtra<UsingDirective> {
 /* the using-enum-declaration node */
 struct UsingEnumDeclaration : SyntaxExtra<UsingEnumDeclaration> {
     using SyntaxExtra<UsingEnumDeclaration>::SyntaxExtra;
+    UsingEnumDeclaration() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    UsingEnumDeclaration(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<UsingEnumDeclaration>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    UsingEnumDeclaration(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<UsingEnumDeclaration>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     ElaboratedEnumSpecifier elaborated_enum_specifier() const;
 };
@@ -6339,6 +10553,20 @@ struct UsingEnumDeclaration : SyntaxExtra<UsingEnumDeclaration> {
 /* the virt-specifier-seq node */
 struct VirtSpecifierSeq : SyntaxExtra<VirtSpecifierSeq> {
     using SyntaxExtra<VirtSpecifierSeq>::SyntaxExtra;
+    VirtSpecifierSeq() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    VirtSpecifierSeq(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<VirtSpecifierSeq>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    VirtSpecifierSeq(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<VirtSpecifierSeq>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     VirtSpecifierSeq virt_specifier_seq() const;
 };
@@ -6346,6 +10574,20 @@ struct VirtSpecifierSeq : SyntaxExtra<VirtSpecifierSeq> {
 /* the yield-expression node */
 struct YieldExpression : SyntaxExtra<YieldExpression> {
     using SyntaxExtra<YieldExpression>::SyntaxExtra;
+    YieldExpression() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    YieldExpression(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<YieldExpression>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    YieldExpression(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<YieldExpression>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
     static bool accepts(syntax_kind k);
     AssignmentExpression assignment_expression() const;
     BracedInitList braced_init_list() const;

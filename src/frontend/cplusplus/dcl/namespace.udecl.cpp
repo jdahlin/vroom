@@ -149,9 +149,8 @@ analysis_result semantic_analysis::using_declaration(UsingDeclaration n)
             }
             if ((g.flags & ~gnu_using_if_exists) || g.aligned || g.section)
                 return worse(result, not_supported(n, "namespace.udecl"));
-            result =
-                worse(result, using_declarator(d.using_declarator(),
-                                               g.flags & gnu_using_if_exists));
+            result = worse(result,
+                           using_declarator(d, g.flags & gnu_using_if_exists));
             any = true;
         } else if (syntax(d).is(syntax_kind::gnu_attribute_specifier)) {
             continue; /* the using-declarator's before it */
@@ -187,8 +186,7 @@ analysis_result semantic_analysis::using_declarator(UsingDeclarator n,
            expansion */
         return not_supported(n, "namespace.udecl");
     nominated_scope q;
-    analysis_result r =
-        nested_name_specifier(node[0].nested_name_specifier(), q);
+    analysis_result r = nested_name_specifier(node[0], q);
     if (r != analysis_result::well_formed)
         return r;
     token_index t = node[1].token();

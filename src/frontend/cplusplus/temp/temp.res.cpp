@@ -106,8 +106,7 @@ analysis_result semantic_analysis::typename_type(node_index n, type_index &type,
            is written; an instantiation looks the template up in the
            substituted class */
         nominated_scope scope;
-        analysis_result r =
-            nested_name_specifier(node[1].nested_name_specifier(), scope, true);
+        analysis_result r = nested_name_specifier(node[1], scope, true);
         if (r != analysis_result::well_formed)
             return r;
         if (scope.dependent) {
@@ -125,8 +124,7 @@ analysis_result semantic_analysis::typename_type(node_index n, type_index &type,
     token_index t = node[2].token();
     uint32_t name = tokens.identifier(t);
     nominated_scope scope;
-    analysis_result r =
-        nested_name_specifier(node[1].nested_name_specifier(), scope, true);
+    analysis_result r = nested_name_specifier(node[1], scope, true);
     if (r != analysis_result::well_formed)
         return r;
     if (scope.dependent) {

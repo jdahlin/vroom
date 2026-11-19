@@ -165,8 +165,7 @@ analysis_result semantic_analysis::pointer_operator(node_index op,
                cv-qualifier-seq pointer to member of class
                nested-name-specifier of type T"." */
             nominated_scope scope;
-            analysis_result r =
-                nested_name_specifier(c.nested_name_specifier(), scope);
+            analysis_result r = nested_name_specifier(c, scope);
             if (r != analysis_result::well_formed)
                 return r;
             if (!scope.global && !scope.dependent &&
@@ -730,8 +729,7 @@ analysis_result semantic_analysis::declarator_qualifier(node_index nested,
                                                         declarator_meaning &m)
 {
     nominated_scope scope;
-    analysis_result r =
-        nested_name_specifier(syntax(nested).nested_name_specifier(), scope);
+    analysis_result r = nested_name_specifier(syntax(nested), scope);
     if (r != analysis_result::well_formed)
         return r;
     if (at_block_scope() || defining_class || function_state.active)
@@ -832,9 +830,9 @@ analysis_result semantic_analysis::declarator(node_index declaration,
         return declarator(declaration, e[0], type, m);
     }
     case syntax_kind::operator_function_id:
-        return operator_function_id(syntax(n).operator_function_id(), m);
+        return operator_function_id(syntax(n), m);
     case syntax_kind::literal_operator_id:
-        return literal_operator_id(syntax(n).literal_operator_id(), m);
+        return literal_operator_id(syntax(n), m);
     case syntax_kind::conversion_function_id:
         /* [class.conv.fct]/1: the type is the declaration's
            (conversion_function_member) */

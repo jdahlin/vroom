@@ -469,8 +469,7 @@ analysis_result semantic_analysis::named_namespace(node_index at,
     lookup_result found;
     if (qualifier) {
         nominated_scope scope;
-        analysis_result r = nested_name_specifier(
-            syntax(qualifier).nested_name_specifier(), scope);
+        analysis_result r = nested_name_specifier(syntax(qualifier), scope);
         if (r != analysis_result::well_formed)
             return r;
         if (!is_namespace(scope.entity))

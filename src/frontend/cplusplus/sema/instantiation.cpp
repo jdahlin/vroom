@@ -231,18 +231,17 @@ analysis_result semantic_analysis::instantiate_definition(node_index at,
         last_declared = instantiations[index].specialization;
         if (r == analysis_result::well_formed)
             r = special_member_body(
-                d_syntax.function_definition(),
-                d_syntax[d_skip + specifiers + 1 +
-                         (static_cast<bool>(
-                             trailing_constraint(ft.declaration)))]
-                    .function_body());
+                d_syntax, d_syntax[d_skip + specifiers + 1 +
+                                   (static_cast<bool>(
+                                       trailing_constraint(ft.declaration)))]
+                              .function_body());
     } else if (syntax(ft.definition).is(syntax_kind::lambda_expression)) {
         /* a generic lambda's ([expr.prim.lambda.closure]/3) */
         qualified_type type;
         r = lambda_specialization(ft.definition, true, type,
                                   instantiations[index].specialization);
     } else {
-        r = function_definition(syntax(ft.definition).function_definition());
+        r = function_definition(syntax(ft.definition));
     }
     member_template_declarator(0);
     instantiations[index].defining = false;
@@ -437,8 +436,7 @@ analysis_result semantic_analysis::define_class_instantiation(node_index at,
     class_instantiating = index + 1;
     postpone_member_bodies = context.defining_class != 0;
     type_index type = 0;
-    analysis_result r =
-        class_specifier(syntax(definition.definition).class_specifier(), type);
+    analysis_result r = class_specifier(syntax(definition.definition), type);
     postpone_member_bodies = false;
     leave_instantiation(context);
     instantiations[index].defining = false;

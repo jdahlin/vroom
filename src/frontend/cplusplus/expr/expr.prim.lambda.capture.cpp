@@ -212,7 +212,7 @@ analysis_result semantic_analysis::lambda_introducer(LambdaIntroducer n,
                 return not_supported(n, "expr.prim.lambda.capture");
             }
         } else if (syntax(c).is(syntax_kind::init_capture)) {
-            r = init_capture(c.init_capture(), l, record);
+            r = init_capture(c, l, record);
             if (r != analysis_result::well_formed)
                 return r;
             lambda_captures.append(record);
