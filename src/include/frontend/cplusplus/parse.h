@@ -243,6 +243,9 @@ enum class scope_kind : uint8_t {
     namespace_,
     block,
     class_,
+    /* [basic.scope.enum]: an enumeration's enumerators, found by E::name
+       ([basic.lookup.qual]/1) */
+    enumeration,
     function_prototype,
     template_parameter,
 };
@@ -927,7 +930,7 @@ class parser
     node_index opaque_enum_declaration();
     /* enum-specifier or elaborated-enum-specifier in a decl-specifier-seq */
     node_index enum_specifier_or_elaborated(decl_specifier_facts &facts);
-    node_index enumerator_list(bool scoped);
+    node_index enumerator_list(bool scoped, scope_index region);
     node_index using_enum_declaration();
 
     /* ---- [namespace.udecl], [dcl.asm] */
