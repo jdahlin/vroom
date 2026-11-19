@@ -464,7 +464,13 @@ bool semantic_analysis::assigned_bitwise(entity_index c)
     /* [class.copy.assign]/9.1: a class with virtual functions: its
        implicit copy assignment is not trivial (it keeps the virtual table
        pointer): not analysed */
-    if (entity_table[c].dynamic)
+    /* [class.copy.assign]/2: a declared move constructor or move
+       assignment operator makes the implicit copy assignment deleted:
+       not analysed */
+    const entity &x = entity_table[c];
+    if (x.dynamic ||
+        ((x.defaulted_move_constructor || x.defaulted_move_assignment) &&
+         !x.defaulted_copy_assignment))
         return false;
     lookup_result found = lookup_qualified(
         c, operator_name(preprocessing_op_or_punc::EQUAL), lookup_filter::any);

@@ -146,12 +146,42 @@ def tests():
     return found
 
 
-def run(cmd, cwd, timeout=TIMEOUT):
-    try:
-        r = subprocess.run(cmd, cwd=cwd, capture_output=True, timeout=timeout)
-        return r.returncode, r.stdout.decode('utf-8', 'replace'), r.stderr.decode('utf-8', 'replace')
-    except subprocess.TimeoutExpired:
-        return 'timeout', '', ''
+# the most a command may write to stdout: clang's -ast-dump=json of a test
+# whose instantiations recurse (CXX/drs/cwg1736.cpp) runs to tens of GB
+OUTPUT_LIMIT = 256 << 20
+
+
+def run(cmd, cwd, timeout=TIMEOUT, limit=OUTPUT_LIMIT):
+    """(returncode, stdout, stderr); ('timeout', '', '') past the timeout,
+    ('too large', '', '') when stdout passes limit bytes"""
+    with tempfile.TemporaryFile() as err:
+        p = subprocess.Popen(cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=err)
+        expired = threading.Event()
+
+        def expire():
+            expired.set()
+            p.kill()
+        killer = threading.Timer(timeout, expire)
+        killer.start()
+        chunks, size = [], 0
+        try:
+            while chunk := p.stdout.read(1 << 20):
+                size += len(chunk)
+                if size > limit:
+                    p.kill()
+                    break
+                chunks.append(chunk)
+            p.wait()
+        finally:
+            killer.cancel()
+            p.stdout.close()
+        if expired.is_set():
+            return 'timeout', '', ''
+        if size > limit:
+            return 'too large', '', ''
+        err.seek(0)
+        return (p.returncode, b''.join(chunks).decode('utf-8', 'replace'),
+                err.read().decode('utf-8', 'replace'))
 
 
 LOCATION = re.compile(r'<invalid sloc>|\bline:(\d+):(\d+)|\bcol:(\d+)|((?:<[^<>]+>|[^\s<>,()\'"]+)):(\d+):(\d+)')

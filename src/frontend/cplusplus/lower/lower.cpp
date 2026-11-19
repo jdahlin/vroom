@@ -6261,11 +6261,15 @@ bool c_lowering::translation_unit()
             analysis.entity_table[d->key_function].defined && !vtable(k, 0))
             return false;
     }
-    /* the member functions defined, in the order of their definitions */
+    /* the member functions defined, in the order of their definitions,
+       and the functions friend declarations define ([class.friend]/6) */
     for (const semantic_analysis::definition_record &d : analysis.definitions) {
         const entity &x = analysis.entity_table[d.entity];
-        if (x.kind != entity_kind::function || !x.enclosing ||
-            analysis.entity_table[x.enclosing].kind != entity_kind::class_type)
+        bool friend_ = analysis.defined_by_friend(d.entity);
+        if (x.kind != entity_kind::function ||
+            (!friend_ &&
+             (!x.enclosing || analysis.entity_table[x.enclosing].kind !=
+                                  entity_kind::class_type)))
             continue;
         if (analysis.explicitly_instantiated(d.entity) ==
             instantiation_kind::declaration)

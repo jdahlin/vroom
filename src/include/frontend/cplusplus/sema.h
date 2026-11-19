@@ -416,11 +416,21 @@ struct entity {
     /* a class: its default constructor is declared = default
        ([dcl.fct.def.default]), declared as the implicit one is */
     bool defaulted_default_constructor = false;
+    /* a class: its implicit copy constructor is deleted, a subobject's
+       being deleted or not accessible ([class.copy.ctor]/10.1) */
+    bool implicit_copy_deleted = false;
     /* ... and explicit: explicit X() = default ([class.conv.ctor]/2: a
        copy-initialization does not consider it) */
     bool explicit_default_constructor = false;
     /* X& operator=(const X&) = default (defaulted_copy_assignment) */
     bool defaulted_copy_assignment = false;
+    /* X(X&&) = default and X& operator=(X&&) = default, trivial
+       ([class.copy.ctor]/11, [class.copy.assign]/9): no entity; the move
+       constructor copies the bytes (construct) */
+    bool defaulted_move_constructor = false;
+    /* X(const X&) = default: no entity when trivial */
+    bool defaulted_copy_constructor = false;
+    bool defaulted_move_assignment = false;
     /* [class.default.ctor]/2: the implicit default constructor is deleted
        (a subobject without a usable default constructor) */
     bool implicit_default_deleted = false;
@@ -1417,6 +1427,7 @@ class semantic_analysis
     constness literal_class(entity_index c) const;
     bool trivial_defaulted_default_constructor(entity_index c) const;
     bool copies_bytes(entity_index c) const;
+    bool trivial_special_members(entity_index c) const;
     bool is_copy_constructor(entity_index c, entity_index k) const;
     bool declares_move_constructor(entity_index c) const;
     /* a user-declared copy constructor whose parameter is an lvalue reference
@@ -1797,10 +1808,25 @@ class semantic_analysis
         uint32_t name = 0;
     };
     owned_array<friend_record> friends;
-    analysis_result friend_declaration(entity_index c, node_index n);
+    analysis_result friend_declaration(entity_index c, node_index n,
+                                       owned_array<node_index> &bodies);
     analysis_result friend_class(entity_index c, node_index n,
                                  syntax_child type);
-    analysis_result friend_function(entity_index c, node_index n);
+    analysis_result friend_function(entity_index c, node_index n,
+                                    owned_array<node_index> &bodies);
+    /* [class.friend]/6: the functions friend declarations define */
+    struct friend_definition {
+        node_index definition = 0;
+        entity_index function = 0, granting = 0;
+    };
+    owned_array<friend_definition> friend_definitions;
+    entity_index friend_defined_by(node_index n) const;
+    /* the scope unqualified lookup goes to after s: its enclosing one, or
+       for a friend function defined in a class, the class
+       ([basic.lookup.unqual]/1) */
+    entity_index lexical_parent(entity_index s) const;
+    analysis_result friend_function_body(entity_index c, node_index n,
+                                         entity_index f);
     bool friend_names(const friend_record &f, entity_index e) const;
     bool grants(entity_index k, entity_index e) const;
     bool in_friend_of(entity_index k) const;
@@ -3871,6 +3897,9 @@ class semantic_analysis
             return 0;
         return a.count + 1;
     }
+    /* whether function f is defined by a friend declaration in a class
+       ([class.friend]/6) */
+    bool defined_by_friend(entity_index f) const;
     /* whether element of argument i is a template's own pack expanded,
        not bound to elements (res<A...> in its own declaration): the
        pack parameter's entity (a type parameter's typedef-name), 0 if
