@@ -2036,6 +2036,7 @@ template <> inline constexpr bool syntax_converts<DeductionGuide, MemberDeclarat
 template <> inline constexpr bool syntax_converts<EmptyDeclaration, MemberDeclaration> = true;
 template <> inline constexpr bool syntax_converts<ExplicitSpecialization, MemberDeclaration> = true;
 template <> inline constexpr bool syntax_converts<FunctionDefinition, MemberDeclaration> = true;
+template <> inline constexpr bool syntax_converts<GnuExtensionDeclaration, MemberDeclaration> = true;
 template <> inline constexpr bool syntax_converts<MemberSimpleDeclaration, MemberDeclaration> = true;
 template <> inline constexpr bool syntax_converts<OpaqueEnumDeclaration, MemberDeclaration> = true;
 template <> inline constexpr bool syntax_converts<StaticAssertDeclaration, MemberDeclaration> = true;
@@ -5020,7 +5021,7 @@ struct MemInitializers : SyntaxExtra<MemInitializers> {
     static bool accepts(syntax_kind k);
 };
 
-/* member-declaration: one of alias_declaration, deduction_guide, empty_declaration, explicit_specialization, function_definition, member_declaration, opaque_enum_declaration, static_assert_declaration, template_declaration, using_declaration, using_enum_declaration */
+/* member-declaration: one of alias_declaration, deduction_guide, empty_declaration, explicit_specialization, function_definition, gnu_extension_declaration, member_declaration, opaque_enum_declaration, static_assert_declaration, template_declaration, using_declaration, using_enum_declaration */
 struct MemberDeclaration : SyntaxExtra<MemberDeclaration> {
     using SyntaxExtra<MemberDeclaration>::SyntaxExtra;
     MemberDeclaration() = default;
@@ -8679,7 +8680,7 @@ inline bool MemInitializers::accepts(syntax_kind k)
 
 inline bool MemberDeclaration::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0x2080038u, 0x2040000000u, 0xc0010004000u, 0x0u};
+    static const uint64_t kinds[] = {0x2080038u, 0x2040000000u, 0xc0010004000u, 0x8u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -11262,7 +11263,7 @@ template <class S, class F> decltype(auto) syntax_visit(const S &s, F &f)
         break;
     case syntax_kind::gnu_extension_declaration:
         if constexpr (syntax_converts<GnuExtensionDeclaration, S>)
-            return syntax_call<BlockDeclaration, DeclarationStatement, Statement, StatementSeq, Declaration, DeclarationSeq, NamespaceBody>(f, GnuExtensionDeclaration(s.context(), s.index()));
+            return syntax_call<BlockDeclaration, DeclarationStatement, MemberDeclaration, Statement, StatementSeq, Declaration, DeclarationSeq, NamespaceBody>(f, GnuExtensionDeclaration(s.context(), s.index()));
         break;
     case syntax_kind::gnu_extension_expression:
         if constexpr (syntax_converts<GnuExtensionExpression, S>)
@@ -13026,7 +13027,7 @@ static const uint64_t syntax_allowed_children[][4] = {
     {0x0u, 0x40800000000u, 0x40000010001c0000u, 0xc0000u}, /* class_head */
     {0x4000000u, 0x0u, 0x1000000000u, 0xc0000u}, /* class_head_name */
     {0x2080038u, 0x3040000000u, 0xe0010004000u, 0xc0008u}, /* member_specification */
-    {0x1a0800b8u, 0x1c00e0400000f0u, 0x40000c30901c4000u, 0xc0000u}, /* member_declaration */
+    {0x1a0800b8u, 0x1c00e0400000f0u, 0x40000c30901c4000u, 0xc0008u}, /* member_declaration */
     {0x18000000u, 0x1c00c0000000f0u, 0x3080000000u, 0xc0000u}, /* member_declarator_list */
     {0xfffe0813f8000000u, 0x1c0300030000f0u, 0x40300030801c0000u, 0xcec70u}, /* member_declarator */
     {0x0u, 0x10000000000u, 0x0u, 0xc0000u}, /* virt_specifier_seq */

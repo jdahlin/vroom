@@ -2871,7 +2871,11 @@ class semantic_analysis
                                  const declarator_meaning &m, uint32_t allowed,
                                  const char *subclause, uint32_t &gnu_flags,
                                  token_index &abi_tag);
-    analysis_result member_declaration(entity_index c, syntax_child n,
+    analysis_result member_declaration(entity_index c, MemberDeclaration m,
+                                       uint8_t access,
+                                       owned_array<node_index> &bodies);
+    analysis_result
+    member_declaration_with_specifiers(entity_index c, SyntaxRef node,
                                        uint8_t access,
                                        owned_array<node_index> &bodies);
     analysis_result member_declarators(entity_index c, node_index n,

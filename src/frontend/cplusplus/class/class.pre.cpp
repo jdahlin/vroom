@@ -577,7 +577,15 @@ analysis_result semantic_analysis::class_definition(node_index n,
             result = worse(result, not_supported(n, "class.mem"));
             continue;
         }
-        result = worse(result, member_declaration(c, member, access, bodies));
+        auto declaration = member.member_declaration();
+        if (!declaration) {
+            /* a node the grammar does not place here (unparsed, an
+               explicit instantiation kept as an error) */
+            result = worse(result, not_supported(member.index()));
+            continue;
+        }
+        result =
+            worse(result, member_declaration(c, declaration, access, bodies));
     }
 
     /* [class.mem]/7: complete at the closing }, where its bases and
@@ -1054,47 +1062,67 @@ bool semantic_analysis::accessible(entity_index member,
  * end of the class (bodies).
  */
 analysis_result
-semantic_analysis::member_declaration(entity_index c, syntax_child member,
+semantic_analysis::member_declaration(entity_index c, MemberDeclaration m,
                                       uint8_t access,
                                       owned_array<node_index> &bodies)
 {
-    node_index n = member.index();
-    auto node = syntax(n);
-    if (node.is(syntax_kind::gnu_extension_declaration))
-        /* [ext:gnu_extension_keyword]: __extension__ changes no meaning */
-        return member_declaration(c, node[1], access, bodies);
-    if (node.is(syntax_kind::empty_declaration))
-        return analysis_result::well_formed;
-    if (node.is(syntax_kind::using_declaration)) {
-        /* [namespace.udecl]/2: a using-declaration is a
-           member-declaration */
-        declaration_access = access;
-        analysis_result r = using_declaration(n);
-        declaration_access = 0;
-        return r;
-    }
-    if (node.is(syntax_kind::alias_declaration)) {
-        /* [dcl.typedef]/2: "A typedef-name can also be introduced by an
-           alias-declaration", a member-declaration ([class.mem]/1) */
-        qualified_type type;
-        analysis_result r = alias_type(n, type);
-        if (r != analysis_result::well_formed)
+    return m.visit(Overloaded{
+        [&](GnuExtensionDeclaration x) {
+            /* [ext:gnu_extension_keyword]: __extension__ changes no
+               meaning */
+            return member_declaration(c, x[1].member_declaration(), access,
+                                      bodies);
+        },
+        [&](EmptyDeclaration) { return analysis_result::well_formed; },
+        [&](UsingDeclaration u) {
+            /* [namespace.udecl]/2: a using-declaration is a
+               member-declaration */
+            declaration_access = access;
+            analysis_result r = using_declaration(u);
+            declaration_access = 0;
             return r;
-        specified s;
-        s.typedef_ = true;
-        s.type = type;
-        s.has_type = true;
-        return member_typedef(c, n, node.first_token() + 1, type, s,
-                              declarator_meaning(), access);
-    }
-    if (node.is(syntax_kind::template_declaration))
-        return member_template_declaration(c, n, access);
-    if (node.is(syntax_kind::static_assert_declaration))
-        /* [class.mem]/1: a member-declaration */
-        return static_assert_declaration(n);
-    if (!node.is(syntax_kind::member_declaration) &&
-        !node.is(syntax_kind::function_definition))
-        return not_supported(n);
+        },
+        [&](AliasDeclaration a) {
+            /* [dcl.typedef]/2: "A typedef-name can also be introduced by
+               an alias-declaration", a member-declaration ([class.mem]/1) */
+            qualified_type type;
+            analysis_result r = alias_type(a, type);
+            if (r != analysis_result::well_formed)
+                return r;
+            specified s;
+            s.typedef_ = true;
+            s.type = type;
+            s.has_type = true;
+            return member_typedef(c, a, a.first_token() + 1, type, s,
+                                  declarator_meaning(), access);
+        },
+        [&](TemplateDeclaration t) {
+            return member_template_declaration(c, t, access);
+        },
+        [&](StaticAssertDeclaration s) {
+            /* [class.mem]/1: a member-declaration */
+            return static_assert_declaration(s);
+        },
+        [&](FunctionDefinition f) {
+            return member_declaration_with_specifiers(c, f, access, bodies);
+        },
+        [&](MemberSimpleDeclaration d) {
+            return member_declaration_with_specifiers(c, d, access, bodies);
+        },
+        [&](MemberDeclaration other) { return not_supported(other); }});
+}
+
+/*
+ * A member-declaration that is a simple declaration or a
+ * function-definition, with the decl-specifier-seq and the declarators it
+ * has: a constructor, a destructor, a conversion function, a friend, or a
+ * member of any other kind.
+ */
+analysis_result semantic_analysis::member_declaration_with_specifiers(
+    entity_index c, SyntaxRef node, uint8_t access,
+    owned_array<node_index> &bodies)
+{
+    node_index n = node.index();
     /* [ext:gnu_attributes] before it all (libc++'s _LIBCPP_HIDE_FROM_ABI
        friend ...) */
     uint32_t leading = leading_gnu_attributes(n);

@@ -135,6 +135,7 @@ ALWAYS_NODE = {
 EXTRA_MEMBERS = {
     'declaration': ['gnu_extension_declaration'],
     'block-declaration': ['gnu_extension_declaration'],
+    'member-declaration': ['gnu_extension_declaration'],
     'unary-expression': ['gnu_extension_expression'],
 }
 
