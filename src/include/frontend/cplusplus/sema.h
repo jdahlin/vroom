@@ -3749,6 +3749,11 @@ class semantic_analysis
        (of value category c) adjusted for deduce_type */
     void adjust_call_deduction(qualified_type &p, qualified_type &a,
                                value_category c);
+    /* [temp.deduct.call]/4.3: P a simple-template-id, from a base class
+       of the class A; 1 deduced, 0 failed, -1 not known */
+    int deduce_from_base(qualified_type p, qualified_type a,
+                         owned_array<template_argument> &deduced,
+                         owned_array<bool> &set);
     bool deduce_bound(entity_index parameter, uint64_t bound,
                       owned_array<template_argument> &deduced,
                       owned_array<bool> &set);
