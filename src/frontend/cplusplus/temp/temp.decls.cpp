@@ -804,8 +804,16 @@ analysis_result semantic_analysis::alias_template_definition(node_index n,
     if (r != analysis_result::well_formed)
         return r;
     uint32_t name = tokens.identifier(tree[alias].first_token + 1);
-    if (entity_table.find(outer, name))
-        return not_supported(n, "temp.alias");
+    if (entity_index prior = entity_table.find(outer, name)) {
+        /* a redeclaration of the same tokens (libc++'s __swap_result_t in
+           two headers), as clang accepts it; [temp.alias] has no rule for
+           one that differs */
+        uint32_t same = alias_template_of(prior);
+        if (!same || !same_tokens(function_templates[same - 1].declaration, n))
+            return not_supported(n, "temp.alias");
+        entity_table.add_declaration(function_templates[same - 1].entity, n);
+        return analysis_result::well_formed;
+    }
     uint32_t index = 0, first = 0;
     entity_index scope = 0;
     r = template_parameter_scope(n, parameters, outer, name, index, scope,

@@ -235,7 +235,13 @@ bool semantic_analysis::same_constraints(node_index a, node_index b)
     if (x.is_token() || y.is_token())
         return x.is_token() && y.is_token() &&
                same_token_spelling(x.index(), y.index());
-    const syntax_node &p = tree[x.index()], &q = tree[y.index()];
+    return same_tokens(x.index(), y.index());
+}
+
+/* whether nodes a and b are the same tokens, spelled the same */
+bool semantic_analysis::same_tokens(node_index a, node_index b)
+{
+    const syntax_node &p = tree[a], &q = tree[b];
     if (p.end_token - p.first_token != q.end_token - q.first_token)
         return false;
     for (token_index i = 0; i < p.end_token - p.first_token; i++)

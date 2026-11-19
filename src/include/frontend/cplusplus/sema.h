@@ -3345,6 +3345,7 @@ class semantic_analysis
                       bool &satisfied);
     bool same_constraints(node_index a, node_index b);
     bool same_token_spelling(token_index a, token_index b);
+    bool same_tokens(node_index a, node_index b);
     /* [temp.deduct]/5: whether the function template's constraints are
        satisfied by the arguments deduced */
     analysis_result

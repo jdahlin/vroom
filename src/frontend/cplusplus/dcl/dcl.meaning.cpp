@@ -384,7 +384,8 @@ token_index semantic_analysis::declarator_id(syntax_child d) const
 }
 
 /* whether a template-declaration's innermost declaration is a
-   function-definition or a simple-declaration with declarators */
+   function-definition or a simple-declaration with declarators (a list,
+   or the one declarator of a function template's declaration) */
 static bool declares_by_declarator(const syntax_tree &tree, node_index n)
 {
     while ((tree[n].kind == syntax_kind::template_declaration ||
@@ -398,7 +399,10 @@ static bool declares_by_declarator(const syntax_tree &tree, node_index n)
         return false;
     for (uint32_t i = 0; i < tree[n].child_count; i++)
         if (syntax_is(tree, tree.children(n)[i],
-                      syntax_kind::init_declarator_list))
+                      syntax_kind::init_declarator_list) ||
+            syntax_is(tree, tree.children(n)[i],
+                      syntax_kind::noptr_declarator) ||
+            syntax_is(tree, tree.children(n)[i], syntax_kind::ptr_declarator))
             return true;
     return false;
 }
