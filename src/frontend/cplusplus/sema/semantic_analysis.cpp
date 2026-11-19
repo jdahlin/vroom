@@ -154,6 +154,9 @@ analysis_result semantic_analysis::declaration(node_index n)
 analysis_result semantic_analysis::declaration_by_kind(node_index n)
 {
     switch (tree[n].kind) {
+    case syntax_kind::gnu_extension_declaration:
+        /* [ext:gnu_extension_keyword]: __extension__ changes no meaning */
+        return declaration_by_kind(tree.children(n)[1].index());
     case syntax_kind::empty_declaration:
         return empty_declaration(n);
     case syntax_kind::static_assert_declaration:

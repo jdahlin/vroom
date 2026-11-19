@@ -484,6 +484,9 @@ analysis_result semantic_analysis::statement(syntax_child s, uint32_t &built)
         return not_supported(current_declaration, "stmt.pre");
     node_index n = s.index();
     switch (tree[n].kind) {
+    case syntax_kind::gnu_extension_declaration:
+        /* [ext:gnu_extension_keyword]: __extension__ changes no meaning */
+        return statement(tree.children(n)[1], built);
     case syntax_kind::compound_statement:
         return compound_statement(n, 0, built);
     case syntax_kind::expression_statement:
