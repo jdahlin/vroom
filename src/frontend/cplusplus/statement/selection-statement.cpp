@@ -101,8 +101,7 @@ analysis_result semantic_analysis::selection_statement(SelectionStatement n,
         !n[1].is(preprocessing_op_or_punc::LEFT_PARENTHESIS))
         /* if constexpr, if consteval */
         return not_supported(n, "stmt.if");
-    bool is_switch =
-        p.keyword_of(tokens[n[0].token()]) == standard_keyword::switch_;
+    bool is_switch = n[0].keyword() == standard_keyword::switch_;
     statement_parts parts;
     uint32_t i = 2;
     owned_array<SyntaxElement> inside;

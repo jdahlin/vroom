@@ -505,7 +505,7 @@ void semantic_analysis::hold_names(SyntaxRef declaration)
                 SyntaxElement c = x[i];
                 if (!c.is_token())
                     work.append(c);
-                else if (tokens[c.token()].kind == token_kind::identifier &&
+                else if (c.is_identifier() &&
                          (x.is(syntax_kind::using_declarator) ||
                           (x == declaration && i == 1)))
                     ids.append(c.token());

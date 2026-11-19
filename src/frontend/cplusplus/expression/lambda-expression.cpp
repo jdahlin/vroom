@@ -542,7 +542,7 @@ semantic_analysis::lambda_call_type(SyntaxRef n, SyntaxRef d, lambda_context &l,
             for (SyntaxElement sp : specifiers) {
                 standard_keyword kw = standard_keyword::none;
                 if (sp.is_token())
-                    kw = p.keyword_of(tokens[sp.token()]);
+                    kw = sp.keyword();
                 if (kw == standard_keyword::mutable_)
                     l.mutable_ = true;
                 else if (kw == standard_keyword::constexpr_)

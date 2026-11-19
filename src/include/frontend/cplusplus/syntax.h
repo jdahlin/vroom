@@ -333,6 +333,13 @@ class SyntaxElement : public SyntaxRef
         return c.index();
     }
     using SyntaxRef::is;
+    /* the keyword this child is: none for a node or another token */
+    standard_keyword keyword() const
+    {
+        if (!c.is_token())
+            return standard_keyword::none;
+        return syntax_ambient->p.keyword_of(syntax_ambient->tokens[c.index()]);
+    }
     bool is_identifier() const
     {
         return c.is_token() &&

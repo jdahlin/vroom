@@ -30,7 +30,7 @@ semantic_analysis::explicit_specialization(ExplicitSpecialization n)
             only[1].is(syntax_kind::simple_template_id) &&
             d[1].is(preprocessing_op_or_punc::SEMICOLON) &&
             !leading_gnu_attributes(d)) {
-            standard_keyword key = p.keyword_of(tokens[only[0].token()]);
+            standard_keyword key = only[0].keyword();
             if (key == standard_keyword::struct_ ||
                 key == standard_keyword::class_) {
                 owned_array<SyntaxRef> none;
@@ -113,8 +113,8 @@ semantic_analysis::explicit_instantiation(ExplicitInstantiation n)
         auto ec = e;
         if (e.size() != 2 || !ec[0].is_token() ||
             !ec[1].is(syntax_kind::simple_template_id) ||
-            (p.keyword_of(tokens[ec[0].token()]) != standard_keyword::struct_ &&
-             p.keyword_of(tokens[ec[0].token()]) != standard_keyword::class_))
+            (ec[0].keyword() != standard_keyword::struct_ &&
+             ec[0].keyword() != standard_keyword::class_))
             return not_supported(n, "temp.explicit");
         return class_explicit_instantiation(n, ec[1], extern_);
     }

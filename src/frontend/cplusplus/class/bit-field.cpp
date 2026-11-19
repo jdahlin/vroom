@@ -40,8 +40,7 @@ analysis_result semantic_analysis::member_bit_field(entity_index c,
 {
     token_index id = 0;
     uint32_t k = 0;
-    if (k < d.size() && d[k].is_token() &&
-        tokens[d[k].token()].kind == token_kind::identifier)
+    if (k < d.size() && d[k].is_token() && d[k].is_identifier())
         id = d[k++].token();
     if (k + 2 != d.size() || !d[k].is(preprocessing_op_or_punc::COLON))
         /* attributes, a brace-or-equal-initializer */

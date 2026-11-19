@@ -339,7 +339,7 @@ analysis_result semantic_analysis::size_of(SyntaxRef n, bool alignment,
         operand = e.type;
     } else if (!alignment && n.size() == 5 &&
                n[1].is(preprocessing_op_or_punc::ELLIPSIS) && n[3].is_token() &&
-               tokens[n[3].token()].kind == token_kind::identifier) {
+               n[3].is_identifier()) {
         /* [expr.sizeof]/4: "The identifier in a sizeof... expression shall
            name a pack.  The sizeof... operator yields the number of
            elements in the pack ([temp.variadic]).  A sizeof... expression

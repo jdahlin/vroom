@@ -58,7 +58,7 @@ void semantic_analysis::collect_labels(SyntaxElement s)
     if (s.is(syntax_kind::lambda_expression, syntax_kind::class_specifier))
         return;
     if (s.is(syntax_kind::labeled_statement) && s.size() && s[0].is_token() &&
-        tokens[s[0].token()].kind == token_kind::identifier) {
+        s[0].is_identifier()) {
         label_record l;
         l.name = tokens.identifier(s[0].token());
         l.point.at = s[0].token();

@@ -56,7 +56,7 @@ analysis_result semantic_analysis::expression(SyntaxElement e,
        complete declarator ([dcl.decl]) and before its initializer (if
        any)", but the initializer can complete the type (an array's bound),
        so after the declaration the name may have another type */
-    if (e.is_token() && tokens[e.token()].kind == token_kind::identifier) {
+    if (e.is_identifier()) {
         const struct type &named = type_table[m.type.unqualified()];
         if (named.kind == type_kind::array && !named.bound_known)
             x.placeable = false;

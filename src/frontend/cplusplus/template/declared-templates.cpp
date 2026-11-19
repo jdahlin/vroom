@@ -2419,7 +2419,7 @@ semantic_analysis::class_template_declaration(SyntaxRef n, SyntaxRef elaborated)
     if (elaborated.size() != 2 || !elaborated[0].is_token() ||
         !elaborated[1].is_identifier())
         return not_supported(n, "temp.class");
-    standard_keyword key = p.keyword_of(tokens[elaborated[0].token()]);
+    standard_keyword key = elaborated[0].keyword();
     if (key != standard_keyword::class_ && key != standard_keyword::struct_)
         return not_supported(n, "temp.class");
     owned_array<SyntaxRef> parameters;

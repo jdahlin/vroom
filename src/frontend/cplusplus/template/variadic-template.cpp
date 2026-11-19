@@ -73,16 +73,14 @@ bool semantic_analysis::template_parameter_form(
         out.pack = true;
         k++;
     }
-    if (k < p.size() && p[k].is_token() &&
-        tokens[p[k].token()].kind == token_kind::identifier) {
+    if (k < p.size() && p[k].is_token() && p[k].is_identifier()) {
         out.named = true;
         out.id = p[k].token();
         k++;
     } else if (!out.type && !out.pack && k < p.size() &&
                p[k].is(syntax_kind::noptr_declarator) && p[k].size() == 2 &&
                p[k][0].is(preprocessing_op_or_punc::ELLIPSIS) &&
-               p[k][1].is_token() &&
-               tokens[p[k][1].token()].kind == token_kind::identifier) {
+               p[k][1].is_token() && p[k][1].is_identifier()) {
         /* [temp.param]/17: a non-type template parameter pack, int... N
            (the parser's declarator: the ellipsis, then the name) */
         out.pack = true;

@@ -223,8 +223,7 @@ analysis_result semantic_analysis::lambda_introducer(LambdaIntroducer n,
                 record.star_this = true;
             } else if (c.size() == 2 &&
                        c[0].is(preprocessing_op_or_punc::AMPERSAND) &&
-                       c[1].is_token() &&
-                       tokens[c[1].token()].kind == token_kind::identifier) {
+                       c[1].is_token() && c[1].is_identifier()) {
                 name = c[1].token();
                 record.by_reference = true;
                 if (l.default_capture == capture_default::reference)

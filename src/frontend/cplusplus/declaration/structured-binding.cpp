@@ -547,8 +547,7 @@ analysis_result semantic_analysis::structured_binding_declaration(
         names.append(list.token());
     } else {
         for (SyntaxElement c : list.elements()) {
-            if (c.is_token() &&
-                tokens[c.token()].kind == token_kind::identifier)
+            if (c.is_token() && c.is_identifier())
                 names.append(c.token());
         }
     }

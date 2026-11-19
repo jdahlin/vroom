@@ -17,7 +17,7 @@ namespace cplusplus
 bool semantic_analysis::names_entity(SyntaxElement operand) const
 {
     if (operand.is_token())
-        return tokens[operand.token()].kind == token_kind::identifier;
+        return operand.is_identifier();
     if (operand.is(syntax_kind::qualified_id))
         return true;
     if (!operand.is(syntax_kind::postfix_expression) || operand.size() != 3)

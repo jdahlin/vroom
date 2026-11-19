@@ -369,7 +369,7 @@ analysis_result semantic_analysis::function(SyntaxRef parameters,
                declarator ([class.mfct.non-static]/5) */
             standard_keyword kw = standard_keyword::none;
             if (c.is_token())
-                kw = p.keyword_of(tokens[c.token()]);
+                kw = c.keyword();
             if (may_qualify && kw == standard_keyword::const_ &&
                 !(cv & cv_const)) {
                 cv |= cv_const;

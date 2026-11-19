@@ -527,7 +527,7 @@ analysis_result semantic_analysis::using_directive(UsingDirective n)
         if (!c.is_token())
             /* an attribute-specifier-seq */
             return unknown(not_supported(n, "dcl.attr"));
-        if (tokens[c.token()].kind == token_kind::identifier)
+        if (c.is_identifier())
             name = c.token();
     }
     if (!name)
@@ -575,8 +575,7 @@ semantic_analysis::namespace_alias_definition(NamespaceAliasDefinition n)
             return not_supported(n, "namespace.alias");
         qualifier = named[0].index();
         name = named[1].token();
-    } else if (named.is_token() &&
-               tokens[named.token()].kind == token_kind::identifier) {
+    } else if (named.is_token() && named.is_identifier()) {
         name = named.token();
     } else {
         return not_supported(n, "namespace.alias");

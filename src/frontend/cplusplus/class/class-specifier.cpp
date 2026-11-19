@@ -273,7 +273,7 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
     if (head_count > 2 && !has_bases)
         /* a class-virt-specifier, a base-clause of an unnamed class */
         return not_supported(n, "class.derived");
-    standard_keyword key = p.keyword_of(tokens[head_children[0].token()]);
+    standard_keyword key = head_children[0].keyword();
     if (!is_class_key(key))
         return not_supported(n, "class.pre");
     /* #pragma pack and the like change the layout: no rules yet */
@@ -558,7 +558,7 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
     auto spec = n.class_specifier().member_specification();
     for (auto member : spec.elements()) {
         if (member.is_token()) {
-            switch (p.keyword_of(tokens[member.token()])) {
+            switch (member.keyword()) {
             case standard_keyword::public_:
                 access = 0;
                 continue;

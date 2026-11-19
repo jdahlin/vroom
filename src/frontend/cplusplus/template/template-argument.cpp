@@ -128,8 +128,7 @@ entity_index semantic_analysis::dependent_value_entity(SyntaxElement written)
     }
     /* an alias template's parameter bound to such an argument: that
        argument */
-    if (!negated && written.is_token() &&
-        tokens[written.token()].kind == token_kind::identifier) {
+    if (!negated && written.is_token() && written.is_identifier()) {
         lookup_result x = lookup_unqualified(tokens.identifier(written.token()),
                                              lookup_filter::any);
         if (x.entity &&
@@ -489,7 +488,7 @@ analysis_result semantic_analysis::address_argument(SyntaxRef at,
     out.kind = template_argument::kind_t::value;
     out.type = to;
     if (!reference && written.is_token() &&
-        p.keyword_of(tokens[written.token()]) == standard_keyword::nullptr_)
+        written.keyword() == standard_keyword::nullptr_)
         return analysis_result::well_formed;
     SyntaxElement operand = written;
     bool address_of = false;

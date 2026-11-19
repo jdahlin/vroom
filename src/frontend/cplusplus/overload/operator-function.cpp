@@ -221,10 +221,9 @@ analysis_result semantic_analysis::operator_function_id(OperatorFunctionId id,
     operators_held = true;
     if ((id.size() == 2 || id.size() == 4) && id[1].is_token() &&
         tokens[id[1].token()].kind == token_kind::keyword &&
-        (p.keyword_of(tokens[id[1].token()]) == standard_keyword::new_ ||
-         p.keyword_of(tokens[id[1].token()]) == standard_keyword::delete_)) {
-        bool is_new =
-            p.keyword_of(tokens[id[1].token()]) == standard_keyword::new_;
+        (id[1].keyword() == standard_keyword::new_ ||
+         id[1].keyword() == standard_keyword::delete_)) {
+        bool is_new = id[1].keyword() == standard_keyword::new_;
         bool array = id.size() == 4;
         allocation_function kind = allocation_function::delete_;
         if (is_new && array)

@@ -312,7 +312,7 @@ analysis_result semantic_analysis::base_clause(entity_index c, BaseClause n,
                 if (!b[k].is_token())
                     /* an attribute-specifier-seq */
                     return not_supported(specifier.index(), "class.derived");
-                switch (p.keyword_of(tokens[b[k].token()])) {
+                switch (b[k].keyword()) {
                 case standard_keyword::public_:
                     access = 0;
                     break;

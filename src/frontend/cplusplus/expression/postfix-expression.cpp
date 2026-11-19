@@ -291,7 +291,7 @@ analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
     if (n.size() < 2)
         return not_supported(n, "expr.post");
     if (n.size() == 7 && n[0].is_token() && n[2].is(syntax_kind::type_id)) {
-        standard_keyword k = p.keyword_of(tokens[n[0].token()]);
+        standard_keyword k = n[0].keyword();
         if (k == standard_keyword::static_cast_ ||
             k == standard_keyword::const_cast_ ||
             k == standard_keyword::reinterpret_cast_ ||
@@ -401,8 +401,7 @@ analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
            naming a class template is a simple-type-specifier
            ([dcl.type.simple]/1), the specialization's class */
         auto id = n[0];
-        if (n[0].size() >= 3 && id[0].is_token() &&
-            tokens[id[0].token()].kind == token_kind::identifier) {
+        if (n[0].size() >= 3 && id[0].is_token() && id[0].is_identifier()) {
             lookup_result x = lookup_unqualified(
                 tokens.identifier(id[0].token()), lookup_filter::any);
             entity_index found = x.entity;
@@ -645,8 +644,7 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
         /* [class.mfct.non-static]/2: a member function template's name
            in a member function of its class (or a class derived from
            it), called on (*this) */
-        if (n[0].is_token() &&
-            tokens[n[0].token()].kind == token_kind::identifier) {
+        if (n[0].is_token() && n[0].is_identifier()) {
             lookup_result x = lookup_unqualified(
                 tokens.identifier(n[0].token()), lookup_filter::any);
             if (x.unknown && !x.entity && !x.ambiguous &&
@@ -691,8 +689,7 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
        lookup's */
     owned_array<entity_index> found_by_adl;
     bool looked_up = false;
-    if (n[0].is_token() &&
-        tokens[n[0].token()].kind == token_kind::identifier) {
+    if (n[0].is_token() && n[0].is_identifier()) {
         /* [basic.lookup.argdep]/3: "Let X be the lookup set produced by
            unqualified lookup and let Y be the lookup set produced by argument
            dependent lookup (defined as follows).  If X contains (3.1) a
@@ -1476,8 +1473,7 @@ analysis_result semantic_analysis::call_with(
             (name[1].is(preprocessing_op_or_punc::DOT,
                         preprocessing_op_or_punc::ARROW)))
             name = name[2];
-        if (name.is_token() &&
-            tokens[name.token()].kind == token_kind::identifier)
+        if (name.is_token() && name.is_identifier())
             dispatched = true;
         else if (!name.is(syntax_kind::qualified_id))
             return not_supported(n, "class.virtual");

@@ -1198,8 +1198,7 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
                     }
                     bool decltype_auto =
                         !c[last].is_token() ||
-                        p.keyword_of(tokens[c[last].token()]) !=
-                            standard_keyword::auto_;
+                        c[last].keyword() != standard_keyword::auto_;
                     if (!allow_placeholder ||
                         !tokens.files.behavior.has(
                             language_feature::return_type_deduction))

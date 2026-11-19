@@ -33,7 +33,7 @@ bool semantic_analysis::explicit_body(SyntaxElement body,
         body.size() < 3)
         return false;
     return body[0].is(preprocessing_op_or_punc::EQUAL) && body[1].is_token() &&
-           p.keyword_of(tokens[body[1].token()]) == k;
+           body[1].keyword() == k;
 }
 
 analysis_result semantic_analysis::deleted_definition(SyntaxRef n,

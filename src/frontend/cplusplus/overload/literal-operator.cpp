@@ -51,8 +51,7 @@ analysis_result semantic_analysis::literal_operator_id(LiteralOperatorId id,
                                                        declarator_meaning &m)
 {
     owned_buffer suffix;
-    if (id.size() == 3 && id[2].is_token() &&
-        tokens[id[2].token()].kind == token_kind::identifier) {
+    if (id.size() == 3 && id[2].is_token() && id[2].is_identifier()) {
         /* /1: "The string-literal or user-defined-string-literal in a
            literal-operator-id shall have no encoding-prefix and shall
            contain no characters other than the implicit terminating

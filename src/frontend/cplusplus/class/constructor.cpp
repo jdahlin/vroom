@@ -160,7 +160,7 @@ analysis_result semantic_analysis::constructor_specifiers(SyntaxRef seq,
         }
         if (!x.is_token())
             return not_supported(seq, "temp.mem");
-        switch (p.keyword_of(tokens[x.token()])) {
+        switch (x.keyword()) {
         case standard_keyword::constexpr_:
         case standard_keyword::consteval_:
             s.constexpr_ = true;
@@ -358,7 +358,7 @@ bool semantic_analysis::function_specifiers_only(SyntaxRef seq,
     for (SyntaxElement c : seq.elements()) {
         if (!c.is_token())
             return false;
-        switch (p.keyword_of(tokens[c.token()])) {
+        switch (c.keyword()) {
         case standard_keyword::constexpr_:
             if (constexpr_specified)
                 return false;

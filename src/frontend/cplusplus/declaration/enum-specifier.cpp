@@ -476,12 +476,11 @@ analysis_result semantic_analysis::enum_specifier_rules(SyntaxRef n,
             base = c.index();
             continue;
         }
-        if (c.is_token() &&
-            p.keyword_of(tokens[c.token()]) == standard_keyword::enum_)
+        if (c.is_token() && c.keyword() == standard_keyword::enum_)
             continue;
         if (opaque && c.is(preprocessing_op_or_punc::SEMICOLON))
             continue;
-        if (c.is_token() && tokens[c.token()].kind == token_kind::identifier) {
+        if (c.is_identifier()) {
             name = tokens.identifier(c.token());
             name_at = c.token();
             continue;

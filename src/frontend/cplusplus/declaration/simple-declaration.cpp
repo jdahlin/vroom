@@ -935,8 +935,7 @@ analysis_result semantic_analysis::init_declarators(SyntaxRef declaration,
         if (c.is(syntax_kind::init_declarator_list)) {
             for (uint32_t k = 0; k < c.size(); k++) {
                 SyntaxElement item = c[k];
-                if (!item.is_token() ||
-                    tokens[item.token()].kind == token_kind::identifier)
+                if (!item.is_token() || item.is_identifier())
                     items.append(item);
             }
         } else {

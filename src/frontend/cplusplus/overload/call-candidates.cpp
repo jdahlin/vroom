@@ -31,17 +31,17 @@ namespace cplusplus
 token_index semantic_analysis::callee_name(SyntaxElement c) const
 {
     if (c.is_token()) {
-        if (tokens[c.token()].kind == token_kind::identifier)
+        if (c.is_identifier())
             return c.token();
         return 0;
     }
     if (c.is(syntax_kind::qualified_id) && c.size() == 2 && c[1].is_token() &&
-        tokens[c[1].token()].kind == token_kind::identifier)
+        c[1].is_identifier())
         return c[1].token();
     if (c.is(syntax_kind::postfix_expression) && c.size() == 3 &&
         (c[1].is(preprocessing_op_or_punc::DOT,
                  preprocessing_op_or_punc::ARROW)) &&
-        c[2].is_token() && tokens[c[2].token()].kind == token_kind::identifier)
+        c[2].is_identifier())
         return c[2].token();
     return 0;
 }
