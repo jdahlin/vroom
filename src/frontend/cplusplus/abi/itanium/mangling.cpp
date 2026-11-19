@@ -346,12 +346,15 @@ bool itanium_mangler::specialization_encoding(entity_index e)
         return false;
     if (!bare_function_type(pattern))
         return false;
-    /* [impl.clang] a generic lambda's trailing requires-clause: Q and its
-       expression, after the parameters (one after its template-parameters
+    /* [impl.clang] a generic lambda's or a function template's trailing
+       requires-clause: Q and its expression, after the parameters (one after its template-parameters
        is the closure type's, closure_type_name) */
     bool trailing = false;
     if (table[scope].lambda)
         constraint = analysis.lambda_constraint(table[scope].lambda, &trailing);
+    else if ((constraint = analysis.template_trailing_constraint(pattern_of))
+                 .bits)
+        trailing = true;
     if (constraint.bits && trailing) {
         text("Q");
         return constraint_expression(pattern_of, constraint);
@@ -369,8 +372,21 @@ bool itanium_mangler::specialization_encoding(entity_index e)
  */
 bool itanium_mangler::constraint_expression(entity_index t, syntax_child c)
 {
-    if (c.is_token())
-        return false;
+    if (c.is_token()) {
+        /* a decimal integer-literal of type int: Li <value> E */
+        owned_buffer spelling;
+        analysis.token_spelling(c.index(), spelling.get());
+        if (!spelling.size() || spelling.size() > 9 ||
+            (spelling.data()[0] == '0' && spelling.size() > 1))
+            return false;
+        for (size_t i = 0; i < spelling.size(); i++)
+            if (spelling.data()[i] < '0' || spelling.data()[i] > '9')
+                return false;
+        text("Li");
+        vbuffer_append(out, spelling.data(), spelling.size());
+        text("E");
+        return true;
+    }
     const syntax_tree &tree = analysis.syntax();
     const syntax_node &node = tree[c.index()];
     const syntax_child *parts = tree.children(c.index());
@@ -394,11 +410,53 @@ bool itanium_mangler::constraint_expression(entity_index t, syntax_child c)
             return false;
         return constraint_expression(t, parts[1]);
     case syntax_kind::unary_expression:
+        if (node.child_count == 4 && parts[0].is_token() &&
+            punctuator(parts[1], preprocessing_op_or_punc::LEFT_PARENTHESIS)) {
+            /* sizeof ( T ), T a template parameter: st <type> */
+            owned_buffer spelling;
+            analysis.token_spelling(parts[0].index(), spelling.get());
+            syntax_child a = parts[2];
+            while (!a.is_token() && tree[a.index()].child_count == 1 &&
+                   (tree[a.index()].kind == syntax_kind::type_id ||
+                    tree[a.index()].kind == syntax_kind::type_specifier_seq))
+                a = tree.children(a.index())[0];
+            if (spelling.size() != 6 || memcmp(spelling.data(), "sizeof", 6) ||
+                !a.is_token())
+                return false;
+            entity_index pe = analysis.constraint_parameter(t, a.index());
+            text("st");
+            return pe && type(analysis.entity_table[pe].type);
+        }
         if (node.child_count != 2 ||
             !punctuator(parts[0], preprocessing_op_or_punc::EXCLAMATION))
             return false;
         text("nt");
         return constraint_expression(t, parts[1]);
+    case syntax_kind::relational_expression:
+    case syntax_kind::equality_expression: {
+        static const struct {
+            preprocessing_op_or_punc op;
+            const char *code;
+        } comparisons[] = {
+            {preprocessing_op_or_punc::EQUAL_EQUAL, "eq"},
+            {preprocessing_op_or_punc::EXCLAMATION_EQUAL, "ne"},
+            {preprocessing_op_or_punc::LESS, "lt"},
+            {preprocessing_op_or_punc::GREATER, "gt"},
+            {preprocessing_op_or_punc::LESS_EQUAL, "le"},
+            {preprocessing_op_or_punc::GREATER_EQUAL, "ge"},
+        };
+        if (node.child_count != 3)
+            return false;
+        const char *code = nullptr;
+        for (const auto &x : comparisons)
+            if (punctuator(parts[1], x.op))
+                code = x.code;
+        if (!code)
+            return false;
+        text(code);
+        return constraint_expression(t, parts[0]) &&
+               constraint_expression(t, parts[2]);
+    }
     case syntax_kind::simple_template_id: {
         if (!parts[0].is_token() ||
             !analysis.constraint_concept(t, parts[0].index()))

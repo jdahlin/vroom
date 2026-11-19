@@ -299,6 +299,8 @@ bool semantic_analysis::same_constraints(node_index a, node_index b)
         }
     }
     syntax_child x = head_constraint(a), y = head_constraint(b);
+    if (!x.bits && !y.bits)
+        x = trailing_constraint(a), y = trailing_constraint(b);
     if (!x.bits || !y.bits)
         return !x.bits && !y.bits;
     if (x.is_token() || y.is_token())
@@ -358,6 +360,15 @@ syntax_child semantic_analysis::template_constraint(entity_index t) const
     if (!ft)
         return syntax_child();
     return head_constraint(function_templates[ft - 1].declaration);
+}
+
+syntax_child
+semantic_analysis::template_trailing_constraint(entity_index t) const
+{
+    uint32_t ft = template_record(t);
+    if (!ft)
+        return syntax_child();
+    return trailing_constraint(function_templates[ft - 1].declaration);
 }
 
 entity_index semantic_analysis::constraint_parameter(entity_index t,
@@ -445,6 +456,10 @@ analysis_result semantic_analysis::template_constraints_satisfied(
     const struct function_template ft =
         function_templates[function_template - 1];
     syntax_child constraint = head_constraint(ft.declaration);
+    /* (a trailing requires-clause only where the head has none: the
+       definitions refuse both) */
+    if (!constraint.bits)
+        constraint = trailing_constraint(ft.declaration);
     /* [temp.constr.decl]/3: the associated constraints are the
        conjunction of the type-constraints' immediately-declared
        constraints, in order, then the requires-clause's
