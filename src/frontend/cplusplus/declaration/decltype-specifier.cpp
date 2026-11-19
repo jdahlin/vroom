@@ -108,11 +108,6 @@ analysis_result semantic_analysis::decltype_type(SyntaxRef n,
         type = qualified_type::make(dependent_written_type(n), cv_none);
         return analysis_result::well_formed;
     }
-    /* in a class's member-specification: the names of members whose
-       declarations analysis has no rules for are not held (a dependent
-       operand, above, is not looked into) */
-    if (defining_class)
-        return not_supported(n, "class.mem");
     expression_meaning m;
     unevaluated++;
     analysis_result r = expression(operand, m);

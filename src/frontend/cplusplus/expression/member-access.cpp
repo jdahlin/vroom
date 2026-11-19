@@ -253,12 +253,34 @@ analysis_result semantic_analysis::implicit_member_access(token_index at,
     while (entity_table[member_of].anonymous_object)
         member_of =
             entity_table[entity_table[member_of].anonymous_object].enclosing;
-    if (!function_state.this_entity ||
-        (member_of != current_class() &&
-         !base_step(current_class(), member_of, ambiguous)))
-        /* in a static member function, or unevaluated ([expr.prim.id]/2) */
-        return not_supported(current_declaration, "expr.prim.id");
+    entity_index cls = current_class();
+    if (!cls)
+        cls = defining_class;
+    bool of_current =
+        cls && (member_of == cls || base_step(cls, member_of, ambiguous));
     expression_meaning object;
+    if (!function_state.this_entity && unevaluated && of_current &&
+        entity_table[e].kind == entity_kind::variable &&
+        entity_table[e].nonstatic_member) {
+        /* [expr.prim.id]/3: "An id-expression that denotes a non-static
+           data member ... can only be used: as part of a class member
+           access in which the object expression refers to the member's
+           class or a class derived from that class, or to form a pointer to
+           member, or if that id-expression denotes a non-static data member
+           and it appears in an unevaluated operand."  The object is the
+           class's, an lvalue, not evaluated */
+        object.type = entity_table[cls].type;
+        object.category = value_category::lvalue;
+        object.evaluation = constness::not_constant;
+        object.node =
+            expression_node(semantic_kind::indirection, object, at, 0);
+        VTRY(r, member_access(at, e, object));
+        m = object;
+        return analysis_result::well_formed;
+    }
+    if (!function_state.this_entity || !of_current)
+        /* in a static member function, or a member function unevaluated */
+        return not_supported(current_declaration, "expr.prim.id");
     VTRY(r, this_object(at, object));
     VTRY_SET(r, member_access(at, e, object));
     m = object;
