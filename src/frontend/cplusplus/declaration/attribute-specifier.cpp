@@ -471,7 +471,7 @@ bool name_is(const char *name, size_t length, const char *s)
  * for a diagnostic or describe the program to a tool.  Standard:
  * maybe_unused, nodiscard, deprecated, likely, unlikely; GCC's, as
  * gnu::NAME: nodebug, unused, deprecated, returns_nonnull, alloc_size,
- * alloc_align, nonnull, pure, const; clang's, as clang::NAME:
+ * alloc_align, nonnull, pure, const; clang's, as clang::NAME (also _Clang::NAME):
  * preferred_name, no_specializations, lifetimebound, availability (the names clang 23
  * knows in each namespace; another is an unknown attribute to clang).
  */
@@ -490,6 +490,40 @@ bool attribute_without_effect(const char *ns, size_t ns_length,
     /* availability: platform versions, for diagnostics only */
     static const char *const clang[] = {"preferred_name", "no_specializations",
                                         "lifetimebound", "availability"};
+    /* the thread-safety attributes (libc++'s _LIBCPP_CAPABILITY, ...):
+       checked only under -Wthread-safety, which vcc does not do */
+    static const char *const thread_safety[] = {"capability",
+                                                "lockable",
+                                                "scoped_lockable",
+                                                "acquire_capability",
+                                                "acquire_shared_capability",
+                                                "release_capability",
+                                                "release_shared_capability",
+                                                "release_generic_capability",
+                                                "try_acquire_capability",
+                                                "try_acquire_shared_capability",
+                                                "requires_capability",
+                                                "requires_shared_capability",
+                                                "no_thread_safety_analysis",
+                                                "guarded_by",
+                                                "pt_guarded_by",
+                                                "guarded_var",
+                                                "pt_guarded_var",
+                                                "acquired_before",
+                                                "acquired_after",
+                                                "locks_excluded",
+                                                "assert_capability",
+                                                "assert_shared_capability",
+                                                "exclusive_lock_function",
+                                                "shared_lock_function",
+                                                "unlock_function",
+                                                "exclusive_trylock_function",
+                                                "shared_trylock_function",
+                                                "exclusive_locks_required",
+                                                "shared_locks_required",
+                                                "lock_returned",
+                                                "assert_exclusive_lock",
+                                                "assert_shared_lock"};
     if (!ns) {
         for (const char *s : standard)
             if (name_is(name, length, s))
@@ -498,8 +532,12 @@ bool attribute_without_effect(const char *ns, size_t ns_length,
         for (const char *s : gnu)
             if (name_is(name, length, s))
                 return true;
-    } else if (name_is(ns, ns_length, "clang")) {
+    } else if (name_is(ns, ns_length, "clang") ||
+               name_is(ns, ns_length, "_Clang")) {
         for (const char *s : clang)
+            if (name_is(name, length, s))
+                return true;
+        for (const char *s : thread_safety)
             if (name_is(name, length, s))
                 return true;
     }
