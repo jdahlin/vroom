@@ -129,6 +129,8 @@ analysis_result semantic_analysis::expression_kind(SyntaxElement e,
         return new_expression(n, m);
     case syntax_kind::delete_expression:
         return delete_expression(n, m);
+    case syntax_kind::throw_expression:
+        return throw_expression(n, m);
     case syntax_kind::fold_expression:
         return fold(n, m);
     case syntax_kind::lambda_expression:

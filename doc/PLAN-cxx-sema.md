@@ -2271,3 +2271,44 @@ P9 -> S0 -> S1 -> S2 -> S3 --------> S5 -> S6b -> S8 -> S9
    clause order.
 9. **Reuse of the C front end's folding, layout and attributes through
    shared interfaces**, not copies.
+
+## 8. Lessons from the first front end
+
+The first front end (`src/frontend/cxx`, removed in 7283c431) met these on
+libc++, Skia and nlohmann/json.  Its run tests are kept as
+`src/test/cxx/run/old-*.cpp` (most in `xfail.txt` today).
+
+- Converting-constructor cycle (1cdd55d5): binding a temporary made by a
+  converting constructor picked the same constructor again; Skia's
+  bentleyottmann (`std::tuple`, `std::get`, `std::tie`) nested 479 binds and
+  overflowed the stack.  Fixed by a nesting bound of 16 (cause not found).
+  Today: reference binding to converted temporaries is refused
+  (`old-converting-bind` xfail); the lowering needs a bound or a cycle check
+  when it lands (TODO.md).
+- Deep nesting in general: today expressions have the [implimits] bound
+  (20000 nested parentheses: a clean error) and instantiation stops at depth
+  64 (`sema/instantiation.cpp`).  Handled.
+- `const T&` bound to a bit-field took the bit-field's address (5ad83e27);
+  180 of Skia's 213 failures (`SkToBool(fBitfields.fAntiAlias)`).  Fix: a
+  temporary, [dcl.init.ref].  Today: `old-bitfield-const-ref` xfail ([class.bit]).
+- `__builtin_common_type` as a base class (76295ba6): libc++'s
+  `common_type` derives from it, so `common_type<int, long>::type` was
+  unknown (json's `value_in_range_of`).  Today: `old-builtin-common-type`
+  xfail ([temp.arg]); `builtin-common-type` passes.
+- Layout of libc++ containers (ae1da9a9): `[[no_unique_address]]` (empty
+  takes no space, non-POD-for-layout gives up tail padding), packed classes,
+  constant bit-field widths, `__builtin_offsetof`, `__datasizeof`.  Without
+  them `std::string`, `vector`, `map` had no size.  Today: checked by
+  `bench/cxx-sema.py` class layouts against clang.
+- Traits for classes not POD for layout (7e8e60d4): trivially
+  destructible/assignable answered only for POD classes, so `optional<T>`
+  of a `T` with `~T()` (SkMatrix) chose no base and nothing holding one got
+  code.  Today: answered from the special members ([class.dtor]); check with
+  `old-nothrow-traits` when it passes.
+- Mangling (b02fd567, 83d27fc1, a8e7e70f, f6e7b5c8, 682b96ef): clang 23's
+  `Tn` for value parameters of dependent type, `T::name()` in a parameter's
+  type, array bounds and `_Float16`/`__fp16`, `DT` for decltype returns,
+  `enable_if` overloads that differ only in the return type.  Today: the
+  `-O0` symbols are compared with clang's by `bench/cxx-run.py`.
+- Member template bodies parsed late lost their template depth (e0d34d7c).
+  Today: the parser keeps the scope ([temp.mem]).

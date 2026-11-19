@@ -172,9 +172,9 @@ analysis_result semantic_analysis::using_declaration(UsingDeclaration n)
  * names ([namespace.udecl]/1), marked as bound by a using-declaration: a
  * declaration of the name there does not redeclare the entity
  * ([dcl.meaning]/1: "the member shall not merely have been introduced by a
- * using-declaration").  A set of more than one declaration (overloaded
- * functions, or a class and what hides it found in two namespaces) has no
- * rules yet.
+ * using-declaration").  A set of overloaded functions and function templates
+ * of a namespace is followed; other sets of more than one declaration (a
+ * class and what hides it found in two namespaces) have no rules yet.
  */
 analysis_result semantic_analysis::using_declarator(UsingDeclarator n,
                                                     bool if_exists)
@@ -192,6 +192,51 @@ analysis_result semantic_analysis::using_declarator(UsingDeclarator n,
     token_index t = node[1].token();
     uint32_t name = tokens.identifier(t);
     lookup_result found = lookup_qualified(q.entity, name, lookup_filter::any);
+    /* [namespace.udecl]/1: "If the using-declarator names ... a set of
+       declarations, the using-declarator introduces the declarator's name
+       as a synonym for that set" of overloaded functions and function
+       templates: their name is held by an entity of its own
+       (held_by_template), which calls resolve the overloads of.  It is
+       bound here, or its templates and functions join the set the name
+       already denotes here (/11: declarations of the set added later are
+       not, which copies of its records give) */
+    entity_index held = found.unknown_entity;
+    if (found.unknown && !found.ambiguous && held && !defining_class &&
+        is_namespace(q.entity) && function_template_of(held)) {
+        entity_index scope = current_scope;
+        entity_index prior = entity_table.find(scope, name);
+        if (!prior) {
+            entity_table.bind(scope, name, held, true);
+        } else if (prior != held) {
+            if (entity_table[prior].kind == entity_kind::function) {
+                /* (as function_template_definition holds the name of
+                   functions declared before a template) */
+                owned_array<entity_index> functions;
+                overload_set(prior, functions);
+                prior = entity_table.make(entity_kind::none, name, scope);
+                entity_table[prior].held_by_template = true;
+                entity_table.bind(scope, name, prior, true);
+                for (entity_index f : functions)
+                    template_name_functions.append({prior, f});
+            } else if (!entity_table[prior].held_by_template ||
+                       !function_template_of(prior)) {
+                return not_supported(n, "over");
+            }
+            for (size_t i = 0, k = function_templates.size(); i < k; i++)
+                if (function_templates[i].name == held &&
+                    !function_templates[i].unusable) {
+                    function_template copy = function_templates[i];
+                    copy.name = prior;
+                    function_templates.append(copy);
+                }
+            for (size_t i = 0, k = template_name_functions.size(); i < k; i++)
+                if (template_name_functions[i].name == held)
+                    template_name_functions.append(
+                        {prior, template_name_functions[i].function});
+        }
+        used(t, held);
+        return analysis_result::well_formed;
+    }
     if (found.unknown)
         return not_supported(n, "over");
     /* clang's using_if_exists: "the using-declaration is ignored if the

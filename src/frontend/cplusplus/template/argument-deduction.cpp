@@ -349,6 +349,85 @@ static bool deduction_may_succeed(const types &table, qualified_type p,
     }
 }
 
+/* to = from: the deduced values and which are set, saved before a match
+   that may fail partway */
+template <typename T>
+static void copy_deduction(const owned_array<T> &from,
+                           const owned_array<bool> &from_set,
+                           owned_array<T> &to, owned_array<bool> &to_set)
+{
+    to.clear();
+    to_set.clear();
+    for (uint32_t k = 0; k < from.size(); k++) {
+        to.append(from[k]);
+        to_set.append(from_set[k]);
+    }
+}
+
+/* [temp.deduct.call]/4.3: "If P is a class and P has the form
+   simple-template-id, then the transformed A can be a derived class D of
+   the deduced A.  ..."  /5: "If there is more than one possible deduced
+   A, the type deduction fails." */
+int semantic_analysis::deduce_from_base(qualified_type p, qualified_type a,
+                                        owned_array<template_argument> &deduced,
+                                        owned_array<bool> &set)
+{
+    const struct type &pr = type_table[p.unqualified()];
+    const struct type &ar = type_table[a.unqualified()];
+    if (pr.kind != type_kind::dependent ||
+        !entity_table[pr.entity].instantiation)
+        return -1;
+    /* (an arithmetic or enumeration A is no class, nor derived from one) */
+    if (ar.kind == type_kind::fundamental || ar.kind == type_kind::enumeration)
+        return 0;
+    if (ar.kind != type_kind::class_type ||
+        template_template_parameter(specialized_template(pr.entity)))
+        return -1;
+    /* (an incomplete class, perhaps a specialization not instantiated,
+       has bases not known yet) */
+    const entity &x = entity_table[ar.entity];
+    if (!x.defined)
+        return -1;
+    int found = 0;
+    owned_array<template_argument> result;
+    for (uint32_t i = 0; i < x.base_count; i++) {
+        qualified_type b = qualified_type::make(
+            entity_table[class_bases[x.first_base + i]].type.unqualified(),
+            a.cv());
+        /* each attempt, direct or through b's bases, starts from the
+           values before it: a failed match may have set some */
+        owned_array<template_argument> values;
+        owned_array<bool> given;
+        copy_deduction(deduced, set, values, given);
+        uint32_t unknowns = deduction_unknowns;
+        int r = 1;
+        if (!deduce_type(p, b, values, given)) {
+            if (deduction_unknowns != unknowns)
+                return -1;
+            copy_deduction(deduced, set, values, given);
+            r = deduce_from_base(p, b, values, given);
+        }
+        if (r < 0)
+            return -1;
+        if (!r)
+            continue;
+        if (found) {
+            for (uint32_t k = 0; k < values.size(); k++)
+                if (!(values[k] == result[k]))
+                    return 0;
+            continue;
+        }
+        found = 1;
+        for (uint32_t k = 0; k < values.size(); k++) {
+            result.append(values[k]);
+            set[k] = given[k];
+        }
+    }
+    for (uint32_t k = 0; found && k < result.size(); k++)
+        deduced[k] = result[k];
+    return found;
+}
+
 /* [temp.deduct.call]/2-3: the P and A deduce_type compares, for a
    parameter of type p and an argument of type a and value category c */
 void semantic_analysis::adjust_call_deduction(qualified_type &p,
@@ -492,15 +571,23 @@ analysis_result semantic_analysis::deduce_from_call(
            its other functions decides; neither is analysed yet */
         uint32_t unknowns = deduction_unknowns;
         if (i < fixed) {
+            owned_array<template_argument> before;
+            owned_array<bool> before_set;
+            copy_deduction(values, set, before, before_set);
             if (deduce_type(p, a, values, set))
                 continue;
             if (deduction_unknowns != unknowns)
                 return not_supported(at, "temp.deduct.type");
+            copy_deduction(before, before_set, values, set);
+            int base = deduce_from_base(p, a, values, set);
+            if (base > 0)
+                continue;
             /* [temp.over]/1: "If, for a given function template, argument
                deduction fails or the synthesized function template
                specialization would be ill-formed, no such function is
                added to the set of candidate functions for that template" */
-            if (!failed || deduction_may_succeed(type_table, p, a))
+            if (!failed ||
+                (base < 0 && deduction_may_succeed(type_table, p, a)))
                 return not_supported(at, "temp.deduct.call");
             *failed = true;
             return analysis_result::well_formed;

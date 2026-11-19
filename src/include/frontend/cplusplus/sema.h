@@ -1105,6 +1105,8 @@ enum class semantic_kind : uint8_t {
        element's destruction (last first), c is given the cookie's address
        as allocated and array_count is the cookie's count */
     delete_object,
+    /* [expr.throw]: a: the operand (0: none, a rethrow); not lowered */
+    throw_exception,
     /* [class.cdtor]/4, [abi:vtable-ctor]: a: the address of the object
        under construction or destruction (this), b: its class, whose
        virtual table pointer is stored in it */
@@ -2424,6 +2426,10 @@ class semantic_analysis
     analysis_result conditional(SyntaxRef n, expression_meaning &m);
     analysis_result noexcept_operator(SyntaxRef n, expression_meaning &m);
     analysis_result clang_type_trait(SyntaxRef n, expression_meaning &m);
+    /* [ext:clang_type_traits] the answer of the trait of one type-id
+       numbered which (ext/clang/unary-traits.inc) for the non-dependent
+       t; false if the analysis has none */
+    bool unary_trait(int which, qualified_type t, int64_t &value);
     analysis_result gnu_offsetof(SyntaxRef n, expression_meaning &m);
     analysis_result clang_bit_cast(SyntaxRef n, expression_meaning &m);
     analysis_result clang_convertvector(SyntaxRef n, expression_meaning &m);
@@ -3743,6 +3749,11 @@ class semantic_analysis
        (of value category c) adjusted for deduce_type */
     void adjust_call_deduction(qualified_type &p, qualified_type &a,
                                value_category c);
+    /* [temp.deduct.call]/4.3: P a simple-template-id, from a base class
+       of the class A; 1 deduced, 0 failed, -1 not known */
+    int deduce_from_base(qualified_type p, qualified_type a,
+                         owned_array<template_argument> &deduced,
+                         owned_array<bool> &set);
     bool deduce_bound(entity_index parameter, uint64_t bound,
                       owned_array<template_argument> &deduced,
                       owned_array<bool> &set);
@@ -4397,6 +4408,7 @@ class semantic_analysis
     analysis_result new_expression(NewExpression n, expression_meaning &m);
     analysis_result delete_expression(DeleteExpression n,
                                       expression_meaning &m);
+    analysis_result throw_expression(ThrowExpression n, expression_meaning &m);
     analysis_result usual_deallocation(SyntaxRef n, entity_index c, bool global,
                                        bool array, entity_index &function,
                                        bool &sized, bool class_complete = false,

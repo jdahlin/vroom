@@ -139,6 +139,11 @@ analysis_result semantic_analysis::declaration(SyntaxRef n)
         d.result = namespace_definition(n);
         if (d.result == analysis_result::well_formed)
             return d.result;
+    } else if (tree[n].kind == syntax_kind::linkage_specification) {
+        /* [dcl.link]: a linkage-specification is no scope of its own, its
+           declarations are the enclosing scope's: one of them not parsed
+           does not stop the others (linkage_specification() checks each) */
+        d.result = linkage_specification(n);
     } else if (!parsed_completely(n))
         d.result = analysis_result::not_parsed;
     else

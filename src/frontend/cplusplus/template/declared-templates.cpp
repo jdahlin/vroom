@@ -432,11 +432,29 @@ semantic_analysis::function_template_definition(SyntaxRef n,
                 last = i;
                 packs++;
             }
-        if (packs > 1)
-            return not_supported(n, "temp.variadic");
-        bool pack = packs == 1;
         const struct type ft = type_table[type.unqualified()];
         const qualified_type *list = type_table.parameters(type.unqualified());
+        /* [temp.param]/14: "A template parameter pack of a function
+           template shall not be followed by another template parameter
+           unless that template parameter can be deduced from the
+           parameter-type-list": several packs, each named only in pack
+           expansions inside the parameters' types (tuple<A...>,
+           seq<N...>), no function parameter pack */
+        if (packs > 1) {
+            for (uint32_t i = 0; i < ft.parameter_count; i++)
+                if (type_table[list[i].unqualified()].kind ==
+                    type_kind::pack_expansion)
+                    return not_supported(n, "temp.variadic");
+            for (uint32_t i = 0; i < parameters.size(); i++)
+                if (template_parameter_is_pack(first + i) &&
+                    !pack_only_expanded(
+                        entity_table[template_parameter_entities[first + i]]
+                            .name,
+                        d[lead].first_token(), d[lead + 1].end_token()))
+                    return not_supported(n, "temp.variadic");
+            packs = 0;
+        }
+        bool pack = packs == 1;
         uint32_t pack_name = 0;
         if (pack)
             pack_name =
@@ -480,8 +498,6 @@ semantic_analysis::function_template_definition(SyntaxRef n,
            expressions involving template parameters"; one that is not is
            another template of the name, an overload ([temp.over]) */
         const function_template f = function_templates[g - 1];
-        if (entity_table[f.entity].enclosing != outer)
-            return not_supported(n, "temp.over.link");
         if (f.parameter_count != parameters.size() ||
             !same_template_parameters(first, f.first_parameter,
                                       f.parameter_count) ||
@@ -501,6 +517,10 @@ semantic_analysis::function_template_definition(SyntaxRef n,
                            !(values[i].type == entity_table[pe].type)))
                 same = false;
         }
+        /* [namespace.udecl]/13: one a using-declaration introduced joins
+           the overload set with this one unless they are equivalent */
+        if (same && entity_table[f.entity].enclosing != outer)
+            return not_supported(n, "namespace.udecl");
         if (same)
             earlier = g;
     }
@@ -591,9 +611,16 @@ semantic_analysis::function_template_definition(SyntaxRef n,
     owned_array<entity_index> functions;
     /* (a scope with a using-directive, an inline namespace's among them,
        or names not known: lookup of the name finds more than the
-       scope's own declarations) */
-    bool own = !entity_table[outer].has_using_directive &&
-               !entity_table[outer].unknown_names;
+       scope's own declarations, [namespace.udir]/2, unless no namespace
+       the directives nominate declares it or has directives of its own) */
+    bool own = !entity_table[outer].unknown_names;
+    if (own && entity_table[outer].has_using_directive)
+        for (const using_directive_record &u : using_directives)
+            if (u.scope == outer &&
+                (entity_table[u.nominated].has_using_directive ||
+                 entity_table[u.nominated].unknown_names ||
+                 entity_table.find(u.nominated, name)))
+                own = false;
     if (prior && group.empty() && own &&
         entity_table[prior].kind == entity_kind::function &&
         entity_table[prior].enclosing == outer &&
@@ -1609,8 +1636,8 @@ semantic_analysis::class_template_definition(SyntaxRef n, SyntaxRef specifier)
     SyntaxElement head_name = class_head_name(head);
     bool specialization =
         head_name && head_name.is(syntax_kind::simple_template_id);
-    analysis_result r = template_head_parameters(
-        n, parameters, true, true, specialization, specialization);
+    analysis_result r = template_head_parameters(n, parameters, true, true,
+                                                 specialization, true);
     if (r != analysis_result::well_formed)
         return r;
     /* a partial specialization's requires-clause is checked where it is
@@ -2402,7 +2429,8 @@ semantic_analysis::class_template_declaration(SyntaxRef n, SyntaxRef elaborated)
         return not_supported(n, "temp.class");
     owned_array<SyntaxRef> parameters;
     /* [temp.pre]/9: a requires-clause in its template-head */
-    analysis_result r = template_head_parameters(n, parameters, true, true);
+    analysis_result r =
+        template_head_parameters(n, parameters, true, true, false, true);
     if (r != analysis_result::well_formed)
         return r;
     uint32_t name = tokens.identifier(e[1].token());

@@ -41,3 +41,10 @@ int r2 = (delete[] p4, 0);
 int r3 = (::delete p19, 0);
 int r4 = (::delete[] p20, 0);
 int r5 = (delete (int *)p3, delete[] (p5), 0);
+
+// [stmt.ambig]: ::operator new and ::operator delete starting a statement are
+// expression-statements (libc++'s allocator<T>::deallocate)
+void free_raw(void *q) {
+  ::operator delete(q);
+  ::operator new(1);
+}
