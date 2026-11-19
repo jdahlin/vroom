@@ -1200,13 +1200,14 @@ semantic_analysis::instantiate_variable(node_index at, uint32_t vt,
  */
 analysis_result semantic_analysis::alias_template_type(node_index id,
                                                        uint32_t at,
-                                                       type_index &type)
+                                                       type_index &type,
+                                                       uint32_t *cv)
 {
     owned_array<template_argument> arguments;
     analysis_result r = template_id_arguments(id, at, arguments);
     if (r != analysis_result::well_formed)
         return r;
-    return alias_template_specialization(id, at, arguments, type);
+    return alias_template_specialization(id, at, arguments, type, cv);
 }
 
 /* the dependent type template t's simple-template-id with arguments
@@ -1247,7 +1248,7 @@ type_index semantic_analysis::dependent_specialization(
    arguments (one per parameter, a pack's as one) */
 analysis_result semantic_analysis::alias_template_specialization(
     node_index id, uint32_t at, const owned_array<template_argument> &arguments,
-    type_index &type)
+    type_index &type, uint32_t *cv)
 {
     const function_template ft = function_templates[at - 1];
     analysis_result r = analysis_result::well_formed;
@@ -1332,8 +1333,9 @@ analysis_result semantic_analysis::alias_template_specialization(
         return not_supported(id, "temp.alias");
     if (r != analysis_result::well_formed)
         return r;
-    /* (a cv-qualified type: template_type's callers take no cv) */
-    if (t.cv())
+    /* a cv-qualified type (alias<const T>) to a caller that takes its cv;
+       the others refuse it rather than drop the cv */
+    if (t.cv() && !cv)
         return not_supported(id, "temp.alias");
     /* [temp.alias]/4 (CWG 1558): "when a template-id refers to the
        specialization of an alias template ... any substitution failure in
@@ -1349,6 +1351,8 @@ analysis_result semantic_analysis::alias_template_specialization(
             return not_supported(id, "temp.alias");
     }
     type = t.unqualified();
+    if (cv)
+        *cv = t.cv();
     return analysis_result::well_formed;
 }
 
@@ -2042,7 +2046,7 @@ analysis_result semantic_analysis::matching_specialization(
 analysis_result semantic_analysis::template_type(node_index id,
                                                  entity_index scope,
                                                  bool qualified,
-                                                 type_index &type)
+                                                 type_index &type, uint32_t *cv)
 {
     const syntax_node &t = tree[id];
     const syntax_child *parts = tree.children(id);
@@ -2071,7 +2075,7 @@ analysis_result semantic_analysis::template_type(node_index id,
     if (!ct) {
         uint32_t at = alias_template_of(named);
         if (at)
-            return alias_template_type(id, at, type);
+            return alias_template_type(id, at, type, cv);
         return not_supported(id, "temp.names");
     }
     owned_array<template_argument> arguments;

@@ -3394,9 +3394,11 @@ class semantic_analysis
                              const owned_array<template_argument> &arguments);
     analysis_result alias_template_specialization(
         node_index id, uint32_t at,
-        const owned_array<template_argument> &arguments, type_index &type);
+        const owned_array<template_argument> &arguments, type_index &type,
+        uint32_t *cv = nullptr);
     analysis_result alias_template_type(node_index id, uint32_t at,
-                                        type_index &type);
+                                        type_index &type,
+                                        uint32_t *cv = nullptr);
     node_index variable_specialization_id(node_index d) const;
     /* a partial specialization equivalent to another: the template not
        used */
@@ -3638,9 +3640,12 @@ class semantic_analysis
     analysis_result define_class_instantiation(node_index at, uint32_t index,
                                                entity_index &c);
     /* [temp.names]/1: a simple-template-id that names a class template's
-       specialization, as a type; in the scope given (0: unqualified) */
+       specialization, as a type; in the scope given (0: unqualified).  An
+       alias template's may be cv-qualified: its cv in *cv, refused when
+       cv is null */
     analysis_result template_type(node_index id, entity_index scope,
-                                  bool qualified, type_index &type);
+                                  bool qualified, type_index &type,
+                                  uint32_t *cv = nullptr);
     /* [temp.inst]/2: the class template specialization, instantiated */
     analysis_result instantiate_class(node_index at, uint32_t class_template,
                                       const template_argument *arguments,

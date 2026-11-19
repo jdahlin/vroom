@@ -1147,9 +1147,11 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
             } else if (syntax_is(tree, c,
                                  syntax_kind::elaborated_enum_specifier))
                 r = elaborated_enum_specifier(c.index(), class_type);
-            else if (syntax_is(tree, c, syntax_kind::simple_template_id))
-                r = template_type(c.index(), 0, false, class_type);
-            else if (syntax_is(tree, c, syntax_kind::simple_type_specifier)) {
+            else if (syntax_is(tree, c, syntax_kind::simple_template_id)) {
+                uint32_t named_cv = 0;
+                r = template_type(c.index(), 0, false, class_type, &named_cv);
+                cv |= named_cv;
+            } else if (syntax_is(tree, c, syntax_kind::simple_type_specifier)) {
                 uint32_t named_cv = 0;
                 r = qualified_type_name(c.index(), class_type, named_cv);
                 cv |= named_cv;
@@ -1531,7 +1533,8 @@ analysis_result semantic_analysis::qualified_type_name(node_index n,
             if (!is_namespace(scope.entity) &&
                 entity_table[scope.entity].kind != entity_kind::class_type)
                 return not_supported(n, "temp.names");
-            return template_type(parts[1].index(), scope.entity, true, type);
+            return template_type(parts[1].index(), scope.entity, true, type,
+                                 &cv);
         }
         return not_supported(n, "dcl.type.simple");
     }
