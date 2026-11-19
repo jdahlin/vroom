@@ -557,6 +557,7 @@ semantic_analysis::function_template_definition(node_index n,
     entity_table[t].defined = defines;
     entity_table[t].inline_ = s.inline_;
     entity_table[t].constexpr_ = s.constexpr_;
+    entity_table[t].immediate = s.consteval_;
     /* [over.oper]: an operator function template's specializations are
        operator functions (named by the operator: [abi:mangling-operator]) */
     entity_table[t].operator_function = m.operator_function;

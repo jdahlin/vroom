@@ -1037,7 +1037,7 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
     uint32_t cv = cv_none;
     unsigned const_ = 0, volatile_ = 0, typedef_ = 0, static_ = 0, extern_ = 0,
              inline_ = 0, constexpr_ = 0, virtual_ = 0, friend_ = 0,
-             explicit_ = 0;
+             explicit_ = 0, consteval_ = 0;
     type_index named = 0;
     bool declares_class = false, declares_enumeration = false;
     token_index named_at = 0, duplicate = 0;
@@ -1297,7 +1297,8 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
             kw != standard_keyword::inline_ &&
             kw != standard_keyword::virtual_ &&
             kw != standard_keyword::explicit_ &&
-            kw != standard_keyword::constexpr_)
+            kw != standard_keyword::constexpr_ &&
+            kw != standard_keyword::consteval_)
             k.first = t;
         switch (kw) {
         case standard_keyword::const_:
@@ -1372,6 +1373,12 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
         case standard_keyword::constexpr_:
             count(constexpr_, t, "constexpr");
             break;
+        case standard_keyword::consteval_:
+            /* [dcl.constexpr]/2: "The consteval specifier shall be applied
+               only to the declaration of a function or function template";
+               an immediate function is a constexpr function */
+            count(consteval_, t, "consteval");
+            break;
         case standard_keyword::virtual_:
             /* [dcl.fct.spec]/2: "The virtual specifier shall be used only
                in the initial declaration of a non-static member
@@ -1409,6 +1416,15 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
             return not_supported(seq, specifier_subclause(kw));
         }
     }
+    /* [dcl.spec]/2: "At most one of the constexpr, consteval, and
+       constinit keywords shall appear in a decl-specifier-seq." */
+    if (constexpr_ && consteval_)
+        return ill_formed(seq,
+                          "at most one of the constexpr, consteval, and "
+                          "constinit keywords shall appear in a "
+                          "decl-specifier-seq",
+                          "dcl.spec");
+    constexpr_ += consteval_;
     if (parameter && (typedef_ || static_ || extern_ || inline_ || constexpr_))
         return not_supported(seq, "dcl.fct");
     /* [dcl.stc]/1: "At most one storage-class-specifier shall appear in a
@@ -1492,6 +1508,7 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
     s.friend_ = friend_ != 0;
     s.explicit_ = explicit_ != 0;
     s.constexpr_ = constexpr_;
+    s.consteval_ = consteval_;
     if (type)
         s.type = add_cv(qualified_type::make(type, cv_none), cv);
     return analysis_result::well_formed;

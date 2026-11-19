@@ -772,6 +772,7 @@ analysis_result semantic_analysis::declare(node_index declaration,
         entity_table[declared_entity].kind == entity_kind::function) {
         entity_table[declared_entity].inline_ = true;
         entity_table[declared_entity].constexpr_ = true;
+        entity_table[declared_entity].immediate = s.consteval_;
     }
     declared_name d;
     d.declaration = declaration;

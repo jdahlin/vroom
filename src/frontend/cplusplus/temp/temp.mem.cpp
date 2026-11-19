@@ -121,6 +121,7 @@ analysis_result semantic_analysis::member_function_template(
     /* [class.mfct]/1: defined in its class, inline */
     entity_table[t].inline_ = true;
     entity_table[t].constexpr_ = s.constexpr_;
+    entity_table[t].immediate = s.consteval_;
     entity_table[t].operator_function = m.operator_function;
     entity_table[t].implemented = m.implemented;
     if (constructor) {
