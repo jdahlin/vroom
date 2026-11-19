@@ -39,6 +39,10 @@ struct SyntaxContext {
     SYNTAX_VIEW(declaration_seq, DeclarationSeq)                               \
     SYNTAX_VIEW(declaration, Declaration)                                      \
     SYNTAX_VIEW(function_definition, FunctionDefinition)                       \
+    SYNTAX_VIEW(template_declaration, TemplateDeclaration)                     \
+    SYNTAX_VIEW(concept_definition, ConceptDefinition)                         \
+    SYNTAX_VIEW(alias_declaration, AliasDeclaration)                           \
+    SYNTAX_VIEW(simple_declaration, SimpleDeclaration)                         \
     SYNTAX_VIEW(function_body, FunctionBody)
 
 #define SYNTAX_VIEW_DECLARE(name, Type) struct Type;
@@ -330,6 +334,71 @@ auto bind_member(T *self, R (T::*member)(A))
 }
 
 /*
+ * [temp.pre]/1:
+ *
+ *     template-declaration:
+ *         template-head declaration
+ *         template-head concept-definition
+ *
+ * The declaration (or concept-definition) is the last child.
+ */
+struct TemplateDeclaration : SyntaxRef {
+    using SyntaxRef::SyntaxRef;
+    static bool accepts(syntax_kind k)
+    {
+        return k == syntax_kind::template_declaration;
+    }
+    /* the declaration after the template-head ({} if there is none) */
+    Declaration declaration() const;
+};
+
+/* [temp.concept]/1: concept-definition: concept concept-name
+   attribute-specifier-seq_opt = constraint-expression ; */
+struct ConceptDefinition : SyntaxRef {
+    using SyntaxRef::SyntaxRef;
+    static bool accepts(syntax_kind k)
+    {
+        return k == syntax_kind::concept_definition;
+    }
+};
+
+/* [dcl.pre]/1: alias-declaration: using identifier
+   attribute-specifier-seq_opt = defining-type-id ; */
+struct AliasDeclaration : SyntaxRef {
+    using SyntaxRef::SyntaxRef;
+    static bool accepts(syntax_kind k)
+    {
+        return k == syntax_kind::alias_declaration;
+    }
+};
+
+/*
+ * [dcl.pre]/1:
+ *
+ *     simple-declaration:
+ *         decl-specifier-seq init-declarator-list_opt ;
+ *         attribute-specifier-seq decl-specifier-seq init-declarator-list ;
+ *         attribute-specifier-seq_opt decl-specifier-seq ref-qualifier_opt
+ *             [ identifier-list ] initializer ;
+ */
+struct SimpleDeclaration : SyntaxRef {
+    using SyntaxRef::SyntaxRef;
+    static bool accepts(syntax_kind k)
+    {
+        return k == syntax_kind::simple_declaration;
+    }
+    /* the init-declarator-list ({} without one; one declarator that is
+       not in a list is not one) */
+    syntax_child init_declarator_list() const
+    {
+        for (uint32_t i = 0; i < size(); i++)
+            if (is((*this)[i], syntax_kind::init_declarator_list))
+                return (*this)[i];
+        return {};
+    }
+};
+
+/*
  * [dcl.pre]/1:
  *
  *     declaration-seq:
@@ -344,16 +413,34 @@ struct DeclarationSeq : SyntaxRef {
     SyntaxRange<Declaration> declarations() const;
 };
 
+/* the alternatives of a declaration that have a view, for visit */
+#define DECLARATION_ALTERNATIVES(ALTERNATIVE)                                  \
+    ALTERNATIVE(function_definition, FunctionDefinition)                       \
+    ALTERNATIVE(template_declaration, TemplateDeclaration)                     \
+    ALTERNATIVE(concept_definition, ConceptDefinition)                         \
+    ALTERNATIVE(alias_declaration, AliasDeclaration)                           \
+    ALTERNATIVE(simple_declaration, SimpleDeclaration)
+
 /*
  * [dcl.pre]/1: a declaration is one of its alternatives
  * (block-declaration, function-definition, template-declaration, ...).
  * visit calls f with the view of the alternative it is, for the
- * alternatives that have one, and with the Declaration itself for
- * the others: a visitor without a case for an alternative with a view
+ * alternatives that have one (DECLARATION_ALTERNATIVES), and with the
+ * Declaration itself for the others.  Each alternative's view converts to
+ * a Declaration, so a case taking a Declaration is the visitor's default:
+ * it gets the alternatives the visitor has no case of their own for.  A
+ * visitor without a default needs a case for every alternative, or it
  * does not compile.
  */
 struct Declaration : SyntaxRef {
     using SyntaxRef::SyntaxRef;
+#define DECLARATION_FROM(name, Type)                                           \
+    Declaration(Type alternative) : SyntaxRef(alternative)                     \
+    {                                                                          \
+    }
+    DECLARATION_ALTERNATIVES(DECLARATION_FROM)
+#undef DECLARATION_FROM
+    Declaration() = default;
     static bool accepts(syntax_kind)
     {
         return true;
@@ -368,13 +455,23 @@ struct Declaration : SyntaxRef {
     template <class F> decltype(auto) visit(F &&f) const
     {
         switch (kind()) {
-        case syntax_kind::function_definition:
-            return f(FunctionDefinition(*cx, n));
+#define DECLARATION_CASE(name, Type)                                           \
+    case syntax_kind::name:                                                    \
+        return f(Type(*cx, n));
+            DECLARATION_ALTERNATIVES(DECLARATION_CASE)
+#undef DECLARATION_CASE
         default:
             return f(*this);
         }
     }
 };
+
+inline Declaration TemplateDeclaration::declaration() const
+{
+    if (!*this)
+        return {};
+    return Declaration(*cx, (*this)[size() - 1]);
+}
 
 inline SyntaxRange<Declaration> DeclarationSeq::declarations() const
 {

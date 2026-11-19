@@ -22,13 +22,9 @@ namespace cplusplus
  * [temp.pre]/1: "A template defines a family of classes, functions, or
  * variables, an alias for a family of types, or a concept."
  */
-analysis_result semantic_analysis::template_declaration(node_index n)
+analysis_result semantic_analysis::template_declaration(TemplateDeclaration t)
 {
-    const syntax_node &node = tree[n];
-    if (!node.child_count || tree.children(n)[node.child_count - 1].is_token())
-        return not_supported(n, "temp.pre");
-    auto inner = syntax(tree.children(n)[node.child_count - 1]).declaration();
-    return inner.visit(Overloaded{
+    return t.declaration().visit(Overloaded{
         /* [temp.fct]/1: "A function template defines an unbounded set of
            related functions." */
         [&](FunctionDefinition f) {
@@ -36,90 +32,68 @@ analysis_result semantic_analysis::template_declaration(node_index n)
                may be defined outside of the class template definition in
                which it is declared." */
             if (out_of_class_member(f))
-                return member_definition_of_template(n, f);
-            return function_template_definition(n, f);
+                return member_definition_of_template(t, f);
+            return function_template_definition(t, f);
         },
-        [&](Declaration d) { return template_of_declaration(n, d); }});
+        /* [temp.mem]/1: "A member template can be defined within or
+           outside its class definition or class template definition"
+           (template<...> template<...> ...) */
+        [&](TemplateDeclaration) { return not_supported(t, "temp.mem"); },
+        /* [temp.concept]/1: "A concept is a template that defines
+           constraints on its template arguments." */
+        [&](ConceptDefinition c) { return concept_definition(t, c); },
+        /* [temp.alias]/1: "A template-declaration in which the declaration
+           is an alias-declaration declares the identifier to be an alias
+           template." */
+        [&](AliasDeclaration a) { return alias_template_definition(t, a); },
+        [&](SimpleDeclaration s) { return template_simple_declaration(t, s); },
+        /* (or no declaration: a token) */
+        [&](Declaration) { return not_supported(t, "temp.pre"); }});
 }
 
-/* a template-declaration whose declaration is not a function-definition */
-analysis_result semantic_analysis::template_of_declaration(node_index n,
-                                                           Declaration d)
+/* a template-declaration whose declaration is a simple-declaration */
+analysis_result
+semantic_analysis::template_simple_declaration(TemplateDeclaration t,
+                                               SimpleDeclaration s)
 {
-    node_index inner = d;
-    switch (d.kind()) {
-    /* [temp.mem]/1: "A member template can be defined within or outside
-       its class definition or class template definition" (template<...>
-       template<...> ...) */
-    case syntax_kind::template_declaration:
-        return not_supported(n, "temp.mem");
-    /* [temp.concept]/1: "A concept is a template that defines constraints
-       on its template arguments." */
-    case syntax_kind::concept_definition:
-        return concept_definition(n, inner);
-    /* [temp.alias]/1: "A template-declaration in which the declaration is
-       an alias-declaration declares the identifier to be an alias
-       template." */
-    case syntax_kind::alias_declaration:
-        return alias_template_definition(n, inner);
-    case syntax_kind::simple_declaration: {
-        /* [temp.class]/1: "A class template defines the layout and
-           operations for an unbounded set of related types." (a
-           declaration with no declarator: a class's) */
-        bool declarators = false;
-        for (uint32_t i = 0; i < tree[inner].child_count; i++)
-            if (syntax_is(tree, tree.children(inner)[i],
-                          syntax_kind::init_declarator_list))
-                declarators = true;
-        if (!declarators) {
-            const syntax_node &d = tree[inner];
-            node_index only = sole_decl_specifier(inner);
-            if (only && tree[only].kind == syntax_kind::class_specifier)
-                return class_template_definition(n, only);
-            /* [temp.class]/1's declaration without a definition
-               (template<class T> struct S;) */
-            if (only &&
-                tree[only].kind == syntax_kind::elaborated_type_specifier)
-                return class_template_declaration(n, only);
-            /* [temp.pre]/1: a variable template, its one init-declarator
-               with an initializer, after attributes without effect
-               (libc++'s deprecated is_pod_v) */
-            uint32_t lead = attributes_without_effect_before(inner);
-            if (d.child_count == 3 + lead &&
-                syntax_is(tree, tree.children(inner)[lead],
-                          syntax_kind::decl_specifier_seq) &&
-                syntax_is(tree, tree.children(inner)[lead + 1],
-                          syntax_kind::init_declarator)) {
-                /* (a specialization's template-id after attributes: no
-                   rules yet) */
-                node_index item = tree.children(inner)[lead + 1].index();
-                if (lead && tree[item].child_count &&
-                    syntax_is(tree, tree.children(item)[0],
-                              syntax_kind::simple_template_id))
-                    return not_supported(n, "temp.pre");
-                if (node_index id = variable_specialization_id(inner))
-                    return variable_partial_specialization(n, inner, id);
-                return variable_template_definition(n, inner);
-            }
-            /* [temp.fct]/1: a function template's declaration
-               (template<class T> T f(T);), one declarator not in an
-               init-declarator-list */
-            uint32_t gnu = leading_gnu_attributes(inner);
-            if (d.child_count == 3 + gnu &&
-                (syntax_is(tree, tree.children(inner)[1 + gnu],
-                           syntax_kind::noptr_declarator) ||
-                 syntax_is(tree, tree.children(inner)[1 + gnu],
-                           syntax_kind::ptr_declarator)))
-                return function_template_definition(n, inner);
-            return not_supported(n, "temp.class");
-        }
-        /* a function template's declaration or a variable template of
-           several declarators: which needs the declarator's type */
-        return not_supported(n, "temp.pre");
+    /* a function template's declaration or a variable template of several
+       declarators: which needs the declarator's type */
+    if (s.init_declarator_list().bits)
+        return not_supported(t, "temp.pre");
+    /* [temp.class]/1: "A class template defines the layout and operations
+       for an unbounded set of related types." (a declaration with no
+       declarator: a class's) */
+    node_index only = sole_decl_specifier(s);
+    if (only && tree[only].kind == syntax_kind::class_specifier)
+        return class_template_definition(t, only);
+    /* [temp.class]/1's declaration without a definition (template<class T>
+       struct S;) */
+    if (only && tree[only].kind == syntax_kind::elaborated_type_specifier)
+        return class_template_declaration(t, only);
+    /* [temp.pre]/1: a variable template, its one init-declarator with an
+       initializer, after attributes without effect (libc++'s deprecated
+       is_pod_v) */
+    uint32_t lead = attributes_without_effect_before(s);
+    if (s.size() == 3 + lead &&
+        s.is(s[lead], syntax_kind::decl_specifier_seq) &&
+        s.is(s[lead + 1], syntax_kind::init_declarator)) {
+        /* (a specialization's template-id after attributes: no rules
+           yet) */
+        auto item = syntax(s[lead + 1]);
+        if (lead && item.is(item[0], syntax_kind::simple_template_id))
+            return not_supported(t, "temp.pre");
+        if (node_index id = variable_specialization_id(s))
+            return variable_partial_specialization(t, s, id);
+        return variable_template_definition(t, s);
     }
-    default:
-        return not_supported(n, "temp.pre");
-    }
+    /* [temp.fct]/1: a function template's declaration (template<class T>
+       T f(T);), one declarator not in an init-declarator-list */
+    uint32_t gnu = leading_gnu_attributes(s);
+    if (s.size() == 3 + gnu &&
+        (s.is(s[1 + gnu], syntax_kind::noptr_declarator) ||
+         s.is(s[1 + gnu], syntax_kind::ptr_declarator)))
+        return function_template_definition(t, s);
+    return not_supported(t, "temp.class");
 }
 
 /* [temp.deduct.guide]/1: "Deduction guides are used when a template-name

@@ -1523,8 +1523,9 @@ class semantic_analysis
     /* [temp.pre], [temp.expl.spec], [temp.explicit], [temp.deduct.guide]
        (temp/): the declarations of templates and of their
        specializations; no rules yet, each answers its subclause */
-    analysis_result template_declaration(node_index n);
-    analysis_result template_of_declaration(node_index n, Declaration d);
+    analysis_result template_declaration(TemplateDeclaration t);
+    analysis_result template_simple_declaration(TemplateDeclaration t,
+                                                SimpleDeclaration s);
     /* [temp.fct]: a function template defined at namespace scope */
     analysis_result function_template_definition(node_index n,
                                                  node_index definition);

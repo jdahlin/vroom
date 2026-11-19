@@ -156,6 +156,7 @@ analysis_result semantic_analysis::declaration_by_kind(node_index n)
 {
     return syntax(n).declaration().visit(
         this, &semantic_analysis::function_definition,
+        &semantic_analysis::template_declaration,
         &semantic_analysis::other_declaration);
 }
 
@@ -173,8 +174,6 @@ analysis_result semantic_analysis::other_declaration(Declaration d)
         return static_assert_declaration(n);
     case syntax_kind::alias_declaration:
         return alias_declaration(n);
-    case syntax_kind::template_declaration:
-        return template_declaration(n);
     case syntax_kind::explicit_specialization:
         return explicit_specialization(n);
     case syntax_kind::explicit_instantiation:
