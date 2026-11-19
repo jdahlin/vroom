@@ -72,6 +72,11 @@ parser::reading parser::reading_at(unsigned ahead)
             return reading::either;
         return reading::declaration;
     }
+    /* ::operator new(n): a declaration's declarator-id in a block is not
+       qualified ([dcl.meaning]/1), so this is an expression */
+    if (at(preprocessing_op_or_punc::COLON_COLON, ahead) &&
+        at(standard_keyword::operator_, ahead + 1))
+        return reading::expression;
     if (at_identifier(ahead) ||
         at(preprocessing_op_or_punc::COLON_COLON, ahead)) {
         /* a '<' after a name is read by what the name is (id_expression,
