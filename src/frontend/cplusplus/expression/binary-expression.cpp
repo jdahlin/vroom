@@ -178,8 +178,11 @@ node_index parser::binary_expression(unsigned lowest_level)
         if (level == binary_production_count || level < lowest_level)
             break;
         /* [temp.names]/3: in a template-argument-list the first
-           non-nested > ends it */
-        if (!greater_is_operator && at_closing_angle())
+           non-nested > ends it (and a >> or >>= from C++11 on); a >= is
+           still the operator after an expression, as clang takes it
+           (only after a type-id is it split: accept_closing_angle) */
+        if (!greater_is_operator && at_closing_angle() &&
+            !at(preprocessing_op_or_punc::GREATER_EQUAL))
             break;
         /* [expr.prim.fold]/1: a fold-expression is parenthesized */
         if (at(preprocessing_op_or_punc::ELLIPSIS, 1))
