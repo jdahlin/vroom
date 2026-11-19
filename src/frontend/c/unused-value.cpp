@@ -187,7 +187,7 @@ static bool cc_unused_value_walk(cc *c, uint32_t e, cc_unused_value_state *w)
 CC_PRIVATE bool cc_unused_comparison_check(cc *c, uint32_t e)
 {
     if (AST_NODE(e)->op != AST_NODE_BINARY ||
-        !cc_operator_is_comparison(AST_NODE(e)->aux) ||
+        !lex_token_is_comparison(AST_NODE(e)->aux) ||
         (AST_NODE(e)->flags & (AST_NODE_FLAG_PARENTHESIZED |
                                AST_NODE_FLAG_FROM_MACRO | AST_NODE_FLAG_ERROR)))
         return false;
@@ -252,7 +252,7 @@ CC_PRIVATE void cc_unused_value_check(cc *c, uint32_t e, bool comma)
     if (!c->fn || !e || (AST_NODE(e)->flags & AST_NODE_FLAG_ERROR))
         return;
     if (comma && AST_NODE(e)->op == AST_NODE_BINARY &&
-        cc_operator_is_comparison(AST_NODE(e)->aux) &&
+        lex_token_is_comparison(AST_NODE(e)->aux) &&
         !(AST_NODE(e)->flags &
           (AST_NODE_FLAG_PARENTHESIZED | AST_NODE_FLAG_FROM_MACRO)) &&
         (c->in_stmtexpr || cc_unused_comparison_check(c, e)))

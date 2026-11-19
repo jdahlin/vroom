@@ -567,7 +567,7 @@ static void vir_print_insn_append(vir_print_state *p, const vir_insn *in,
     case VIR_FORM_SWITCH: {
         uint32_t n = in->c < ne ? f->extra[in->c] : 0,
                  ty = in->a < f->insn_count ? f->insns[in->a].type : 0;
-        uint32_t st = ty == VIR_TYPE_I64 ? 5 : 3;
+        uint32_t st = vir_switch_stride(ty);
 
         if ((uint64_t)in->c + 1 + (uint64_t)n * st > ne)
             n = 0;

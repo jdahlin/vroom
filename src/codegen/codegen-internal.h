@@ -1284,7 +1284,6 @@ VPRIV codegen_lvalue bind_lreg(codegen_context *e, uint32_t s);
 VPRIV codegen_value fold_int_bin(codegen_context *e, int op,
                                  ast_qualified_type ot, ast_qualified_type rt,
                                  i128 l, i128 r, bool *ok);
-VPRIV bool codegen_operator_is_comparison(int op);
 /* Pure control proofs: bounded shared walk, no committed target instructions. */
 VPRIV bool em_const_strcmp(cc *c, uint32_t n, i128 *value);
 VPRIV int em_const_truth(codegen_context *e, uint32_t n,
@@ -1476,6 +1475,7 @@ VPRIV uint32_t codegen_recursion_group(
 VPRIV bool codegen_inline_has_constant_argument(const codegen_unit *E, cc *c,
                                                 uint32_t callee, uint32_t call);
 VPRIV bool virbuild_asm_is_crc32q(cc *c, const ast_asm_statement *a);
+VPRIV bool codegen_statement_is_tiny(cc *c, uint32_t n, bool vir);
 VPRIV bool codegen_inline_is_candidate(codegen_unit *E, cc *c, uint32_t s);
 /* VIR could inline a call to s (size aside) */ /* per function: 1 when its one reference in the TU is a direct call */
 VPRIV int codegen_u32_compare(const void *a, const void *b);

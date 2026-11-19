@@ -405,6 +405,7 @@ CC_PRIVATE ast_qualified_type cc_type_atomic(cc *c, ast_qualified_type t,
                                              uint32_t loc);
 static inline ast_qualified_type cc_type_unatomic(cc *c, ast_qualified_type t);
 CC_PRIVATE uint64_t cc_type_size(cc *c, ast_qualified_type t);
+CC_PRIVATE uint64_t cc_pointer_element_size(cc *c, ast_qualified_type ptr);
 CC_PRIVATE uint32_t cc_type_alignment(cc *c, ast_qualified_type t);
 CC_PRIVATE bool cc_type_complete(cc *c, ast_qualified_type t);
 CC_PRIVATE int cc_type_rank(cc *c, ast_qualified_type t);
@@ -643,7 +644,6 @@ CC_PRIVATE uint32_t cc_complex_increment(cc *c, uint32_t n, int op,
 CC_PRIVATE uint32_t cc_complex_unary(cc *c, int op, uint32_t n, uint32_t loc);
 CC_PRIVATE bool cc_lowering_is_pure(cc *c, uint32_t n, int d);
 /* expression.c */
-CC_PRIVATE bool cc_operator_is_comparison(int op);
 CC_PRIVATE uint32_t cc_binary_build(cc *c, int op, uint32_t l, uint32_t r,
                                     uint32_t loc);
 CC_PRIVATE uint32_t cc_assignment_build(cc *c, int op, uint32_t l, uint32_t r,

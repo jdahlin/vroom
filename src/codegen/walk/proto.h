@@ -119,7 +119,6 @@ VPRIV codegen_value walk_vla_bytes(
     codegen_context *e, ast_qualified_type t); /* sizeof t (a VLA: computed) */
 VPRIV void walk_vla_declare(codegen_context *e, uint32_t s,
                             bool zero); /* a VLA's storage below sp */
-VPRIV uint32_t walk_user_label_get(codegen_context *e, uint32_t l);
 VPRIV void walk_lvalue_store_register(codegen_context *e,
                                       const codegen_lvalue *l,
                                       ast_qualified_type t, int r);

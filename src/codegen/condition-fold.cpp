@@ -53,7 +53,7 @@ static bool codegen_expression_is_same_pure(cc *c, uint32_t a, uint32_t b)
         return x->aux == y->aux &&
                codegen_expression_is_same_pure(c, x->a, y->a);
     case AST_NODE_BINARY:
-        return x->aux == y->aux && !codegen_operator_is_comparison(x->aux) &&
+        return x->aux == y->aux && !lex_token_is_comparison(x->aux) &&
                x->aux != LEX_TOKEN_SLASH && x->aux != LEX_TOKEN_PERCENT &&
                codegen_expression_is_same_pure(c, x->a, y->a) &&
                codegen_expression_is_same_pure(c, x->b, y->b);
@@ -68,7 +68,7 @@ static int codegen_comparison_outcomes(cc *c, uint32_t n, uint32_t *l,
     const node *x = N(n);
     int m;
 
-    if (x->op != AST_NODE_BINARY || !codegen_operator_is_comparison(x->aux) ||
+    if (x->op != AST_NODE_BINARY || !lex_token_is_comparison(x->aux) ||
         codegen_type_is_float(c, N(x->a)->ty) ||
         codegen_type_is_wide(c, N(x->a)->ty))
         return 0;
@@ -170,7 +170,7 @@ static int codegen_expression_range_compare(cc *c, uint32_t n, uint32_t s,
     const node *x = N(n);
     i128 alo, ahi, blo, bhi;
 
-    if (x->op != AST_NODE_BINARY || !codegen_operator_is_comparison(x->aux) ||
+    if (x->op != AST_NODE_BINARY || !lex_token_is_comparison(x->aux) ||
         !codegen_expression_range(c, x->a, s, slo, shi, &alo, &ahi) ||
         !codegen_expression_range(c, x->b, s, slo, shi, &blo, &bhi))
         return -1;
@@ -203,7 +203,7 @@ static bool codegen_comparison_variable_range(cc *c, uint32_t n, bool t,
     int op;
     i128 k;
 
-    if (x->op != AST_NODE_BINARY || !codegen_operator_is_comparison(x->aux) ||
+    if (x->op != AST_NODE_BINARY || !lex_token_is_comparison(x->aux) ||
         N(x->a)->op != AST_NODE_VARIABLE || N(x->b)->op != AST_NODE_NUMBER ||
         !codegen_type_range(c, N(x->a)->ty, lo, hi) ||
         (AST_QUALIFIED_TYPE_QUALIFIERS(N(x->a)->ty) & AST_QUALIFIER_VOLATILE) ||
@@ -317,11 +317,4 @@ VPRIV int codegen_condition_fold(codegen_context *e, uint32_t n)
     if (m && codegen_expression_is_same_pure(c, l1, r1))
         return (m & 2) != 0;
     return -1;
-}
-
-VPRIV bool codegen_operator_is_comparison(int op)
-{
-    return op == LEX_TOKEN_LESS || op == LEX_TOKEN_LESS_EQUAL ||
-           op == LEX_TOKEN_GREATER || op == LEX_TOKEN_GREATER_EQUAL ||
-           op == LEX_TOKEN_EQUAL_EQUAL || op == LEX_TOKEN_EXCLAMATION_EQUAL;
 }

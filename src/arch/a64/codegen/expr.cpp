@@ -467,7 +467,7 @@ static codegen_value gen_vlanes(codegen_context *e, int op,
                                  codegen_value_constant(-1))
                         : arith(e, LEX_TOKEN_CARET, et, x,
                                 codegen_value_constant(-1));
-        } else if (codegen_operator_is_comparison(op)) {
+        } else if (lex_token_is_comparison(op)) {
             if (codegen_type_is_float(c, et)) {
                 r = f_compare(e, op, et, x, y);
             } else {
@@ -546,8 +546,7 @@ static codegen_value gen_binary(codegen_context *e, uint32_t n)
     const node *x = N(n);
     int op = x->aux;
     ast_qualified_type lt = N(x->a)->ty, rt = N(x->b)->ty, ty = x->ty;
-    int known =
-        codegen_operator_is_comparison(op) ? codegen_condition_fold(e, n) : -1;
+    int known = lex_token_is_comparison(op) ? codegen_condition_fold(e, n) : -1;
     codegen_value a, b;
     uint32_t operand;
     int bound = em_cmpbounds(e, n, &operand);
@@ -630,11 +629,11 @@ static codegen_value gen_binary(codegen_context *e, uint32_t n)
         b = cast(e, b, rt, codegen_type_primitive(AST_TYPE_INT),
                  AST_CAST_INTEGER);
     if (codegen_type_is_bitint_big(c, lt))
-        return codegen_operator_is_comparison(op) ? a64_bigcmp(e, op, lt, a, b)
-                                                  : a64_bigbin(e, op, ty, a, b);
+        return lex_token_is_comparison(op) ? a64_bigcmp(e, op, lt, a, b)
+                                           : a64_bigbin(e, op, ty, a, b);
     if (codegen_type_is_float(c, lt) || codegen_type_is_float(c, ty))
-        return codegen_operator_is_comparison(op) ? f_compare(e, op, lt, a, b)
-                                                  : f_arith(e, op, ty, a, b);
+        return lex_token_is_comparison(op) ? f_compare(e, op, lt, a, b)
+                                           : f_arith(e, op, ty, a, b);
     /* pointer arithmetic */
     if (codegen_type_is_pointer(c, ty) &&
         (op == LEX_TOKEN_PLUS || op == LEX_TOKEN_MINUS) &&
@@ -682,7 +681,7 @@ static codegen_value gen_binary(codegen_context *e, uint32_t n)
             return a;
         }
     }
-    if (codegen_operator_is_comparison(op)) {
+    if (lex_token_is_comparison(op)) {
         bool sg =
             !codegen_type_is_pointer(c, lt) && codegen_type_is_signed(c, lt);
         int cond, r;

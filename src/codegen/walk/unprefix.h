@@ -62,7 +62,6 @@
 #undef walk_float_pattern
 #undef walk_function_emit
 #undef walk_function_is_main
-#undef walk_function_is_tiny
 #undef walk_global_constant_value
 #undef walk_goto_emit
 #undef walk_increment_emit
@@ -76,6 +75,7 @@
 #undef walk_integer_value_evaluate
 #undef walk_label_new
 #undef walk_label_place
+#undef walk_label_slot_get
 #undef walk_library_call_shrink
 #undef walk_local_slot
 #undef walk_loop_push
@@ -127,7 +127,6 @@
 #undef walk_unary_emit
 #undef walk_unsupported_fail
 #undef walk_user_label_find
-#undef walk_user_label_get
 #undef walk_valist_emit
 #undef walk_value_constant
 #undef walk_value_convert

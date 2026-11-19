@@ -783,7 +783,7 @@ static __attribute__((noinline)) uint32_t cc_binary_operators_parse(cc *c,
                  op == LEX_TOKEN_PIPE_PIPE) &&
                 !mac)
                 cc_expression_logical_constant_check(c, op, l, r, loc);
-            else if (cc_operator_is_comparison(op) && !mac) {
+            else if (lex_token_is_comparison(op) && !mac) {
                 cc_binary_self_compare_check(c, op, l, r, loc);
                 if (unlikely(cc_type_is_pointer(c, AST_NODE(l)->ty) ||
                              cc_type_is_pointer(c, AST_NODE(r)->ty) ||
@@ -798,7 +798,7 @@ static __attribute__((noinline)) uint32_t cc_binary_operators_parse(cc *c,
             if (mac)
                 AST_NODE(l)->flags |= AST_NODE_FLAG_FROM_MACRO;
             cc_node_span_set(c, l, b);
-            if (cc_operator_is_comparison(op) && !mac &&
+            if (lex_token_is_comparison(op) && !mac &&
                 !cc_report_runtime_is_quiet(c))
                 cc_binary_range_compare_check(c, l, loc);
             if (op == LEX_TOKEN_PLUS || op == LEX_TOKEN_MINUS ||

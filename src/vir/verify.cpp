@@ -375,7 +375,7 @@ static bool vir_verify_lists_in_range_check(vir_verify_state *v, uint32_t b,
     }
     case VIR_OP_SWITCH: {
         uint32_t ty = in->a < f->insn_count ? f->insns[in->a].type : 0,
-                 st = ty == VIR_TYPE_I64 ? 5 : 3;
+                 st = vir_switch_stride(ty);
 
         vir_alloc_check_failure_add =
             in->c == 0 || in->c >= ne ||
@@ -805,16 +805,12 @@ static void vir_verify_switch_check(vir_verify_state *v, uint32_t b, uint32_t i,
                                     const vir_insn *in)
 {
     vir_function *f = v->function;
-    uint32_t ty = f->insns[in->a].type, st = ty == VIR_TYPE_I64 ? 5 : 3,
-             n = f->extra[in->c];
+    uint32_t n = vir_switch_count(f, in);
     uint64_t prev_hi = 0;
 
     for (uint32_t k = 0; k < n; k++) {
-        const uint32_t *w = &f->extra[in->c + 1 + (size_t)k * st];
-        uint64_t lo =
-            ty == VIR_TYPE_I64 ? (uint64_t)w[0] | (uint64_t)w[1] << 32 : w[0];
-        uint64_t hi =
-            ty == VIR_TYPE_I64 ? (uint64_t)w[2] | (uint64_t)w[3] << 32 : w[1];
+        vir_switch_case c = vir_switch_case_get(f, in, k);
+        uint64_t lo = c.lo, hi = c.hi;
 
         if (lo > hi) {
             vir_verify_fail(v, "C5", b, i, "switch: case %u has lo above hi",
