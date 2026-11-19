@@ -1725,6 +1725,17 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
                                        "of a variable or function",
                                        "dcl.inline");
         const struct type &record = type_table[type.unqualified()];
+        if (entity_table[c].union_ &&
+            (record.kind == type_kind::lvalue_reference ||
+             record.kind == type_kind::rvalue_reference) &&
+            !tokens.files.behavior.microsoft_extensions)
+            /* [class.union]/4: "If a union contains a non-static data
+               member of reference type the program is ill-formed." (a
+               Microsoft extension allows it) */
+            return ill_formed_at_token(m.id,
+                                       "a union shall not have a non-static "
+                                       "data member of reference type",
+                                       "class.union");
         uint64_t size = size_of_type(type);
         bool is_void = record.kind == type_kind::fundamental &&
                        record.fundamental == fundamental_type::void_;
@@ -1751,9 +1762,10 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
         uint32_t alignment = static_cast<uint32_t>(alignment_of_type(type));
         if (!alignment)
             return not_supported(declaration, "class.mem");
-        if (entity_table[c].union_ && record.kind == type_kind::class_type)
-            /* a member whose special member functions may make the
-               union's deleted ([class.union]/2 Note) */
+        if (entity_table[c].union_ && element_class(type) &&
+            !trivial_special_members(element_class(type)))
+            /* a member whose special member functions make the union's
+               deleted ([class.union]/4 Note 3) */
             return not_supported(declaration, "class.union");
         /* its offset is the layout's, at the closing }
            ([abi:class-types]), with [ext:gnu_attributes]' aligned and

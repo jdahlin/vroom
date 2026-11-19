@@ -1423,6 +1423,7 @@ class semantic_analysis
     constness literal_class(entity_index c) const;
     bool trivial_defaulted_default_constructor(entity_index c) const;
     bool copies_bytes(entity_index c) const;
+    bool trivial_special_members(entity_index c) const;
     bool is_copy_constructor(entity_index c, entity_index k) const;
     bool declares_move_constructor(entity_index c) const;
     /* a user-declared copy constructor whose parameter is an lvalue reference
