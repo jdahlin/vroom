@@ -432,15 +432,14 @@ uint32_t semantic_analysis::function_parameter_position(entity_index t,
     return 0;
 }
 
-entity_index semantic_analysis::constraint_concept(entity_index t,
+entity_index semantic_analysis::constraint_concept(entity_index scope,
                                                    token_index i) const
 {
     uint32_t name = tokens.identifier(i);
     if (!name)
         return 0;
-    /* the template's scopes outward, the global namespace (0) last */
-    for (entity_index s = entity_table[t].enclosing;;
-         s = entity_table[s].enclosing) {
+    /* scope's scopes outward, the global namespace (0) last */
+    for (entity_index s = scope;; s = entity_table[s].enclosing) {
         entity_index e = entity_table.find(s, name);
         if (e && concept_of(e))
             return e;
@@ -477,7 +476,8 @@ analysis_result semantic_analysis::template_constraints_satisfied(
         const syntax_child *q = tree.children(x.constraint);
         if (tree[x.constraint].child_count != 1 || !q[0].is_token())
             return not_supported(x.constraint, "temp.param");
-        entity_index named = constraint_concept(ft.entity, q[0].index());
+        entity_index named =
+            constraint_concept(entity_table[ft.entity].enclosing, q[0].index());
         uint32_t ct = 0;
         if (named)
             ct = concept_of(named);

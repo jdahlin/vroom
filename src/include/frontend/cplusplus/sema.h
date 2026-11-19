@@ -2091,12 +2091,15 @@ class semantic_analysis
                                             qualified_type type,
                                             entity_kind kind, bool placeholder,
                                             bool initialized);
-    /* [dcl.spec.auto]/1: the placeholder type of auto or decltype(auto) */
-    qualified_type placeholder_type(bool decltype_auto);
+    /* [dcl.spec.auto]/1: the placeholder type of auto or decltype(auto),
+       of type-constraint C auto when named_concept is C's entity */
+    qualified_type placeholder_type(bool decltype_auto,
+                                    entity_index named_concept = 0);
     /* whether t is or contains (through pointers, references, arrays and
-       a function's return type) a placeholder type, and which */
-    bool contains_placeholder(qualified_type t,
-                              bool *decltype_auto = nullptr) const;
+       a function's return type) a placeholder type, and which (concept:
+       its type-constraint's concept, 0 for none) */
+    bool contains_placeholder(qualified_type t, bool *decltype_auto = nullptr,
+                              entity_index *named_concept = nullptr) const;
     /* [dcl.type.decltype]/1: the type decltype ( expression ) denotes */
     analysis_result decltype_type(node_index n, qualified_type &type);
     analysis_result clang_type_transformation(node_index n,
@@ -2113,6 +2116,11 @@ class semantic_analysis
     /* [dcl.type.auto.deduct]: the type replacing declared (which contains a
        placeholder) for the initializer E analysed as e (named:
        names_entity of it), and what replaced the placeholder in it */
+    /* [dcl.type.auto.deduct]/6: C<u> satisfied, of a placeholder whose
+       type-constraint names named_concept (0: none) */
+    analysis_result placeholder_constraint(node_index at,
+                                           entity_index named_concept,
+                                           qualified_type u);
     analysis_result deduce_placeholder(node_index at, qualified_type declared,
                                        const expression_meaning &e, bool named,
                                        qualified_type &deduced,
@@ -3964,7 +3972,8 @@ class semantic_analysis
             .parameter_count;
     }
     entity_index constraint_parameter(entity_index t, token_index i) const;
-    entity_index constraint_concept(entity_index t, token_index i) const;
+    /* the concept token i names, looked up from scope outward (0: none) */
+    entity_index constraint_concept(entity_index scope, token_index i) const;
     /* [abi:mangle.function-param]: the position plus one of function
        template t's parameter named by token i (0: none) */
     uint32_t function_parameter_position(entity_index t, token_index i) const;
