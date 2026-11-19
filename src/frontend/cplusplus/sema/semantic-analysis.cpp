@@ -150,7 +150,9 @@ analysis_result semantic_analysis::declaration(SyntaxRef n)
     if (d.result == analysis_result::unsupported)
         d.first_unsupported = static_cast<uint32_t>(unsupported_before);
     d.has_unsupported = unsupported.size() > unsupported_before;
-    if (d.result != analysis_result::well_formed)
+    /* (a linkage-specification holds the names of its own declarations) */
+    if (d.result != analysis_result::well_formed &&
+        tree[n].kind != syntax_kind::linkage_specification)
         hold_names(n);
     declarations.append(d);
     return d.result;
