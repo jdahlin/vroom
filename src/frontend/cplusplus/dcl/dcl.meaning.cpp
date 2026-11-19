@@ -154,7 +154,7 @@ analysis_result semantic_analysis::pointer_operator(node_index op,
     using enum preprocessing_op_or_punc;
     entity_index member_class = 0;
     for (auto c : syntax(op).elements()) {
-        if (syntax_is_attribute(tree, c))
+        if (c.is_attribute())
             return not_supported(op, "dcl.attr");
         if (c.nested_name_specifier()) {
             /* [dcl.mptr]/1: "In a declaration T D where D has the form
@@ -275,8 +275,7 @@ entity_index semantic_analysis::value_parameter_named(syntax_child e)
  * array of N T."  /2: without the constant-expression, "array of unknown
  * bound of T".
  */
-analysis_result semantic_analysis::array(node_index at,
-                                         const syntax_child *bound,
+analysis_result semantic_analysis::array(node_index at, SyntaxElement bound,
                                          qualified_type &type)
 {
     /* [dcl.array]/4: "U is called the array element type; this type shall
@@ -314,7 +313,7 @@ analysis_result semantic_analysis::array(node_index at,
        value-dependent: the type records the parameter, which deduction
        ([temp.deduct.type]/8's T[i]) gives a value; each instantiation
        analyses the declarator again with the parameter bound to it */
-    if (entity_index named = value_parameter_named(*bound)) {
+    if (entity_index named = value_parameter_named(bound)) {
         if (!is_integral(entity_table[named].type))
             return not_supported(at, "temp.dep.constexpr");
         type = qualified_type::make(
@@ -322,7 +321,7 @@ analysis_result semantic_analysis::array(node_index at,
         return analysis_result::well_formed;
     }
     expression_meaning m;
-    analysis_result r = expression(*bound, m);
+    analysis_result r = expression(bound, m);
     if (r != analysis_result::well_formed)
         return r;
     r = operand_value(at, m);
@@ -400,7 +399,7 @@ token_index semantic_analysis::declarator_id(syntax_child d) const
             continue;
         }
         token_index id = declarator_id(c);
-        if (id || c.qualified_id() || c.is(syntax_kind::unqualified_id))
+        if (id || c.qualified_id() || c.destructor_type_id())
             return id;
     }
     return 0;
@@ -448,7 +447,7 @@ void semantic_analysis::hold_names(node_index declaration)
         for (auto c : syntax(declaration).elements()) {
             if (c.is_token())
                 continue;
-            if (c.is(syntax_kind::declaration_seq)) {
+            if (c.declarations()) {
                 for (auto d : c.elements())
                     if (d.is_node())
                         hold_names(d);
@@ -461,7 +460,7 @@ void semantic_analysis::hold_names(node_index declaration)
     /* the declarator-ids of a simple-declaration or function-definition */
     auto declarator_ids = [&](node_index d) {
         for (auto c : syntax(d).elements()) {
-            if (c.is(syntax_kind::init_declarator_list)) {
+            if (c.init_declarators()) {
                 for (auto i : c.elements())
                     ids.append(declarator_id(i));
             } else if (c.identifier_list()) {
@@ -862,22 +861,21 @@ analysis_result semantic_analysis::declarator(node_index declaration,
     uint32_t i = 0;
     bool has_head = false;
     syntax_child head = {};
-    if (e.size() >= 3 && e[0].is(LEFT_PARENTHESIS)) {
-        if (!e[2].is(RIGHT_PARENTHESIS))
+    auto parts = NoptrDeclaratorParts(e.context(), n);
+    auto id = parts.declarator_id();
+    if (e[0].is(LEFT_PARENTHESIS)) {
+        auto inner = parts.parenthesized();
+        if (!inner)
             return not_supported(n, "dcl.decl");
         has_head = true;
-        head = e[1];
+        head = inner;
         i = 3;
         /* the suffixes are of the type the parenthesized declarator
            derives from (a pointer's or a pointer to member's function
            type, [dcl.mptr]/1), whose cv-qualifier-seq is not a member
            function's ([dcl.fct]/6) */
         in_member_declarator = false;
-    } else if (e[0].is_identifier()) {
-        has_head = true;
-        head = e[0];
-        i = 1;
-    } else if (e[0].is(ELLIPSIS)) {
+    } else if (parts.ellipsis()) {
         /* [dcl.fct]/21: "A declarator-id or abstract-declarator
            containing an ellipsis shall only be used in a
            parameter-declaration.  When it is part of a
@@ -885,35 +883,38 @@ analysis_result semantic_analysis::declarator(node_index declaration,
            a function parameter pack" */
         if (!pack_declarator || m.pack)
             return not_supported(n, "temp.variadic");
-        m.pack = e[0].token();
+        m.pack = parts.ellipsis().token();
         i = 1;
-        if (e[1].is_identifier()) {
+        if (id.is_identifier()) {
             has_head = true;
-            head = e[1];
+            head = id;
             i = 2;
         }
-    } else if (declarator_template_id && e[0].simple_template_id() &&
-               e[0].size() >= 3 && e[0][0].is_identifier()) {
+    } else if (id.is_identifier()) {
+        has_head = true;
+        head = id;
+        i = 1;
+    } else if (declarator_template_id && id.simple_template_id() &&
+               id.size() >= 3 && id[0].is_identifier()) {
         /* [temp.expl.spec]/1, [temp.explicit]/3: a specialization's
            template-id (its template-name the declarator-id's name) */
-        m.template_id = e[0];
+        m.template_id = id;
         declarator_template_id = false;
         has_head = true;
-        head = e[0][0];
+        head = id[0];
         i = 1;
-    } else if (e[0].operator_function_id() || e[0].literal_operator_id() ||
-               e[0].conversion_function_id()) {
+    } else if (id.operator_function_id() || id.literal_operator_id() ||
+               id.conversion_function_id()) {
         /* [over.oper]/1, [over.literal]/1: an operator function's name */
         has_head = true;
-        head = e[0];
+        head = id;
         i = 1;
-    } else if (e[0].qualified_id()) {
+    } else if (auto q = id.qualified_id()) {
         /* [dcl.meaning]/1: "When the declarator-id is qualified, the
            declaration shall refer to a previously declared member of the
            class or namespace to which the qualifier refers": a
            nested-name-specifier that is one class-name of the global
            namespace */
-        auto q = e[0].qualified_id();
         SyntaxElement name;
         if (q.size() == 2)
             name = q[1];
@@ -948,11 +949,10 @@ analysis_result semantic_analysis::declarator(node_index declaration,
             current_scope = m.qualifier;
         else
             current_scope = m.namespace_qualifier;
-    } else if (e[0].is(syntax_kind::unqualified_id)) {
+    } else if (auto u = id.destructor_type_id()) {
         /* [class.dtor]/1: ~ class-name, in its class */
-        auto u = e[0].destructor_type_id();
         if (!in_member_declarator || u.size() != 2 || !u.identifier())
-            return not_supported(e[0], "dcl.meaning");
+            return not_supported(id, "dcl.meaning");
         m.destructor = true;
         has_head = true;
         head = u.identifier();
@@ -983,7 +983,7 @@ analysis_result semantic_analysis::declarator(node_index declaration,
             i++;
             continue;
         }
-        if (syntax_is_attribute(tree, c))
+        if (c.is_attribute())
             return not_supported(n, "dcl.attr");
         if (c.parameters_and_qualifiers()) {
             /* [ext:gnu_attributes] after the parameters */
@@ -1011,9 +1011,9 @@ analysis_result semantic_analysis::declarator(node_index declaration,
         if (x.function)
             r = function(e[x.child], type);
         else if (x.has_bound)
-            r = array(n, &tree.children(n)[x.child], type);
+            r = array(n, e[x.child], type);
         else
-            r = array(n, nullptr, type);
+            r = array(n, {}, type);
         if (r != analysis_result::well_formed)
             return r;
         /* a reference the suffix's operand was is no longer the

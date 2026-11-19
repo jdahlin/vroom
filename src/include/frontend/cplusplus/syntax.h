@@ -226,6 +226,13 @@ class SyntaxElement : public SyntaxRef
     {
         return is_punctuator(c, op);
     }
+    /* an attribute-specifier, its seq or an alignment-specifier */
+    bool is_attribute() const
+    {
+        return is(syntax_kind::attribute_specifier,
+                  syntax_kind::attribute_specifier_seq,
+                  syntax_kind::alignment_specifier);
+    }
     bool is(standard_keyword k) const
     {
         return is_keyword(c, k);
@@ -435,35 +442,35 @@ template <> struct SyntaxExtra<FunctionBody> : SyntaxRef {
     bool unparsed() const
     {
         return is(syntax_kind::function_body) && size() == 1 &&
-               is((*this)[0], syntax_kind::unparsed);
+               (*this)[0].is(syntax_kind::unparsed);
     }
     bool defaulted() const
     {
         return is(syntax_kind::function_body) && size() == 3 &&
-               is_punctuator((*this)[0], preprocessing_op_or_punc::EQUAL) &&
-               is_keyword((*this)[1], standard_keyword::default_);
+               (*this)[0].is(preprocessing_op_or_punc::EQUAL) &&
+               (*this)[1].is(standard_keyword::default_);
     }
     bool deleted() const
     {
         return is(syntax_kind::function_body) && size() >= 3 &&
-               is_punctuator((*this)[0], preprocessing_op_or_punc::EQUAL) &&
-               is_keyword((*this)[1], standard_keyword::delete_);
+               (*this)[0].is(preprocessing_op_or_punc::EQUAL) &&
+               (*this)[1].is(standard_keyword::delete_);
     }
     /* ctor-initializer_opt compound-statement: the compound-statement
        ({} for another form) and the ctor-initializer ({} if none) */
-    syntax_child compound_statement() const
+    SyntaxElement compound_statement() const
     {
         if (!is(syntax_kind::function_body))
             return {};
-        syntax_child last = (*this)[size() - 1];
-        if (!is(last, syntax_kind::compound_statement) || size() > 2 ||
-            (size() == 2 && !is((*this)[0], syntax_kind::ctor_initializer)))
+        auto last = back();
+        if (!last.is(syntax_kind::compound_statement) || size() > 2 ||
+            (size() == 2 && !(*this)[0].is(syntax_kind::ctor_initializer)))
             return {};
         return last;
     }
-    syntax_child ctor_initializer() const
+    SyntaxElement ctor_initializer() const
     {
-        if (!compound_statement().bits || size() != 2)
+        if (!compound_statement() || size() != 2)
             return {};
         return (*this)[0];
     }
@@ -471,7 +478,7 @@ template <> struct SyntaxExtra<FunctionBody> : SyntaxRef {
        (a ctor-initializer is a constructor's) */
     bool plain() const
     {
-        return compound_statement().bits && size() == 1;
+        return compound_statement() && size() == 1;
     }
 };
 
@@ -490,10 +497,10 @@ template <> struct SyntaxExtra<FunctionDefinition> : SyntaxRef {
     using SyntaxRef::SyntaxRef;
     /* the declarator after the decl-specifier-seq ({} without one; a
        declarator that is only its identifier is that token) */
-    syntax_child declarator() const
+    SyntaxElement declarator() const
     {
         for (uint32_t i = 0; i + 1 < size(); i++)
-            if (is((*this)[i], syntax_kind::decl_specifier_seq))
+            if ((*this)[i].is(syntax_kind::decl_specifier_seq))
                 return (*this)[i + 1];
         return {};
     }
@@ -503,8 +510,55 @@ template <> struct SyntaxExtra<FunctionDefinition> : SyntaxRef {
     bool plain() const
     {
         return size() >= 3 &&
-               is((*this)[size() - 3], syntax_kind::decl_specifier_seq) &&
-               is((*this)[size() - 1], syntax_kind::function_body);
+               (*this)[size() - 3].is(syntax_kind::decl_specifier_seq) &&
+               (*this)[size() - 1].is(syntax_kind::function_body);
+    }
+};
+
+/*
+ * [dcl.decl.general]/5, [dcl.name]/1:
+ *
+ *     noptr-declarator:
+ *         declarator-id attribute-specifier-seq_opt
+ *         noptr-declarator parameters-and-qualifiers
+ *         noptr-declarator [ constant-expression_opt ]
+ *             attribute-specifier-seq_opt
+ *         ( ptr-declarator )
+ *
+ * and noptr-abstract-declarator alike: the parser makes one node of a head
+ * (the parenthesized declarator, or ..._opt and the declarator-id) and the
+ * suffixes after it.
+ */
+struct NoptrDeclaratorParts : SyntaxRef {
+    using SyntaxRef::SyntaxRef;
+    /* ( ptr-declarator ): the declarator in the parentheses */
+    SyntaxElement parenthesized() const
+    {
+        if (!(*this)[0].is(preprocessing_op_or_punc::LEFT_PARENTHESIS) ||
+            !(*this)[2].is(preprocessing_op_or_punc::RIGHT_PARENTHESIS))
+            return {};
+        return (*this)[1];
+    }
+    /* the ... of a parameter pack's declarator */
+    SyntaxElement ellipsis() const
+    {
+        if (!(*this)[0].is(preprocessing_op_or_punc::ELLIPSIS))
+            return {};
+        return (*this)[0];
+    }
+    /* what follows the ..._opt when it is not a suffix or parenthesis:
+       the declarator-id (an identifier, a qualified-id, ...) */
+    SyntaxElement declarator_id() const
+    {
+        uint32_t at = 0;
+        if (ellipsis())
+            at = 1;
+        auto id = (*this)[at];
+        if (!id || id.is(preprocessing_op_or_punc::LEFT_PARENTHESIS) ||
+            id.is(preprocessing_op_or_punc::LEFT_BRACKET) ||
+            id.is(syntax_kind::parameters_and_qualifiers))
+            return {};
+        return id;
     }
 };
 

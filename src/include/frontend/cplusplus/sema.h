@@ -1979,7 +1979,7 @@ class semantic_analysis
     entity_index open_scope(entity_index conflicts, bool parameters);
     analysis_result pointer_operator(node_index op, qualified_type &type,
                                      declarator_meaning &m);
-    analysis_result array(node_index at, const syntax_child *bound,
+    analysis_result array(node_index at, SyntaxElement bound,
                           qualified_type &type);
     analysis_result reference(node_index at, bool rvalue, qualified_type &type,
                               declarator_meaning &m);
@@ -4114,6 +4114,11 @@ class semantic_analysis
     SyntaxElement syntax(syntax_child c) const
     {
         return SyntaxElement(syntax_cx, c);
+    }
+    /* already a view: syntax(x[i]) needs no conversion */
+    SyntaxElement syntax(SyntaxElement e) const
+    {
+        return e;
     }
 
   private:

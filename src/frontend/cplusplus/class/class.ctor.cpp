@@ -1996,7 +1996,7 @@ semantic_analysis::special_member_body(FunctionDefinition definition,
                                        FunctionBody body)
 {
     syntax_child init = body.ctor_initializer();
-    if (!body.compound_statement().bits)
+    if (!body.compound_statement())
         return not_supported(definition, "dcl.fct.def.general");
     if (init.bits &&
         entity_table[last_declared].special != special_member::constructor)
