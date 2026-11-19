@@ -714,6 +714,11 @@ semantic_analysis::construct(node_index at, qualified_type type,
        created except as subobjects of a class derived from it" */
     if (abstract_class(type) && !constructing_base)
         return not_supported(at, "class.abstract");
+    /* [class.copy.ctor]/10.1: which construction from arguments the
+       deleted implicit copy constructor takes part in (copy elision,
+       [dcl.init]/17.6.2's aggregate) is not analysed */
+    if (!arguments.empty() && x.implicit_copy_deleted)
+        return not_supported(at, "class.copy.ctor");
     if (arguments.empty() && trivial_defaulted_default_constructor(c))
         /* value-initialization through a trivial X() = default
            ([dcl.init]/8.2: zero-initialized): not analysed */
@@ -1023,6 +1028,13 @@ analysis_result semantic_analysis::ctor_initializer(syntax_child list,
                 return not_supported(n, "class.base.init");
             if (r != analysis_result::well_formed)
                 return r;
+            /* [dcl.init]/17.6.1: a member initialized from a prvalue of
+               its class is that object, no constructor called: not
+               analysed */
+            if (!entity_table[e].base_subobject && arguments.size() == 1 &&
+                arguments[0].category == value_category::prvalue &&
+                arguments[0].type.unqualified() == type.unqualified())
+                return not_supported(n, "class.copy.elision");
             initialized_value value;
             constructing_base = entity_table[e].base_subobject;
             r = construct(n, type, arguments, object.node, value);
@@ -1127,8 +1139,11 @@ analysis_result semantic_analysis::ctor_initializer(syntax_child list,
             /* its implicit default constructor is deleted
                ([class.default.ctor]/2) */
             return not_supported(current_declaration, "class.default.ctor");
+        /* [class.default.ctor]/3: default-initialized through a trivial
+           X() = default, it is left as it is */
         if (record.kind != type_kind::class_type ||
-            !entity_table[record.entity].first_constructor)
+            !entity_table[record.entity].first_constructor ||
+            trivial_defaulted_default_constructor(record.entity))
             continue;
         expression_meaning object;
         analysis_result r = subobject(at, subobjects[i], object);
@@ -1363,7 +1378,9 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
         copy = true;
     }
     for (entity_index k : classes) {
-        if (entity_table[k].first_constructor)
+        /* /3.4, /3.5: a subobject's trivial X() = default keeps it trivial */
+        if (entity_table[k].first_constructor &&
+            !trivial_defaulted_default_constructor(k))
             construction = true;
         if (destroys(k))
             destruction = true;
@@ -1374,7 +1391,7 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
        implicitly-declared one that would call a subobject's constructor
        or destructor that does not exist or is not accessible is defined
        as deleted, an error only where it is used: not analysed */
-    bool declares_copy = false;
+    bool declares_copy = false, copy_deleted = false;
     for (entity_index q = x.first_constructor; q;
          q = entity_table[q].next_constructor)
         if (is_copy_constructor(c, q))
@@ -1385,8 +1402,11 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
             /* [class.copy.ctor]/8: the implicit move constructor, which
                moves the subobject, is not declared yet */
             return not_supported(n, "class.copy.ctor");
-        bool default_ok =
-                 !sub.first_constructor && !sub.implicit_default_deleted,
+        /* X() = default beside other constructors may be no entity
+           (trivial_defaulted_default_constructor) */
+        bool default_ok = (!sub.first_constructor ||
+                           sub.defaulted_default_constructor) &&
+                          !sub.implicit_default_deleted,
              copy_ok = copies_bytes(k);
         for (entity_index q = sub.first_constructor; q;
              q = entity_table[q].next_constructor) {
@@ -1412,12 +1432,17 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
                deleted, an error only where it is used */
             entity_table[c].implicit_default_deleted = true;
         }
-        if ((!copy_ok && !declares_copy) ||
-            /* [class.copy.ctor]/10.2, [class.default.ctor]/2.7: an
-               implicit constructor beside a subobject's inaccessible
-               destructor is deleted */
-            (sub.destructor && entity_table[sub.destructor].access &&
-             (!x.destructor || !declares_copy || !x.first_constructor)))
+        /* [class.copy.ctor]/10.1: the implicit copy constructor is
+           deleted when a subobject's copy constructor is deleted or not
+           accessible: none is declared, and a copy of the class, which
+           does not copy its bytes, is refused where it is used */
+        if (!copy_ok && !declares_copy)
+            copy_deleted = true;
+        /* [class.copy.ctor]/10.2, [class.default.ctor]/2.7: an
+           implicit constructor beside a subobject's inaccessible
+           destructor is deleted */
+        if (sub.destructor && entity_table[sub.destructor].access &&
+            (!x.destructor || !declares_copy || !x.first_constructor))
             return not_supported(n, "class.default.ctor");
     }
     /* [temp.mem]/1: a constructor template is user-declared; the copy
@@ -1440,7 +1465,8 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
          k = entity_table[k].next_constructor)
         if (is_copy_constructor(c, k))
             user_copy = true;
-    if (copy && !user_copy)
+    entity_table[c].implicit_copy_deleted = copy_deleted;
+    if (copy && !user_copy && !copy_deleted)
         declare_implicit(c, special_member::constructor, true);
     if (!user_constructors && !entity_table[c].implicit_default_deleted &&
         (construction || entity_table[c].first_constructor))
