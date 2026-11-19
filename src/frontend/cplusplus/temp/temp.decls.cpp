@@ -507,8 +507,6 @@ semantic_analysis::function_template_definition(node_index n,
            expressions involving template parameters"; one that is not is
            another template of the name, an overload ([temp.over]) */
         const function_template f = function_templates[g - 1];
-        if (entity_table[f.entity].enclosing != outer)
-            return not_supported(n, "temp.over.link");
         if (f.parameter_count != parameters.size() ||
             !same_template_parameters(first, f.first_parameter,
                                       f.parameter_count) ||
@@ -528,6 +526,10 @@ semantic_analysis::function_template_definition(node_index n,
                            !(values[i].type == entity_table[pe].type)))
                 same = false;
         }
+        /* [namespace.udecl]/13: one a using-declaration introduced joins
+           the overload set with this one unless they are equivalent */
+        if (same && entity_table[f.entity].enclosing != outer)
+            return not_supported(n, "namespace.udecl");
         if (same)
             earlier = g;
     }
