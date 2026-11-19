@@ -112,12 +112,11 @@ analysis_result semantic_analysis::friend_class(entity_index c, node_index n,
     if (!syntax(type).is(syntax_kind::elaborated_type_specifier))
         return not_supported(n, "class.friend");
     node_index t = type.index();
-    const syntax_node &node = tree[t];
-    const syntax_child *parts = tree.children(t);
+    auto node = syntax(t);
     standard_keyword key = leading_keyword(t);
     if (!is_class_key(key))
         return not_supported(n, "class.friend");
-    if (node.child_count == 3) {
+    if (node.size() == 3) {
         /* a qualified name: [basic.lookup.elab]/3, a class declared
            before */
         type_index named = 0;
@@ -134,10 +133,9 @@ analysis_result semantic_analysis::friend_class(entity_index c, node_index n,
         friends.append(f);
         return analysis_result::well_formed;
     }
-    if (node.child_count != 2 || !parts[1].is_token() ||
-        tokens[parts[1].index()].kind != token_kind::identifier)
+    if (node.size() != 2 || !node[1].is_identifier())
         return not_supported(n, "class.friend");
-    uint32_t name = tokens.identifier(parts[1].index());
+    uint32_t name = tokens.identifier(node[1].token());
     if (entity_table[space].unknown_names)
         return not_supported(n, "class.friend");
     lookup_result found = lookup_unqualified(name, lookup_filter::types);
@@ -478,18 +476,17 @@ analysis_result semantic_analysis::friend_member_declaration(
     entity_index c, MemberSimpleDeclaration d, owned_array<node_index> &bodies)
 {
     node_index n = d;
-    const syntax_node &node = tree[n];
+    auto node = syntax(n);
     uint32_t leading = leading_gnu_attributes(n);
     const syntax_child *children = tree.children(n) + leading;
-    if (node.child_count < leading + 2)
+    if (node.size() < leading + 2)
         return not_supported(n, "class.friend");
-    if (node.child_count == leading + 2) {
+    if (node.size() == leading + 2) {
         /* friend class-key identifier ; friend type-name ; */
         node_index seq = children[0].index();
         syntax_child type = {};
         unsigned friends_seen = 0, others = 0;
-        for (uint32_t i = 0; i < tree[seq].child_count; i++) {
-            syntax_child x = tree.children(seq)[i];
+        for (syntax_child x : syntax(seq).elements()) {
             if (is_keyword(x, standard_keyword::friend_)) {
                 friends_seen++;
                 continue;

@@ -87,7 +87,7 @@ bool bit_cast_kept(const implementation_defined_behavior &behavior,
 analysis_result semantic_analysis::clang_bit_cast(node_index n,
                                                   expression_meaning &m)
 {
-    const syntax_child *children = tree.children(n);
+    auto children = syntax(n);
     qualified_type to;
     analysis_result r = type_id(children[2].index(), to);
     if (r != analysis_result::well_formed)

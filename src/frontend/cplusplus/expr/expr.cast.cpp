@@ -417,7 +417,7 @@ analysis_result semantic_analysis::member_pointer_cast(node_index at,
                               "conversion is ill-formed",
                               "conv.mem");
         r = member_pointer_along_path(
-            tree[at].first_token, b, d,
+            syntax(at).first_token(), b, d,
             qualified_type::make(
                 type_table.pointer_to_member(b, source.operand), cv_none),
             false, false, m);
@@ -436,7 +436,7 @@ analysis_result semantic_analysis::member_pointer_cast(node_index at,
     /* [expr.cast]/4: "in performing a static_cast in the following
        situations the conversion is valid even if the base class is
        inaccessible" */
-    return member_pointer_along_path(tree[at].first_token, d, b, to, true,
+    return member_pointer_along_path(syntax(at).first_token(), d, b, to, true,
                                      kinds == cast_static, m);
 }
 
@@ -618,7 +618,7 @@ analysis_result semantic_analysis::class_pointer_cast(node_index at,
         type_table.pointer_to(qualified_type::make(
             target_pointee.unqualified(), target_pointee.cv() | pointee.cv())),
         cv_none);
-    token_index t = tree[at].first_token;
+    token_index t = syntax(at).first_token();
     analysis_result r = analysis_result::well_formed;
     if (kinds != cast_static)
         /* [expr.cast]/4: "in performing a static_cast in the following
@@ -720,7 +720,7 @@ analysis_result semantic_analysis::reference_cast(node_index at,
                temporary of the converted value */
             return not_supported(at, "expr.static.cast");
     }
-    token_index t = tree[at].first_token;
+    token_index t = syntax(at).first_token();
     expression_meaning address;
     address.type = qualified_type::make(type_table.pointer_to(m.type), cv_none);
     address.category = value_category::prvalue;
@@ -753,22 +753,21 @@ analysis_result semantic_analysis::reference_cast(node_index at,
  */
 analysis_result semantic_analysis::cast(node_index n, expression_meaning &m)
 {
-    const syntax_node &node = tree[n];
-    const syntax_child *children = tree.children(n);
-    if (node.child_count != 4 || !syntax(children[1]).is(syntax_kind::type_id))
+    auto node = syntax(n);
+    if (node.size() != 4 || !node[1].is(syntax_kind::type_id))
         return not_supported(n, "expr.cast");
     qualified_type to;
-    analysis_result r = type_id(children[1].index(), to);
+    analysis_result r = type_id(node[1].index(), to);
     /* [over.over]/1: "an explicit type conversion" */
     if (r == analysis_result::well_formed)
-        r = target_expression(children[3], to, m);
+        r = target_expression(node[3], to, m);
     if (r != analysis_result::well_formed)
         return r;
     /* C++03 [expr.const]/1: "Floating literals can appear only if they are
        cast to integral or enumeration types." */
     bool floating_literal_to_integral =
-        children[3].is_token() &&
-        tokens[children[3].index()].literal ==
+        node[3].is_token() &&
+        tokens[node[3].token()].literal ==
             literal_kind::floating_point_literal &&
         is_integral(to);
     r = explicit_conversion(n, to, m);

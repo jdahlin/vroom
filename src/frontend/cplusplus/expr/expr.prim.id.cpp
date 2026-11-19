@@ -681,18 +681,15 @@ analysis_result semantic_analysis::named_entity(token_index t, entity_index e,
 analysis_result semantic_analysis::qualified_id(node_index n,
                                                 expression_meaning &m)
 {
-    const syntax_node &node = tree[n];
-    const syntax_child *parts = tree.children(n);
-    if (node.child_count != 2 ||
-        !syntax(parts[0]).is(syntax_kind::nested_name_specifier) ||
-        !parts[1].is_token() ||
-        tokens[parts[1].index()].kind != token_kind::identifier)
+    auto node = syntax(n);
+    if (node.size() != 2 || !node[0].is(syntax_kind::nested_name_specifier) ||
+        !node[1].is_identifier())
         return not_supported(n, "expr.prim.id.qual");
     nominated_scope scope;
-    analysis_result r = nested_name_specifier(parts[0].index(), scope);
+    analysis_result r = nested_name_specifier(node[0].index(), scope);
     if (r != analysis_result::well_formed)
         return r;
-    token_index t = parts[1].index();
+    token_index t = node[1].token();
     uint32_t name = tokens.identifier(t);
     entity_index c = scope.entity;
     if (!is_namespace(c) && entity_table[c].kind == entity_kind::enumeration) {

@@ -35,18 +35,17 @@ token_index semantic_analysis::callee_name(syntax_child c) const
             return c.index();
         return 0;
     }
-    const syntax_node &node = tree[c.index()];
-    const syntax_child *children = tree.children(c.index());
-    if (node.kind == syntax_kind::qualified_id && node.child_count == 2 &&
-        children[1].is_token() &&
-        tokens[children[1].index()].kind == token_kind::identifier)
-        return children[1].index();
-    if (node.kind == syntax_kind::postfix_expression && node.child_count == 3 &&
-        (syntax(children[1]).is(preprocessing_op_or_punc::DOT) ||
-         syntax(children[1]).is(preprocessing_op_or_punc::ARROW)) &&
-        children[2].is_token() &&
-        tokens[children[2].index()].kind == token_kind::identifier)
-        return children[2].index();
+    auto node = syntax(c);
+    if (node.is(syntax_kind::qualified_id) && node.size() == 2 &&
+        node[1].is_token() &&
+        tokens[node[1].token()].kind == token_kind::identifier)
+        return node[1].token();
+    if (node.is(syntax_kind::postfix_expression) && node.size() == 3 &&
+        (node[1].is(preprocessing_op_or_punc::DOT) ||
+         node[1].is(preprocessing_op_or_punc::ARROW)) &&
+        node[2].is_token() &&
+        tokens[node[2].token()].kind == token_kind::identifier)
+        return node[2].token();
     return 0;
 }
 

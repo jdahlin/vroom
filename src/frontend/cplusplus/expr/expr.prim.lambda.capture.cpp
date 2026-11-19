@@ -219,20 +219,16 @@ analysis_result semantic_analysis::lambda_introducer(node_index n,
             lambda_captures.append(record);
             continue;
         } else if (syntax(c).is(syntax_kind::simple_capture)) {
-            const syntax_node &sc = tree[c.index()];
-            const syntax_child *parts = tree.children(c.index());
-            if (sc.child_count == 2 &&
-                syntax(parts[0]).is(preprocessing_op_or_punc::STAR)) {
+            auto sc = syntax(c);
+            if (sc.size() == 2 && sc[0].is(preprocessing_op_or_punc::STAR)) {
                 /* * this: *this captured by copy (/10) */
-                record.at = parts[1].index();
+                record.at = sc[1].token();
                 record.star_this = true;
-            } else if (sc.child_count == 2 &&
-                       syntax(parts[0]).is(
-                           preprocessing_op_or_punc::AMPERSAND) &&
-                       parts[1].is_token() &&
-                       tokens[parts[1].index()].kind ==
-                           token_kind::identifier) {
-                name = parts[1].index();
+            } else if (sc.size() == 2 &&
+                       sc[0].is(preprocessing_op_or_punc::AMPERSAND) &&
+                       sc[1].is_token() &&
+                       tokens[sc[1].token()].kind == token_kind::identifier) {
+                name = sc[1].token();
                 record.by_reference = true;
                 if (l.default_capture == capture_default::reference)
                     return ill_formed_at_token(name,
@@ -340,17 +336,14 @@ analysis_result semantic_analysis::lambda_introducer(node_index n,
 analysis_result semantic_analysis::init_capture(node_index n, lambda_context &l,
                                                 capture_record &record)
 {
-    const syntax_node &node = tree[n];
-    const syntax_child *parts = tree.children(n);
+    auto node = syntax(n);
     uint32_t i = 0;
-    bool by_reference =
-        syntax(parts[0]).is(preprocessing_op_or_punc::AMPERSAND);
+    bool by_reference = node[0].is(preprocessing_op_or_punc::AMPERSAND);
     if (by_reference)
         i = 1;
-    if (node.child_count != i + 2 || !parts[i].is_token() ||
-        tokens[parts[i].index()].kind != token_kind::identifier)
+    if (node.size() != i + 2 || !node[i].is_identifier())
         return not_supported(n, "temp.variadic");
-    token_index name = parts[i].index();
+    token_index name = node[i].token();
     for (size_t k = l.first_capture; k < lambda_captures.size(); k++)
         if (lambda_captures[k].variable &&
             entity_table[lambda_captures[k].variable].name ==
@@ -373,7 +366,7 @@ analysis_result semantic_analysis::init_capture(node_index n, lambda_context &l,
     declaration_deduced = qualified_type();
     deducing_variable = v;
     initialized_value value;
-    analysis_result r = deduced_initializer(parts[i + 1], v, type, value);
+    analysis_result r = deduced_initializer(node[i + 1], v, type, value);
     declaration_deduced = outer_deduced;
     deducing_variable = outer_variable;
     if (r != analysis_result::well_formed)

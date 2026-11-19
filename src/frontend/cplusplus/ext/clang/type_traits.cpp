@@ -278,28 +278,26 @@ semantic_analysis::clang_type_transformation(node_index n, qualified_type &type)
 analysis_result semantic_analysis::clang_type_trait(node_index n,
                                                     expression_meaning &m)
 {
-    const syntax_node &node = tree[n];
-    const syntax_child *children = tree.children(n);
+    auto node = syntax(n);
     owned_buffer written;
-    tokens.spelling(children[0].index(), written.get());
+    tokens.spelling(node[0].token(), written.get());
     const char *name = reinterpret_cast<const char *>(written.data());
     bool same = spelled(name, written.size(), "__is_same") ||
                 spelled(name, written.size(), "__is_same_as");
     /* ( type-id , type-id ) */
-    if (!same || node.child_count != 6 ||
-        !syntax(children[2]).is(syntax_kind::type_id) ||
-        !syntax(children[4]).is(syntax_kind::type_id))
+    if (!same || node.size() != 6 || !node[2].is(syntax_kind::type_id) ||
+        !node[4].is(syntax_kind::type_id))
         return not_supported(n, "ext.clang");
     qualified_type t, u;
-    analysis_result r = type_id(children[2].index(), t);
+    analysis_result r = type_id(node[2].index(), t);
     if (r != analysis_result::well_formed)
         return r;
-    r = type_id(children[4].index(), u);
+    r = type_id(node[4].index(), u);
     if (r != analysis_result::well_formed)
         return r;
     if (depends_on_template_parameter(t) || depends_on_template_parameter(u))
         return not_supported(n, "temp.dep.constexpr");
-    m = integer_constant(fundamental_type::bool_, t == u, node.first_token);
+    m = integer_constant(fundamental_type::bool_, t == u, node.first_token());
     return analysis_result::well_formed;
 }
 
@@ -343,15 +341,15 @@ analysis_result semantic_analysis::builtin_template_arguments(
     node_index id, owned_array<syntax_child> &written,
     owned_array<bool> &expansion)
 {
-    const syntax_child *parts = tree.children(id);
-    for (uint32_t i = 2; i + 1 < tree[id].child_count; i++) {
-        if (syntax(parts[i]).is(preprocessing_op_or_punc::ELLIPSIS)) {
+    auto parts = syntax(id);
+    for (uint32_t i = 2; i + 1 < parts.size(); i++) {
+        if (parts[i].is(preprocessing_op_or_punc::ELLIPSIS)) {
             if (written.empty() || expansion.back())
                 return not_supported(id, "temp.variadic");
             expansion.back() = true;
             continue;
         }
-        if (syntax(parts[i]).is(syntax_kind::template_argument_list)) {
+        if (parts[i].is(syntax_kind::template_argument_list)) {
             if (!expansion_list(parts[i].index(), written, expansion))
                 return not_supported(id, "temp.variadic");
         } else {
@@ -361,9 +359,9 @@ analysis_result semantic_analysis::builtin_template_arguments(
     }
     for (size_t w = 0; w < written.size(); w++)
         if (syntax(written[w]).is(syntax_kind::type_id) &&
-            tree[written[w].index()].child_count == 2 &&
-            syntax(tree.children(written[w].index())[1])
-                .is(preprocessing_op_or_punc::ELLIPSIS))
+            syntax(written[w].index()).size() == 2 &&
+            syntax(written[w].index())[1].is(
+                preprocessing_op_or_punc::ELLIPSIS))
             expansion[w] = true;
     return analysis_result::well_formed;
 }
@@ -383,7 +381,7 @@ analysis_result semantic_analysis::builtin_template_types(
         uint32_t times = 1;
         if (expansion[w]) {
             token_index first = first_token(a);
-            token_index end = tree[a.index()].end_token;
+            token_index end = syntax(a).end_token();
             if (end > first + 1 && syntax(syntax_child::token(end - 1))
                                        .is(preprocessing_op_or_punc::ELLIPSIS))
                 end--;
@@ -434,7 +432,7 @@ analysis_result semantic_analysis::builtin_common_type(node_index id,
         token_index first = first_token(a);
         token_index end = first + 1;
         if (!a.is_token())
-            end = tree[a.index()].end_token;
+            end = syntax(a).end_token();
         if (end != first + 1 || tokens[first].kind != token_kind::identifier)
             return not_supported(id, "ext.clang");
         lookup_result x =
@@ -515,7 +513,7 @@ analysis_result semantic_analysis::builtin_type_pack_element(node_index id,
     token_index first = first_token(n);
     token_index end = first + 1;
     if (!n.is_token())
-        end = tree[n.index()].end_token;
+        end = syntax(n).end_token();
     if (dependent || names_dependent_entity(first, end)) {
         /* [temp.dep.type]/9: a template-id of dependent arguments */
         type = dependent_written_type(id);
@@ -575,7 +573,7 @@ analysis_result semantic_analysis::builtin_make_integer_seq(node_index id,
     /* B, by name */
     token_index first = first_token(written[0]);
     if ((!written[0].is_token() &&
-         tree[written[0].index()].end_token != first + 1) ||
+         syntax(written[0].index()).end_token() != first + 1) ||
         tokens[first].kind != token_kind::identifier)
         return not_supported(id, "ext.clang");
     lookup_result x =
@@ -599,7 +597,7 @@ analysis_result semantic_analysis::builtin_make_integer_seq(node_index id,
     syntax_child n = written[2];
     token_index end = first_token(n) + 1;
     if (!n.is_token())
-        end = tree[n.index()].end_token;
+        end = syntax(n).end_token();
     if (function_templates[t - 1].is_parameter ||
         depends_on_template_parameter(element) ||
         names_dependent_entity(first_token(n), end)) {

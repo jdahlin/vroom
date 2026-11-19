@@ -65,11 +65,10 @@ node_index parser::jump_statement()
  */
 analysis_result semantic_analysis::jump_statement(node_index n, uint32_t &built)
 {
-    const syntax_node &node = tree[n];
-    const syntax_child *children = tree.children(n);
-    if (!node.child_count || !children[0].is_token())
+    auto node = syntax(n);
+    if (!node.size() || !node[0].is_token())
         return not_supported(n, "stmt.jump");
-    token_index at = children[0].index();
+    token_index at = node[0].token();
     switch (p.keyword_of(tokens[at])) {
     case standard_keyword::break_:
         /* [stmt.break]/1: "The break statement shall occur only in an
@@ -92,14 +91,13 @@ analysis_result semantic_analysis::jump_statement(node_index n, uint32_t &built)
         built = statement_node(semantic_kind::continue_statement, at);
         return analysis_result::well_formed;
     case standard_keyword::goto_: {
-        if (node.child_count != 3 || !children[1].is_token() ||
-            tokens[children[1].index()].kind != token_kind::identifier)
+        if (node.size() != 3 || !node[1].is_identifier())
             /* GNU's computed goto */
             return not_supported(n, "stmt.goto");
         goto_record g;
-        g.name = tokens.identifier(children[1].index());
+        g.name = tokens.identifier(node[1].token());
         g.point.scope = current_scope;
-        g.point.at = children[0].index();
+        g.point.at = node[0].token();
         g.node = n;
         function_state.gotos.append(g);
         built = statement_node(semantic_kind::goto_statement, at);
@@ -131,11 +129,10 @@ analysis_result semantic_analysis::jump_statement(node_index n, uint32_t &built)
 analysis_result semantic_analysis::return_statement(node_index n,
                                                     uint32_t &operand_node)
 {
-    const syntax_node &node = tree[n];
-    const syntax_child *children = tree.children(n);
+    auto node = syntax(n);
     qualified_type returns = function_state.returns;
     bool returns_void = fundamental_of(returns) == fundamental_type::void_;
-    if (function_state.deducing && node.child_count == 2) {
+    if (function_state.deducing && node.size() == 2) {
         /* [dcl.type.auto.deduct]/2: "If the return statement has no
            operand, then E is void()" */
         analysis_result r = deduce_return(n, nullptr, false);
@@ -143,22 +140,22 @@ analysis_result semantic_analysis::return_statement(node_index n,
             return r;
         returns_void = true;
     }
-    if (function_state.deducing && node.child_count == 3 &&
-        syntax(children[1]).is(syntax_kind::braced_init_list))
+    if (function_state.deducing && node.size() == 3 &&
+        node[1].is(syntax_kind::braced_init_list))
         /* [dcl.type.auto.deduct]/3 */
         return ill_formed(n,
                           "if the deduction is for a return statement and E "
                           "is a braced-init-list, the program is ill-formed",
                           "dcl.type.auto.deduct");
-    if (node.child_count == 2) {
+    if (node.size() == 2) {
         if (returns_void)
             return analysis_result::well_formed;
         return extension_used(diagnostic_id::sema_return_without_value,
-                              children[0].index(), nullptr);
+                              node[0].token(), nullptr);
     }
-    if (node.child_count != 3)
+    if (node.size() != 3)
         return not_supported(n, "stmt.return");
-    syntax_child operand = children[1];
+    syntax_child operand = node[1];
     initialized_value result;
     if (syntax(operand).is(syntax_kind::braced_init_list)) {
         if (returns_void)
@@ -239,7 +236,7 @@ analysis_result semantic_analysis::return_statement(node_index n,
         if (void_operand)
             return analysis_result::well_formed;
         return extension_used(diagnostic_id::sema_return_with_value,
-                              children[0].index(), nullptr);
+                              node[0].token(), nullptr);
     }
     if (void_operand)
         return ill_formed(n,
@@ -262,9 +259,9 @@ entity_index semantic_analysis::implicitly_movable(syntax_child operand)
 {
     syntax_child named = operand;
     while (!named.is_token() &&
-           tree[named.index()].kind == syntax_kind::primary_expression &&
-           tree[named.index()].child_count == 3)
-        named = tree.children(named.index())[1];
+           syntax(named).is(syntax_kind::primary_expression) &&
+           syntax(named).size() == 3)
+        named = syntax(named)[1];
     if (!named.is_token() ||
         tokens[named.index()].kind != token_kind::identifier)
         return 0;

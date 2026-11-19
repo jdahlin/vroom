@@ -34,19 +34,20 @@ node_index parser::expression_statement()
 analysis_result semantic_analysis::expression_statement(node_index n,
                                                         uint32_t &built)
 {
-    const syntax_node &node = tree[n];
-    if (node.child_count == 1) {
-        built = statement_node(semantic_kind::null_statement, node.first_token);
+    auto node = syntax(n);
+    if (node.size() == 1) {
+        built =
+            statement_node(semantic_kind::null_statement, node.first_token());
         return analysis_result::well_formed;
     }
-    if (node.child_count != 2)
+    if (node.size() != 2)
         return not_supported(n, "stmt.expr");
     expression_meaning m;
-    analysis_result r = expression(tree.children(n)[0], m);
+    analysis_result r = expression(node[0], m);
     if (r == analysis_result::well_formed && destroyed_temporary(m))
         return not_supported(n, "class.temporary");
     built = statement_node(semantic_kind::expression_statement,
-                           node.first_token, m.node);
+                           node.first_token(), m.node);
     return r;
 }
 

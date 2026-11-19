@@ -66,19 +66,18 @@ node_index parser::gnu_offsetof_expression()
 analysis_result semantic_analysis::gnu_offsetof(node_index n,
                                                 expression_meaning &m)
 {
-    const syntax_node &node = tree[n];
-    const syntax_child *children = tree.children(n);
+    auto node = syntax(n);
     qualified_type t;
-    analysis_result r = type_id(children[2].index(), t);
+    analysis_result r = type_id(node[2].index(), t);
     if (r != analysis_result::well_formed)
         return r;
     if (depends_on_template_parameter(t))
         return not_supported(n, "temp.dep.constexpr");
     const implementation_defined_behavior &b = tokens.files.behavior;
     uint64_t offset = 0;
-    /* children[4 .. child_count - 1): the member-designator */
-    for (uint32_t i = 4; i + 1 < node.child_count; i++) {
-        syntax_child c = children[i];
+    /* node[4 .. child_count - 1): the member-designator */
+    for (uint32_t i = 4; i + 1 < node.size(); i++) {
+        syntax_child c = node[i];
         if (syntax(c).is(preprocessing_op_or_punc::DOT))
             continue;
         const struct type record = type_table[t.unqualified()];
@@ -89,7 +88,7 @@ analysis_result semantic_analysis::gnu_offsetof(node_index n,
                                   "shall designate an array element",
                                   "ext.gnu");
             expression_meaning e;
-            r = expression(children[++i], e);
+            r = expression(node[++i], e);
             if (r == analysis_result::well_formed)
                 r = operand_value(n, e);
             bool constant = false;
@@ -122,7 +121,7 @@ analysis_result semantic_analysis::gnu_offsetof(node_index n,
         t = e.type;
     }
     m = integer_constant(fundamental_type::unsigned_long_int, offset,
-                         node.first_token);
+                         node.first_token());
     return analysis_result::well_formed;
 }
 

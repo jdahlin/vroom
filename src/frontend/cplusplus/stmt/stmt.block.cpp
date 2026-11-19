@@ -63,15 +63,15 @@ analysis_result semantic_analysis::compound_statement(node_index n,
 analysis_result semantic_analysis::block_items(node_index n, uint32_t &built)
 {
     owned_array<syntax_child> items;
-    const syntax_node &node = tree[n];
-    for (uint32_t i = 0; i < node.child_count; i++) {
-        syntax_child c = tree.children(n)[i];
+    auto node = syntax(n);
+    for (uint32_t i = 0; i < node.size(); i++) {
+        syntax_child c = node[i];
         if (syntax(c).is(preprocessing_op_or_punc::LEFT_BRACE) ||
             syntax(c).is(preprocessing_op_or_punc::RIGHT_BRACE))
             continue;
         if (syntax(c).is(syntax_kind::statement_seq)) {
-            for (uint32_t k = 0; k < tree[c.index()].child_count; k++)
-                items.append(tree.children(c.index())[k]);
+            for (uint32_t k = 0; k < syntax(c).size(); k++)
+                items.append(syntax(c)[k]);
             continue;
         }
         items.append(c);
@@ -83,7 +83,7 @@ analysis_result semantic_analysis::block_items(node_index n, uint32_t &built)
     for (syntax_child s : items) {
         claim_place = s.index();
         if (!s.is_token())
-            claim_place = tree[s.index()].end_token - 1;
+            claim_place = syntax(s).end_token() - 1;
         claim_scope = current_scope;
         uint32_t one = 0;
         result = worse(result, statement(s, one));
@@ -91,7 +91,7 @@ analysis_result semantic_analysis::block_items(node_index n, uint32_t &built)
     }
     claim_place = place;
     claim_scope = place_scope;
-    built = block_statement(tree[n].first_token, statements);
+    built = block_statement(node.first_token(), statements);
     return result;
 }
 

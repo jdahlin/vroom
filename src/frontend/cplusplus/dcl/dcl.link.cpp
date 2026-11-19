@@ -24,14 +24,13 @@ namespace cplusplus
 
 analysis_result semantic_analysis::linkage_specification(node_index n)
 {
-    const syntax_node &node = tree[n];
-    const syntax_child *children = tree.children(n);
-    if (node.child_count < 3 || !children[1].is_token())
+    auto node = syntax(n);
+    if (node.size() < 3 || !node[1].is_token())
         return not_supported(n, "dcl.link");
     /* [dcl.link]/4: "A linkage-specification shall inhabit a namespace
        scope." */
     owned_buffer spelling;
-    tokens.spelling(children[1].index(), spelling.get());
+    tokens.spelling(node[1].token(), spelling.get());
     bool c = false;
     if (spelling.size() == 3 && !memcmp(spelling.data(), "\"C\"", 3))
         c = true;
@@ -42,15 +41,14 @@ analysis_result semantic_analysis::linkage_specification(node_index n)
         return not_supported(n, "dcl.link");
     owned_array<node_index> inner;
     bool braces = false;
-    for (uint32_t i = 2; i < node.child_count; i++) {
-        syntax_child x = children[i];
+    for (uint32_t i = 2; i < node.size(); i++) {
+        syntax_child x = node[i];
         if (x.is_token()) {
             braces = true;
             continue;
         }
         if (syntax(x).is(syntax_kind::declaration_seq)) {
-            for (uint32_t k = 0; k < tree[x.index()].child_count; k++) {
-                syntax_child y = tree.children(x.index())[k];
+            for (syntax_child y : syntax(x).elements()) {
                 if (!y.is_token())
                     inner.append(y.index());
             }

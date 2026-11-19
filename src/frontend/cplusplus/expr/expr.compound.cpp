@@ -529,24 +529,23 @@ analysis_result semantic_analysis::binary_built(analysis_result r,
  */
 analysis_result semantic_analysis::binary(node_index n, expression_meaning &m)
 {
-    const syntax_node &node = tree[n];
-    const syntax_child *children = tree.children(n);
-    if (node.child_count != 3 || !children[1].is_token())
+    auto node = syntax(n);
+    if (node.size() != 3 || !node[1].is_token())
         return not_supported(n, "expr.compound");
-    const token &t = tokens[children[1].index()];
+    const token &t = tokens[node[1].token()];
     if (t.kind != token_kind::operator_or_punctuator)
         return not_supported(n, "expr.compound");
     preprocessing_op_or_punc op =
         preprocessing_op_or_punc_primary(t.op_or_punc);
-    token_index at = children[1].index();
+    token_index at = node[1].token();
     expression_meaning left, right;
-    analysis_result r = expression(children[0], left);
+    analysis_result r = expression(node[0], left);
     if (r != analysis_result::well_formed)
         return r;
-    r = expression(children[2], right);
+    r = expression(node[2], right);
     if (r != analysis_result::well_formed)
         return r;
-    return binary_of(n, at, op, children[0], left, children[2], right, m);
+    return binary_of(n, at, op, node[0], left, node[2], right, m);
 }
 
 analysis_result semantic_analysis::binary_of(
@@ -724,19 +723,18 @@ analysis_result semantic_analysis::builtin_binary(node_index n, token_index at,
 analysis_result semantic_analysis::conditional(node_index n,
                                                expression_meaning &m)
 {
-    const syntax_node &node = tree[n];
-    const syntax_child *children = tree.children(n);
-    if (node.child_count != 5)
+    auto node = syntax(n);
+    if (node.size() != 5)
         /* GCC's a ?: b */
         return not_supported(n, "expr.cond");
     expression_meaning c, e2, e3;
-    analysis_result r = expression(children[0], c);
+    analysis_result r = expression(node[0], c);
     if (r == analysis_result::well_formed)
         r = contextual_bool(n, c);
     if (r == analysis_result::well_formed)
-        r = expression(children[2], e2);
+        r = expression(node[2], e2);
     if (r == analysis_result::well_formed)
-        r = expression(children[4], e3);
+        r = expression(node[4], e3);
     if (r != analysis_result::well_formed)
         return r;
     return conditional_operands(n, c, e2, e3, m);
@@ -790,7 +788,7 @@ analysis_result semantic_analysis::conditional_operands(
                     m.evaluation = constness::unknown;
             }
             m.node = expression_node(semantic_kind::conditional, m,
-                                     tree[n].first_token, c.node, e2.node);
+                                     syntax(n).first_token(), c.node, e2.node);
             semantics[m.node].c = e3.node;
             return analysis_result::well_formed;
         }
@@ -856,8 +854,8 @@ analysis_result semantic_analysis::conditional_operands(
         if (m.evaluation == constness::constant)
             m.evaluation = constness::unknown;
     }
-    m.node = expression_node(semantic_kind::conditional, m, tree[n].first_token,
-                             c.node, e2.node);
+    m.node = expression_node(semantic_kind::conditional, m,
+                             syntax(n).first_token(), c.node, e2.node);
     semantics[m.node].c = e3.node;
     return analysis_result::well_formed;
 }
@@ -870,15 +868,14 @@ analysis_result semantic_analysis::conditional_operands(
  */
 analysis_result semantic_analysis::comma(node_index n, expression_meaning &m)
 {
-    const syntax_node &node = tree[n];
-    const syntax_child *children = tree.children(n);
+    auto node = syntax(n);
     constness so_far = constness::constant;
     bool any = false;
-    for (uint32_t i = 0; i < node.child_count; i++) {
-        if (syntax(children[i]).is(preprocessing_op_or_punc::COMMA))
+    for (uint32_t i = 0; i < node.size(); i++) {
+        if (node[i].is(preprocessing_op_or_punc::COMMA))
             continue;
         expression_meaning e;
-        analysis_result r = expression(children[i], e);
+        analysis_result r = expression(node[i], e);
         if (r != analysis_result::well_formed)
             return r;
         if (any) {
@@ -886,12 +883,12 @@ analysis_result semantic_analysis::comma(node_index n, expression_meaning &m)
                the left operand is the comma expression before ((a, b), c) */
             syntax_child left = {};
             if (i == 2)
-                left = children[0];
+                left = node[0];
             bool handled = false;
             expression_meaning result;
-            r = binary_operator_function(n, children[i - 1].index(),
+            r = binary_operator_function(n, node[i - 1].token(),
                                          preprocessing_op_or_punc::COMMA, left,
-                                         m, children[i], e, handled, result);
+                                         m, node[i], e, handled, result);
             if (r != analysis_result::well_formed)
                 return r;
             if (handled) {
@@ -909,9 +906,8 @@ analysis_result semantic_analysis::comma(node_index n, expression_meaning &m)
         m = e;
         /* the left operand is evaluated first ([expr.comma]/1) */
         if (any)
-            m.node =
-                expression_node(semantic_kind::comma, e,
-                                first_token(children[i]), previous, e.node);
+            m.node = expression_node(semantic_kind::comma, e,
+                                     first_token(node[i]), previous, e.node);
         any = true;
     }
     if (!any)
@@ -927,7 +923,7 @@ analysis_result semantic_analysis::comma(node_index n, expression_meaning &m)
     m.beyond_integral_constant = true;
     m.zero_literal = false;
     m.string_literal = 0;
-    if (m.node && node.child_count > 1)
+    if (m.node && node.size() > 1)
         semantics[m.node].evaluation = m.evaluation;
     return analysis_result::well_formed;
 }

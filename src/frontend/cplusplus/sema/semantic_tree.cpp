@@ -145,7 +145,7 @@ token_index semantic_analysis::first_token(syntax_child c) const
 {
     if (c.is_token())
         return c.index();
-    return tree[c.index()].first_token;
+    return syntax(c).first_token();
 }
 
 } // namespace cplusplus

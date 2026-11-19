@@ -196,12 +196,11 @@ analysis_result semantic_analysis::literal(token_index t, expression_meaning &m)
 analysis_result semantic_analysis::parenthesized(node_index n,
                                                  expression_meaning &m)
 {
-    const syntax_node &node = tree[n];
-    const syntax_child *children = tree.children(n);
-    if (node.child_count != 3 ||
-        !syntax(children[0]).is(preprocessing_op_or_punc::LEFT_PARENTHESIS))
+    auto node = syntax(n);
+    if (node.size() != 3 ||
+        !node[0].is(preprocessing_op_or_punc::LEFT_PARENTHESIS))
         return not_supported(n, "expr.prim");
-    return expression(children[1], m);
+    return expression(node[1], m);
 }
 
 bool semantic_analysis::string_literal_meaning(token_index t,

@@ -106,8 +106,8 @@ analysis_result semantic_analysis::default_arguments(node_index n,
            so here, so a default argument that may name one is not
            analysed */
         node_index clause = node_of(p.default_argument);
-        token_index first = tree[clause].first_token;
-        token_index end = tree[clause].end_token;
+        token_index first = syntax(clause).first_token();
+        token_index end = syntax(clause).end_token();
         if (p.default_argument.is_token()) {
             first = p.default_argument.index();
             end = first + 1;

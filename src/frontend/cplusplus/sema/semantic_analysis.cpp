@@ -61,7 +61,7 @@ analysis_result semantic_analysis::not_supported(node_index n,
 analysis_result semantic_analysis::ill_formed(node_index at, const char *rule,
                                               const char *subclause)
 {
-    return ill_formed_at_token(tree[at].first_token, rule, subclause);
+    return ill_formed_at_token(syntax(at).first_token(), rule, subclause);
 }
 
 analysis_result semantic_analysis::ill_formed_at_token(token_index at,
@@ -104,11 +104,11 @@ bool semantic_analysis::parsed_completely(node_index n) const
     while (!work.empty()) {
         node_index next = work.back();
         work.resize(work.size() - 1);
-        const syntax_node &s = tree[next];
-        if (s.kind == syntax_kind::erroneous || s.kind == syntax_kind::unparsed)
+        auto s = syntax(next);
+        if (s.is(syntax_kind::erroneous) || s.is(syntax_kind::unparsed))
             return false;
-        for (uint32_t i = 0; i < s.child_count; i++) {
-            syntax_child c = tree.children(next)[i];
+        for (uint32_t i = 0; i < s.size(); i++) {
+            syntax_child c = syntax(next)[i];
             if (!c.is_token())
                 work.append(c.index());
         }

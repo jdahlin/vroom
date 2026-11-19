@@ -97,33 +97,32 @@ struct statement_parts {
 analysis_result semantic_analysis::selection_statement(node_index n,
                                                        uint32_t &built)
 {
-    const syntax_node &node = tree[n];
-    const syntax_child *children = tree.children(n);
-    if (node.child_count < 5 || !children[0].is_token() ||
-        !syntax(children[1]).is(preprocessing_op_or_punc::LEFT_PARENTHESIS))
+    auto node = syntax(n);
+    if (node.size() < 5 || !node[0].is_token() ||
+        !node[1].is(preprocessing_op_or_punc::LEFT_PARENTHESIS))
         /* if constexpr, if consteval */
         return not_supported(n, "stmt.if");
     bool is_switch =
-        p.keyword_of(tokens[children[0].index()]) == standard_keyword::switch_;
+        p.keyword_of(tokens[node[0].token()]) == standard_keyword::switch_;
     statement_parts parts;
     uint32_t i = 2;
     owned_array<syntax_child> inside;
-    for (; i < node.child_count; i++) {
-        if (syntax(children[i]).is(preprocessing_op_or_punc::RIGHT_PARENTHESIS))
+    for (; i < node.size(); i++) {
+        if (node[i].is(preprocessing_op_or_punc::RIGHT_PARENTHESIS))
             break;
-        inside.append(children[i]);
+        inside.append(node[i]);
     }
-    if (i + 1 >= node.child_count || inside.empty() || inside.size() > 2)
+    if (i + 1 >= node.size() || inside.empty() || inside.size() > 2)
         return not_supported(n, "stmt.select");
     if (inside.size() == 2) {
         parts.has_init = true;
         parts.init = inside[0];
     }
     parts.condition = inside[inside.size() - 1];
-    parts.body = children[i + 1];
-    if (i + 3 < node.child_count) {
+    parts.body = node[i + 1];
+    if (i + 3 < node.size()) {
         parts.has_otherwise = true;
-        parts.otherwise = children[i + 3];
+        parts.otherwise = node[i + 3];
     }
     entity_index outer = current_scope, statement_scope = 0;
     if ((parts.has_init &&
@@ -141,7 +140,7 @@ analysis_result semantic_analysis::selection_statement(node_index n,
     expression_meaning m;
     analysis_result c = condition(parts.condition, is_switch, m);
     result = worse(result, c);
-    token_index at = children[0].index();
+    token_index at = node[0].token();
     if (!is_switch) {
         result = worse(result, substatement(parts.body, statement_scope, body));
         if (parts.has_otherwise)
@@ -156,7 +155,7 @@ analysis_result semantic_analysis::selection_statement(node_index n,
     if (c == analysis_result::well_formed)
         sw.type = fundamental_of(m.type);
     sw.point.scope = current_scope;
-    sw.point.at = children[i].index();
+    sw.point.at = node[i].token();
     sw.first_value = function_state.case_values.size();
     function_state.switches.append(sw);
     function_state.breakable++;

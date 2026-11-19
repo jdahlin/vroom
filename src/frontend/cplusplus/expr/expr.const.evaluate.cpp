@@ -193,7 +193,7 @@ void semantic_analysis::evaluate_analysed_expressions()
         if (x.at.is_token())
             state.defined_before = x.at.index();
         else
-            state.defined_before = tree[x.at.index()].first_token;
+            state.defined_before = syntax(x.at.index()).first_token();
         constant_value v;
         if (evaluate_node(state, m.node, v) == constness::constant &&
             is_value(v))

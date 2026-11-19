@@ -50,30 +50,29 @@ uint32_t semantic_analysis::literal_operator_name(const char *suffix,
 analysis_result semantic_analysis::literal_operator_id(node_index id,
                                                        declarator_meaning &m)
 {
-    const syntax_node &node = tree[id];
-    const syntax_child *children = tree.children(id);
+    auto node = syntax(id);
     owned_buffer suffix;
-    if (node.child_count == 3 && children[2].is_token() &&
-        tokens[children[2].index()].kind == token_kind::identifier) {
+    if (node.size() == 3 && node[2].is_token() &&
+        tokens[node[2].token()].kind == token_kind::identifier) {
         /* /1: "The string-literal or user-defined-string-literal in a
            literal-operator-id shall have no encoding-prefix and shall
            contain no characters other than the implicit terminating
            '\0'." */
         owned_buffer quotes;
-        tokens.spelling(children[1].index(), quotes.get());
+        tokens.spelling(node[1].token(), quotes.get());
         if (quotes.size() != 2)
             return ill_formed(id,
                               "the string-literal in a literal-operator-id "
                               "shall have no encoding-prefix and contain no "
                               "characters",
                               "over.literal");
-        tokens.spelling(children[2].index(), suffix.get());
-    } else if (node.child_count == 2 && children[1].is_token()) {
+        tokens.spelling(node[2].token(), suffix.get());
+    } else if (node.size() == 2 && node[1].is_token()) {
         owned_buffer spelling;
-        tokens.spelling(children[1].index(), spelling.get());
+        tokens.spelling(node[1].token(), spelling.get());
         suffix_after_quote(spelling, suffix);
     }
-    if (!node.child_count || !children[0].is_token() || !suffix.size())
+    if (!node.size() || !node[0].is_token() || !suffix.size())
         return not_supported(id, "over.literal");
     /* [usrlit.suffix]/1: "Literal suffix identifiers that do not start
        with an underscore are reserved for future standardization": the
@@ -81,7 +80,7 @@ analysis_result semantic_analysis::literal_operator_id(node_index id,
     if (suffix.data()[0] != '_')
         return not_supported(id, "over.literal");
     m.has_id = true;
-    m.id = children[0].index();
+    m.id = node[0].token();
     m.literal_operator = true;
     tokens.name_token(m.id,
                       literal_operator_name(suffix.data(), suffix.size()));

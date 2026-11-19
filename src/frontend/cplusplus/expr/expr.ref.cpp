@@ -292,14 +292,13 @@ analysis_result semantic_analysis::implicit_member_access(token_index at,
 analysis_result semantic_analysis::member_reference(node_index n,
                                                     expression_meaning &m)
 {
-    const syntax_child *children = tree.children(n);
-    bool arrow = syntax(children[1]).is(preprocessing_op_or_punc::ARROW);
-    if (!children[2].is_token() ||
-        tokens[children[2].index()].kind != token_kind::identifier)
+    auto children = syntax(n);
+    bool arrow = children[1].is(preprocessing_op_or_punc::ARROW);
+    if (!children[2].is_identifier())
         /* template, a qualified-id, a destructor's name, an operator
            function's */
         return not_supported(n, "expr.ref");
-    token_index name = children[2].index();
+    token_index name = children[2].token();
     /* (the call's callee name, which analysing the object expression's
        calls changes) */
     token_index callee = overloaded_callee;
@@ -317,7 +316,7 @@ analysis_result semantic_analysis::member_reference(node_index n,
             /* a chain of operator-> this long, or a cycle */
             return not_supported(n, "over.ref");
         bool handled = false;
-        r = unary_operator_function(n, children[1].index(),
+        r = unary_operator_function(n, children[1].token(),
                                     preprocessing_op_or_punc::ARROW, false,
                                     children[0], m, handled);
         if (r != analysis_result::well_formed)
@@ -346,7 +345,7 @@ analysis_result semantic_analysis::member_reference(node_index n,
         if (m.evaluation != constness::not_constant)
             m.evaluation = constness::unknown;
         m.node = expression_node(semantic_kind::indirection, m,
-                                 tree[n].first_token, m.node);
+                                 children.first_token(), m.node);
     }
     const struct type object = type_table[m.type.unqualified()];
     if (object.kind != type_kind::class_type) {

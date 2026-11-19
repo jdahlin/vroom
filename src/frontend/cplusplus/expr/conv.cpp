@@ -824,7 +824,7 @@ analysis_result semantic_analysis::implicit_conversion(node_index at,
                 entity_table[fp.entity].size &&
                 !(pointee.cv() & ~target_pointee.cv()) &&
                 base_step(fp.entity, tp.entity, ambiguous))
-                return pointer_to_base(tree[at].first_token, fp.entity,
+                return pointer_to_base(syntax(at).first_token(), fp.entity,
                                        tp.entity, to, m);
             /* a function pointer conversion: not analysed yet */
             if (fp.kind == type_kind::class_type ||

@@ -45,7 +45,7 @@ node_index parser::clang_convertvector_expression()
 analysis_result semantic_analysis::clang_convertvector(node_index n,
                                                        expression_meaning &m)
 {
-    const syntax_child *children = tree.children(n);
+    auto children = syntax(n);
     analysis_result r = expression(children[2], m);
     if (r != analysis_result::well_formed)
         return r;

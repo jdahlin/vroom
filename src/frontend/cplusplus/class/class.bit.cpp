@@ -38,18 +38,16 @@ analysis_result semantic_analysis::member_bit_field(entity_index c,
                                                     const specified &s,
                                                     uint8_t access)
 {
-    const syntax_node &node = tree[d.index()];
-    const syntax_child *children = tree.children(d.index());
+    auto node = syntax(d);
     token_index id = 0;
     uint32_t k = 0;
-    if (k < node.child_count && children[k].is_token() &&
-        tokens[children[k].index()].kind == token_kind::identifier)
-        id = children[k++].index();
-    if (k + 2 != node.child_count ||
-        !syntax(children[k]).is(preprocessing_op_or_punc::COLON))
+    if (k < node.size() && node[k].is_token() &&
+        tokens[node[k].token()].kind == token_kind::identifier)
+        id = node[k++].token();
+    if (k + 2 != node.size() || !node[k].is(preprocessing_op_or_punc::COLON))
         /* attributes, a brace-or-equal-initializer */
         return not_supported(d.index(), "class.bit");
-    syntax_child width_expression = children[k + 1];
+    syntax_child width_expression = node[k + 1];
     if (!s.has_type || s.typedef_ || s.static_ || s.extern_ || s.inline_ ||
         s.constexpr_ || s.aligned || s.gnu_flags)
         return not_supported(declaration, "class.bit");

@@ -106,27 +106,26 @@ node_index parser::assignment_expression()
 analysis_result semantic_analysis::assignment(node_index n,
                                               expression_meaning &m)
 {
-    const syntax_node &node = tree[n];
-    const syntax_child *children = tree.children(n);
-    if (node.child_count != 3 || !children[1].is_token() ||
-        syntax(children[2]).is(syntax_kind::braced_init_list))
+    auto node = syntax(n);
+    if (node.size() != 3 || !node[1].is_token() ||
+        node[2].is(syntax_kind::braced_init_list))
         return not_supported(n, "expr.ass");
-    preprocessing_op_or_punc op = preprocessing_op_or_punc_primary(
-        tokens[children[1].index()].op_or_punc);
+    preprocessing_op_or_punc op =
+        preprocessing_op_or_punc_primary(tokens[node[1].token()].op_or_punc);
     expression_meaning left, right;
-    analysis_result r = expression(children[0], left);
+    analysis_result r = expression(node[0], left);
     /* [over.over]/1: "the left side of an assignment" */
     if (r == analysis_result::well_formed &&
         op == preprocessing_op_or_punc::EQUAL)
-        r = target_expression(children[2], left.type, right);
+        r = target_expression(node[2], left.type, right);
     else if (r == analysis_result::well_formed)
-        r = expression(children[2], right);
+        r = expression(node[2], right);
     if (r != analysis_result::well_formed)
         return r;
     /* [over.match.oper]/2: an operand of class or enumeration type */
     bool handled = false;
-    r = binary_operator_function(n, children[1].index(), op, children[0], left,
-                                 children[2], right, handled, m);
+    r = binary_operator_function(n, node[1].token(), op, node[0], left, node[2],
+                                 right, handled, m);
     if (r != analysis_result::well_formed || handled)
         return r;
     const struct type record = type_table[left.type.unqualified()];
@@ -214,7 +213,7 @@ analysis_result semantic_analysis::assignment(node_index n,
     m.evaluation = constness::not_constant;
     m.entity = 0;
     m.beyond_integral_constant = true;
-    m.node = expression_node(semantic_kind::assignment, m, children[1].index(),
+    m.node = expression_node(semantic_kind::assignment, m, node[1].token(),
                              assigned, right.node, static_cast<uint8_t>(op));
     semantics[m.node].computation = computation;
     return analysis_result::well_formed;
@@ -321,8 +320,9 @@ analysis_result semantic_analysis::class_assignment(node_index n,
     m.evaluation = constness::not_constant;
     m.entity = 0;
     m.beyond_integral_constant = true;
-    m.node = expression_node(semantic_kind::assignment, m, tree[n].first_token,
-                             assigned, right.node, static_cast<uint8_t>(op));
+    m.node =
+        expression_node(semantic_kind::assignment, m, syntax(n).first_token(),
+                        assigned, right.node, static_cast<uint8_t>(op));
     semantics[m.node].computation = left.type;
     return analysis_result::well_formed;
 }

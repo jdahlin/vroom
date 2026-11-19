@@ -337,8 +337,8 @@ analysis_result semantic_analysis::tuple_size_of(node_index n,
         for (const analysed_declaration &d : declarations) {
             if (d.result == analysis_result::well_formed)
                 continue;
-            for (token_index t = tree[d.node].first_token;
-                 t < tree[d.node].end_token; t++)
+            for (token_index t = syntax(d.node).first_token();
+                 t < syntax(d.node).end_token(); t++)
                 if (tokens[t].kind == token_kind::identifier &&
                     tokens.identifier(t) == name)
                     return not_supported(n, "temp.expl.spec");
@@ -528,28 +528,25 @@ analysis_result semantic_analysis::structured_binding_declaration(
     node_index declaration, uint32_t first, const specified &s,
     const expression_meaning *supplied)
 {
-    const syntax_node &node = tree[declaration];
-    const syntax_child *children = tree.children(declaration);
+    auto node = syntax(declaration);
     uint32_t i = first;
     bool reference = false, rvalue = false;
-    if (syntax(children[i]).is(preprocessing_op_or_punc::AMPERSAND)) {
+    if (node[i].is(preprocessing_op_or_punc::AMPERSAND)) {
         reference = true;
         i++;
-    } else if (syntax(children[i])
-                   .is(preprocessing_op_or_punc::AMPERSAND_AMPERSAND)) {
+    } else if (node[i].is(preprocessing_op_or_punc::AMPERSAND_AMPERSAND)) {
         reference = rvalue = true;
         i++;
     }
-    if (i + 3 > node.child_count)
+    if (i + 3 > node.size())
         return not_supported(declaration, "dcl.struct.bind");
-    token_index at = children[i].index();
+    token_index at = node[i].token();
     owned_array<token_index> names;
-    syntax_child list = children[i + 1];
+    syntax_child list = node[i + 1];
     if (list.is_token()) {
         names.append(list.index());
     } else {
-        for (uint32_t k = 0; k < tree[list.index()].child_count; k++) {
-            syntax_child c = tree.children(list.index())[k];
+        for (syntax_child c : syntax(list).elements()) {
             if (c.is_token() &&
                 tokens[c.index()].kind == token_kind::identifier)
                 names.append(c.index());
@@ -557,9 +554,9 @@ analysis_result semantic_analysis::structured_binding_declaration(
     }
     syntax_child init;
     if (!supplied) {
-        if (i + 4 > node.child_count)
+        if (i + 4 > node.size())
             return not_supported(declaration, "dcl.struct.bind");
-        init = children[i + 3];
+        init = node[i + 3];
     }
     /* [dcl.pre]/8: "If the decl-specifier-seq contains any decl-specifier
        other than static, thread_local, auto ([dcl.spec.auto]), or

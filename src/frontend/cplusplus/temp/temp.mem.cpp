@@ -40,20 +40,20 @@ analysis_result semantic_analysis::member_function_template(
     defining_class = saved_class;
     if (head != analysis_result::well_formed)
         return head;
-    const syntax_node &d = tree[definition];
+    auto d = syntax(definition);
     uint32_t lead = leading_gnu_attributes(definition);
     const syntax_child *dc = tree.children(definition) + lead;
     /* a constructor template's decl-specifier-seq is optional
        ([class.ctor]/1) */
-    uint32_t specifiers = d.child_count > lead &&
-                          syntax(dc[0]).is(syntax_kind::decl_specifier_seq);
+    uint32_t specifiers =
+        d.size() > lead && syntax(dc[0]).is(syntax_kind::decl_specifier_seq);
     bool constructor = declares_special_member(c, dc[specifiers]);
     /* [dcl.decl]/4: a trailing requires-clause (trailing_constraint),
        where the template-head has none */
     uint32_t trailing = trailing_constraint(n).bits != 0;
     if (trailing && head_constraint(n).bits)
         return not_supported(n, "temp.constr");
-    if (d.child_count != lead + 2 + specifiers + trailing ||
+    if (d.size() != lead + 2 + specifiers + trailing ||
         (!specifiers && !constructor) || dc[specifiers].is_token() ||
         !syntax(dc[specifiers + 1 + trailing]).is(syntax_kind::function_body))
         return not_supported(n, "temp.mem");
@@ -271,7 +271,7 @@ analysis_result semantic_analysis::bound_member_call(
     const owned_array<syntax_child> &arguments,
     owned_array<expression_meaning> &early, expression_meaning &m)
 {
-    token_index at = tree[n].first_token;
+    token_index at = syntax(n).first_token();
     expression_meaning e = object;
     entity_index object_class = type_table[e.type.unqualified()].entity;
     const entity x = entity_table[f];

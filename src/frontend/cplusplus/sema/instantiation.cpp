@@ -683,10 +683,10 @@ token_index semantic_analysis::parameter_type_constraint(entity_index t,
         template_parameter_parts x;
         if (!template_parameter_form(
                 template_parameter_nodes[ft.first_parameter + i], x) ||
-            !x.constraint || tree[x.constraint].child_count != 1 ||
-            !tree.children(x.constraint)[0].is_token())
+            !x.constraint || syntax(x.constraint).size() != 1 ||
+            !syntax(x.constraint)[0].is_token())
             return 0;
-        return tree.children(x.constraint)[0].index();
+        return syntax(x.constraint)[0].token();
     }
     return 0;
 }
@@ -765,7 +765,7 @@ void semantic_analysis::enter_instantiation(instantiation_context &c,
     c.uses_before = name_uses.size();
     current_scope = scope;
     current_declaration = declaration;
-    lookup_horizon = tree[declaration].first_token;
+    lookup_horizon = syntax(declaration).first_token();
     defining_class = 0;
     in_condition = false;
     overloaded_callee = 0;

@@ -18,12 +18,12 @@ bool semantic_analysis::names_entity(syntax_child operand) const
 {
     if (operand.is_token())
         return tokens[operand.index()].kind == token_kind::identifier;
-    const syntax_node &node = tree[operand.index()];
-    if (node.kind == syntax_kind::qualified_id)
+    auto node = syntax(operand);
+    if (node.is(syntax_kind::qualified_id))
         return true;
-    if (node.kind != syntax_kind::postfix_expression || node.child_count != 3)
+    if (!node.is(syntax_kind::postfix_expression) || node.size() != 3)
         return false;
-    syntax_child op = tree.children(operand.index())[1];
+    syntax_child op = node[1];
     return syntax(op).is(preprocessing_op_or_punc::DOT) ||
            syntax(op).is(preprocessing_op_or_punc::ARROW);
 }
@@ -94,13 +94,13 @@ bool semantic_analysis::decltype_of(const expression_meaning &m, bool named,
 analysis_result semantic_analysis::decltype_type(node_index n,
                                                  qualified_type &type)
 {
-    const syntax_node &node = tree[n];
-    if (node.child_count != 4)
+    auto node = syntax(n);
+    if (node.size() != 4)
         return not_supported(n, "dcl.type.decltype");
-    syntax_child operand = tree.children(n)[2];
+    syntax_child operand = node[2];
     /* an operand that names a template parameter (or a type that depends
        on one) is type-dependent ([temp.dep.expr]): not analysed */
-    if (names_dependent_entity(tree[n].first_token, tree[n].end_token)) {
+    if (names_dependent_entity(node.first_token(), node.end_token())) {
         /* [temp.dep.type]/10.3: "denoted by decltype(expression), where
            expression is type-dependent" a dependent type, in a template's
            own declaration (an instantiation's names are bound to
@@ -158,13 +158,15 @@ bool semantic_analysis::names_dependent_entity(token_index first,
    same tokens */
 type_index semantic_analysis::dependent_written_type(node_index n)
 {
-    const syntax_node &x = tree[n];
+    auto x = syntax(n);
     for (entity_index e : dependent_written_types) {
         const syntax_node &y =
             tree[static_cast<node_index>(entity_table[e].value)];
-        bool same = y.end_token - y.first_token == x.end_token - x.first_token;
-        for (token_index i = 0; same && i < x.end_token - x.first_token; i++)
-            same = same_token_spelling(x.first_token + i, y.first_token + i);
+        bool same =
+            y.end_token - y.first_token == x.end_token() - x.first_token();
+        for (token_index i = 0; same && i < x.end_token() - x.first_token();
+             i++)
+            same = same_token_spelling(x.first_token() + i, y.first_token + i);
         if (same)
             return entity_table[e].type.unqualified();
     }

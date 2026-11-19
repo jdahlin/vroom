@@ -30,13 +30,12 @@ bool semantic_analysis::explicit_body(syntax_child body,
                                       standard_keyword k) const
 {
     if (body.is_token() || !body.index() ||
-        tree[body.index()].kind != syntax_kind::function_body ||
-        tree[body.index()].child_count < 3)
+        !syntax(body).is(syntax_kind::function_body) || syntax(body).size() < 3)
         return false;
-    const syntax_child *children = tree.children(body.index());
-    return syntax(children[0]).is(preprocessing_op_or_punc::EQUAL) &&
+    auto children = syntax(body);
+    return children[0].is(preprocessing_op_or_punc::EQUAL) &&
            children[1].is_token() &&
-           p.keyword_of(tokens[children[1].index()]) == k;
+           p.keyword_of(tokens[children[1].token()]) == k;
 }
 
 analysis_result semantic_analysis::deleted_definition(node_index n,

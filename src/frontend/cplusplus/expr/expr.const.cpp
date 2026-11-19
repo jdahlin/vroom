@@ -215,7 +215,7 @@ analysis_result semantic_analysis::converted_constant_expression(
             return r;
         if (narrows) {
             r = extension_used(diagnostic_id::sema_narrowing,
-                               tree[at].first_token, nullptr);
+                               syntax(at).first_token(), nullptr);
             if (r != analysis_result::well_formed)
                 return r;
         }

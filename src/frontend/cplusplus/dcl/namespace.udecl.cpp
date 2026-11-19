@@ -122,13 +122,13 @@ analysis_result semantic_analysis::using_declaration(node_index n)
     /* the using-declarators, the GNU attributes after each (clang's
        extension) and the commas: of the using-declaration, or of its
        using-declarator-list */
-    const syntax_node &node = tree[n];
+    auto node = syntax(n);
     owned_array<syntax_child> items;
-    for (uint32_t i = 0; i < node.child_count; i++) {
-        syntax_child c = tree.children(n)[i];
+    for (uint32_t i = 0; i < node.size(); i++) {
+        syntax_child c = node[i];
         if (syntax(c).is(syntax_kind::using_declarator_list)) {
-            for (uint32_t k = 0; k < tree[c.index()].child_count; k++)
-                items.append(tree.children(c.index())[k]);
+            for (uint32_t k = 0; k < syntax(c).size(); k++)
+                items.append(syntax(c)[k]);
         } else if (!c.is_token()) {
             items.append(c);
         }
@@ -181,20 +181,17 @@ analysis_result semantic_analysis::using_declaration(node_index n)
 analysis_result semantic_analysis::using_declarator(node_index n,
                                                     bool if_exists)
 {
-    const syntax_node &node = tree[n];
-    const syntax_child *children = tree.children(n);
-    if (node.child_count != 2 ||
-        !syntax(children[0]).is(syntax_kind::nested_name_specifier) ||
-        !children[1].is_token() ||
-        tokens[children[1].index()].kind != token_kind::identifier)
+    auto node = syntax(n);
+    if (node.size() != 2 || !node[0].is(syntax_kind::nested_name_specifier) ||
+        !node[1].is_identifier())
         /* typename, an operator-function-id, a destructor's name, a pack
            expansion */
         return not_supported(n, "namespace.udecl");
     nominated_scope q;
-    analysis_result r = nested_name_specifier(children[0].index(), q);
+    analysis_result r = nested_name_specifier(node[0].index(), q);
     if (r != analysis_result::well_formed)
         return r;
-    token_index t = children[1].index();
+    token_index t = node[1].token();
     uint32_t name = tokens.identifier(t);
     lookup_result found = lookup_qualified(q.entity, name, lookup_filter::any);
     if (found.unknown)

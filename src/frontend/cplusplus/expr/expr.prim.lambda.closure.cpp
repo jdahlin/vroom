@@ -88,7 +88,7 @@ analysis_result semantic_analysis::closure_conversion(entity_index c,
     const struct type f = type_table[function_type.unqualified()];
     if (f.variadic || contains_placeholder(f.operand))
         return not_supported(n, "expr.prim.lambda.closure");
-    token_index at = tree[n].first_token;
+    token_index at = syntax(n).first_token();
     static const char invoke_spelling[] = "__invoke";
     uint32_t invoke_name =
         tokens.pp.identifier(invoke_spelling, sizeof invoke_spelling - 1) + 1;

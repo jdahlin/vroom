@@ -297,25 +297,22 @@ bool semantic_analysis::initializer_form(syntax_child init,
     if (init.is_token())
         return false;
     node_index n = init.index();
-    const syntax_node &node = tree[n];
-    const syntax_child *children = tree.children(n);
+    auto node = syntax(n);
     direct = false;
     list = false;
-    if (node.kind == syntax_kind::brace_or_equal_initializer &&
-        node.child_count == 2 &&
-        !syntax(children[1]).is(syntax_kind::braced_init_list)) {
-        clause = children[1];
-    } else if (node.kind == syntax_kind::initializer && node.child_count == 3 &&
-               !syntax(children[1]).is(syntax_kind::initializer_list) &&
-               !syntax(children[1]).is(syntax_kind::braced_init_list)) {
-        clause = children[1];
+    if (node.is(syntax_kind::brace_or_equal_initializer) && node.size() == 2 &&
+        !node[1].is(syntax_kind::braced_init_list)) {
+        clause = node[1];
+    } else if (node.is(syntax_kind::initializer) && node.size() == 3 &&
+               !node[1].is(syntax_kind::initializer_list) &&
+               !node[1].is(syntax_kind::braced_init_list)) {
+        clause = node[1];
         direct = true;
-    } else if (node.kind == syntax_kind::braced_init_list &&
-               node.child_count == 3 &&
-               !syntax(children[1]).is(syntax_kind::initializer_list) &&
-               !syntax(children[1]).is(syntax_kind::braced_init_list) &&
-               !syntax(children[1]).is(preprocessing_op_or_punc::RIGHT_BRACE)) {
-        clause = children[1];
+    } else if (node.is(syntax_kind::braced_init_list) && node.size() == 3 &&
+               !node[1].is(syntax_kind::initializer_list) &&
+               !node[1].is(syntax_kind::braced_init_list) &&
+               !node[1].is(preprocessing_op_or_punc::RIGHT_BRACE)) {
+        clause = node[1];
         direct = true;
         list = true;
     } else {
@@ -510,25 +507,23 @@ analysis_result semantic_analysis::trailing_return(node_index declaration,
                                                    qualified_type &type,
                                                    declarator_meaning &m)
 {
-    const syntax_node &node = tree[n];
-    const syntax_child *children = tree.children(n);
-    if (node.child_count != 2 ||
-        !syntax(children[1]).is(syntax_kind::trailing_return_type))
+    auto node = syntax(n);
+    if (node.size() != 2 || !node[1].is(syntax_kind::trailing_return_type))
         return not_supported(n, "dcl.fct");
     qualified_type auto_type = placeholder_type(false);
     /* (T other than auto: clang takes S(s)()->m, which [dcl.ambig.res]/1
        makes such a declaration, for an expression) */
     if (!(type == auto_type))
         return not_supported(n, "dcl.fct");
-    analysis_result r = declarator(declaration, children[0], type, m);
+    analysis_result r = declarator(declaration, node[0], type, m);
     if (r != analysis_result::well_formed)
         return r;
     const struct type f = type_table[type.unqualified()];
     if (f.kind != type_kind::function || !(f.operand == auto_type))
         return not_supported(n, "dcl.fct");
-    node_index trailing = children[1].index();
-    if (tree[trailing].child_count != 2 ||
-        !syntax(tree.children(trailing)[1]).is(syntax_kind::type_id))
+    node_index trailing = node[1].index();
+    if (syntax(trailing).size() != 2 ||
+        !syntax(trailing)[1].is(syntax_kind::type_id))
         return not_supported(n, "dcl.fct");
     /* the type-id's own function declarators would replace the
        parameters and cv-qualifier-seq this declarator's has */
@@ -539,7 +534,7 @@ analysis_result semantic_analysis::trailing_return(node_index declaration,
     qualified_type returned;
     entity_index outer = current_scope;
     open_parameter_scope();
-    r = type_id(tree.children(trailing)[1].index(), returned);
+    r = type_id(syntax(trailing)[1].index(), returned);
     current_scope = outer;
     function_parameters.clear();
     for (const parameter_meaning &parameter : parameters)

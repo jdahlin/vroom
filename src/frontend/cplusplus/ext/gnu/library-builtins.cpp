@@ -454,15 +454,13 @@ entity_index semantic_analysis::library_builtin(uint32_t name)
    nothing for, with one argument */
 bool semantic_analysis::builtin_addressof_call(node_index n)
 {
-    const syntax_node &node = tree[n];
-    const syntax_child *children = tree.children(n);
-    if (node.child_count != 4 || !children[0].is_token() ||
-        tokens[children[0].index()].kind != token_kind::identifier ||
-        syntax(children[2]).is(syntax_kind::initializer_list) ||
+    auto node = syntax(n);
+    if (node.size() != 4 || !node[0].is_identifier() ||
+        node[2].is(syntax_kind::initializer_list) ||
         !tokens.files.behavior.has(extension::gnu_library_builtins))
         return false;
     static const char spelled[] = "__builtin_addressof";
-    uint32_t name = tokens.identifier(children[0].index());
+    uint32_t name = tokens.identifier(node[0].token());
     if (name != tokens.pp.identifier(spelled, sizeof spelled - 1) + 1)
         return false;
     lookup_result x = lookup_unqualified(name, lookup_filter::any);
@@ -474,7 +472,7 @@ bool semantic_analysis::builtin_addressof_call(node_index n)
 analysis_result semantic_analysis::builtin_addressof(node_index n,
                                                      expression_meaning &m)
 {
-    syntax_child operand = tree.children(n)[2];
+    syntax_child operand = syntax(n)[2];
     analysis_result r = expression(operand, m);
     if (r != analysis_result::well_formed)
         return r;
@@ -484,8 +482,8 @@ analysis_result semantic_analysis::builtin_addressof(node_index n,
                           "lvalue",
                           "specialized.addressof");
     if (m.bit_field_width)
-        return address_of_bit_field(tree[n].first_token);
-    address_of_glvalue(tree[n].first_token, m);
+        return address_of_bit_field(syntax(n).first_token());
+    address_of_glvalue(syntax(n).first_token(), m);
     return analysis_result::well_formed;
 }
 
