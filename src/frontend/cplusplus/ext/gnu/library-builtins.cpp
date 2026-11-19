@@ -447,4 +447,46 @@ entity_index semantic_analysis::library_builtin(uint32_t name)
                            parameters.size(), variadic, flags);
 }
 
+/* clang's T *__builtin_addressof(T &) (Builtins.td, custom type checking):
+   [specialized.addressof]/1's std::addressof, "the actual address of the
+   object or function referenced by r, even in the presence of an
+   overloaded operator&"; a call of the name unqualified lookup finds
+   nothing for, with one argument */
+bool semantic_analysis::builtin_addressof_call(node_index n)
+{
+    const syntax_node &node = tree[n];
+    const syntax_child *children = tree.children(n);
+    if (node.child_count != 4 || !children[0].is_token() ||
+        tokens[children[0].index()].kind != token_kind::identifier ||
+        syntax_is(tree, children[2], syntax_kind::initializer_list) ||
+        !tokens.files.behavior.has(extension::gnu_library_builtins))
+        return false;
+    static const char spelled[] = "__builtin_addressof";
+    uint32_t name = tokens.identifier(children[0].index());
+    if (name != tokens.pp.identifier(spelled, sizeof spelled - 1) + 1)
+        return false;
+    lookup_result x = lookup_unqualified(name, lookup_filter::any);
+    return !x.entity && !x.unknown && !x.ambiguous;
+}
+
+/* the built-in & of [expr.unary.op]/3.2 on the lvalue operand: a prvalue
+   "pointer to T" (cv kept), constant where &x is ([expr.const]/11) */
+analysis_result semantic_analysis::builtin_addressof(node_index n,
+                                                     expression_meaning &m)
+{
+    syntax_child operand = tree.children(n)[2];
+    analysis_result r = expression(operand, m);
+    if (r != analysis_result::well_formed)
+        return r;
+    if (m.category != value_category::lvalue)
+        return ill_formed(n,
+                          "the operand of __builtin_addressof shall be an "
+                          "lvalue",
+                          "specialized.addressof");
+    if (m.bit_field_width)
+        return address_of_bit_field(tree[n].first_token);
+    address_of_glvalue(tree[n].first_token, m);
+    return analysis_result::well_formed;
+}
+
 } // namespace cplusplus

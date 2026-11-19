@@ -2411,6 +2411,8 @@ class semantic_analysis
     analysis_result clang_type_trait(node_index n, expression_meaning &m);
     analysis_result gnu_offsetof(node_index n, expression_meaning &m);
     analysis_result clang_bit_cast(node_index n, expression_meaning &m);
+    bool builtin_addressof_call(node_index n);
+    analysis_result builtin_addressof(node_index n, expression_meaning &m);
     analysis_result clang_source_location(node_index n, expression_meaning &m);
     analysis_result clang_atomic_type(node_index n, qualified_type &type);
     uint64_t atomic_layout(qualified_type value, bool alignment) const;
