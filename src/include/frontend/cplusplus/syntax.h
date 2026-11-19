@@ -108,6 +108,15 @@ class SyntaxRef
             return 0;
         return node().child_count;
     }
+    /* the node's tokens: [first_token(), end_token()) */
+    token_index first_token() const
+    {
+        return node().first_token;
+    }
+    token_index end_token() const
+    {
+        return node().end_token;
+    }
     /* the i-th child, a node or a token; {} past the end */
     SyntaxElement operator[](uint32_t i) const;
     /* the last child ({} without one) */
@@ -175,7 +184,7 @@ class SyntaxRef
         return {};
     }
     /* the first child that is a token of kind k, {} if none */
-    SyntaxElement first_token(token_kind k) const;
+    SyntaxElement token_of_kind(token_kind k) const;
     const SyntaxContext *cx = nullptr;
     node_index n = 0;
 };
@@ -306,7 +315,7 @@ inline SyntaxElement SyntaxRef::back() const
     return (*this)[size() - 1];
 }
 
-inline SyntaxElement SyntaxRef::first_token(token_kind k) const
+inline SyntaxElement SyntaxRef::token_of_kind(token_kind k) const
 {
     for (uint32_t i = 0; i < size(); i++) {
         syntax_child c = children()[i];

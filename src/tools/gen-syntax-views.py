@@ -541,7 +541,7 @@ def generate():
             w('')
             w('inline SyntaxElement %s::%s() const' % (t, tok))
             w('{')
-            w('    return first_token(token_kind::%s);' % {'identifier': 'identifier', 'string_literal': 'literal'}[tok])
+            w('    return token_of_kind(token_kind::%s);' % {'identifier': 'identifier', 'string_literal': 'literal'}[tok])
             w('}')
     w('')
     w("/* the view of s's kind if that kind is a member of S, else s itself */")
