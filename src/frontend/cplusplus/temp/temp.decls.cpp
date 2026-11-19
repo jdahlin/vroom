@@ -618,9 +618,16 @@ semantic_analysis::function_template_definition(node_index n,
     owned_array<entity_index> functions;
     /* (a scope with a using-directive, an inline namespace's among them,
        or names not known: lookup of the name finds more than the
-       scope's own declarations) */
-    bool own = !entity_table[outer].has_using_directive &&
-               !entity_table[outer].unknown_names;
+       scope's own declarations, [namespace.udir]/2, unless no namespace
+       the directives nominate declares it or has directives of its own) */
+    bool own = !entity_table[outer].unknown_names;
+    if (own && entity_table[outer].has_using_directive)
+        for (const using_directive_record &u : using_directives)
+            if (u.scope == outer &&
+                (entity_table[u.nominated].has_using_directive ||
+                 entity_table[u.nominated].unknown_names ||
+                 entity_table.find(u.nominated, name)))
+                own = false;
     if (prior && group.empty() && own &&
         entity_table[prior].kind == entity_kind::function &&
         entity_table[prior].enclosing == outer &&
