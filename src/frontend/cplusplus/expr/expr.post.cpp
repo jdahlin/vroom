@@ -594,6 +594,8 @@ analysis_result semantic_analysis::call(node_index n, expression_meaning &m)
 {
     const syntax_node &node = tree[n];
     const syntax_child *children = tree.children(n);
+    if (builtin_addressof_call(n))
+        return builtin_addressof(n, m);
     owned_array<syntax_child> arguments;
     /* [temp.variadic]/5: the arguments, pack expansions instantiated: each
        analysed now, one per element of the packs its pattern names */
