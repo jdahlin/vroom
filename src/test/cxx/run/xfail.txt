@@ -43,9 +43,9 @@ old-enum-class-no-conversion	vcc: the rules of [expr.prim.req] are not implement
 old-enumerator-prvalue	vcc: the rules of [ext.clang] are not implemented yet
 old-enums-switch	vcc: the C++ front end does not handle a declaration the parser kept as tokens yet
 old-explicit-destructor-instance	vcc: the C++ front end does not handle a declaration the parser kept as tokens yet
-old-friend-templates	vcc: the rules of [stmt.if] are not implemented yet
+old-friend-templates	vcc: the rules of [expr.prim.req] are not implemented yet
 old-function-pointers	vcc: the rules of [expr.type.conv] are not implemented yet
-old-function-templates	vcc: the rules of [stmt.if] are not implemented yet
+old-function-templates	vcc: the rules of [expr.ref] are not implemented yet
 old-gnu-conditional-omitted	vcc: the C++ front end does not handle a declaration the parser kept as tokens yet
 old-ilist-ctor-not-viable	vcc: the rules of [class.mem] are not implemented yet
 old-implicit-assignment-parts	vcc: the rules of [over.match.oper] are not implemented yet
