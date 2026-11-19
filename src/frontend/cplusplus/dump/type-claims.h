@@ -117,6 +117,10 @@ static bool write_type_claim(const types &table, qualified_type t, vbuffer *out)
         vbuffer_string_append(out, "::vcc_claim::volatile_<");
         wrappers++;
     }
+    if (t.cv() & cv_restrict) {
+        vbuffer_string_append(out, "::vcc_claim::restrict_<");
+        wrappers++;
+    }
     if (!write_type_claim_unqualified(table, t.unqualified(), out)) {
         out->n = size;
         return false;

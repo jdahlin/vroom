@@ -1766,6 +1766,8 @@ bool itanium_mangler::builtin_type(fundamental_type t)
  */
 bool itanium_mangler::qualified(qualified_type t)
 {
+    if (t.cv() & cv_restrict)
+        text("r");
     if (t.cv() & cv_volatile)
         text("V");
     if (t.cv() & cv_const)

@@ -43,6 +43,37 @@ qualified_type semantic_analysis::add_cv(qualified_type t, uint32_t cv)
     }
 }
 
+/*
+ * A qualifier after a ptr-operator's * ([dcl.ptr]/1: "the cv-qualifiers
+ * apply to the pointer"): const, volatile, [ext:gnu_restrict]'s __restrict
+ * (C's restrict, [C11 6.7.3]/2: on a pointer type only) and
+ * [ext:clang_nullability]'s keywords, which do not change the type.
+ */
+analysis_result semantic_analysis::pointer_qualifier(node_index op,
+                                                     token_index t,
+                                                     qualified_type &type)
+{
+    switch (p.extension_keyword_of(tokens[t])) {
+    case extension_keyword::nullability:
+        return analysis_result::well_formed;
+    case extension_keyword::restrict:
+        if (type_table[type.unqualified()].kind != type_kind::pointer)
+            return not_supported(op, "ext.gnu");
+        type = add_cv(type, cv_restrict);
+        return analysis_result::well_formed;
+    default:
+        break;
+    }
+    standard_keyword kw = p.keyword_of(tokens[t]);
+    if (kw == standard_keyword::const_)
+        type = add_cv(type, cv_const);
+    else if (kw == standard_keyword::volatile_)
+        type = add_cv(type, cv_volatile);
+    else
+        return not_supported(op, "ext");
+    return analysis_result::well_formed;
+}
+
 type_index semantic_analysis::array_with_element(const struct type &array,
                                                  qualified_type element)
 {
@@ -200,29 +231,14 @@ analysis_result semantic_analysis::pointer_operator(node_index op,
                 syntax_child q = tree.children(c.index())[k];
                 if (!q.is_token())
                     return not_supported(op, "dcl.ptr");
-                standard_keyword kw = p.keyword_of(tokens[q.index()]);
-                /* [ext:clang_nullability]: no effect on the type */
-                if (p.extension_keyword_of(tokens[q.index()]) ==
-                    extension_keyword::nullability)
-                    continue;
-                if (kw == standard_keyword::const_)
-                    type = add_cv(type, cv_const);
-                else if (kw == standard_keyword::volatile_)
-                    type = add_cv(type, cv_volatile);
-                else
-                    return not_supported(op, "ext");
+                analysis_result r = pointer_qualifier(op, q.index(), type);
+                if (r != analysis_result::well_formed)
+                    return r;
             }
         } else if (c.is_token()) {
-            standard_keyword kw = p.keyword_of(tokens[c.index()]);
-            if (p.extension_keyword_of(tokens[c.index()]) ==
-                extension_keyword::nullability)
-                continue;
-            if (kw == standard_keyword::const_)
-                type = add_cv(type, cv_const);
-            else if (kw == standard_keyword::volatile_)
-                type = add_cv(type, cv_volatile);
-            else
-                return not_supported(op, "ext");
+            analysis_result r = pointer_qualifier(op, c.index(), type);
+            if (r != analysis_result::well_formed)
+                return r;
         } else {
             return not_supported(op, "dcl.ptr");
         }

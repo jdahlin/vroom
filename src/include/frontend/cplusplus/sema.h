@@ -52,11 +52,13 @@ inline bool syntax_is_punctuator(token_stream &tokens, syntax_child c,
 using type_index = uint32_t;
 
 /* [basic.type.qualifier]/1: "a const-qualified version, a
-   volatile-qualified version, and a const-volatile-qualified version" */
+   volatile-qualified version, and a const-volatile-qualified version";
+   [ext:gnu_restrict]'s __restrict, on pointers only, a third */
 enum cv_qualifier : uint32_t {
     cv_none = 0,
     cv_const = 1,
     cv_volatile = 2,
+    cv_restrict = 4,
 };
 
 /*
@@ -69,15 +71,15 @@ struct qualified_type {
     uint32_t bits = 0;
     static qualified_type make(type_index type, uint32_t cv)
     {
-        return {type << 2 | cv};
+        return {type << 3 | cv};
     }
     type_index unqualified() const
     {
-        return bits >> 2;
+        return bits >> 3;
     }
     uint32_t cv() const
     {
-        return bits & 3;
+        return bits & 7;
     }
     bool operator==(const qualified_type &other) const
     {
@@ -2099,6 +2101,8 @@ class semantic_analysis
        ([basic.type.qualifier]/3), none to a reference or a function type
        ([dcl.ref]/1, [dcl.fct]/7) */
     qualified_type add_cv(qualified_type t, uint32_t cv);
+    analysis_result pointer_qualifier(node_index op, token_index t,
+                                      qualified_type &type);
 
     analysis_result init_declarator(node_index declaration, syntax_child item,
                                     const specified &s, bool definition);
