@@ -530,15 +530,12 @@ analysis_result semantic_analysis::builtin_type_pack_element(node_index id,
     if (r != analysis_result::well_formed)
         return r;
     bool constant = false;
-    if (!is_integral(m.type))
-        return ill_formed(id,
-                          "the index of __type_pack_element is an integral "
-                          "constant expression",
-                          "ext.clang");
-    r = converted_constant_expression(
-        id, m, fundamental_type::unsigned_long_int, constant);
-    if (r != analysis_result::well_formed)
-        return r;
+    if (is_integral(m.type)) {
+        r = converted_constant_expression(
+            id, m, fundamental_type::unsigned_long_int, constant);
+        if (r != analysis_result::well_formed)
+            return r;
+    }
     if (!constant)
         return ill_formed(id,
                           "the index of __type_pack_element is an integral "
