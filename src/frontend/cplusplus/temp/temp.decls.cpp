@@ -880,7 +880,7 @@ analysis_result semantic_analysis::variable_partial_specialization(
     /* [temp.param]/14: a partial specialization's packs are deduced,
        wherever they are */
     analysis_result r =
-        template_head_parameters(n, parameters, true, false, true);
+        template_head_parameters(n, parameters, true, true, true, true);
     if (r != analysis_result::well_formed)
         return r;
     lookup_result x;
@@ -907,28 +907,9 @@ analysis_result semantic_analysis::variable_partial_specialization(
     partial_arguments--;
     if (r != analysis_result::well_formed)
         return r;
-    bool dependent = false;
-    bool identity = arguments.size() == parameters.size();
-    for (uint32_t i = 0; i < arguments.size(); i++) {
-        const template_argument &a = arguments[i];
-        if (depends(type_table, a.type) || a.template_entity)
-            dependent = true;
-        if (a.kind == template_argument::kind_t::pack)
-            for (uint32_t k = 0; k < a.count; k++)
-                if (depends(type_table, pack_arguments[a.value + k].type) ||
-                    pack_arguments[a.value + k].template_entity)
-                    dependent = true;
-    }
-    for (uint32_t i = 0; i < arguments.size() && identity; i++) {
-        entity_index pe = template_parameter_entities[first + i];
-        const template_argument &a = arguments[i];
-        identity = a.template_entity == pe ||
-                   (a.kind == template_argument::kind_t::type &&
-                    a.type == entity_table[pe].type) ||
-                   (a.kind == template_argument::kind_t::pack && a.count == 1 &&
-                    pack_arguments[a.value].count == UINT32_MAX &&
-                    pack_arguments[a.value].template_entity == pe);
-    }
+    bool dependent = dependent_arguments(arguments);
+    bool identity = primary_arguments(n, primary.declaration, arguments, first,
+                                      parameters.size());
     /* [temp.class.spec]/9: more specialized than the primary */
     if (!dependent || identity)
         return not_supported(n, "temp.class.spec");
@@ -1356,6 +1337,35 @@ bool semantic_analysis::depends_on_template_parameter(qualified_type t) const
     return depends(type_table, t);
 }
 
+/*
+ * [temp.class.spec]/9: "The specialization shall be more specialized than
+ * the primary template": whether partial specialization n's arguments are
+ * its parameters (first, count of them) in order, the primary's own,
+ * unless n is constrained and the primary is not (/9 Example 1's #2:
+ * more constrained, [temp.constr.order]); other cases are
+ * [temp.class.order]'s, not analysed.
+ */
+bool semantic_analysis::primary_arguments(
+    node_index n, node_index primary,
+    const owned_array<template_argument> &arguments, uint32_t first,
+    size_t count)
+{
+    if (arguments.size() != count)
+        return false;
+    for (uint32_t i = 0; i < count; i++) {
+        entity_index pe = template_parameter_entities[first + i];
+        const template_argument &a = arguments[i];
+        if (!(a.template_entity == pe ||
+              (a.kind == template_argument::kind_t::type &&
+               a.type == entity_table[pe].type) ||
+              (a.kind == template_argument::kind_t::pack && a.count == 1 &&
+               pack_arguments[a.value].count == UINT32_MAX &&
+               pack_arguments[a.value].template_entity == pe)))
+            return false;
+    }
+    return !template_head_constrained(n) || template_head_constrained(primary);
+}
+
 /* whether a template argument, or a pack's element, is dependent */
 bool semantic_analysis::dependent_arguments(
     const owned_array<template_argument> &arguments) const
@@ -1366,7 +1376,8 @@ bool semantic_analysis::dependent_arguments(
         if (a.kind == template_argument::kind_t::pack)
             for (uint32_t k = 0; k < a.count; k++)
                 if (depends_on_template_parameter(
-                        pack_arguments[a.value + k].type))
+                        pack_arguments[a.value + k].type) ||
+                    pack_arguments[a.value + k].template_entity)
                     return true;
     }
     return false;
@@ -1670,38 +1681,12 @@ analysis_result semantic_analysis::class_specialization_definition(
     partial_arguments--;
     if (r != analysis_result::well_formed)
         return r;
-    bool dependent = false;
-    bool identity = arguments.size() == parameters.size();
-    for (uint32_t i = 0; i < arguments.size(); i++) {
-        const template_argument &a = arguments[i];
-        if (depends(type_table, a.type) || a.template_entity)
-            dependent = true;
-        if (a.kind == template_argument::kind_t::pack)
-            for (uint32_t k = 0; k < a.count; k++)
-                if (depends(type_table, pack_arguments[a.value + k].type) ||
-                    pack_arguments[a.value + k].template_entity)
-                    dependent = true;
-    }
-    for (uint32_t i = 0; i < arguments.size() && identity; i++) {
-        entity_index pe = template_parameter_entities[first + i];
-        const template_argument &a = arguments[i];
-        identity = a.template_entity == pe ||
-                   (a.kind == template_argument::kind_t::type &&
-                    a.type == entity_table[pe].type) ||
-                   (a.kind == template_argument::kind_t::pack && a.count == 1 &&
-                    pack_arguments[a.value].count == UINT32_MAX &&
-                    pack_arguments[a.value].template_entity == pe);
-    }
+    bool dependent = dependent_arguments(arguments);
+    bool identity = primary_arguments(n, primary.declaration, arguments, first,
+                                      parameters.size());
     /* [temp.expl.spec]: no dependent argument; [temp.class.spec]/9: "The
        specialization shall be more specialized than the primary template"
-       (the primary's own arguments are not; other cases are
-       [temp.class.order]'s, not analysed); /9 Example 1's #2: the
-       primary's arguments with a requires-clause, more constrained than
-       the unconstrained primary ([temp.constr.order]); a type-constraint
-       the same (a primary has none) */
-    if (identity && template_head_constrained(n) &&
-        !template_head_constrained(function_templates[ct - 1].declaration))
-        identity = false;
+       (primary_arguments) */
     if (parameters.empty() == dependent || identity)
         return not_supported(n, rule);
     function_template record;
