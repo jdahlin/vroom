@@ -681,14 +681,13 @@ analysis_result semantic_analysis::named_entity(token_index t, entity_index e,
 analysis_result semantic_analysis::qualified_id(QualifiedId n,
                                                 expression_meaning &m)
 {
-    if (n.size() != 2 || !n[0].is(syntax_kind::nested_name_specifier) ||
-        !n[1].is_identifier())
+    if (n.size() != 2 || !n.nested_name_specifier() || !n.identifier())
         return not_supported(n, "expr.prim.id.qual");
     nominated_scope scope;
-    analysis_result r = nested_name_specifier(n[0], scope);
+    analysis_result r = nested_name_specifier(n.nested_name_specifier(), scope);
     if (r != analysis_result::well_formed)
         return r;
-    token_index t = n[1].token();
+    token_index t = n.identifier().token();
     uint32_t name = tokens.identifier(t);
     entity_index c = scope.entity;
     if (!is_namespace(c) && entity_table[c].kind == entity_kind::enumeration) {

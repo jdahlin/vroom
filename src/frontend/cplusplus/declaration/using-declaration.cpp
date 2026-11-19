@@ -177,16 +177,15 @@ analysis_result semantic_analysis::using_declaration(UsingDeclaration n)
 analysis_result semantic_analysis::using_declarator(UsingDeclarator n,
                                                     bool if_exists)
 {
-    if (n.size() != 2 || !n[0].is(syntax_kind::nested_name_specifier) ||
-        !n[1].is_identifier())
+    if (n.size() != 2 || !n.nested_name_specifier() || !n.identifier())
         /* typename, an operator-function-id, a destructor's name, a pack
            expansion */
         return not_supported(n, "namespace.udecl");
     nominated_scope q;
-    analysis_result r = nested_name_specifier(n[0], q);
+    analysis_result r = nested_name_specifier(n.nested_name_specifier(), q);
     if (r != analysis_result::well_formed)
         return r;
-    token_index t = n[1].token();
+    token_index t = n.identifier().token();
     uint32_t name = tokens.identifier(t);
     lookup_result found = lookup_qualified(q.entity, name, lookup_filter::any);
     /* [namespace.udecl]/1: "If the using-declarator names ... a set of

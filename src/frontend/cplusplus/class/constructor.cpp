@@ -74,11 +74,11 @@ bool semantic_analysis::declares_special_member(entity_index c,
 analysis_result semantic_analysis::member_template_declaration(
     entity_index c, TemplateDeclaration n, uint8_t access)
 {
-    if (n.size() != 2 || !n[0].is(syntax_kind::template_head) ||
-        n[1].is_token())
+    if (n.size() != 2 || !n.template_head() || n[1].is_token())
         return not_supported(n, "temp.mem");
     owned_array<SyntaxRef> parameters;
-    if (!template_head_list(n[0], parameters) || parameters.empty())
+    if (!template_head_list(n.template_head(), parameters) ||
+        parameters.empty())
         return not_supported(n, "temp.mem");
     auto inner = n[1];
     /* [temp.alias]/1: a member alias template, of a class of namespace

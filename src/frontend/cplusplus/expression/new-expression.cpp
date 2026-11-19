@@ -191,10 +191,10 @@ analysis_result semantic_analysis::new_type_id(NewTypeId n,
                                                qualified_type &type,
                                                SyntaxElement &bound)
 {
-    if (!n.size() || n.size() > 2 || !n[0].is(syntax_kind::type_specifier_seq))
+    if (!n.type_specifier_seq() || n.size() > 2)
         return not_supported(n, "expr.new");
     specified s;
-    analysis_result r = decl_specifier_seq(n[0], s, false);
+    analysis_result r = decl_specifier_seq(n.type_specifier_seq(), s, false);
     if (r != analysis_result::well_formed)
         return r;
     if (!s.has_type)
@@ -202,7 +202,7 @@ analysis_result semantic_analysis::new_type_id(NewTypeId n,
     type = s.type;
     if (n.size() == 1)
         return analysis_result::well_formed;
-    SyntaxElement d = n[1];
+    SyntaxElement d = n.new_declarator();
     for (;;) {
         if (d.is(syntax_kind::noptr_new_declarator)) {
             auto bounds = d;

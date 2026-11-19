@@ -369,9 +369,8 @@ analysis_result semantic_analysis::lambda_expression(LambdaExpression n,
         else if (!x.is_token() && !x.is(syntax_kind::requires_clause))
             return not_supported(n, "expr.prim.lambda");
     }
-    SyntaxElement body = n[n.size() - 1];
-    if (!n[0].is(syntax_kind::lambda_introducer) ||
-        !body.is(syntax_kind::compound_statement))
+    SyntaxElement body = n.compound_statement();
+    if (!n.lambda_introducer() || !body)
         return not_supported(n, "expr.prim.lambda");
     if (declarator) {
         /* [expr.prim.lambda]/5: "A lambda is a generic lambda if the
@@ -428,13 +427,13 @@ analysis_result semantic_analysis::lambda_expression(LambdaExpression n,
     entity_table.add_declaration(c, n);
     l.closure = c;
     l.first_capture = static_cast<uint32_t>(lambda_captures.size());
-    analysis_result r = lambda_introducer(n[0], l);
+    analysis_result r = lambda_introducer(n.lambda_introducer(), l);
     if (r != analysis_result::well_formed) {
         lambda_captures.resize(l.first_capture);
         entity_table[c].kind = entity_kind::none;
         return r;
     }
-    bool has_capture = n[0].size() > 2;
+    bool has_capture = n.lambda_introducer().size() > 2;
 
     qualified_type type;
     owned_array<parameter_meaning> parameters;
