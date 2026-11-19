@@ -1609,8 +1609,8 @@ semantic_analysis::class_template_definition(SyntaxRef n, SyntaxRef specifier)
     SyntaxElement head_name = class_head_name(head);
     bool specialization =
         head_name && head_name.is(syntax_kind::simple_template_id);
-    analysis_result r = template_head_parameters(
-        n, parameters, true, true, specialization, specialization);
+    analysis_result r = template_head_parameters(n, parameters, true, true,
+                                                 specialization, true);
     if (r != analysis_result::well_formed)
         return r;
     /* a partial specialization's requires-clause is checked where it is
@@ -2402,7 +2402,8 @@ semantic_analysis::class_template_declaration(SyntaxRef n, SyntaxRef elaborated)
         return not_supported(n, "temp.class");
     owned_array<SyntaxRef> parameters;
     /* [temp.pre]/9: a requires-clause in its template-head */
-    analysis_result r = template_head_parameters(n, parameters, true, true);
+    analysis_result r =
+        template_head_parameters(n, parameters, true, true, false, true);
     if (r != analysis_result::well_formed)
         return r;
     uint32_t name = tokens.identifier(e[1].token());
