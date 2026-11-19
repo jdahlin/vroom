@@ -255,7 +255,7 @@ analysis_result semantic_analysis::substituted_parameter_type(
     qualified_type &type)
 {
     const function_template ft = function_templates[template_index - 1];
-    node_index node = template_parameter_nodes[ft.first_parameter + position];
+    SyntaxRef node = template_parameter_nodes[ft.first_parameter + position];
     template_parameter_parts form;
     if (!template_parameter_form(node, form))
         return not_supported(node, "temp.param");
@@ -291,7 +291,7 @@ analysis_result semantic_analysis::substituted_parameter_type(
  * expression of the type of the template-parameter" (integral here).
  */
 analysis_result semantic_analysis::template_argument_for(
-    node_index at, uint32_t template_index, uint32_t position,
+    SyntaxRef at, uint32_t template_index, uint32_t position,
     SyntaxElement written, const template_argument *before,
     template_argument &out)
 {
@@ -470,7 +470,7 @@ analysis_result semantic_analysis::template_argument_for(
  * an array decaying to the pointer) of exactly the type referred to, or
  * nullptr: the argument's value is the entity (0 for a null pointer).
  */
-analysis_result semantic_analysis::address_argument(node_index at,
+analysis_result semantic_analysis::address_argument(SyntaxRef at,
                                                     qualified_type to,
                                                     SyntaxElement written,
                                                     template_argument &out)
@@ -527,12 +527,12 @@ analysis_result semantic_analysis::address_argument(node_index at,
  * unsupported, not judged).
  */
 analysis_result semantic_analysis::template_template_argument(
-    node_index at, entity_index parameter, SyntaxElement written,
+    SyntaxRef at, entity_index parameter, SyntaxElement written,
     template_argument &out)
 {
     /* the written name: identifier, or nested-name-specifier identifier */
     SyntaxElement name = written;
-    node_index qualifier = 0;
+    SyntaxRef qualifier = 0;
     if (name.is(syntax_kind::type_id)) {
         if (name.size() != 1 || !name[0].is(syntax_kind::type_specifier_seq))
             return not_supported(at, "temp.arg.template");
@@ -603,7 +603,7 @@ analysis_result semantic_analysis::template_template_argument(
  * parameters before it.
  */
 analysis_result semantic_analysis::default_template_arguments(
-    node_index at, uint32_t template_index,
+    SyntaxRef at, uint32_t template_index,
     owned_array<template_argument> &arguments, const owned_array<bool> &set)
 {
     const function_template ft = function_templates[template_index - 1];
@@ -613,7 +613,7 @@ analysis_result semantic_analysis::default_template_arguments(
     for (uint32_t i = 0; i < ft.parameter_count; i++) {
         if (set[i])
             continue;
-        node_index node = template_parameter_nodes[ft.first_parameter + i];
+        SyntaxRef node = template_parameter_nodes[ft.first_parameter + i];
         template_parameter_parts form;
         if (!template_parameter_form(node, form) || !form.has_default)
             return not_supported(at, "temp.arg");

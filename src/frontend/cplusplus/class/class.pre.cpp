@@ -188,7 +188,7 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
     bool postpone = postpone_member_bodies;
     postpone_member_bodies = false;
     entity_index postponed_scope = current_scope;
-    node_index postponed_declaration = current_declaration;
+    SyntaxRef postponed_declaration = current_declaration;
     auto node = n;
     auto head = node.class_specifier().class_head();
     if (!head)
@@ -196,7 +196,7 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
     /* class-key attribute-specifier-seq_opt class-head-name ...: the
        alignment-specifiers left out of head_children, kept in alignas */
     owned_array<SyntaxElement> head_list;
-    owned_array<node_index> alignas_list;
+    owned_array<SyntaxRef> alignas_list;
     /* [ext:gnu_attributes] a class's visibility("hidden") (its members'
        symbols', c_lowering::gnu_attributes), abi_tag (its name's,
        [abi:mangle.abi-tag]) and exclude_from_explicit_instantiation */
@@ -246,7 +246,7 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
     bool unnamed = head_count == 1;
     /* class-head-name: nested-name-specifier_opt class-name */
     token_index head_name = 0;
-    node_index head_qualifier = 0;
+    SyntaxRef head_qualifier = 0;
     SyntaxElement name_syntax;
     if (!unnamed)
         name_syntax = head_children[1];
@@ -541,7 +541,7 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
         result = base_clause(c, head_children[2], key);
     entity_table[c].requested_alignment = trailing_class_alignment;
     trailing_class_alignment = 0;
-    for (node_index a : alignas_list) {
+    for (SyntaxRef a : alignas_list) {
         uint64_t alignment = 0;
         if (result == analysis_result::well_formed)
             result = alignment_specifier(syntax(a), alignment);
@@ -555,7 +555,7 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
         entity_table[c].size = 0;
         return result;
     }
-    owned_array<node_index> bodies;
+    owned_array<SyntaxRef> bodies;
     size_t nested_start = nested_bodies.size();
     auto spec = node.class_specifier().member_specification();
     for (auto member : spec.elements()) {
@@ -615,7 +615,7 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
     /* [class.mem]/6: "A complete-class context of a class is a function
        body ... within the member-specification of the class": the bodies
        are analysed with the class complete */
-    node_index outer_declaration = current_declaration;
+    SyntaxRef outer_declaration = current_declaration;
     /* [class.local]: a local class's member functions are analysed inside
        the enclosing function's body, whose state is kept aside meanwhile */
     function_context enclosing_function =
@@ -631,7 +631,7 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
         /* [class.mem]/6: a nested class's member function bodies are in
            the complete-class context of the enclosing class too: analysed
            at its closing } */
-        for (node_index body : bodies)
+        for (SyntaxRef body : bodies)
             nested_bodies.append(deferred_body{c, body});
     } else if (postpone) {
         /* [temp.inst]/4: a member function's definition is instantiated
@@ -639,7 +639,7 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
            (template<class D> struct base { ... static_cast<D *>(this) ...
            }; struct d : base<d>) is complete only after it: the bodies
            wait for the end of the translation unit (instantiate_pending) */
-        for (node_index body : bodies)
+        for (SyntaxRef body : bodies)
             postponed_bodies.append(postponed_body{c, body, postponed_scope,
                                                    postponed_declaration});
         for (size_t i = nested_start; i < nested_bodies.size(); i++)
@@ -649,7 +649,7 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
         nested_bodies.resize(nested_start);
     } else {
         size_t nested_end = nested_bodies.size();
-        for (node_index body : bodies) {
+        for (SyntaxRef body : bodies) {
             result = worse(result, member_function_body(c, syntax(body)));
             current_declaration = outer_declaration;
         }
@@ -1067,7 +1067,7 @@ bool semantic_analysis::accessible(entity_index member,
 analysis_result
 semantic_analysis::member_declaration(entity_index c, MemberDeclaration m,
                                       uint8_t access,
-                                      owned_array<node_index> &bodies)
+                                      owned_array<SyntaxRef> &bodies)
 {
     return m.visit(Overloaded{
         [&](GnuExtensionDeclaration x) {
@@ -1122,7 +1122,7 @@ semantic_analysis::member_declaration(entity_index c, MemberDeclaration m,
  */
 analysis_result semantic_analysis::member_declaration_with_specifiers(
     entity_index c, SyntaxRef node, uint8_t access,
-    owned_array<node_index> &bodies)
+    owned_array<SyntaxRef> &bodies)
 {
     auto n = node;
     /* [ext:gnu_attributes] before it all (libc++'s _LIBCPP_HIDE_FROM_ABI
@@ -1139,7 +1139,7 @@ analysis_result semantic_analysis::member_declaration_with_specifiers(
     if (node.is(syntax_kind::function_definition) &&
         is_namespace(entity_table[c].enclosing) && abbreviated_function(n))
         return member_function_template(c, n, n, access);
-    if (node_index id = conversion_function_id_of(n))
+    if (SyntaxRef id = conversion_function_id_of(n))
         return conversion_function_member(c, n, syntax(id), access, bodies);
 
     /* a constructor or destructor: no decl-specifier-seq, or one of
@@ -1185,7 +1185,7 @@ analysis_result semantic_analysis::member_declaration_with_specifiers(
         if (!node.size() || !declares_special_member(c, special(node[at]))) {
             /* a conversion function ([class.conv.fct]) has no rules yet:
                reported at its conversion-function-id */
-            owned_array<node_index> work;
+            owned_array<SyntaxRef> work;
             for (auto x : node.elements())
                 if (x.is_node() && !x.is(syntax_kind::function_body))
                     work.append(x.index());
@@ -1264,7 +1264,7 @@ analysis_result semantic_analysis::member_declaration_with_specifiers(
  */
 analysis_result semantic_analysis::member_declarators(
     entity_index c, SyntaxRef n, const specified &s, uint8_t access,
-    uint32_t first, owned_array<node_index> &bodies)
+    uint32_t first, owned_array<SyntaxRef> &bodies)
 {
     auto node = n;
     analysis_result r = analysis_result::well_formed;

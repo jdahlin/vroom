@@ -791,7 +791,7 @@ analysis_result semantic_analysis::simple_declaration(SyntaxRef n)
 /* [ext:gnu_attributes] the number of gnu-attribute-specifiers (or
    attribute-specifier-seqs of them alone) a declaration begins with: GCC
    applies them to the declaration, as the decl-specifier-seq's */
-uint32_t semantic_analysis::leading_gnu_attributes(node_index n) const
+uint32_t semantic_analysis::leading_gnu_attributes(SyntaxRef n) const
 {
     uint32_t k = 0;
     while (k < syntax(n).size() && !syntax(n)[k].is_token() &&
@@ -835,7 +835,7 @@ semantic_analysis::function_definition(FunctionDefinition definition)
 {
     if (!definition)
         return not_supported(current_declaration, "dcl.fct.def.general");
-    node_index n = definition;
+    SyntaxRef n = definition;
     auto node = syntax(n);
     uint32_t k = leading_gnu_attributes(n);
     if (k &&

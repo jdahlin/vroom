@@ -39,12 +39,12 @@ semantic_analysis::semantic_analysis(const syntax_tree &tree,
     unsupported.append(unsupported_construct());
 }
 
-analysis_result semantic_analysis::not_supported(node_index n, call_site where)
+analysis_result semantic_analysis::not_supported(SyntaxRef n, call_site where)
 {
     return not_supported(n, syntax_kind_subclause(syntax(n).kind()), where);
 }
 
-analysis_result semantic_analysis::not_supported(node_index n,
+analysis_result semantic_analysis::not_supported(SyntaxRef n,
                                                  const char *subclause,
                                                  call_site where)
 {
@@ -58,7 +58,7 @@ analysis_result semantic_analysis::not_supported(node_index n,
     return analysis_result::unsupported;
 }
 
-analysis_result semantic_analysis::ill_formed(node_index at, const char *rule,
+analysis_result semantic_analysis::ill_formed(SyntaxRef at, const char *rule,
                                               const char *subclause)
 {
     return ill_formed_at_token(syntax(at).first_token(), rule, subclause);
@@ -99,10 +99,10 @@ bool semantic_analysis::parsed_completely(SyntaxRef n) const
 {
     /* the nodes under n, without recursion: a tree is as deep as its
        source is nested */
-    owned_array<node_index> work;
+    owned_array<SyntaxRef> work;
     work.append(n);
     while (!work.empty()) {
-        node_index next = work.back();
+        SyntaxRef next = work.back();
         work.resize(work.size() - 1);
         auto s = syntax(next);
         if (s.is(syntax_kind::erroneous) || s.is(syntax_kind::unparsed))
@@ -117,7 +117,7 @@ bool semantic_analysis::parsed_completely(SyntaxRef n) const
 }
 
 /* whether the node is a namespace-definition ([namespace.def]) */
-static bool is_namespace_definition(const syntax_tree &tree, node_index n)
+static bool is_namespace_definition(const syntax_tree &tree, SyntaxRef n)
 {
     syntax_kind kind = tree[n].kind;
     return kind == syntax_kind::named_namespace_definition ||

@@ -290,7 +290,7 @@ bool is_string_literal(token_stream &tokens, syntax_child c)
  * elements."
  */
 analysis_result semantic_analysis::string_initialization(
-    node_index at, const expression_meaning &string, qualified_type &type)
+    SyntaxRef at, const expression_meaning &string, qualified_type &type)
 {
     const struct type array = type_table[type.unqualified()];
     fundamental_type element = fundamental_of(array.operand);
@@ -346,7 +346,7 @@ analysis_result semantic_analysis::string_initialization(
  * m is the prvalue before the conversion; unsupported where whether the
  * source is a constant expression decides and analysis cannot tell.
  */
-analysis_result semantic_analysis::narrowing(node_index at,
+analysis_result semantic_analysis::narrowing(SyntaxRef at,
                                              const expression_meaning &m,
                                              qualified_type to, bool &narrows)
 {
@@ -425,7 +425,7 @@ analysis_result semantic_analysis::narrowing(node_index at,
  * prvalue of type "pointer to cv2 T2" can be converted to the type "pointer
  * to cv1 T1" via a standard conversion sequence".
  */
-analysis_result semantic_analysis::reference_binding(node_index at,
+analysis_result semantic_analysis::reference_binding(SyntaxRef at,
                                                      expression_meaning &m,
                                                      qualified_type reference)
 {
@@ -559,7 +559,7 @@ analysis_result semantic_analysis::reference_binding(node_index at,
  * analysed, nor a temporary with a destructor.
  */
 analysis_result
-semantic_analysis::class_reference_binding(node_index at, expression_meaning &m,
+semantic_analysis::class_reference_binding(SyntaxRef at, expression_meaning &m,
                                            qualified_type reference)
 {
     const struct type r = type_table[reference.unqualified()];
@@ -616,7 +616,7 @@ semantic_analysis::class_reference_binding(node_index at, expression_meaning &m,
  * the clause is the element of a list-initialization, whose narrowing
  * conversions are ill-formed ([dcl.init.list]/3.9).
  */
-analysis_result semantic_analysis::initialize_from(node_index at,
+analysis_result semantic_analysis::initialize_from(SyntaxRef at,
                                                    SyntaxElement clause,
                                                    qualified_type &type,
                                                    bool direct, bool list,
@@ -665,7 +665,7 @@ analysis_result semantic_analysis::initialize_from(node_index at,
 
 /* the initialization of an object or reference of type type by the
    analysed expression m (the rest of initialize_from) */
-analysis_result semantic_analysis::initialize_with(node_index at,
+analysis_result semantic_analysis::initialize_with(SyntaxRef at,
                                                    expression_meaning &m,
                                                    qualified_type type,
                                                    bool direct, bool list,
@@ -1204,7 +1204,7 @@ analysis_result semantic_analysis::constructor_list_initialization(
                 type_kind::class_type ||
             type_table[to.unqualified()].kind == type_kind::class_type)
             continue;
-        node_index at = list;
+        SyntaxRef at = list;
         if (!clauses[i].is_token())
             at = clauses[i].index();
         expression_meaning value = before[i];
@@ -1264,7 +1264,7 @@ analysis_result semantic_analysis::aggregate_elements(
 {
     const struct type target = type_table[type.unqualified()];
     owned_array<qualified_type> types;
-    owned_array<node_index> defaults;
+    owned_array<SyntaxRef> defaults;
     uint64_t count = 0;
     bool unknown_bound = false;
     if (target.kind == type_kind::array) {
@@ -1373,7 +1373,7 @@ analysis_result semantic_analysis::aggregate_element(
     qualified_type element, initialized_value &one)
 {
     SyntaxElement clause = clauses[next];
-    node_index at = list;
+    SyntaxRef at = list;
     if (!clause.is_token())
         at = clause.index();
     /* a copy: analysing the clause adds types, which may move

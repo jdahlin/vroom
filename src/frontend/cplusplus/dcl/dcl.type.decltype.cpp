@@ -160,7 +160,8 @@ type_index semantic_analysis::dependent_written_type(SyntaxRef n)
 {
     auto x = n;
     for (entity_index e : dependent_written_types) {
-        auto y = syntax(static_cast<node_index>(entity_table[e].value));
+        auto y =
+            SyntaxRef(node_index(static_cast<uint32_t>(entity_table[e].value)));
         bool same =
             y.end_token() - y.first_token() == x.end_token() - x.first_token();
         for (token_index i = 0; same && i < x.end_token() - x.first_token();

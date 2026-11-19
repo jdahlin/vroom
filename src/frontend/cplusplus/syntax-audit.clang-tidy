@@ -7,10 +7,3 @@ CustomChecks:
       - BindName: root
         Message: "an element's index() is 0 for a token: to ask whether there is a child, test the element itself (if (x))"
         Level: Warning
-  - Name: vcc-syntax-view-stored-in-a-field
-    Query: |
-      match fieldDecl(unless(hasDeclContext(cxxRecordDecl(isInAnonymousNamespace()))), hasType(hasUnqualifiedDesugaredType(recordType(hasDeclaration(cxxRecordDecl(isSameOrDerivedFrom(hasName("SyntaxRef")))))))).bind("root")
-    Diagnostic:
-      - BindName: root
-        Message: "a view is 16 bytes and carries the context (a file-local helper struct in an anonymous namespace may hold them): store the 4-byte node or child (node_index, syntax_child) and make the view where it is read"
-        Level: Warning

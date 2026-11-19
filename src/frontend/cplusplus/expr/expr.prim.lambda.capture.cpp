@@ -71,7 +71,7 @@ entity_index semantic_analysis::capture_member_of(entity_index closure,
  * to a function, or the type of the corresponding captured entity
  * otherwise."  By reference (/12), a reference to the object.
  */
-analysis_result semantic_analysis::capture_type(node_index at, qualified_type t,
+analysis_result semantic_analysis::capture_type(SyntaxRef at, qualified_type t,
                                                 bool by_reference,
                                                 qualified_type &type)
 {

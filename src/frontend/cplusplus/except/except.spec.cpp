@@ -235,7 +235,7 @@ bool semantic_analysis::dependent_exception_specification(entity_index t) const
         if (f.entity != t || !f.declaration)
             continue;
         auto d = syntax(f.declaration);
-        for (node_index x : dependent_exception_specifications)
+        for (SyntaxRef x : dependent_exception_specifications)
             if (syntax(x).first_token() >= d.first_token() &&
                 syntax(x).end_token() <= d.end_token())
                 return true;

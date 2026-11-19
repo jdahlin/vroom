@@ -79,7 +79,7 @@ analysis_result semantic_analysis::member_template_declaration(
     if (node.size() != 2 || !node[0].is(syntax_kind::template_head) ||
         node[1].is_token())
         return not_supported(n, "temp.mem");
-    owned_array<node_index> parameters;
+    owned_array<SyntaxRef> parameters;
     if (!template_head_list(syntax(node[0].index()), parameters) ||
         parameters.empty())
         return not_supported(n, "temp.mem");
@@ -98,7 +98,7 @@ analysis_result semantic_analysis::member_template_declaration(
     /* [temp.class]/1: a member class template (template<...> struct X
        { ... };), a class template declared in the class's scope */
     if (d.is(syntax_kind::member_declaration)) {
-        node_index only = sole_decl_specifier(inner);
+        SyntaxRef only = sole_decl_specifier(inner);
         if (only && syntax(only).is(syntax_kind::class_specifier)) {
             entity_index saved = current_scope, saved_class = defining_class;
             current_scope = c;
@@ -208,7 +208,7 @@ semantic_analysis::default_member_initializer(token_index at, entity_index e,
 {
     qualified_type type = entity_table[e].type;
     const struct type &record = type_table[type.unqualified()];
-    node_index init = entity_table[e].default_initializer;
+    SyntaxRef init = entity_table[e].default_initializer;
     if (record.kind == type_kind::array ||
         record.kind == type_kind::lvalue_reference ||
         record.kind == type_kind::rvalue_reference ||
@@ -809,7 +809,7 @@ analysis_result semantic_analysis::expression_list_meanings(
  * class that declares none copies the object's bytes (copies_bytes).
  */
 analysis_result
-semantic_analysis::construct(node_index at, qualified_type type,
+semantic_analysis::construct(SyntaxRef at, qualified_type type,
                              owned_array<expression_meaning> &arguments,
                              uint32_t object, initialized_value &result,
                              bool copy)

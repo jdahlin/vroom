@@ -2,18 +2,15 @@
 """
 bench/cxx-syntax-audit.py: what the type system does not tell about the syntax views.
 
-A node (ast::node) and a token (token_index) are different types, and
-neither converts to an integer or to the other without saying so: the
-compiler finds a node used as a token.  Two things it cannot find, which
-clang-tidy's query-based custom checks report
-(src/frontend/cplusplus/syntax-audit.clang-tidy: clang-query matchers on
+A node (a view) and a token (token_index) are different types, and neither
+converts to an integer or to the other without saying so: the compiler finds
+a node used as a token.  One thing it cannot find, which clang-tidy's
+query-based custom check reports
+(src/frontend/cplusplus/syntax-audit.clang-tidy: a clang-query matcher on
 the real types):
 
   * an element's index() as a condition: it is 0 for a token, where the
-    question is whether there is a child (test the element: if (x));
-  * a view (16 bytes, the context included) stored in a field: records
-    hold the 4-byte node or child, and the view is made where it is read
-    (a file-local helper struct in an anonymous namespace may hold them).
+    question is whether there is a child (test the element: if (x)).
 
 The trap of -DVCC_CHECK_SYNTAX_VIEWS (SyntaxElement::index() of a token, a
 node converted to a view of another kind), run by cxx-run.py and

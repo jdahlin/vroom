@@ -105,7 +105,7 @@ analysis_result semantic_analysis::default_arguments(SyntaxRef n,
            are in scope and can hide namespace and class member names": not
            so here, so a default argument that may name one is not
            analysed */
-        node_index clause = node_of(syntax(p.default_argument));
+        SyntaxRef clause = node_of(syntax(p.default_argument));
         token_index first = syntax(clause).first_token();
         token_index end = syntax(clause).end_token();
         if (p.default_argument.is_token()) {

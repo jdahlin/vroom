@@ -1075,7 +1075,7 @@ analysis_result semantic_analysis::template_candidates(
     const expression_meaning *meanings, uint32_t count,
     owned_array<overload_candidate> &candidates,
     owned_array<uint32_t> *first_arguments, owned_array<template_argument> *all,
-    const owned_array<SyntaxElement> *written, node_index written_at,
+    const owned_array<SyntaxElement> *written, SyntaxRef written_at,
     const owned_array<template_argument> *specified)
 {
     for (uint32_t g : group) {
@@ -1159,7 +1159,7 @@ analysis_result semantic_analysis::template_call(
     owned_array<expression_meaning> &early, expression_meaning &f)
 {
     owned_array<SyntaxElement> written;
-    node_index written_at = overloaded_written_at;
+    SyntaxRef written_at = overloaded_written_at;
     for (SyntaxElement a : overloaded_written)
         written.append(a);
     overloaded_written.clear();
@@ -1375,7 +1375,7 @@ analysis_result semantic_analysis::call_with(
                     /* [over.over]/1: "a parameter of a function" */
                     r = target_expression(a, parameter, e);
                 /* an argument that is one token is reported at the call */
-                node_index at = n;
+                SyntaxRef at = n;
                 if (a.is_node())
                     at = a.index();
                 if (r == analysis_result::well_formed)

@@ -150,7 +150,7 @@ uint64_t floating_kept(double v)
  * through a pointer, a class value) is unsupported here, and is where the
  * evaluator of the semantic tree is to be asked.
  */
-analysis_result semantic_analysis::constant_expression(node_index at,
+analysis_result semantic_analysis::constant_expression(SyntaxRef at,
                                                        expression_meaning &m,
                                                        bool &constant)
 {
@@ -176,7 +176,7 @@ analysis_result semantic_analysis::constant_expression(node_index at,
  * caller has checked the type.
  */
 analysis_result semantic_analysis::integral_constant_expression(
-    node_index at, expression_meaning &m, bool &constant)
+    SyntaxRef at, expression_meaning &m, bool &constant)
 {
     analysis_result r = constant_expression(at, m, constant);
     if (r != analysis_result::well_formed || !constant)
@@ -203,7 +203,7 @@ analysis_result semantic_analysis::integral_constant_expression(
  * -Wc++11-narrowing, an error by default.
  */
 analysis_result semantic_analysis::converted_constant_expression(
-    node_index at, expression_meaning &m, fundamental_type to, bool &constant)
+    SyntaxRef at, expression_meaning &m, fundamental_type to, bool &constant)
 {
     constant = false;
     if (tokens.files.behavior.has(language_feature::list_initialization)) {
@@ -230,7 +230,7 @@ analysis_result semantic_analysis::converted_constant_expression(
  * converted expression is a constant expression and the conversion sequence
  * contains only the conversions above."
  */
-analysis_result semantic_analysis::bool_constant_expression(node_index at,
+analysis_result semantic_analysis::bool_constant_expression(SyntaxRef at,
                                                             SyntaxElement e,
                                                             bool &constant,
                                                             bool &value)

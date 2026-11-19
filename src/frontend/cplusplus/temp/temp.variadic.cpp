@@ -37,7 +37,7 @@ token_index semantic_analysis::template_parameter_id(SyntaxRef p) const
    id-expression)_opt; parameter-declaration: decl-specifier-seq,
    identifier or declarator_opt, (= initializer-clause)_opt */
 bool semantic_analysis::template_parameter_form(
-    node_index p, template_parameter_parts &out) const
+    SyntaxRef p, template_parameter_parts &out) const
 {
     out = template_parameter_parts();
     auto x = syntax(p);
@@ -106,7 +106,7 @@ bool semantic_analysis::template_parameter_form(
 }
 
 bool semantic_analysis::template_head_list(
-    SyntaxRef head, owned_array<node_index> &parameters) const
+    SyntaxRef head, owned_array<SyntaxRef> &parameters) const
 {
     for (SyntaxElement c : head.elements()) {
         if (c.is_token())

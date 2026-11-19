@@ -109,7 +109,7 @@ qualified_type semantic_analysis::reference_to(qualified_type type, bool rvalue)
  * ... the type of the identifier of D is derived-declarator-type-list
  * reference to T."
  */
-analysis_result semantic_analysis::reference(node_index at, bool rvalue,
+analysis_result semantic_analysis::reference(SyntaxRef at, bool rvalue,
                                              qualified_type &type,
                                              declarator_meaning &m)
 {
@@ -275,7 +275,7 @@ entity_index semantic_analysis::value_parameter_named(SyntaxElement e)
  * array of N T."  /2: without the constant-expression, "array of unknown
  * bound of T".
  */
-analysis_result semantic_analysis::array(node_index at, SyntaxElement bound,
+analysis_result semantic_analysis::array(SyntaxRef at, SyntaxElement bound,
                                          qualified_type &type)
 {
     /* [dcl.array]/4: "U is called the array element type; this type shall
@@ -458,7 +458,7 @@ void semantic_analysis::hold_names(SyntaxRef declaration)
         return;
     }
     /* the declarator-ids of a simple-declaration or function-definition */
-    auto declarator_ids = [&](node_index d) {
+    auto declarator_ids = [&](SyntaxRef d) {
         for (auto c : syntax(d).elements()) {
             if (c.init_declarators()) {
                 for (auto i : c.elements())
@@ -494,10 +494,10 @@ void semantic_analysis::hold_names(SyntaxRef declaration)
         /* the names they bring into the scope: each using-declarator's
            last identifier, the alias; not the namespaces and classes
            named on the way */
-        owned_array<node_index> work;
+        owned_array<SyntaxRef> work;
         work.append(declaration);
         while (!work.empty()) {
-            node_index x = work.back();
+            SyntaxRef x = work.back();
             work.resize(work.size() - 1);
             if (syntax(x).is(syntax_kind::nested_name_specifier) ||
                 syntax(x).is(syntax_kind::qualified_namespace_specifier))
@@ -534,7 +534,7 @@ void semantic_analysis::hold_names(SyntaxRef declaration)
         /* not a template-head's: its names are the template's parameters
            and what their types and defaults name ([temp.param]) */
         token_index start = node.first_token();
-        for (node_index x = declaration;
+        for (SyntaxRef x = declaration;
              syntax(x).is(syntax_kind::template_declaration) &&
              syntax(x).size() >= 2 &&
              syntax(x)[0].is(syntax_kind::template_head) &&
@@ -623,7 +623,7 @@ void semantic_analysis::hold_names(SyntaxRef declaration)
        parentheses (template<class T> void (f)(T);) */
     bool by_template = node.is(syntax_kind::template_declaration) ||
                        node.is(syntax_kind::explicit_specialization);
-    for (node_index inner = declaration;
+    for (SyntaxRef inner = declaration;
          syntax(inner).is(syntax_kind::template_declaration) ||
          syntax(inner).is(syntax_kind::explicit_specialization);) {
         auto t = syntax(inner);
@@ -755,7 +755,7 @@ analysis_result semantic_analysis::declarator_qualifier(SyntaxRef nested,
  * int a[2][3], D is D1[3] with D1 = a[2], and a is "array of 2 array of 3
  * int".
  */
-analysis_result semantic_analysis::declarator(node_index declaration,
+analysis_result semantic_analysis::declarator(SyntaxRef declaration,
                                               SyntaxElement d,
                                               qualified_type &type,
                                               declarator_meaning &m)
@@ -769,7 +769,7 @@ analysis_result semantic_analysis::declarator(node_index declaration,
         m.id = e.token();
         return analysis_result::well_formed;
     }
-    node_index n = e;
+    SyntaxRef n = e;
     switch (e.kind()) {
     case syntax_kind::ptr_declarator:
     case syntax_kind::ptr_abstract_declarator: {

@@ -523,7 +523,7 @@ analysis_result semantic_analysis::unary(SyntaxRef n, expression_meaning &m)
     /* [expr.unary.op]/4: "A pointer to member is only formed when an
        explicit & is used and its operand is a qualified-id not enclosed in
        parentheses." */
-    node_index outer_operand = member_pointer_operand;
+    SyntaxRef outer_operand = member_pointer_operand;
     member_pointer_operand = 0;
     if (o == preprocessing_op_or_punc::AMPERSAND &&
         node[1].is(syntax_kind::qualified_id))

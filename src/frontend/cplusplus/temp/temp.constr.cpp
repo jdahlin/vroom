@@ -32,7 +32,7 @@ analysis_result
 semantic_analysis::concept_definition(SyntaxRef n, ConceptDefinition definition)
 {
     entity_index outer = current_scope;
-    owned_array<node_index> parameters;
+    owned_array<SyntaxRef> parameters;
     analysis_result r = template_head_parameters(n, parameters, true);
     if (r != analysis_result::well_formed)
         return r;
@@ -149,7 +149,7 @@ analysis_result semantic_analysis::requires_expression(RequiresExpression n,
 }
 
 analysis_result semantic_analysis::concept_satisfied(
-    node_index at, uint32_t ct, const owned_array<template_argument> &arguments,
+    SyntaxRef at, uint32_t ct, const owned_array<template_argument> &arguments,
     bool &satisfied)
 {
     for (const satisfaction &s : satisfactions) {
@@ -203,7 +203,7 @@ analysis_result semantic_analysis::constraint_satisfied(SyntaxElement e,
 {
     satisfied = false;
     /* (a token is an atomic constraint: true) */
-    node_index at = current_declaration;
+    SyntaxRef at = current_declaration;
     if (!e.is_token()) {
         auto c = e;
         at = c;
@@ -279,7 +279,7 @@ bool semantic_analysis::same_constraints(SyntaxRef a, SyntaxRef b)
 {
     /* the type-constraints too, parameter by parameter ([temp.over.link]/6:
        equivalent template-heads) */
-    owned_array<node_index> pa, pb;
+    owned_array<SyntaxRef> pa, pb;
     if (a.size() && b.size() && a[0].is(syntax_kind::template_head) &&
         b[0].is(syntax_kind::template_head) &&
         template_head_list(syntax(a[0].index()), pa) &&
@@ -311,14 +311,14 @@ bool semantic_analysis::same_constraints(SyntaxRef a, SyntaxRef b)
 /* whether template-head n has a requires-clause or a type-constraint */
 bool semantic_analysis::template_head_constrained(SyntaxRef n)
 {
-    owned_array<node_index> parameters;
+    owned_array<SyntaxRef> parameters;
     if (head_constraint(n))
         return true;
     if (n.size() && n[0].is(syntax_kind::template_head) &&
         !template_head_list(syntax(n[0].index()), parameters))
         return false;
     abbreviated_parameters(n, parameters);
-    for (node_index p : parameters) {
+    for (SyntaxRef p : parameters) {
         template_parameter_parts x;
         if (template_parameter_form(p, x) && x.constraint)
             return true;
@@ -399,7 +399,7 @@ uint32_t semantic_analysis::function_parameter_position(entity_index t,
     uint32_t name = tokens.identifier(i);
     if (!ft || !name)
         return 0;
-    node_index d = function_templates[ft - 1].declarator;
+    SyntaxRef d = function_templates[ft - 1].declarator;
     owned_array<SyntaxElement> work;
     work.append(syntax(d)[leading_gnu_attributes(d) + 1]);
     uint32_t position = 0;
@@ -466,7 +466,7 @@ analysis_result semantic_analysis::template_constraints_satisfied(
        designating a concept C, of a type-parameter T: C<T>; Q's own
        template-argument-list, C<T, A...>, is not analysed */
     for (uint32_t i = 0; i < ft.parameter_count && satisfied; i++) {
-        node_index p = template_parameter_nodes[ft.first_parameter + i];
+        SyntaxRef p = template_parameter_nodes[ft.first_parameter + i];
         template_parameter_parts x;
         if (!template_parameter_form(p, x) || !x.constraint)
             continue;

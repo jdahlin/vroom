@@ -356,7 +356,7 @@ analysis_result semantic_analysis::arithmetic(SyntaxRef n,
  *     composite pointer type is ill-formed."
  * Analysis writes the cv-combined type of one level of pointers.
  */
-analysis_result semantic_analysis::composite_pointer_type(node_index at,
+analysis_result semantic_analysis::composite_pointer_type(SyntaxRef at,
                                                           expression_meaning &a,
                                                           expression_meaning &b)
 {

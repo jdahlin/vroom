@@ -49,7 +49,7 @@ analysis_result semantic_analysis::closure_class(entity_index c, SyntaxRef n,
         static_cast<owned_array<entity_index> &&>(block_variables);
     block_variables = owned_array<entity_index>();
     entity_index enclosing_scope = current_scope;
-    node_index declaration = current_declaration;
+    SyntaxRef declaration = current_declaration;
     /* (a generic lambda's conversion function template is not
        declared) */
     entity_index call = entity_table[c].call_operator;

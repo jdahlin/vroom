@@ -201,7 +201,7 @@ void semantic_analysis::evaluate_analysed_expressions()
     }
 }
 
-analysis_result semantic_analysis::evaluate_constant(node_index at,
+analysis_result semantic_analysis::evaluate_constant(SyntaxRef at,
                                                      uint32_t node,
                                                      constant_value &v,
                                                      bool &constant)

@@ -118,7 +118,7 @@ static const char *cast_rule_of(uint8_t kinds, const char *&label)
     }
 }
 
-analysis_result semantic_analysis::no_cast(node_index at, uint8_t kinds)
+analysis_result semantic_analysis::no_cast(SyntaxRef at, uint8_t kinds)
 {
     const char *label = nullptr;
     const char *rule = cast_rule_of(kinds, label);
@@ -129,7 +129,7 @@ analysis_result semantic_analysis::no_cast(node_index at, uint8_t kinds)
     return ill_formed(at, rule, label);
 }
 
-analysis_result semantic_analysis::explicit_conversion(node_index at,
+analysis_result semantic_analysis::explicit_conversion(SyntaxRef at,
                                                        qualified_type to,
                                                        expression_meaning &m,
                                                        uint8_t kinds)
@@ -380,7 +380,7 @@ analysis_result semantic_analysis::explicit_conversion(node_index at,
  * the null member pointer value of the destination type."  The const_casts
  * and reinterpret_casts of pointers to members are not analysed.
  */
-analysis_result semantic_analysis::member_pointer_cast(node_index at,
+analysis_result semantic_analysis::member_pointer_cast(SyntaxRef at,
                                                        qualified_type to,
                                                        expression_meaning &m,
                                                        uint8_t kinds)
@@ -472,7 +472,7 @@ analysis_result semantic_analysis::member_pointer_cast(node_index at,
  * conversion from type cv void* to a pointer-to-object type", "a
  * reinterpret_cast").
  */
-analysis_result semantic_analysis::pointer_conversion(node_index at,
+analysis_result semantic_analysis::pointer_conversion(SyntaxRef at,
                                                       qualified_type to,
                                                       expression_meaning &m,
                                                       uint8_t kinds)
@@ -571,7 +571,7 @@ analysis_result semantic_analysis::pointer_conversion(node_index at,
  * the base class is inaccessible": the cast notation's here only on one
  * path of non-virtual bases.  handled is false for the other pointers.
  */
-analysis_result semantic_analysis::class_pointer_cast(node_index at,
+analysis_result semantic_analysis::class_pointer_cast(SyntaxRef at,
                                                       qualified_type to,
                                                       expression_meaning &m,
                                                       uint8_t kinds,
@@ -664,7 +664,7 @@ analysis_result semantic_analysis::class_pointer_cast(node_index at,
  * of a class, a prvalue operand otherwise, an xvalue of another type and
  * a function are not analysed.
  */
-analysis_result semantic_analysis::reference_cast(node_index at,
+analysis_result semantic_analysis::reference_cast(SyntaxRef at,
                                                   qualified_type to,
                                                   expression_meaning &m,
                                                   uint8_t kinds)

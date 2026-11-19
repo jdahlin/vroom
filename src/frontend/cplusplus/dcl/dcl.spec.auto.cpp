@@ -103,7 +103,7 @@ qualified_type semantic_analysis::function_returning(qualified_type f,
 /* a type deduced as an array, a function or void: what the declaration
    then means (an object of that type, a function returning it) is not
    analysed */
-analysis_result semantic_analysis::deduced_type_supported(node_index at,
+analysis_result semantic_analysis::deduced_type_supported(SyntaxRef at,
                                                           qualified_type t)
 {
     const struct type record = type_table[t.unqualified()];
@@ -217,7 +217,7 @@ analysis_result semantic_analysis::placeholder_declaration(
  * [dcl.type.simple], as though E had been the operand of the decltype."
  */
 analysis_result semantic_analysis::deduce_placeholder(
-    node_index at, qualified_type declared, const expression_meaning &e,
+    SyntaxRef at, qualified_type declared, const expression_meaning &e,
     bool named, qualified_type &deduced, qualified_type &replacement)
 {
     bool decltype_auto = false;
@@ -267,7 +267,7 @@ analysis_result semantic_analysis::deduce_placeholder(
  * satisfied."  ([temp.param]/4: of C, C<U>.)
  */
 analysis_result semantic_analysis::placeholder_constraint(
-    node_index at, entity_index named_concept, qualified_type u)
+    SyntaxRef at, entity_index named_concept, qualified_type u)
 {
     if (!named_concept)
         return analysis_result::well_formed;
@@ -414,7 +414,7 @@ analysis_result semantic_analysis::deduced_initialization(
  * in a function, however, the return type deduced from that statement can
  * be used in the rest of the function".
  */
-analysis_result semantic_analysis::deduce_return(node_index at,
+analysis_result semantic_analysis::deduce_return(SyntaxRef at,
                                                  const expression_meaning *e,
                                                  bool named)
 {

@@ -39,7 +39,7 @@ analysis_result semantic_analysis::linkage_specification(LinkageSpecification n)
            conditionally-supported, with implementation-defined
            semantics." */
         return not_supported(n, "dcl.link");
-    owned_array<node_index> inner;
+    owned_array<SyntaxRef> inner;
     bool braces = false;
     for (auto x : node.elements(2)) {
         if (x.is_token()) {
@@ -60,7 +60,7 @@ analysis_result semantic_analysis::linkage_specification(LinkageSpecification n)
     c_language = c;
     linkage_without_braces = !braces;
     analysis_result result = analysis_result::well_formed;
-    for (node_index d : inner) {
+    for (SyntaxRef d : inner) {
         current_declaration = d;
         if (!parsed_completely(syntax(d))) {
             result = worse(result, analysis_result::not_parsed);

@@ -31,7 +31,7 @@ namespace cplusplus
 analysis_result semantic_analysis::member_function_template(
     entity_index c, SyntaxRef n, SyntaxRef definition, uint8_t access)
 {
-    owned_array<node_index> parameters;
+    owned_array<SyntaxRef> parameters;
     /* (the template-head's rules are a namespace-scope template's) */
     entity_index saved_class = defining_class;
     defining_class = 0;

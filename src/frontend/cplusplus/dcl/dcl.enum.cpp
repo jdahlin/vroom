@@ -44,7 +44,7 @@ void enum_key(parser &p, bool *scoped)
  * An identifier alone passes through.  *name is the identifier when there
  * is no nested-name-specifier.  Nothing when there is no identifier.
  */
-node_index enum_head_name(parser &p, uint32_t *name, bool *qualified)
+SyntaxRef enum_head_name(parser &p, uint32_t *name, bool *qualified)
 {
     size_t mark = p.begin_node();
     token_index first = p.position;
@@ -52,7 +52,7 @@ node_index enum_head_name(parser &p, uint32_t *name, bool *qualified)
     *qualified = false;
     scope_index scope = 0;
     bool known = false;
-    node_index qualifier = 0;
+    SyntaxRef qualifier = 0;
     if (p.nested_name_specifier_follows(0)) {
         qualifier = p.nested_name_specifier(&scope, &known);
         if (p.failed())
@@ -83,7 +83,7 @@ node_index enum_head_name(parser &p, uint32_t *name, bool *qualified)
  *     enum-base:
  *         : type-specifier-seq
  */
-node_index enum_base(parser &p)
+SyntaxRef enum_base(parser &p)
 {
     size_t mark = p.begin_node();
     token_index first = p.position;
@@ -468,7 +468,7 @@ analysis_result semantic_analysis::enum_specifier_rules(SyntaxRef n,
     bool scoped = false;
     uint32_t name = 0;
     token_index name_at = node.first_token();
-    node_index base = 0;
+    SyntaxRef base = 0;
     for (SyntaxElement c : head) {
         if (syntax(c).is(syntax_kind::enum_key)) {
             scoped = true;

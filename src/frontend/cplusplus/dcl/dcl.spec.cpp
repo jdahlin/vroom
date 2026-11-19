@@ -1022,7 +1022,7 @@ bool semantic_analysis::class_specifier_before(SyntaxRef seq, uint32_t i) const
  * "First, the decl-specifier-seq determines a type") and the specifiers
  * that apply to the names it declares.
  */
-analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
+analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
                                                       specified &s,
                                                       bool parameter)
 {
@@ -1653,9 +1653,8 @@ analysis_result semantic_analysis::named_member_type(SyntaxRef n, token_index t,
  * "non-type names are ignored").  [dcl.typedef]/1: a typedef-name "is thus
  * a synonym for another type": one that names a class is the class.
  */
-analysis_result semantic_analysis::named_class(SyntaxElement name,
-                                               node_index at, entity_index &c,
-                                               token_index &id)
+analysis_result semantic_analysis::named_class(SyntaxElement name, SyntaxRef at,
+                                               entity_index &c, token_index &id)
 {
     c = 0;
     lookup_result found;

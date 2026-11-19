@@ -343,14 +343,14 @@ analysis_result semantic_analysis::function(SyntaxRef parameters,
     auto node = parameters;
     /* the parameter-declarations and the ellipsis, from the clause and its
        list: ( clause ) is the first and last child */
-    owned_array<node_index> declarations;
+    owned_array<SyntaxRef> declarations;
     bool variadic = false, closed = false;
     owned_array<SyntaxElement> work;
     uint32_t cv = cv_none;
     bool may_qualify = in_member_declarator;
     /* [except.spec]/1: the noexcept-specifier */
     bool specified_exceptions = false, non_throwing = false;
-    node_index exceptions = 0;
+    SyntaxRef exceptions = 0;
     for (uint32_t i = node.size(); i-- > 0;) {
         auto c = node[i];
         if (c.is(RIGHT_PARENTHESIS)) {
@@ -582,7 +582,7 @@ bool semantic_analysis::generic_placeholder(SyntaxRef seq) const
 }
 
 bool semantic_analysis::abbreviated_parameters(
-    SyntaxRef declaration, owned_array<node_index> &parameters) const
+    SyntaxRef declaration, owned_array<SyntaxRef> &parameters) const
 {
     auto d = declaration;
     if (d.template_declaration()) {

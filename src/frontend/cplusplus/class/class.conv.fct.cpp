@@ -100,7 +100,7 @@ analysis_result semantic_analysis::conversion_type(SyntaxRef id,
     if (node.size() != 2 || node[1].is_token())
         return not_supported(id, "class.conv.fct");
     auto t = node[1];
-    node_index seq = t;
+    SyntaxRef seq = t;
     if (t.is(syntax_kind::conversion_type_id))
         seq = t[0].index();
     specified s;
@@ -115,12 +115,12 @@ analysis_result semantic_analysis::conversion_type(SyntaxRef id,
         return analysis_result::well_formed;
     /* the ptr-operators, in source order (a conversion-declarator nests
        the rest after its first) */
-    owned_array<node_index> work;
+    owned_array<SyntaxRef> work;
     for (uint32_t i = t.size(); i-- > 1;)
         if (!t[i].is_token())
             work.append(t[i].index());
     while (!work.empty()) {
-        node_index k = work.back();
+        SyntaxRef k = work.back();
         work.resize(work.size() - 1);
         if (syntax(k).is(syntax_kind::conversion_declarator)) {
             for (uint32_t i = syntax(k).size(); i-- > 0;)
@@ -155,7 +155,7 @@ analysis_result semantic_analysis::conversion_type(SyntaxRef id,
 analysis_result
 semantic_analysis::conversion_function_member(entity_index c, SyntaxRef n,
                                               SyntaxRef id, uint8_t access,
-                                              owned_array<node_index> &bodies)
+                                              owned_array<SyntaxRef> &bodies)
 {
     auto children_syntax = n;
     specified s;
@@ -210,16 +210,16 @@ semantic_analysis::conversion_function_member(entity_index c, SyntaxRef n,
 
 /* [class.conv.fct]/1: the declarator-id is found in the declarator, not
    in the decl-specifier-seq, the parameters or the body */
-node_index semantic_analysis::conversion_function_id_of(SyntaxRef n) const
+SyntaxRef semantic_analysis::conversion_function_id_of(SyntaxRef n) const
 {
-    owned_array<node_index> work;
+    owned_array<SyntaxRef> work;
     for (SyntaxElement x : n.elements()) {
         if (!x.is_token() && !x.is(syntax_kind::decl_specifier_seq) &&
             !x.is(syntax_kind::function_body))
             work.append(x.index());
     }
     while (!work.empty()) {
-        node_index k = work.back();
+        SyntaxRef k = work.back();
         work.resize(work.size() - 1);
         syntax_kind kind = syntax(k).kind();
         if (kind == syntax_kind::conversion_function_id)
@@ -390,9 +390,10 @@ semantic_analysis::conversion_function_for(const expression_meaning &m,
  * into the object being initialized."  converted is false when the class
  * has none that does; m is then unchanged.
  */
-analysis_result semantic_analysis::conversion_function_call(
-    node_index at, expression_meaning &m, qualified_type to, bool direct,
-    bool &converted)
+analysis_result
+semantic_analysis::conversion_function_call(SyntaxRef at, expression_meaning &m,
+                                            qualified_type to, bool direct,
+                                            bool &converted)
 {
     converted = false;
     bool ambiguous = false, unknown = false;

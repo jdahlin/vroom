@@ -19,9 +19,9 @@ semantic_analysis::explicit_specialization(ExplicitSpecialization n)
        a simple-template-id */
     auto x = n;
     if (x.size() == 4 && x[3].is(syntax_kind::simple_declaration)) {
-        node_index only = sole_decl_specifier(syntax(x[3].index()));
+        SyntaxRef only = sole_decl_specifier(syntax(x[3].index()));
         if (only && syntax(only).is(syntax_kind::class_specifier)) {
-            owned_array<node_index> none;
+            owned_array<SyntaxRef> none;
             return class_specialization_definition(n, syntax(only), none);
         }
         /* template<> class-key simple-template-id ; declared only */
@@ -37,7 +37,7 @@ semantic_analysis::explicit_specialization(ExplicitSpecialization n)
                 p.keyword_of(tokens[syntax(only)[0].token()]);
             if (key == standard_keyword::struct_ ||
                 key == standard_keyword::class_) {
-                owned_array<node_index> none;
+                owned_array<SyntaxRef> none;
                 return class_specialization_definition(n, syntax(only), none);
             }
         }
@@ -46,7 +46,7 @@ semantic_analysis::explicit_specialization(ExplicitSpecialization n)
     if (x.size() != 4 || x[3].is_token())
         return not_supported(n, "temp.expl.spec");
     auto inner = x[3];
-    if (node_index id = variable_specialization_id(inner))
+    if (SyntaxRef id = variable_specialization_id(inner))
         return variable_specialization(n, inner, syntax(id));
     if (!inner.is(syntax_kind::function_definition) &&
         !inner.is(syntax_kind::simple_declaration))
@@ -189,7 +189,7 @@ semantic_analysis::record_instantiation(const function_template &ft,
 /* the simple-template-id a simple-declaration of one declarator with an
    initializer declares (the declarator-id of a variable template's
    explicit specialization), or 0 */
-node_index semantic_analysis::variable_specialization_id(SyntaxRef d) const
+SyntaxRef semantic_analysis::variable_specialization_id(SyntaxRef d) const
 {
     auto node = d;
     if (!node.is(syntax_kind::simple_declaration) || node.size() != 3 ||

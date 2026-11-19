@@ -35,7 +35,7 @@ namespace cplusplus
  * are looked up again (lookup_horizon).
  */
 analysis_result
-semantic_analysis::instantiate(node_index at, entity_index template_entity,
+semantic_analysis::instantiate(SyntaxRef at, entity_index template_entity,
                                const template_argument *arguments,
                                uint32_t count, entity_index &specialization)
 {
@@ -193,7 +193,7 @@ semantic_analysis::instantiate(node_index at, entity_index template_entity,
  * reports them there, with a note at the use), or unsupported if analysis
  * has no rules for something in it.
  */
-analysis_result semantic_analysis::instantiate_definition(node_index at,
+analysis_result semantic_analysis::instantiate_definition(SyntaxRef at,
                                                           uint32_t index)
 {
     /* [temp.inst]/17: "There is an implementation-defined quantity that
@@ -280,7 +280,7 @@ analysis_result semantic_analysis::instantiate_definition(node_index at,
  * member's definition only when used).
  */
 analysis_result
-semantic_analysis::instantiate_class(node_index at, uint32_t class_template,
+semantic_analysis::instantiate_class(SyntaxRef at, uint32_t class_template,
                                      const template_argument *arguments,
                                      uint32_t count, entity_index &c)
 {
@@ -312,7 +312,7 @@ semantic_analysis::instantiate_class(node_index at, uint32_t class_template,
             for (const template_argument &a : deduced)
                 template_arguments.append(a);
         }
-        node_index defined_by = ft.definition;
+        SyntaxRef defined_by = ft.definition;
         if (pattern)
             defined_by = function_templates[pattern - 1].definition;
         if (defined_by && !declaring_specializations)
@@ -357,7 +357,7 @@ semantic_analysis::instantiate_class(node_index at, uint32_t class_template,
         template_arguments.append(a);
     uint32_t index = static_cast<uint32_t>(instantiations.size());
     instantiations.append(record);
-    node_index defined_by = ft.definition;
+    SyntaxRef defined_by = ft.definition;
     if (pattern)
         defined_by = function_templates[pattern - 1].definition;
     if (!defined_by || declaring_specializations) {
@@ -387,7 +387,7 @@ semantic_analysis::instantiate_class(node_index at, uint32_t class_template,
    context of the function type, its template parameter types, and its
    explicit-specifier can result in a deduction failure": a class
    instantiated while a candidate's declaration is is not in it */
-analysis_result semantic_analysis::define_class_outside(node_index at,
+analysis_result semantic_analysis::define_class_outside(SyntaxRef at,
                                                         uint32_t index,
                                                         entity_index &c)
 {
@@ -406,7 +406,7 @@ analysis_result semantic_analysis::define_class_outside(node_index at,
  * functions defined outside the class template ([temp.mem.func]/1) with
  * the class's arguments.
  */
-analysis_result semantic_analysis::define_class_instantiation(node_index at,
+analysis_result semantic_analysis::define_class_instantiation(SyntaxRef at,
                                                               uint32_t index,
                                                               entity_index &c)
 {

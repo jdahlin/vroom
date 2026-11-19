@@ -110,10 +110,49 @@ class SyntaxRef
         if (!c.is_token())
             n = node_index(c.index());
     }
+    /* a node of the thread's tree (or none: 0) */
+    SyntaxRef(node_index n) : n(n)
+    {
+    }
+    SyntaxRef(decltype(nullptr))
+    {
+    }
     SyntaxRef(const SyntaxContext &, node_index n) : n(n)
     {
     }
 
+    friend bool operator==(const SyntaxRef &a, const SyntaxRef &b)
+    {
+        return a.n == b.n;
+    }
+    friend bool operator!=(const SyntaxRef &a, const SyntaxRef &b)
+    {
+        return a.n != b.n;
+    }
+    friend bool operator==(const SyntaxRef &a, node_index b)
+    {
+        return a.n == b;
+    }
+    friend bool operator==(node_index a, const SyntaxRef &b)
+    {
+        return a == b.n;
+    }
+    friend bool operator!=(const SyntaxRef &a, node_index b)
+    {
+        return a.n != b;
+    }
+    friend bool operator!=(node_index a, const SyntaxRef &b)
+    {
+        return a != b.n;
+    }
+    friend bool operator<(const SyntaxRef &a, const SyntaxRef &b)
+    {
+        return a.n < b.n;
+    }
+    friend bool operator>(const SyntaxRef &a, const SyntaxRef &b)
+    {
+        return a.n > b.n;
+    }
     /* false for an empty view, or a token */
     explicit operator bool() const
     {

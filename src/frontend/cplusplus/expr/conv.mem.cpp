@@ -33,7 +33,7 @@ bool semantic_analysis::is_member_function_pointer(qualified_type t) const
  * [conv.qual]/3 (member_pointer_qualification).
  */
 analysis_result semantic_analysis::member_pointer_conversion(
-    node_index at, expression_meaning &m, qualified_type to, bool &handled)
+    SyntaxRef at, expression_meaning &m, qualified_type to, bool &handled)
 {
     handled = false;
     to = qualified_type::make(to.unqualified(), cv_none);

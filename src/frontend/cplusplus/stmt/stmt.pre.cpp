@@ -36,11 +36,11 @@ namespace
 /* attribute-specifier-seq_opt and the alternative parse() parses: a
    statement node when there are attributes */
 template <class Alternative>
-node_index with_attributes(parser &p, Alternative parse)
+SyntaxRef with_attributes(parser &p, Alternative parse)
 {
     size_t mark = p.begin_node();
     token_index first = p.position;
-    node_index attributes = p.attribute_specifier_seq();
+    SyntaxRef attributes = p.attribute_specifier_seq();
     if (p.failed())
         return 0;
     /* [ext.gnu] clang takes GCC's attributes before a declaration, a label,
@@ -54,7 +54,7 @@ node_index with_attributes(parser &p, Alternative parse)
         return p.violates("GCC's attributes only before a declaration, a "
                           "label, or an expression or null statement",
                           "ext.gnu", first);
-    node_index n = parse();
+    SyntaxRef n = parse();
     if (p.failed())
         return 0;
     if (!attributes)
@@ -629,7 +629,7 @@ uint32_t semantic_analysis::declaration_statements(size_t first, token_index at)
 
 /* the node of a syntax child, or the declaration's for a token (where a
    diagnostic about it is issued) */
-node_index semantic_analysis::node_of(SyntaxElement c) const
+SyntaxRef semantic_analysis::node_of(SyntaxElement c) const
 {
     if (c.is_token())
         return current_declaration;
@@ -655,7 +655,7 @@ node_index semantic_analysis::node_of(SyntaxElement c) const
 analysis_result semantic_analysis::condition(SyntaxElement c, bool for_switch,
                                              expression_meaning &m)
 {
-    node_index at = node_of(c);
+    SyntaxRef at = node_of(c);
     analysis_result r = analysis_result::well_formed;
     uint32_t declaration = 0;
     if (syntax(c).is(syntax_kind::condition)) {
@@ -724,7 +724,7 @@ analysis_result semantic_analysis::condition(SyntaxElement c, bool for_switch,
 }
 
 /* [stmt.switch]/2: the value of a switch's condition, m */
-analysis_result semantic_analysis::switch_condition(node_index at,
+analysis_result semantic_analysis::switch_condition(SyntaxRef at,
                                                     expression_meaning &m)
 {
     analysis_result r = operand_value(at, m);

@@ -722,7 +722,7 @@ analysis_result semantic_analysis::generic_lambda(SyntaxRef n, SyntaxRef list,
             list_items.append(list[i]);
     else
         list_items.append(element(list));
-    owned_array<node_index> parameters;
+    owned_array<SyntaxRef> parameters;
     for (SyntaxElement p : list_items) {
         if (p.is_token())
             continue;
@@ -817,7 +817,7 @@ SyntaxElement semantic_analysis::lambda_constraint(SyntaxRef n,
 analysis_result semantic_analysis::lambda_specialization(
     SyntaxRef n, bool body, qualified_type &type, entity_index specialization)
 {
-    node_index declarator = 0;
+    SyntaxRef declarator = 0;
     for (uint32_t i = 1; i + 1 < n.size(); i++)
         if (n[i].is(syntax_kind::lambda_declarator))
             declarator = n[i].index();

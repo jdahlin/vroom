@@ -1901,8 +1901,8 @@ bool itanium_mangler::type(qualified_type t)
                <decltype> ::= DT <expression> E
 
            the decltype-specifier's operand */
-        node_index n =
-            static_cast<node_index>(analysis.entity_table[r.entity].value);
+        SyntaxRef n = SyntaxRef(node_index(
+            static_cast<uint32_t>(analysis.entity_table[r.entity].value)));
         auto operand = analysis.syntax(n);
         text("DT");
         done = operand.size() == 4 && encoding_template &&

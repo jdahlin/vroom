@@ -188,7 +188,7 @@ analysis_result semantic_analysis::friend_class(entity_index c, SyntaxRef n,
  */
 analysis_result
 semantic_analysis::friend_function(entity_index c, SyntaxRef n,
-                                   owned_array<node_index> &bodies)
+                                   owned_array<SyntaxRef> &bodies)
 {
     /* [ext:gnu_attributes] before it all: GCC's, which a friend's
        definition has no rules for beyond its form (visibility as the
@@ -464,7 +464,7 @@ analysis_result semantic_analysis::defaulted_equality(
 /* a member-declaration whose decl-specifier-seq has friend */
 analysis_result
 semantic_analysis::friend_declaration(entity_index c, SyntaxRef n,
-                                      owned_array<node_index> &bodies)
+                                      owned_array<SyntaxRef> &bodies)
 {
     /* [class.friend]/11: a friend declaration in a local class */
     for (entity_index k = c; !is_namespace(k); k = entity_table[k].enclosing)
@@ -480,9 +480,9 @@ semantic_analysis::friend_declaration(entity_index c, SyntaxRef n,
 
 /* a friend member-declaration that is not a function-definition */
 analysis_result semantic_analysis::friend_member_declaration(
-    entity_index c, MemberSimpleDeclaration d, owned_array<node_index> &bodies)
+    entity_index c, MemberSimpleDeclaration d, owned_array<SyntaxRef> &bodies)
 {
-    node_index n = d;
+    SyntaxRef n = d;
     auto node = syntax(n);
     uint32_t leading = leading_gnu_attributes(n);
     auto children_syntax = syntax(n);

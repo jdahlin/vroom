@@ -527,7 +527,7 @@ analysis_result semantic_analysis::range_based_for(SyntaxRef n,
 analysis_result semantic_analysis::for_range_declaration(
     SyntaxElement d, const expression_meaning &element, uint32_t &built)
 {
-    node_index at = node_of(d);
+    SyntaxRef at = node_of(d);
     auto node = syntax(at);
     /* the second form: a structured binding ([dcl.struct.bind]) */
     bool binding = node.size() > 2 &&

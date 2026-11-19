@@ -371,7 +371,7 @@ node_index parser::clang_availability_arguments()
  * x86-64, as clang's).  An attribute analysis has no rule for is
  * unsupported with ext.gnu.
  */
-analysis_result semantic_analysis::gnu_attribute_specifier(node_index n,
+analysis_result semantic_analysis::gnu_attribute_specifier(SyntaxRef n,
                                                            gnu_attributes &g)
 {
     /* (standard attributes without effect, or [[noreturn]]:
@@ -383,10 +383,10 @@ analysis_result semantic_analysis::gnu_attribute_specifier(node_index n,
         return analysis_result::well_formed;
     }
     owned_array<SyntaxElement> attributes;
-    owned_array<node_index> work;
+    owned_array<SyntaxRef> work;
     work.append(n);
     while (!work.empty()) {
-        node_index next = work.back();
+        SyntaxRef next = work.back();
         work.resize(work.size() - 1);
         for (uint32_t i = 0; i < syntax(next).size(); i++) {
             SyntaxElement c = syntax(next)[i];
@@ -421,7 +421,7 @@ analysis_result semantic_analysis::gnu_attribute_specifier(node_index n,
         tokens.spelling(name_token, spelling.get());
         const gnu_attribute_rule *rule = gnu_attribute_rule_of(
             reinterpret_cast<const char *>(spelling.data()), spelling.size());
-        node_index at = n;
+        SyntaxRef at = n;
         if (!a.is_token())
             at = a.index();
         if (a.is_token() && ((spelling.size() == 13 &&
@@ -557,7 +557,7 @@ analysis_result semantic_analysis::gnu_attribute_specifier(node_index n,
 
 /* ... of a declarator, and among (or before) a decl-specifier-seq */
 analysis_result
-semantic_analysis::gnu_attribute_specifier(node_index n, declarator_meaning &m)
+semantic_analysis::gnu_attribute_specifier(SyntaxRef n, declarator_meaning &m)
 {
     gnu_attributes g;
     g.aligned = m.aligned;
@@ -572,7 +572,7 @@ semantic_analysis::gnu_attribute_specifier(node_index n, declarator_meaning &m)
     return r;
 }
 
-analysis_result semantic_analysis::gnu_attribute_specifier(node_index n,
+analysis_result semantic_analysis::gnu_attribute_specifier(SyntaxRef n,
                                                            specified &s)
 {
     gnu_attributes g;

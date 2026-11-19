@@ -461,7 +461,7 @@ analysis_result semantic_analysis::namespace_definition(SyntaxRef n)
  * The namespace the name denotes ([namespace.alias]/2: a namespace-alias
  * is "a synonym for the name of the namespace" it was defined to).
  */
-analysis_result semantic_analysis::named_namespace(node_index at,
+analysis_result semantic_analysis::named_namespace(SyntaxRef at,
                                                    SyntaxRef qualifier,
                                                    token_index name,
                                                    entity_index &n)
@@ -519,7 +519,7 @@ analysis_result semantic_analysis::using_directive(UsingDirective n)
     };
     if (defining_class)
         return unknown(not_supported(n, "namespace.udir"));
-    node_index qualifier = 0;
+    SyntaxRef qualifier = 0;
     token_index name = 0;
     for (auto c : node.elements()) {
         if (c.is(syntax_kind::nested_name_specifier)) {
@@ -568,7 +568,7 @@ semantic_analysis::namespace_alias_definition(NamespaceAliasDefinition n)
     if (defining_class || node.size() < 4 || !node[1].is_identifier())
         return not_supported(n, "namespace.alias");
     token_index alias = node[1].token();
-    node_index qualifier = 0;
+    SyntaxRef qualifier = 0;
     token_index name = 0;
     SyntaxElement named = node[3];
     if (named.is(syntax_kind::qualified_namespace_specifier)) {
