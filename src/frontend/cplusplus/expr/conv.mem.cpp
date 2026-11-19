@@ -96,8 +96,8 @@ analysis_result semantic_analysis::member_pointer_conversion(
                           "program that necessitates this conversion is "
                           "ill-formed",
                           "conv.mem");
-    analysis_result r = member_pointer_along_path(syntax(at).first_token(), d,
-                                                  b, via, false, true, m);
+    analysis_result r =
+        member_pointer_along_path(at.first_token(), d, b, via, false, true, m);
     if (r == analysis_result::well_formed)
         member_pointer_qualification(m, to);
     return r;

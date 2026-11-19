@@ -195,7 +195,7 @@ analysis_result semantic_analysis::closure_conversion(entity_index c,
     uint32_t items[2] = {declared, statement};
     uint32_t block = statement_node(semantic_kind::block, at);
     semantics.set_list(block, items, 2);
-    finish_synthesized(sf, syntax(current_declaration), at, block);
+    finish_synthesized(sf, current_declaration, at, block);
 
     /* the conversion function: __invoke's address */
     begin_synthesized(
@@ -216,7 +216,7 @@ analysis_result semantic_analysis::closure_conversion(entity_index c,
     statement = statement_node(semantic_kind::return_statement, at, value.node);
     block = statement_node(semantic_kind::block, at);
     semantics.set_list(block, &statement, 1);
-    finish_synthesized(sf, syntax(current_declaration), at, block);
+    finish_synthesized(sf, current_declaration, at, block);
     return analysis_result::well_formed;
 }
 

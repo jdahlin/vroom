@@ -321,8 +321,8 @@ semantic_analysis::lookup_unqualified(uint32_t name, lookup_filter filter) const
     if (lookup_horizon && r.entity && is_namespace(r.found_in))
         for (entity_index o = r.entity; o; o = entity_table[o].next_overload) {
             uint32_t d = entity_table[o].first_declaration;
-            if (d && syntax(entity_table.declaration(d).node).first_token() >
-                         lookup_horizon)
+            if (d &&
+                entity_table.declaration(d).node.first_token() > lookup_horizon)
                 r.unknown = true;
             if (entity_table[o].kind != entity_kind::function)
                 break;
@@ -743,8 +743,8 @@ analysis_result semantic_analysis::nested_name_specifier(NestedNameSpecifier n,
                specialization's head) */
             uint32_t declaring = declaring_specializations;
             declaring_specializations = 0;
-            analysis_result r = template_type(syntax(node[i].index()),
-                                              scope.entity, qualified, named);
+            analysis_result r =
+                template_type(node[i], scope.entity, qualified, named);
             declaring_specializations = declaring;
             if (r != analysis_result::well_formed)
                 return r;

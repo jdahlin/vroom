@@ -658,8 +658,8 @@ analysis_result semantic_analysis::condition(SyntaxElement c, bool for_switch,
     SyntaxRef at = node_of(c);
     analysis_result r = analysis_result::well_formed;
     uint32_t declaration = 0;
-    if (syntax(c).is(syntax_kind::condition)) {
-        auto node = syntax(at);
+    if (c.is(syntax_kind::condition)) {
+        auto node = at;
         if (node.size() != 3 || !node[0].is(syntax_kind::decl_specifier_seq))
             return not_supported(at, "dcl.attr");
         specified s;
@@ -683,14 +683,13 @@ analysis_result semantic_analysis::condition(SyntaxElement c, bool for_switch,
             bool claimable = declarations_claimable;
             declarations_claimable = false;
             in_condition = true;
-            r = declare_with_initializer(syntax(at), node[1], node[2], true, s,
-                                         false);
+            r = declare_with_initializer(at, node[1], node[2], true, s, false);
             in_condition = false;
             declarations_claimable = claimable;
         }
         if (r != analysis_result::well_formed) {
             block_variables.resize(first);
-            hold_names(syntax(at));
+            hold_names(at);
             return r;
         }
         declaration = declaration_statements(first, first_token(c));

@@ -171,7 +171,7 @@ analysis_result semantic_analysis::base_class_name(SyntaxElement name,
 {
     if (name.is(syntax_kind::simple_template_id)) {
         type_index t = 0;
-        analysis_result r = template_type(syntax(name.index()), 0, false, t);
+        analysis_result r = template_type(name, 0, false, t);
         if (r != analysis_result::well_formed)
             return r;
         id = name.first_token();

@@ -141,7 +141,7 @@ class itanium_mangler
     bool dependent_expression(SyntaxElement c);
     bool punctuator(SyntaxElement c, preprocessing_op_or_punc op) const
     {
-        return analysis.syntax(c).is(op);
+        return c.is(op);
     }
     bool class_template_args(entity_index c);
     bool template_args(entity_index c, entity_index function = 0);
@@ -351,8 +351,7 @@ bool itanium_mangler::specialization_encoding(entity_index e)
        is the closure type's, closure_type_name) */
     bool trailing = false;
     if (table[scope].lambda)
-        constraint = analysis.lambda_constraint(
-            analysis.syntax(table[scope].lambda), &trailing);
+        constraint = analysis.lambda_constraint(table[scope].lambda, &trailing);
     else if ((constraint = analysis.template_trailing_constraint(pattern_of)))
         trailing = true;
     if (constraint && trailing) {
@@ -387,7 +386,7 @@ bool itanium_mangler::constraint_expression(entity_index t, SyntaxElement c)
         text("E");
         return true;
     }
-    auto node = analysis.syntax(c);
+    auto node = c;
     switch (node.kind()) {
     case syntax_kind::constraint_logical_or_expression:
     case syntax_kind::constraint_logical_and_expression:
@@ -523,7 +522,7 @@ bool itanium_mangler::dependent_expression(SyntaxElement c)
         text("_");
         return true;
     }
-    auto node = analysis.syntax(c);
+    auto node = c;
     if (node.kind() != syntax_kind::postfix_expression || node.size() < 3)
         return false;
     bool arrow = punctuator(node[1], preprocessing_op_or_punc::ARROW);
@@ -1676,8 +1675,8 @@ bool itanium_mangler::closure_type_name(entity_index c)
         /* [impl.clang] the template-head's requires-clause: Q and its
            expression */
         bool trailing = false;
-        SyntaxElement constraint = analysis.lambda_constraint(
-            analysis.syntax(table[c].lambda), &trailing);
+        SyntaxElement constraint =
+            analysis.lambda_constraint(table[c].lambda, &trailing);
         if (constraint && !trailing) {
             text("Q");
             if (!constraint_expression(call, constraint))
@@ -1903,7 +1902,7 @@ bool itanium_mangler::type(qualified_type t)
            the decltype-specifier's operand */
         SyntaxRef n = SyntaxRef(node_index(
             static_cast<uint32_t>(analysis.entity_table[r.entity].value)));
-        auto operand = analysis.syntax(n);
+        auto operand = n;
         text("DT");
         done = operand.size() == 4 && encoding_template &&
                dependent_expression(operand[2]);

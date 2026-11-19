@@ -470,18 +470,18 @@ analysis_result semantic_analysis::enum_specifier_rules(SyntaxRef n,
     token_index name_at = node.first_token();
     SyntaxRef base = 0;
     for (SyntaxElement c : head) {
-        if (syntax(c).is(syntax_kind::enum_key)) {
+        if (c.is(syntax_kind::enum_key)) {
             scoped = true;
             continue;
         }
-        if (syntax(c).is(syntax_kind::enum_base)) {
+        if (c.is(syntax_kind::enum_base)) {
             base = c.index();
             continue;
         }
         if (c.is_token() &&
             p.keyword_of(tokens[c.token()]) == standard_keyword::enum_)
             continue;
-        if (opaque && syntax(c).is(preprocessing_op_or_punc::SEMICOLON))
+        if (opaque && c.is(preprocessing_op_or_punc::SEMICOLON))
             continue;
         if (c.is_token() && tokens[c.token()].kind == token_kind::identifier) {
             name = tokens.identifier(c.token());
@@ -497,17 +497,17 @@ analysis_result semantic_analysis::enum_specifier_rules(SyntaxRef n,
     owned_array<SyntaxElement> enumerators;
     for (i++; i < node.size(); i++) {
         SyntaxElement c = node[i];
-        if (syntax(c).is(syntax_kind::enumerator_list)) {
-            auto list = syntax(c);
+        if (c.is(syntax_kind::enumerator_list)) {
+            auto list = c;
             for (uint32_t k = 0; k < list.size(); k++) {
-                SyntaxElement item = syntax(c)[k];
-                if (!syntax(item).is(preprocessing_op_or_punc::COMMA))
+                SyntaxElement item = c[k];
+                if (!item.is(preprocessing_op_or_punc::COMMA))
                     enumerators.append(item);
             }
             continue;
         }
-        if (syntax(c).is(preprocessing_op_or_punc::COMMA) ||
-            syntax(c).is(preprocessing_op_or_punc::RIGHT_BRACE))
+        if (c.is(preprocessing_op_or_punc::COMMA) ||
+            c.is(preprocessing_op_or_punc::RIGHT_BRACE))
             continue;
         enumerators.append(c);
     }
@@ -519,13 +519,11 @@ analysis_result semantic_analysis::enum_specifier_rules(SyntaxRef n,
     if (scoped)
         fixed = fundamental_type::int_;
     if (base) {
-        auto bn = syntax(base);
-        if (bn.size() != 2 ||
-            !syntax(base)[1].is(syntax_kind::type_specifier_seq))
+        auto bn = base;
+        if (bn.size() != 2 || !base[1].is(syntax_kind::type_specifier_seq))
             return not_supported(n, "dcl.enum");
         specified s;
-        analysis_result r =
-            decl_specifier_seq(syntax(base)[1].index(), s, true);
+        analysis_result r = decl_specifier_seq(base[1].index(), s, true);
         if (r != analysis_result::well_formed)
             return r;
         /* [dcl.enum]/2: "The type-specifier-seq of an enum-base shall name
@@ -666,20 +664,20 @@ analysis_result semantic_analysis::enum_specifier_rules(SyntaxRef n,
         SyntaxElement id = c;
         SyntaxElement init;
         bool has_init = false;
-        if (syntax(c).is(syntax_kind::enumerator_definition)) {
-            auto d = syntax(c);
+        if (c.is(syntax_kind::enumerator_definition)) {
+            auto d = c;
             if (d.size() != 3)
                 return not_supported(n, "dcl.enum");
-            id = syntax(c)[0];
-            init = syntax(c)[2];
+            id = c[0];
+            init = c[2];
             has_init = true;
         }
         /* [dcl.enum]/2: "The optional attribute-specifier-seq in an
            enumerator appertains to that enumerator": one without effect
            (Apple's availability) is passed over */
-        if (syntax(id).is(syntax_kind::enumerator)) {
-            auto attrs = syntax(id);
-            for (uint32_t i = 1; i < syntax(id).size(); i++)
+        if (id.is(syntax_kind::enumerator)) {
+            auto attrs = id;
+            for (uint32_t i = 1; i < id.size(); i++)
                 if (!class_head_attributes_without_effect(attrs[i]))
                     return not_supported(n, "dcl.enum");
             id = attrs[0];

@@ -19,26 +19,24 @@ semantic_analysis::explicit_specialization(ExplicitSpecialization n)
        a simple-template-id */
     auto x = n;
     if (x.size() == 4 && x[3].is(syntax_kind::simple_declaration)) {
-        SyntaxRef only = sole_decl_specifier(syntax(x[3].index()));
-        if (only && syntax(only).is(syntax_kind::class_specifier)) {
+        SyntaxRef only = sole_decl_specifier(x[3]);
+        if (only && only.is(syntax_kind::class_specifier)) {
             owned_array<SyntaxRef> none;
-            return class_specialization_definition(n, syntax(only), none);
+            return class_specialization_definition(n, only, none);
         }
         /* template<> class-key simple-template-id ; declared only */
         auto d = x[3];
         auto dc = d;
-        if (only && syntax(only).is(syntax_kind::elaborated_type_specifier) &&
-            d.size() == 2 && syntax(only).size() == 2 &&
-            syntax(only)[0].is_token() &&
-            syntax(only)[1].is(syntax_kind::simple_template_id) &&
+        if (only && only.is(syntax_kind::elaborated_type_specifier) &&
+            d.size() == 2 && only.size() == 2 && only[0].is_token() &&
+            only[1].is(syntax_kind::simple_template_id) &&
             dc[1].is(preprocessing_op_or_punc::SEMICOLON) &&
             !leading_gnu_attributes(d)) {
-            standard_keyword key =
-                p.keyword_of(tokens[syntax(only)[0].token()]);
+            standard_keyword key = p.keyword_of(tokens[only[0].token()]);
             if (key == standard_keyword::struct_ ||
                 key == standard_keyword::class_) {
                 owned_array<SyntaxRef> none;
-                return class_specialization_definition(n, syntax(only), none);
+                return class_specialization_definition(n, only, none);
             }
         }
     }
@@ -47,7 +45,7 @@ semantic_analysis::explicit_specialization(ExplicitSpecialization n)
         return not_supported(n, "temp.expl.spec");
     auto inner = x[3];
     if (SyntaxRef id = variable_specialization_id(inner))
-        return variable_specialization(n, inner, syntax(id));
+        return variable_specialization(n, inner, id);
     if (!inner.is(syntax_kind::function_definition) &&
         !inner.is(syntax_kind::simple_declaration))
         return not_supported(n, "temp.expl.spec");
@@ -122,7 +120,7 @@ semantic_analysis::explicit_instantiation(ExplicitInstantiation n)
             (p.keyword_of(tokens[ec[0].token()]) != standard_keyword::struct_ &&
              p.keyword_of(tokens[ec[0].token()]) != standard_keyword::class_))
             return not_supported(n, "temp.explicit");
-        return class_explicit_instantiation(n, syntax(ec[1].index()), extern_);
+        return class_explicit_instantiation(n, ec[1], extern_);
     }
     if (d.size() != 3 || !dc[0].is(syntax_kind::decl_specifier_seq) ||
         dc[1].is_token() || !dc[2].is(preprocessing_op_or_punc::SEMICOLON))
@@ -340,9 +338,9 @@ semantic_analysis::named_specialization(SyntaxRef n, SyntaxRef declaration,
     uint32_t ft = 0;
     owned_array<template_argument> values;
     bool qualified = false;
-    SyntaxElement callee = token_element(m.id);
+    SyntaxElement callee = SyntaxElement::from_token(m.id);
     if (m.template_id)
-        callee = element(m.template_id);
+        callee = m.template_id;
     else
         ft = function_template_of(
             lookup_unqualified(tokens.identifier(m.id), lookup_filter::any)

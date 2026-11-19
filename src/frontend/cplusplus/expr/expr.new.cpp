@@ -220,7 +220,7 @@ analysis_result semantic_analysis::new_type_id(NewTypeId n,
             !declarator[0].is(syntax_kind::ptr_operator))
             return not_supported(d.index(), "expr.new");
         declarator_meaning ignored;
-        r = pointer_operator(syntax(declarator[0].index()), type, ignored);
+        r = pointer_operator(declarator[0], type, ignored);
         if (r != analysis_result::well_formed || declarator.size() == 1)
             return r;
         d = declarator[1];
@@ -542,7 +542,7 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
                                   "dcl.init");
         }
     } else if (init.is(syntax_kind::braced_init_list)) {
-        r = list_initialization(syntax(init.index()), type, true, value);
+        r = list_initialization(init, type, true, value);
     } else if (init.is(syntax_kind::new_initializer)) {
         auto k = init;
         if (k.size() == 2) {

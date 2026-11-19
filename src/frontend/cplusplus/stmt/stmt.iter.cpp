@@ -528,7 +528,7 @@ analysis_result semantic_analysis::for_range_declaration(
     SyntaxElement d, const expression_meaning &element, uint32_t &built)
 {
     SyntaxRef at = node_of(d);
-    auto node = syntax(at);
+    auto node = at;
     /* the second form: a structured binding ([dcl.struct.bind]) */
     bool binding = node.size() > 2 &&
                    (node[1].is(preprocessing_op_or_punc::LEFT_BRACKET) ||
@@ -536,7 +536,7 @@ analysis_result semantic_analysis::for_range_declaration(
                     node[1].is(preprocessing_op_or_punc::AMPERSAND_AMPERSAND));
     if ((node.size() != 2 && !binding) ||
         !node[0].is(syntax_kind::decl_specifier_seq) ||
-        syntax(at).first_token() != first_token(node[0]))
+        at.first_token() != first_token(node[0]))
         /* an attribute-specifier-seq */
         return not_supported(at, "stmt.ranged");
     specified s;
@@ -561,8 +561,8 @@ analysis_result semantic_analysis::for_range_declaration(
            enumeration." */
         auto seq = node[0];
         for (SyntaxElement c : seq.elements()) {
-            if (syntax(c).is(syntax_kind::class_specifier) ||
-                syntax(c).is(syntax_kind::enum_specifier))
+            if (c.is(syntax_kind::class_specifier) ||
+                c.is(syntax_kind::enum_specifier))
                 return ill_formed(at,
                                   "the decl-specifier-seq shall not define a "
                                   "class or enumeration",
@@ -573,14 +573,14 @@ analysis_result semantic_analysis::for_range_declaration(
     bool claimable = declarations_claimable;
     declarations_claimable = false;
     if (binding)
-        r = structured_binding_declaration(syntax(at), 1, s, &element);
+        r = structured_binding_declaration(at, 1, s, &element);
     else
-        r = declare_with_initializer(syntax(at), node[1], SyntaxElement(), true,
-                                     s, false, &element);
+        r = declare_with_initializer(at, node[1], SyntaxElement(), true, s,
+                                     false, &element);
     declarations_claimable = claimable;
     if (r != analysis_result::well_formed) {
         block_variables.resize(first);
-        hold_names(syntax(at));
+        hold_names(at);
         return r;
     }
     built = declaration_statements(first, first_token(d));

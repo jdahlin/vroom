@@ -403,7 +403,7 @@ analysis_result semantic_analysis::analyse_function_body(
         result = worse(result, defaulted_equality(first_token(compound),
                                                   parameter_entities, block));
     else
-        result = worse(result, block_items(syntax(compound.index()), block));
+        result = worse(result, block_items(compound, block));
     result = finish_return_deduction(definition, result, returns);
     uint32_t destructions = 0;
     if (entity_table[f].special == special_member::destructor)

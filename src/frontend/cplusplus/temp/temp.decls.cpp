@@ -66,12 +66,12 @@ semantic_analysis::template_simple_declaration(TemplateDeclaration t,
        for an unbounded set of related types." (a declaration with no
        declarator: a class's) */
     SyntaxRef only = sole_decl_specifier(s);
-    if (only && syntax(only).is(syntax_kind::class_specifier))
-        return class_template_definition(t, syntax(only));
+    if (only && only.is(syntax_kind::class_specifier))
+        return class_template_definition(t, only);
     /* [temp.class]/1's declaration without a definition (template<class T>
        struct S;) */
-    if (only && syntax(only).is(syntax_kind::elaborated_type_specifier))
-        return class_template_declaration(t, syntax(only));
+    if (only && only.is(syntax_kind::elaborated_type_specifier))
+        return class_template_declaration(t, only);
     /* [temp.pre]/1: a variable template, its one init-declarator with an
        initializer, after attributes without effect (libc++'s deprecated
        is_pod_v) */
@@ -85,7 +85,7 @@ semantic_analysis::template_simple_declaration(TemplateDeclaration t,
         if (lead && item.is(item[0], syntax_kind::simple_template_id))
             return not_supported(t, "temp.pre");
         if (SyntaxRef id = variable_specialization_id(s))
-            return variable_partial_specialization(t, s, syntax(id));
+            return variable_partial_specialization(t, s, id);
         return variable_template_definition(t, s);
     }
     /* [temp.fct]/1: a function template's declaration (template<class T>
@@ -115,8 +115,7 @@ analysis_result semantic_analysis::deduction_guide(DeductionGuide n)
     }
     /* [temp.deduct.guide]/3: "The template-name shall be the same
        identifier as the template-name of the simple-template-id." */
-    if (!id ||
-        tokens.identifier(syntax(id).first_token()) != tokens.identifier(name))
+    if (!id || tokens.identifier(id.first_token()) != tokens.identifier(name))
         return ill_formed_at_token(name,
                                    "the template-name shall be the same "
                                    "identifier as the template-name of the "
@@ -245,7 +244,7 @@ analysis_result semantic_analysis::template_head_parameters(
            parameters type-parameters or integral parameter-declarations,
            without defaults; a pack its last */
         owned_array<SyntaxRef> inner;
-        if (!template_head_list(syntax(x.head), inner) || inner.empty())
+        if (!template_head_list(x.head, inner) || inner.empty())
             return not_supported(p, "temp.arg.template");
         for (size_t k = 0; k < inner.size(); k++) {
             template_parameter_parts y;
@@ -290,7 +289,7 @@ analysis_result semantic_analysis::function_template_declarator(
     placeholder_allowed = true;
     analysis_result r = analysis_result::well_formed;
     if (constructor && specifiers)
-        r = constructor_specifiers(syntax(d[lead].index()), s);
+        r = constructor_specifiers(d[lead], s);
     else if (specifiers)
         r = decl_specifier_seq(d[lead].index(), s, false);
     for (uint32_t i = 0; i < lead && r == analysis_result::well_formed; i++)
@@ -485,7 +484,7 @@ semantic_analysis::function_template_definition(SyntaxRef n,
         if (f.parameter_count != parameters.size() ||
             !same_template_parameters(first, f.first_parameter,
                                       f.parameter_count) ||
-            !same_constraints(syntax(f.declaration), n))
+            !same_constraints(f.declaration, n))
             continue;
         owned_array<template_argument> values;
         owned_array<bool> set;
@@ -687,8 +686,8 @@ analysis_result semantic_analysis::declare_template_parameters(
         uint32_t name = 0;
         if (form.named)
             name = tokens.identifier(id);
-        else if (syntax(node).is(syntax_kind::decl_specifier_seq))
-            name = invented_parameter_name(syntax(node));
+        else if (node.is(syntax_kind::decl_specifier_seq))
+            name = invented_parameter_name(node);
         /* [temp.local]/6: "The name of a template-parameter shall not be
            redeclared within its scope (including nested scopes)." */
         if (name && (entity_table.find(scope, name) || name == reserved))
@@ -712,12 +711,11 @@ analysis_result semantic_analysis::declare_template_parameters(
             entity_index saved = current_scope;
             current_scope = scope;
             specified sp;
-            analysis_result r =
-                decl_specifier_seq(syntax(node)[0].index(), sp, false);
+            analysis_result r = decl_specifier_seq(node[0].index(), sp, false);
             qualified_type type = sp.type;
             if (r == analysis_result::well_formed && form.has_declarator) {
                 declarator_meaning dm;
-                r = declarator(node, syntax(form.declarator), type, dm);
+                r = declarator(node, form.declarator, type, dm);
                 if (r == analysis_result::well_formed &&
                     (dm.qualifier || dm.qualified_namespace || dm.pack ||
                      dm.gnu_flags || dm.aligned || dm.template_id ||
@@ -764,7 +762,7 @@ analysis_result semantic_analysis::declare_template_parameters(
         template_parameter_parts form;
         template_parameter_form(parameters[i], form);
         owned_array<SyntaxRef> inner;
-        template_head_list(syntax(form.head), inner);
+        template_head_list(form.head, inner);
         uint32_t own = static_cast<uint32_t>(function_templates.size());
         entity_index inner_scope =
             entity_table.make(entity_kind::block_scope, 0, scope);
@@ -894,8 +892,7 @@ analysis_result semantic_analysis::alias_template_definition(SyntaxRef n,
            two headers), as clang accepts it; [temp.alias] has no rule for
            one that differs */
         uint32_t same = alias_template_of(prior);
-        if (!same ||
-            !same_tokens(syntax(function_templates[same - 1].declaration), n))
+        if (!same || !same_tokens(function_templates[same - 1].declaration, n))
             return not_supported(n, "temp.alias");
         entity_table.add_declaration(function_templates[same - 1].entity, n);
         return analysis_result::well_formed;
@@ -983,8 +980,8 @@ analysis_result semantic_analysis::variable_partial_specialization(
     if (r != analysis_result::well_formed)
         return r;
     bool dependent = dependent_arguments(arguments);
-    bool identity = primary_arguments(n, syntax(primary.declaration), arguments,
-                                      first, parameters.size());
+    bool identity = primary_arguments(n, primary.declaration, arguments, first,
+                                      parameters.size());
     /* [temp.class.spec]/9: more specialized than the primary */
     if (!dependent || identity)
         return not_supported(n, "temp.class.spec");
@@ -1025,7 +1022,7 @@ void semantic_analysis::equivalent_partial_specializations(uint32_t added)
             continue;
         /* [temp.over.link]/7: the template-heads' constraints equivalent
            too */
-        if (!same_constraints(syntax(a.declaration), syntax(o.declaration)))
+        if (!same_constraints(a.declaration, o.declaration))
             continue;
         bool unknown = false;
         bool forward = class_at_least_as_specialized(added, k + 1, unknown);
@@ -1215,7 +1212,7 @@ semantic_analysis::instantiate_variable(SyntaxRef at, uint32_t vt,
     }
     entity_index scope = instantiations[index].scope;
     instantiation_context context;
-    enter_instantiation(context, scope, syntax(definition.declaration));
+    enter_instantiation(context, scope, definition.declaration);
     template_member_scope = scope;
     expanding = false;
     instantiating = 0;
@@ -1223,7 +1220,7 @@ semantic_analysis::instantiate_variable(SyntaxRef at, uint32_t vt,
     instantiations[index].defining = true;
     /* (a partial specialization's declarator-id: its template-id) */
     declarator_template_id = pattern != 0;
-    analysis_result r = simple_declaration(syntax(definition.declarator));
+    analysis_result r = simple_declaration(definition.declarator);
     declarator_template_id = false;
     instantiations[index].defining = false;
     leave_instantiation(context);
@@ -1363,10 +1360,10 @@ analysis_result semantic_analysis::alias_template_specialization(
     token_index saved_horizon = lookup_horizon;
     bool saved_expanding = expanding;
     current_scope = scope;
-    lookup_horizon = syntax(ft.declaration).first_token();
+    lookup_horizon = ft.declaration.first_token();
     expanding = false;
     qualified_type t;
-    r = alias_type(syntax(ft.definition), t);
+    r = alias_type(ft.definition, t);
     current_scope = saved_scope;
     lookup_horizon = saved_horizon;
     expanding = saved_expanding;
@@ -1645,7 +1642,7 @@ semantic_analysis::class_template_definition(SyntaxRef n, SyntaxRef specifier)
             d.parameter_count != parameters.size() ||
             !same_template_parameters(first, d.first_parameter,
                                       d.parameter_count) ||
-            !same_constraints(syntax(d.declaration), n))
+            !same_constraints(d.declaration, n))
             return not_supported(n, "temp.class");
         /* [temp.param]/12: "A template-parameter shall not be given
            default arguments by two different declarations in the same
@@ -1753,7 +1750,7 @@ analysis_result semantic_analysis::class_specialization_definition(
        (a plain identifier) is not one */
     auto written = spec[1];
     if (defines)
-        written = class_head_name(syntax(spec[0].index()));
+        written = class_head_name(spec[0]);
     if (!written.is_node())
         return not_supported(n, rule);
     auto id = written;
@@ -1801,8 +1798,8 @@ analysis_result semantic_analysis::class_specialization_definition(
     if (r != analysis_result::well_formed)
         return r;
     bool dependent = dependent_arguments(arguments);
-    bool identity = primary_arguments(n, syntax(primary.declaration), arguments,
-                                      first, parameters.size());
+    bool identity = primary_arguments(n, primary.declaration, arguments, first,
+                                      parameters.size());
     /* [temp.expl.spec]: no dependent argument; [temp.class.spec]/9: "The
        specialization shall be more specialized than the primary template"
        (primary_arguments) */
@@ -1882,10 +1879,10 @@ analysis_result semantic_analysis::substitute_specialization(
     const function_template s = function_templates[specialization - 1];
     SyntaxRef id = 0;
     if (s.is_variable) {
-        id = variable_specialization_id(syntax(s.declarator));
+        id = variable_specialization_id(s.declarator);
     } else {
-        SyntaxRef head = syntax(s.definition)[0].index();
-        id = class_head_name(syntax(head)).index();
+        SyntaxRef head = s.definition[0].index();
+        id = class_head_name(head).index();
     }
     entity_index scope = entity_table.make(entity_kind::block_scope, 0,
                                            entity_table[s.entity].enclosing);
@@ -1896,12 +1893,11 @@ analysis_result semantic_analysis::substitute_specialization(
     substitution_mark mark = mark_substitution();
     owned_array<template_argument> again;
     token_index saved_horizon = lookup_horizon;
-    lookup_horizon = syntax(s.declaration).first_token();
+    lookup_horizon = s.declaration.first_token();
     substituting++;
     partial_arguments++;
     declaring_specializations++;
-    analysis_result r =
-        template_id_arguments_in(syntax(id), s.primary, scope, again);
+    analysis_result r = template_id_arguments_in(id, s.primary, scope, again);
     partial_arguments--;
     declaring_specializations--;
     substituting--;
@@ -2159,7 +2155,7 @@ analysis_result semantic_analysis::template_type(SyntaxRef id,
        names a constrained non-function template ... the constraints of
        that template shall be satisfied" ([temp.constr.decl]/3: its
        requires-clause) */
-    if (head_constraint(syntax(function_templates[ct - 1].declaration))) {
+    if (head_constraint(function_templates[ct - 1].declaration)) {
         bool satisfied = true;
         analysis_result s =
             template_constraints_satisfied(ct, arguments, satisfied);
@@ -2210,7 +2206,7 @@ analysis_result semantic_analysis::template_id_arguments(
             continue;
         }
         if (parts[i].is(syntax_kind::template_argument_list)) {
-            if (!expansion_list(syntax(parts[i].index()), written, expansion))
+            if (!expansion_list(parts[i], written, expansion))
                 return not_supported(id, "temp.variadic");
         } else {
             written.append(parts[i]);
@@ -2221,8 +2217,7 @@ analysis_result semantic_analysis::template_id_arguments(
        it */
     for (size_t w = 0; w < written.size(); w++)
         if (written[w].is(syntax_kind::type_id) && written[w].size() == 2 &&
-            syntax(written[w].index())[1].is(
-                preprocessing_op_or_punc::ELLIPSIS)) {
+            written[w][1].is(preprocessing_op_or_punc::ELLIPSIS)) {
             if (expansion[w])
                 return not_supported(id, "temp.variadic");
             expansion[w] = true;
@@ -2239,7 +2234,7 @@ analysis_result semantic_analysis::template_id_arguments(
                 token_index end = first + 1;
                 if (!a.is_token())
                     end = a.end_token();
-                if (end > first + 1 && token_element(end - 1).is(
+                if (end > first + 1 && SyntaxElement::from_token(end - 1).is(
                                            preprocessing_op_or_punc::ELLIPSIS))
                     end--;
                 /* a partial specialization's own pack, In... (its
@@ -2273,8 +2268,8 @@ analysis_result semantic_analysis::template_id_arguments(
                         return not_supported(id, "temp.variadic");
                     template_argument v;
                     v.kind = template_argument::kind_t::pack;
-                    v.type = qualified_type::make(
-                        dependent_written_type(syntax(a.index())), cv_none);
+                    v.type = qualified_type::make(dependent_written_type(a),
+                                                  cv_none);
                     v.template_entity = type_table[v.type.unqualified()].entity;
                     v.value = UINT32_MAX;
                     v.count = UINT32_MAX;
@@ -2430,7 +2425,7 @@ semantic_analysis::class_template_declaration(SyntaxRef n, SyntaxRef elaborated)
             d.parameter_count != parameters.size() ||
             !same_template_parameters(first, d.first_parameter,
                                       d.parameter_count) ||
-            !same_constraints(syntax(d.declaration), n))
+            !same_constraints(d.declaration, n))
             return not_supported(n, "temp.class");
         for (SyntaxRef x : parameters)
             if (template_parameter_has_default(x))
@@ -2515,7 +2510,7 @@ semantic_analysis::member_definition_of_template(SyntaxRef n,
     SyntaxRef id = out_of_class_member(definition);
     lookup_result x;
     entity_index named = 0;
-    if (!template_id_name(syntax(id), x, named))
+    if (!template_id_name(id, x, named))
         return not_supported(n, "temp.mem.func");
     uint32_t ct = class_template_of(named);
     if (!ct || function_templates[ct - 1].name != named ||
@@ -2531,7 +2526,7 @@ semantic_analysis::member_definition_of_template(SyntaxRef n,
     /* the template-id's arguments in terms of the parameters; what they
        record for claims is the template's */
     owned_array<template_argument> arguments;
-    r = template_id_arguments_in(syntax(id), ct, scope, arguments);
+    r = template_id_arguments_in(id, ct, scope, arguments);
     if (r != analysis_result::well_formed)
         return r;
     uint32_t pattern = 0;
@@ -2627,24 +2622,23 @@ analysis_result semantic_analysis::define_template_member(uint32_t member,
             scope, template_parameter_entities[of.first_parameter + i],
             template_arguments[first + i]);
     instantiation_context context;
-    enter_instantiation(context, scope, syntax(o.declaration));
+    enter_instantiation(context, scope, o.declaration);
     template_member_scope = scope;
     declaration_access = 0;
     instantiating = 0;
     class_instantiating = 0;
-    analysis_result r = function_definition(syntax(o.definition));
+    analysis_result r = function_definition(o.definition);
     leave_instantiation(context);
     /* the member defined: the class's function this definition declares
        (last_declared may be a name its body declared) */
     entity_index defined = 0;
     if (r == analysis_result::well_formed) {
         token_index name = 0;
-        out_of_class_member(syntax(o.definition), &name);
+        out_of_class_member(o.definition, &name);
         entity_index f =
             entity_table.find(x.specialization, tokens.identifier(name));
         if (f && entity_table[f].kind == entity_kind::function &&
-            (declared_by(f, syntax(o.definition)) ||
-             declared_by(f, syntax(o.declaration))))
+            (declared_by(f, o.definition) || declared_by(f, o.declaration)))
             defined = f;
         if (!defined)
             r = analysis_result::unsupported;
@@ -2724,7 +2718,7 @@ bool semantic_analysis::pack_only_expanded(uint32_t name, token_index first,
                                            token_index end) const
 {
     auto is = [&](token_index t, preprocessing_op_or_punc op) {
-        return token_element(t).is(op);
+        return SyntaxElement::from_token(t).is(op);
     };
     for (token_index t = first; t < end; t++) {
         if (tokens[t].kind != token_kind::identifier ||

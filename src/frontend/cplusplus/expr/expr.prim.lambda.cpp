@@ -386,8 +386,7 @@ analysis_result semantic_analysis::lambda_expression(LambdaExpression n,
         /* a requires-clause after the parameters: a generic lambda's,
            (lambda_constraint) */
         if (!template_list &&
-            syntax(declarator.index())[declarator.size() - 1].is(
-                syntax_kind::requires_clause))
+            declarator[declarator.size() - 1].is(syntax_kind::requires_clause))
             return not_supported(n, "temp.constr");
     }
 
@@ -441,11 +440,9 @@ analysis_result semantic_analysis::lambda_expression(LambdaExpression n,
     qualified_type type;
     owned_array<parameter_meaning> parameters;
     if (template_list)
-        r = generic_lambda(n, syntax(template_list.index()),
-                           syntax(declarator.index()), l, has_capture, m);
+        r = generic_lambda(n, template_list, declarator, l, has_capture, m);
     else
-        r = lambda_call_type(n, syntax(declarator.index()), l, type,
-                             parameters);
+        r = lambda_call_type(n, declarator, l, type, parameters);
     if (r != analysis_result::well_formed || template_list) {
         lambda_captures.resize(l.first_capture);
         if (r != analysis_result::well_formed)
@@ -721,7 +718,7 @@ analysis_result semantic_analysis::generic_lambda(SyntaxRef n, SyntaxRef list,
         for (uint32_t i = 0; i < list.size(); i++)
             list_items.append(list[i]);
     else
-        list_items.append(element(list));
+        list_items.append(list);
     owned_array<SyntaxRef> parameters;
     for (SyntaxElement p : list_items) {
         if (p.is_token())
@@ -829,8 +826,7 @@ analysis_result semantic_analysis::lambda_specialization(
     l.call = specialization;
     l.first_capture = static_cast<uint32_t>(lambda_captures.size());
     owned_array<parameter_meaning> parameters;
-    analysis_result r =
-        lambda_call_type(n, syntax(declarator), l, type, parameters);
+    analysis_result r = lambda_call_type(n, declarator, l, type, parameters);
     if (r != analysis_result::well_formed || !body)
         return r;
     owned_array<capture_record> captures;

@@ -166,8 +166,7 @@ analysis_result semantic_analysis::return_statement(SyntaxRef n,
                               "type is not cv void",
                               "stmt.return");
         qualified_type type = returns;
-        analysis_result r =
-            list_initialization(syntax(operand.index()), type, false, result);
+        analysis_result r = list_initialization(operand, type, false, result);
         operand_node = result.node;
         return r;
     }

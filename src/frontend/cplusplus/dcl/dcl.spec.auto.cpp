@@ -348,8 +348,8 @@ analysis_result semantic_analysis::deduced_initializer(SyntaxElement init,
     analysis_result r = expression(clause, m);
     if (r != analysis_result::well_formed)
         return r;
-    return deduced_initialization(syntax(init.index()), m, names_entity(clause),
-                                  direct, list, e, type, value);
+    return deduced_initialization(init, m, names_entity(clause), direct, list,
+                                  e, type, value);
 }
 
 /* ... the initializer's expression analysed as m (named: names_entity of

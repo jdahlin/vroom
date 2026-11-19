@@ -132,8 +132,7 @@ analysis_result semantic_analysis::requires_expression(RequiresExpression n,
         substitution_mark mark = mark_substitution();
         type_index type = 0;
         uint32_t cv = 0;
-        analysis_result r =
-            typename_type(syntax(requirements[i].index()), type, cv);
+        analysis_result r = typename_type(requirements[i], type, cv);
         if (r == analysis_result::ill_formed && undo_substitution(mark)) {
             satisfied = false;
             continue;
@@ -172,9 +171,8 @@ analysis_result semantic_analysis::concept_satisfied(
         bind_template_argument(
             scope, template_parameter_entities[c.first_parameter + i],
             arguments[i]);
-    analysis_result r =
-        constraint_satisfied(element(c.definition), scope,
-                             syntax(c.declaration).first_token(), satisfied);
+    analysis_result r = constraint_satisfied(
+        c.definition, scope, c.declaration.first_token(), satisfied);
     if (r != analysis_result::well_formed && r != analysis_result::unsupported)
         return r;
     satisfaction s;
@@ -281,9 +279,8 @@ bool semantic_analysis::same_constraints(SyntaxRef a, SyntaxRef b)
        equivalent template-heads) */
     owned_array<SyntaxRef> pa, pb;
     if (a.size() && b.size() && a[0].is(syntax_kind::template_head) &&
-        b[0].is(syntax_kind::template_head) &&
-        template_head_list(syntax(a[0].index()), pa) &&
-        template_head_list(syntax(b[0].index()), pb)) {
+        b[0].is(syntax_kind::template_head) && template_head_list(a[0], pa) &&
+        template_head_list(b[0], pb)) {
         if (pa.size() != pb.size())
             return false;
         for (size_t i = 0; i < pa.size(); i++) {
@@ -292,8 +289,7 @@ bool semantic_analysis::same_constraints(SyntaxRef a, SyntaxRef b)
                 !template_parameter_form(pb[i], v))
                 continue;
             if (!u.constraint != !v.constraint ||
-                (u.constraint &&
-                 !same_tokens(syntax(u.constraint), syntax(v.constraint))))
+                (u.constraint && !same_tokens(u.constraint, v.constraint)))
                 return false;
         }
     }
@@ -305,7 +301,7 @@ bool semantic_analysis::same_constraints(SyntaxRef a, SyntaxRef b)
     if (x.is_token() || y.is_token())
         return x.is_token() && y.is_token() &&
                same_token_spelling(x.token(), y.token());
-    return same_tokens(syntax(x.index()), syntax(y.index()));
+    return same_tokens(x, y);
 }
 
 /* whether template-head n has a requires-clause or a type-constraint */
@@ -315,7 +311,7 @@ bool semantic_analysis::template_head_constrained(SyntaxRef n)
     if (head_constraint(n))
         return true;
     if (n.size() && n[0].is(syntax_kind::template_head) &&
-        !template_head_list(syntax(n[0].index()), parameters))
+        !template_head_list(n[0], parameters))
         return false;
     abbreviated_parameters(n, parameters);
     for (SyntaxRef p : parameters) {
@@ -361,7 +357,7 @@ SyntaxElement semantic_analysis::template_constraint(entity_index t) const
     uint32_t ft = template_record(t);
     if (!ft)
         return SyntaxElement();
-    return head_constraint(syntax(function_templates[ft - 1].declaration));
+    return head_constraint(function_templates[ft - 1].declaration);
 }
 
 SyntaxElement
@@ -370,7 +366,7 @@ semantic_analysis::template_trailing_constraint(entity_index t) const
     uint32_t ft = template_record(t);
     if (!ft)
         return SyntaxElement();
-    return trailing_constraint(syntax(function_templates[ft - 1].declaration));
+    return trailing_constraint(function_templates[ft - 1].declaration);
 }
 
 entity_index semantic_analysis::constraint_parameter(entity_index t,
@@ -401,30 +397,30 @@ uint32_t semantic_analysis::function_parameter_position(entity_index t,
         return 0;
     SyntaxRef d = function_templates[ft - 1].declarator;
     owned_array<SyntaxElement> work;
-    work.append(syntax(d)[leading_gnu_attributes(d) + 1]);
+    work.append(d[leading_gnu_attributes(d) + 1]);
     uint32_t position = 0;
     bool inside = false;
     /* (depth first, children in order: the parameters in theirs) */
     while (work.size()) {
         SyntaxElement c = work[work.size() - 1];
         work.resize(work.size() - 1);
-        if (c.is_token() || syntax(c).is(syntax_kind::trailing_return_type))
+        if (c.is_token() || c.is(syntax_kind::trailing_return_type))
             continue;
-        if (syntax(c).is(syntax_kind::parameter_declaration)) {
+        if (c.is(syntax_kind::parameter_declaration)) {
             position++;
-            for (auto child : syntax(c).elements(1)) {
+            for (auto child : c.elements(1)) {
                 token_index id = declarator_id(child);
                 if (id && tokens.identifier(id) == name)
                     return position;
             }
             continue;
         }
-        bool clause = syntax(c).is(syntax_kind::parameters_and_qualifiers);
+        bool clause = c.is(syntax_kind::parameters_and_qualifiers);
         if (clause && inside)
             continue;
         inside |= clause;
-        for (uint32_t j = syntax(c).size(); j > 0; j--)
-            work.append(syntax(c)[j - 1]);
+        for (uint32_t j = c.size(); j > 0; j--)
+            work.append(c[j - 1]);
     }
     return 0;
 }
@@ -454,11 +450,11 @@ analysis_result semantic_analysis::template_constraints_satisfied(
     satisfied = true;
     const struct function_template ft =
         function_templates[function_template - 1];
-    SyntaxElement constraint = head_constraint(syntax(ft.declaration));
+    SyntaxElement constraint = head_constraint(ft.declaration);
     /* (a trailing requires-clause only where the head has none: the
        definitions refuse both) */
     if (!constraint)
-        constraint = trailing_constraint(syntax(ft.declaration));
+        constraint = trailing_constraint(ft.declaration);
     /* [temp.constr.decl]/3: the associated constraints are the
        conjunction of the type-constraints' immediately-declared
        constraints, in order, then the requires-clause's
@@ -470,7 +466,7 @@ analysis_result semantic_analysis::template_constraints_satisfied(
         template_parameter_parts x;
         if (!template_parameter_form(p, x) || !x.constraint)
             continue;
-        auto q = syntax(x.constraint);
+        auto q = x.constraint;
         if (q.size() != 1 || !q[0].is_token())
             return not_supported(x.constraint, "temp.param");
         entity_index named =
@@ -497,8 +493,8 @@ analysis_result semantic_analysis::template_constraints_satisfied(
         bind_template_argument(
             scope, template_parameter_entities[ft.first_parameter + i],
             values[i]);
-    return constraint_satisfied(
-        constraint, scope, syntax(ft.declaration).first_token(), satisfied);
+    return constraint_satisfied(constraint, scope, ft.declaration.first_token(),
+                                satisfied);
 }
 
 } // namespace cplusplus

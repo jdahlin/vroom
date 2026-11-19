@@ -97,7 +97,7 @@ semantic_analysis::resolve_call(SyntaxRef n,
         if (!arguments[i].is(syntax_kind::braced_init_list))
             continue;
         owned_array<SyntaxElement> clauses;
-        analysis_result r = list_clauses(syntax(arguments[i].index()), clauses);
+        analysis_result r = list_clauses(arguments[i], clauses);
         if (r != analysis_result::well_formed)
             return r;
         if (clauses.size() != 1 || clauses[0].is(syntax_kind::braced_init_list))

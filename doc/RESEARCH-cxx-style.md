@@ -269,7 +269,7 @@ or matcher that reports the same thing, for section 6.4.
 | 11 | A class with a destructor deletes copying (and defines moving if it moves) | 28 classes copy implicitly | S | `cppcoreguidelines-special-member-functions` with `AllowMissingMoveFunctionsWhenCopyIsDeleted` |
 | 12 | `struct`: data, all public, no invariant.  `class`: private data behind member functions | 329 public members in classes | S | `misc-non-private-member-variables-in-classes` |
 | 13 | One way to give a name internal linkage | 66 `static`, 57 unnamed namespaces | S | `llvm-prefer-static-over-anonymous-namespace` or `misc-use-anonymous-namespace` |
-| 14 | `auto` for a lambda, in a range-`for`, and for a syntax view (`auto body = syntax(n).function_definition().function_body();`: the initializer names the view's type); a type's name elsewhere | 50 of 51 before the views; about 290 `auto x =` now, nearly all views | S | none (`modernize-use-auto` is the opposite rule) |
+| 14 | `auto` for a lambda, in a range-`for`, and for a syntax view (`auto body = n.function_definition().function_body();`: the initializer names the view's type); a type's name elsewhere | 50 of 51 before the views; about 290 `auto x =` now, nearly all views | S | none (`modernize-use-auto` is the opposite rule) |
 | 15 | A lambda that captures by reference does not outlive its scope | not known | D | none |
 | 16 | Templates for owners, containers and parse helpers; no computation in types | 10 | S (count) | none |
 | 17 | Macros: include guards and X-macro tables; code is a `constexpr` or `inline` function | 36 `#define` | T | `cppcoreguidelines-macro-usage` |

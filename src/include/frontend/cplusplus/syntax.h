@@ -5,11 +5,10 @@
  * order of the alternative of the grammar that matched.  A view names a
  * node's parts after the standard's grammar instead of indexing children:
  *
- *     auto body = syntax(n).function_definition().function_body();
+ *     auto body = n.function_definition().function_body();
  *     if (body.deleted()) ...
  *
- * A view is a handle (the tree's context and a node index) built where it
- * is used; nothing is stored in the tree or allocated.  SyntaxRef is the
+ * Nothing is stored in the tree or allocated for a view.  SyntaxRef is the
  * untyped handle.  The views are generated (syntax-views.inc, by
  * src/tools/gen-syntax-views.py, from the grammar):
  *
@@ -21,14 +20,14 @@
  *     with visit(), and a range of the elements for a list (X-seq, X-list);
  *   - SyntaxRef::name() per nonterminal: the node as that view.
  *
- * Handles.  ast::node (parse.h) is a node's index, 4 bytes, no context: what
- * a record or a table holds.  A view is a node and the context to read it
- * with (two registers): what a function takes and returns; a record never
- * holds one (syntax-audit.clang-tidy).  semantic_analysis::syntax(n) makes
- * a view of a stored node (or of a stored syntax_child), and a view
- * converts to its ast::node implicitly.  A node and a token (token_index)
- * are different types: neither converts to an integer, or to the other,
- * without saying so.
+ * Handles.  A view is a node index (4 bytes) that reads through the
+ * thread's current SyntaxContext (syntax_ambient, set by SyntaxScope while
+ * a semantic_analysis, or the declarator claims, lives): a record holds
+ * one, a function takes and returns one, nothing makes a view of a node
+ * index.  ast::node (parse.h) is the raw index the parser and the tree
+ * work with; a view converts to it and from it.  A node and a token
+ * (token_index) are different types: neither converts to an integer, or to
+ * the other, without saying so.
  *
  * An empty view (the node is of another kind, or absent) answers every
  * question with "none" (no child, false), so a chain needs no test between
@@ -105,6 +104,11 @@ class SyntaxRef
 {
   public:
     SyntaxRef() = default;
+    SyntaxRef(syntax_child c)
+    {
+        if (!c.is_token())
+            n = node_index(c.index());
+    }
     SyntaxRef(const SyntaxContext &, syntax_child c)
     {
         if (!c.is_token())
@@ -284,6 +288,19 @@ class SyntaxElement : public SyntaxRef
     SyntaxElement(const SyntaxContext &cx, syntax_child c)
         : SyntaxRef(cx, c), c(c)
     {
+    }
+    /* a child of the thread's tree */
+    SyntaxElement(syntax_child c) : SyntaxRef(c), c(c)
+    {
+    }
+    /* a node as a child */
+    SyntaxElement(const SyntaxRef &r) : SyntaxRef(r), c(r.child())
+    {
+    }
+    /* a token as a child, to ask it what an element is asked */
+    static SyntaxElement from_token(token_index t)
+    {
+        return SyntaxElement(syntax_child::token(t));
     }
     /* false for no child at all (a token is one) */
     explicit operator bool() const

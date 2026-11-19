@@ -364,7 +364,7 @@ analysis_result semantic_analysis::array(SyntaxRef at, SyntaxElement bound,
     /* "N shall be greater than zero": zero is clang's extension */
     if (!value) {
         r = extension_used(diagnostic_id::sema_zero_length_array,
-                           syntax(at).first_token(), nullptr);
+                           at.first_token(), nullptr);
         if (r != analysis_result::well_formed)
             return r;
     }
@@ -459,7 +459,7 @@ void semantic_analysis::hold_names(SyntaxRef declaration)
     }
     /* the declarator-ids of a simple-declaration or function-definition */
     auto declarator_ids = [&](SyntaxRef d) {
-        for (auto c : syntax(d).elements()) {
+        for (auto c : d.elements()) {
             if (c.init_declarators()) {
                 for (auto i : c.elements())
                     ids.append(declarator_id(i));
@@ -499,15 +499,15 @@ void semantic_analysis::hold_names(SyntaxRef declaration)
         while (!work.empty()) {
             SyntaxRef x = work.back();
             work.resize(work.size() - 1);
-            if (syntax(x).is(syntax_kind::nested_name_specifier) ||
-                syntax(x).is(syntax_kind::qualified_namespace_specifier))
+            if (x.is(syntax_kind::nested_name_specifier) ||
+                x.is(syntax_kind::qualified_namespace_specifier))
                 continue;
-            for (uint32_t i = 0; i < syntax(x).size(); i++) {
-                SyntaxElement c = syntax(x)[i];
+            for (uint32_t i = 0; i < x.size(); i++) {
+                SyntaxElement c = x[i];
                 if (!c.is_token())
                     work.append(c.index());
                 else if (tokens[c.token()].kind == token_kind::identifier &&
-                         (syntax(x).is(syntax_kind::using_declarator) ||
+                         (x.is(syntax_kind::using_declarator) ||
                           (x == declaration && i == 1)))
                     ids.append(c.token());
             }
@@ -535,12 +535,10 @@ void semantic_analysis::hold_names(SyntaxRef declaration)
            and what their types and defaults name ([temp.param]) */
         token_index start = node.first_token();
         for (SyntaxRef x = declaration;
-             syntax(x).is(syntax_kind::template_declaration) &&
-             syntax(x).size() >= 2 &&
-             syntax(x)[0].is(syntax_kind::template_head) &&
-             !syntax(x)[syntax(x).size() - 1].is_token();
-             x = syntax(x)[syntax(x).size() - 1].index())
-            start = syntax(x)[0].end_token();
+             x.is(syntax_kind::template_declaration) && x.size() >= 2 &&
+             x[0].is(syntax_kind::template_head) && !x[x.size() - 1].is_token();
+             x = x[x.size() - 1].index())
+            start = x[0].end_token();
         for (token_index t = start; t < node.end_token(); t++) {
             const token &tok = tokens[t];
             /* a name before or after :: is a qualifier or a member of
@@ -624,15 +622,15 @@ void semantic_analysis::hold_names(SyntaxRef declaration)
     bool by_template = node.is(syntax_kind::template_declaration) ||
                        node.is(syntax_kind::explicit_specialization);
     for (SyntaxRef inner = declaration;
-         syntax(inner).is(syntax_kind::template_declaration) ||
-         syntax(inner).is(syntax_kind::explicit_specialization);) {
-        auto t = syntax(inner);
-        if (!t.size() || syntax(inner)[t.size() - 1].is_token())
+         inner.is(syntax_kind::template_declaration) ||
+         inner.is(syntax_kind::explicit_specialization);) {
+        auto t = inner;
+        if (!t.size() || inner[t.size() - 1].is_token())
             break;
-        inner = syntax(inner)[t.size() - 1].index();
-        if ((syntax(inner).is(syntax_kind::simple_declaration) ||
-             syntax(inner).is(syntax_kind::function_definition)) &&
-            parsed_completely(syntax(inner)))
+        inner = inner[t.size() - 1].index();
+        if ((inner.is(syntax_kind::simple_declaration) ||
+             inner.is(syntax_kind::function_definition)) &&
+            parsed_completely(inner))
             declarator_ids(inner);
     }
     for (token_index id : ids) {
@@ -761,7 +759,7 @@ analysis_result semantic_analysis::declarator(SyntaxRef declaration,
                                               declarator_meaning &m)
 {
     using enum preprocessing_op_or_punc;
-    auto e = syntax(d);
+    auto e = d;
     if (e.is_token()) {
         if (!e.is_identifier())
             return not_supported(declaration, "dcl.decl");
@@ -785,7 +783,7 @@ analysis_result semantic_analysis::declarator(SyntaxRef declaration,
     }
     case syntax_kind::parameters_and_qualifiers:
         /* an abstract declarator that is only its parameters */
-        return function(syntax(n), type);
+        return function(n, type);
     case syntax_kind::noptr_declarator:
     case syntax_kind::noptr_abstract_declarator:
         break;
@@ -804,7 +802,7 @@ analysis_result semantic_analysis::declarator(SyntaxRef declaration,
         return analysis_result::well_formed;
     }
     case syntax_kind::declarator:
-        return trailing_return(syntax(declaration), syntax(n), type, m);
+        return trailing_return(declaration, n, type, m);
     case syntax_kind::gnu_declarator: {
         /* [ext:gnu_asm_labels] declarator gnu-asm-label_opt
            gnu-attribute-specifier-seq_opt: the label is the symbol, one
@@ -830,9 +828,9 @@ analysis_result semantic_analysis::declarator(SyntaxRef declaration,
         return declarator(declaration, e[0], type, m);
     }
     case syntax_kind::operator_function_id:
-        return operator_function_id(syntax(n), m);
+        return operator_function_id(n, m);
     case syntax_kind::literal_operator_id:
-        return literal_operator_id(syntax(n), m);
+        return literal_operator_id(n, m);
     case syntax_kind::conversion_function_id:
         /* [class.conv.fct]/1: the type is the declaration's
            (conversion_function_member) */

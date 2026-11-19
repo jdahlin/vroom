@@ -351,7 +351,7 @@ analysis_result semantic_analysis::builtin_template_arguments(
             continue;
         }
         if (parts[i].is(syntax_kind::template_argument_list)) {
-            if (!expansion_list(syntax(parts[i].index()), written, expansion))
+            if (!expansion_list(parts[i], written, expansion))
                 return not_supported(id, "temp.variadic");
         } else {
             written.append(parts[i]);
@@ -360,8 +360,7 @@ analysis_result semantic_analysis::builtin_template_arguments(
     }
     for (size_t w = 0; w < written.size(); w++)
         if (written[w].is(syntax_kind::type_id) && written[w].size() == 2 &&
-            syntax(written[w].index())[1].is(
-                preprocessing_op_or_punc::ELLIPSIS))
+            written[w][1].is(preprocessing_op_or_punc::ELLIPSIS))
             expansion[w] = true;
     return analysis_result::well_formed;
 }
@@ -382,8 +381,8 @@ analysis_result semantic_analysis::builtin_template_types(
         if (expansion[w]) {
             token_index first = first_token(a);
             token_index end = a.end_token();
-            if (end > first + 1 &&
-                token_element(end - 1).is(preprocessing_op_or_punc::ELLIPSIS))
+            if (end > first + 1 && SyntaxElement::from_token(end - 1).is(
+                                       preprocessing_op_or_punc::ELLIPSIS))
                 end--;
             /* a template's own pack, not bound to elements: a dependent
                template-id */

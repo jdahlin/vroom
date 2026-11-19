@@ -377,8 +377,8 @@ analysis_result semantic_analysis::gnu_attribute_specifier(SyntaxRef n,
     /* (standard attributes without effect, or [[noreturn]]:
        leading_gnu_attributes) */
     uint32_t standard = 0;
-    if (syntax(n).is(syntax_kind::attribute_specifier) &&
-        attributes_as_gnu(element(n), standard)) {
+    if (n.is(syntax_kind::attribute_specifier) &&
+        attributes_as_gnu(n, standard)) {
         g.flags |= standard;
         return analysis_result::well_formed;
     }
@@ -388,8 +388,8 @@ analysis_result semantic_analysis::gnu_attribute_specifier(SyntaxRef n,
     while (!work.empty()) {
         SyntaxRef next = work.back();
         work.resize(work.size() - 1);
-        for (uint32_t i = 0; i < syntax(next).size(); i++) {
-            SyntaxElement c = syntax(next)[i];
+        for (uint32_t i = 0; i < next.size(); i++) {
+            SyntaxElement c = next[i];
             if (next == n && i == 0 && c.is_token())
                 continue; /* __attribute__ */
             if (c.is(syntax_kind::gnu_attribute))

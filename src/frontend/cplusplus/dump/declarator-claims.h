@@ -50,7 +50,7 @@ class declarator_claims
     }
 
     /* the claims of the declarations under n */
-    void write(node_index n)
+    void write(SyntaxRef n)
     {
         declarations(n, 0, false);
     }
@@ -62,16 +62,6 @@ class declarator_claims
     vbuffer *out;
     SyntaxContext syntax_cx{tree, tokens, p};
     SyntaxScope syntax_scope{syntax_cx};
-
-    /* the typed view of a node of the tree, or of a child (syntax.h) */
-    SyntaxRef syntax(node_index n) const
-    {
-        return SyntaxRef(syntax_cx, n);
-    }
-    SyntaxElement syntax(SyntaxElement e) const
-    {
-        return e;
-    }
 
     /* what a decl-specifier-seq says besides its type */
     struct specifiers {
@@ -114,9 +104,9 @@ class declarator_claims
     /* whether node n has a lambda-expression in it: each one is a closure
        type of its own ([expr.prim.lambda.closure]/1), so the claim's
        decltype([]{}) would name another type */
-    bool has_lambda(node_index n) const
+    bool has_lambda(SyntaxRef n) const
     {
-        auto node = syntax(n);
+        auto node = n;
         if (node.is(syntax_kind::lambda_expression))
             return true;
         for (auto c : node.elements()) {
@@ -128,7 +118,7 @@ class declarator_claims
 
     bool is_kind(SyntaxElement c, syntax_kind kind) const
     {
-        return syntax(c).is(kind);
+        return c.is(kind);
     }
 
     bool is_attribute(SyntaxElement c) const
@@ -171,9 +161,9 @@ class declarator_claims
      * example of [dcl.meaning]/4: "the type specifiers int unsigned determine
      * the type unsigned int").
      */
-    bool specified_type(node_index seq, owned_buffer &type, specifiers &s)
+    bool specified_type(SyntaxRef seq, owned_buffer &type, specifiers &s)
     {
-        auto node = syntax(seq);
+        auto node = seq;
         unsigned const_ = 0, volatile_ = 0, signed_ = 0, unsigned_ = 0;
         unsigned short_ = 0, long_ = 0, char_ = 0, int_ = 0, double_ = 0;
         bool named = false;
@@ -257,7 +247,7 @@ class declarator_claims
                 }
                 continue;
             }
-            auto child = syntax(c);
+            auto child = c;
             switch (child.kind()) {
             case syntax_kind::decltype_specifier:
                 if (has_lambda(c.index()))
@@ -329,28 +319,28 @@ class declarator_claims
 
     /* the name a class-specifier or enum-specifier gives its type: the
        identifier of its head, with its nested-name-specifier if it has one */
-    bool name_of_defined_type(node_index specifier, owned_buffer &type)
+    bool name_of_defined_type(SyntaxRef specifier, owned_buffer &type)
     {
-        node_index head = specifier;
-        auto s = syntax(specifier);
+        SyntaxRef head = specifier;
+        auto s = specifier;
         if (s.size() && is_kind(s[0], syntax_kind::enum_head))
             head = s[0].index();
-        auto h = syntax(head);
+        auto h = head;
         for (uint32_t i = 0; i < h.size(); i++) {
-            SyntaxElement c = syntax(head)[i];
+            SyntaxElement c = head[i];
             if (c.is_token() &&
                 tokens[c.token()].kind == token_kind::identifier) {
                 /* after a nested-name-specifier the name is not the next
                    token alone: the two are written together */
                 token_index first = c.token();
-                if (i && is_kind(syntax(head)[i - 1],
-                                 syntax_kind::nested_name_specifier))
-                    first = syntax(head)[i - 1].first_token();
+                if (i &&
+                    is_kind(head[i - 1], syntax_kind::nested_name_specifier))
+                    first = head[i - 1].first_token();
                 verbatim(first, c.token() + 1, type.get());
                 return true;
             }
             if (is_kind(c, syntax_kind::enum_head_name)) {
-                auto name = syntax(c);
+                auto name = c;
                 verbatim(name.first_token(), name.end_token(), type.get());
                 return true;
             }
@@ -368,25 +358,25 @@ class declarator_claims
      * [dcl.ref]/1: "... reference to T"; [dcl.mptr]/1: "... cv-qualifier-seq
      * pointer to member of class nested-name-specifier of type T".
      */
-    bool apply_ptr_operator(node_index op, owned_buffer &type, declared &d)
+    bool apply_ptr_operator(SyntaxRef op, owned_buffer &type, declared &d)
     {
-        auto node = syntax(op);
+        auto node = op;
         for (uint32_t i = 0; i < node.size(); i++) {
             SyntaxElement c = node[i];
             if (is_attribute(c))
                 continue;
             if (is_kind(c, syntax_kind::nested_name_specifier)) {
                 /* the class is the specifier without its last :: */
-                auto name = syntax(c);
+                auto name = c;
                 wrap(type, "::vcc_claim::pointer_to_member_of<", ", ");
                 verbatim(name.first_token(), name.end_token() - 1, type.get());
                 vbuffer_string_append(type.get(), ">");
                 d.last = outermost::member_pointer;
                 i++; /* its * */
             } else if (is_kind(c, syntax_kind::cv_qualifier_seq)) {
-                auto seq = syntax(c);
+                auto seq = c;
                 for (uint32_t k = 0; k < seq.size(); k++)
-                    if (!apply_cv_qualifier(syntax(c)[k], type))
+                    if (!apply_cv_qualifier(c[k], type))
                         return false;
             } else if (is_operator_token(c, preprocessing_op_or_punc::STAR)) {
                 wrap(type, "::vcc_claim::pointer_to<", ">");
@@ -433,13 +423,13 @@ class declarator_claims
      * then clang's to make on both sides.  noexcept is part of the type from
      * C++17 (P0012R1).
      */
-    bool apply_function(node_index parameters, owned_buffer &type, declared &d)
+    bool apply_function(SyntaxRef parameters, owned_buffer &type, declared &d)
     {
-        auto node = syntax(parameters);
+        auto node = parameters;
         owned_buffer list, qualifiers;
         bool closed = false;
         unsigned count = 0;
-        owned_array<node_index> work;
+        owned_array<SyntaxRef> work;
         for (auto c : node.elements()) {
             if (is_attribute(c))
                 continue;
@@ -456,11 +446,11 @@ class declarator_claims
                 continue;
             }
             if (is_kind(c, syntax_kind::cv_qualifier_seq)) {
-                auto seq = syntax(c);
+                auto seq = c;
                 vbuffer_append(qualifiers.get(), " ", 1);
                 verbatim(seq.first_token(), seq.end_token(), qualifiers.get());
             } else if (is_kind(c, syntax_kind::noexcept_specifier)) {
-                auto spec = syntax(c);
+                auto spec = c;
                 if (tokens.files.behavior.edition >=
                     standard_edition::cplusplus_17) {
                     vbuffer_append(qualifiers.get(), " ", 1);
@@ -500,9 +490,9 @@ class declarator_claims
         }
         if (is_kind(c, syntax_kind::parameter_declaration_clause) ||
             is_kind(c, syntax_kind::parameter_declaration_list)) {
-            auto node = syntax(c);
+            auto node = c;
             for (uint32_t i = 0; i < node.size(); i++)
-                if (!parameter_types(syntax(c)[i], list, count))
+                if (!parameter_types(c[i], list, count))
                     return false;
             return true;
         }
@@ -510,21 +500,21 @@ class declarator_claims
             return false;
         /* attribute-specifier-seq_opt decl-specifier-seq declarator_opt,
            then perhaps = initializer-clause */
-        auto node = syntax(c);
+        auto node = c;
         owned_buffer type;
         specifiers s;
         declared d;
         uint32_t i = 0;
-        while (i < node.size() && is_attribute(syntax(c)[i]))
+        while (i < node.size() && is_attribute(c[i]))
             i++;
         if (i == node.size() ||
-            !is_kind(syntax(c)[i], syntax_kind::decl_specifier_seq) ||
-            !specified_type(syntax(c)[i].index(), type, s))
+            !is_kind(c[i], syntax_kind::decl_specifier_seq) ||
+            !specified_type(c[i].index(), type, s))
             return false;
         i++;
         if (i < node.size() &&
-            !is_operator_token(syntax(c)[i], preprocessing_op_or_punc::EQUAL) &&
-            !declared_type(syntax(c)[i], type, s, d))
+            !is_operator_token(c[i], preprocessing_op_or_punc::EQUAL) &&
+            !declared_type(c[i], type, s, d))
             return false;
         /* a placeholder in a parameter's type makes the function a template
            ([dcl.fct]/18, an abbreviated function template) */
@@ -588,8 +578,8 @@ class declarator_claims
             d.id_end = declarator.token() + 1;
             return true;
         }
-        node_index n = declarator.index();
-        auto node = syntax(n);
+        SyntaxRef n = declarator.index();
+        auto node = n;
         switch (node.kind()) {
         case syntax_kind::qualified_id:
             d.has_id = true;
@@ -620,7 +610,7 @@ class declarator_claims
                 return false;
             auto trailing = node[1];
             if (trailing.size() != 2 ||
-                !type_of_type_id(syntax(node[1].index())[1].index(), type))
+                !type_of_type_id(node[1][1].index(), type))
                 return false;
             s.placeholder = false;
             return declared_type(node[0], type, s, d);
@@ -703,9 +693,9 @@ class declarator_claims
     /* [dcl.name]/1: a type-id is "syntactically a declaration for a variable
        or function of that type that omits the name of the entity": its type
        is found as a declaration's is */
-    bool type_of_type_id(node_index type_id, owned_buffer &type)
+    bool type_of_type_id(SyntaxRef type_id, owned_buffer &type)
     {
-        auto node = syntax(type_id);
+        auto node = type_id;
         if (!node.is(syntax_kind::type_id) &&
             !node.is(syntax_kind::defining_type_id))
             return false;
@@ -723,16 +713,16 @@ class declarator_claims
     /* FILE, the lines of the declaration that say the type, and where a
        static_assert can stand: after anchor, the declaration of a
        declaration-seq that the declaration is or is in */
-    void write_place(node_index anchor, node_index declaration)
+    void write_place(SyntaxRef anchor, SyntaxRef declaration)
     {
-        auto d = syntax(declaration);
+        auto d = declaration;
         token_index last = d.end_token() - 1;
         for (auto c : d.elements()) {
             if (is_kind(c, syntax_kind::function_body) &&
-                syntax(c).first_token() > d.first_token())
-                last = syntax(c).first_token() - 1;
+                c.first_token() > d.first_token())
+                last = c.first_token() - 1;
         }
-        auto a = syntax(anchor);
+        auto a = anchor;
         source_position end = tokens.position(a.end_token() - 1);
         uint32_t extent = tokens[a.end_token() - 1].preprocessing.extent;
         vbuffer_format_append(out, "%s\t%u-%u\t%u:%u\t", end.file_name,
@@ -746,25 +736,25 @@ class declarator_claims
        any extension's construct (a node of ext/, a keyword the standard
        does not have: __restrict, __int128), whose meaning the claims'
        encoding does not have */
-    bool has_vendor_attribute(node_index declaration) const
+    bool has_vendor_attribute(SyntaxRef declaration) const
     {
-        for (token_index t = syntax(declaration).first_token();
-             t < syntax(declaration).end_token(); t++)
+        for (token_index t = declaration.first_token();
+             t < declaration.end_token(); t++)
             if (p.keyword_of(tokens[t]) == standard_keyword::extension)
                 return true;
-        owned_array<node_index> work;
+        owned_array<SyntaxRef> work;
         work.append(declaration);
         while (!work.empty()) {
-            node_index n = work.back();
+            SyntaxRef n = work.back();
             work.resize(work.size() - 1);
-            auto s = syntax(n);
+            auto s = n;
             if (s.is(syntax_kind::attribute_scoped_token) ||
                 s.is(syntax_kind::attribute_using_prefix) ||
                 !strncmp(syntax_kind_subclause(s.kind()), "ext.", 4))
                 return true;
             for (uint32_t i = 0; i < s.size(); i++)
-                if (!syntax(n)[i].is_token())
-                    work.append(syntax(n)[i].index());
+                if (!n[i].is_token())
+                    work.append(n[i].index());
         }
         return false;
     }
@@ -780,7 +770,7 @@ class declarator_claims
 
     /* the claim for one declarator of a declaration whose decl-specifier-seq
        is seq */
-    void claim(node_index anchor, node_index declaration, node_index seq,
+    void claim(SyntaxRef anchor, SyntaxRef declaration, SyntaxRef seq,
                SyntaxElement declarator)
     {
         owned_buffer type;
@@ -817,25 +807,25 @@ class declarator_claims
        then the declarators ([dcl.decl]/3: "Each init-declarator in a
        declaration is analyzed separately as if it was in a declaration by
        itself") */
-    void declarators(node_index anchor, node_index declaration)
+    void declarators(SyntaxRef anchor, SyntaxRef declaration)
     {
-        auto node = syntax(declaration);
+        auto node = declaration;
         uint32_t i = 0;
         while (i < node.size() && is_attribute(node[i]))
             i++;
         if (i == node.size() ||
             !is_kind(node[i], syntax_kind::decl_specifier_seq))
             return;
-        node_index seq = node[i].index();
+        SyntaxRef seq = node[i].index();
         for (i++; i < node.size(); i++) {
             SyntaxElement c = node[i];
             if (is_kind(c, syntax_kind::function_body) ||
                 is_operator_token(c, preprocessing_op_or_punc::SEMICOLON))
                 break;
             if (is_kind(c, syntax_kind::init_declarator_list)) {
-                auto list = syntax(c);
+                auto list = c;
                 for (uint32_t k = 0; k < list.size(); k++) {
-                    SyntaxElement item = syntax(c)[k];
+                    SyntaxElement item = c[k];
                     if (is_operator_token(item,
                                           preprocessing_op_or_punc::COMMA))
                         continue;
@@ -851,17 +841,17 @@ class declarator_claims
        passes through */
     SyntaxElement declarator_of(SyntaxElement item) const
     {
-        if (is_kind(item, syntax_kind::init_declarator) && syntax(item).size())
-            return syntax(item)[0];
+        if (is_kind(item, syntax_kind::init_declarator) && item.size())
+            return item[0];
         return item;
     }
 
     /* [dcl.typedef]/2: using identifier = defining-type-id: "the identifier
        following the using keyword becomes a typedef-name" for the type the
        defining-type-id denotes */
-    void alias(node_index anchor, node_index declaration)
+    void alias(SyntaxRef anchor, SyntaxRef declaration)
     {
-        auto node = syntax(declaration);
+        auto node = declaration;
         if (node.size() < 4 || !node[1].is_token())
             return;
         owned_buffer type;
@@ -895,9 +885,9 @@ class declarator_claims
 
     /* the declarations under n; anchor is the declaration of a
        declaration-seq they are in */
-    void declarations(node_index n, node_index anchor, bool in_sequence)
+    void declarations(SyntaxRef n, SyntaxRef anchor, bool in_sequence)
     {
-        auto s = syntax(n);
+        auto s = n;
         if (in_sequence) {
             anchor = n;
             for (token_index t = s.first_token(); t < s.end_token(); t++)

@@ -535,7 +535,7 @@ analysis_result semantic_analysis::using_directive(UsingDirective n)
     if (!name)
         return unknown(not_supported(n, "namespace.udir"));
     entity_index nominated = 0;
-    analysis_result r = named_namespace(n, syntax(qualifier), name, nominated);
+    analysis_result r = named_namespace(n, qualifier, name, nominated);
     if (r != analysis_result::well_formed)
         return unknown(r);
     for (const using_directive_record &u : using_directives)
@@ -586,7 +586,7 @@ semantic_analysis::namespace_alias_definition(NamespaceAliasDefinition n)
         return not_supported(n, "namespace.alias");
     }
     entity_index nominated = 0;
-    analysis_result r = named_namespace(n, syntax(qualifier), name, nominated);
+    analysis_result r = named_namespace(n, qualifier, name, nominated);
     if (r != analysis_result::well_formed)
         return r;
     entity_index scope = current_scope;

@@ -436,7 +436,7 @@ analysis_result semantic_analysis::function(SyntaxRef parameters,
         uint32_t elements = 0;
         token_index ellipsis = 0;
         analysis_result r = parameter_pack_expansion(
-            syntax(declarations[k]), k + 1 == declarations.size() && !variadic,
+            declarations[k], k + 1 == declarations.size() && !variadic,
             elements, ellipsis);
         if (r != analysis_result::well_formed)
             return r;
@@ -449,8 +449,8 @@ analysis_result semantic_analysis::function(SyntaxRef parameters,
             for (uint32_t e = 0; e < elements; e++) {
                 expanding = true;
                 expansion_element = e;
-                r = parameter_declaration(syntax(declarations[k]), t, unnamed,
-                                          id, default_argument);
+                r = parameter_declaration(declarations[k], t, unnamed, id,
+                                          default_argument);
                 expanding = saved;
                 expansion_element = saved_element;
                 if (r != analysis_result::well_formed)
@@ -479,7 +479,7 @@ analysis_result semantic_analysis::function(SyntaxRef parameters,
                 empty_pack = pack_name;
             continue;
         }
-        r = parameter_declaration(syntax(declarations[k]), t, unnamed, id,
+        r = parameter_declaration(declarations[k], t, unnamed, id,
                                   default_argument);
         if (r != analysis_result::well_formed)
             return r;
@@ -545,8 +545,8 @@ analysis_result semantic_analysis::function(SyntaxRef parameters,
     function_cv = cv;
     function_exceptions_specified = specified_exceptions;
     if (exceptions) {
-        analysis_result r = parameter_scope_noexcept(syntax(exceptions),
-                                                     may_qualify, non_throwing);
+        analysis_result r =
+            parameter_scope_noexcept(exceptions, may_qualify, non_throwing);
         if (r != analysis_result::well_formed)
             return r;
     }
@@ -629,7 +629,8 @@ bool semantic_analysis::abbreviated_parameters(
                template parameter pack if the corresponding parameter-
                declaration declares a function parameter pack" */
             for (token_index t = c.first_token(); t < c.end_token(); t++)
-                if (token_element(t).is(preprocessing_op_or_punc::ELLIPSIS))
+                if (SyntaxElement::from_token(t).is(
+                        preprocessing_op_or_punc::ELLIPSIS))
                     return false;
             parameters.append(seq);
             break;

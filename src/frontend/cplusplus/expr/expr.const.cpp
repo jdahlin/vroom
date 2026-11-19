@@ -214,8 +214,8 @@ analysis_result semantic_analysis::converted_constant_expression(
         if (r != analysis_result::well_formed)
             return r;
         if (narrows) {
-            r = extension_used(diagnostic_id::sema_narrowing,
-                               syntax(at).first_token(), nullptr);
+            r = extension_used(diagnostic_id::sema_narrowing, at.first_token(),
+                               nullptr);
             if (r != analysis_result::well_formed)
                 return r;
         }

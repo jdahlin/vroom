@@ -55,7 +55,7 @@ semantic_analysis::instantiate(SyntaxRef at, entity_index template_entity,
         index = record_instantiation(ft, arguments, count);
         /* the declaration: the declarator, where its types are the
            arguments' */
-        auto d_syntax = syntax(ft.declarator);
+        auto d_syntax = ft.declarator;
         uint32_t d_skip = leading_gnu_attributes(ft.declarator);
         entity_index saved_scope = current_scope;
         uint32_t saved_cv = function_cv;
@@ -76,13 +76,12 @@ semantic_analysis::instantiate(SyntaxRef at, entity_index template_entity,
         bool specifiers = d_syntax[d_skip].is(syntax_kind::decl_specifier_seq);
         bool constructor = t.special == special_member::constructor;
         analysis_result r = analysis_result::well_formed;
-        bool lambda = syntax(ft.declarator).is(syntax_kind::lambda_expression);
+        bool lambda = ft.declarator.is(syntax_kind::lambda_expression);
         qualified_type lambda_type;
         if (lambda)
-            r = lambda_specialization(syntax(ft.declarator), false, lambda_type,
-                                      0);
+            r = lambda_specialization(ft.declarator, false, lambda_type, 0);
         else if (constructor && specifiers)
-            r = constructor_specifiers(syntax(d_syntax[d_skip].index()), s);
+            r = constructor_specifiers(d_syntax[d_skip], s);
         else if (specifiers)
             r = decl_specifier_seq(d_syntax[d_skip].index(), s, false);
         qualified_type type = s.type;
@@ -97,8 +96,7 @@ semantic_analysis::instantiate(SyntaxRef at, entity_index template_entity,
             member_template_declarator(2 * !is_namespace(t.enclosing));
             if (constructor)
                 r = constructor_template_declarator(
-                    syntax(ft.declarator), d_syntax[d_skip + specifiers], type,
-                    m);
+                    ft.declarator, d_syntax[d_skip + specifiers], type, m);
             else
                 r = declarator(ft.declarator, d_syntax[d_skip + specifiers],
                                type, m);
@@ -107,14 +105,14 @@ semantic_analysis::instantiate(SyntaxRef at, entity_index template_entity,
         entity_index e = 0;
         if (r == analysis_result::well_formed) {
             instantiating = index + 1;
-            r = declare_specialization(syntax(ft.declarator), m.id, type, s, e);
+            r = declare_specialization(ft.declarator, m.id, type, s, e);
             instantiating = 0;
         }
         /* [dcl.fct.def.delete]/2: a specialization of a deleted template
            is deleted from its declaration on, a call of it ill-formed;
            its definition is the deleted definition */
         if (r == analysis_result::well_formed && ft.definition && !lambda &&
-            deleted_body(syntax(ft.definition).back())) {
+            deleted_body(ft.definition.back())) {
             entity_table[e].deleted = true;
             entity_table[e].inline_ = true;
             instantiations[index].defined = true;
@@ -129,8 +127,7 @@ semantic_analysis::instantiate(SyntaxRef at, entity_index template_entity,
            uses it */
         if (r == analysis_result::well_formed && ft.default_arguments) {
             size_t unsupported_before = unsupported.size();
-            if (default_arguments(syntax(ft.declarator), e,
-                                  entity_kind::function,
+            if (default_arguments(ft.declarator, e, entity_kind::function,
                                   true) != analysis_result::well_formed) {
                 unsupported.resize(unsupported_before);
                 entity_table[e].unknown_defaults = true;
@@ -209,8 +206,7 @@ analysis_result semantic_analysis::instantiate_definition(SyntaxRef at,
     /* (leave_instantiation drops the claims of the template's expressions:
        they are about one specialization, which clang makes none of) */
     instantiation_context context;
-    enter_instantiation(context, instantiations[index].scope,
-                        syntax(ft.declaration));
+    enter_instantiation(context, instantiations[index].scope, ft.declaration);
     expanding = false;
     instantiating = index + 1;
     instantiations[index].defining = true;
@@ -223,7 +219,7 @@ analysis_result semantic_analysis::instantiate_definition(SyntaxRef at,
     if (entity_table[template_entity].special == special_member::constructor) {
         /* a constructor template's ([temp.mem]/1): its declarator again
            (the parameters), then its function-body */
-        auto d_syntax = syntax(ft.definition);
+        auto d_syntax = ft.definition;
         uint32_t d_skip = leading_gnu_attributes(ft.definition);
         bool specifiers = d_syntax[d_skip].is(syntax_kind::decl_specifier_seq);
         qualified_type type;
@@ -231,21 +227,21 @@ analysis_result semantic_analysis::instantiate_definition(SyntaxRef at,
         function_cv = 0;
         function_parameters.clear();
         r = constructor_template_declarator(
-            syntax(ft.definition), d_syntax[d_skip + specifiers], type, m);
+            ft.definition, d_syntax[d_skip + specifiers], type, m);
         last_declared = instantiations[index].specialization;
         if (r == analysis_result::well_formed)
             r = special_member_body(
                 d_syntax, d_syntax[d_skip + specifiers + 1 +
-                                   (static_cast<bool>(trailing_constraint(
-                                       syntax(ft.declaration))))]
+                                   (static_cast<bool>(
+                                       trailing_constraint(ft.declaration)))]
                               .function_body());
-    } else if (syntax(ft.definition).is(syntax_kind::lambda_expression)) {
+    } else if (ft.definition.is(syntax_kind::lambda_expression)) {
         /* a generic lambda's ([expr.prim.lambda.closure]/3) */
         qualified_type type;
-        r = lambda_specialization(syntax(ft.definition), true, type,
+        r = lambda_specialization(ft.definition, true, type,
                                   instantiations[index].specialization);
     } else {
-        r = function_definition(syntax(ft.definition));
+        r = function_definition(ft.definition);
     }
     member_template_declarator(0);
     instantiations[index].defining = false;
@@ -434,13 +430,13 @@ analysis_result semantic_analysis::define_class_instantiation(SyntaxRef at,
     size_t unsupported_before = unsupported.size();
     instantiation_context context;
     enter_instantiation(context, entity_table[ft.entity].enclosing,
-                        syntax(definition.declaration));
+                        definition.declaration);
     declaration_access = 0;
     instantiating = 0;
     class_instantiating = index + 1;
     postpone_member_bodies = context.defining_class != 0;
     type_index type = 0;
-    analysis_result r = class_specifier(syntax(definition.definition), type);
+    analysis_result r = class_specifier(definition.definition, type);
     postpone_member_bodies = false;
     leave_instantiation(context);
     instantiations[index].defining = false;
@@ -475,8 +471,8 @@ void semantic_analysis::instantiate_pending()
     for (size_t i = 0; i < postponed_bodies.size(); i++) {
         const postponed_body b = postponed_bodies[i];
         instantiation_context context;
-        enter_instantiation(context, b.scope, syntax(b.declaration));
-        member_function_body(b.c, syntax(b.body));
+        enter_instantiation(context, b.scope, b.declaration);
+        member_function_body(b.c, b.body);
         leave_instantiation(context);
     }
     postponed_bodies.clear();
@@ -685,10 +681,10 @@ token_index semantic_analysis::parameter_type_constraint(entity_index t,
         template_parameter_parts x;
         if (!template_parameter_form(
                 template_parameter_nodes[ft.first_parameter + i], x) ||
-            !x.constraint || syntax(x.constraint).size() != 1 ||
-            !syntax(x.constraint)[0].is_token())
+            !x.constraint || x.constraint.size() != 1 ||
+            !x.constraint[0].is_token())
             return 0;
-        return syntax(x.constraint)[0].token();
+        return x.constraint[0].token();
     }
     return 0;
 }

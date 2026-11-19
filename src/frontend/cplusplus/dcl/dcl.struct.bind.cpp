@@ -337,8 +337,8 @@ analysis_result semantic_analysis::tuple_size_of(SyntaxRef n,
         for (const analysed_declaration &d : declarations) {
             if (d.result == analysis_result::well_formed)
                 continue;
-            for (token_index t = syntax(d.node).first_token();
-                 t < syntax(d.node).end_token(); t++)
+            for (token_index t = d.node.first_token(); t < d.node.end_token();
+                 t++)
                 if (tokens[t].kind == token_kind::identifier &&
                     tokens.identifier(t) == name)
                     return not_supported(n, "temp.expl.spec");
@@ -862,7 +862,7 @@ analysis_result semantic_analysis::structured_binding_use(token_index t,
         if (r == analysis_result::well_formed && x.binding_target) {
             r = member_access(t, x.binding_target, m);
         } else if (r == analysis_result::well_formed) {
-            r = array_element(syntax(current_declaration), t, m, x.field);
+            r = array_element(current_declaration, t, m, x.field);
         }
     }
     if (r != analysis_result::well_formed)

@@ -40,7 +40,7 @@ bool semantic_analysis::template_parameter_form(
     SyntaxRef p, template_parameter_parts &out) const
 {
     out = template_parameter_parts();
-    auto x = syntax(p);
+    auto x = p;
     if (!x.size())
         return false;
     /* [dcl.fct]/22: a parameter's decl-specifier-seq with a generic
@@ -55,7 +55,7 @@ bool semantic_analysis::template_parameter_form(
         return true;
     }
     uint32_t k = 1;
-    out.type = syntax(p).is(syntax_kind::type_parameter);
+    out.type = p.is(syntax_kind::type_parameter);
     if (out.type) {
         if (x[0].is(syntax_kind::type_constraint)) {
             out.constraint = x[0].index();

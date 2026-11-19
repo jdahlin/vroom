@@ -39,7 +39,7 @@ semantic_analysis::lambda_captures_of(SyntaxRef n,
             continue;
         if (c.is(syntax_kind::lambda_capture) ||
             c.is(syntax_kind::capture_list)) {
-            analysis_result r = lambda_captures_of(syntax(c.index()), out);
+            analysis_result r = lambda_captures_of(c, out);
             if (r != analysis_result::well_formed)
                 return r;
             continue;
@@ -566,7 +566,7 @@ semantic_analysis::closure_object(lambda_context &l,
                                   const owned_array<capture_record> &captures,
                                   expression_meaning &m)
 {
-    token_index at = syntax(l.at).first_token();
+    token_index at = l.at.first_token();
     owned_array<uint32_t> elements;
     for (const capture_record &c : captures) {
         if (c.init_capture) {

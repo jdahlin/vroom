@@ -105,11 +105,11 @@ analysis_result semantic_analysis::default_arguments(SyntaxRef n,
            are in scope and can hide namespace and class member names": not
            so here, so a default argument that may name one is not
            analysed */
-        SyntaxRef clause = node_of(syntax(p.default_argument));
-        token_index first = syntax(clause).first_token();
-        token_index end = syntax(clause).end_token();
+        SyntaxRef clause = node_of(p.default_argument);
+        token_index first = clause.first_token();
+        token_index end = clause.end_token();
         if (p.default_argument.is_token()) {
-            first = p.default_argument.index();
+            first = p.default_argument.token();
             end = first + 1;
         }
         for (token_index t = first; t < end && member; t++) {
@@ -137,9 +137,8 @@ analysis_result semantic_analysis::default_arguments(SyntaxRef n,
                     return not_supported(p.declaration, "dcl.fct.default");
         qualified_type type = types[i];
         initialized_value value;
-        analysis_result r =
-            initialize_from(p.declaration, syntax(p.default_argument), type,
-                            false, false, value);
+        analysis_result r = initialize_from(p.declaration, p.default_argument,
+                                            type, false, false, value);
         if (r != analysis_result::well_formed)
             return r;
         nodes[i] = value.node;
@@ -185,8 +184,8 @@ analysis_result semantic_analysis::member_default_arguments(entity_index c)
             function_parameters.append(member_default_parameters[p.first + i]);
         current_scope = c;
         analysing_member_defaults = true;
-        analysis_result r = default_arguments(syntax(p.declaration), p.function,
-                                              entity_kind::function);
+        analysis_result r =
+            default_arguments(p.declaration, p.function, entity_kind::function);
         analysing_member_defaults = false;
         current_scope = scope;
         if (r != analysis_result::well_formed)

@@ -1286,7 +1286,7 @@ class semantic_tree
 /* one expression analysis gave a type: what -fcxx-dump=type-claims has clang
    check */
 struct analysed_expression {
-    syntax_child at;
+    SyntaxElement at;
     SyntaxRef declaration = 0;
     expression_meaning meaning;
     /* where a claim about it can be placed: just after this token (the
@@ -2014,7 +2014,7 @@ class semantic_analysis
         /* its parameter-declaration, and the initializer-clause of its
            default argument ([dcl.fct.default]/1), none if it has none */
         SyntaxRef declaration = 0;
-        syntax_child default_argument;
+        SyntaxElement default_argument;
         /* [temp.variadic]/5: an element of the function parameter pack
            (an instantiation's) of this name, id 0 */
         uint32_t pack_name = 0;
@@ -3492,7 +3492,7 @@ class semantic_analysis
     bool abbreviated_function(SyntaxRef definition) const
     {
         owned_array<SyntaxRef> parameters;
-        return !abbreviated_parameters(syntax(definition), parameters) ||
+        return !abbreviated_parameters(definition, parameters) ||
                !parameters.empty();
     }
     /* the name of the invented template-parameter of seq, auto:N, which no
@@ -3546,7 +3546,7 @@ class semantic_analysis
         /* a type-parameter's type-constraint ([temp.param]/1), or 0 */
         SyntaxRef constraint = 0;
         SyntaxRef head = 0;
-        syntax_child default_argument, declarator;
+        SyntaxElement default_argument, declarator;
     };
     bool template_parameter_form(SyntaxRef parameter,
                                  template_parameter_parts &out) const;
@@ -4081,33 +4081,6 @@ class semantic_analysis
     bool specialization_template_name(entity_index e, uint32_t i,
                                       entity_index &named, uint32_t &parameter,
                                       uint32_t element = 0) const;
-
-    /* the typed view of a node of the syntax tree, or of a child (a node
-       or a token) (syntax.h) */
-    SyntaxRef syntax(SyntaxRef n) const
-    {
-        return SyntaxRef(syntax_cx, n);
-    }
-    /* a child read out of a record (a stored child is 4 bytes, a view 16) */
-    SyntaxElement syntax(syntax_child c) const
-    {
-        return SyntaxElement(syntax_cx, c);
-    }
-    /* a token as a child: to ask it what a SyntaxElement is asked */
-    SyntaxElement token_element(token_index t) const
-    {
-        return SyntaxElement(syntax_cx, syntax_child::token(t));
-    }
-    /* a node as a child: where a function takes a SyntaxElement */
-    SyntaxElement element(SyntaxRef n) const
-    {
-        return SyntaxElement(syntax_cx, syntax_child::node(n));
-    }
-    /* already a view: syntax(x[i]) needs no conversion */
-    SyntaxElement syntax(SyntaxElement e) const
-    {
-        return e;
-    }
 
   private:
     const template_argument &

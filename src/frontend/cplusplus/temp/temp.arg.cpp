@@ -137,7 +137,7 @@ entity_index semantic_analysis::dependent_value_entity(SyntaxElement written)
             return x.entity;
     }
     if (!negated && written.is(syntax_kind::simple_template_id))
-        return dependent_variable_specialization(syntax(written.index()), e);
+        return dependent_variable_specialization(written, e);
     if (!written.is(syntax_kind::qualified_id) || written.size() != 2)
         return e;
     SyntaxElement qualifier = written[0];
@@ -151,8 +151,7 @@ entity_index semantic_analysis::dependent_value_entity(SyntaxElement written)
     /* (its own unsupported records: the argument stays value-dependent) */
     size_t unsupported_before = unsupported.size();
     type_index q = 0;
-    analysis_result r =
-        template_type(syntax(qualifier[0].index()), 0, false, q);
+    analysis_result r = template_type(qualifier[0], 0, false, q);
     unsupported.resize(unsupported_before);
     if (r != analysis_result::well_formed ||
         type_table[q].kind != type_kind::dependent ||
@@ -268,13 +267,13 @@ analysis_result semantic_analysis::substituted_parameter_type(
     entity_index saved = current_scope;
     token_index saved_horizon = lookup_horizon;
     current_scope = scope;
-    lookup_horizon = syntax(ft.declaration).first_token();
+    lookup_horizon = ft.declaration.first_token();
     specified sp;
-    analysis_result r = decl_specifier_seq(syntax(node)[0].index(), sp, false);
+    analysis_result r = decl_specifier_seq(node[0].index(), sp, false);
     qualified_type t = sp.type;
     if (r == analysis_result::well_formed && form.has_declarator) {
         declarator_meaning dm;
-        r = declarator(node, syntax(form.declarator), t, dm);
+        r = declarator(node, form.declarator, t, dm);
     }
     current_scope = saved;
     lookup_horizon = saved_horizon;
@@ -560,7 +559,7 @@ analysis_result semantic_analysis::template_template_argument(
     lookup_result x;
     if (qualifier) {
         nominated_scope scope;
-        analysis_result r = nested_name_specifier(syntax(qualifier), scope);
+        analysis_result r = nested_name_specifier(qualifier, scope);
         if (r != analysis_result::well_formed)
             return r;
         if (scope.entity && !is_namespace(scope.entity))
@@ -624,11 +623,10 @@ analysis_result semantic_analysis::default_template_arguments(
                 scope, template_parameter_entities[ft.first_parameter + k],
                 arguments[k]);
         current_scope = scope;
-        lookup_horizon = syntax(ft.declaration).first_token();
+        lookup_horizon = ft.declaration.first_token();
         template_argument a;
-        analysis_result r = template_argument_for(at, template_index, i,
-                                                  syntax(form.default_argument),
-                                                  arguments.data(), a);
+        analysis_result r = template_argument_for(
+            at, template_index, i, form.default_argument, arguments.data(), a);
         current_scope = saved;
         lookup_horizon = saved_horizon;
         if (r != analysis_result::well_formed)

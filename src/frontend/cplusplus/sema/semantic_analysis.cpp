@@ -41,7 +41,7 @@ semantic_analysis::semantic_analysis(const syntax_tree &tree,
 
 analysis_result semantic_analysis::not_supported(SyntaxRef n, call_site where)
 {
-    return not_supported(n, syntax_kind_subclause(syntax(n).kind()), where);
+    return not_supported(n, syntax_kind_subclause(n.kind()), where);
 }
 
 analysis_result semantic_analysis::not_supported(SyntaxRef n,
@@ -61,7 +61,7 @@ analysis_result semantic_analysis::not_supported(SyntaxRef n,
 analysis_result semantic_analysis::ill_formed(SyntaxRef at, const char *rule,
                                               const char *subclause)
 {
-    return ill_formed_at_token(syntax(at).first_token(), rule, subclause);
+    return ill_formed_at_token(at.first_token(), rule, subclause);
 }
 
 analysis_result semantic_analysis::ill_formed_at_token(token_index at,
@@ -104,11 +104,11 @@ bool semantic_analysis::parsed_completely(SyntaxRef n) const
     while (!work.empty()) {
         SyntaxRef next = work.back();
         work.resize(work.size() - 1);
-        auto s = syntax(next);
+        auto s = next;
         if (s.is(syntax_kind::erroneous) || s.is(syntax_kind::unparsed))
             return false;
         for (uint32_t i = 0; i < s.size(); i++) {
-            SyntaxElement c = syntax(next)[i];
+            SyntaxElement c = next[i];
             if (!c.is_token())
                 work.append(c.index());
         }
@@ -228,7 +228,7 @@ void semantic_analysis::translation_unit()
     owned_array<node_index> all;
     tree.declarations(&all);
     for (node_index n : all)
-        declaration(syntax(n));
+        declaration(n);
     instantiate_pending();
 }
 

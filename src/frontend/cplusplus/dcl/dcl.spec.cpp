@@ -1026,7 +1026,7 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
                                                       specified &s,
                                                       bool parameter)
 {
-    auto node = syntax(seq);
+    auto node = seq;
     /* [dcl.spec.auto]/6: "A program that uses a placeholder type in a
        context not explicitly allowed in this subclause is ill-formed": the
        contexts analysed allow it (placeholder_allowed) */
@@ -1052,18 +1052,18 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
     trailing_class_alignment = 0;
     for (uint32_t i = 0; i < node.size(); i++) {
         SyntaxElement c = node[i];
-        if (c.is_token() || syntax(c).is(syntax_kind::class_specifier) ||
-            syntax(c).is(syntax_kind::elaborated_type_specifier) ||
-            syntax(c).is(syntax_kind::enum_specifier) ||
-            syntax(c).is(syntax_kind::elaborated_enum_specifier) ||
-            syntax(c).is(syntax_kind::simple_type_specifier) ||
-            syntax(c).is(syntax_kind::typename_specifier) ||
-            syntax(c).is(syntax_kind::simple_template_id) ||
-            syntax(c).is(syntax_kind::decltype_specifier) ||
-            syntax(c).is(syntax_kind::clang_type_transformation) ||
-            syntax(c).is(syntax_kind::clang_atomic_type_specifier) ||
-            syntax(c).is(syntax_kind::clang_bit_int_type_specifier) ||
-            syntax(c).is(syntax_kind::placeholder_type_specifier))
+        if (c.is_token() || c.is(syntax_kind::class_specifier) ||
+            c.is(syntax_kind::elaborated_type_specifier) ||
+            c.is(syntax_kind::enum_specifier) ||
+            c.is(syntax_kind::elaborated_enum_specifier) ||
+            c.is(syntax_kind::simple_type_specifier) ||
+            c.is(syntax_kind::typename_specifier) ||
+            c.is(syntax_kind::simple_template_id) ||
+            c.is(syntax_kind::decltype_specifier) ||
+            c.is(syntax_kind::clang_type_transformation) ||
+            c.is(syntax_kind::clang_atomic_type_specifier) ||
+            c.is(syntax_kind::clang_bit_int_type_specifier) ||
+            c.is(syntax_kind::placeholder_type_specifier))
             continue;
         /* an attribute specifier has rules unless a class-specifier is
            among the specifiers */
@@ -1071,13 +1071,12 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
         for (auto child : node.elements())
             if (child.is(syntax_kind::class_specifier))
                 defines_class = true;
-        if (!defines_class &&
-            syntax(c).is(syntax_kind::gnu_attribute_specifier))
+        if (!defines_class && c.is(syntax_kind::gnu_attribute_specifier))
             continue;
         /* [ext:gnu_attributes] aligned after the class-specifier's closing
            brace: GCC raises the class's alignment (clang's layout too) */
-        if (syntax(c).is(syntax_kind::gnu_attribute_specifier) &&
-            class_specifier_before(syntax(seq), i)) {
+        if (c.is(syntax_kind::gnu_attribute_specifier) &&
+            class_specifier_before(seq, i)) {
             gnu_attributes g;
             analysis_result r = gnu_attribute_specifier(c.index(), g);
             if (r != analysis_result::well_formed)
@@ -1092,11 +1091,10 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
         /* the class names the declaration would define are held, as
            hold_names holds its declarators' */
         for (auto spec : node.elements()) {
-            if (!syntax(spec).is(syntax_kind::class_specifier) ||
-                !syntax(spec).size() ||
-                !syntax(spec)[0].is(syntax_kind::class_head))
+            if (!spec.is(syntax_kind::class_specifier) || !spec.size() ||
+                !spec[0].is(syntax_kind::class_head))
                 continue;
-            auto head = syntax(spec)[0];
+            auto head = spec[0];
             for (SyntaxElement t : head.elements()) {
                 if (!t.is_token() ||
                     tokens[t.token()].kind != token_kind::identifier)
@@ -1115,9 +1113,9 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
         }
         /* [dcl.align]/2: "the constant-expression shall be an integral
            constant expression" */
-        bool alignment = syntax(c).is(syntax_kind::alignment_specifier);
-        if (syntax(c).is(syntax_kind::attribute_specifier_seq))
-            for (auto child : syntax(c).elements())
+        bool alignment = c.is(syntax_kind::alignment_specifier);
+        if (c.is(syntax_kind::attribute_specifier_seq))
+            for (auto child : c.elements())
                 if (child.is(syntax_kind::alignment_specifier))
                     alignment = true;
         if (alignment)
@@ -1131,59 +1129,55 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
                elaborated-type-specifier: the class is the type */
             type_index class_type = 0;
             analysis_result r;
-            if (syntax(c).is(syntax_kind::class_specifier))
+            if (c.is(syntax_kind::class_specifier))
                 r = class_specifier(c, class_type);
-            else if (syntax(c).is(syntax_kind::elaborated_type_specifier))
+            else if (c.is(syntax_kind::elaborated_type_specifier))
                 r = elaborated_type_specifier(c, class_type);
-            else if (syntax(c).is(syntax_kind::enum_specifier)) {
-                r = enum_specifier(syntax(c.index()), class_type);
+            else if (c.is(syntax_kind::enum_specifier)) {
+                r = enum_specifier(c, class_type);
                 declares_enumeration = true;
-            } else if (syntax(c).is(syntax_kind::elaborated_enum_specifier))
+            } else if (c.is(syntax_kind::elaborated_enum_specifier))
                 r = elaborated_enum_specifier(c, class_type);
-            else if (syntax(c).is(syntax_kind::simple_template_id)) {
+            else if (c.is(syntax_kind::simple_template_id)) {
                 uint32_t named_cv = 0;
-                r = template_type(syntax(c.index()), 0, false, class_type,
-                                  &named_cv);
+                r = template_type(c, 0, false, class_type, &named_cv);
                 cv |= named_cv;
-            } else if (syntax(c).is(syntax_kind::simple_type_specifier)) {
+            } else if (c.is(syntax_kind::simple_type_specifier)) {
                 uint32_t named_cv = 0;
-                r = qualified_type_name(syntax(c.index()), class_type,
-                                        named_cv);
+                r = qualified_type_name(c, class_type, named_cv);
                 cv |= named_cv;
-            } else if (syntax(c).is(syntax_kind::typename_specifier)) {
+            } else if (c.is(syntax_kind::typename_specifier)) {
                 uint32_t named_cv = 0;
-                r = typename_type(syntax(c.index()), class_type, named_cv);
+                r = typename_type(c, class_type, named_cv);
                 cv |= named_cv;
-            } else if (syntax(c).is(syntax_kind::decltype_specifier)) {
+            } else if (c.is(syntax_kind::decltype_specifier)) {
                 /* [dcl.type.decltype] */
                 qualified_type denoted;
-                r = decltype_type(syntax(c.index()), denoted);
+                r = decltype_type(c, denoted);
                 class_type = denoted.unqualified();
                 cv |= denoted.cv();
-            } else if (syntax(c).is(syntax_kind::clang_type_transformation)) {
+            } else if (c.is(syntax_kind::clang_type_transformation)) {
                 /* [ext:clang_type_traits] */
                 qualified_type denoted;
                 r = clang_type_transformation(c, denoted);
                 class_type = denoted.unqualified();
                 cv |= denoted.cv();
-            } else if (syntax(c).is(syntax_kind::clang_atomic_type_specifier)) {
+            } else if (c.is(syntax_kind::clang_atomic_type_specifier)) {
                 /* [ext:clang_atomic] */
                 qualified_type denoted;
-                r = clang_atomic_type(syntax(c.index()), denoted);
+                r = clang_atomic_type(c, denoted);
                 class_type = denoted.unqualified();
-            } else if (syntax(c).is(
-                           syntax_kind::clang_bit_int_type_specifier)) {
+            } else if (c.is(syntax_kind::clang_bit_int_type_specifier)) {
                 /* [ext:clang_bit_int] */
                 qualified_type denoted;
-                r = clang_bit_int_type(syntax(c.index()), denoted);
+                r = clang_bit_int_type(c, denoted);
                 class_type = denoted.unqualified();
-            } else if (syntax(c).is(syntax_kind::placeholder_type_specifier)) {
+            } else if (c.is(syntax_kind::placeholder_type_specifier)) {
                 /* [dcl.spec.auto]: decltype(auto); a type-constraint is
                    [temp.param]'s */
-                auto parts = syntax(c);
+                auto parts = c;
                 qualified_type invented;
-                if (parameter &&
-                    invented_parameter_type(syntax(seq), invented)) {
+                if (parameter && invented_parameter_type(seq, invented)) {
                     /* [dcl.fct]/22: C auto's invented template-parameter */
                     class_type = invented.unqualified();
                     cv |= invented.cv();
@@ -1193,7 +1187,7 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
                        type-constraint_opt decltype(auto); a type-constraint
                        of a concept-name alone, C<U> ([temp.param]/4) */
                     entity_index named_concept = 0;
-                    uint32_t last = syntax(c).size() - 1;
+                    uint32_t last = c.size() - 1;
                     if (parts[0].is(syntax_kind::type_constraint)) {
                         auto q = parts[0];
                         if (parts[0].size() == 1 && q[0].is_token())
@@ -1217,10 +1211,10 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
                                      .unqualified();
                     r = analysis_result::well_formed;
                 }
-            } else if (syntax(c).is(syntax_kind::gnu_attribute_specifier)) {
+            } else if (c.is(syntax_kind::gnu_attribute_specifier)) {
                 /* (after a class-specifier: the class's alignment, taken
                    above) */
-                if (class_specifier_before(syntax(seq), i))
+                if (class_specifier_before(seq, i))
                     continue;
                 /* [ext:gnu_attributes] a decl-specifier: it applies to
                    the declaration */
@@ -1233,18 +1227,18 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
             if (r != analysis_result::well_formed)
                 return r;
             if (named || !k.first)
-                k.first = syntax(c).first_token();
+                k.first = c.first_token();
             if (named)
                 k.alone++;
             named = class_type;
-            named_at = syntax(c).first_token();
-            if (!syntax(c).is(syntax_kind::simple_type_specifier) &&
-                !syntax(c).is(syntax_kind::typename_specifier) &&
-                !syntax(c).is(syntax_kind::decltype_specifier) &&
-                !syntax(c).is(syntax_kind::clang_type_transformation) &&
-                !syntax(c).is(syntax_kind::clang_atomic_type_specifier) &&
-                !syntax(c).is(syntax_kind::clang_bit_int_type_specifier) &&
-                !syntax(c).is(syntax_kind::placeholder_type_specifier))
+            named_at = c.first_token();
+            if (!c.is(syntax_kind::simple_type_specifier) &&
+                !c.is(syntax_kind::typename_specifier) &&
+                !c.is(syntax_kind::decltype_specifier) &&
+                !c.is(syntax_kind::clang_type_transformation) &&
+                !c.is(syntax_kind::clang_atomic_type_specifier) &&
+                !c.is(syntax_kind::clang_bit_int_type_specifier) &&
+                !c.is(syntax_kind::placeholder_type_specifier))
                 declares_class = true;
             continue;
         }
@@ -1409,7 +1403,7 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
             /* [dcl.fct]/22: a generic parameter type placeholder, the type
                of its invented template-parameter */
             qualified_type invented;
-            if (parameter && invented_parameter_type(syntax(seq), invented)) {
+            if (parameter && invented_parameter_type(seq, invented)) {
                 if (named)
                     k.alone++;
                 named = invented.unqualified();
@@ -1513,7 +1507,7 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
     if (named) {
         type = named;
     } else if (keywords) {
-        analysis_result r = simple_type(syntax(seq), k, type);
+        analysis_result r = simple_type(seq, k, type);
         if (r != analysis_result::well_formed)
             return r;
     }
@@ -1576,8 +1570,7 @@ analysis_result semantic_analysis::qualified_type_name(SyntaxRef n,
             if (!is_namespace(scope.entity) &&
                 entity_table[scope.entity].kind != entity_kind::class_type)
                 return not_supported(n, "temp.names");
-            return template_type(syntax(node[1].index()), scope.entity, true,
-                                 type, &cv);
+            return template_type(node[1], scope.entity, true, type, &cv);
         }
         return not_supported(n, "dcl.type.simple");
     }

@@ -234,10 +234,10 @@ bool semantic_analysis::dependent_exception_specification(entity_index t) const
     for (const function_template &f : function_templates) {
         if (f.entity != t || !f.declaration)
             continue;
-        auto d = syntax(f.declaration);
+        auto d = f.declaration;
         for (SyntaxRef x : dependent_exception_specifications)
-            if (syntax(x).first_token() >= d.first_token() &&
-                syntax(x).end_token() <= d.end_token())
+            if (x.first_token() >= d.first_token() &&
+                x.end_token() <= d.end_token())
                 return true;
     }
     return false;

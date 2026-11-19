@@ -167,8 +167,7 @@ analysis_result semantic_analysis::explicit_conversion(SyntaxRef at,
            variable as the result of the conversion" */
         owned_array<expression_meaning> arguments;
         arguments.append(m);
-        return class_direct_initialization(syntax(at), target.entity, arguments,
-                                           m);
+        return class_direct_initialization(at, target.entity, arguments, m);
     }
     if (type_table[m.type.unqualified()].kind == type_kind::class_type) {
         if (!by_static)
@@ -418,7 +417,7 @@ analysis_result semantic_analysis::member_pointer_cast(SyntaxRef at,
                               "conversion is ill-formed",
                               "conv.mem");
         r = member_pointer_along_path(
-            syntax(at).first_token(), b, d,
+            at.first_token(), b, d,
             qualified_type::make(
                 type_table.pointer_to_member(b, source.operand), cv_none),
             false, false, m);
@@ -437,7 +436,7 @@ analysis_result semantic_analysis::member_pointer_cast(SyntaxRef at,
     /* [expr.cast]/4: "in performing a static_cast in the following
        situations the conversion is valid even if the base class is
        inaccessible" */
-    return member_pointer_along_path(syntax(at).first_token(), d, b, to, true,
+    return member_pointer_along_path(at.first_token(), d, b, to, true,
                                      kinds == cast_static, m);
 }
 
@@ -619,7 +618,7 @@ analysis_result semantic_analysis::class_pointer_cast(SyntaxRef at,
         type_table.pointer_to(qualified_type::make(
             target_pointee.unqualified(), target_pointee.cv() | pointee.cv())),
         cv_none);
-    token_index t = syntax(at).first_token();
+    token_index t = at.first_token();
     analysis_result r = analysis_result::well_formed;
     if (kinds != cast_static)
         /* [expr.cast]/4: "in performing a static_cast in the following
@@ -721,7 +720,7 @@ analysis_result semantic_analysis::reference_cast(SyntaxRef at,
                temporary of the converted value */
             return not_supported(at, "expr.static.cast");
     }
-    token_index t = syntax(at).first_token();
+    token_index t = at.first_token();
     expression_meaning address;
     address.type = qualified_type::make(type_table.pointer_to(m.type), cv_none);
     address.category = value_category::prvalue;

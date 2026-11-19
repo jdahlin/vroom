@@ -6307,7 +6307,7 @@ bool analysis_complete(const semantic_analysis &analysis, lowering_failure &why)
 {
     for (const analysed_declaration &d : analysis.declarations)
         if (d.result != analysis_result::well_formed) {
-            why.at = analysis.syntax(d.node).first_token();
+            why.at = d.node.first_token();
             if (d.result == analysis_result::unsupported && d.has_unsupported) {
                 const unsupported_construct &u =
                     analysis.unsupported[d.first_unsupported];
@@ -6315,14 +6315,14 @@ bool analysis_complete(const semantic_analysis &analysis, lowering_failure &why)
                 why.file = u.file;
                 why.line = u.line;
                 why.function = u.function;
-                why.at = analysis.syntax(u.node).first_token();
+                why.at = u.node.first_token();
             }
             why.what = "a declaration that is not well-formed";
             why.front_end = true;
             if (d.result == analysis_result::not_parsed) {
                 why.what = "a declaration the parser kept as tokens";
                 /* the first part of it the parser kept, and why */
-                auto node = analysis.syntax(d.node);
+                auto node = d.node;
                 for (const parser::unparsed_reason &r :
                      analysis.parsed().unparsed_reasons)
                     if (r.first >= node.first_token() &&

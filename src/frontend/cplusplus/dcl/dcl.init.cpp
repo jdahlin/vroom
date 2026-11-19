@@ -606,7 +606,7 @@ semantic_analysis::class_reference_binding(SyntaxRef at, expression_meaning &m,
         return not_supported(at, "class.temporary");
     if (c1 == c2)
         return analysis_result::well_formed;
-    return to_base(syntax(at).first_token(), c1, m);
+    return to_base(at.first_token(), c1, m);
 }
 
 /*
@@ -623,8 +623,7 @@ analysis_result semantic_analysis::initialize_from(SyntaxRef at,
                                                    initialized_value &result)
 {
     if (clause.is(syntax_kind::braced_init_list))
-        return list_initialization(syntax(clause.index()), type, direct,
-                                   result);
+        return list_initialization(clause, type, direct, result);
     const struct type target = type_table[type.unqualified()];
     expression_meaning m;
     if (target.kind == type_kind::array) {
@@ -683,7 +682,7 @@ analysis_result semantic_analysis::initialize_with(SyntaxRef at,
             return r;
         /* the reference's own type: what lowering makes an address of */
         result.node = expression_node(semantic_kind::bind_reference, m,
-                                      syntax(at).first_token(), m.node);
+                                      at.first_token(), m.node);
         semantics[result.node].type = type;
         return r;
     }
@@ -735,7 +734,7 @@ analysis_result semantic_analysis::initialize_with(SyntaxRef at,
                class subobject of the derived object */
             if (!copies_bytes(target.entity))
                 return not_supported(at, "class.copy.ctor");
-            r = to_base(syntax(at).first_token(), target.entity, m);
+            r = to_base(at.first_token(), target.entity, m);
             if (r != analysis_result::well_formed)
                 return r;
             same = true;
@@ -796,8 +795,8 @@ analysis_result semantic_analysis::initialize_with(SyntaxRef at,
         if (narrows && tokens.files.behavior.microsoft_extensions)
             return not_supported(at, "dcl.init.list");
         if (narrows) {
-            r = extension_used(diagnostic_id::sema_narrowing,
-                               syntax(at).first_token(), nullptr);
+            r = extension_used(diagnostic_id::sema_narrowing, at.first_token(),
+                               nullptr);
             if (r != analysis_result::well_formed)
                 return r;
         }
@@ -974,8 +973,7 @@ analysis_result semantic_analysis::initializer(SyntaxElement init,
         if (node.size() != 2)
             return not_supported(n, "dcl.init");
         if (node[1].is(syntax_kind::braced_init_list))
-            return list_initialization(syntax(node[1].index()), type, false,
-                                       result);
+            return list_initialization(node[1], type, false, result);
         return initialize_from(n, node[1], type, false, false, result);
     case syntax_kind::initializer:
         if (node.size() != 3)
@@ -1221,8 +1219,8 @@ analysis_result semantic_analysis::constructor_list_initialization(
             (reference || tokens.files.behavior.microsoft_extensions))
             return not_supported(at, "dcl.init.list");
         if (narrows) {
-            r = extension_used(diagnostic_id::sema_narrowing,
-                               syntax(at).first_token(), nullptr);
+            r = extension_used(diagnostic_id::sema_narrowing, at.first_token(),
+                               nullptr);
             if (r != analysis_result::well_formed)
                 return r;
         }

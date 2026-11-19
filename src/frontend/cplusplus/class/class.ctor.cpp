@@ -80,8 +80,7 @@ analysis_result semantic_analysis::member_template_declaration(
         node[1].is_token())
         return not_supported(n, "temp.mem");
     owned_array<SyntaxRef> parameters;
-    if (!template_head_list(syntax(node[0].index()), parameters) ||
-        parameters.empty())
+    if (!template_head_list(node[0], parameters) || parameters.empty())
         return not_supported(n, "temp.mem");
     auto inner = node[1];
     auto d = inner;
@@ -99,11 +98,11 @@ analysis_result semantic_analysis::member_template_declaration(
        { ... };), a class template declared in the class's scope */
     if (d.is(syntax_kind::member_declaration)) {
         SyntaxRef only = sole_decl_specifier(inner);
-        if (only && syntax(only).is(syntax_kind::class_specifier)) {
+        if (only && only.is(syntax_kind::class_specifier)) {
             entity_index saved = current_scope, saved_class = defining_class;
             current_scope = c;
             defining_class = 0;
-            analysis_result r = class_template_definition(n, syntax(only));
+            analysis_result r = class_template_definition(n, only);
             current_scope = saved;
             defining_class = saved_class;
             return r;
@@ -128,7 +127,7 @@ analysis_result semantic_analysis::member_template_declaration(
         return not_supported(n, "temp.constr");
     if (at < d.size() && d[at].is(syntax_kind::decl_specifier_seq)) {
         specified s;
-        analysis_result r = constructor_specifiers(syntax(d[at].index()), s);
+        analysis_result r = constructor_specifiers(d[at], s);
         if (r != analysis_result::well_formed)
             return r;
         at++;
@@ -220,7 +219,7 @@ semantic_analysis::default_member_initializer(token_index at, entity_index e,
     if (r != analysis_result::well_formed)
         return r;
     initialized_value value;
-    r = initializer(element(init), type, value);
+    r = initializer(init, type, value);
     if (r != analysis_result::well_formed)
         return r;
     statement = subobject_store(object, type, at, value.node);
@@ -859,9 +858,8 @@ semantic_analysis::construct(SyntaxRef at, qualified_type type,
     owned_array<template_argument> deduced;
     if (x.constructor_templates) {
         analysis_result r = constructor_template_candidates(
-            syntax(at), c, arguments.data(),
-            static_cast<uint32_t>(arguments.size()), copy, candidates,
-            &first_arguments, &deduced);
+            at, c, arguments.data(), static_cast<uint32_t>(arguments.size()),
+            copy, candidates, &first_arguments, &deduced);
         if (r != analysis_result::well_formed)
             return r;
     }
@@ -945,8 +943,7 @@ semantic_analysis::construct(SyntaxRef at, qualified_type type,
         entity_index from = type_table[arguments[0].type.unqualified()].entity;
         if (from != c && base_step(from, c, ambiguous)) {
             /* its const X& bound to the base class subobject */
-            analysis_result r =
-                to_base(syntax(at).first_token(), c, arguments[0]);
+            analysis_result r = to_base(at.first_token(), c, arguments[0]);
             if (r != analysis_result::well_formed)
                 return r;
         }
@@ -965,7 +962,7 @@ semantic_analysis::construct(SyntaxRef at, qualified_type type,
                           "it is declared",
                           "class.access");
     /* [dcl.fct.def.delete]/2 */
-    analysis_result deleted = deleted_use(syntax(at).first_token(), chosen);
+    analysis_result deleted = deleted_use(at.first_token(), chosen);
     if (deleted != analysis_result::well_formed)
         return deleted;
     size_t n = arguments.size();
@@ -1008,7 +1005,7 @@ semantic_analysis::construct(SyntaxRef at, qualified_type type,
     }
     result.value = 0;
     result.node = expression_node(semantic_kind::construct, made,
-                                  syntax(at).first_token(), object, chosen);
+                                  at.first_token(), object, chosen);
     if (!nodes.empty()) {
         semantics.set_list(result.node, &nodes[0], nodes.size());
     }
@@ -1037,7 +1034,7 @@ analysis_result semantic_analysis::ctor_initializer(SyntaxElement list,
                                                     uint32_t &built)
 {
     entity_index c = current_class();
-    token_index at = syntax(current_declaration).first_token();
+    token_index at = current_declaration.first_token();
     owned_array<SyntaxElement> items;
     for (uint32_t i = 0; list && i < list.size(); i++) {
         SyntaxElement item = list[i];
@@ -1200,7 +1197,7 @@ analysis_result semantic_analysis::ctor_initializer(SyntaxElement list,
         }
         initialized_value value;
         if (node.size() == 2 && node[1].is(syntax_kind::braced_init_list)) {
-            r = list_initialization(syntax(node[1].index()), type, true, value);
+            r = list_initialization(node[1], type, true, value);
         } else if (node.size() == 3) {
             /* ( ): value-initialization ([dcl.init]/11): zero for the
                members analysis has */
@@ -2089,7 +2086,7 @@ analysis_result semantic_analysis::class_conversion(SyntaxRef n, entity_index c,
     if (node[1].is(syntax_kind::braced_init_list)) {
         if (node.size() != 2)
             return not_supported(n, "expr.type.conv");
-        r = list_initialization(syntax(node[1].index()), type, true, value);
+        r = list_initialization(node[1], type, true, value);
     } else {
         if (node.size() == 4) {
             r = expression_list_meanings(node[2], arguments);

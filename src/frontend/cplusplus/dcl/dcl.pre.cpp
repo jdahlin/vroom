@@ -785,7 +785,7 @@ analysis_result semantic_analysis::simple_declaration(SyntaxRef n)
     uint32_t k = leading_gnu_attributes(n);
     if (k >= n.size() || !n[k].is(syntax_kind::decl_specifier_seq))
         return not_supported(n, "dcl.attr");
-    return init_declarators(n, syntax(n[k].index()), false);
+    return init_declarators(n, n[k], false);
 }
 
 /* [ext:gnu_attributes] the number of gnu-attribute-specifiers (or
@@ -794,8 +794,7 @@ analysis_result semantic_analysis::simple_declaration(SyntaxRef n)
 uint32_t semantic_analysis::leading_gnu_attributes(SyntaxRef n) const
 {
     uint32_t k = 0;
-    while (k < syntax(n).size() && !syntax(n)[k].is_token() &&
-           gnu_or_without_effect(syntax(syntax(n)[k].index())))
+    while (k < n.size() && !n[k].is_token() && gnu_or_without_effect(n[k]))
         k++;
     return k;
 }
@@ -807,14 +806,14 @@ bool semantic_analysis::gnu_or_without_effect(SyntaxRef n) const
 {
     uint32_t flags = 0;
     if (n.is(syntax_kind::attribute_specifier))
-        return attributes_as_gnu(element(n), flags);
+        return attributes_as_gnu(n, flags);
     if (!n.is(syntax_kind::attribute_specifier_seq))
         return only_gnu_attributes(tree, n);
     for (SyntaxElement c : n.elements()) {
         if (c.is_token())
             return false;
         if (!c.is(syntax_kind::gnu_attribute_specifier) &&
-            !gnu_or_without_effect(syntax(c.index())))
+            !gnu_or_without_effect(c))
             return false;
     }
     return true;
@@ -836,26 +835,23 @@ semantic_analysis::function_definition(FunctionDefinition definition)
     if (!definition)
         return not_supported(current_declaration, "dcl.fct.def.general");
     SyntaxRef n = definition;
-    auto node = syntax(n);
+    auto node = n;
     uint32_t k = leading_gnu_attributes(n);
-    if (k &&
-        (k >= node.size() || !syntax(n)[k].is(syntax_kind::decl_specifier_seq)))
+    if (k && (k >= node.size() || !n[k].is(syntax_kind::decl_specifier_seq)))
         return not_supported(n, "dcl.fct.def.general");
-    if (node.size() && !syntax(n)[k].is(syntax_kind::decl_specifier_seq))
+    if (node.size() && !n[k].is(syntax_kind::decl_specifier_seq))
         /* [class.mem]/12: a constructor or destructor (or a conversion
            function) defined outside its class */
-        return special_member_definition(syntax(n), 0);
+        return special_member_definition(n, 0);
     bool constexpr_specified = false;
     if (!k && node.size() == 3 &&
-        function_specifiers_only(syntax(syntax(n)[0].index()),
-                                 constexpr_specified))
+        function_specifiers_only(n[0], constexpr_specified))
         /* the same, constexpr ([class.ctor]/1): a decl-specifier-seq of
            constexpr alone has no type, so names no other function */
-        return special_member_definition(syntax(n), 1);
+        return special_member_definition(n, 1);
     if (!node.size())
         return not_supported(n, "dcl.fct.def.general");
-    analysis_result r =
-        init_declarators(syntax(n), syntax(syntax(n)[k].index()), true);
+    analysis_result r = init_declarators(n, n[k], true);
     if (r != analysis_result::well_formed)
         return r;
     entity_index f = last_declared;
@@ -865,10 +861,10 @@ semantic_analysis::function_definition(FunctionDefinition definition)
        function-try-block and = default are not analysed yet */
     auto body = definition.function_body();
     if (body.deleted())
-        return deleted_definition(syntax(n), f);
+        return deleted_definition(n, f);
     if (!body.plain())
         return not_supported(n, "dcl.fct.def.general");
-    return analyse_function_body(syntax(n), body.compound_statement());
+    return analyse_function_body(n, body.compound_statement());
 }
 
 /*

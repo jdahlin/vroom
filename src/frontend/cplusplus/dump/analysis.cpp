@@ -204,9 +204,7 @@ static void dump_declaration_claims(const semantic_analysis &analysis,
             !write_type_claim(analysis.type_table, d.type, claim.get()))
             continue;
         token_index last = node.end_token - 1;
-        auto body = analysis.syntax(d.declaration)
-                        .function_definition()
-                        .function_body();
+        auto body = d.declaration.function_definition().function_body();
         if (body && !body.function_try_block())
             last = tree[body.index()].first_token - 1;
         source_position end = tokens.position(node.end_token - 1);
@@ -299,10 +297,10 @@ static void dump_type_claims(const semantic_analysis &analysis,
         if (result != analysis_result::well_formed &&
             result != analysis_result::unsupported)
             continue;
-        token_index first = x.at.index(), end = x.at.index() + 1;
+        token_index first = x.at.token(), end = x.at.token() + 1;
         if (!x.at.is_token()) {
-            first = tree[x.at.node()].first_token;
-            end = tree[x.at.node()].end_token;
+            first = tree[x.at.index()].first_token;
+            end = tree[x.at.index()].end_token;
         }
         bool from_macro = false;
         spelling.clear();

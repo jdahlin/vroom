@@ -369,7 +369,7 @@ analysis_result semantic_analysis::friend_function_body(
         auto body = definition.function_body();
         if (body.defaulted()) {
             scoped_value<entity_index> compared(defaulted_comparison, c);
-            r = analyse_function_body(definition, element(body.index()));
+            r = analyse_function_body(definition, body);
         } else {
             r = analyse_function_body(definition, body.compound_statement());
         }
@@ -439,10 +439,9 @@ analysis_result semantic_analysis::defaulted_equality(
             if (r != analysis_result::well_formed)
                 return r;
         }
-        analysis_result r =
-            binary_of(syntax(current_declaration), at,
-                      preprocessing_op_or_punc::EQUAL_EQUAL, SyntaxElement(),
-                      sides[0], SyntaxElement(), sides[1], equal);
+        analysis_result r = binary_of(
+            current_declaration, at, preprocessing_op_or_punc::EQUAL_EQUAL,
+            SyntaxElement(), sides[0], SyntaxElement(), sides[1], equal);
         if (r != analysis_result::well_formed)
             return r;
         /* a bool prvalue each ([class.eq]/2), joined by && ([expr.log.and]) */
@@ -483,9 +482,9 @@ analysis_result semantic_analysis::friend_member_declaration(
     entity_index c, MemberSimpleDeclaration d, owned_array<SyntaxRef> &bodies)
 {
     SyntaxRef n = d;
-    auto node = syntax(n);
+    auto node = n;
     uint32_t leading = leading_gnu_attributes(n);
-    auto children_syntax = syntax(n);
+    auto children_syntax = n;
     if (node.size() < leading + 2)
         return not_supported(n, "class.friend");
     if (node.size() == leading + 2) {
@@ -503,9 +502,9 @@ analysis_result semantic_analysis::friend_member_declaration(
         }
         if (friends_seen != 1 || others != 1)
             return not_supported(n, "class.friend");
-        return friend_class(c, syntax(n), type);
+        return friend_class(c, n, type);
     }
-    return friend_function(c, syntax(n), bodies);
+    return friend_function(c, n, bodies);
 }
 
 } // namespace cplusplus

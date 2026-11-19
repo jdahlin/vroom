@@ -122,16 +122,16 @@ analysis_result semantic_analysis::conversion_type(SyntaxRef id,
     while (!work.empty()) {
         SyntaxRef k = work.back();
         work.resize(work.size() - 1);
-        if (syntax(k).is(syntax_kind::conversion_declarator)) {
-            for (uint32_t i = syntax(k).size(); i-- > 0;)
-                if (!syntax(k)[i].is_token())
-                    work.append(syntax(k)[i].index());
+        if (k.is(syntax_kind::conversion_declarator)) {
+            for (uint32_t i = k.size(); i-- > 0;)
+                if (!k[i].is_token())
+                    work.append(k[i].index());
             continue;
         }
-        if (!syntax(k).is(syntax_kind::ptr_operator))
+        if (!k.is(syntax_kind::ptr_operator))
             return not_supported(k, "class.conv.fct");
         declarator_meaning m;
-        r = pointer_operator(syntax(k), type, m);
+        r = pointer_operator(k, type, m);
         if (r != analysis_result::well_formed)
             return r;
     }
@@ -221,14 +221,14 @@ SyntaxRef semantic_analysis::conversion_function_id_of(SyntaxRef n) const
     while (!work.empty()) {
         SyntaxRef k = work.back();
         work.resize(work.size() - 1);
-        syntax_kind kind = syntax(k).kind();
+        syntax_kind kind = k.kind();
         if (kind == syntax_kind::conversion_function_id)
             return k;
         if (kind == syntax_kind::parameters_and_qualifiers ||
             kind == syntax_kind::brace_or_equal_initializer ||
             kind == syntax_kind::braced_init_list)
             continue;
-        for (auto child : syntax(k).elements())
+        for (auto child : k.elements())
             if (!child.is_token())
                 work.append(child.index());
     }
@@ -416,7 +416,7 @@ semantic_analysis::conversion_function_call(SyntaxRef at, expression_meaning &m,
                           "only by members and friends of the class in which "
                           "it is declared",
                           "class.access");
-    token_index t = syntax(at).first_token();
+    token_index t = at.first_token();
     analysis_result r = deleted_use(t, f);
     if (r != analysis_result::well_formed)
         return r;
@@ -441,8 +441,8 @@ semantic_analysis::conversion_function_call(SyntaxRef at, expression_meaning &m,
     owned_array<SyntaxElement> syntax;
     owned_array<expression_meaning> arguments;
     expression_meaning result;
-    r = call_with(this->syntax(at), callee, x.type, address.node, f, syntax,
-                  arguments, result);
+    r = call_with(at, callee, x.type, address.node, f, syntax, arguments,
+                  result);
     if (r != analysis_result::well_formed)
         return r;
     m = result;

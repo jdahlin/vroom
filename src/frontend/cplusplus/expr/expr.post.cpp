@@ -317,8 +317,7 @@ analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
     uint32_t named_cv = 0;
     if ((parenthesized || braced) &&
         node[0].is(syntax_kind::simple_type_specifier)) {
-        analysis_result r =
-            qualified_type_name(syntax(node[0].index()), named, named_cv);
+        analysis_result r = qualified_type_name(node[0], named, named_cv);
         if (r != analysis_result::well_formed)
             return r;
         if (type_table[named].kind == type_kind::class_type &&
@@ -416,8 +415,7 @@ analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
                 found = x.unknown_entity;
             if (class_template_of(found)) {
                 type_index t = 0;
-                analysis_result r =
-                    template_type(syntax(node[0].index()), 0, false, t);
+                analysis_result r = template_type(node[0], 0, false, t);
                 if (r != analysis_result::well_formed)
                     return r;
                 if (type_table[t].kind != type_kind::class_type)
@@ -480,8 +478,7 @@ analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
             if (is_void)
                 return not_supported(n, "expr.type.conv");
             initialized_value result;
-            analysis_result r =
-                list_initialization(syntax(node[1].index()), to, true, result);
+            analysis_result r = list_initialization(node[1], to, true, result);
             if (r != analysis_result::well_formed)
                 return r;
             m = expression_meaning();
@@ -598,7 +595,7 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
         if (c.is(syntax_kind::initializer_list)) {
             owned_array<SyntaxElement> written;
             owned_array<bool> expansion;
-            if (!expansion_list(syntax(c.index()), written, expansion))
+            if (!expansion_list(c, written, expansion))
                 return not_supported(n, "temp.variadic");
             bool any = false;
             for (bool x : expansion)
@@ -1108,8 +1105,7 @@ analysis_result semantic_analysis::template_candidates(
                 bool type_parameter =
                     entity_table[p].kind == entity_kind::typedef_name;
                 if (entity_table[p].kind != entity_kind::template_entity &&
-                    type_parameter !=
-                        syntax((*written)[i]).is(syntax_kind::type_id)) {
+                    type_parameter != (*written)[i].is(syntax_kind::type_id)) {
                     failed = true;
                     break;
                 }
@@ -1365,8 +1361,7 @@ analysis_result semantic_analysis::call_with(
             qualified_type parameter =
                 type_table.parameters(function_type.unqualified())[i];
             if (a.is(syntax_kind::braced_init_list)) {
-                r = list_initialization(syntax(a.index()), parameter, false,
-                                        value);
+                r = list_initialization(a, parameter, false, value);
             } else {
                 expression_meaning e;
                 if (i < early.size() && early[i].node)
