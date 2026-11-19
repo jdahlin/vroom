@@ -317,18 +317,31 @@ analysis_result semantic_analysis::postfix(node_index n, expression_meaning &m)
         tokens, children[1], preprocessing_op_or_punc::LEFT_PARENTHESIS);
     bool braced = syntax_is(tree, children[1], syntax_kind::braced_init_list);
     type_index named = 0;
+    /* [dcl.type.simple]/1: nested-name-specifier(opt) type-name */
+    entity_index class_named = 0;
+    uint32_t named_cv = 0;
+    if ((parenthesized || braced) &&
+        syntax_is(tree, children[0], syntax_kind::simple_type_specifier)) {
+        analysis_result r =
+            qualified_type_name(children[0].index(), named, named_cv);
+        if (r != analysis_result::well_formed)
+            return r;
+        if (type_table[named].kind == type_kind::class_type &&
+            entity_table[type_table[named].entity].kind ==
+                entity_kind::class_type)
+            class_named = type_table[named].entity;
+    }
     if ((parenthesized || braced) && children[0].is_token()) {
         const token &t = tokens[children[0].index()];
         if (t.kind == token_kind::identifier) {
             entity_index e = lookup(tokens.identifier(children[0].index()));
             if (e && entity_table[e].kind == entity_kind::class_type)
-                return class_conversion(n, e, m);
-            if (e && (entity_table[e].kind == entity_kind::typedef_name ||
-                      entity_table[e].kind == entity_kind::enumeration))
+                class_named = e;
+            else if (e && (entity_table[e].kind == entity_kind::typedef_name ||
+                           entity_table[e].kind == entity_kind::enumeration)) {
                 named = entity_table[e].type.unqualified();
-            if (e && entity_table[e].kind == entity_kind::typedef_name &&
-                entity_table[e].type.cv())
-                return not_supported(n, "expr.type.conv");
+                named_cv = entity_table[e].type.cv();
+            }
         } else if (t.kind == token_kind::keyword) {
             simple_type_keywords k;
             switch (p.keyword_of(t)) {
@@ -389,6 +402,10 @@ analysis_result semantic_analysis::postfix(node_index n, expression_meaning &m)
                 return r;
         }
     }
+    if (named_cv)
+        return not_supported(n, "expr.type.conv");
+    if (class_named)
+        return class_conversion(n, class_named, m);
     if ((parenthesized || braced) &&
         syntax_is(tree, children[0], syntax_kind::simple_template_id)) {
         /* [temp.names]/1 with [expr.type.conv]/1: a simple-template-id
