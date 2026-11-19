@@ -12,7 +12,7 @@ namespace __math {
 }
 }
 enum { E = 4 };
-_Complex double z;
+_Float16 z;
 }
 namespace std {
 inline namespace __1 {

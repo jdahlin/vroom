@@ -25,6 +25,16 @@ analysis_result semantic_analysis::expression(SyntaxElement e,
     /* [ext:clang_atomic], [ext:clang_bit_int] the operations on an atomic
        object or a _BitInt are not analysed yet */
     type_kind k = type_table[m.type.unqualified()].kind;
+    if (k == type_kind::complex ||
+        (k == type_kind::fundamental &&
+         type_table[m.type.unqualified()].fundamental ==
+             fundamental_type::float128)) {
+        /* [ext:gnu_complex], [ext:gnu_float128] complex and binary128
+           arithmetic is not analysed yet */
+        if (e.is_token())
+            return not_supported(current_declaration, "ext.gnu");
+        return not_supported(e.index(), "ext.gnu");
+    }
     if (k == type_kind::atomic || k == type_kind::bit_int ||
         k == type_kind::ext_vector) {
         if (e.is_token())

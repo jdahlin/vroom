@@ -251,4 +251,13 @@ type_index types::atomic_of(qualified_type value)
     return intern(t, nullptr);
 }
 
+/* [ext:gnu_complex] _Complex T */
+type_index types::complex_of(qualified_type value)
+{
+    type t;
+    t.kind = type_kind::complex;
+    t.operand = value;
+    return intern(t, nullptr);
+}
+
 } // namespace cplusplus

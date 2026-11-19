@@ -241,14 +241,24 @@ struct type_specifier_count {
 
     /* [ext:gnu_int128]: __int128, with signed or unsigned only */
     unsigned int128 = 0;
+    /* [ext:gnu_float128]: __float128, alone */
+    unsigned float128 = 0;
 
     /* adds the specifier: false if the sequence now breaks the rule */
-    bool add(standard_keyword k, bool is_int128)
+    bool add(standard_keyword k, extension_keyword ext)
     {
-        if (is_int128) {
+        /* [ext:gnu_complex]: a modifier, which analysis checks */
+        if (ext == extension_keyword::complex)
+            return true;
+        if (ext == extension_keyword::float128) {
+            float128++;
+            return float128 == 1 && !char_ && !int_ && !double_ && !other &&
+                   !short_ && !long_ && !sign && !int128;
+        }
+        if (ext == extension_keyword::int128) {
             int128++;
             return int128 == 1 && !char_ && !int_ && !double_ && !other &&
-                   !short_ && !long_;
+                   !short_ && !long_ && !float128;
         }
         switch (k) {
         case standard_keyword::const_:
@@ -278,13 +288,13 @@ struct type_specifier_count {
             other++;
             break;
         }
-        unsigned base = char_ + int_ + double_ + other + int128;
+        unsigned base = char_ + int_ + double_ + other + int128 + float128;
         if (base > 1 || sign > 1 || short_ > 1 || long_ > 2 ||
             (short_ && long_))
             return false;
-        if (sign && (double_ || other))
+        if (sign && (double_ || other || float128))
             return false;
-        if ((short_ || long_) && (char_ || other || int128))
+        if ((short_ || long_) && (char_ || other || int128 || float128))
             return false;
         if (short_ && double_)
             return false;
@@ -534,6 +544,14 @@ node_index parser::decl_specifier_seq(decl_specifier_facts &facts,
             /* [ext:gnu_int128] a simple-type-specifier */
             add_token();
             facts.has_defining_type_specifier = true;
+        } else if (at(extension_keyword::float128)) {
+            /* [ext:gnu_float128] a simple-type-specifier */
+            add_token();
+            facts.has_defining_type_specifier = true;
+        } else if (at(extension_keyword::complex)) {
+            /* [ext:gnu_complex] a modifier of float and double, as signed
+               is of int; what it combines with is analysis's */
+            add_token();
         } else if (k == standard_keyword::extension) {
             /* an extension's keyword (P9) */
             return beyond_this_step();
@@ -623,8 +641,7 @@ node_index parser::decl_specifier_seq(decl_specifier_facts &facts,
         if (k == standard_keyword::auto_ && !storage_class_auto)
             has_auto = true;
         if (type_specifier &&
-            !count.add(k, extension_keyword_of(tokens[specifier]) ==
-                              extension_keyword::int128)) {
+            !count.add(k, extension_keyword_of(tokens[specifier]))) {
             /* auto int x: C++03's storage-class-specifier auto
                ([diff.cpp03.dcl.dcl]/1), in a later edition [ext.clang]
                clang's extension: P9 */
@@ -1292,6 +1309,20 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
         /* [ext:clang_nullability]: no effect on the type */
         if (p.extension_keyword_of(tok) == extension_keyword::nullability)
             continue;
+        if (p.extension_keyword_of(tok) == extension_keyword::complex) {
+            /* [ext:gnu_complex] */
+            if (!k.first)
+                k.first = t;
+            k.complex++;
+            continue;
+        }
+        if (p.extension_keyword_of(tok) == extension_keyword::float128) {
+            /* [ext:gnu_float128] */
+            if (!k.first)
+                k.first = t;
+            k.float128++;
+            continue;
+        }
         if (p.extension_keyword_of(tok) == extension_keyword::int128) {
             /* [ext:gnu_int128] */
             if (!k.first)
@@ -1487,8 +1518,8 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
                           "dcl.constexpr");
     type_index type = 0;
     bool keywords = k.signed_ || k.unsigned_ || k.short_ || k.long_ ||
-                    k.char_ || k.int_ || k.double_ || k.int128 ||
-                    k.alone_type != fundamental_type::none;
+                    k.char_ || k.int_ || k.double_ || k.int128 || k.float128 ||
+                    k.complex || k.alone_type != fundamental_type::none;
     if (named && keywords)
         /* [dcl.type]/2: "As a general rule, at most one
            defining-type-specifier is allowed in the complete

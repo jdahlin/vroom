@@ -53,6 +53,11 @@ ast_qualified_type ast_builder_type_atomic(cc *c, ast_qualified_type value)
     return cc_type_atomic(c, value, 0);
 }
 
+ast_qualified_type ast_builder_type_complex(cc *c, ast_qualified_type element)
+{
+    return cc_type_complex(c, element);
+}
+
 ast_qualified_type
 ast_builder_type_ext_vector(cc *c, ast_qualified_type element, uint64_t count)
 {

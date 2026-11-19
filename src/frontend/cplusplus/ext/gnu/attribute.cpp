@@ -229,6 +229,9 @@ static const gnu_attribute_rule gnu_attribute_rules[] = {
     {"using_if_exists", gnu_using_if_exists},
     /* "aligned (alignment)" (below) */
     {"aligned", gnu_aligned},
+    /* "mode (mode)": the size of the type of a typedef or variable by the
+       name of a machine mode (below) */
+    {"mode", gnu_mode},
     /* the attributes that change no code vcc generates: they say what a
        function or variable does (const, pure, nothrow, leaf, malloc,
        returns_nonnull, nonnull, format, format_arg, alloc_size,
@@ -489,6 +492,15 @@ analysis_result semantic_analysis::gnu_attribute_specifier(SyntaxRef n,
                 g.aligned = alignment;
             continue;
         }
+        if (rule->flag == gnu_mode) {
+            /* one identifier: the mode */
+            if (count != 4 || !a[2].is_token() ||
+                tokens[a[2].token()].kind != token_kind::identifier || g.mode)
+                return not_supported(at, "ext.gnu");
+            g.mode = a[2].token();
+            g.flags |= gnu_mode;
+            continue;
+        }
         if (rule->flag == gnu_section) {
             /* one ordinary string-literal: "section-name" */
             if (count != 4 || !a[2].is_token() ||
@@ -555,6 +567,132 @@ analysis_result semantic_analysis::gnu_attribute_specifier(SyntaxRef n,
     return analysis_result::well_formed;
 }
 
+/*
+ * mode (GCC manual 6.39.1, Common Variable Attributes): "This attribute
+ * specifies the data type for the declaration—whichever type corresponds
+ * to the mode mode.  This in effect lets you request an integer or
+ * floating-point type according to its width."  The integer modes QI, HI,
+ * SI, DI and TI (8 to 128 bits) of an integer type, which keep its
+ * signedness (<sys/types.h>'s int8_t), and byte, word and pointer; the floating-point and
+ * complex modes of a floating-point or complex type: SF and DF (float and
+ * double), XF (long double, x87), TF (binary128: long double where that
+ * is binary128, else __float128), and the complex modes SC, DC, XC and TC
+ * of them; with or without the underscores around the name.
+ */
+analysis_result semantic_analysis::gnu_mode_type(SyntaxRef at, token_index mode,
+                                                 qualified_type &type)
+{
+    owned_buffer spelling;
+    tokens.spelling(mode, spelling.get());
+    const char *name = reinterpret_cast<const char *>(spelling.data());
+    size_t length = spelling.size();
+    if (length > 4 && name[0] == '_' && name[1] == '_' &&
+        name[length - 1] == '_' && name[length - 2] == '_') {
+        name += 2;
+        length -= 4;
+    }
+    /* byte, word and pointer name an integer mode by the target's widths
+       (word and pointer: those of a pointer; unwind_word too) */
+    const char *spelled = name;
+    if (length == 4 && !memcmp(name, "byte", 4))
+        spelled = "QI";
+    else if ((length == 4 && !memcmp(name, "word", 4)) ||
+             (length == 7 && !memcmp(name, "pointer", 7)) ||
+             (length == 11 && !memcmp(name, "unwind_word", 11))) {
+        spelled = "SI";
+        if (pointer_size() == 8)
+            spelled = "DI";
+    } else if (length != 2) {
+        return not_supported(at, "ext.gnu");
+    }
+    name = spelled;
+    fundamental_type integer = fundamental_of(type);
+    if (type_table[type.unqualified()].kind == type_kind::fundamental &&
+        fundamental_type_is_integral(integer) &&
+        integer != fundamental_type::bool_ && name[1] == 'I') {
+        const implementation_defined_behavior &b = tokens.files.behavior;
+        bool negative = fundamental_type_is_signed(b, integer);
+        fundamental_type t = fundamental_type::none;
+        switch (name[0]) {
+        case 'Q':
+            t = fundamental_type::unsigned_char;
+            if (negative)
+                t = fundamental_type::signed_char;
+            break;
+        case 'H':
+            t = fundamental_type::unsigned_short_int;
+            if (negative)
+                t = fundamental_type::short_int;
+            break;
+        case 'S':
+            t = fundamental_type::unsigned_int;
+            if (negative)
+                t = fundamental_type::int_;
+            break;
+        case 'D':
+            /* 64 bits: long where it has them, as clang's int64_t */
+            if (b.long_width == 64) {
+                t = fundamental_type::unsigned_long_int;
+                if (negative)
+                    t = fundamental_type::long_int;
+            } else {
+                t = fundamental_type::unsigned_long_long_int;
+                if (negative)
+                    t = fundamental_type::long_long_int;
+            }
+            break;
+        case 'T':
+            t = fundamental_type::unsigned_int128;
+            if (negative)
+                t = fundamental_type::int128;
+            break;
+        default:
+            return not_supported(at, "ext.gnu");
+        }
+        type = qualified_type::make(type_table.fundamental(t), type.cv());
+        return analysis_result::well_formed;
+    }
+    const type_kind kind = type_table[type.unqualified()].kind;
+    qualified_type base = type;
+    if (kind == type_kind::complex)
+        base = type_table[type.unqualified()].operand;
+    if (!fundamental_type_is_floating(fundamental_of(base)) &&
+        fundamental_of(base) != fundamental_type::float128)
+        return not_supported(at, "ext.gnu");
+    /* the second letter C says complex, F real */
+    bool complex = name[1] == 'C';
+    if (!complex && name[1] != 'F')
+        return not_supported(at, "ext.gnu");
+    if (complex != (kind == type_kind::complex))
+        return not_supported(at, "ext.gnu");
+    fundamental_type t = fundamental_type::none;
+    switch (name[0]) {
+    case 'S':
+        t = fundamental_type::float_;
+        break;
+    case 'D':
+        t = fundamental_type::double_;
+        break;
+    case 'X':
+        if (tokens.files.behavior.long_double_fraction_bits != 63)
+            return not_supported(at, "ext.gnu");
+        t = fundamental_type::long_double;
+        break;
+    case 'T':
+        t = fundamental_type::float128;
+        if (tokens.files.behavior.long_double_fraction_bits == 112)
+            t = fundamental_type::long_double;
+        break;
+    default:
+        return not_supported(at, "ext.gnu");
+    }
+    type_index made = type_table.fundamental(t);
+    if (complex)
+        made = type_table.complex_of(qualified_type::make(made, cv_none));
+    type = qualified_type::make(made, type.cv());
+    return analysis_result::well_formed;
+}
+
 /* ... of a declarator, and among (or before) a decl-specifier-seq */
 analysis_result
 semantic_analysis::gnu_attribute_specifier(SyntaxRef n, declarator_meaning &m)
@@ -564,7 +702,9 @@ semantic_analysis::gnu_attribute_specifier(SyntaxRef n, declarator_meaning &m)
     g.flags = m.gnu_flags;
     g.section = m.section;
     g.abi_tag = m.abi_tag;
+    g.mode = m.mode;
     analysis_result r = gnu_attribute_specifier(n, g);
+    m.mode = g.mode;
     m.aligned = g.aligned;
     m.gnu_flags = g.flags;
     m.section = g.section;
@@ -581,6 +721,9 @@ analysis_result semantic_analysis::gnu_attribute_specifier(SyntaxRef n,
     g.section = s.section;
     g.abi_tag = s.abi_tag;
     analysis_result r = gnu_attribute_specifier(n, g);
+    if (g.mode)
+        /* the mode of a decl-specifier's attribute: not analysed */
+        return not_supported(n, "ext.gnu");
     s.aligned = g.aligned;
     s.gnu_flags = g.flags;
     s.section = g.section;

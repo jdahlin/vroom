@@ -297,9 +297,11 @@ bool semantic_analysis::unary_trait(int which, qualified_type t, int64_t &value)
     const struct type *record = &type_table[t.unqualified()];
     type_kind kind = record->kind;
     fundamental_type f = fundamental_of(t);
-    if (kind == type_kind::atomic || kind == type_kind::none ||
-        kind == type_kind::placeholder || kind == type_kind::pack_expansion ||
+    if (kind == type_kind::atomic || kind == type_kind::complex ||
+        kind == type_kind::none || kind == type_kind::placeholder ||
+        kind == type_kind::pack_expansion ||
         kind == type_kind::template_parameter || kind == type_kind::dependent ||
+        f == fundamental_type::float128 ||
         f == fundamental_type::builtin_va_list)
         return false;
     bool is_void =

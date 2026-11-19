@@ -91,6 +91,8 @@ enum class type_kind : uint8_t {
     pack_expansion,
     /* [ext:clang_atomic] _Atomic(T): operand T */
     atomic,
+    /* [ext:gnu_complex] _Complex T: operand T, a floating-point type */
+    complex,
     /* [ext:clang_blocks] a block pointer to operand (a function type) */
     block_pointer,
     /* [ext:clang_bit_int] _BitInt(N): bound N, or entity the non-type
@@ -157,6 +159,7 @@ class types
     type_index pointer_to_member(uint32_t class_entity, qualified_type member);
     type_index pack_expansion_of(qualified_type pattern);
     type_index atomic_of(qualified_type value);
+    type_index complex_of(qualified_type value);
     type_index block_pointer_to(qualified_type function);
     type_index bit_int(uint64_t width, uint32_t parameter);
     type_index ext_vector_of(qualified_type element, uint64_t count,
@@ -311,6 +314,8 @@ enum gnu_attribute_flag : uint32_t {
        own, preferred in overload resolution, mangled with
        Ua9enable_ifILb1EE (gnu_attribute_specifier) */
     gnu_enable_if = 65536,
+    /* mode(M): the type of the typedef or variable (gnu_mode_type) */
+    gnu_mode = 131072,
 };
 /* the GNU attributes of a function's own symbol that analysis carries to
    member functions and function templates */
@@ -1594,12 +1599,15 @@ class semantic_analysis
        keywords of a decl-specifier-seq */
     struct simple_type_keywords {
         unsigned signed_ = 0, unsigned_ = 0, short_ = 0, long_ = 0, char_ = 0,
-                 int_ = 0, double_ = 0, alone = 0, int128 = 0;
+                 int_ = 0, double_ = 0, alone = 0, int128 = 0, float128 = 0,
+                 complex = 0;
         fundamental_type alone_type = fundamental_type::none;
         token_index first = 0;
     };
     analysis_result simple_type(SyntaxRef seq, const simple_type_keywords &k,
                                 type_index &type);
+    analysis_result complex_type(SyntaxRef seq, const simple_type_keywords &k,
+                                 unsigned keywords, type_index &type);
 
     /* [dcl.meaning]: the type a declarator gives its declarator-id */
     struct declarator_meaning {
@@ -1622,6 +1630,8 @@ class semantic_analysis
         uint64_t aligned = 0;
         uint32_t gnu_flags = 0;
         token_index section = 0, abi_tag = 0;
+        /* mode (gnu_mode): the mode's identifier */
+        token_index mode = 0;
         /* [ext:gnu_asm_labels] the asm label's string-literal, 0 if none */
         token_index asm_label = 0;
         /* the declarator-id is ~ class-name: a destructor ([class.dtor]/1) */
@@ -1972,6 +1982,8 @@ class semantic_analysis
         uint64_t aligned = 0;
         uint32_t flags = 0;
         token_index section = 0, abi_tag = 0;
+        /* mode (gnu_mode): the mode's identifier */
+        token_index mode = 0;
         /* [ext:clang_ext_vector_type] taken where allowed (an
            alias-declaration): ext_vector_type(N)'s N, or the entity of the
            non-type template-parameter N names */
@@ -1982,6 +1994,8 @@ class semantic_analysis
     analysis_result gnu_attribute_specifier(SyntaxRef n, gnu_attributes &g);
     analysis_result gnu_attribute_specifier(SyntaxRef n, declarator_meaning &m);
     analysis_result gnu_attribute_specifier(SyntaxRef n, specified &s);
+    analysis_result gnu_mode_type(SyntaxRef at, token_index mode,
+                                  qualified_type &type);
     uint32_t leading_gnu_attributes(SyntaxRef n) const;
     bool class_specifier_before(SyntaxRef seq, uint32_t i) const;
     bool gnu_or_without_effect(SyntaxRef n) const;

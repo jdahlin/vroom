@@ -401,6 +401,9 @@ enum class fundamental_type : uint8_t {
        ([basic.fundamental]/2): GCC's __int128 */
     int128,
     unsigned_int128,
+    /* [ext:gnu_float128] GCC's __float128: IEEE binary128, a type of its
+       own that no arithmetic is analysed for */
+    float128,
     /* [impl.clang] the type of clang's predeclared typedef-name
        __builtin_va_list, <stdarg.h>'s va_list: on aarch64 Linux AAPCS64's
        struct std::__va_list (B.3: __stack, __gr_top, __vr_top, __gr_offs,

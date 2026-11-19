@@ -79,6 +79,7 @@ static bool write_type_claim_unqualified(const types &table, type_index t,
     case type_kind::placeholder:
     case type_kind::pack_expansion:
     case type_kind::atomic:
+    case type_kind::complex:
     case type_kind::block_pointer:
     case type_kind::bit_int:
     case type_kind::ext_vector:

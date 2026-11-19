@@ -1067,7 +1067,15 @@ analysis_result semantic_analysis::declare_with_initializer(
     if (s.aligned > aligned)
         aligned = s.aligned;
     uint32_t gnu_flags =
-        (m.gnu_flags | s.gnu_flags) & ~(gnu_aligned | gnu_packed);
+        (m.gnu_flags | s.gnu_flags) & ~(gnu_aligned | gnu_packed | gnu_mode);
+    if (m.mode) {
+        /* mode: the type of a typedef-name or of a variable */
+        if (m.qualifier || m.qualified_namespace)
+            return not_supported(declaration, "ext.gnu");
+        r = gnu_mode_type(declaration, m.mode, type);
+        if (r != analysis_result::well_formed)
+            return r;
+    }
     token_index section = m.section;
     if (!section)
         section = s.section;

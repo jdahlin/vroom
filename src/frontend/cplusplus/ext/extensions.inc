@@ -49,6 +49,11 @@ EXTENSION(gnu_extension_keyword, gnu,
 EXTENSION(gnu_int128, gnu,
           "GCC manual 6.9, 128-bit Integers: __int128 and unsigned __int128, an extended "
           "integer type ([basic.fundamental]/2)")
+EXTENSION(gnu_float128, gnu,
+          "GCC manual 6.12, Additional Floating Types: __float128, IEEE binary128")
+EXTENSION(gnu_complex, gnu,
+          "GCC manual 6.12, Complex Numbers: _Complex, __complex__ and __complex with float, "
+          "double and long double")
 EXTENSION(gnu_labels_as_values, gnu,
           "GCC manual 6.3, Labels as Values: &&label and goto *expression;")
 EXTENSION(gnu_designated_initializers, gnu,

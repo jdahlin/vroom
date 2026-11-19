@@ -1842,6 +1842,10 @@ bool itanium_mangler::type(qualified_type t)
            mangles _Atomic(T) ([ext:clang_atomic]) */
         text("U7_Atomic");
         done = type(r.operand);
+    } else if (r.kind == type_kind::complex) {
+        /* [abi:mangling-type]: <type> ::= C <type>  # complex pair (C99) */
+        text("C");
+        done = type(r.operand);
     } else if (r.kind == type_kind::bit_int && !r.entity) {
         /* [abi:mangling-builtin]:
 
@@ -2020,6 +2024,9 @@ bool itanium_mangler::builtin_type(fundamental_type t)
         return true;
     case fundamental_type::long_double:
         text("e");
+        return true;
+    case fundamental_type::float128:
+        text("g");
         return true;
     case fundamental_type::char32_t_:
         text("Di");

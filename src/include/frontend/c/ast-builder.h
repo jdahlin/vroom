@@ -48,6 +48,8 @@ ast_qualified_type ast_builder_type_qualified(cc *c, ast_qualified_type t,
 ast_qualified_type ast_builder_type_pointer(cc *c, ast_qualified_type to);
 /* _Atomic(value), with C11's layout */
 ast_qualified_type ast_builder_type_atomic(cc *c, ast_qualified_type value);
+/* _Complex of a floating-point element */
+ast_qualified_type ast_builder_type_complex(cc *c, ast_qualified_type element);
 /* clang's ext_vector_type(count) of element (not bool) */
 ast_qualified_type
 ast_builder_type_ext_vector(cc *c, ast_qualified_type element, uint64_t count);

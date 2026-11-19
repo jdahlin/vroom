@@ -1464,6 +1464,7 @@ static bool depends(const types &table, qualified_type t,
     case type_kind::rvalue_reference:
     case type_kind::pack_expansion:
     case type_kind::atomic:
+    case type_kind::complex:
     case type_kind::block_pointer:
         return depends(table, r.operand, parameters, from);
     case type_kind::function: {

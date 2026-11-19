@@ -198,9 +198,13 @@ uint64_t semantic_analysis::size_of_type(qualified_type t) const
         case fundamental_type::double_:
             return 8;
         case fundamental_type::long_double:
-            if (b.long_double_fraction_bits == 112)
-                return 16;
-            return 8;
+            /* binary128 (aarch64), and x87's 80 bits padded to 16 bytes
+               (x86-64); 8 where it is a double (Darwin) */
+            if (b.long_double_fraction_bits == 52)
+                return 8;
+            return 16;
+        case fundamental_type::float128:
+            return 16;
         case fundamental_type::std_nullptr_t:
             return b.long_width / 8;
         case fundamental_type::builtin_va_list:
@@ -228,6 +232,9 @@ uint64_t semantic_analysis::size_of_type(qualified_type t) const
         return size_of_type(record.operand);
     case type_kind::atomic:
         return atomic_layout(record.operand, false);
+    case type_kind::complex:
+        /* [ext:gnu_complex] struct { T re, im; } */
+        return 2 * size_of_type(record.operand);
     case type_kind::bit_int:
         return bit_int_layout(record.bound, false);
     case type_kind::ext_vector:
@@ -280,6 +287,8 @@ uint64_t semantic_analysis::alignment_of_type(qualified_type t) const
     switch (record.kind) {
     case type_kind::atomic:
         return atomic_layout(record.operand, true);
+    case type_kind::complex:
+        return alignment_of_type(record.operand);
     case type_kind::bit_int:
         return bit_int_layout(record.bound, true);
     case type_kind::ext_vector:

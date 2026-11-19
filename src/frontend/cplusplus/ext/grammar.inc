@@ -117,6 +117,14 @@ PRODUCTION(gnu_extension_keyword, "unary-expression", "__extension__ cast-expres
 
 PRODUCTION(gnu_int128, "simple-type-specifier", "__int128")
 
+/* ---- GCC manual 6.12, Additional Floating Types ---- */
+
+PRODUCTION(gnu_float128, "simple-type-specifier", "__float128")
+
+/* ---- GCC manual 6.12, Complex Numbers ---- */
+
+PRODUCTION(gnu_complex, "simple-type-specifier", "_Complex")
+
 /* ---- GCC manual 6.3, Labels as Values ---- */
 
 PRODUCTION(gnu_labels_as_values, "unary-expression", "gnu-label-address")

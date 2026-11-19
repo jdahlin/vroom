@@ -1470,7 +1470,7 @@ semantic_analysis::member_declarator(entity_index c, SyntaxRef declaration,
     /* a member's symbol attributes (a member function's weak and section,
        a static data member's, a data member's function attributes) are not
        analysed yet; on a non-static data member they are GCC's error */
-    if ((m.gnu_flags & (gnu_weak | gnu_used | gnu_section)) ||
+    if ((m.gnu_flags & (gnu_weak | gnu_used | gnu_section | gnu_mode)) ||
         (!is_function &&
          (m.gnu_flags & (gnu_inline_flags | gnu_function_symbol_flags))))
         return not_supported(declaration, "ext.gnu");

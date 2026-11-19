@@ -56,3 +56,24 @@ int x2() {
   __attribute__((unused)) int b = a;
   return a;
 }
+
+// complex numbers (6.12): _Complex, __complex__ and __complex are a modifier
+// of float, double, long double and __float128 in any order; alone it is
+// _Complex double; the mode attribute (6.39) names the size of a type
+typedef _Complex float gc1;
+typedef double _Complex gc2;
+typedef long double __complex__ gc3;
+typedef __complex double gc4;
+typedef _Complex __float128 gc5;
+typedef __float128 gc6;
+typedef _Complex float gc7 __attribute__ ((__mode__ (__TC__)));
+typedef int gc8 __attribute__ ((__mode__ (__word__)));
+typedef unsigned gc9 __attribute__ ((mode(QI)));
+static_assert(sizeof(gc1) == 8 && alignof(gc1) == 4);
+static_assert(sizeof(gc2) == 16 && sizeof(gc3) == 32 && sizeof(gc4) == 16);
+static_assert(sizeof(gc5) == 32 && alignof(gc5) == 16 && sizeof(gc6) == 16);
+static_assert(sizeof(gc7) == 32 && sizeof(gc8) == 8 && sizeof(gc9) == 1);
+static_assert(sizeof(_Complex) == 16);
+_Complex double gc10;
+extern gc1 gc11;
+gc1 gc12(gc1 *p, gc6 q);
