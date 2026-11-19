@@ -322,8 +322,9 @@ enum gnu_attribute_flag : uint32_t {
        (__builtin_unreachable, __c11_atomic_thread_fence): lowered to its
        builtin node, no function */
     gnu_compiler_builtin = 32768,
-    /* clang's enable_if (gnu_attribute_specifier); never set in a
-       declaration's flags */
+    /* clang's enable_if with a constant true condition: a function of its
+       own, preferred in overload resolution, mangled with
+       Ua9enable_ifILb1EE (gnu_attribute_specifier) */
     gnu_enable_if = 65536,
 };
 /* the GNU attributes of a function's own symbol that analysis carries to

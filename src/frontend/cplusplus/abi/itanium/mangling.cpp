@@ -1078,13 +1078,17 @@ bool itanium_mangler::unqualified_name(entity_index e)
     if (!unqualified_name_untagged(e))
         return false;
     token_index tag = analysis.entity_table[e].abi_tag;
-    if (!tag)
-        return true;
-    owned_buffer written;
-    analysis.token_spelling(tag, written.get());
-    text("B");
-    number(written.size() - 2);
-    vbuffer_append(out, written.data() + 1, written.size() - 2);
+    if (tag) {
+        owned_buffer written;
+        analysis.token_spelling(tag, written.get());
+        text("B");
+        number(written.size() - 2);
+        vbuffer_append(out, written.data() + 1, written.size() - 2);
+    }
+    /* [impl.clang] enable_if(true, ...): the vendor qualifier
+       "U <source-name> <template-args>" of its condition */
+    if (analysis.entity_table[e].gnu_flags & gnu_enable_if)
+        text("Ua9enable_ifILb1EE");
     return true;
 }
 
