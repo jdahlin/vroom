@@ -364,7 +364,7 @@ analysis_result semantic_analysis::array(node_index at, SyntaxElement bound,
     /* "N shall be greater than zero": zero is clang's extension */
     if (!value) {
         r = extension_used(diagnostic_id::sema_zero_length_array,
-                           tree[at].first_token, nullptr);
+                           syntax(at).first_token(), nullptr);
         if (r != analysis_result::well_formed)
             return r;
     }
@@ -434,17 +434,17 @@ static bool declares_by_declarator(SyntaxRef d)
 void semantic_analysis::hold_names(node_index declaration)
 {
     owned_array<token_index> ids;
-    const syntax_node &node = tree[declaration];
+    auto node = syntax(declaration);
     /* [over.oper]/1: an operator function, or a conversion function, it
        may declare: the meaning of operators on classes and enumerations is
        not known from now on */
-    for (token_index t = node.first_token; t < node.end_token; t++)
+    for (token_index t = node.first_token(); t < node.end_token(); t++)
         if (tokens[t].kind == token_kind::keyword &&
             p.keyword_of(tokens[t]) == standard_keyword::operator_)
             operators_held = true;
-    if (node.kind == syntax_kind::linkage_specification) {
+    if (node.is(syntax_kind::linkage_specification)) {
         /* extern "C" { ... }: the declarations in it are the scope's */
-        for (auto c : syntax(declaration).elements()) {
+        for (auto c : node.elements()) {
             if (c.is_token())
                 continue;
             if (c.declarations()) {
@@ -475,22 +475,22 @@ void semantic_analysis::hold_names(node_index declaration)
         }
     };
     bool by_declarator = parsed_completely(declaration) &&
-                         (node.kind == syntax_kind::simple_declaration ||
-                          node.kind == syntax_kind::function_definition ||
-                          node.kind == syntax_kind::condition);
+                         (node.is(syntax_kind::simple_declaration) ||
+                          node.is(syntax_kind::function_definition) ||
+                          node.is(syntax_kind::condition));
     /* a template of a function or of declarators: what its declarator-ids
        name (below), not the types its declaration names (an explicit
        specialization's name is a template-id: all its names held) */
-    if (!by_declarator && node.kind == syntax_kind::template_declaration &&
+    if (!by_declarator && node.is(syntax_kind::template_declaration) &&
         parsed_completely(declaration))
         by_declarator = declares_by_declarator(syntax(declaration));
-    if (node.kind == syntax_kind::using_directive) {
+    if (node.is(syntax_kind::using_directive)) {
         /* [namespace.udir]: what it makes visible is not known */
         entity_table[current_scope].unknown_names = true;
         return;
     }
-    if (node.kind == syntax_kind::using_declaration ||
-        node.kind == syntax_kind::namespace_alias_definition) {
+    if (node.is(syntax_kind::using_declaration) ||
+        node.is(syntax_kind::namespace_alias_definition)) {
         /* the names they bring into the scope: each using-declarator's
            last identifier, the alias; not the namespaces and classes
            named on the way */
@@ -499,15 +499,15 @@ void semantic_analysis::hold_names(node_index declaration)
         while (!work.empty()) {
             node_index x = work.back();
             work.resize(work.size() - 1);
-            if (tree[x].kind == syntax_kind::nested_name_specifier ||
-                tree[x].kind == syntax_kind::qualified_namespace_specifier)
+            if (syntax(x).is(syntax_kind::nested_name_specifier) ||
+                syntax(x).is(syntax_kind::qualified_namespace_specifier))
                 continue;
-            for (uint32_t i = 0; i < tree[x].child_count; i++) {
-                syntax_child c = tree.children(x)[i];
+            for (uint32_t i = 0; i < syntax(x).size(); i++) {
+                syntax_child c = syntax(x)[i];
                 if (!c.is_token())
                     work.append(c.index());
                 else if (tokens[c.index()].kind == token_kind::identifier &&
-                         (tree[x].kind == syntax_kind::using_declarator ||
+                         (syntax(x).is(syntax_kind::using_declarator) ||
                           (x == declaration && i == 1)))
                     ids.append(c.index());
             }
@@ -533,33 +533,34 @@ void semantic_analysis::hold_names(node_index declaration)
         };
         /* not a template-head's: its names are the template's parameters
            and what their types and defaults name ([temp.param]) */
-        token_index start = node.first_token;
+        token_index start = node.first_token();
         for (node_index x = declaration;
-             tree[x].kind == syntax_kind::template_declaration &&
-             tree[x].child_count >= 2 &&
-             syntax(tree.children(x)[0]).is(syntax_kind::template_head) &&
-             !tree.children(x)[tree[x].child_count - 1].is_token();
-             x = tree.children(x)[tree[x].child_count - 1].index())
-            start = tree[tree.children(x)[0].index()].end_token;
-        for (token_index t = start; t < node.end_token; t++) {
+             syntax(x).is(syntax_kind::template_declaration) &&
+             syntax(x).size() >= 2 &&
+             syntax(x)[0].is(syntax_kind::template_head) &&
+             !syntax(x)[syntax(x).size() - 1].is_token();
+             x = syntax(x)[syntax(x).size() - 1].index())
+            start = syntax(x)[0].end_token();
+        for (token_index t = start; t < node.end_token(); t++) {
             const token &tok = tokens[t];
             /* a name before or after :: is a qualifier or a member of
                another scope declared again ([dcl.meaning]/1), not a name
                this declaration brings into the scope */
             bool qualified =
-                (t + 1 < node.end_token && is_scope_operator(t + 1)) ||
-                (t > node.first_token && is_scope_operator(t - 1));
+                (t + 1 < node.end_token() && is_scope_operator(t + 1)) ||
+                (t > node.first_token() && is_scope_operator(t - 1));
             /* a typename-specifier's simple-template-id before ::
                (typename only_int<T>::type) names a type, never what the
                declaration declares; its template-arguments neither */
             if (tok.kind == token_kind::identifier && !depth && !qualified &&
-                t > node.first_token &&
+                t > node.first_token() &&
                 p.keyword_of(tokens[t - 1]) == standard_keyword::typename_ &&
-                t + 1 < node.end_token &&
+                t + 1 < node.end_token() &&
                 is_punctuator_at(t + 1, preprocessing_op_or_punc::LESS)) {
                 token_index close = 0;
                 int angles = 0, nested = 0;
-                for (token_index k = t + 1; k < node.end_token && !close; k++) {
+                for (token_index k = t + 1; k < node.end_token() && !close;
+                     k++) {
                     if (is_punctuator_at(
                             k, preprocessing_op_or_punc::LEFT_PARENTHESIS) ||
                         is_punctuator_at(
@@ -586,7 +587,7 @@ void semantic_analysis::hold_names(node_index declaration)
                     if (nested < 0)
                         break;
                 }
-                if (close && close + 1 < node.end_token &&
+                if (close && close + 1 < node.end_token() &&
                     is_scope_operator(close + 1)) {
                     t = close;
                     continue;
@@ -611,27 +612,26 @@ void semantic_analysis::hold_names(node_index declaration)
                 break;
             }
         }
-    } else if (node.kind == syntax_kind::condition) {
-        if (node.child_count > 1)
-            ids.append(declarator_id(tree.children(declaration)[1]));
-    } else if (node.kind != syntax_kind::template_declaration) {
+    } else if (node.is(syntax_kind::condition)) {
+        if (node.size() > 1)
+            ids.append(declarator_id(node[1]));
+    } else if (!node.is(syntax_kind::template_declaration)) {
         /* (a template's: its declaration's, below) */
         declarator_ids(declaration);
     }
     /* a template's declaration: its declarator-ids too, which may be in
        parentheses (template<class T> void (f)(T);) */
-    bool by_template = node.kind == syntax_kind::template_declaration ||
-                       node.kind == syntax_kind::explicit_specialization;
+    bool by_template = node.is(syntax_kind::template_declaration) ||
+                       node.is(syntax_kind::explicit_specialization);
     for (node_index inner = declaration;
-         tree[inner].kind == syntax_kind::template_declaration ||
-         tree[inner].kind == syntax_kind::explicit_specialization;) {
-        const syntax_node &t = tree[inner];
-        if (!t.child_count ||
-            tree.children(inner)[t.child_count - 1].is_token())
+         syntax(inner).is(syntax_kind::template_declaration) ||
+         syntax(inner).is(syntax_kind::explicit_specialization);) {
+        auto t = syntax(inner);
+        if (!t.size() || syntax(inner)[t.size() - 1].is_token())
             break;
-        inner = tree.children(inner)[t.child_count - 1].index();
-        if ((tree[inner].kind == syntax_kind::simple_declaration ||
-             tree[inner].kind == syntax_kind::function_definition) &&
+        inner = syntax(inner)[t.size() - 1].index();
+        if ((syntax(inner).is(syntax_kind::simple_declaration) ||
+             syntax(inner).is(syntax_kind::function_definition)) &&
             parsed_completely(inner))
             declarator_ids(inner);
     }
@@ -641,9 +641,9 @@ void semantic_analysis::hold_names(node_index declaration)
         uint32_t name = tokens.identifier(id);
         entity_index found = entity_table.find(current_scope, name);
         bool defines_namespace =
-            node.kind == syntax_kind::named_namespace_definition ||
-            node.kind == syntax_kind::unnamed_namespace_definition ||
-            node.kind == syntax_kind::nested_namespace_definition;
+            node.is(syntax_kind::named_namespace_definition) ||
+            node.is(syntax_kind::unnamed_namespace_definition) ||
+            node.is(syntax_kind::nested_namespace_definition);
         if (found && defines_namespace &&
             entity_table[found].kind == entity_kind::namespace_entity &&
             entity_table[found].name == name &&

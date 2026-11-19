@@ -174,7 +174,7 @@ analysis_result semantic_analysis::base_class_name(syntax_child name,
         analysis_result r = template_type(name.index(), 0, false, t);
         if (r != analysis_result::well_formed)
             return r;
-        id = tree[name.index()].first_token;
+        id = syntax(name).first_token();
         if (type_table[t].kind != type_kind::class_type)
             return not_supported(n, "class.derived");
         base = type_table[t].entity;
@@ -227,15 +227,14 @@ analysis_result semantic_analysis::base_clause(entity_index c, node_index n,
        template's own definition they are not known) */
     owned_array<syntax_child> listed;
     owned_array<bool> expanded;
-    for (uint32_t i = 1; i < tree[n].child_count; i++) {
-        syntax_child item = tree.children(n)[i];
+    for (uint32_t i = 1; i < syntax(n).size(); i++) {
+        syntax_child item = syntax(n)[i];
         if (!syntax(item).is(syntax_kind::base_specifier_list)) {
             listed.append(item);
             expanded.append(false);
             continue;
         }
-        for (uint32_t k = 0; k < tree[item.index()].child_count; k++) {
-            syntax_child one = tree.children(item.index())[k];
+        for (syntax_child one : syntax(item).elements()) {
             if (syntax(one).is(preprocessing_op_or_punc::COMMA))
                 continue;
             if (syntax(one).is(preprocessing_op_or_punc::ELLIPSIS)) {
@@ -259,8 +258,8 @@ analysis_result semantic_analysis::base_clause(entity_index c, node_index n,
         }
         token_index first = listed[i].index(), end = first + 1;
         if (!listed[i].is_token()) {
-            first = tree[listed[i].index()].first_token;
-            end = tree[listed[i].index()].end_token;
+            first = syntax(listed[i].index()).first_token();
+            end = syntax(listed[i].index()).end_token();
         }
         uint32_t count = 0;
         if (!expansion_count(first, end, count))
@@ -281,8 +280,7 @@ analysis_result semantic_analysis::base_clause(entity_index c, node_index n,
     for (size_t si = 0; si < specifiers.size(); si++) {
         syntax_child name = specifiers[si];
         if (syntax(name).is(syntax_kind::base_specifier))
-            name =
-                tree.children(name.index())[tree[name.index()].child_count - 1];
+            name = syntax(name)[syntax(name).size() - 1];
         token_index id = 0;
         entity_index base = 0;
         bool saved_expanding = expanding;
@@ -309,14 +307,13 @@ analysis_result semantic_analysis::base_clause(entity_index c, node_index n,
             access = 2;
         syntax_child name = specifier;
         if (syntax(specifier).is(syntax_kind::base_specifier)) {
-            const syntax_node &b = tree[specifier.index()];
-            const syntax_child *parts = tree.children(specifier.index());
-            name = parts[b.child_count - 1];
-            for (uint32_t k = 0; k + 1 < b.child_count; k++) {
-                if (!parts[k].is_token())
+            auto b = syntax(specifier);
+            name = b[b.size() - 1];
+            for (uint32_t k = 0; k + 1 < b.size(); k++) {
+                if (!b[k].is_token())
                     /* an attribute-specifier-seq */
                     return not_supported(specifier.index(), "class.derived");
-                switch (p.keyword_of(tokens[parts[k].index()])) {
+                switch (p.keyword_of(tokens[b[k].token()])) {
                 case standard_keyword::public_:
                     access = 0;
                     break;
@@ -519,8 +516,8 @@ bool semantic_analysis::dependent_base_specifier(entity_index c,
         return false;
     token_index first = name.index(), end = name.index() + 1;
     if (!name.is_token()) {
-        first = tree[name.index()].first_token;
-        end = tree[name.index()].end_token;
+        first = syntax(name).first_token();
+        end = syntax(name).end_token();
     }
     for (token_index t = first; t < end; t++) {
         if (tokens[t].kind != token_kind::identifier)

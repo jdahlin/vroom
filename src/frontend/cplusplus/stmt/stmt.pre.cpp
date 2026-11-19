@@ -486,7 +486,7 @@ analysis_result semantic_analysis::statement(syntax_child s, uint32_t &built)
     switch (tree[n].kind) {
     case syntax_kind::gnu_extension_declaration:
         /* [ext:gnu_extension_keyword]: __extension__ changes no meaning */
-        return statement(tree.children(n)[1], built);
+        return statement(syntax(n)[1], built);
     case syntax_kind::compound_statement:
         return compound_statement(n, 0, built);
     case syntax_kind::expression_statement:
@@ -504,7 +504,7 @@ analysis_result semantic_analysis::statement(syntax_child s, uint32_t &built)
            names into a block" */
         size_t first = block_variables.size();
         analysis_result r = simple_declaration(n);
-        built = declaration_statements(first, tree[n].first_token);
+        built = declaration_statements(first, syntax(n).first_token());
         if (r != analysis_result::well_formed)
             hold_names(n);
         return r;
@@ -517,8 +517,8 @@ analysis_result semantic_analysis::statement(syntax_child s, uint32_t &built)
         /* [stmt.dcl]/1: a block-declaration that declares no object: no
            code */
         analysis_result r = declaration_by_kind(n);
-        built =
-            statement_node(semantic_kind::null_statement, tree[n].first_token);
+        built = statement_node(semantic_kind::null_statement,
+                               syntax(n).first_token());
         if (r != analysis_result::well_formed)
             hold_names(n);
         return r;
@@ -541,19 +541,19 @@ analysis_result semantic_analysis::attributed_statement(node_index n,
                                                         uint32_t &built)
 {
     /* the attribute-specifiers, then the statement */
-    const syntax_node &node = tree[n];
-    if (node.child_count < 2)
+    auto node = syntax(n);
+    if (node.size() < 2)
         return not_supported(n, "stmt.pre");
-    syntax_child inner = tree.children(n)[node.child_count - 1];
+    syntax_child inner = node[node.size() - 1];
     if (syntax(inner).is(syntax_kind::simple_declaration))
         return not_supported(n, "dcl.attr");
-    for (uint32_t i = 0; i + 1 < node.child_count; i++) {
-        syntax_child c = tree.children(n)[i];
+    for (uint32_t i = 0; i + 1 < node.size(); i++) {
+        syntax_child c = node[i];
         if (!syntax(c).is(syntax_kind::attribute_specifier) &&
             !syntax(c).is(syntax_kind::attribute_specifier_seq))
             return not_supported(n, "dcl.attr");
-        const syntax_node &a = tree[c.index()];
-        for (token_index t = a.first_token; t < a.end_token; t++) {
+        auto a = syntax(c);
+        for (token_index t = a.first_token(); t < a.end_token(); t++) {
             if (tokens[t].kind == token_kind::operator_or_punctuator)
                 continue;
             owned_buffer spelling;
@@ -658,17 +658,15 @@ analysis_result semantic_analysis::condition(syntax_child c, bool for_switch,
     analysis_result r = analysis_result::well_formed;
     uint32_t declaration = 0;
     if (syntax(c).is(syntax_kind::condition)) {
-        const syntax_node &node = tree[at];
-        const syntax_child *children = tree.children(at);
-        if (node.child_count != 3 ||
-            !syntax(children[0]).is(syntax_kind::decl_specifier_seq))
+        auto node = syntax(at);
+        if (node.size() != 3 || !node[0].is(syntax_kind::decl_specifier_seq))
             return not_supported(at, "dcl.attr");
         specified s;
         placeholder_allowed = true;
         scoped_value<qualified_type> deduced(declaration_deduced,
                                              qualified_type());
         scoped_value<bool> group(placeholder_group, false);
-        r = decl_specifier_seq(children[0].index(), s, false);
+        r = decl_specifier_seq(node[0].index(), s, false);
         if (r == analysis_result::well_formed &&
             (s.typedef_ || s.static_ || s.extern_ || s.inline_))
             /* [stmt.pre]/8: "In the decl-specifier-seq of a condition, each
@@ -684,8 +682,7 @@ analysis_result semantic_analysis::condition(syntax_child c, bool for_switch,
             bool claimable = declarations_claimable;
             declarations_claimable = false;
             in_condition = true;
-            r = declare_with_initializer(at, children[1], children[2], true, s,
-                                         false);
+            r = declare_with_initializer(at, node[1], node[2], true, s, false);
             in_condition = false;
             declarations_claimable = claimable;
         }
@@ -707,8 +704,8 @@ analysis_result semantic_analysis::condition(syntax_child c, bool for_switch,
             m.type = record.operand;
             m.entity = 0;
         }
-        m.node = expression_node(semantic_kind::entity, m,
-                                 first_token(children[1]), last_declared);
+        m.node = expression_node(semantic_kind::entity, m, first_token(node[1]),
+                                 last_declared);
     } else {
         r = expression(c, m);
         if (r != analysis_result::well_formed)

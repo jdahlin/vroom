@@ -377,7 +377,7 @@ analysis_result semantic_analysis::gnu_attribute_specifier(node_index n,
     /* (standard attributes without effect, or [[noreturn]]:
        leading_gnu_attributes) */
     uint32_t standard = 0;
-    if (tree[n].kind == syntax_kind::attribute_specifier &&
+    if (syntax(n).is(syntax_kind::attribute_specifier) &&
         attributes_as_gnu(syntax_child::node(n), standard)) {
         g.flags |= standard;
         return analysis_result::well_formed;
@@ -388,8 +388,8 @@ analysis_result semantic_analysis::gnu_attribute_specifier(node_index n,
     while (!work.empty()) {
         node_index next = work.back();
         work.resize(work.size() - 1);
-        for (uint32_t i = 0; i < tree[next].child_count; i++) {
-            syntax_child c = tree.children(next)[i];
+        for (uint32_t i = 0; i < syntax(next).size(); i++) {
+            syntax_child c = syntax(next)[i];
             if (next == n && i == 0 && c.is_token())
                 continue; /* __attribute__ */
             if (syntax(c).is(syntax_kind::gnu_attribute))
@@ -414,9 +414,9 @@ analysis_result semantic_analysis::gnu_attribute_specifier(node_index n,
         uint32_t count = 0;
         const syntax_child *children = nullptr;
         if (!a.is_token()) {
-            const syntax_node &node = tree[a.index()];
+            auto node = syntax(a);
             children = tree.children(a.index());
-            count = node.child_count;
+            count = node.size();
             if (!count || !children[0].is_token())
                 return not_supported(a.index(), "ext.gnu");
             name_token = children[0].index();

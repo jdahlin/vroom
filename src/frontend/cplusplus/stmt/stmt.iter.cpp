@@ -158,65 +158,63 @@ node_index parser::for_range_declaration()
 analysis_result semantic_analysis::iteration_statement(node_index n,
                                                        uint32_t &built)
 {
-    const syntax_node &node = tree[n];
-    const syntax_child *children = tree.children(n);
+    auto node = syntax(n);
     standard_keyword k = leading_keyword(n);
     if (k == standard_keyword::none)
         return not_supported(n, "stmt.iter");
     entity_index outer = current_scope, statement_scope = 0;
     analysis_result result = analysis_result::well_formed;
     expression_meaning m;
-    token_index at = children[0].index();
+    token_index at = node[0].token();
     uint32_t body = 0, init = 0, step_node = 0;
     if (k == standard_keyword::do_) {
         /* do statement while ( expression ) ; */
-        if (node.child_count != 7)
+        if (node.size() != 7)
             return not_supported(n, "stmt.do");
         function_state.loops++;
         function_state.breakable++;
-        result = substatement(children[1], 0, body);
+        result = substatement(node[1], 0, body);
         function_state.loops--;
         function_state.breakable--;
         /* [stmt.do]/1: "The expression is contextually converted to bool;
            if that conversion is ill-formed, the program is ill-formed." */
-        analysis_result r = expression(children[4], m);
+        analysis_result r = expression(node[4], m);
         if (r == analysis_result::well_formed)
             r = contextual_bool(n, m);
         built = statement_node(semantic_kind::do_statement, at, body, m.node);
         return worse(result, r);
     }
     if (k == standard_keyword::while_) {
-        if (node.child_count != 5)
+        if (node.size() != 5)
             return not_supported(n, "stmt.while");
-        if (syntax(children[2]).is(syntax_kind::condition))
+        if (node[2].is(syntax_kind::condition))
             statement_scope = open_scope(0, false);
-        result = condition(children[2], false, m);
+        result = condition(node[2], false, m);
     } else if (k == standard_keyword::for_) {
-        if (node.child_count < 6)
+        if (node.size() < 6)
             return not_supported(n, "stmt.for");
-        for (uint32_t i = 0; i < node.child_count; i++)
-            if (syntax(children[i]).is(syntax_kind::for_range_declaration))
+        for (uint32_t i = 0; i < node.size(); i++)
+            if (node[i].is(syntax_kind::for_range_declaration))
                 return range_based_for(n, i, built);
         /* for ( init-statement condition_opt ; expression_opt ) statement:
            the init-statement ends with its own ; */
-        syntax_child init_syntax = children[2], cond, step;
+        syntax_child init_syntax = node[2], cond, step;
         bool has_cond = false, has_step = false;
         uint32_t i = 3;
-        if (!syntax(children[i]).is(preprocessing_op_or_punc::SEMICOLON)) {
-            cond = children[i++];
+        if (!node[i].is(preprocessing_op_or_punc::SEMICOLON)) {
+            cond = node[i++];
             has_cond = true;
         }
-        if (i >= node.child_count ||
-            !syntax(children[i]).is(preprocessing_op_or_punc::SEMICOLON))
+        if (i >= node.size() ||
+            !node[i].is(preprocessing_op_or_punc::SEMICOLON))
             return not_supported(n, "stmt.for");
         i++;
-        if (i < node.child_count &&
-            !syntax(children[i])
-                 .is(preprocessing_op_or_punc::RIGHT_PARENTHESIS)) {
-            step = children[i++];
+        if (i < node.size() &&
+            !node[i].is(preprocessing_op_or_punc::RIGHT_PARENTHESIS)) {
+            step = node[i++];
             has_step = true;
         }
-        if (i + 2 != node.child_count)
+        if (i + 2 != node.size())
             return not_supported(n, "stmt.for");
         if (!syntax(init_syntax).is(syntax_kind::expression_statement) ||
             (has_cond && syntax(cond).is(syntax_kind::condition)))
@@ -237,8 +235,8 @@ analysis_result semantic_analysis::iteration_statement(node_index n,
     }
     function_state.loops++;
     function_state.breakable++;
-    result = worse(result, substatement(children[node.child_count - 1],
-                                        statement_scope, body));
+    result = worse(result,
+                   substatement(node[node.size() - 1], statement_scope, body));
     function_state.loops--;
     function_state.breakable--;
     current_scope = outer;
@@ -369,13 +367,12 @@ analysis_result semantic_analysis::range_based_for(node_index n,
                                                    uint32_t declaration,
                                                    uint32_t &built)
 {
-    const syntax_node &node = tree[n];
-    const syntax_child *children = tree.children(n);
-    if (declaration + 5 != node.child_count)
+    auto node = syntax(n);
+    if (declaration + 5 != node.size())
         return not_supported(n, "stmt.ranged");
-    syntax_child range_declaration = children[declaration];
-    syntax_child initializer = children[declaration + 2];
-    token_index at = children[declaration + 1].index();
+    syntax_child range_declaration = node[declaration];
+    syntax_child initializer = node[declaration + 2];
+    token_index at = node[declaration + 1].token();
     entity_index outer = current_scope;
     entity_index statement_scope = open_scope(0, false);
     owned_array<uint32_t> items;
@@ -385,7 +382,7 @@ analysis_result semantic_analysis::range_based_for(node_index n,
         bool claimable = declarations_claimable;
         declarations_claimable = false;
         uint32_t init = 0;
-        result = statement(children[2], init);
+        result = statement(node[2], init);
         declarations_claimable = claimable;
         if (result != analysis_result::well_formed) {
             current_scope = outer;
@@ -505,8 +502,7 @@ analysis_result semantic_analysis::range_based_for(node_index n,
     uint32_t body = 0;
     function_state.loops++;
     function_state.breakable++;
-    result =
-        substatement(children[node.child_count - 1], statement_scope, body);
+    result = substatement(node[node.size() - 1], statement_scope, body);
     function_state.loops--;
     function_state.breakable--;
     current_scope = outer;
@@ -515,7 +511,7 @@ analysis_result semantic_analysis::range_based_for(node_index n,
     semantics.set_list(loop_body, pair, 2);
     items.append(statement_node(semantic_kind::for_statement, at, 0,
                                 condition.node, step.node, loop_body));
-    built = statement_node(semantic_kind::block, first_token(children[0]));
+    built = statement_node(semantic_kind::block, first_token(node[0]));
     semantics.set_list(built, items.data(), items.size());
     return result;
 }
@@ -532,24 +528,22 @@ analysis_result semantic_analysis::for_range_declaration(
     syntax_child d, const expression_meaning &element, uint32_t &built)
 {
     node_index at = node_of(d);
-    const syntax_node &node = tree[at];
-    const syntax_child *children = tree.children(at);
+    auto node = syntax(at);
     /* the second form: a structured binding ([dcl.struct.bind]) */
-    bool binding =
-        node.child_count > 2 &&
-        (syntax(children[1]).is(preprocessing_op_or_punc::LEFT_BRACKET) ||
-         syntax(children[1]).is(preprocessing_op_or_punc::AMPERSAND) ||
-         syntax(children[1]).is(preprocessing_op_or_punc::AMPERSAND_AMPERSAND));
-    if ((node.child_count != 2 && !binding) ||
-        !syntax(children[0]).is(syntax_kind::decl_specifier_seq) ||
-        tree[at].first_token != first_token(children[0]))
+    bool binding = node.size() > 2 &&
+                   (node[1].is(preprocessing_op_or_punc::LEFT_BRACKET) ||
+                    node[1].is(preprocessing_op_or_punc::AMPERSAND) ||
+                    node[1].is(preprocessing_op_or_punc::AMPERSAND_AMPERSAND));
+    if ((node.size() != 2 && !binding) ||
+        !node[0].is(syntax_kind::decl_specifier_seq) ||
+        syntax(at).first_token() != first_token(node[0]))
         /* an attribute-specifier-seq */
         return not_supported(at, "stmt.ranged");
     specified s;
     placeholder_allowed = true;
     scoped_value<qualified_type> deduced(declaration_deduced, qualified_type());
     scoped_value<bool> group(placeholder_group, false);
-    analysis_result r = decl_specifier_seq(children[0].index(), s, false);
+    analysis_result r = decl_specifier_seq(node[0].index(), s, false);
     if (r != analysis_result::well_formed)
         return r;
     /* [stmt.ranged]/2: "In the decl-specifier-seq of a for-range-declaration,
@@ -565,9 +559,8 @@ analysis_result semantic_analysis::for_range_declaration(
     {
         /* "The decl-specifier-seq shall not define a class or
            enumeration." */
-        node_index seq = children[0].index();
-        for (uint32_t i = 0; i < tree[seq].child_count; i++) {
-            syntax_child c = tree.children(seq)[i];
+        node_index seq = node[0].index();
+        for (syntax_child c : syntax(seq).elements()) {
             if (syntax(c).is(syntax_kind::class_specifier) ||
                 syntax(c).is(syntax_kind::enum_specifier))
                 return ill_formed(at,
@@ -582,7 +575,7 @@ analysis_result semantic_analysis::for_range_declaration(
     if (binding)
         r = structured_binding_declaration(at, 1, s, &element);
     else
-        r = declare_with_initializer(at, children[1], syntax_child(), true, s,
+        r = declare_with_initializer(at, node[1], syntax_child(), true, s,
                                      false, &element);
     declarations_claimable = claimable;
     if (r != analysis_result::well_formed) {

@@ -96,13 +96,13 @@ uint32_t semantic_analysis::conversion_function_name() const
 analysis_result semantic_analysis::conversion_type(node_index id,
                                                    qualified_type &type)
 {
-    const syntax_node &node = tree[id];
-    if (node.child_count != 2 || tree.children(id)[1].is_token())
+    auto node = syntax(id);
+    if (node.size() != 2 || node[1].is_token())
         return not_supported(id, "class.conv.fct");
-    node_index t = tree.children(id)[1].index();
+    node_index t = node[1].index();
     node_index seq = t;
-    if (tree[t].kind == syntax_kind::conversion_type_id)
-        seq = tree.children(t)[0].index();
+    if (syntax(t).is(syntax_kind::conversion_type_id))
+        seq = syntax(t)[0].index();
     specified s;
     analysis_result r = decl_specifier_seq(seq, s, false);
     if (r != analysis_result::well_formed)
@@ -116,19 +116,19 @@ analysis_result semantic_analysis::conversion_type(node_index id,
     /* the ptr-operators, in source order (a conversion-declarator nests
        the rest after its first) */
     owned_array<node_index> work;
-    for (uint32_t i = tree[t].child_count; i-- > 1;)
-        if (!tree.children(t)[i].is_token())
-            work.append(tree.children(t)[i].index());
+    for (uint32_t i = syntax(t).size(); i-- > 1;)
+        if (!syntax(t)[i].is_token())
+            work.append(syntax(t)[i].index());
     while (!work.empty()) {
         node_index k = work.back();
         work.resize(work.size() - 1);
-        if (tree[k].kind == syntax_kind::conversion_declarator) {
-            for (uint32_t i = tree[k].child_count; i-- > 0;)
-                if (!tree.children(k)[i].is_token())
-                    work.append(tree.children(k)[i].index());
+        if (syntax(k).is(syntax_kind::conversion_declarator)) {
+            for (uint32_t i = syntax(k).size(); i-- > 0;)
+                if (!syntax(k)[i].is_token())
+                    work.append(syntax(k)[i].index());
             continue;
         }
-        if (tree[k].kind != syntax_kind::ptr_operator)
+        if (!syntax(k).is(syntax_kind::ptr_operator))
             return not_supported(k, "class.conv.fct");
         declarator_meaning m;
         r = pointer_operator(k, type, m);
@@ -213,8 +213,7 @@ semantic_analysis::conversion_function_member(entity_index c, node_index n,
 node_index semantic_analysis::conversion_function_id_of(node_index n) const
 {
     owned_array<node_index> work;
-    for (uint32_t i = 0; i < tree[n].child_count; i++) {
-        syntax_child x = tree.children(n)[i];
+    for (syntax_child x : syntax(n).elements()) {
         if (!x.is_token() && !syntax(x).is(syntax_kind::decl_specifier_seq) &&
             !syntax(x).is(syntax_kind::function_body))
             work.append(x.index());
@@ -229,9 +228,9 @@ node_index semantic_analysis::conversion_function_id_of(node_index n) const
             kind == syntax_kind::brace_or_equal_initializer ||
             kind == syntax_kind::braced_init_list)
             continue;
-        for (uint32_t i = 0; i < tree[k].child_count; i++)
-            if (!tree.children(k)[i].is_token())
-                work.append(tree.children(k)[i].index());
+        for (uint32_t i = 0; i < syntax(k).size(); i++)
+            if (!syntax(k)[i].is_token())
+                work.append(syntax(k)[i].index());
     }
     return 0;
 }
@@ -416,7 +415,7 @@ analysis_result semantic_analysis::conversion_function_call(
                           "only by members and friends of the class in which "
                           "it is declared",
                           "class.access");
-    token_index t = tree[at].first_token;
+    token_index t = syntax(at).first_token();
     analysis_result r = deleted_use(t, f);
     if (r != analysis_result::well_formed)
         return r;

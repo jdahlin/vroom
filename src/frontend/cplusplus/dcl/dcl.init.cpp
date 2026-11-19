@@ -682,7 +682,7 @@ analysis_result semantic_analysis::initialize_with(node_index at,
             return r;
         /* the reference's own type: what lowering makes an address of */
         result.node = expression_node(semantic_kind::bind_reference, m,
-                                      tree[at].first_token, m.node);
+                                      syntax(at).first_token(), m.node);
         semantics[result.node].type = type;
         return r;
     }
@@ -734,7 +734,7 @@ analysis_result semantic_analysis::initialize_with(node_index at,
                class subobject of the derived object */
             if (!copies_bytes(target.entity))
                 return not_supported(at, "class.copy.ctor");
-            r = to_base(tree[at].first_token, target.entity, m);
+            r = to_base(syntax(at).first_token(), target.entity, m);
             if (r != analysis_result::well_formed)
                 return r;
             same = true;
@@ -796,7 +796,7 @@ analysis_result semantic_analysis::initialize_with(node_index at,
             return not_supported(at, "dcl.init.list");
         if (narrows) {
             r = extension_used(diagnostic_id::sema_narrowing,
-                               tree[at].first_token, nullptr);
+                               syntax(at).first_token(), nullptr);
             if (r != analysis_result::well_formed)
                 return r;
         }
@@ -867,7 +867,7 @@ analysis_result semantic_analysis::list_initialization_of(
     node_index list, const owned_array<syntax_child> &clauses,
     qualified_type &type, bool direct, initialized_value &result)
 {
-    const syntax_node &node = tree[list];
+    auto node = syntax(list);
     const struct type target = type_table[type.unqualified()];
     if (target.kind == type_kind::array) {
         /* [dcl.init.list]/3.3: "if T is a character array and the
@@ -883,8 +883,8 @@ analysis_result semantic_analysis::list_initialization_of(
             character_type(fundamental_of(target.operand))) {
             syntax_child inner = clauses[0];
             while (syntax(inner).is(syntax_kind::primary_expression) &&
-                   tree[inner.index()].child_count == 3)
-                inner = tree.children(inner.index())[1];
+                   syntax(inner).size() == 3)
+                inner = syntax(inner)[1];
             if (is_string_literal(tokens, inner))
                 return not_supported(list, "dcl.init.string");
         }
@@ -898,7 +898,7 @@ analysis_result semantic_analysis::list_initialization_of(
             if (!bound) {
                 analysis_result r =
                     extension_used(diagnostic_id::sema_zero_length_array,
-                                   node.first_token, nullptr);
+                                   node.first_token(), nullptr);
                 if (r != analysis_result::well_formed)
                     return r;
             }
@@ -939,7 +939,7 @@ analysis_result semantic_analysis::list_initialization_of(
         zero.type = qualified_type::make(type.unqualified(), cv_none);
         zero.evaluation = result.evaluation;
         result.node =
-            expression_node(semantic_kind::zero, zero, node.first_token);
+            expression_node(semantic_kind::zero, zero, node.first_token());
         return analysis_result::well_formed;
     }
     if (clauses.size() > 1)
@@ -969,23 +969,21 @@ analysis_result semantic_analysis::initializer(syntax_child init,
     if (init.is_token())
         return not_supported(current_declaration, "dcl.init");
     node_index n = init.index();
-    const syntax_node &node = tree[n];
-    const syntax_child *children = tree.children(n);
-    switch (node.kind) {
+    auto node = syntax(n);
+    switch (node.kind()) {
     case syntax_kind::braced_init_list:
         return list_initialization(n, type, true, result);
     case syntax_kind::brace_or_equal_initializer:
-        if (node.child_count != 2)
+        if (node.size() != 2)
             return not_supported(n, "dcl.init");
-        if (syntax(children[1]).is(syntax_kind::braced_init_list))
-            return list_initialization(children[1].index(), type, false,
-                                       result);
-        return initialize_from(n, children[1], type, false, false, result);
+        if (node[1].is(syntax_kind::braced_init_list))
+            return list_initialization(node[1].index(), type, false, result);
+        return initialize_from(n, node[1], type, false, false, result);
     case syntax_kind::initializer:
-        if (node.child_count != 3)
+        if (node.size() != 3)
             return not_supported(n, "dcl.init");
-        if (syntax(children[1]).is(syntax_kind::initializer_list)) {
-            if (has_pack_expansion(children[1]))
+        if (node[1].is(syntax_kind::initializer_list)) {
+            if (has_pack_expansion(node[1]))
                 return not_supported(n, "temp.variadic");
             const struct type target = type_table[type.unqualified()];
             if (target.kind == type_kind::array)
@@ -999,7 +997,7 @@ analysis_result semantic_analysis::initializer(syntax_child init,
                     return not_supported(n, "dcl.init");
                 owned_array<expression_meaning> arguments;
                 analysis_result r =
-                    expression_list_meanings(children[1], arguments);
+                    expression_list_meanings(node[1], arguments);
                 if (r != analysis_result::well_formed)
                     return r;
                 return construct(n, type, arguments, 0, result);
@@ -1011,7 +1009,7 @@ analysis_result semantic_analysis::initializer(syntax_child init,
                               "expression",
                               "dcl.init");
         }
-        return initialize_from(n, children[1], type, true, false, result);
+        return initialize_from(n, node[1], type, true, false, result);
     default:
         return not_supported(n, "dcl.init");
     }
@@ -1227,7 +1225,7 @@ analysis_result semantic_analysis::constructor_list_initialization(
             return not_supported(at, "dcl.init.list");
         if (narrows) {
             r = extension_used(diagnostic_id::sema_narrowing,
-                               tree[at].first_token, nullptr);
+                               syntax(at).first_token(), nullptr);
             if (r != analysis_result::well_formed)
                 return r;
         }
@@ -1342,7 +1340,7 @@ analysis_result semantic_analysis::aggregate_elements(
             zero.evaluation = constness::constant;
             one.evaluation = constness::constant;
             one.node = expression_node(semantic_kind::zero, zero,
-                                       tree[list].first_token);
+                                       syntax(list).first_token());
         }
         all = combined_constness(all, one.evaluation);
         elements.append(one.node);
@@ -1355,7 +1353,7 @@ analysis_result semantic_analysis::aggregate_elements(
         list_meaning.type = type;
     list_meaning.evaluation = all;
     result.node = expression_node(semantic_kind::initializer_list, list_meaning,
-                                  tree[list].first_token);
+                                  syntax(list).first_token());
     semantics.set_list(result.node, elements.data(), elements.size());
     return analysis_result::well_formed;
 }

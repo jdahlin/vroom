@@ -549,44 +549,41 @@ bool semantic_analysis::attributes_as_gnu(syntax_child n, uint32_t &flags) const
                 return false;
             continue;
         }
-        const syntax_node &node = tree[c.index()];
-        const syntax_child *children = tree.children(c.index());
-        if (node.kind == syntax_kind::attribute_specifier &&
-            node.child_count > 2 &&
-            syntax(children[2]).is(syntax_kind::attribute_using_prefix)) {
+        auto node = syntax(c);
+        if (node.is(syntax_kind::attribute_specifier) && node.size() > 2 &&
+            node[2].is(syntax_kind::attribute_using_prefix)) {
             /* [dcl.attr.grammar]/3: "If an attribute-specifier contains an
                attribute-using-prefix, ... each attribute-token in that
                attribute-list is treated as if its identifier were prefixed
                with N::" */
-            const syntax_child *prefix = tree.children(children[2].index());
-            if (tree[children[2].index()].child_count != 3 ||
-                !prefix[1].is_token())
+            auto prefix = node[2];
+            if (node[2].size() != 3 || !prefix[1].is_token())
                 return false;
             owned_buffer ns_spelling;
-            tokens.spelling(prefix[1].index(), ns_spelling.get());
+            tokens.spelling(prefix[1].token(), ns_spelling.get());
             const char *ns;
             size_t ns_length;
             attribute_name(ns_spelling, &ns, &ns_length);
             owned_array<syntax_child> names;
-            for (uint32_t i = 3; i < node.child_count; i++)
-                names.append(children[i]);
+            for (uint32_t i = 3; i < node.size(); i++)
+                names.append(node[i]);
             while (!names.empty()) {
                 syntax_child a = names.back();
                 names.resize(names.size() - 1);
                 if (!a.is_token()) {
-                    const syntax_node &an = tree[a.index()];
-                    if (an.kind == syntax_kind::attribute_list) {
-                        for (uint32_t i = 0; i < an.child_count; i++)
-                            names.append(tree.children(a.index())[i]);
+                    auto an = syntax(a);
+                    if (an.is(syntax_kind::attribute_list)) {
+                        for (uint32_t i = 0; i < an.size(); i++)
+                            names.append(syntax(a)[i]);
                         continue;
                     }
                     /* an attribute: its token and an argument clause,
                        which none of these takes for anything vcc
                        generates */
-                    if (an.kind != syntax_kind::attribute || !an.child_count ||
-                        !tree.children(a.index())[0].is_token())
+                    if (!an.is(syntax_kind::attribute) || !an.size() ||
+                        !syntax(a)[0].is_token())
                         return false;
-                    a = tree.children(a.index())[0];
+                    a = syntax(a)[0];
                 }
                 if (tokens[a.index()].kind ==
                     token_kind::operator_or_punctuator)
@@ -604,30 +601,28 @@ bool semantic_analysis::attributes_as_gnu(syntax_child n, uint32_t &flags) const
             }
             continue;
         }
-        if (node.kind == syntax_kind::attribute_specifier_seq ||
-            node.kind == syntax_kind::attribute_specifier ||
-            node.kind == syntax_kind::attribute_list) {
-            for (uint32_t i = 0; i < node.child_count; i++)
-                work.append(children[i]);
+        if (node.is(syntax_kind::attribute_specifier_seq) ||
+            node.is(syntax_kind::attribute_specifier) ||
+            node.is(syntax_kind::attribute_list)) {
+            for (uint32_t i = 0; i < node.size(); i++)
+                work.append(node[i]);
             continue;
         }
-        if (node.kind == syntax_kind::attribute) {
+        if (node.is(syntax_kind::attribute)) {
             /* the token and an attribute-argument-clause, which none of
                these takes for anything vcc generates */
-            if (!node.child_count ||
-                syntax(children[0]).is(syntax_kind::attribute))
+            if (!node.size() || node[0].is(syntax_kind::attribute))
                 return false;
-            work.append(children[0]);
+            work.append(node[0]);
             continue;
         }
-        if (node.kind != syntax_kind::attribute_scoped_token ||
-            node.child_count != 3 || !children[0].is_token() ||
-            !children[2].is_token())
+        if (!node.is(syntax_kind::attribute_scoped_token) || node.size() != 3 ||
+            !node[0].is_token() || !node[2].is_token())
             /* an attribute-using-prefix, an alignment-specifier */
             return false;
         owned_buffer ns_spelling, spelling;
-        tokens.spelling(children[0].index(), ns_spelling.get());
-        tokens.spelling(children[2].index(), spelling.get());
+        tokens.spelling(node[0].token(), ns_spelling.get());
+        tokens.spelling(node[2].token(), spelling.get());
         const char *ns, *name;
         size_t ns_length, length;
         attribute_name(ns_spelling, &ns, &ns_length);
@@ -656,19 +651,18 @@ bool semantic_analysis::gnu_attributes_without_effect(syntax_child n) const
         work.resize(work.size() - 1);
         syntax_child name_token = c;
         if (!c.is_token()) {
-            const syntax_node &node = tree[c.index()];
-            const syntax_child *children = tree.children(c.index());
-            if (node.kind == syntax_kind::gnu_attribute_specifier ||
-                node.kind == syntax_kind::gnu_attribute_list) {
-                for (uint32_t i = 0; i < node.child_count; i++)
-                    work.append(children[i]);
+            auto node = syntax(c);
+            if (node.is(syntax_kind::gnu_attribute_specifier) ||
+                node.is(syntax_kind::gnu_attribute_list)) {
+                for (uint32_t i = 0; i < node.size(); i++)
+                    work.append(node[i]);
                 continue;
             }
             /* an attribute with arguments: its name first */
-            if (node.kind != syntax_kind::gnu_attribute || !node.child_count ||
-                !children[0].is_token())
+            if (!node.is(syntax_kind::gnu_attribute) || !node.size() ||
+                !node[0].is_token())
                 return false;
-            name_token = children[0];
+            name_token = node[0];
             /* visibility("default") (libc++'s _LIBCPP_EXPORTED_FROM_ABI):
                the visibility every symbol vcc emits has already
                (gnu_attribute_specifier's rule) */
@@ -678,9 +672,9 @@ bool semantic_analysis::gnu_attributes_without_effect(syntax_child n) const
             size_t length;
             attribute_name(spelling, &name, &length);
             if (name_is(name, length, "visibility")) {
-                if (node.child_count != 4 || !children[2].is_token())
+                if (node.size() != 4 || !node[2].is_token())
                     return false;
-                tokens.spelling(children[2].index(), value.get());
+                tokens.spelling(node[2].token(), value.get());
                 if (value.size() != 9 || memcmp(value.data(), "\"default\"", 9))
                     return false;
                 any = true;
@@ -717,8 +711,8 @@ bool semantic_analysis::class_head_attributes_without_effect(
         return attributes_without_effect(c);
     if (!syntax(c).is(syntax_kind::attribute_specifier_seq))
         return false;
-    for (uint32_t i = 0; i < tree[c.index()].child_count; i++)
-        if (!class_head_attributes_without_effect(tree.children(c.index())[i]))
+    for (uint32_t i = 0; i < syntax(c).size(); i++)
+        if (!class_head_attributes_without_effect(syntax(c)[i]))
             return false;
     return true;
 }
