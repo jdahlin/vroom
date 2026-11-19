@@ -1060,6 +1060,11 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   *Validate:* `flat_declarators_labels.c`, stress `pointer-10k` and
   `case-labels-*`; GCC `limits-pointer.c` and `limits-caselabels.c`;
   excessive pointer storage and genuine expression nesting fail cleanly.
+- **C++: bound reference binding through converting constructors.**  The first
+  front end overflowed its stack on Skia's bentleyottmann (1cdd55d5): binding a
+  temporary made by a converting constructor picked the same constructor again.
+  When [dcl.init.ref] to converted temporaries lands, bound or detect the cycle.
+  Validated by `old-converting-bind` and Skia's Contour.cpp.
 - **C++: lazy class template instantiation** ([temp.inst]/2).  `template_type`
   instantiates a class specialization at every non-dependent template-id;
   only a specialization's head defers it (`declaring_specializations`).  So
