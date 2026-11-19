@@ -234,6 +234,7 @@ SYNTAX_NODE(gnu_designation, "gnu-designation", "ext.gnu")
 SYNTAX_NODE(gnu_offsetof_expression, "gnu-offsetof-expression", "ext.gnu")
 SYNTAX_NODE(clang_type_trait_expression, "clang-type-trait-expression", "ext.clang")
 SYNTAX_NODE(clang_type_transformation, "clang-type-transformation", "ext.clang")
+SYNTAX_NODE(clang_bit_cast_expression, "clang-bit-cast-expression", "ext.clang")
 
 /*
  * Scaffolding, not grammar: both are counted, and both are at zero on

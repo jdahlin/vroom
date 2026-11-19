@@ -884,6 +884,13 @@ constness combined_constness(constness a, constness b);
 /* a floating-point value as an expression_meaning keeps it */
 double floating_value(uint64_t kept);
 uint64_t floating_kept(double v);
+/* [bit.cast]/1 of a value as an expression_meaning keeps it, from one
+   arithmetic type to another of the same size: false where analysis does
+   not know the object representation (long double, 128-bit integers) or
+   the result has no value of to (bool) */
+bool bit_cast_kept(const implementation_defined_behavior &behavior,
+                   fundamental_type from, fundamental_type to, uint64_t kept,
+                   uint64_t &result);
 /* the operators of the arithmetic types on values as expression_meaning
    keeps them (expr/folding.cpp): constant with the value in out,
    not_constant where [expr.pre]/4 makes the operation undefined, unknown
@@ -1169,6 +1176,9 @@ enum class conversion_kind : uint8_t {
     member_pointer_to_base,
     /* [conv.qual]/3 of a pointer to member: the same value */
     member_pointer_qualification,
+    /* [ext:clang_bit_cast] [bit.cast]/1: the operand's object
+       representation as a value of another type of the same size */
+    bit_cast,
 };
 
 /* [expr.cast]/4: the casts that may perform an explicit conversion */
@@ -2313,6 +2323,7 @@ class semantic_analysis
     analysis_result noexcept_operator(node_index n, expression_meaning &m);
     analysis_result clang_type_trait(node_index n, expression_meaning &m);
     analysis_result gnu_offsetof(node_index n, expression_meaning &m);
+    analysis_result clang_bit_cast(node_index n, expression_meaning &m);
     analysis_result potentially_throwing(node_index n, uint32_t x,
                                          bool &throwing);
     analysis_result conditional_operands(node_index n,

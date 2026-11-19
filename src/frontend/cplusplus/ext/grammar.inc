@@ -138,6 +138,11 @@ PRODUCTION(gnu_offsetof, "gnu-offsetof-member-designator", "identifier")
 PRODUCTION(gnu_offsetof, "gnu-offsetof-member-designator", "gnu-offsetof-member-designator . identifier")
 PRODUCTION(gnu_offsetof, "gnu-offsetof-member-designator", "gnu-offsetof-member-designator [ expression ]")
 
+/* ---- clang Language Extensions, __builtin_bit_cast ---- */
+
+PRODUCTION(clang_bit_cast, "primary-expression", "clang-bit-cast-expression")
+PRODUCTION(clang_bit_cast, "clang-bit-cast-expression", "__builtin_bit_cast ( type-id , assignment-expression )")
+
 /* ---- clang Language Extensions, Type Trait Primitives ---- */
 
 PRODUCTION(clang_type_traits, "primary-expression", "clang-type-trait-expression")

@@ -455,6 +455,7 @@ enum class extension_keyword : uint8_t {
     int128,
     nullability,
     offsetof_,
+    bit_cast,
 };
 
 /*
@@ -879,6 +880,8 @@ class parser
     node_index clang_type_transformation();
     /* ---- ext/gnu/offsetof.cpp: __builtin_offsetof(T, a.b[1]) */
     node_index gnu_offsetof_expression();
+    /* ---- ext/clang/bit_cast.cpp: __builtin_bit_cast(T, e) */
+    node_index clang_bit_cast_expression();
     /* ---- ext/gnu/asm_label.cpp: declarator asm ( "name" ) attributes */
     bool gnu_declarator_suffix_follows(const declarator_facts &facts);
     node_index gnu_declarator_suffix(size_t mark, token_index first,

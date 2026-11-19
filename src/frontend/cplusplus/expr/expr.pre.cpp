@@ -130,6 +130,8 @@ analysis_result semantic_analysis::expression_kind(syntax_child e,
         return clang_type_trait(n, m);
     case syntax_kind::gnu_offsetof_expression:
         return gnu_offsetof(n, m);
+    case syntax_kind::clang_bit_cast_expression:
+        return clang_bit_cast(n, m);
     default:
         return not_supported(n);
     }
