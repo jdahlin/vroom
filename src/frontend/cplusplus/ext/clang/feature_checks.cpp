@@ -295,9 +295,39 @@ int64_t has_gnu_attribute(const implementation_defined_behavior &b,
     return answer(b, check_kind::attribute, name, length);
 }
 
+/* builtins clang has and this front end does not, which libc++ tests
+   with __has_builtin and has a fallback for: the answer is 0, so that
+   libc++ takes the fallback (bench/cxx-libcxx-builtins.py lists them) */
+static const char *const builtins_not_had[] = {
+    "__array_extent",
+    "__atomic_add_fetch",
+    "__atomic_load_n",
+    "__builtin_bswapg",
+    "__builtin_char_memchr",
+    "__builtin_clear_padding",
+    "__builtin_clzg",
+    "__builtin_complex",
+    "__builtin_coro_noop",
+    "__builtin_ctzg",
+    "__builtin_is_implicit_lifetime",
+    "__builtin_is_virtual_base_of",
+    "__builtin_is_within_lifetime",
+    "__builtin_lt_synthesizes_from_spaceship",
+    "__builtin_operator_delete",
+    "__builtin_operator_new",
+    "__builtin_verbose_trap",
+    "__is_destructible",
+    "__is_nothrow_destructible",
+    "__is_trivially_equality_comparable",
+    "__is_trivially_relocatable",
+};
+
 bool has_builtin(const implementation_defined_behavior &b, const char *name,
                  size_t length)
 {
+    for (const char *n : builtins_not_had)
+        if (strlen(n) == length && !memcmp(n, name, length))
+            return false;
     return answer(b, check_kind::builtin, name, length) != 0;
 }
 

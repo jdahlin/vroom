@@ -1081,6 +1081,29 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   *Validate:* the repro above and a pointer/reference to a specialization
   whose members are invalid accepted as clang does; `cxx-run.py`,
   `cxx-c-suites.py` unchanged; the libc++ header count.
+- [ ] **C++: the compiler builtins libc++ uses that the front end lacks.**
+  `bench/cxx-libcxx-builtins.py` lists them: of 188 libc++ uses, 98 are
+  had (the 28 traits of one type's category in
+  `ext/clang/unary-traits.inc` among them); 21 more answer
+  `__has_builtin` 0 (`ext/clang/feature_checks.cpp`) where libc++ has a
+  fallback.  Left (69): the traits that need class properties
+  (`__is_constructible`, `__is_assignable`, `__is_convertible`, the
+  `trivially`/`nothrow` ones, `__is_empty`, `__is_polymorphic`,
+  `__is_abstract`, `__is_final`, `__is_aggregate`, `__is_base_of`,
+  `__has_virtual_destructor`, `__is_standard_layout`, `__is_pod`,
+  `__is_trivial`, `__has_unique_object_representations`,
+  `__reference_c*_from_temporary`, `__is_trivially_destructible` and
+  `__has_trivial_destructor`: libc++ has no fallback, an `#error`),
+  `__atomic_*` and `__c11_atomic_*` (C's nodes, pointer arguments),
+  `__builtin_{add,sub,mul}_overflow`, `__builtin_launder`,
+  `__builtin_bit_cast`, `__builtin_assume_aligned`, `__builtin_constant_p`,
+  `__builtin_coro_*`, `__builtin_source_location`, `__builtin_nans`,
+  `__builtin_popcountg`, the `elementwise`/`reduce` vector builtins,
+  `__builtin_invoke` (answering 0 sends libc++ to a fallback the front end
+  cannot analyse yet); `__GetExceptionInfo` and `__break` are MSVC's, and
+  `__builtin_offsetof`/`__builtin_convertvector` are had (the probe calls
+  them without their syntax).
+  *Validate:* the script's count; `cxx-run.py`; the libc++ header sweep.
 
 ### Preprocessor and lexer (`pp.c`, `frontend/lex/lex.c`)
 - [x] **`#pragma once` by path string, capped at 4096** [P].  (Done: by (dev, ino) from
