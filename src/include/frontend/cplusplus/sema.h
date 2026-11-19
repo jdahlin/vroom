@@ -316,6 +316,10 @@ enum gnu_attribute_flag : uint32_t {
     gnu_enable_if = 65536,
     /* mode(M): the type of the typedef or variable (gnu_mode_type) */
     gnu_mode = 131072,
+    /* [ext:gnu_library_builtins] __builtin_popcountg, __builtin_clzg and
+       __builtin_ctzg (with gnu_compiler_builtin): a constant expression
+       when its arguments are (bit_count_builtin) */
+    gnu_bit_count = 262144,
 };
 /* the GNU attributes of a function's own symbol that analysis carries to
    member functions and function templates */
@@ -2471,6 +2475,12 @@ class semantic_analysis
     analysis_result clang_bit_cast(SyntaxRef n, expression_meaning &m);
     analysis_result clang_convertvector(SyntaxRef n, expression_meaning &m);
     bool builtin_addressof_call(SyntaxRef n);
+    /* clang's type-generic bit counts: which one the function e is (1
+       popcount, 2 clz, 3 ctz; 0 none), the check of a call's arguments,
+       and its value in a constant evaluation */
+    int bit_count_builtin(entity_index e) const;
+    analysis_result bit_count_arguments(SyntaxRef n, entity_index called,
+                                        const owned_array<uint32_t> &nodes);
     analysis_result builtin_addressof(SyntaxRef n, expression_meaning &m);
     analysis_result clang_source_location(SyntaxRef n, expression_meaning &m);
     analysis_result clang_atomic_type(SyntaxRef n, qualified_type &type);
@@ -2697,6 +2707,8 @@ class semantic_analysis
                             constant_value &v);
     constness evaluate_statement(constant_evaluation &state, uint32_t node,
                                  bool &returned, constant_value &result);
+    constness evaluate_bit_count(constant_evaluation &state, int which,
+                                 const semantic_node &call, constant_value &v);
     constness evaluate_call(constant_evaluation &state, uint32_t node,
                             constant_value &v);
     constness evaluate_object(constant_evaluation &state, uint32_t node,

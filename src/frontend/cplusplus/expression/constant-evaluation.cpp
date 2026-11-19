@@ -979,6 +979,9 @@ constness semantic_analysis::evaluate_call(constant_evaluation &state,
         v.integer = 1;
         return constness::constant;
     }
+    /* [ext:gnu_library_builtins] clang evaluates the bit counts */
+    if (int which = bit_count_builtin(semantics[callee].a))
+        return evaluate_bit_count(state, which, x, v);
     /* [expr.prim.lambda.closure]/4: whether a closure's function call
        operator is constexpr is not decided yet (evaluate_invocation),
        unless its lambda-declarator says constexpr */

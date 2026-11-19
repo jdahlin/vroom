@@ -322,10 +322,41 @@ semantic_analysis::declare_builtin(uint32_t name, uint32_t symbol,
    are passed as they are, unpromoted (postfix-expression.cpp), as clang's
    custom type checking does */
 static const char *const generic_builtins[] = {
-    "fpclassify", "isfinite", "isgreater",   "isgreaterequal",
-    "isinf",      "isless",   "islessequal", "islessgreater",
-    "isnan",      "isnormal", "isunordered", "signbit",
+    "fpclassify",
+    "isfinite",
+    "isgreater",
+    "isgreaterequal",
+    "isinf",
+    "isless",
+    "islessequal",
+    "islessgreater",
+    "isnan",
+    "isnormal",
+    "isunordered",
+    "signbit",
+    /* clang's type-generic bit counts (Builtins.td, custom type
+       checking): the one argument of any unsigned integer type */
+    "popcountg",
+    "clzg",
+    "ctzg",
 };
+
+/* __builtin_popcountg, __builtin_clzg, __builtin_ctzg: 1, 2, 3 */
+static int bit_count_kind(const char *spelling, size_t length)
+{
+    static const char *const names[] = {"popcountg", "clzg", "ctzg"};
+    for (int i = 0; i < 3; i++)
+        if (length == 10 + strlen(names[i]) &&
+            !memcmp(spelling + 10, names[i], length - 10))
+            return i + 1;
+    return 0;
+}
+
+static bool is_bit_count_builtin(const char *spelling, size_t length)
+{
+    return length > 10 && !memcmp(spelling, "__builtin_", 10) &&
+           bit_count_kind(spelling, length) != 0;
+}
 
 static bool is_generic_builtin(const char *spelling, size_t length)
 {
@@ -376,8 +407,11 @@ entity_index semantic_analysis::compiler_builtin(uint32_t name,
             type_table.fundamental(types[at - letters]), cv_none));
     }
     /* the result, then the parameters */
+    uint32_t flags = gnu_compiler_builtin;
+    if (is_bit_count_builtin(spelling, length))
+        flags |= gnu_bit_count;
     return declare_builtin(name, name, types_of[0], types_of.data() + 1,
-                           types_of.size() - 1, generic, gnu_compiler_builtin);
+                           types_of.size() - 1, generic, flags);
 }
 
 entity_index semantic_analysis::library_builtin(uint32_t name)
@@ -445,6 +479,108 @@ entity_index semantic_analysis::library_builtin(uint32_t name)
        the library function is another */
     return declare_builtin(name, library, result, parameters.data(),
                            parameters.size(), variadic, flags);
+}
+
+int semantic_analysis::bit_count_builtin(entity_index e) const
+{
+    if (!(entity_table[e].gnu_flags & gnu_bit_count))
+        return 0;
+    size_t length = 0;
+    const char *spelling =
+        tokens.pp.identifier_spelling(entity_table[e].name - 1, &length);
+    return bit_count_kind(spelling, length);
+}
+
+/* clang's __builtin_popcountg(x), __builtin_clzg(x[, fallback]) and
+   __builtin_ctzg(x[, fallback]) (Sema's BuiltinPopcountg and the like): "1st
+   argument must be a scalar unsigned integer type", and the fallback "must
+   have type int after integer promotion" */
+analysis_result
+semantic_analysis::bit_count_arguments(SyntaxRef n, entity_index called,
+                                       const owned_array<uint32_t> &nodes)
+{
+    int which = bit_count_builtin(called);
+    size_t most = 2;
+    if (which == 1)
+        most = 1;
+    if (nodes.size() < 1 || nodes.size() > most)
+        return ill_formed(n,
+                          "a bit count takes the value to count and, for "
+                          "clzg and ctzg, a fallback",
+                          "ext.gnu");
+    qualified_type first = semantics[nodes[0]].type;
+    fundamental_type f = fundamental_of(first);
+    if (f == fundamental_type::none)
+        return not_supported(n, "ext.gnu");
+    if (!fundamental_type_is_integral(f) ||
+        fundamental_type_is_signed(tokens.files.behavior, f))
+        return ill_formed(n,
+                          "1st argument must be a scalar unsigned integer "
+                          "type",
+                          "ext.gnu");
+    if (nodes.size() == 2) {
+        fundamental_type g = fundamental_of(semantics[nodes[1]].type);
+        if (g == fundamental_type::none)
+            return not_supported(n, "ext.gnu");
+        if (!fundamental_type_is_integral(g) ||
+            fundamental_type_width(tokens.files.behavior, g) >
+                fundamental_type_width(tokens.files.behavior,
+                                       fundamental_type::int_))
+            return ill_formed(n,
+                              "2nd argument must have type int after "
+                              "integer promotion",
+                              "ext.gnu");
+    }
+    return analysis_result::well_formed;
+}
+
+/* the count of the value of the first argument, an unsigned integer of
+   its type's width; for zero the fallback, or no constant (clang: "the
+   operand is zero") when there is none */
+constness semantic_analysis::evaluate_bit_count(constant_evaluation &state,
+                                                int which,
+                                                const semantic_node &call,
+                                                constant_value &v)
+{
+    const uint32_t *items = semantics.items(call.first);
+    constant_value x;
+    constness c = evaluate_node(state, items[0], x);
+    if (c == constness::constant && x.kind != constant_value_kind::integer)
+        return constness::unknown;
+    if (c != constness::constant)
+        return c;
+    unsigned width = fundamental_type_width(
+        tokens.files.behavior, fundamental_of(semantics[items[0]].type));
+    unsigned __int128 bits = x.integer;
+    if (width < 128)
+        bits &= (static_cast<unsigned __int128>(1) << width) - 1;
+    uint64_t low = static_cast<uint64_t>(bits);
+    uint64_t high = static_cast<uint64_t>(bits >> 64);
+    if (bits == 0 && which != 1) {
+        if (call.count < 2)
+            return constness::not_constant;
+        return evaluate_node(state, items[1], v);
+    }
+    unsigned count = 0;
+    if (which == 1) {
+        count = static_cast<unsigned>(__builtin_popcountll(low) +
+                                      __builtin_popcountll(high));
+    } else if (which == 2) {
+        if (high)
+            count = static_cast<unsigned>(__builtin_clzll(high));
+        else
+            count = 64 + static_cast<unsigned>(__builtin_clzll(low));
+        /* the 128 bits counted: the leading zeros above the width */
+        count -= 128 - width;
+    } else if (low) {
+        count = static_cast<unsigned>(__builtin_ctzll(low));
+    } else {
+        count = 64 + static_cast<unsigned>(__builtin_ctzll(high));
+    }
+    v = constant_value();
+    v.kind = constant_value_kind::integer;
+    v.integer = count;
+    return constness::constant;
 }
 
 /* clang's T *__builtin_addressof(T &) (Builtins.td, custom type checking):

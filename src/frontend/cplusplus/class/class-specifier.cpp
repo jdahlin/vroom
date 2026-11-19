@@ -2022,6 +2022,23 @@ semantic_analysis::static_member_initializer(SyntaxRef declarator,
     value.evaluation = constness::unknown;
     value.value = 0;
     VTRY(r, initializer(init, type, value));
+    /* [expr.const]/5: an initializer that calls a function (a constexpr
+       function, or a builtin clang evaluates) is the evaluator's */
+    if (value.evaluation == constness::unknown && value.node) {
+        constant_value v;
+        bool constant = false;
+        VTRY_SET(r, evaluate_constant(declarator, value.node, v, constant));
+        if (constant) {
+            expression_meaning folded;
+            folded.type = semantics[value.node].type;
+            folded.category = value_category::prvalue;
+            evaluated_meaning(folded, v);
+            value.node = expression_node(semantic_kind::constant, folded,
+                                         semantics[value.node].at);
+            value.evaluation = constness::constant;
+            value.value = folded.value;
+        }
+    }
     if (value.evaluation == constness::not_constant)
         return ill_formed(declarator,
                           "every initializer-clause of a static data "

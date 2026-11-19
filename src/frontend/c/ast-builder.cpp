@@ -325,6 +325,18 @@ uint32_t ast_builder_builtin_call(cc *c, const char *name, size_t length,
     /* the parser's tree of conditionals, as for C */
     if (b->id == CC_BUILTIN_FPCLASSIFY && count == 6)
         return cc_fpclassify_build(c, args, 0);
+    /* the generic bit counts: the operand's precision, lowered from the
+       nodes as for C (the C++ front end has checked the arguments) */
+    if ((b->id == CC_BUILTIN_CLZG || b->id == CC_BUILTIN_CTZG ||
+         b->id == CC_BUILTIN_POPCOUNTG) &&
+        count >= 1 && count <= 2) {
+        uint32_t fallback = 0;
+        if (count == 2)
+            fallback =
+                cc_conversion_apply(c, args[1], cc_type_basic(AST_TYPE_INT));
+        return cc_builtin_bit_count_lower(
+            c, b->id, false, cc_conversion_decay(c, args[0]), fallback, 0);
+    }
     cc_id_list list;
     cc_id_list_init(&list);
     for (uint32_t i = 0; i < count; i++)

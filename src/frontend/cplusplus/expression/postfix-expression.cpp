@@ -408,6 +408,21 @@ analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
                     return not_supported(n, "temp.res");
                 return class_conversion(n, type_table[t].entity, m);
             }
+            if (alias_template_of(found)) {
+                /* [temp.alias]/2: the alias template-id "is equivalent to
+                   the substitution of its template-arguments" in its
+                   type: the simple-type-specifier names that type */
+                type_index t = 0;
+                uint32_t cv = 0;
+                VTRY(r, template_type(n[0], 0, false, t, &cv));
+                if (cv)
+                    return not_supported(n, "expr.type.conv");
+                if (type_table[t].kind == type_kind::class_type &&
+                    entity_table[type_table[t].entity].kind ==
+                        entity_kind::class_type)
+                    return class_conversion(n, type_table[t].entity, m);
+                named = t;
+            }
         }
     }
     if (named) {
@@ -1365,6 +1380,9 @@ analysis_result semantic_analysis::call_with(
     for (size_t i = arguments.size(); i < count; i++)
         argument_nodes.append(
             default_argument_nodes[entity_table[called].first_default + i]);
+    if (called && (entity_table[called].gnu_flags & gnu_bit_count)) {
+        VTRY_SET(r, bit_count_arguments(n, called, argument_nodes));
+    }
     /* [expr.call]/14: "A function call is an lvalue if the result type is
        an lvalue reference type or an rvalue reference to function type, an
        xvalue if the result type is an rvalue reference to object type, and
@@ -1380,7 +1398,8 @@ analysis_result semantic_analysis::call_with(
        specifier: [expr.prim.lambda.closure]/4, evaluate_invocation) */
     if (called && !entity_table[called].constexpr_ &&
         !(entity_table[called].enclosing &&
-          entity_table[entity_table[called].enclosing].lambda))
+          entity_table[entity_table[called].enclosing].lambda) &&
+        !(entity_table[called].gnu_flags & gnu_bit_count))
         m.evaluation = constness::not_constant;
     /* a constexpr member function's invocation is the evaluator's */
     if (called && entity_table[called].constexpr_) {
