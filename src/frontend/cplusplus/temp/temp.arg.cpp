@@ -274,7 +274,7 @@ analysis_result semantic_analysis::substituted_parameter_type(
     qualified_type t = sp.type;
     if (r == analysis_result::well_formed && form.has_declarator) {
         declarator_meaning dm;
-        r = declarator(node, form.declarator, t, dm);
+        r = declarator(node, syntax(form.declarator), t, dm);
     }
     current_scope = saved;
     lookup_horizon = saved_horizon;
@@ -628,8 +628,9 @@ analysis_result semantic_analysis::default_template_arguments(
         current_scope = scope;
         lookup_horizon = syntax(ft.declaration).first_token();
         template_argument a;
-        analysis_result r = template_argument_for(
-            at, template_index, i, form.default_argument, arguments.data(), a);
+        analysis_result r = template_argument_for(at, template_index, i,
+                                                  syntax(form.default_argument),
+                                                  arguments.data(), a);
         current_scope = saved;
         lookup_horizon = saved_horizon;
         if (r != analysis_result::well_formed)

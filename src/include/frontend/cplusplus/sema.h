@@ -1286,7 +1286,7 @@ class semantic_tree
 /* one expression analysis gave a type: what -fcxx-dump=type-claims has clang
    check */
 struct analysed_expression {
-    SyntaxElement at;
+    syntax_child at;
     node_index declaration = 0;
     expression_meaning meaning;
     /* where a claim about it can be placed: just after this token (the
@@ -2015,7 +2015,7 @@ class semantic_analysis
         /* its parameter-declaration, and the initializer-clause of its
            default argument ([dcl.fct.default]/1), none if it has none */
         node_index declaration = 0;
-        SyntaxElement default_argument;
+        syntax_child default_argument;
         /* [temp.variadic]/5: an element of the function parameter pack
            (an instantiation's) of this name, id 0 */
         uint32_t pack_name = 0;
@@ -3548,7 +3548,7 @@ class semantic_analysis
         /* a type-parameter's type-constraint ([temp.param]/1), or 0 */
         node_index constraint = 0;
         node_index head = 0;
-        SyntaxElement default_argument, declarator;
+        syntax_child default_argument, declarator;
     };
     bool template_parameter_form(node_index parameter,
                                  template_parameter_parts &out) const;
@@ -4090,6 +4090,11 @@ class semantic_analysis
     SyntaxRef syntax(node_index n) const
     {
         return SyntaxRef(syntax_cx, n);
+    }
+    /* a child read out of a record (a stored child is 4 bytes, a view 16) */
+    SyntaxElement syntax(syntax_child c) const
+    {
+        return SyntaxElement(syntax_cx, c);
     }
     /* a token as a child: to ask it what a SyntaxElement is asked */
     SyntaxElement token_element(token_index t) const

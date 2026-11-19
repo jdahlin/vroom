@@ -410,7 +410,7 @@ size_t check_tree(const semantic_analysis &analysis, const syntax_tree &tree,
             continue;
         uint32_t n = x.meaning.node;
         if (!n) {
-            token_index at = x.at.token();
+            token_index at = x.at.index();
             if (!x.at.is_token())
                 at = tree[x.at.index()].first_token;
             source_position p = tokens.position(at);

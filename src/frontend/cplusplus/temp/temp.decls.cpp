@@ -717,7 +717,7 @@ analysis_result semantic_analysis::declare_template_parameters(
             qualified_type type = sp.type;
             if (r == analysis_result::well_formed && form.has_declarator) {
                 declarator_meaning dm;
-                r = declarator(node, form.declarator, type, dm);
+                r = declarator(node, syntax(form.declarator), type, dm);
                 if (r == analysis_result::well_formed &&
                     (dm.qualifier || dm.qualified_namespace || dm.pack ||
                      dm.gnu_flags || dm.aligned || dm.template_id ||

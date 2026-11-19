@@ -105,11 +105,11 @@ analysis_result semantic_analysis::default_arguments(SyntaxRef n,
            are in scope and can hide namespace and class member names": not
            so here, so a default argument that may name one is not
            analysed */
-        node_index clause = node_of(p.default_argument);
+        node_index clause = node_of(syntax(p.default_argument));
         token_index first = syntax(clause).first_token();
         token_index end = syntax(clause).end_token();
         if (p.default_argument.is_token()) {
-            first = p.default_argument.token();
+            first = p.default_argument.index();
             end = first + 1;
         }
         for (token_index t = first; t < end && member; t++) {
@@ -137,8 +137,9 @@ analysis_result semantic_analysis::default_arguments(SyntaxRef n,
                     return not_supported(p.declaration, "dcl.fct.default");
         qualified_type type = types[i];
         initialized_value value;
-        analysis_result r = initialize_from(p.declaration, p.default_argument,
-                                            type, false, false, value);
+        analysis_result r =
+            initialize_from(p.declaration, syntax(p.default_argument), type,
+                            false, false, value);
         if (r != analysis_result::well_formed)
             return r;
         nodes[i] = value.node;

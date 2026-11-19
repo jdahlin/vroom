@@ -150,6 +150,11 @@ struct syntax_child {
     {
         return bits >> 1;
     }
+    /* false for no child at all (a token is one) */
+    explicit operator bool() const
+    {
+        return bits != 0;
+    }
 };
 
 struct syntax_node {

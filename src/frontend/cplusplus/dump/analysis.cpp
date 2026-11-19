@@ -298,7 +298,7 @@ static void dump_type_claims(const semantic_analysis &analysis,
         if (result != analysis_result::well_formed &&
             result != analysis_result::unsupported)
             continue;
-        token_index first = x.at.token(), end = x.at.token() + 1;
+        token_index first = x.at.index(), end = x.at.index() + 1;
         if (!x.at.is_token()) {
             first = tree[x.at.index()].first_token;
             end = tree[x.at.index()].end_token;
