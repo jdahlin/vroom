@@ -1415,6 +1415,13 @@ analysis_result semantic_analysis::call_with(
             r = operand_value(node_of(a), e);
         if (r != analysis_result::well_formed)
             return r;
+        /* [ext:gnu_library_builtins] a type-generic builtin of the C
+           front end (__builtin_isfinite, ...) takes its argument as it
+           is, as clang's custom type checking does: no promotion */
+        if (called && (entity_table[called].gnu_flags & gnu_compiler_builtin)) {
+            argument_nodes.append(e.node);
+            continue;
+        }
         promote_enumeration(e);
         fundamental_type passed = fundamental_of(e.type);
         if (passed == fundamental_type::void_)

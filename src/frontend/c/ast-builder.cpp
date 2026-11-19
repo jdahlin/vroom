@@ -306,6 +306,9 @@ uint32_t ast_builder_builtin_call(cc *c, const char *name, size_t length,
     const cc_builtin *b = ast_builder_builtin(name, length);
     if (!b)
         return 0;
+    /* the parser's tree of conditionals, as for C */
+    if (b->id == CC_BUILTIN_FPCLASSIFY && count == 6)
+        return cc_fpclassify_build(c, args, 0);
     cc_id_list list;
     cc_id_list_init(&list);
     for (uint32_t i = 0; i < count; i++)

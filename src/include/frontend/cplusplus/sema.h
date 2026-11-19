@@ -1998,7 +1998,8 @@ class semantic_analysis
                                  qualified_type result,
                                  const qualified_type *parameters, size_t count,
                                  bool variadic, uint32_t flags);
-    qualified_type builtin_parameter_type(uint8_t t);
+    /* real: the fundamental_type of builtin_type::real */
+    qualified_type builtin_parameter_type(uint8_t t, uint8_t real = 0);
     /* the parameters of the function declarator analysed last: a function
        definition's, with the types they have in its body ([dcl.fct]/5's
        adjustment, top-level cv-qualifiers kept) */
