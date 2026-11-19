@@ -98,17 +98,18 @@ bool dump_analysis_selftest(vbuffer *out)
         ok &=
             analysis_check(out, n && x && e[x].enclosing == n && e[x].name == 8,
                            "an entity and its enclosing entity");
-        e.add_declaration(x, 11);
-        e.add_declaration(n, 5);
-        e.add_declaration(x, 12);
+        e.add_declaration(x, node_index(11));
+        e.add_declaration(n, node_index(5));
+        e.add_declaration(x, node_index(12));
         uint32_t first = e[x].first_declaration;
         ok &= analysis_check(
             out,
-            e.declaration(first).node == 11 &&
-                e.declaration(e.declaration(first).next).node == 12 &&
+            e.declaration(first).node == node_index(11) &&
+                e.declaration(e.declaration(first).next).node ==
+                    node_index(12) &&
                 e[x].last_declaration == e.declaration(first).next &&
                 !e.declaration(e[x].last_declaration).next &&
-                e.declaration(e[n].first_declaration).node == 5,
+                e.declaration(e[n].first_declaration).node == node_index(5),
             "[basic.link]/1: an entity's declarations in order");
     }
     {
@@ -203,11 +204,9 @@ static void dump_declaration_claims(const semantic_analysis &analysis,
             !write_type_claim(analysis.type_table, d.type, claim.get()))
             continue;
         token_index last = node.end_token - 1;
-        for (uint32_t i = 0; i < node.child_count; i++) {
-            syntax_child c = tree.children(d.declaration)[i];
-            if (syntax_is(tree, c, syntax_kind::function_body))
-                last = tree[c.index()].first_token - 1;
-        }
+        auto body = d.declaration.function_definition().function_body();
+        if (body && !body.function_try_block())
+            last = tree[body.index()].first_token - 1;
         source_position end = tokens.position(node.end_token - 1);
         uint32_t extent = tokens[node.end_token - 1].preprocessing.extent;
         vbuffer_format_append(out, "%s\t%u-%u\t%u:%u\t", end.file_name,
@@ -298,7 +297,7 @@ static void dump_type_claims(const semantic_analysis &analysis,
         if (result != analysis_result::well_formed &&
             result != analysis_result::unsupported)
             continue;
-        token_index first = x.at.index(), end = x.at.index() + 1;
+        token_index first = x.at.token(), end = x.at.token() + 1;
         if (!x.at.is_token()) {
             first = tree[x.at.index()].first_token;
             end = tree[x.at.index()].end_token;

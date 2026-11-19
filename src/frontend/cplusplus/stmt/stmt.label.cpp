@@ -51,25 +51,24 @@ node_index parser::labeled_statement()
 /* the identifier labels of a function body, before its statements are
    analysed: a goto can name a label that follows it ([stmt.label]/1); a
    lambda's or a local class's body is another function's */
-void semantic_analysis::collect_labels(syntax_child s)
+void semantic_analysis::collect_labels(SyntaxElement s)
 {
     if (s.is_token())
         return;
-    const syntax_node &node = tree[s.index()];
-    if (node.kind == syntax_kind::lambda_expression ||
-        node.kind == syntax_kind::class_specifier)
+    auto node = s;
+    if (node.is(syntax_kind::lambda_expression) ||
+        node.is(syntax_kind::class_specifier))
         return;
-    const syntax_child *children = tree.children(s.index());
-    if (node.kind == syntax_kind::labeled_statement && node.child_count &&
-        children[0].is_token() &&
-        tokens[children[0].index()].kind == token_kind::identifier) {
+    if (node.is(syntax_kind::labeled_statement) && node.size() &&
+        node[0].is_token() &&
+        tokens[node[0].token()].kind == token_kind::identifier) {
         label_record l;
-        l.name = tokens.identifier(children[0].index());
-        l.point.at = children[0].index();
+        l.name = tokens.identifier(node[0].token());
+        l.point.at = node[0].token();
         function_state.labels.append(l);
     }
-    for (uint32_t i = 0; i < node.child_count; i++)
-        collect_labels(children[i]);
+    for (auto child : node.elements())
+        collect_labels(child);
 }
 
 /*
@@ -80,18 +79,17 @@ void semantic_analysis::collect_labels(syntax_child s)
  *         attribute-specifier-seq_opt case constant-expression : statement
  *         attribute-specifier-seq_opt default : statement
  */
-analysis_result semantic_analysis::labeled_statement(node_index n,
+analysis_result semantic_analysis::labeled_statement(LabeledStatement n,
                                                      uint32_t &built)
 {
-    const syntax_node &node = tree[n];
-    const syntax_child *children = tree.children(n);
-    if (!node.child_count || !children[0].is_token())
+    auto node = n;
+    if (!node.size() || !node[0].is_token())
         return not_supported(n, "dcl.attr");
-    token_index first = children[0].index();
+    token_index first = node[0].token();
     const token &t = tokens[first];
-    syntax_child last = children[node.child_count - 1];
+    SyntaxElement last = node[node.size() - 1];
     if (t.kind == token_kind::identifier) {
-        if (node.child_count != 3)
+        if (node.size() != 3)
             return not_supported(n, "stmt.label");
         for (label_record &l : function_state.labels)
             if (l.point.at == first) {
@@ -126,7 +124,7 @@ analysis_result semantic_analysis::labeled_statement(node_index n,
     semantic_kind kind = semantic_kind::default_label;
     uint64_t value = 0;
     if (k == standard_keyword::default_) {
-        if (node.child_count != 3)
+        if (node.size() != 3)
             return not_supported(n, "stmt.label");
         /* [stmt.switch]/3: "There shall be at most one label of the form
            default : within a switch statement." */
@@ -139,9 +137,9 @@ analysis_result semantic_analysis::labeled_statement(node_index n,
     } else {
         /* case constant-expression : statement; GNU's case ranges
            (case a ... b) are not analysed */
-        if (node.child_count != 4)
+        if (node.size() != 4)
             return not_supported(n, "stmt.switch");
-        result = case_label(n, children[1], innermost);
+        result = case_label(n, node[1], innermost);
         kind = semantic_kind::case_label;
         if (result == analysis_result::well_formed)
             value = function_state.case_values.back();
@@ -166,7 +164,7 @@ analysis_result semantic_analysis::labeled_statement(node_index n,
  * adjusted type of the switch condition.  No two of the case constants in
  * the same switch shall have the same value after conversion."
  */
-analysis_result semantic_analysis::case_label(node_index n, syntax_child value,
+analysis_result semantic_analysis::case_label(SyntaxRef n, SyntaxElement value,
                                               size_t innermost)
 {
     expression_meaning m;

@@ -33,7 +33,7 @@ bool semantic_analysis::is_member_function_pointer(qualified_type t) const
  * [conv.qual]/3 (member_pointer_qualification).
  */
 analysis_result semantic_analysis::member_pointer_conversion(
-    node_index at, expression_meaning &m, qualified_type to, bool &handled)
+    SyntaxRef at, expression_meaning &m, qualified_type to, bool &handled)
 {
     handled = false;
     to = qualified_type::make(to.unqualified(), cv_none);
@@ -96,8 +96,8 @@ analysis_result semantic_analysis::member_pointer_conversion(
                           "program that necessitates this conversion is "
                           "ill-formed",
                           "conv.mem");
-    analysis_result r = member_pointer_along_path(tree[at].first_token, d, b,
-                                                  via, false, true, m);
+    analysis_result r =
+        member_pointer_along_path(at.first_token(), d, b, via, false, true, m);
     if (r == analysis_result::well_formed)
         member_pointer_qualification(m, to);
     return r;

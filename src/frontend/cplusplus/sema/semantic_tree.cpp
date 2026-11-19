@@ -141,11 +141,11 @@ uint32_t semantic_analysis::statement_node(semantic_kind kind, token_index at,
     return semantics.add(n);
 }
 
-token_index semantic_analysis::first_token(syntax_child c) const
+token_index semantic_analysis::first_token(SyntaxElement c) const
 {
     if (c.is_token())
-        return c.index();
-    return tree[c.index()].first_token;
+        return c.token();
+    return c.first_token();
 }
 
 } // namespace cplusplus

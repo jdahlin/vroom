@@ -119,16 +119,16 @@ namespace cplusplus
  * /5: noexcept(true) is a non-throwing exception specification, and with
  * -fno-exceptions nothing analysis generates depends on it but the type.
  */
-analysis_result semantic_analysis::noexcept_specifier(node_index n, bool member,
+analysis_result semantic_analysis::noexcept_specifier(NoexceptSpecifier n,
+                                                      bool member,
                                                       bool &non_throwing)
 {
-    const syntax_node &node = tree[n];
-    const syntax_child *children = tree.children(n);
+    auto node = n;
     non_throwing = true;
-    if (node.child_count == 1 || node.child_count == 3)
+    if (node.size() == 1 || node.size() == 3)
         /* noexcept, throw ( ) */
         return analysis_result::well_formed;
-    if (node.child_count != 4)
+    if (node.size() != 4)
         return not_supported(n, "except.spec");
     if (member)
         /* [class.mem]/6: a member function's noexcept-specifier is a
@@ -136,8 +136,7 @@ analysis_result semantic_analysis::noexcept_specifier(node_index n, bool member,
            deferred yet */
         return not_supported(n, "except.spec");
     bool constant = false, value = false;
-    analysis_result r =
-        bool_constant_expression(n, children[2], constant, value);
+    analysis_result r = bool_constant_expression(n, node[2], constant, value);
     if (r != analysis_result::well_formed)
         return r;
     if (!constant)
@@ -193,28 +192,28 @@ void semantic_analysis::open_parameter_scope()
  * not a definition's: the noexcept-specifier n names the parameters of
  * function_parameters, analysed in a scope of their own.
  */
-analysis_result semantic_analysis::parameter_scope_noexcept(node_index n,
+analysis_result semantic_analysis::parameter_scope_noexcept(SyntaxRef n,
                                                             bool member,
                                                             bool &non_throwing)
 {
-    const syntax_node &node = tree[n];
+    auto node = n;
     /* [class.mem]/6: a member function template's noexcept-specifier,
        is analysed per specialization (taken as value-dependent), whose class is
        complete by then ([temp.inst]/4) */
-    if (member && node.child_count == 4 && in_member_template_declarator == 1) {
+    if (member && node.size() == 4 && in_member_template_declarator == 1) {
         non_throwing = false;
         dependent_exception_specifications.append(n);
         return analysis_result::well_formed;
     }
     if (member && in_member_template_declarator == 2)
         member = false;
-    if (node.child_count != 4 || member)
+    if (node.size() != 4 || member)
         return noexcept_specifier(n, member, non_throwing);
     entity_index outer = current_scope;
     open_parameter_scope();
     analysis_result r = analysis_result::well_formed;
     if (!instantiating && !class_instantiating && !substituting &&
-        names_dependent_entity(node.first_token, node.end_token))
+        names_dependent_entity(node.first_token(), node.end_token()))
     /* [temp.dep.constexpr]: value-dependent in the template's own
            declaration; each specialization's declaration is analysed with
            the arguments, and the template's own type says potentially
@@ -235,10 +234,10 @@ bool semantic_analysis::dependent_exception_specification(entity_index t) const
     for (const function_template &f : function_templates) {
         if (f.entity != t || !f.declaration)
             continue;
-        const syntax_node &d = tree[f.declaration];
-        for (node_index x : dependent_exception_specifications)
-            if (tree[x].first_token >= d.first_token &&
-                tree[x].end_token <= d.end_token)
+        auto d = f.declaration;
+        for (SyntaxRef x : dependent_exception_specifications)
+            if (x.first_token() >= d.first_token() &&
+                x.end_token() <= d.end_token())
                 return true;
     }
     return false;

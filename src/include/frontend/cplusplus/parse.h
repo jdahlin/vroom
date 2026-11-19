@@ -103,15 +103,67 @@ const char *syntax_kind_subclause(syntax_kind kind);
    a node that has a value, which parentheses around it do not change */
 bool syntax_kind_is_expression(syntax_kind kind);
 
+namespace ast
+{
+/*
+ * A node of the translation unit's syntax tree: its index in the tree's
+ * node array; 0 is no node.  A strong type: it does not convert to or from
+ * an integer without saying so (node(i), n.index()), so a node and a token
+ * (token_index) cannot be mixed up; 0 (the literal) is no node.
+ */
+struct node {
+    uint32_t i = 0;
+    constexpr node() = default;
+    constexpr node(decltype(nullptr))
+    {
+    }
+    explicit constexpr node(uint32_t i) : i(i)
+    {
+    }
+    explicit constexpr operator bool() const
+    {
+        return i != 0;
+    }
+    constexpr uint32_t index() const
+    {
+        return i;
+    }
+    friend constexpr bool operator==(node a, node b)
+    {
+        return a.i == b.i;
+    }
+    friend constexpr bool operator!=(node a, node b)
+    {
+        return a.i != b.i;
+    }
+    friend constexpr bool operator<(node a, node b)
+    {
+        return a.i < b.i;
+    }
+    friend constexpr bool operator>(node a, node b)
+    {
+        return a.i > b.i;
+    }
+    friend constexpr bool operator<=(node a, node b)
+    {
+        return a.i <= b.i;
+    }
+    friend constexpr bool operator>=(node a, node b)
+    {
+        return a.i >= b.i;
+    }
+};
+} // namespace ast
+
 /* a node of the translation unit's syntax tree; 0 is no node */
-using node_index = uint32_t;
+using node_index = ast::node;
 
 /* a child of a node: a node or a token of the alternative that matched */
 struct syntax_child {
     uint32_t bits = 0;
     static syntax_child node(node_index n)
     {
-        return {n << 1};
+        return {n.index() << 1};
     }
     static syntax_child token(token_index t)
     {
@@ -124,6 +176,16 @@ struct syntax_child {
     uint32_t index() const
     {
         return bits >> 1;
+    }
+    /* the node (the child is one: a token's index is no node's) */
+    node_index node() const
+    {
+        return node_index(bits >> 1);
+    }
+    /* false for no child at all (a token is one) */
+    explicit operator bool() const
+    {
+        return bits != 0;
     }
 };
 
@@ -153,11 +215,20 @@ class syntax_tree
                     token_index end_token);
     const syntax_node &operator[](node_index n) const
     {
-        return nodes[n];
+        return nodes[n.index()];
     }
     const syntax_child *children(node_index n) const
     {
-        return child_lists.data() + nodes[n].first_child;
+        return child_lists.data() + nodes[n.index()].first_child;
+    }
+    /* the two arrays: for a reader that holds them (syntax.h) */
+    const syntax_node *node_data() const
+    {
+        return nodes.data();
+    }
+    const syntax_child *child_data() const
+    {
+        return child_lists.data();
     }
     /* the number of nodes, the unused node 0 included */
     size_t size() const

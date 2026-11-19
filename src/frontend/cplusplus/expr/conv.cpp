@@ -62,7 +62,7 @@ bool semantic_analysis::is_object_pointer(qualified_type t) const
  * array-to-pointer, or function-to-pointer standard conversions are
  * applied to convert the expression to a prvalue."
  */
-analysis_result semantic_analysis::operand_value(node_index at,
+analysis_result semantic_analysis::operand_value(SyntaxRef at,
                                                  expression_meaning &m)
 {
     if (m.node &&
@@ -674,7 +674,7 @@ bool semantic_analysis::qualification_convertible(qualified_type from,
  * a type T if and only if the declaration T t=E; is well-formed": the
  * other contexts of an implicit conversion use this one.
  */
-analysis_result semantic_analysis::implicit_conversion(node_index at,
+analysis_result semantic_analysis::implicit_conversion(SyntaxRef at,
                                                        expression_meaning &m,
                                                        qualified_type to,
                                                        bool direct)
@@ -824,8 +824,8 @@ analysis_result semantic_analysis::implicit_conversion(node_index at,
                 entity_table[fp.entity].size &&
                 !(pointee.cv() & ~target_pointee.cv()) &&
                 base_step(fp.entity, tp.entity, ambiguous))
-                return pointer_to_base(tree[at].first_token, fp.entity,
-                                       tp.entity, to, m);
+                return pointer_to_base(at.first_token(), fp.entity, tp.entity,
+                                       to, m);
             /* a function pointer conversion: not analysed yet */
             if (fp.kind == type_kind::class_type ||
                 fp.kind == type_kind::function ||
@@ -880,7 +880,7 @@ void semantic_analysis::null_pointer_constant_to(expression_meaning &m,
  * contextually converted to bool and is well-formed if and only if the
  * declaration bool t(E); is well-formed"
  */
-analysis_result semantic_analysis::contextual_bool(node_index at,
+analysis_result semantic_analysis::contextual_bool(SyntaxRef at,
                                                    expression_meaning &m)
 {
     analysis_result r = analysis_result::well_formed;

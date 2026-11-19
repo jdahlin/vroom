@@ -155,75 +155,69 @@ node_index parser::for_range_declaration()
  *
  * The range-based for is range_based_for's.
  */
-analysis_result semantic_analysis::iteration_statement(node_index n,
+analysis_result semantic_analysis::iteration_statement(IterationStatement n,
                                                        uint32_t &built)
 {
-    const syntax_node &node = tree[n];
-    const syntax_child *children = tree.children(n);
+    auto node = n;
     standard_keyword k = leading_keyword(n);
     if (k == standard_keyword::none)
         return not_supported(n, "stmt.iter");
     entity_index outer = current_scope, statement_scope = 0;
     analysis_result result = analysis_result::well_formed;
     expression_meaning m;
-    token_index at = children[0].index();
+    token_index at = node[0].token();
     uint32_t body = 0, init = 0, step_node = 0;
     if (k == standard_keyword::do_) {
         /* do statement while ( expression ) ; */
-        if (node.child_count != 7)
+        if (node.size() != 7)
             return not_supported(n, "stmt.do");
         function_state.loops++;
         function_state.breakable++;
-        result = substatement(children[1], 0, body);
+        result = substatement(node[1], 0, body);
         function_state.loops--;
         function_state.breakable--;
         /* [stmt.do]/1: "The expression is contextually converted to bool;
            if that conversion is ill-formed, the program is ill-formed." */
-        analysis_result r = expression(children[4], m);
+        analysis_result r = expression(node[4], m);
         if (r == analysis_result::well_formed)
             r = contextual_bool(n, m);
         built = statement_node(semantic_kind::do_statement, at, body, m.node);
         return worse(result, r);
     }
     if (k == standard_keyword::while_) {
-        if (node.child_count != 5)
+        if (node.size() != 5)
             return not_supported(n, "stmt.while");
-        if (syntax_is(tree, children[2], syntax_kind::condition))
+        if (node[2].is(syntax_kind::condition))
             statement_scope = open_scope(0, false);
-        result = condition(children[2], false, m);
+        result = condition(node[2], false, m);
     } else if (k == standard_keyword::for_) {
-        if (node.child_count < 6)
+        if (node.size() < 6)
             return not_supported(n, "stmt.for");
-        for (uint32_t i = 0; i < node.child_count; i++)
-            if (syntax_is(tree, children[i],
-                          syntax_kind::for_range_declaration))
+        for (uint32_t i = 0; i < node.size(); i++)
+            if (node[i].is(syntax_kind::for_range_declaration))
                 return range_based_for(n, i, built);
         /* for ( init-statement condition_opt ; expression_opt ) statement:
            the init-statement ends with its own ; */
-        syntax_child init_syntax = children[2], cond, step;
+        SyntaxElement init_syntax = node[2], cond, step;
         bool has_cond = false, has_step = false;
         uint32_t i = 3;
-        if (!syntax_is_punctuator(tokens, children[i],
-                                  preprocessing_op_or_punc::SEMICOLON)) {
-            cond = children[i++];
+        if (!node[i].is(preprocessing_op_or_punc::SEMICOLON)) {
+            cond = node[i++];
             has_cond = true;
         }
-        if (i >= node.child_count ||
-            !syntax_is_punctuator(tokens, children[i],
-                                  preprocessing_op_or_punc::SEMICOLON))
+        if (i >= node.size() ||
+            !node[i].is(preprocessing_op_or_punc::SEMICOLON))
             return not_supported(n, "stmt.for");
         i++;
-        if (i < node.child_count &&
-            !syntax_is_punctuator(
-                tokens, children[i],
-                preprocessing_op_or_punc::RIGHT_PARENTHESIS)) {
-            step = children[i++];
+        if (i < node.size() &&
+            !node[i].is(preprocessing_op_or_punc::RIGHT_PARENTHESIS)) {
+            step = node[i++];
             has_step = true;
         }
-        if (i + 2 != node.child_count)
+        if (i + 2 != node.size())
             return not_supported(n, "stmt.for");
-        if (!syntax_is(tree, init_syntax, syntax_kind::expression_statement) ||
-            (has_cond && syntax_is(tree, cond, syntax_kind::condition)))
+        if (!init_syntax.is(syntax_kind::expression_statement) ||
+            (has_cond && cond.is(syntax_kind::condition)))
             statement_scope = open_scope(0, false);
         bool claimable = declarations_claimable;
         declarations_claimable = false;
@@ -241,8 +235,8 @@ analysis_result semantic_analysis::iteration_statement(node_index n,
     }
     function_state.loops++;
     function_state.breakable++;
-    result = worse(result, substatement(children[node.child_count - 1],
-                                        statement_scope, body));
+    result = worse(result,
+                   substatement(node[node.size() - 1], statement_scope, body));
     function_state.loops--;
     function_state.breakable--;
     current_scope = outer;
@@ -259,7 +253,7 @@ analysis_result semantic_analysis::iteration_statement(node_index n,
    the current scope) of type type, initialized by m: its declaration
    statement, and the variable named (an lvalue) in named */
 analysis_result semantic_analysis::exposition_variable(
-    node_index n, token_index at, expression_meaning &m, qualified_type type,
+    SyntaxRef n, token_index at, expression_meaning &m, qualified_type type,
     bool named, uint32_t &declaration, expression_meaning &variable)
 {
     entity_index v = entity_table.make(entity_kind::variable, 0, current_scope);
@@ -281,12 +275,12 @@ analysis_result semantic_analysis::exposition_variable(
 /* [stmt.ranged]/1: begin-expr or end-expr (name begin or end) for range,
    the variable range named: range.name() (member, of class type) or
    name(range) */
-analysis_result semantic_analysis::range_call(node_index n, token_index at,
+analysis_result semantic_analysis::range_call(SyntaxRef n, token_index at,
                                               const expression_meaning &range,
                                               uint32_t name, bool member,
                                               expression_meaning &m)
 {
-    owned_array<syntax_child> arguments;
+    owned_array<SyntaxElement> arguments;
     owned_array<expression_meaning> early;
     owned_array<entity_index> set;
     expression_meaning f = range;
@@ -328,7 +322,7 @@ analysis_result semantic_analysis::range_call(node_index n, token_index at,
                               "end(range), where begin and end are looked up "
                               "in the associated namespaces",
                               "stmt.ranged");
-        arguments.append(syntax_child());
+        arguments.append(SyntaxElement());
         early.append(range);
         f = expression_meaning();
         overloaded_callee = at;
@@ -369,17 +363,16 @@ analysis_result semantic_analysis::range_call(node_index n, token_index at,
  * the variables range, begin and end unnamed.  declaration is the index
  * of the for-range-declaration among n's children.
  */
-analysis_result semantic_analysis::range_based_for(node_index n,
+analysis_result semantic_analysis::range_based_for(SyntaxRef n,
                                                    uint32_t declaration,
                                                    uint32_t &built)
 {
-    const syntax_node &node = tree[n];
-    const syntax_child *children = tree.children(n);
-    if (declaration + 5 != node.child_count)
+    auto node = n;
+    if (declaration + 5 != node.size())
         return not_supported(n, "stmt.ranged");
-    syntax_child range_declaration = children[declaration];
-    syntax_child initializer = children[declaration + 2];
-    token_index at = children[declaration + 1].index();
+    SyntaxElement range_declaration = node[declaration];
+    SyntaxElement initializer = node[declaration + 2];
+    token_index at = node[declaration + 1].token();
     entity_index outer = current_scope;
     entity_index statement_scope = open_scope(0, false);
     owned_array<uint32_t> items;
@@ -389,7 +382,7 @@ analysis_result semantic_analysis::range_based_for(node_index n,
         bool claimable = declarations_claimable;
         declarations_claimable = false;
         uint32_t init = 0;
-        result = statement(children[2], init);
+        result = statement(node[2], init);
         declarations_claimable = claimable;
         if (result != analysis_result::well_formed) {
             current_scope = outer;
@@ -404,7 +397,7 @@ analysis_result semantic_analysis::range_based_for(node_index n,
         current_scope = outer;
         return r;
     };
-    if (syntax_is(tree, initializer, syntax_kind::braced_init_list))
+    if (initializer.is(syntax_kind::braced_init_list))
         /* auto && deduced from a braced-init-list: std::initializer_list
            ([dcl.type.auto.deduct]/4) */
         return failed(not_supported(n, "stmt.ranged"));
@@ -487,19 +480,19 @@ analysis_result semantic_analysis::range_based_for(node_index n,
     /* begin != end */
     expression_meaning left = begin, right = end, condition;
     r = binary_of(n, at, preprocessing_op_or_punc::EXCLAMATION_EQUAL,
-                  syntax_child(), left, syntax_child(), right, condition);
+                  SyntaxElement(), left, SyntaxElement(), right, condition);
     if (r == analysis_result::well_formed)
         r = contextual_bool(n, condition);
     if (r != analysis_result::well_formed)
         return failed(r);
     /* ++begin */
     expression_meaning step = begin;
-    r = increment_of(n, at, syntax_child(), false, false, step);
+    r = increment_of(n, at, SyntaxElement(), false, false, step);
     if (r != analysis_result::well_formed)
         return failed(r);
     /* for-range-declaration = * begin ; */
     expression_meaning element = begin;
-    r = indirection_of(n, at, syntax_child(), element);
+    r = indirection_of(n, at, SyntaxElement(), element);
     if (r != analysis_result::well_formed)
         return failed(r);
     uint32_t variable = 0;
@@ -509,8 +502,7 @@ analysis_result semantic_analysis::range_based_for(node_index n,
     uint32_t body = 0;
     function_state.loops++;
     function_state.breakable++;
-    result =
-        substatement(children[node.child_count - 1], statement_scope, body);
+    result = substatement(node[node.size() - 1], statement_scope, body);
     function_state.loops--;
     function_state.breakable--;
     current_scope = outer;
@@ -519,7 +511,7 @@ analysis_result semantic_analysis::range_based_for(node_index n,
     semantics.set_list(loop_body, pair, 2);
     items.append(statement_node(semantic_kind::for_statement, at, 0,
                                 condition.node, step.node, loop_body));
-    built = statement_node(semantic_kind::block, first_token(children[0]));
+    built = statement_node(semantic_kind::block, first_token(node[0]));
     semantics.set_list(built, items.data(), items.size());
     return result;
 }
@@ -533,30 +525,25 @@ analysis_result semantic_analysis::range_based_for(node_index n,
  *         attribute-specifier-seq_opt decl-specifier-seq ref-qualifier_opt [ identifier-list ]
  */
 analysis_result semantic_analysis::for_range_declaration(
-    syntax_child d, const expression_meaning &element, uint32_t &built)
+    SyntaxElement d, const expression_meaning &element, uint32_t &built)
 {
-    node_index at = node_of(d);
-    const syntax_node &node = tree[at];
-    const syntax_child *children = tree.children(at);
+    SyntaxRef at = node_of(d);
+    auto node = at;
     /* the second form: a structured binding ([dcl.struct.bind]) */
-    bool binding =
-        node.child_count > 2 &&
-        (syntax_is_punctuator(tokens, children[1],
-                              preprocessing_op_or_punc::LEFT_BRACKET) ||
-         syntax_is_punctuator(tokens, children[1],
-                              preprocessing_op_or_punc::AMPERSAND) ||
-         syntax_is_punctuator(tokens, children[1],
-                              preprocessing_op_or_punc::AMPERSAND_AMPERSAND));
-    if ((node.child_count != 2 && !binding) ||
-        !syntax_is(tree, children[0], syntax_kind::decl_specifier_seq) ||
-        tree[at].first_token != first_token(children[0]))
+    bool binding = node.size() > 2 &&
+                   (node[1].is(preprocessing_op_or_punc::LEFT_BRACKET) ||
+                    node[1].is(preprocessing_op_or_punc::AMPERSAND) ||
+                    node[1].is(preprocessing_op_or_punc::AMPERSAND_AMPERSAND));
+    if ((node.size() != 2 && !binding) ||
+        !node[0].is(syntax_kind::decl_specifier_seq) ||
+        at.first_token() != first_token(node[0]))
         /* an attribute-specifier-seq */
         return not_supported(at, "stmt.ranged");
     specified s;
     placeholder_allowed = true;
     scoped_value<qualified_type> deduced(declaration_deduced, qualified_type());
     scoped_value<bool> group(placeholder_group, false);
-    analysis_result r = decl_specifier_seq(children[0].index(), s, false);
+    analysis_result r = decl_specifier_seq(node[0].index(), s, false);
     if (r != analysis_result::well_formed)
         return r;
     /* [stmt.ranged]/2: "In the decl-specifier-seq of a for-range-declaration,
@@ -572,11 +559,10 @@ analysis_result semantic_analysis::for_range_declaration(
     {
         /* "The decl-specifier-seq shall not define a class or
            enumeration." */
-        node_index seq = children[0].index();
-        for (uint32_t i = 0; i < tree[seq].child_count; i++) {
-            syntax_child c = tree.children(seq)[i];
-            if (syntax_is(tree, c, syntax_kind::class_specifier) ||
-                syntax_is(tree, c, syntax_kind::enum_specifier))
+        auto seq = node[0];
+        for (SyntaxElement c : seq.elements()) {
+            if (c.is(syntax_kind::class_specifier) ||
+                c.is(syntax_kind::enum_specifier))
                 return ill_formed(at,
                                   "the decl-specifier-seq shall not define a "
                                   "class or enumeration",
@@ -589,7 +575,7 @@ analysis_result semantic_analysis::for_range_declaration(
     if (binding)
         r = structured_binding_declaration(at, 1, s, &element);
     else
-        r = declare_with_initializer(at, children[1], syntax_child(), true, s,
+        r = declare_with_initializer(at, node[1], SyntaxElement(), true, s,
                                      false, &element);
     declarations_claimable = claimable;
     if (r != analysis_result::well_formed) {

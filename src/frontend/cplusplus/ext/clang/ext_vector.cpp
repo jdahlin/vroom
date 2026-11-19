@@ -20,8 +20,8 @@ namespace cplusplus
 /* ext_vector_type(N)'s N: an integral constant at least 1, or in a
    template's own declaration a non-type template-parameter
    ([temp.dep.constexpr]/2), as for an array's bound */
-analysis_result semantic_analysis::clang_ext_vector_count(node_index at,
-                                                          syntax_child count,
+analysis_result semantic_analysis::clang_ext_vector_count(SyntaxRef at,
+                                                          SyntaxElement count,
                                                           gnu_attributes &g)
 {
     if (entity_index named = value_parameter_named(count)) {
@@ -54,7 +54,7 @@ analysis_result semantic_analysis::clang_ext_vector_count(node_index at,
    arithmetic type other than bool (clang: "invalid vector element type"),
    or a template's type parameter */
 analysis_result
-semantic_analysis::clang_ext_vector_type(node_index at, const gnu_attributes &g,
+semantic_analysis::clang_ext_vector_type(SyntaxRef at, const gnu_attributes &g,
                                          qualified_type &type)
 {
     const struct type &element = type_table[type.unqualified()];

@@ -274,9 +274,8 @@ void walk_constexpr_body(const semantic_tree &tree, uint32_t n,
 
 } // namespace
 
-analysis_result semantic_analysis::function_body(node_index definition,
-                                                 syntax_child compound,
-                                                 syntax_child ctor_init)
+analysis_result semantic_analysis::analyse_function_body(
+    SyntaxRef definition, SyntaxElement compound, SyntaxElement ctor_init)
 {
     entity_index f = last_declared;
     qualified_type returns =
@@ -390,8 +389,7 @@ analysis_result semantic_analysis::function_body(node_index definition,
     uint32_t members = 0;
     /* [class.base.init]/9: a constructor without a ctor-initializer
        default-initializes its bases and members as well */
-    if (ctor_init.index() ||
-        entity_table[f].special == special_member::constructor)
+    if (ctor_init || entity_table[f].special == special_member::constructor)
         result = worse(result, ctor_initializer(ctor_init, members));
     else if (entity_table[f].special == special_member::destructor)
         /* [class.cdtor]/4: in the destructor, a virtual call finds this
@@ -405,7 +403,7 @@ analysis_result semantic_analysis::function_body(node_index definition,
         result = worse(result, defaulted_equality(first_token(compound),
                                                   parameter_entities, block));
     else
-        result = worse(result, block_items(compound.index(), block));
+        result = worse(result, block_items(compound, block));
     result = finish_return_deduction(definition, result, returns);
     uint32_t destructions = 0;
     if (entity_table[f].special == special_member::destructor)
@@ -615,7 +613,7 @@ entity_index semantic_analysis::synthesized_variable(synthesized_function &s,
 }
 
 void semantic_analysis::finish_synthesized(synthesized_function &s,
-                                           node_index declaration,
+                                           SyntaxRef declaration,
                                            token_index at, uint32_t block,
                                            uint32_t members,
                                            uint32_t destructions)

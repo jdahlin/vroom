@@ -117,18 +117,17 @@ node_index parser::using_declarator()
  * below."  /2: "Every using-declaration is a declaration and a
  * member-declaration and can therefore be used in a class definition."
  */
-analysis_result semantic_analysis::using_declaration(node_index n)
+analysis_result semantic_analysis::using_declaration(UsingDeclaration n)
 {
     /* the using-declarators, the GNU attributes after each (clang's
        extension) and the commas: of the using-declaration, or of its
        using-declarator-list */
-    const syntax_node &node = tree[n];
-    owned_array<syntax_child> items;
-    for (uint32_t i = 0; i < node.child_count; i++) {
-        syntax_child c = tree.children(n)[i];
-        if (syntax_is(tree, c, syntax_kind::using_declarator_list)) {
-            for (uint32_t k = 0; k < tree[c.index()].child_count; k++)
-                items.append(tree.children(c.index())[k]);
+    auto node = n;
+    owned_array<SyntaxElement> items;
+    for (auto c : node.elements()) {
+        if (c.is(syntax_kind::using_declarator_list)) {
+            for (auto child : c.elements())
+                items.append(child);
         } else if (!c.is_token()) {
             items.append(c);
         }
@@ -136,13 +135,12 @@ analysis_result semantic_analysis::using_declaration(node_index n)
     analysis_result result = analysis_result::well_formed;
     bool any = false;
     for (size_t i = 0; i < items.size(); i++) {
-        syntax_child d = items[i];
-        if (syntax_is(tree, d, syntax_kind::using_declarator)) {
+        SyntaxElement d = items[i];
+        if (d.is(syntax_kind::using_declarator)) {
             gnu_attributes g;
             for (size_t k = i + 1;
                  k < items.size() &&
-                 syntax_is(tree, items[k],
-                           syntax_kind::gnu_attribute_specifier);
+                 items[k].is(syntax_kind::gnu_attribute_specifier);
                  k++) {
                 analysis_result r =
                     gnu_attribute_specifier(items[k].index(), g);
@@ -151,14 +149,12 @@ analysis_result semantic_analysis::using_declaration(node_index n)
             }
             if ((g.flags & ~gnu_using_if_exists) || g.aligned || g.section)
                 return worse(result, not_supported(n, "namespace.udecl"));
-            result =
-                worse(result, using_declarator(d.index(),
-                                               g.flags & gnu_using_if_exists));
+            result = worse(result,
+                           using_declarator(d, g.flags & gnu_using_if_exists));
             any = true;
-        } else if (syntax_is(tree, d, syntax_kind::gnu_attribute_specifier)) {
+        } else if (d.is(syntax_kind::gnu_attribute_specifier)) {
             continue; /* the using-declarator's before it */
-        } else if (!syntax_is_punctuator(tokens, d,
-                                         preprocessing_op_or_punc::COMMA)) {
+        } else if (!d.is(preprocessing_op_or_punc::COMMA)) {
             /* a pack expansion */
             result = worse(result, not_supported(n, "temp.variadic"));
         }
@@ -180,23 +176,20 @@ analysis_result semantic_analysis::using_declaration(node_index n)
  * functions, or a class and what hides it found in two namespaces) has no
  * rules yet.
  */
-analysis_result semantic_analysis::using_declarator(node_index n,
+analysis_result semantic_analysis::using_declarator(UsingDeclarator n,
                                                     bool if_exists)
 {
-    const syntax_node &node = tree[n];
-    const syntax_child *children = tree.children(n);
-    if (node.child_count != 2 ||
-        !syntax_is(tree, children[0], syntax_kind::nested_name_specifier) ||
-        !children[1].is_token() ||
-        tokens[children[1].index()].kind != token_kind::identifier)
+    auto node = n;
+    if (node.size() != 2 || !node[0].is(syntax_kind::nested_name_specifier) ||
+        !node[1].is_identifier())
         /* typename, an operator-function-id, a destructor's name, a pack
            expansion */
         return not_supported(n, "namespace.udecl");
     nominated_scope q;
-    analysis_result r = nested_name_specifier(children[0].index(), q);
+    analysis_result r = nested_name_specifier(node[0], q);
     if (r != analysis_result::well_formed)
         return r;
-    token_index t = children[1].index();
+    token_index t = node[1].token();
     uint32_t name = tokens.identifier(t);
     lookup_result found = lookup_qualified(q.entity, name, lookup_filter::any);
     if (found.unknown)

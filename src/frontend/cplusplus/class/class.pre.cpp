@@ -55,12 +55,12 @@ const char *semantic_analysis::local_class_rule(entity_index c) const
  * ([class.name]) within its scope."  [class.name]/2: "A class declaration
  * introduces the class name into the scope where it is declared".
  */
-analysis_result semantic_analysis::class_specifier(node_index n,
+analysis_result semantic_analysis::class_specifier(ClassSpecifier n,
                                                    type_index &type)
 {
     analysis_result r = class_definition(n, type);
-    if (r == analysis_result::well_formed || !tree[n].child_count ||
-        !syntax_is(tree, tree.children(n)[0], syntax_kind::class_head))
+    auto head = n.class_specifier().class_head();
+    if (r == analysis_result::well_formed || !head)
         return r;
     /* a class whose definition is not analysed: its name is held in the
        scope it would be declared in, so that a later
@@ -69,12 +69,10 @@ analysis_result semantic_analysis::class_specifier(node_index n,
     entity_index held_in = current_scope;
     if (defining_class)
         held_in = defining_class;
-    node_index head = tree.children(n)[0].index();
-    for (uint32_t i = 1; i < tree[head].child_count; i++) {
-        syntax_child c = tree.children(head)[i];
-        if (!c.is_token() || tokens[c.index()].kind != token_kind::identifier)
+    for (auto c : head.elements(1)) {
+        if (!c.is_identifier())
             continue;
-        uint32_t name = tokens.identifier(c.index());
+        uint32_t name = tokens.identifier(c.token());
         entity_index e = entity_table.find(held_in, name);
         if (!e) {
             e = entity_table.make(entity_kind::none, name, held_in);
@@ -90,16 +88,11 @@ analysis_result semantic_analysis::class_specifier(node_index n,
 
 /* whether a decl-specifier-seq has a class-specifier of an unnamed
    class */
-bool semantic_analysis::declares_unnamed_class(node_index seq) const
+bool semantic_analysis::declares_unnamed_class(SyntaxRef seq) const
 {
-    for (uint32_t i = 0; i < tree[seq].child_count; i++) {
-        syntax_child c = tree.children(seq)[i];
-        if (!syntax_is(tree, c, syntax_kind::class_specifier) ||
-            !tree[c.index()].child_count)
-            continue;
-        syntax_child head = tree.children(c.index())[0];
-        if (syntax_is(tree, head, syntax_kind::class_head) &&
-            tree[head.index()].child_count == 1)
+    for (auto c : seq.elements()) {
+        auto head = c.class_specifier().class_head();
+        if (head && head.size() == 1)
             return true;
     }
     return false;
@@ -120,7 +113,7 @@ bool semantic_analysis::declares_unnamed_class(node_index seq) const
  * says which object it is in (entity::anonymous_object).
  */
 analysis_result semantic_analysis::anonymous_union_member(entity_index c,
-                                                          node_index n,
+                                                          SyntaxRef n,
                                                           const specified &s,
                                                           uint8_t access)
 {
@@ -151,7 +144,7 @@ analysis_result semantic_analysis::anonymous_union_member(entity_index c,
 /* the names of the members of anonymous union u, and of the anonymous
    unions among them, bound in c ([class.union.anon]/1) */
 analysis_result semantic_analysis::bind_anonymous_members(entity_index c,
-                                                          node_index n,
+                                                          SyntaxRef n,
                                                           entity_index u)
 {
     const entity &x = entity_table[u];
@@ -187,7 +180,7 @@ analysis_result semantic_analysis::bind_anonymous_members(entity_index c,
 }
 
 /* (class_definition) */
-analysis_result semantic_analysis::class_definition(node_index n,
+analysis_result semantic_analysis::class_definition(SyntaxRef n,
                                                     type_index &type)
 {
     /* a class template's specialization defined while another class is
@@ -195,47 +188,44 @@ analysis_result semantic_analysis::class_definition(node_index n,
     bool postpone = postpone_member_bodies;
     postpone_member_bodies = false;
     entity_index postponed_scope = current_scope;
-    node_index postponed_declaration = current_declaration;
-    const syntax_node &node = tree[n];
-    const syntax_child *children = tree.children(n);
-    if (!node.child_count ||
-        !syntax_is(tree, children[0], syntax_kind::class_head))
+    SyntaxRef postponed_declaration = current_declaration;
+    auto node = n;
+    auto head = node.class_specifier().class_head();
+    if (!head)
         return not_supported(n, "class.pre");
-    node_index head = children[0].index();
-    const syntax_node &h = tree[head];
     /* class-key attribute-specifier-seq_opt class-head-name ...: the
        alignment-specifiers left out of head_children, kept in alignas */
-    owned_array<syntax_child> head_list;
-    owned_array<node_index> alignas_list;
+    owned_array<SyntaxElement> head_list;
+    owned_array<SyntaxRef> alignas_list;
     /* [ext:gnu_attributes] a class's visibility("hidden") (its members'
        symbols', c_lowering::gnu_attributes), abi_tag (its name's,
        [abi:mangle.abi-tag]) and exclude_from_explicit_instantiation */
     gnu_attributes gnu;
-    for (uint32_t i = 0; i < h.child_count; i++) {
-        syntax_child c = tree.children(head)[i];
-        bool only_alignment =
-            i && syntax_is(tree, c, syntax_kind::attribute_specifier_seq);
-        for (uint32_t k = 0; only_alignment && k < tree[c.index()].child_count;
-             k++)
-            only_alignment = syntax_is(tree, tree.children(c.index())[k],
-                                       syntax_kind::alignment_specifier);
+    /* the class-key first, then what follows it */
+    head_list.append(head[0]);
+    for (auto c : head.elements(1)) {
+        bool only_alignment = c.is(syntax_kind::attribute_specifier_seq);
+        for (auto k : c.elements())
+            only_alignment =
+                only_alignment && k.is(syntax_kind::alignment_specifier);
         if (only_alignment) {
-            for (uint32_t k = 0; k < tree[c.index()].child_count; k++)
-                alignas_list.append(tree.children(c.index())[k].index());
-        } else if (i && syntax_is(tree, c, syntax_kind::alignment_specifier)) {
+            for (auto k : c.elements())
+                alignas_list.append(k.index());
+        } else if (c.is(syntax_kind::alignment_specifier)) {
             alignas_list.append(c.index());
-        } else if (i && class_head_attributes_without_effect(c)) {
+        } else if (class_head_attributes_without_effect(c)) {
             /* [dcl.attr.deprecated] and the like: nothing generated */
-        } else if (i && !c.is_token() && gnu_or_without_effect(c.index())) {
-            const syntax_child *each = &c;
-            uint32_t count = 1;
-            if (syntax_is(tree, c, syntax_kind::attribute_specifier_seq)) {
-                each = tree.children(c.index());
-                count = tree[c.index()].child_count;
-            }
-            for (uint32_t k = 0; k < count; k++) {
-                analysis_result r =
-                    gnu_attribute_specifier(each[k].index(), gnu);
+        } else if (c.is_node() && gnu_or_without_effect(c)) {
+            /* one attribute-specifier, or a seq of them */
+            if (c.is(syntax_kind::attribute_specifier_seq)) {
+                for (auto each : c.elements()) {
+                    analysis_result r =
+                        gnu_attribute_specifier(each.index(), gnu);
+                    if (r != analysis_result::well_formed)
+                        return r;
+                }
+            } else {
+                analysis_result r = gnu_attribute_specifier(c.index(), gnu);
                 if (r != analysis_result::well_formed)
                     return r;
             }
@@ -247,7 +237,7 @@ analysis_result semantic_analysis::class_definition(node_index n,
         (gnu.flags & ~(gnu_hidden_visibility | gnu_abi_tag |
                        gnu_exclude_from_explicit_instantiation)))
         return not_supported(n, "ext.gnu");
-    const syntax_child *head_children = head_list.data();
+    const SyntaxElement *head_children = head_list.data();
     uint32_t head_count = static_cast<uint32_t>(head_list.size());
     if (!head_count || !head_children[0].is_token())
         return not_supported(n, "class.pre");
@@ -256,44 +246,36 @@ analysis_result semantic_analysis::class_definition(node_index n,
     bool unnamed = head_count == 1;
     /* class-head-name: nested-name-specifier_opt class-name */
     token_index head_name = 0;
-    node_index head_qualifier = 0;
-    if (!unnamed && head_children[1].is_token() &&
-        tokens[head_children[1].index()].kind == token_kind::identifier) {
-        head_name = head_children[1].index();
-    } else if (!unnamed && class_instantiating &&
-               syntax_is(tree, head_children[1],
-                         syntax_kind::simple_template_id)) {
+    SyntaxRef head_qualifier = 0;
+    SyntaxElement name_syntax;
+    if (!unnamed)
+        name_syntax = head_children[1];
+    if (name_syntax.is_identifier()) {
+        head_name = name_syntax.token();
+    } else if (class_instantiating && name_syntax.simple_template_id()) {
         /* a partial or explicit specialization's definition, instantiated
            (instantiate_class): the template's name */
-        head_name = tree.children(head_children[1].index())[0].index();
-    } else if (!unnamed && syntax_is(tree, head_children[1],
-                                     syntax_kind::class_head_name)) {
-        node_index hn = head_children[1].index();
-        const syntax_child *name_parts = tree.children(hn);
-        if (tree[hn].child_count != 2 ||
-            !syntax_is(tree, name_parts[0],
-                       syntax_kind::nested_name_specifier) ||
-            !name_parts[1].is_token() ||
-            tokens[name_parts[1].index()].kind != token_kind::identifier)
+        head_name = name_syntax[0].token();
+    } else if (auto qualified = name_syntax.qualified_class_head_name()) {
+        if (!qualified.nested_name_specifier() || !qualified.identifier())
             /* a simple-template-id: an explicit or partial
                specialization's class-head ([temp.spec]/4: "A
                specialization is a class, variable, function, or class
                member that is either instantiated ... from a templated entity
                or is an explicit specialization") */
             return not_supported(n, "temp.spec");
-        head_qualifier = name_parts[0].index();
-        head_name = name_parts[1].index();
+        head_qualifier = qualified.nested_name_specifier().index();
+        head_name = qualified.identifier().token();
     } else if (!unnamed) {
         /* attributes */
         return not_supported(n, "class.pre");
     }
     bool has_bases =
-        head_count == 3 && !unnamed &&
-        syntax_is(tree, head_children[2], syntax_kind::base_clause);
+        head_count == 3 && !unnamed && head_children[2].base_clause();
     if (head_count > 2 && !has_bases)
         /* a class-virt-specifier, a base-clause of an unnamed class */
         return not_supported(n, "class.derived");
-    standard_keyword key = p.keyword_of(tokens[head_children[0].index()]);
+    standard_keyword key = p.keyword_of(tokens[head_children[0].token()]);
     if (!is_class_key(key))
         return not_supported(n, "class.pre");
     /* #pragma pack and the like change the layout: no rules yet */
@@ -383,7 +365,7 @@ analysis_result semantic_analysis::class_definition(node_index n,
     class_instantiating = 0;
     if (has_bases && !is_namespace(scope))
         return not_supported(n, inner_class_rule(scope));
-    token_index id = head_children[0].index();
+    token_index id = head_children[0].token();
     uint32_t name = 0;
     entity_index c = 0;
     if (specialization) {
@@ -530,7 +512,7 @@ analysis_result semantic_analysis::class_definition(node_index n,
         entity_table[c].abi_tag = gnu.abi_tag;
     entity_table[c].defined = true;
     entity_table[c].union_ = key == standard_keyword::union_;
-    entity_table[c].class_key = head_children[0].index();
+    entity_table[c].class_key = head_children[0].token();
     entity_table[c].first_member = static_cast<uint32_t>(class_members.size());
     entity_table[c].member_count = 0;
     type = entity_table[c].type.unqualified();
@@ -556,10 +538,10 @@ analysis_result semantic_analysis::class_definition(node_index n,
     entity_table[c].base_count = 0;
     analysis_result result = analysis_result::well_formed;
     if (has_bases)
-        result = base_clause(c, head_children[2].index(), key);
+        result = base_clause(c, head_children[2], key);
     entity_table[c].requested_alignment = trailing_class_alignment;
     trailing_class_alignment = 0;
-    for (node_index a : alignas_list) {
+    for (SyntaxRef a : alignas_list) {
         uint64_t alignment = 0;
         if (result == analysis_result::well_formed)
             result = alignment_specifier(a, alignment);
@@ -573,39 +555,40 @@ analysis_result semantic_analysis::class_definition(node_index n,
         entity_table[c].size = 0;
         return result;
     }
-    owned_array<node_index> bodies;
+    owned_array<SyntaxRef> bodies;
     size_t nested_start = nested_bodies.size();
-    for (uint32_t i = 1; i < node.child_count; i++) {
-        syntax_child part = children[i];
-        if (!syntax_is(tree, part, syntax_kind::member_specification))
-            continue;
-        const syntax_node &spec = tree[part.index()];
-        for (uint32_t k = 0; k < spec.child_count; k++) {
-            syntax_child member = tree.children(part.index())[k];
-            if (member.is_token()) {
-                switch (p.keyword_of(tokens[member.index()])) {
-                case standard_keyword::public_:
-                    access = 0;
-                    continue;
-                case standard_keyword::protected_:
-                    access = 1;
-                    continue;
-                case standard_keyword::private_:
-                    access = 2;
-                    continue;
-                default:
-                    break;
-                }
-                if (syntax_is_punctuator(tokens, member,
-                                         preprocessing_op_or_punc::COLON))
-                    continue;
-                result = worse(result, not_supported(n, "class.mem"));
+    auto spec = node.class_specifier().member_specification();
+    for (auto member : spec.elements()) {
+        if (member.is_token()) {
+            switch (p.keyword_of(tokens[member.token()])) {
+            case standard_keyword::public_:
+                access = 0;
                 continue;
+            case standard_keyword::protected_:
+                access = 1;
+                continue;
+            case standard_keyword::private_:
+                access = 2;
+                continue;
+            default:
+                break;
             }
-            result =
-                worse(result, member_declaration(c, member, access, bodies));
+            if (member.is(preprocessing_op_or_punc::COLON))
+                continue;
+            result = worse(result, not_supported(n, "class.mem"));
+            continue;
         }
+        auto declaration = member.member_declaration();
+        if (!declaration) {
+            /* a node the grammar does not place here (unparsed, an
+               explicit instantiation kept as an error) */
+            result = worse(result, not_supported(member.index()));
+            continue;
+        }
+        result =
+            worse(result, member_declaration(c, declaration, access, bodies));
     }
+
     /* [class.mem]/7: complete at the closing }, where its bases and
        members get their offsets and the class its size
        ([abi:class-types]) */
@@ -632,7 +615,7 @@ analysis_result semantic_analysis::class_definition(node_index n,
     /* [class.mem]/6: "A complete-class context of a class is a function
        body ... within the member-specification of the class": the bodies
        are analysed with the class complete */
-    node_index outer_declaration = current_declaration;
+    SyntaxRef outer_declaration = current_declaration;
     /* [class.local]: a local class's member functions are analysed inside
        the enclosing function's body, whose state is kept aside meanwhile */
     function_context enclosing_function =
@@ -648,7 +631,7 @@ analysis_result semantic_analysis::class_definition(node_index n,
         /* [class.mem]/6: a nested class's member function bodies are in
            the complete-class context of the enclosing class too: analysed
            at its closing } */
-        for (node_index body : bodies)
+        for (SyntaxRef body : bodies)
             nested_bodies.append(deferred_body{c, body});
     } else if (postpone) {
         /* [temp.inst]/4: a member function's definition is instantiated
@@ -656,7 +639,7 @@ analysis_result semantic_analysis::class_definition(node_index n,
            (template<class D> struct base { ... static_cast<D *>(this) ...
            }; struct d : base<d>) is complete only after it: the bodies
            wait for the end of the translation unit (instantiate_pending) */
-        for (node_index body : bodies)
+        for (SyntaxRef body : bodies)
             postponed_bodies.append(postponed_body{c, body, postponed_scope,
                                                    postponed_declaration});
         for (size_t i = nested_start; i < nested_bodies.size(); i++)
@@ -666,7 +649,7 @@ analysis_result semantic_analysis::class_definition(node_index n,
         nested_bodies.resize(nested_start);
     } else {
         size_t nested_end = nested_bodies.size();
-        for (node_index body : bodies) {
+        for (SyntaxRef body : bodies) {
             result = worse(result, member_function_body(c, body));
             current_declaration = outer_declaration;
         }
@@ -702,30 +685,24 @@ analysis_result semantic_analysis::class_definition(node_index n,
  * found, the declaration `class-key identifier ;` declares the class in
  * the scope (an incomplete class), as does any other at namespace scope.
  */
-analysis_result semantic_analysis::elaborated_type_specifier(node_index n,
-                                                             type_index &type)
+analysis_result
+semantic_analysis::elaborated_type_specifier(ElaboratedTypeSpecifier n,
+                                             type_index &type)
 {
-    const syntax_child *children = tree.children(n);
-    uint32_t child_count = tree[n].child_count;
     /* the attribute-specifier-seq (or GNU attributes, libc++'s
        _LIBCPP_EXPORTED_FROM_ABI) after the class-key: left out when none
        changes what vcc generates (class_head_attributes_without_effect) */
-    owned_array<syntax_child> kept;
-    if (child_count > 2 && class_head_attributes_without_effect(children[1])) {
-        for (uint32_t i = 0; i < child_count; i++)
-            if (i != 1)
-                kept.append(children[i]);
-        children = kept.data();
-        child_count--;
-    }
+    auto e = n;
+    uint32_t at = 1;
+    if (e.size() > 2 && class_head_attributes_without_effect(e[1]))
+        at = 2;
+    size_t count = e.size() - (at - 1);
     standard_keyword key = leading_keyword(n);
     if (!is_class_key(key))
         return not_supported(n, "dcl.type.elab");
     bool is_union = key == standard_keyword::union_;
-    if (child_count == 3 &&
-        syntax_is(tree, children[1], syntax_kind::nested_name_specifier) &&
-        children[2].is_token() &&
-        tokens[children[2].index()].kind == token_kind::identifier) {
+    if (count == 3 && e[at].nested_name_specifier() &&
+        e[at + 1].is_identifier()) {
         /* [basic.lookup.elab]/3: "If the elaborated-type-specifier has a
            nested-name-specifier, qualified name lookup is performed, as
            described in [basic.lookup.qual], but ignoring any non-type names
@@ -733,10 +710,10 @@ analysis_result semantic_analysis::elaborated_type_specifier(node_index n,
            previously declared type-name, the elaborated-type-specifier is
            ill-formed." */
         nominated_scope q;
-        analysis_result r = nested_name_specifier(children[1].index(), q);
+        analysis_result r = nested_name_specifier(e[at], q);
         if (r != analysis_result::well_formed)
             return r;
-        token_index t = children[2].index();
+        token_index t = e[at + 1].token();
         lookup_result found = lookup_qualified(q.entity, tokens.identifier(t),
                                                lookup_filter::types);
         if (found.ambiguous)
@@ -769,10 +746,9 @@ analysis_result semantic_analysis::elaborated_type_specifier(node_index n,
         type = entity_table[c].type.unqualified();
         return analysis_result::well_formed;
     }
-    if (child_count != 2 || !children[1].is_token() ||
-        tokens[children[1].index()].kind != token_kind::identifier)
+    if (count != 2 || !e[at].is_identifier())
         return not_supported(n, "dcl.type.elab");
-    token_index id = children[1].index();
+    token_index id = e[at].token();
     uint32_t name = tokens.identifier(id);
     bool sole = sole_elaborated == n;
     /* [basic.scope.pdecl]/7.2: "if the elaborated-type-specifier is used in
@@ -1088,66 +1064,81 @@ bool semantic_analysis::accessible(entity_index member,
  * end of the class (bodies).
  */
 analysis_result
-semantic_analysis::member_declaration(entity_index c, syntax_child member,
+semantic_analysis::member_declaration(entity_index c, MemberDeclaration m,
                                       uint8_t access,
-                                      owned_array<node_index> &bodies)
+                                      owned_array<SyntaxRef> &bodies)
 {
-    node_index n = member.index();
-    if (tree[n].kind == syntax_kind::gnu_extension_declaration)
-        /* [ext:gnu_extension_keyword]: __extension__ changes no meaning */
-        return member_declaration(c, tree.children(n)[1], access, bodies);
-    const syntax_node &node = tree[n];
-    const syntax_child *children = tree.children(n);
-    if (node.kind == syntax_kind::empty_declaration)
-        return analysis_result::well_formed;
-    if (node.kind == syntax_kind::using_declaration) {
-        /* [namespace.udecl]/2: a using-declaration is a
-           member-declaration */
-        declaration_access = access;
-        analysis_result r = using_declaration(n);
-        declaration_access = 0;
-        return r;
-    }
-    if (node.kind == syntax_kind::alias_declaration) {
-        /* [dcl.typedef]/2: "A typedef-name can also be introduced by an
-           alias-declaration", a member-declaration ([class.mem]/1) */
-        qualified_type type;
-        analysis_result r = alias_type(n, type);
-        if (r != analysis_result::well_formed)
+    return m.visit(Overloaded{
+        [&](GnuExtensionDeclaration x) {
+            /* [ext:gnu_extension_keyword]: __extension__ changes no
+               meaning */
+            return member_declaration(c, x[1], access, bodies);
+        },
+        [&](EmptyDeclaration) { return analysis_result::well_formed; },
+        [&](UsingDeclaration u) {
+            /* [namespace.udecl]/2: a using-declaration is a
+               member-declaration */
+            declaration_access = access;
+            analysis_result r = using_declaration(u);
+            declaration_access = 0;
             return r;
-        specified s;
-        s.typedef_ = true;
-        s.type = type;
-        s.has_type = true;
-        return member_typedef(c, n, node.first_token + 1, type, s,
-                              declarator_meaning(), access);
-    }
-    if (node.kind == syntax_kind::template_declaration)
-        return member_template_declaration(c, n, access);
-    if (node.kind == syntax_kind::static_assert_declaration)
-        /* [class.mem]/1: a member-declaration */
-        return static_assert_declaration(n);
-    if (node.kind != syntax_kind::member_declaration &&
-        node.kind != syntax_kind::function_definition)
-        return not_supported(n);
+        },
+        [&](AliasDeclaration a) {
+            /* [dcl.typedef]/2: "A typedef-name can also be introduced by
+               an alias-declaration", a member-declaration ([class.mem]/1) */
+            qualified_type type;
+            analysis_result r = alias_type(a, type);
+            if (r != analysis_result::well_formed)
+                return r;
+            specified s;
+            s.typedef_ = true;
+            s.type = type;
+            s.has_type = true;
+            return member_typedef(c, a, a.first_token() + 1, type, s,
+                                  declarator_meaning(), access);
+        },
+        [&](TemplateDeclaration t) {
+            return member_template_declaration(c, t, access);
+        },
+        [&](StaticAssertDeclaration s) {
+            /* [class.mem]/1: a member-declaration */
+            return static_assert_declaration(s);
+        },
+        [&](FunctionDefinition f) {
+            return member_declaration_with_specifiers(c, f, access, bodies);
+        },
+        [&](MemberSimpleDeclaration d) {
+            return member_declaration_with_specifiers(c, d, access, bodies);
+        },
+        [&](MemberDeclaration other) { return not_supported(other); }});
+}
+
+/*
+ * A member-declaration that is a simple declaration or a
+ * function-definition, with the decl-specifier-seq and the declarators it
+ * has: a constructor, a destructor, a conversion function, a friend, or a
+ * member of any other kind.
+ */
+analysis_result semantic_analysis::member_declaration_with_specifiers(
+    entity_index c, SyntaxRef node, uint8_t access,
+    owned_array<SyntaxRef> &bodies)
+{
+    auto n = node;
     /* [ext:gnu_attributes] before it all (libc++'s _LIBCPP_HIDE_FROM_ABI
        friend ...) */
     uint32_t leading = leading_gnu_attributes(n);
-    if (leading < node.child_count &&
-        syntax_is(tree, children[leading], syntax_kind::decl_specifier_seq)) {
-        node_index seq = children[leading].index();
-        for (uint32_t i = 0; i < tree[seq].child_count; i++) {
-            syntax_child x = tree.children(seq)[i];
-            if (is_keyword(x, standard_keyword::friend_))
+    if (leading < node.size() &&
+        node[leading].is(syntax_kind::decl_specifier_seq)) {
+        for (auto x : node[leading].elements())
+            if (x.is(standard_keyword::friend_))
                 return friend_declaration(c, n, bodies);
-        }
     }
 
     /* [dcl.fct]/18: an abbreviated member function template */
-    if (node.kind == syntax_kind::function_definition &&
+    if (node.is(syntax_kind::function_definition) &&
         is_namespace(entity_table[c].enclosing) && abbreviated_function(n))
         return member_function_template(c, n, n, access);
-    if (node_index id = conversion_function_id_of(n))
+    if (SyntaxRef id = conversion_function_id_of(n))
         return conversion_function_member(c, n, id, access, bodies);
 
     /* a constructor or destructor: no decl-specifier-seq, or one of
@@ -1164,85 +1155,75 @@ semantic_analysis::member_declaration(entity_index c, syntax_child member,
        a destructor's ([class.virtual]/4, /5): the declarator, its
        virt-specifiers in override_ and final_ */
     bool override_ = false, final_ = false;
-    auto special = [&](syntax_child d) {
-        if (!syntax_is(tree, d, syntax_kind::member_declarator) ||
-            tree[d.index()].child_count < 2)
+    auto special = [&](SyntaxElement d) {
+        if (!d.is(syntax_kind::member_declarator) || d.size() < 2)
             return d;
-        const syntax_child *dc = tree.children(d.index());
-        if (!syntax_is(tree, dc[0], syntax_kind::noptr_declarator) ||
-            !syntax_is(tree, tree.children(dc[0].index())[0],
-                       syntax_kind::unqualified_id))
+        if (!d[0].is(syntax_kind::noptr_declarator) ||
+            !d[0][0].is(syntax_kind::unqualified_id))
             return d;
         bool o = false, f = false;
-        for (uint32_t i = 1; i < tree[d.index()].child_count; i++)
-            if (!virt_specifier(dc[i], o, f))
+        for (auto child : d.elements(1))
+            if (!virt_specifier(child, o, f))
                 return d;
         override_ = o;
         final_ = f;
-        return dc[0];
+        return d[0];
     };
-    if (node.child_count > lead + 1 &&
-        syntax_is(tree, children[lead], syntax_kind::decl_specifier_seq) &&
-        function_specifiers_only(children[lead].index(), constexpr_specified,
+    if (node.size() > lead + 1 &&
+        node[lead].is(syntax_kind::decl_specifier_seq) &&
+        function_specifiers_only(node[lead], constexpr_specified,
                                  &virtual_specified, &explicit_specified) &&
-        declares_special_member(c, special(children[lead + 1])))
+        declares_special_member(c, special(node[lead + 1])))
         at = lead + 1;
-    if (lead == node.child_count || at > lead ||
-        !syntax_is(tree, children[lead], syntax_kind::decl_specifier_seq)) {
+    if (lead == node.size() || at > lead ||
+        !node[lead].is(syntax_kind::decl_specifier_seq)) {
         /* [class.mem]/12: "The decl-specifier-seq may be omitted in
            constructor, destructor, and conversion function declarations
            only" */
-        if (!node.child_count ||
-            !declares_special_member(c, special(children[at]))) {
+        if (!node.size() || !declares_special_member(c, special(node[at]))) {
             /* a conversion function ([class.conv.fct]) has no rules yet:
                reported at its conversion-function-id */
-            owned_array<node_index> work;
-            for (uint32_t i = 0; i < node.child_count; i++)
-                if (!children[i].is_token() &&
-                    !syntax_is(tree, children[i], syntax_kind::function_body))
-                    work.append(children[i].index());
+            owned_array<SyntaxRef> work;
+            for (auto x : node.elements())
+                if (x.is_node() && !x.is(syntax_kind::function_body))
+                    work.append(x.index());
             while (!work.empty()) {
-                node_index k = work.back();
+                auto k = work.back();
                 work.resize(work.size() - 1);
-                if (tree[k].kind == syntax_kind::conversion_function_id)
+                if (k.is(syntax_kind::conversion_function_id))
                     return not_supported(k, "class.conv.fct");
-                for (uint32_t i = 0; i < tree[k].child_count; i++)
-                    if (!tree.children(k)[i].is_token())
-                        work.append(tree.children(k)[i].index());
+                for (auto x : k.elements())
+                    if (x.is_node())
+                        work.append(x.index());
             }
             return not_supported(n, "class.ctor");
         }
-        if (node.kind == syntax_kind::member_declaration) {
-            if (node.child_count != at + 2 ||
-                !syntax_is_punctuator(tokens, children[at + 1],
-                                      preprocessing_op_or_punc::SEMICOLON))
+        if (node.is(syntax_kind::member_declaration)) {
+            if (node.size() != at + 2 ||
+                !node[at + 1].is(preprocessing_op_or_punc::SEMICOLON))
                 /* = default, = delete, a pure-specifier */
                 return not_supported(n, "dcl.fct.def");
             virt_override = override_;
             virt_final = final_;
             analysis_result r = special_member_declarator(
-                c, n, special(children[at]), access, false, constexpr_specified,
+                c, n, special(node[at]), access, false, constexpr_specified,
                 virtual_specified, explicit_specified);
             virt_override = virt_final = false;
             return r;
         }
-        if (node.child_count != at + 2 ||
-            !syntax_is(tree, children[at + 1], syntax_kind::function_body))
+        auto body = node.function_definition().function_body();
+        if (node.size() != at + 2 || !body || body.function_try_block())
             return not_supported(n, "dcl.fct.def.general");
-        const syntax_node &b = tree[children[at + 1].index()];
-        if (b.child_count &&
-            syntax_is_punctuator(tokens,
-                                 tree.children(children[at + 1].index())[0],
-                                 preprocessing_op_or_punc::EQUAL)) {
+        if (body.defaulted() || body.deleted()) {
             /* = default, = delete: no user-provided function
                ([dcl.fct.def.default]/5), which the layout ([abi:pod]) and
                triviality need to know before the class is complete */
             return defaulted_or_deleted_special_member(
-                c, n, children[at], children[at + 1], access,
-                constexpr_specified, virtual_specified, explicit_specified);
+                c, n, node[at], node[at + 1], access, constexpr_specified,
+                virtual_specified, explicit_specified);
         }
         analysis_result r = special_member_declarator(
-            c, n, children[at], access, true, constexpr_specified,
+            c, n, node[at], access, true, constexpr_specified,
             virtual_specified, explicit_specified);
         if (r == analysis_result::well_formed)
             bodies.append(n);
@@ -1250,28 +1231,26 @@ semantic_analysis::member_declaration(entity_index c, syntax_child member,
     }
     /* [ext:gnu_attributes] before the decl-specifier-seq: what follows
        them is the declaration */
-    children += lead;
-    uint32_t count = node.child_count - lead;
+    auto first = node[lead];
+    uint32_t count = node.size() - lead;
     specified s;
     declaration_access = access;
     /* [basic.scope.pdecl]/7.1: class-key identifier ; declares a nested
        class */
     sole_elaborated = 0;
-    if (node.kind == syntax_kind::member_declaration && count == 2 &&
-        syntax_is_punctuator(tokens, children[1],
-                             preprocessing_op_or_punc::SEMICOLON) &&
-        tree[children[0].index()].child_count == 1 &&
-        syntax_is(tree, tree.children(children[0].index())[0],
-                  syntax_kind::elaborated_type_specifier))
-        sole_elaborated = tree.children(children[0].index())[0].index();
+    if (node.is(syntax_kind::member_declaration) && count == 2 &&
+        node[lead + 1].is(preprocessing_op_or_punc::SEMICOLON) &&
+        first.size() == 1 &&
+        first[0].is(syntax_kind::elaborated_type_specifier))
+        sole_elaborated = first[0].index();
     bool outer_virtual_allowed = virtual_allowed;
     virtual_allowed = true;
-    analysis_result r = decl_specifier_seq(children[0].index(), s, false);
+    analysis_result r = decl_specifier_seq(first.index(), s, false);
     virtual_allowed = outer_virtual_allowed;
     sole_elaborated = 0;
     declaration_access = 0;
     for (uint32_t i = 0; i < lead && r == analysis_result::well_formed; i++)
-        r = gnu_attribute_specifier(tree.children(n)[i].index(), s);
+        r = gnu_attribute_specifier(node[i].index(), s);
     if (r != analysis_result::well_formed)
         return r;
     return member_declarators(c, n, s, access, lead + 1, bodies);
@@ -1279,63 +1258,48 @@ semantic_analysis::member_declaration(entity_index c, syntax_child member,
 
 /*
  * The declarators of the member-declaration (or function-definition) n of
- * class c from children[first] on, after its decl-specifier-seq s.
+ * class c from node[first] on, after its decl-specifier-seq s.
  */
 analysis_result semantic_analysis::member_declarators(
-    entity_index c, node_index n, const specified &s, uint8_t access,
-    uint32_t first, owned_array<node_index> &bodies)
+    entity_index c, SyntaxRef n, const specified &s, uint8_t access,
+    uint32_t first, owned_array<SyntaxRef> &bodies)
 {
-    const syntax_node &node = tree[n];
-    const syntax_child *children = tree.children(n);
+    auto node = n;
     analysis_result r = analysis_result::well_formed;
-    if (node.kind == syntax_kind::function_definition) {
+    if (node.is(syntax_kind::function_definition)) {
         /* [dcl.fct.def.general]/1: declarator virt-specifier-seq_opt
            function-body */
         uint32_t body_at = first + 1;
         bool override_ = false, final_ = false;
-        while (body_at < node.child_count &&
-               virt_specifier(children[body_at], override_, final_))
+        while (body_at < node.size() &&
+               virt_specifier(node[body_at], override_, final_))
             body_at++;
-        if (node.child_count != body_at + 1 ||
-            !syntax_is(tree, children[body_at], syntax_kind::function_body))
+        auto body = node.function_definition().function_body();
+        if (node.size() != body_at + 1 || !body || body.function_try_block())
             return not_supported(n, "dcl.fct.def.general");
-        const syntax_node &b = tree[children[body_at].index()];
-        if (body_at == first + 1 && b.child_count == 3 &&
-            tree.children(children[body_at].index())[1].is_token() &&
-            p.keyword_of(
-                tokens[tree.children(children[body_at].index())[1].index()]) ==
-                standard_keyword::default_)
-            return defaulted_copy_assignment(c, n, children[first], s, access);
+        if (body_at == first + 1 && body.defaulted())
+            return defaulted_copy_assignment(c, n, node[first], s, access);
         /* = delete: member_function_definition's deleted_definition */
-        if (!deleted_body(children[body_at]) &&
-            (b.child_count != 1 ||
-             !syntax_is(tree, tree.children(children[body_at].index())[0],
-                        syntax_kind::compound_statement)))
+        if (!body.deleted() && !body.plain())
             /* a ctor-initializer, a function-try-block, = default */
             return not_supported(n, "dcl.fct.def.general");
         virt_override = override_;
         virt_final = final_;
         virt_pure = false;
-        r = member_declarator(c, n, children[first], s, access, true);
+        r = member_declarator(c, n, node[first], s, access, true);
         virt_override = virt_final = false;
         if (r == analysis_result::well_formed)
             bodies.append(n);
         return r;
     }
-    owned_array<syntax_child> declarators;
-    for (uint32_t i = first; i < node.child_count; i++) {
-        syntax_child d = children[i];
-        if (syntax_is_punctuator(tokens, d,
-                                 preprocessing_op_or_punc::SEMICOLON))
+    owned_array<SyntaxElement> declarators;
+    for (auto d : node.elements(first)) {
+        if (d.is(preprocessing_op_or_punc::SEMICOLON))
             continue;
-        if (syntax_is(tree, d, syntax_kind::member_declarator_list)) {
-            const syntax_node &list = tree[d.index()];
-            for (uint32_t k = 0; k < list.child_count; k++) {
-                syntax_child item = tree.children(d.index())[k];
-                if (!syntax_is_punctuator(tokens, item,
-                                          preprocessing_op_or_punc::COMMA))
+        if (d.is(syntax_kind::member_declarator_list)) {
+            for (auto item : d.elements())
+                if (!item.is(preprocessing_op_or_punc::COMMA))
                     declarators.append(item);
-            }
             continue;
         }
         declarators.append(d);
@@ -1346,22 +1310,20 @@ analysis_result semantic_analysis::member_declarators(
                      !s.constexpr_ && !s.type.cv();
         if (s.declares_enumeration && plain)
             return analysis_result::well_formed;
-        if (declares_unnamed_class(children[first - 1].index()))
+        auto seq = node[first - 1];
+        if (declares_unnamed_class(seq))
             return anonymous_union_member(c, n, s, access);
         /* [class.nest]/1: a nested class's definition, or its declaration
            ([class.nest]/3) */
-        const syntax_node &seq = tree[children[first - 1].index()];
-        if (plain && seq.child_count == 1 &&
-            (syntax_is(tree, tree.children(children[first - 1].index())[0],
-                       syntax_kind::class_specifier) ||
-             syntax_is(tree, tree.children(children[first - 1].index())[0],
-                       syntax_kind::elaborated_type_specifier)))
+        if (plain && seq.size() == 1 &&
+            seq[0].is(syntax_kind::class_specifier,
+                      syntax_kind::elaborated_type_specifier))
             return analysis_result::well_formed;
         /* a nested class, an anonymous union */
         return not_supported(n, "class.mem");
     }
     analysis_result result = analysis_result::well_formed;
-    for (syntax_child d : declarators)
+    for (SyntaxElement d : declarators)
         result = worse(result, member_declarator(c, n, d, s, access, false));
     return result;
 }
@@ -1377,35 +1339,32 @@ analysis_result semantic_analysis::member_declarators(
  * node is one with a bit-field, an initializer or a specifier.
  */
 analysis_result
-semantic_analysis::member_declarator(entity_index c, node_index declaration,
-                                     syntax_child d, const specified &s,
+semantic_analysis::member_declarator(entity_index c, SyntaxRef declaration,
+                                     SyntaxElement d, const specified &s,
                                      uint8_t access, bool definition)
 {
-    if (syntax_is(tree, d, syntax_kind::member_declarator)) {
+    auto node = d;
+    if (node.is(syntax_kind::member_declarator)) {
         /* identifier_opt attribute-specifier-seq_opt : constant-expression */
-        const syntax_node &node = tree[d.index()];
-        for (uint32_t i = 0; i < node.child_count; i++)
-            if (syntax_is_punctuator(tokens, tree.children(d.index())[i],
-                                     preprocessing_op_or_punc::COLON))
+        for (auto x : node.elements())
+            if (x.is(preprocessing_op_or_punc::COLON))
                 return member_bit_field(c, declaration, d, s, access);
         /* declarator virt-specifier-seq_opt pure-specifier_opt */
         {
-            const syntax_child *parts = tree.children(d.index());
             bool override_ = false, final_ = false, pure = false;
             uint32_t i = 1;
-            while (i < node.child_count &&
-                   virt_specifier(parts[i], override_, final_))
+            while (i < node.size() &&
+                   virt_specifier(node[i], override_, final_))
                 i++;
-            if (i < node.child_count &&
-                syntax_is(tree, parts[i], syntax_kind::pure_specifier)) {
+            if (i < node.size() && node[i].is(syntax_kind::pure_specifier)) {
                 pure = true;
                 i++;
             }
-            if (i > 1 && i == node.child_count) {
+            if (i > 1 && i == node.size()) {
                 virt_override = override_;
                 virt_final = final_;
                 virt_pure = pure;
-                analysis_result r = member_declarator(c, declaration, parts[0],
+                analysis_result r = member_declarator(c, declaration, node[0],
                                                       s, access, definition);
                 virt_override = virt_final = virt_pure = false;
                 return r;
@@ -1418,21 +1377,19 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
            of a data member"; for a non-static one it is a default member
            initializer, analysed where a constructor uses it
            ([class.base.init]/9), a complete-class context ([class.mem]/6) */
-        const syntax_child *parts = tree.children(d.index());
-        if (node.child_count != 2 ||
-            (!syntax_is(tree, parts[1],
-                        syntax_kind::brace_or_equal_initializer) &&
-             !syntax_is(tree, parts[1], syntax_kind::braced_init_list)))
+        if (node.size() != 2 ||
+            !node[1].is(syntax_kind::brace_or_equal_initializer,
+                        syntax_kind::braced_init_list))
             return not_supported(d.index(), "class.mem");
         last_declared = 0;
         analysis_result r =
-            member_declarator(c, declaration, parts[0], s, access, definition);
+            member_declarator(c, declaration, node[0], s, access, definition);
         if (r != analysis_result::well_formed)
             return r;
         entity_index e = last_declared;
         if (e && entity_table[e].kind == entity_kind::variable &&
             !entity_table[e].nonstatic_member)
-            return static_member_initializer(d.index(), e, parts[1], s);
+            return static_member_initializer(d, e, node[1], s);
         if (!e || entity_table[e].kind != entity_kind::variable)
             /* a pure-specifier ([class.abstract]) */
             return not_supported(d.index(), "class.abstract");
@@ -1440,7 +1397,7 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
             /* [class.union.anon]: at most one variant member's; an unnamed
                class's members are initialized by no constructor of its own */
             return not_supported(d.index(), "class.union");
-        entity_table[e].default_initializer = parts[1].index();
+        entity_table[e].default_initializer = node[1].index();
         return analysis_result::well_formed;
     }
     if (!s.has_type && declares_special_member(c, d))
@@ -1460,7 +1417,7 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
        complete (member_default_arguments) */
     bool has_defaults = false;
     for (const parameter_meaning &p : function_parameters)
-        if (p.default_argument.index())
+        if (p.default_argument)
             has_defaults = true;
     owned_array<parameter_meaning> parameters;
     for (const parameter_meaning &p : function_parameters)
@@ -1658,8 +1615,7 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
                before the bodies) */
             bool deleted_here =
                 definition &&
-                deleted_body(tree.children(
-                    declaration)[tree[declaration].child_count - 1]);
+                declaration.function_definition().function_body().deleted();
             if (copy_assignment_operator(e, entity_table[e].enclosing) &&
                 !deleted_here)
                 entity_table[entity_table[e].enclosing].user_copy_assignments++;
@@ -1846,7 +1802,7 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
  * not in a class) and attributes on it have no rules yet.
  */
 analysis_result semantic_analysis::member_typedef(
-    entity_index c, node_index declaration, token_index id, qualified_type type,
+    entity_index c, SyntaxRef declaration, token_index id, qualified_type type,
     const specified &s, const declarator_meaning &m, uint8_t access)
 {
     if (s.static_ || s.inline_ || s.constexpr_ || s.virtual_ || s.gnu_flags ||
@@ -1877,51 +1833,53 @@ analysis_result semantic_analysis::member_typedef(
  * parameters (function_body reads them), then the body.
  */
 analysis_result semantic_analysis::member_function_body(entity_index c,
-                                                        node_index definition)
+                                                        SyntaxRef n)
 {
+    auto definition = n.function_definition();
     if (entity_index f = friend_defined_by(definition, c))
         return friend_function_body(c, definition, f);
-    const syntax_child *children = tree.children(definition);
     current_declaration = definition;
     /* [basic.scope.class]/1: the declaration is in the class's scope, its
        names (a member type as the return type) found there */
     entity_index scope = current_scope;
     current_scope = c;
-    analysis_result r = member_function_definition(c, definition, children);
+    analysis_result r = member_function_definition(c, definition);
     current_scope = scope;
     return r;
 }
 
-analysis_result semantic_analysis::member_function_definition(
-    entity_index c, node_index definition, const syntax_child *children)
+analysis_result
+semantic_analysis::member_function_definition(entity_index c,
+                                              FunctionDefinition definition)
 {
     /* [ext:gnu_attributes] before it all: member_declaration took them */
     uint32_t lead = leading_gnu_attributes(definition);
-    children += lead;
     /* a conversion function ([class.conv.fct]): no parameters for the
        declarator to bind, its body the function-body */
     if (entity_index f = conversion_function_declared_by(c, definition)) {
         last_declared = f;
-        syntax_child body = children[tree[definition].child_count - lead - 1];
-        if (deleted_body(body))
+        auto body = definition.function_body();
+        if (body.deleted())
             return deleted_definition(definition, f);
+        if (!body.plain())
+            return not_supported(definition, "dcl.fct.def.general");
         entity_index saved_class = defining_class;
         defining_class = c;
         analysis_result r =
-            function_body(definition, tree.children(body.index())[0]);
+            analyse_function_body(definition, body.compound_statement());
         defining_class = saved_class;
         return r;
     }
     bool constexpr_specified = false, body_virtual = false,
          body_explicit = false;
     uint32_t at = 0;
-    if (tree[definition].child_count > lead + 2 &&
-        syntax_is(tree, children[0], syntax_kind::decl_specifier_seq) &&
-        function_specifiers_only(children[0].index(), constexpr_specified,
-                                 &body_virtual, &body_explicit) &&
-        declares_special_member(c, children[1]))
+    auto seq = definition.decl_specifier_seq();
+    if (seq && definition.size() > leading_gnu_attributes(definition) + 2 &&
+        function_specifiers_only(seq, constexpr_specified, &body_virtual,
+                                 &body_explicit) &&
+        declares_special_member(c, definition.declarator()))
         at = 1;
-    if (at || !syntax_is(tree, children[0], syntax_kind::decl_specifier_seq)) {
+    if (at || !seq) {
         /* a constructor or destructor: the one this definition declared */
         qualified_type type = qualified_type::make(
             type_table.fundamental(fundamental_type::void_), cv_none);
@@ -1930,7 +1888,8 @@ analysis_result semantic_analysis::member_function_definition(
         in_member_declarator = true;
         entity_index saved_class = defining_class;
         defining_class = c;
-        analysis_result r = declarator(definition, children[at], type, m);
+        analysis_result r =
+            declarator(definition, definition[lead + at], type, m);
         defining_class = saved_class;
         in_member_declarator = false;
         if (r != analysis_result::well_formed)
@@ -1946,7 +1905,8 @@ analysis_result semantic_analysis::member_function_definition(
         }
         if (!last_declared)
             return not_supported(definition, "class.ctor");
-        return special_member_body(definition, children[at + 1]);
+        return special_member_body(definition,
+                                   definition[lead + at + 1].function_body());
     }
     /* [basic.scope.class]: the declarator's names are looked up in the
        class, as when its declaration was analysed (a class template's
@@ -1956,14 +1916,14 @@ analysis_result semantic_analysis::member_function_definition(
     specified s;
     bool outer_virtual_allowed = virtual_allowed;
     virtual_allowed = true;
-    analysis_result r = decl_specifier_seq(children[0].index(), s, false);
+    analysis_result r = decl_specifier_seq(seq.index(), s, false);
     virtual_allowed = outer_virtual_allowed;
     qualified_type type = s.type;
     declarator_meaning m;
     if (r == analysis_result::well_formed) {
         function_cv = 0;
         in_member_declarator = true;
-        r = declarator(definition, children[1], type, m);
+        r = declarator(definition, definition.declarator(), type, m);
         in_member_declarator = false;
     }
     defining_class = saved_class;
@@ -1979,10 +1939,12 @@ analysis_result semantic_analysis::member_function_definition(
     if (!last_declared)
         return not_supported(definition, "class.mfct");
     /* the function-body after any virt-specifier-seq */
-    syntax_child body = children[tree[definition].child_count - lead - 1];
-    if (deleted_body(body))
+    auto body = definition.function_body();
+    if (body.deleted())
         return deleted_definition(definition, last_declared);
-    return function_body(definition, tree.children(body.index())[0]);
+    if (!body.plain())
+        return not_supported(definition, "dcl.fct.def.general");
+    return analyse_function_body(definition, body.compound_statement());
 }
 
 /*
@@ -1997,7 +1959,7 @@ analysis_result semantic_analysis::member_function_definition(
  * definition").
  */
 analysis_result semantic_analysis::member_redeclaration(
-    node_index declaration, token_index id, entity_index qualifier,
+    SyntaxRef declaration, token_index id, entity_index qualifier,
     qualified_type type, const specified &s, bool definition)
 {
     last_declared = 0;
@@ -2053,8 +2015,8 @@ analysis_result semantic_analysis::member_redeclaration(
  * (an inline variable, R9) is not analysed.
  */
 analysis_result
-semantic_analysis::static_member_initializer(node_index declarator,
-                                             entity_index e, syntax_child init,
+semantic_analysis::static_member_initializer(SyntaxRef declarator,
+                                             entity_index e, SyntaxElement init,
                                              const specified &s)
 {
     qualified_type type = entity_table[e].type;
@@ -2107,7 +2069,7 @@ semantic_analysis::static_member_initializer(node_index declarator,
  * type (an array's bound may be given here, [dcl.array]/8).
  */
 analysis_result semantic_analysis::static_member_definition(
-    node_index declaration, token_index id, entity_index qualifier,
+    SyntaxRef declaration, token_index id, entity_index qualifier,
     qualified_type type, const specified &s, bool definition,
     entity_index &declared_entity)
 {
@@ -2187,14 +2149,14 @@ analysis_result semantic_analysis::static_member_definition(
  *
  * One virt-specifier is its token; more are a virt-specifier-seq node.
  */
-bool semantic_analysis::virt_specifier(syntax_child d, bool &override_,
+bool semantic_analysis::virt_specifier(SyntaxElement d, bool &override_,
                                        bool &final_) const
 {
-    auto one = [&](syntax_child t) {
-        if (!t.is_token() || tokens[t.index()].kind != token_kind::identifier)
+    auto one = [&](SyntaxElement t) {
+        if (!t.is_identifier())
             return false;
         owned_buffer spelled;
-        tokens.spelling(t.index(), spelled.get());
+        tokens.spelling(t.token(), spelled.get());
         if (spelled.size() == 8 && !memcmp(spelled.data(), "override", 8)) {
             override_ = true;
             return true;
@@ -2207,33 +2169,31 @@ bool semantic_analysis::virt_specifier(syntax_child d, bool &override_,
     };
     if (d.is_token())
         return one(d);
-    if (!syntax_is(tree, d, syntax_kind::virt_specifier_seq))
+    if (!d.is(syntax_kind::virt_specifier_seq))
         return false;
-    for (uint32_t i = 0; i < tree[d.index()].child_count; i++)
-        if (!one(tree.children(d.index())[i]))
+    for (auto t : d.elements())
+        if (!one(t))
             return false;
     return true;
 }
 
 /* a class-head's class-head-name (or what is in its place), after the
    class-key and alignment-specifiers; none in an unnamed class's */
-syntax_child semantic_analysis::class_head_name(node_index head) const
+SyntaxElement semantic_analysis::class_head_name(SyntaxRef head) const
 {
-    for (uint32_t i = 1; i < tree[head].child_count; i++) {
-        syntax_child c = tree.children(head)[i];
-        if (syntax_is(tree, c, syntax_kind::alignment_specifier) ||
-            (!c.is_token() && gnu_or_without_effect(c.index())))
+    auto h = head;
+    for (auto c : h.elements(1)) {
+        if (c.is(syntax_kind::alignment_specifier) ||
+            (c.is_node() && gnu_or_without_effect(c)))
             continue;
-        bool only_alignment =
-            syntax_is(tree, c, syntax_kind::attribute_specifier_seq);
-        for (uint32_t k = 0; only_alignment && k < tree[c.index()].child_count;
-             k++)
-            only_alignment = syntax_is(tree, tree.children(c.index())[k],
-                                       syntax_kind::alignment_specifier);
+        bool only_alignment = c.is(syntax_kind::attribute_specifier_seq);
+        for (auto k : c.elements())
+            only_alignment =
+                only_alignment && k.is(syntax_kind::alignment_specifier);
         if (!only_alignment)
             return c;
     }
-    return syntax_child();
+    return SyntaxElement();
 }
 
 /*
@@ -2246,16 +2206,16 @@ syntax_child semantic_analysis::class_head_name(node_index head) const
  * the form alignas( type-id ) has the same effect as alignas(alignof(
  * type-id ))."  /4: zero has no effect.  A pack expansion: no rules yet.
  */
-analysis_result semantic_analysis::alignment_specifier(node_index n,
+analysis_result semantic_analysis::alignment_specifier(AlignmentSpecifier n,
                                                        uint64_t &alignment)
 {
     alignment = 0;
-    const syntax_child *parts = tree.children(n);
-    if (tree[n].child_count != 4)
+    auto parts = n;
+    if (parts.size() != 4)
         return not_supported(n, "dcl.align");
-    if (syntax_is(tree, parts[2], syntax_kind::type_id)) {
+    if (parts[2].is(syntax_kind::type_id)) {
         qualified_type t;
-        analysis_result r = type_id(parts[2].index(), t);
+        analysis_result r = type_id(parts[2], t);
         if (r != analysis_result::well_formed)
             return r;
         const struct type &record = type_table[t.unqualified()];

@@ -44,7 +44,7 @@ void enum_key(parser &p, bool *scoped)
  * An identifier alone passes through.  *name is the identifier when there
  * is no nested-name-specifier.  Nothing when there is no identifier.
  */
-node_index enum_head_name(parser &p, uint32_t *name, bool *qualified)
+SyntaxRef enum_head_name(parser &p, uint32_t *name, bool *qualified)
 {
     size_t mark = p.begin_node();
     token_index first = p.position;
@@ -52,7 +52,7 @@ node_index enum_head_name(parser &p, uint32_t *name, bool *qualified)
     *qualified = false;
     scope_index scope = 0;
     bool known = false;
-    node_index qualifier = 0;
+    SyntaxRef qualifier = 0;
     if (p.nested_name_specifier_follows(0)) {
         qualifier = p.nested_name_specifier(&scope, &known);
         if (p.failed())
@@ -83,7 +83,7 @@ node_index enum_head_name(parser &p, uint32_t *name, bool *qualified)
  *     enum-base:
  *         : type-specifier-seq
  */
-node_index enum_base(parser &p)
+SyntaxRef enum_base(parser &p)
 {
     size_t mark = p.begin_node();
     token_index first = p.position;
@@ -426,8 +426,7 @@ unsigned signed_bits(__int128 v)
  * promoted type of such an enumeration ([conv.prom]/4) is int when every
  * value fits in it.
  */
-analysis_result semantic_analysis::enum_specifier(node_index n,
-                                                  type_index &type)
+analysis_result semantic_analysis::enum_specifier(SyntaxRef n, type_index &type)
 {
     type = 0;
     analysis_result r = enum_specifier_rules(n, type);
@@ -444,79 +443,71 @@ analysis_result semantic_analysis::enum_specifier(node_index n,
     return r;
 }
 
-analysis_result semantic_analysis::enum_specifier_rules(node_index n,
+analysis_result semantic_analysis::enum_specifier_rules(SyntaxRef n,
                                                         type_index &type)
 {
     const implementation_defined_behavior &b = tokens.files.behavior;
-    const syntax_node &node = tree[n];
-    const syntax_child *children = tree.children(n);
-    owned_array<syntax_child> head;
+    auto node = n;
+    owned_array<SyntaxElement> head;
     uint32_t i = 0;
     /* [dcl.enum]/3: "An opaque-enum-declaration is either a redeclaration
        of an enumeration in the current scope or a declaration of a new
        enumeration": its head and no enumerator-list */
-    bool opaque = node.kind == syntax_kind::opaque_enum_declaration;
-    if (node.child_count &&
-        syntax_is(tree, children[0], syntax_kind::enum_head)) {
-        const syntax_node &h = tree[children[0].index()];
-        for (uint32_t k = 0; k < h.child_count; k++)
-            head.append(tree.children(children[0].index())[k]);
+    bool opaque = node.is(syntax_kind::opaque_enum_declaration);
+    if (node.size() && node[0].is(syntax_kind::enum_head)) {
+        auto h = node[0];
+        for (uint32_t k = 0; k < h.size(); k++)
+            head.append(node[0][k]);
         i = 1;
     } else {
-        for (; i < node.child_count &&
-               !syntax_is_punctuator(tokens, children[i],
-                                     preprocessing_op_or_punc::LEFT_BRACE);
+        for (; i < node.size() &&
+               !node[i].is(preprocessing_op_or_punc::LEFT_BRACE);
              i++)
-            head.append(children[i]);
+            head.append(node[i]);
     }
     bool scoped = false;
     uint32_t name = 0;
-    token_index name_at = node.first_token;
-    node_index base = 0;
-    for (syntax_child c : head) {
-        if (syntax_is(tree, c, syntax_kind::enum_key)) {
+    token_index name_at = node.first_token();
+    SyntaxRef base = 0;
+    for (SyntaxElement c : head) {
+        if (c.is(syntax_kind::enum_key)) {
             scoped = true;
             continue;
         }
-        if (syntax_is(tree, c, syntax_kind::enum_base)) {
+        if (c.is(syntax_kind::enum_base)) {
             base = c.index();
             continue;
         }
         if (c.is_token() &&
-            p.keyword_of(tokens[c.index()]) == standard_keyword::enum_)
+            p.keyword_of(tokens[c.token()]) == standard_keyword::enum_)
             continue;
-        if (opaque && syntax_is_punctuator(tokens, c,
-                                           preprocessing_op_or_punc::SEMICOLON))
+        if (opaque && c.is(preprocessing_op_or_punc::SEMICOLON))
             continue;
-        if (c.is_token() && tokens[c.index()].kind == token_kind::identifier) {
-            name = tokens.identifier(c.index());
-            name_at = c.index();
+        if (c.is_token() && tokens[c.token()].kind == token_kind::identifier) {
+            name = tokens.identifier(c.token());
+            name_at = c.token();
             continue;
         }
         /* an attribute-specifier-seq, a nested-name-specifier */
         return not_supported(n, "dcl.enum");
     }
     if (!opaque &&
-        (i >= node.child_count ||
-         !syntax_is_punctuator(tokens, children[i],
-                               preprocessing_op_or_punc::LEFT_BRACE)))
+        (i >= node.size() || !node[i].is(preprocessing_op_or_punc::LEFT_BRACE)))
         return not_supported(n, "dcl.enum");
-    owned_array<syntax_child> enumerators;
-    for (i++; i < node.child_count; i++) {
-        syntax_child c = children[i];
-        if (syntax_is(tree, c, syntax_kind::enumerator_list)) {
-            const syntax_node &list = tree[c.index()];
-            for (uint32_t k = 0; k < list.child_count; k++) {
-                syntax_child item = tree.children(c.index())[k];
-                if (!syntax_is_punctuator(tokens, item,
-                                          preprocessing_op_or_punc::COMMA))
+    owned_array<SyntaxElement> enumerators;
+    for (i++; i < node.size(); i++) {
+        SyntaxElement c = node[i];
+        if (c.is(syntax_kind::enumerator_list)) {
+            auto list = c;
+            for (uint32_t k = 0; k < list.size(); k++) {
+                SyntaxElement item = c[k];
+                if (!item.is(preprocessing_op_or_punc::COMMA))
                     enumerators.append(item);
             }
             continue;
         }
-        if (syntax_is_punctuator(tokens, c, preprocessing_op_or_punc::COMMA) ||
-            syntax_is_punctuator(tokens, c,
-                                 preprocessing_op_or_punc::RIGHT_BRACE))
+        if (c.is(preprocessing_op_or_punc::COMMA) ||
+            c.is(preprocessing_op_or_punc::RIGHT_BRACE))
             continue;
         enumerators.append(c);
     }
@@ -528,13 +519,11 @@ analysis_result semantic_analysis::enum_specifier_rules(node_index n,
     if (scoped)
         fixed = fundamental_type::int_;
     if (base) {
-        const syntax_node &bn = tree[base];
-        if (bn.child_count != 2 || !syntax_is(tree, tree.children(base)[1],
-                                              syntax_kind::type_specifier_seq))
+        auto bn = base;
+        if (bn.size() != 2 || !base[1].is(syntax_kind::type_specifier_seq))
             return not_supported(n, "dcl.enum");
         specified s;
-        analysis_result r =
-            decl_specifier_seq(tree.children(base)[1].index(), s, true);
+        analysis_result r = decl_specifier_seq(base[1].index(), s, true);
         if (r != analysis_result::well_formed)
             return r;
         /* [dcl.enum]/2: "The type-specifier-seq of an enum-base shall name
@@ -671,31 +660,31 @@ analysis_result semantic_analysis::enum_specifier_rules(node_index n,
     } restore_scope = {current_scope, current_scope};
     if (scoped)
         current_scope = e;
-    for (syntax_child c : enumerators) {
-        syntax_child id = c;
-        syntax_child init;
+    for (SyntaxElement c : enumerators) {
+        SyntaxElement id = c;
+        SyntaxElement init;
         bool has_init = false;
-        if (syntax_is(tree, c, syntax_kind::enumerator_definition)) {
-            const syntax_node &d = tree[c.index()];
-            if (d.child_count != 3)
+        if (c.is(syntax_kind::enumerator_definition)) {
+            auto d = c;
+            if (d.size() != 3)
                 return not_supported(n, "dcl.enum");
-            id = tree.children(c.index())[0];
-            init = tree.children(c.index())[2];
+            id = c[0];
+            init = c[2];
             has_init = true;
         }
         /* [dcl.enum]/2: "The optional attribute-specifier-seq in an
            enumerator appertains to that enumerator": one without effect
            (Apple's availability) is passed over */
-        if (syntax_is(tree, id, syntax_kind::enumerator)) {
-            const syntax_child *attrs = tree.children(id.index());
-            for (uint32_t i = 1; i < tree[id.index()].child_count; i++)
+        if (id.is(syntax_kind::enumerator)) {
+            auto attrs = id;
+            for (uint32_t i = 1; i < id.size(); i++)
                 if (!class_head_attributes_without_effect(attrs[i]))
                     return not_supported(n, "dcl.enum");
             id = attrs[0];
         }
-        if (!id.is_token() || tokens[id.index()].kind != token_kind::identifier)
+        if (!id.is_token() || tokens[id.token()].kind != token_kind::identifier)
             return not_supported(n, "dcl.enum");
-        token_index at = id.index();
+        token_index at = id.token();
         __int128 value;
         fundamental_type value_type = previous_type;
         if (has_init) {
@@ -912,15 +901,14 @@ analysis_result semantic_analysis::enum_specifier_rules(node_index n,
  * declaration to which the name in the elaborated-type-specifier refers":
  * an enumeration not declared yet is not declared by it.
  */
-analysis_result semantic_analysis::elaborated_enum_specifier(node_index n,
-                                                             type_index &type)
+analysis_result
+semantic_analysis::elaborated_enum_specifier(ElaboratedEnumSpecifier n,
+                                             type_index &type)
 {
-    const syntax_node &node = tree[n];
-    const syntax_child *children = tree.children(n);
-    if (node.child_count != 2 || !children[1].is_token() ||
-        tokens[children[1].index()].kind != token_kind::identifier)
+    auto node = n;
+    if (node.size() != 2 || !node[1].is_identifier())
         return not_supported(n, "dcl.type.elab");
-    entity_index e = lookup(tokens.identifier(children[1].index()));
+    entity_index e = lookup(tokens.identifier(node[1].token()));
     if (!e || entity_table[e].kind != entity_kind::enumeration)
         return not_supported(n, "basic.lookup.elab");
     type = entity_table[e].type.unqualified();

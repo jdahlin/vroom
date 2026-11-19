@@ -47,7 +47,7 @@ node_index parser::compound_statement()
  * sequence of statements into a single statement."  [basic.scope.block]/1:
  * "A name declared in a block is local to that block".
  */
-analysis_result semantic_analysis::compound_statement(node_index n,
+analysis_result semantic_analysis::compound_statement(CompoundStatement n,
                                                       entity_index conflicts,
                                                       uint32_t &built)
 {
@@ -60,20 +60,17 @@ analysis_result semantic_analysis::compound_statement(node_index n,
 
 /* the statements of a block, each with the place for the claims about its
    expressions just after it */
-analysis_result semantic_analysis::block_items(node_index n, uint32_t &built)
+analysis_result semantic_analysis::block_items(SyntaxRef n, uint32_t &built)
 {
-    owned_array<syntax_child> items;
-    const syntax_node &node = tree[n];
-    for (uint32_t i = 0; i < node.child_count; i++) {
-        syntax_child c = tree.children(n)[i];
-        if (syntax_is_punctuator(tokens, c,
-                                 preprocessing_op_or_punc::LEFT_BRACE) ||
-            syntax_is_punctuator(tokens, c,
-                                 preprocessing_op_or_punc::RIGHT_BRACE))
+    owned_array<SyntaxElement> items;
+    auto node = n;
+    for (auto c : node.elements()) {
+        if (c.is(preprocessing_op_or_punc::LEFT_BRACE) ||
+            c.is(preprocessing_op_or_punc::RIGHT_BRACE))
             continue;
-        if (syntax_is(tree, c, syntax_kind::statement_seq)) {
-            for (uint32_t k = 0; k < tree[c.index()].child_count; k++)
-                items.append(tree.children(c.index())[k]);
+        if (c.is(syntax_kind::statement_seq)) {
+            for (auto child : c.elements())
+                items.append(child);
             continue;
         }
         items.append(c);
@@ -82,10 +79,10 @@ analysis_result semantic_analysis::block_items(node_index n, uint32_t &built)
     token_index place = claim_place;
     entity_index place_scope = claim_scope;
     owned_array<uint32_t> statements;
-    for (syntax_child s : items) {
-        claim_place = s.index();
+    for (SyntaxElement s : items) {
+        claim_place = s.token();
         if (!s.is_token())
-            claim_place = tree[s.index()].end_token - 1;
+            claim_place = s.end_token() - 1;
         claim_scope = current_scope;
         uint32_t one = 0;
         result = worse(result, statement(s, one));
@@ -93,7 +90,7 @@ analysis_result semantic_analysis::block_items(node_index n, uint32_t &built)
     }
     claim_place = place;
     claim_scope = place_scope;
-    built = block_statement(tree[n].first_token, statements);
+    built = block_statement(node.first_token(), statements);
     return result;
 }
 

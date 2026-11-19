@@ -61,7 +61,7 @@ node_index parser::init_declarator(const decl_specifier_facts &specifiers,
         if (c.is_token())
             first_token = c.index();
         else
-            first_token = tree[c.index()].first_token;
+            first_token = tree[c.node()].first_token;
     } else {
         mark = begin_node();
         first_token = position;
@@ -130,9 +130,9 @@ node_index parser::declarator(declarator_form form, declarator_facts &facts)
        are the declarator's last part */
     const syntax_child last = pending.back();
     if (last.is_token() ||
-        (tree[last.index()].kind != syntax_kind::noptr_declarator &&
-         tree[last.index()].kind != syntax_kind::noptr_abstract_declarator &&
-         tree[last.index()].kind != syntax_kind::parameters_and_qualifiers))
+        (tree[last.node()].kind != syntax_kind::noptr_declarator &&
+         tree[last.node()].kind != syntax_kind::noptr_abstract_declarator &&
+         tree[last.node()].kind != syntax_kind::parameters_and_qualifiers))
         return expected("parameters-and-qualifiers before '->'", "dcl.decl");
     /* [basic.scope.param]/1: the parameters' scope "ends at the end of
        that function declarator", after the trailing-return-type */

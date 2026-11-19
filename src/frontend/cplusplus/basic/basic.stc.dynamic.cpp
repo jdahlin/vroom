@@ -139,7 +139,7 @@ uint32_t semantic_analysis::allocation_names_spelled()
  * deallocation function.
  */
 analysis_result
-semantic_analysis::allocation_function_declaration(node_index n, entity_index f)
+semantic_analysis::allocation_function_declaration(SyntaxRef n, entity_index f)
 {
     entity &x = entity_table[f];
     bool allocation = x.allocation == allocation_function::new_ ||

@@ -28,34 +28,26 @@ namespace
 {
 
 /* the operand of redundant parentheses */
-syntax_child without_parentheses(const syntax_tree &tree, token_stream &tokens,
-                                 syntax_child e)
+SyntaxElement without_parentheses(SyntaxElement e)
 {
-    while (!e.is_token() &&
-           tree[e.index()].kind == syntax_kind::primary_expression &&
-           tree[e.index()].child_count == 3 &&
-           syntax_is_punctuator(tokens, tree.children(e.index())[0],
-                                preprocessing_op_or_punc::LEFT_PARENTHESIS))
-        e = tree.children(e.index())[1];
+    while (e.is(syntax_kind::primary_expression) && e.size() == 3 &&
+           e[0].is(preprocessing_op_or_punc::LEFT_PARENTHESIS))
+        e = e[1];
     return e;
 }
 
 } // namespace
 
-entity_index semantic_analysis::named_overload_set(syntax_child e,
+entity_index semantic_analysis::named_overload_set(SyntaxElement e,
                                                    token_index &at) const
 {
-    syntax_child name = without_parentheses(tree, tokens, e);
-    if (!name.is_token() &&
-        tree[name.index()].kind == syntax_kind::unary_expression &&
-        tree[name.index()].child_count == 2 &&
-        syntax_is_punctuator(tokens, tree.children(name.index())[0],
-                             preprocessing_op_or_punc::AMPERSAND))
-        name =
-            without_parentheses(tree, tokens, tree.children(name.index())[1]);
-    if (!name.is_token() || tokens[name.index()].kind != token_kind::identifier)
+    auto name = without_parentheses(e);
+    if (name.is(syntax_kind::unary_expression) && name.size() == 2 &&
+        name[0].is(preprocessing_op_or_punc::AMPERSAND))
+        name = without_parentheses(name[1]);
+    if (!name.is_identifier())
         return 0;
-    at = name.index();
+    at = name.token();
     lookup_result found =
         lookup_unqualified(tokens.identifier(at), lookup_filter::any);
     if (!found.entity || found.unknown || found.ambiguous)
@@ -66,7 +58,7 @@ entity_index semantic_analysis::named_overload_set(syntax_child e,
     return found.entity;
 }
 
-analysis_result semantic_analysis::target_expression(syntax_child e,
+analysis_result semantic_analysis::target_expression(SyntaxElement e,
                                                      qualified_type target,
                                                      expression_meaning &m)
 {

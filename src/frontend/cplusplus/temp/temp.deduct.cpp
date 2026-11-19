@@ -396,7 +396,7 @@ void semantic_analysis::adjust_call_deduction(qualified_type &p,
 }
 
 analysis_result semantic_analysis::deduce_from_call(
-    node_index at, uint32_t function_template,
+    SyntaxRef at, uint32_t function_template,
     const expression_meaning *arguments, uint32_t count,
     owned_array<template_argument> &deduced, bool *failed)
 {

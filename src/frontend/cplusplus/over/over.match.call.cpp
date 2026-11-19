@@ -28,27 +28,24 @@ namespace cplusplus
 
 /* the token of the name the postfix-expression of a call is, 0 if it is
    none of [over.call.func]/1's forms */
-token_index semantic_analysis::callee_name(syntax_child c) const
+token_index semantic_analysis::callee_name(SyntaxElement c) const
 {
     if (c.is_token()) {
-        if (tokens[c.index()].kind == token_kind::identifier)
-            return c.index();
+        if (tokens[c.token()].kind == token_kind::identifier)
+            return c.token();
         return 0;
     }
-    const syntax_node &node = tree[c.index()];
-    const syntax_child *children = tree.children(c.index());
-    if (node.kind == syntax_kind::qualified_id && node.child_count == 2 &&
-        children[1].is_token() &&
-        tokens[children[1].index()].kind == token_kind::identifier)
-        return children[1].index();
-    if (node.kind == syntax_kind::postfix_expression && node.child_count == 3 &&
-        (syntax_is_punctuator(tokens, children[1],
-                              preprocessing_op_or_punc::DOT) ||
-         syntax_is_punctuator(tokens, children[1],
-                              preprocessing_op_or_punc::ARROW)) &&
-        children[2].is_token() &&
-        tokens[children[2].index()].kind == token_kind::identifier)
-        return children[2].index();
+    auto node = c;
+    if (node.is(syntax_kind::qualified_id) && node.size() == 2 &&
+        node[1].is_token() &&
+        tokens[node[1].token()].kind == token_kind::identifier)
+        return node[1].token();
+    if (node.is(syntax_kind::postfix_expression) && node.size() == 3 &&
+        (node[1].is(preprocessing_op_or_punc::DOT) ||
+         node[1].is(preprocessing_op_or_punc::ARROW)) &&
+        node[2].is_token() &&
+        tokens[node[2].token()].kind == token_kind::identifier)
+        return node[2].token();
     return 0;
 }
 
@@ -70,8 +67,8 @@ token_index semantic_analysis::callee_name(syntax_child c) const
  * arguments are analysed into early.
  */
 analysis_result
-semantic_analysis::resolve_call(node_index n,
-                                const owned_array<syntax_child> &arguments,
+semantic_analysis::resolve_call(SyntaxRef n,
+                                const owned_array<SyntaxElement> &arguments,
                                 owned_array<expression_meaning> &early,
                                 const owned_array<entity_index> &set,
                                 uint32_t object, expression_meaning &f)
@@ -95,16 +92,15 @@ semantic_analysis::resolve_call(node_index n,
        element stands for the list (the call list-initializes the
        parameter); other lists, and lists for a parameter of class,
        reference or array type, are not analysed */
-    owned_array<syntax_child> lists;
+    owned_array<SyntaxElement> lists;
     for (size_t i = 0; i < arguments.size(); i++) {
-        if (!syntax_is(tree, arguments[i], syntax_kind::braced_init_list))
+        if (!arguments[i].is(syntax_kind::braced_init_list))
             continue;
-        owned_array<syntax_child> clauses;
-        analysis_result r = list_clauses(arguments[i].index(), clauses);
+        owned_array<SyntaxElement> clauses;
+        analysis_result r = list_clauses(arguments[i], clauses);
         if (r != analysis_result::well_formed)
             return r;
-        if (clauses.size() != 1 ||
-            syntax_is(tree, clauses[0], syntax_kind::braced_init_list))
+        if (clauses.size() != 1 || clauses[0].is(syntax_kind::braced_init_list))
             return not_supported(n, "over.ics.list");
         for (entity_index e : set) {
             const struct type &ft =
@@ -122,14 +118,13 @@ semantic_analysis::resolve_call(node_index n,
         lists.append(clauses[0]);
     }
     for (size_t i = 0; i < early.size(); i++)
-        if (!early[i].node &&
-            !syntax_is(tree, arguments[i], syntax_kind::braced_init_list))
+        if (!early[i].node && !arguments[i].is(syntax_kind::braced_init_list))
             /* an overload set's name as an argument: the conversion
                sequences of [over.ics.ref] and [over.over] together */
             return not_supported(n, "over.over");
     for (size_t i = early.size(); i < arguments.size(); i++) {
         expression_meaning e;
-        if (!syntax_is(tree, arguments[i], syntax_kind::braced_init_list)) {
+        if (!arguments[i].is(syntax_kind::braced_init_list)) {
             analysis_result r = expression(arguments[i], e);
             if (r != analysis_result::well_formed)
                 return r;
@@ -138,7 +133,7 @@ semantic_analysis::resolve_call(node_index n,
     }
     size_t list = 0;
     for (size_t i = 0; i < arguments.size(); i++) {
-        if (!syntax_is(tree, arguments[i], syntax_kind::braced_init_list))
+        if (!arguments[i].is(syntax_kind::braced_init_list))
             continue;
         analysis_result r = expression(lists[list++], early[i]);
         if (r != analysis_result::well_formed)

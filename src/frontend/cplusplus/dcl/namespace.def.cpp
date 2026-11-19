@@ -294,9 +294,9 @@ node_index parser::linkage_specification()
  * declaration of its own in semantic_analysis::declarations: the definition
  * itself has a record only when it is not well-formed.
  */
-analysis_result semantic_analysis::namespace_definition(node_index n)
+analysis_result semantic_analysis::namespace_definition(SyntaxRef n)
 {
-    const syntax_node &node = tree[n];
+    auto node = n;
     /* [namespace.def]/1 (the grammar): a namespace-definition is a
        declaration of a namespace-body or the translation unit */
     if (!is_namespace(current_scope) || defining_class || function_state.active)
@@ -311,15 +311,15 @@ analysis_result semantic_analysis::namespace_definition(node_index n)
     bool body = false;
     /* the tokens before the '{': inline, namespace, the names and ::, and
        those of an enclosing-namespace-specifier */
-    owned_array<syntax_child> head;
-    for (uint32_t i = 0; i < node.child_count && !body; i++) {
-        syntax_child c = tree.children(n)[i];
-        if (syntax_is(tree, c, syntax_kind::enclosing_namespace_specifier)) {
-            for (uint32_t k = 0; k < tree[c.index()].child_count; k++)
-                head.append(tree.children(c.index())[k]);
+    owned_array<SyntaxElement> head;
+    for (uint32_t i = 0; i < node.size() && !body; i++) {
+        SyntaxElement c = node[i];
+        if (c.is(syntax_kind::enclosing_namespace_specifier)) {
+            for (auto child : c.elements())
+                head.append(child);
             continue;
         }
-        if (syntax_is(tree, c, syntax_kind::gnu_attribute_specifier)) {
+        if (c.is(syntax_kind::gnu_attribute_specifier)) {
             /* GNU attributes that change nothing a namespace's members
                get (abi_tag, which changes their symbols, has no rule) */
             gnu_attributes g;
@@ -333,22 +333,21 @@ analysis_result semantic_analysis::namespace_definition(node_index n)
         if (!c.is_token())
             /* an attribute-specifier-seq */
             return not_supported(n, "dcl.attr");
-        if (syntax_is_punctuator(tokens, c,
-                                 preprocessing_op_or_punc::LEFT_BRACE))
+        if (c.is(preprocessing_op_or_punc::LEFT_BRACE))
             body = true;
         else
             head.append(c);
     }
     if (!body)
         return not_supported(n, "namespace.def");
-    for (syntax_child c : head) {
+    for (SyntaxElement c : head) {
         if (!c.is_token())
             return not_supported(n, "namespace.def");
-        const token &t = tokens[c.index()];
+        const token &t = tokens[c.token()];
         if (t.kind == token_kind::identifier) {
             component x;
-            x.name = tokens.identifier(c.index());
-            x.at = c.index();
+            x.name = tokens.identifier(c.token());
+            x.at = c.token();
             x.inline_ = inline_next;
             inline_next = false;
             components.append(x);
@@ -359,7 +358,7 @@ analysis_result semantic_analysis::namespace_definition(node_index n)
     }
     if (components.empty()) {
         component unnamed;
-        unnamed.at = node.first_token;
+        unnamed.at = node.first_token();
         unnamed.inline_ = inline_next;
         components.append(unnamed);
     }
@@ -462,8 +461,8 @@ analysis_result semantic_analysis::namespace_definition(node_index n)
  * The namespace the name denotes ([namespace.alias]/2: a namespace-alias
  * is "a synonym for the name of the namespace" it was defined to).
  */
-analysis_result semantic_analysis::named_namespace(node_index at,
-                                                   node_index qualifier,
+analysis_result semantic_analysis::named_namespace(SyntaxRef at,
+                                                   SyntaxRef qualifier,
                                                    token_index name,
                                                    entity_index &n)
 {
@@ -507,10 +506,9 @@ analysis_result semantic_analysis::named_namespace(node_index at,
  * with its scope; unqualified and qualified lookup use it
  * (basic/basic.lookup.cpp).
  */
-analysis_result semantic_analysis::using_directive(node_index n)
+analysis_result semantic_analysis::using_directive(UsingDirective n)
 {
-    const syntax_node &node = tree[n];
-    const syntax_child *children = tree.children(n);
+    auto node = n;
     entity_index scope = current_scope;
     /* until the directive is analysed, what it makes visible is not
        known */
@@ -521,19 +519,18 @@ analysis_result semantic_analysis::using_directive(node_index n)
     };
     if (defining_class)
         return unknown(not_supported(n, "namespace.udir"));
-    node_index qualifier = 0;
+    SyntaxRef qualifier = 0;
     token_index name = 0;
-    for (uint32_t i = 0; i < node.child_count; i++) {
-        syntax_child c = children[i];
-        if (syntax_is(tree, c, syntax_kind::nested_name_specifier)) {
+    for (auto c : node.elements()) {
+        if (c.is(syntax_kind::nested_name_specifier)) {
             qualifier = c.index();
             continue;
         }
         if (!c.is_token())
             /* an attribute-specifier-seq */
             return unknown(not_supported(n, "dcl.attr"));
-        if (tokens[c.index()].kind == token_kind::identifier)
-            name = c.index();
+        if (tokens[c.token()].kind == token_kind::identifier)
+            name = c.token();
     }
     if (!name)
         return unknown(not_supported(n, "namespace.udir"));
@@ -564,28 +561,27 @@ analysis_result semantic_analysis::using_directive(node_index n)
  * is [basic.scope.declarative]/4's.  The alias is the namespace bound under
  * another name in the scope.
  */
-analysis_result semantic_analysis::namespace_alias_definition(node_index n)
+analysis_result
+semantic_analysis::namespace_alias_definition(NamespaceAliasDefinition n)
 {
-    const syntax_node &node = tree[n];
-    const syntax_child *children = tree.children(n);
-    if (defining_class || node.child_count < 4 || !children[1].is_token() ||
-        tokens[children[1].index()].kind != token_kind::identifier)
+    auto node = n;
+    if (defining_class || node.size() < 4 || !node[1].is_identifier())
         return not_supported(n, "namespace.alias");
-    token_index alias = children[1].index();
-    node_index qualifier = 0;
+    token_index alias = node[1].token();
+    SyntaxRef qualifier = 0;
     token_index name = 0;
-    syntax_child named = children[3];
-    if (syntax_is(tree, named, syntax_kind::qualified_namespace_specifier)) {
-        const syntax_child *parts = tree.children(named.index());
-        if (tree[named.index()].child_count != 2 ||
-            !syntax_is(tree, parts[0], syntax_kind::nested_name_specifier) ||
+    SyntaxElement named = node[3];
+    if (named.is(syntax_kind::qualified_namespace_specifier)) {
+        auto parts = named;
+        if (named.size() != 2 ||
+            !parts[0].is(syntax_kind::nested_name_specifier) ||
             !parts[1].is_token())
             return not_supported(n, "namespace.alias");
         qualifier = parts[0].index();
-        name = parts[1].index();
+        name = parts[1].token();
     } else if (named.is_token() &&
-               tokens[named.index()].kind == token_kind::identifier) {
-        name = named.index();
+               tokens[named.token()].kind == token_kind::identifier) {
+        name = named.token();
     } else {
         return not_supported(n, "namespace.alias");
     }
@@ -616,19 +612,12 @@ analysis_result semantic_analysis::namespace_alias_definition(node_index n)
 }
 
 /* the declarations between the braces of a namespace-definition */
-void semantic_analysis::declaration_seq_in(node_index container)
+void semantic_analysis::declaration_seq_in(SyntaxRef container)
 {
-    const syntax_node &node = tree[container];
-    for (uint32_t i = 0; i < node.child_count; i++) {
-        syntax_child c = tree.children(container)[i];
-        if (!syntax_is(tree, c, syntax_kind::declaration_seq))
-            continue;
-        for (uint32_t k = 0; k < tree[c.index()].child_count; k++) {
-            syntax_child d = tree.children(c.index())[k];
-            if (!d.is_token())
-                declaration(d.index());
-        }
-    }
+    auto namespace_body = container;
+    for (auto child : namespace_body.elements())
+        for (auto d : child.declaration_seq().declarations())
+            declaration(d);
 }
 
 /* [namespace.std]/1: "the namespace std" of the global namespace */

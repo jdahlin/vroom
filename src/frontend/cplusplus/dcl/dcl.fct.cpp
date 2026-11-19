@@ -234,40 +234,41 @@ node_index parser::parameter_declaration()
  * [dcl.fct]/5: "The type of each parameter (including function parameter
  * packs) is determined from its own decl-specifier-seq and declarator."
  */
-analysis_result
-semantic_analysis::parameter_declaration(node_index n, qualified_type &type,
-                                         bool &unnamed, token_index &id,
-                                         syntax_child &default_argument)
+analysis_result semantic_analysis::parameter_declaration(
+    ParameterDeclaration n, qualified_type &type, bool &unnamed,
+    token_index &id, SyntaxElement &default_argument)
 {
     id = 0;
-    default_argument = syntax_child();
+    default_argument = SyntaxElement();
     /* [dcl.fct]/3: the attribute-specifier-seq_opt before the
        decl-specifier-seq appertains to the parameter: those without effect
        (libc++'s [[__maybe_unused__]]), and GCC's whose rules set nothing
        (libc++'s __attribute__((noescape))), are left out */
+    using enum preprocessing_op_or_punc;
+    auto parameter = n;
     uint32_t lead = 0;
-    while (lead < tree[n].child_count && !tree.children(n)[lead].is_token()) {
-        syntax_child c = tree.children(n)[lead];
-        if (syntax_is(tree, c, syntax_kind::gnu_attribute_specifier)) {
+    while (parameter[lead].is_node()) {
+        auto c = parameter[lead];
+        if (c.gnu_attribute_specifier()) {
             gnu_attributes g;
-            analysis_result r = gnu_attribute_specifier(c.index(), g);
+            analysis_result r = gnu_attribute_specifier(c, g);
             if (r != analysis_result::well_formed)
                 return r;
             if (g.flags || g.aligned || g.section || g.abi_tag)
                 break;
-        } else if ((!syntax_is(tree, c, syntax_kind::attribute_specifier_seq) &&
-                    !syntax_is(tree, c, syntax_kind::attribute_specifier)) ||
+        } else if (!c.is(syntax_kind::attribute_specifier_seq,
+                         syntax_kind::attribute_specifier) ||
                    !attributes_without_effect(c))
             break;
         lead++;
     }
-    const syntax_child *children = tree.children(n) + lead;
-    uint32_t child_count = tree[n].child_count - lead;
-    if (!child_count ||
-        !syntax_is(tree, children[0], syntax_kind::decl_specifier_seq))
+    /* the children after the attributes left out */
+    auto at = [&](uint32_t i) { return parameter[lead + i]; };
+    uint32_t child_count = parameter.size() - lead;
+    if (!at(0).decl_specifier_seq())
         return not_supported(n, "dcl.attr");
     specified s;
-    analysis_result r = decl_specifier_seq(children[0].index(), s, true);
+    analysis_result r = decl_specifier_seq(at(0), s, true);
     if (r != analysis_result::well_formed)
         return r;
     /* [dcl.type]/3: "at least one defining-type-specifier that is not a
@@ -292,11 +293,10 @@ semantic_analysis::parameter_declaration(node_index n, qualified_type &type,
        argument" (default_arguments analyses it) */
     uint32_t declarator_count = child_count;
     for (uint32_t i = 1; i + 1 < child_count; i++)
-        if (syntax_is_punctuator(tokens, children[i],
-                                 preprocessing_op_or_punc::EQUAL)) {
+        if (at(i).is(EQUAL)) {
             if (i + 2 != child_count)
                 return not_supported(n, "dcl.fct.default");
-            default_argument = children[i + 1];
+            default_argument = at(i + 1);
             declarator_count = i;
         }
     if (declarator_count == 1)
@@ -305,7 +305,7 @@ semantic_analysis::parameter_declaration(node_index n, qualified_type &type,
         return not_supported(n, "dcl.fct");
     declarator_meaning m;
     pack_declarator = true;
-    r = declarator(n, children[1], type, m);
+    r = declarator(n, at(1), type, m);
     pack_declarator = false;
     declared_pack = m.pack;
     unnamed = !m.has_id;
@@ -328,7 +328,7 @@ semantic_analysis::parameter_declaration(node_index n, qualified_type &type,
  * noexcept_opt function of parameter-type-list cv-qualifier-seq_opt
  * ref-qualifier_opt returning T".
  */
-analysis_result semantic_analysis::function(node_index parameters,
+analysis_result semantic_analysis::function(SyntaxRef parameters,
                                             qualified_type &type)
 {
     /* [dcl.fct]/11: "Functions shall not have a return type of type array or
@@ -339,40 +339,39 @@ analysis_result semantic_analysis::function(node_index parameters,
                           "functions shall not have a return type of type "
                           "array or function",
                           "dcl.fct");
-    const syntax_node &node = tree[parameters];
+    using enum preprocessing_op_or_punc;
+    auto node = parameters;
     /* the parameter-declarations and the ellipsis, from the clause and its
        list: ( clause ) is the first and last child */
-    owned_array<node_index> declarations;
+    owned_array<SyntaxRef> declarations;
     bool variadic = false, closed = false;
-    owned_array<syntax_child> work;
+    owned_array<SyntaxElement> work;
     uint32_t cv = cv_none;
     bool may_qualify = in_member_declarator;
     /* [except.spec]/1: the noexcept-specifier */
     bool specified_exceptions = false, non_throwing = false;
-    node_index exceptions = 0;
-    for (uint32_t i = node.child_count; i-- > 0;) {
-        syntax_child c = tree.children(parameters)[i];
-        if (syntax_is_punctuator(tokens, c,
-                                 preprocessing_op_or_punc::RIGHT_PARENTHESIS)) {
+    SyntaxRef exceptions = 0;
+    for (uint32_t i = node.size(); i-- > 0;) {
+        auto c = node[i];
+        if (c.is(RIGHT_PARENTHESIS)) {
             closed = true;
         } else if (!closed) {
             /* a lambda-declarator's decl-specifier-seq (mutable, constexpr,
                consteval) and trailing-return-type: lambda_expression's */
-            if (node.kind == syntax_kind::lambda_declarator &&
-                (syntax_is(tree, c, syntax_kind::decl_specifier_seq) ||
-                 syntax_is(tree, c, syntax_kind::trailing_return_type) ||
+            if (node.lambda_declarator() &&
+                (c.decl_specifier_seq() || c.trailing_return_type() ||
                  (c.is_token() &&
-                  tokens[c.index()].kind == token_kind::keyword)))
+                  tokens[c.token()].kind == token_kind::keyword)))
                 continue;
             /* [ext:gnu_attributes] after the parameters: the
                declarator's (declarator takes them) */
-            if (!c.is_token() && only_gnu_attributes(tree, c.index()))
+            if (c.is_node() && only_gnu_attributes(tree, c))
                 continue;
             /* [dcl.fct]/1: the cv-qualifier-seq of a member function's
                declarator ([class.mfct.non-static]/5) */
             standard_keyword kw = standard_keyword::none;
             if (c.is_token())
-                kw = p.keyword_of(tokens[c.index()]);
+                kw = p.keyword_of(tokens[c.token()]);
             if (may_qualify && kw == standard_keyword::const_ &&
                 !(cv & cv_const)) {
                 cv |= cv_const;
@@ -383,15 +382,14 @@ analysis_result semantic_analysis::function(node_index parameters,
                 cv |= cv_volatile;
                 continue;
             }
-            if (syntax_is(tree, c, syntax_kind::noexcept_specifier) &&
-                !specified_exceptions) {
+            if (c.noexcept_specifier() && !specified_exceptions) {
                 /* analysed once the parameters are known */
                 specified_exceptions = true;
-                exceptions = c.index();
+                exceptions = c;
                 continue;
             }
             /* a generic lambda's requires-clause (lambda_constraint) */
-            if (syntax_is(tree, c, syntax_kind::requires_clause))
+            if (c.requires_clause())
                 continue;
             /* a ref-qualifier, attributes, a cv-qualifier-seq of a type
                that is not a member function's */
@@ -400,34 +398,29 @@ analysis_result semantic_analysis::function(node_index parameters,
     }
     /* a function declarator of the parameters is not the member's */
     in_member_declarator = false;
-    for (uint32_t i = 0; i < node.child_count; i++) {
-        syntax_child c = tree.children(parameters)[i];
-        if (syntax_is_punctuator(tokens, c,
-                                 preprocessing_op_or_punc::RIGHT_PARENTHESIS))
+    for (auto c : node.elements()) {
+        if (c.is(RIGHT_PARENTHESIS))
             break;
-        if (!syntax_is_punctuator(tokens, c,
-                                  preprocessing_op_or_punc::LEFT_PARENTHESIS))
+        if (!c.is(LEFT_PARENTHESIS))
             work.append(c);
     }
     for (size_t k = 0; k < work.size(); k++) {
-        syntax_child c = work[k];
-        if (syntax_is_punctuator(tokens, c, preprocessing_op_or_punc::COMMA))
+        auto c = work[k];
+        if (c.is(COMMA))
             continue;
-        if (syntax_is_punctuator(tokens, c,
-                                 preprocessing_op_or_punc::ELLIPSIS)) {
+        if (c.is(ELLIPSIS)) {
             variadic = true;
             continue;
         }
-        if (syntax_is(tree, c, syntax_kind::parameter_declaration_clause) ||
-            syntax_is(tree, c, syntax_kind::parameter_declaration_list)) {
-            const syntax_node &list = tree[c.index()];
-            for (uint32_t i = 0; i < list.child_count; i++)
-                work.append(tree.children(c.index())[i]);
+        if (c.is(syntax_kind::parameter_declaration_clause,
+                 syntax_kind::parameter_declaration_list)) {
+            for (auto item : c.elements())
+                work.append(item);
             continue;
         }
-        if (!syntax_is(tree, c, syntax_kind::parameter_declaration))
+        if (!c.parameter_declaration())
             return not_supported(parameters, "dcl.fct");
-        declarations.append(c.index());
+        declarations.append(c);
     }
     owned_array<qualified_type> list;
     owned_array<parameter_meaning> named;
@@ -436,7 +429,7 @@ analysis_result semantic_analysis::function(node_index parameters,
         qualified_type t;
         bool unnamed = true;
         token_index id = 0;
-        syntax_child default_argument;
+        SyntaxElement default_argument;
         /* [temp.variadic]/5: a function parameter pack of an
            instantiation, whose type names a pack: one parameter per
            element */
@@ -462,7 +455,7 @@ analysis_result semantic_analysis::function(node_index parameters,
                 expansion_element = saved_element;
                 if (r != analysis_result::well_formed)
                     return r;
-                if (declared_pack != ellipsis || default_argument.index() ||
+                if (declared_pack != ellipsis || default_argument ||
                     depends_on_template_parameter(t))
                     return not_supported(declarations[k], "temp.variadic");
                 const struct type &element = type_table[t.unqualified()];
@@ -496,8 +489,8 @@ analysis_result semantic_analysis::function(node_index parameters,
                (function_template_definition checks which), the last
                parameter; [dcl.fct]/22's T... of a type that names none is
                the clause's ellipsis, not analysed */
-            if (k + 1 != declarations.size() || variadic ||
-                default_argument.index() || !depends_on_template_parameter(t))
+            if (k + 1 != declarations.size() || variadic || default_argument ||
+                !depends_on_template_parameter(t))
                 return not_supported(declarations[k], "temp.variadic");
             t = qualified_type::make(
                 type_table.pack_expansion_of(
@@ -577,93 +570,84 @@ analysis_result semantic_analysis::function(node_index parameters,
    type template-parameter for each generic parameter type placeholder of
    the function declaration, in order of appearance": auto or
    type-constraint auto among a parameter's decl-specifiers */
-bool semantic_analysis::generic_placeholder(node_index seq) const
+bool semantic_analysis::generic_placeholder(SyntaxRef seq) const
 {
-    for (uint32_t i = 0; i < tree[seq].child_count; i++) {
-        syntax_child c = tree.children(seq)[i];
-        if (syntax_is(tree, c, syntax_kind::placeholder_type_specifier))
-            c = tree.children(c.index())[tree[c.index()].child_count - 1];
-        if (is_keyword(c, standard_keyword::auto_))
+    for (auto c : seq.elements()) {
+        if (c.placeholder_type_specifier())
+            c = c.back();
+        if (c.is(standard_keyword::auto_))
             return true;
     }
     return false;
 }
 
 bool semantic_analysis::abbreviated_parameters(
-    node_index declaration, owned_array<node_index> &parameters) const
+    SyntaxRef declaration, owned_array<SyntaxRef> &parameters) const
 {
-    if (syntax_is(tree, syntax_child::node(declaration),
-                  syntax_kind::template_declaration)) {
-        syntax_child inner = tree.children(declaration)[1];
-        if (tree[declaration].child_count != 2 || inner.is_token())
+    auto d = declaration;
+    if (d.template_declaration()) {
+        if (d.size() != 2 || !d[1].is_node())
             return true;
-        declaration = inner.index();
+        d = d[1];
     }
-    if (!syntax_is(tree, syntax_child::node(declaration),
-                   syntax_kind::function_definition) &&
-        !syntax_is(tree, syntax_child::node(declaration),
-                   syntax_kind::simple_declaration))
+    if (!d.function_definition() && !d.simple_declaration())
         return true;
     /* the declarator's parameters-and-qualifiers */
-    syntax_child d;
-    for (uint32_t i = 0; i < tree[declaration].child_count && !d.bits; i++) {
-        syntax_child c = tree.children(declaration)[i];
-        if (syntax_is(tree, c, syntax_kind::ptr_declarator) ||
-            syntax_is(tree, c, syntax_kind::noptr_declarator))
-            d = c;
-    }
-    while (syntax_is(tree, d, syntax_kind::ptr_declarator))
-        d = tree.children(d.index())[tree[d.index()].child_count - 1];
-    if (!syntax_is(tree, d, syntax_kind::noptr_declarator))
+    SyntaxRef declarator;
+    for (auto c : d.elements())
+        if (c.is(syntax_kind::ptr_declarator, syntax_kind::noptr_declarator)) {
+            declarator = c;
+            break;
+        }
+    while (declarator.is(syntax_kind::ptr_declarator))
+        declarator = declarator.back();
+    if (!declarator.is(syntax_kind::noptr_declarator))
         return true;
-    syntax_child list;
-    for (uint32_t i = 0; i < tree[d.index()].child_count; i++)
-        if (syntax_is(tree, tree.children(d.index())[i],
-                      syntax_kind::parameters_and_qualifiers))
-            list = tree.children(d.index())[i];
-    if (!list.bits)
+    SyntaxElement list;
+    for (auto c : declarator.elements())
+        if (c.parameters_and_qualifiers())
+            list = c;
+    if (!list)
         return true;
-    owned_array<syntax_child> items;
-    for (uint32_t i = 0; i < tree[list.index()].child_count; i++) {
-        syntax_child c = tree.children(list.index())[i];
-        if (syntax_is(tree, c, syntax_kind::parameter_declaration_list))
-            for (uint32_t k = 0; k < tree[c.index()].child_count; k++)
-                items.append(tree.children(c.index())[k]);
+    owned_array<SyntaxElement> items;
+    for (auto c : list.elements()) {
+        if (c.is(syntax_kind::parameter_declaration_list))
+            for (auto item : c.elements())
+                items.append(item);
         else
             items.append(c);
     }
-    for (syntax_child c : items) {
-        if (!syntax_is(tree, c, syntax_kind::parameter_declaration))
+    for (auto c : items) {
+        if (!c.parameter_declaration())
             continue;
-        const syntax_node &x = tree[c.index()];
-        for (uint32_t k = 0; k < x.child_count; k++) {
-            syntax_child seq = tree.children(c.index())[k];
-            if (!syntax_is(tree, seq, syntax_kind::decl_specifier_seq))
+        for (auto seq : c.elements()) {
+            if (!seq.decl_specifier_seq())
                 continue;
-            if (!generic_placeholder(seq.index()))
+            if (!generic_placeholder(seq))
                 break;
             /* [dcl.fct]/22: "The invented type template-parameter is a
                template parameter pack if the corresponding parameter-
                declaration declares a function parameter pack" */
-            for (token_index t = x.first_token; t < x.end_token; t++)
-                if (syntax_is_punctuator(tokens, syntax_child::token(t),
-                                         preprocessing_op_or_punc::ELLIPSIS))
+            for (token_index t = c.first_token(); t < c.end_token(); t++)
+                if (SyntaxElement::from_token(t).is(
+                        preprocessing_op_or_punc::ELLIPSIS))
                     return false;
-            parameters.append(seq.index());
+            parameters.append(seq);
             break;
         }
     }
     return true;
 }
 
-uint32_t semantic_analysis::invented_parameter_name(node_index seq) const
+uint32_t semantic_analysis::invented_parameter_name(SyntaxRef seq) const
 {
     char spelling[24];
-    int length = snprintf(spelling, sizeof spelling, "auto:%u", seq);
+    int length =
+        snprintf(spelling, sizeof spelling, "auto:%u", seq.index().index());
     return tokens.pp.identifier(spelling, static_cast<size_t>(length)) + 1;
 }
 
-bool semantic_analysis::invented_parameter_type(node_index seq,
+bool semantic_analysis::invented_parameter_type(SyntaxRef seq,
                                                 qualified_type &type) const
 {
     entity_index e = lookup(invented_parameter_name(seq));

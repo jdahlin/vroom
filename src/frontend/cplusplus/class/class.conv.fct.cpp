@@ -71,7 +71,7 @@ node_index parser::conversion_type_id()
     for (unsigned i = operators; i-- > 1;) {
         size_t from = declarator_mark + i - 1;
         finish_node(syntax_kind::conversion_declarator, from,
-                    tree[pending[from].index()].first_token);
+                    tree[pending[from].node()].first_token);
     }
     if (!operators && pending.size() == mark + 1)
         return 0; /* a type-specifier-seq alone passes through */
@@ -93,16 +93,16 @@ uint32_t semantic_analysis::conversion_function_name() const
  * type-specifier-seq, then each ptr-operator of the conversion-declarator,
  * first to last.
  */
-analysis_result semantic_analysis::conversion_type(node_index id,
+analysis_result semantic_analysis::conversion_type(SyntaxRef id,
                                                    qualified_type &type)
 {
-    const syntax_node &node = tree[id];
-    if (node.child_count != 2 || tree.children(id)[1].is_token())
+    auto node = id;
+    if (node.size() != 2 || node[1].is_token())
         return not_supported(id, "class.conv.fct");
-    node_index t = tree.children(id)[1].index();
-    node_index seq = t;
-    if (tree[t].kind == syntax_kind::conversion_type_id)
-        seq = tree.children(t)[0].index();
+    auto t = node[1];
+    SyntaxRef seq = t;
+    if (t.is(syntax_kind::conversion_type_id))
+        seq = t[0].index();
     specified s;
     analysis_result r = decl_specifier_seq(seq, s, false);
     if (r != analysis_result::well_formed)
@@ -115,20 +115,20 @@ analysis_result semantic_analysis::conversion_type(node_index id,
         return analysis_result::well_formed;
     /* the ptr-operators, in source order (a conversion-declarator nests
        the rest after its first) */
-    owned_array<node_index> work;
-    for (uint32_t i = tree[t].child_count; i-- > 1;)
-        if (!tree.children(t)[i].is_token())
-            work.append(tree.children(t)[i].index());
+    owned_array<SyntaxRef> work;
+    for (uint32_t i = t.size(); i-- > 1;)
+        if (!t[i].is_token())
+            work.append(t[i].index());
     while (!work.empty()) {
-        node_index k = work.back();
+        SyntaxRef k = work.back();
         work.resize(work.size() - 1);
-        if (tree[k].kind == syntax_kind::conversion_declarator) {
-            for (uint32_t i = tree[k].child_count; i-- > 0;)
-                if (!tree.children(k)[i].is_token())
-                    work.append(tree.children(k)[i].index());
+        if (k.is(syntax_kind::conversion_declarator)) {
+            for (uint32_t i = k.size(); i-- > 0;)
+                if (!k[i].is_token())
+                    work.append(k[i].index());
             continue;
         }
-        if (tree[k].kind != syntax_kind::ptr_operator)
+        if (!k.is(syntax_kind::ptr_operator))
             return not_supported(k, "class.conv.fct");
         declarator_meaning m;
         r = pointer_operator(k, type, m);
@@ -153,25 +153,25 @@ analysis_result semantic_analysis::conversion_type(node_index id,
  * decl-specifier-seq's.
  */
 analysis_result
-semantic_analysis::conversion_function_member(entity_index c, node_index n,
-                                              node_index id, uint8_t access,
-                                              owned_array<node_index> &bodies)
+semantic_analysis::conversion_function_member(entity_index c, SyntaxRef n,
+                                              SyntaxRef id, uint8_t access,
+                                              owned_array<SyntaxRef> &bodies)
 {
-    const syntax_node &node = tree[n];
-    const syntax_child *children = tree.children(n);
+    auto children_syntax = n;
     specified s;
     uint32_t first = 0;
     /* [ext:gnu_attributes] attributes before the declaration */
     uint32_t lead = leading_gnu_attributes(n);
     while (first < lead) {
-        analysis_result r = gnu_attribute_specifier(children[first].index(), s);
+        analysis_result r =
+            gnu_attribute_specifier(children_syntax[first].index(), s);
         if (r != analysis_result::well_formed)
             return r;
         first++;
     }
-    if (first < node.child_count &&
-        syntax_is(tree, children[first], syntax_kind::decl_specifier_seq)) {
-        node_index seq = children[first].index();
+    if (first < children_syntax.size() &&
+        children_syntax[first].is(syntax_kind::decl_specifier_seq)) {
+        auto seq = children_syntax[first];
         first++;
         bool outer_virtual = virtual_allowed, outer_explicit = explicit_allowed;
         virtual_allowed = explicit_allowed = true;
@@ -210,29 +210,27 @@ semantic_analysis::conversion_function_member(entity_index c, node_index n,
 
 /* [class.conv.fct]/1: the declarator-id is found in the declarator, not
    in the decl-specifier-seq, the parameters or the body */
-node_index semantic_analysis::conversion_function_id_of(node_index n) const
+SyntaxRef semantic_analysis::conversion_function_id_of(SyntaxRef n) const
 {
-    owned_array<node_index> work;
-    for (uint32_t i = 0; i < tree[n].child_count; i++) {
-        syntax_child x = tree.children(n)[i];
-        if (!x.is_token() &&
-            !syntax_is(tree, x, syntax_kind::decl_specifier_seq) &&
-            !syntax_is(tree, x, syntax_kind::function_body))
+    owned_array<SyntaxRef> work;
+    for (SyntaxElement x : n.elements()) {
+        if (!x.is_token() && !x.is(syntax_kind::decl_specifier_seq) &&
+            !x.is(syntax_kind::function_body))
             work.append(x.index());
     }
     while (!work.empty()) {
-        node_index k = work.back();
+        SyntaxRef k = work.back();
         work.resize(work.size() - 1);
-        syntax_kind kind = tree[k].kind;
+        syntax_kind kind = k.kind();
         if (kind == syntax_kind::conversion_function_id)
             return k;
         if (kind == syntax_kind::parameters_and_qualifiers ||
             kind == syntax_kind::brace_or_equal_initializer ||
             kind == syntax_kind::braced_init_list)
             continue;
-        for (uint32_t i = 0; i < tree[k].child_count; i++)
-            if (!tree.children(k)[i].is_token())
-                work.append(tree.children(k)[i].index());
+        for (auto child : k.elements())
+            if (!child.is_token())
+                work.append(child.index());
     }
     return 0;
 }
@@ -244,7 +242,7 @@ entity_index semantic_analysis::own_conversion_functions(entity_index c) const
 
 entity_index
 semantic_analysis::conversion_function_declared_by(entity_index c,
-                                                   node_index definition)
+                                                   SyntaxRef definition)
 {
     for (entity_index f = own_conversion_functions(c); f;
          f = entity_table[f].next_overload)
@@ -392,9 +390,10 @@ semantic_analysis::conversion_function_for(const expression_meaning &m,
  * into the object being initialized."  converted is false when the class
  * has none that does; m is then unchanged.
  */
-analysis_result semantic_analysis::conversion_function_call(
-    node_index at, expression_meaning &m, qualified_type to, bool direct,
-    bool &converted)
+analysis_result
+semantic_analysis::conversion_function_call(SyntaxRef at, expression_meaning &m,
+                                            qualified_type to, bool direct,
+                                            bool &converted)
 {
     converted = false;
     bool ambiguous = false, unknown = false;
@@ -417,7 +416,7 @@ analysis_result semantic_analysis::conversion_function_call(
                           "only by members and friends of the class in which "
                           "it is declared",
                           "class.access");
-    token_index t = tree[at].first_token;
+    token_index t = at.first_token();
     analysis_result r = deleted_use(t, f);
     if (r != analysis_result::well_formed)
         return r;
@@ -439,7 +438,7 @@ analysis_result semantic_analysis::conversion_function_call(
     callee.category = value_category::lvalue;
     callee.evaluation = constness::constant;
     callee.entity = f;
-    owned_array<syntax_child> syntax;
+    owned_array<SyntaxElement> syntax;
     owned_array<expression_meaning> arguments;
     expression_meaning result;
     r = call_with(at, callee, x.type, address.node, f, syntax, arguments,

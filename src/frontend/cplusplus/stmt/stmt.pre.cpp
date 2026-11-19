@@ -36,11 +36,11 @@ namespace
 /* attribute-specifier-seq_opt and the alternative parse() parses: a
    statement node when there are attributes */
 template <class Alternative>
-node_index with_attributes(parser &p, Alternative parse)
+SyntaxRef with_attributes(parser &p, Alternative parse)
 {
     size_t mark = p.begin_node();
     token_index first = p.position;
-    node_index attributes = p.attribute_specifier_seq();
+    SyntaxRef attributes = p.attribute_specifier_seq();
     if (p.failed())
         return 0;
     /* [ext.gnu] clang takes GCC's attributes before a declaration, a label,
@@ -54,7 +54,7 @@ node_index with_attributes(parser &p, Alternative parse)
         return p.violates("GCC's attributes only before a declaration, a "
                           "label, or an expression or null statement",
                           "ext.gnu", first);
-    node_index n = parse();
+    SyntaxRef n = parse();
     if (p.failed())
         return 0;
     if (!attributes)
@@ -247,7 +247,7 @@ node_index parser::statement()
         return n;
     }
     pending.resize(pending.size() - 1);
-    tree.truncate(n);
+    tree.truncate(n.index());
     n = tree.make(syntax_kind::erroneous, nullptr, 0, first, position);
     add(n);
     if (failed_with.beyond_step || failed_with.at > position) {
@@ -477,57 +477,58 @@ node_index parser::substatement()
  * (hold_names), so that nothing after it rests on what it would have
  * declared.
  */
-analysis_result semantic_analysis::statement(syntax_child s, uint32_t &built)
+analysis_result semantic_analysis::statement(SyntaxElement s, uint32_t &built)
 {
     built = 0;
     if (s.is_token())
         return not_supported(current_declaration, "stmt.pre");
-    node_index n = s.index();
-    switch (tree[n].kind) {
-    case syntax_kind::gnu_extension_declaration:
-        /* [ext:gnu_extension_keyword]: __extension__ changes no meaning */
-        return statement(tree.children(n)[1], built);
-    case syntax_kind::compound_statement:
-        return compound_statement(n, 0, built);
-    case syntax_kind::expression_statement:
-        return expression_statement(n, built);
-    case syntax_kind::selection_statement:
-        return selection_statement(n, built);
-    case syntax_kind::iteration_statement:
-        return iteration_statement(n, built);
-    case syntax_kind::jump_statement:
-        return jump_statement(n, built);
-    case syntax_kind::labeled_statement:
-        return labeled_statement(n, built);
-    case syntax_kind::simple_declaration: {
-        /* [stmt.dcl]/1: "A declaration statement introduces one or more new
-           names into a block" */
-        size_t first = block_variables.size();
-        analysis_result r = simple_declaration(n);
-        built = declaration_statements(first, tree[n].first_token);
+    /* [stmt.dcl]/1: a block-declaration that declares no object: no code */
+    auto declares_nothing = [&](SyntaxRef d) {
+        analysis_result r = declaration_by_kind(d);
+        built = statement_node(semantic_kind::null_statement, d.first_token());
         if (r != analysis_result::well_formed)
-            hold_names(n);
+            hold_names(d);
         return r;
-    }
-    case syntax_kind::static_assert_declaration:
-    case syntax_kind::alias_declaration:
-    case syntax_kind::using_directive:
-    case syntax_kind::namespace_alias_definition:
-    case syntax_kind::using_declaration: {
-        /* [stmt.dcl]/1: a block-declaration that declares no object: no
-           code */
-        analysis_result r = declaration_by_kind(n);
-        built =
-            statement_node(semantic_kind::null_statement, tree[n].first_token);
-        if (r != analysis_result::well_formed)
-            hold_names(n);
-        return r;
-    }
-    case syntax_kind::statement:
-        return attributed_statement(n, built);
-    default:
-        return not_supported(n);
-    }
+    };
+    auto view = s.statement();
+    if (!view)
+        /* a node the grammar does not place in a statement */
+        return not_supported(s.index());
+    return view.visit(Overloaded{
+        [&](GnuExtensionDeclaration x) {
+            /* [ext:gnu_extension_keyword]: __extension__ changes no meaning */
+            return statement(x[1], built);
+        },
+        [&](CompoundStatement c) { return compound_statement(c, 0, built); },
+        [&](ExpressionStatement e) { return expression_statement(e, built); },
+        [&](SelectionStatement c) { return selection_statement(c, built); },
+        [&](IterationStatement c) { return iteration_statement(c, built); },
+        /* (jump-statement's sum also has these two kinds: the sum's case
+           would take them, and report their own subclauses elsewhere) */
+        [&](CoroutineReturnStatement c) { return not_supported(c); },
+        [&](GnuComputedGoto c) { return not_supported(c); },
+        [&](JumpStatement c) { return jump_statement(c, built); },
+        [&](LabeledStatement c) { return labeled_statement(c, built); },
+        [&](SimpleDeclaration d) {
+            /* [stmt.dcl]/1: "A declaration statement introduces one or more
+               new names into a block" */
+            size_t first = block_variables.size();
+            analysis_result r = simple_declaration(d);
+            built = declaration_statements(first, d.first_token());
+            if (r != analysis_result::well_formed)
+                hold_names(d);
+            return r;
+        },
+        [&](StaticAssertDeclaration d) { return declares_nothing(d); },
+        [&](AliasDeclaration d) { return declares_nothing(d); },
+        [&](UsingDirective d) { return declares_nothing(d); },
+        [&](NamespaceAliasDefinition d) { return declares_nothing(d); },
+        [&](UsingDeclaration d) { return declares_nothing(d); },
+        [&](Statement other) {
+            if (other.is(syntax_kind::statement))
+                return attributed_statement(other, built);
+            return not_supported(other);
+        }});
 }
 
 /*
@@ -537,23 +538,23 @@ analysis_result semantic_analysis::statement(syntax_child s, uint32_t &built)
  * hints for the path of execution, which change nothing vcc generates.
  * Other attributes of a statement have no rules here.
  */
-analysis_result semantic_analysis::attributed_statement(node_index n,
+analysis_result semantic_analysis::attributed_statement(Statement n,
                                                         uint32_t &built)
 {
     /* the attribute-specifiers, then the statement */
-    const syntax_node &node = tree[n];
-    if (node.child_count < 2)
+    auto node = n;
+    if (node.size() < 2)
         return not_supported(n, "stmt.pre");
-    syntax_child inner = tree.children(n)[node.child_count - 1];
-    if (syntax_is(tree, inner, syntax_kind::simple_declaration))
+    SyntaxElement inner = node[node.size() - 1];
+    if (inner.is(syntax_kind::simple_declaration))
         return not_supported(n, "dcl.attr");
-    for (uint32_t i = 0; i + 1 < node.child_count; i++) {
-        syntax_child c = tree.children(n)[i];
-        if (!syntax_is(tree, c, syntax_kind::attribute_specifier) &&
-            !syntax_is(tree, c, syntax_kind::attribute_specifier_seq))
+    for (uint32_t i = 0; i + 1 < node.size(); i++) {
+        SyntaxElement c = node[i];
+        if (!c.is(syntax_kind::attribute_specifier) &&
+            !c.is(syntax_kind::attribute_specifier_seq))
             return not_supported(n, "dcl.attr");
-        const syntax_node &a = tree[c.index()];
-        for (token_index t = a.first_token; t < a.end_token; t++) {
+        auto a = c;
+        for (token_index t = a.first_token(); t < a.end_token(); t++) {
             if (tokens[t].kind == token_kind::operator_or_punctuator)
                 continue;
             owned_buffer spelling;
@@ -580,13 +581,13 @@ analysis_result semantic_analysis::attributed_statement(node_index n,
  * statement's condition, whose names the substatement's outermost block
  * shall not redeclare ([basic.scope.block]/3).
  */
-analysis_result semantic_analysis::substatement(syntax_child s,
+analysis_result semantic_analysis::substatement(SyntaxElement s,
                                                 entity_index conflicts,
                                                 uint32_t &built)
 {
-    if (syntax_is(tree, s, syntax_kind::compound_statement))
-        return compound_statement(s.index(), conflicts, built);
-    if (!syntax_is(tree, s, syntax_kind::simple_declaration))
+    if (s.is(syntax_kind::compound_statement))
+        return compound_statement(s, conflicts, built);
+    if (!s.is(syntax_kind::simple_declaration))
         return statement(s, built);
     entity_index outer = current_scope;
     bool claimable = declarations_claimable;
@@ -628,7 +629,7 @@ uint32_t semantic_analysis::declaration_statements(size_t first, token_index at)
 
 /* the node of a syntax child, or the declaration's for a token (where a
    diagnostic about it is issued) */
-node_index semantic_analysis::node_of(syntax_child c) const
+SyntaxRef semantic_analysis::node_of(SyntaxElement c) const
 {
     if (c.is_token())
         return current_declaration;
@@ -651,24 +652,22 @@ node_index semantic_analysis::node_of(syntax_child c) const
  * of a condition that is an expression is the value of the expression,
  * contextually converted to bool for statements other than switch".
  */
-analysis_result semantic_analysis::condition(syntax_child c, bool for_switch,
+analysis_result semantic_analysis::condition(SyntaxElement c, bool for_switch,
                                              expression_meaning &m)
 {
-    node_index at = node_of(c);
+    SyntaxRef at = node_of(c);
     analysis_result r = analysis_result::well_formed;
     uint32_t declaration = 0;
-    if (syntax_is(tree, c, syntax_kind::condition)) {
-        const syntax_node &node = tree[at];
-        const syntax_child *children = tree.children(at);
-        if (node.child_count != 3 ||
-            !syntax_is(tree, children[0], syntax_kind::decl_specifier_seq))
+    if (c.is(syntax_kind::condition)) {
+        auto node = at;
+        if (node.size() != 3 || !node[0].is(syntax_kind::decl_specifier_seq))
             return not_supported(at, "dcl.attr");
         specified s;
         placeholder_allowed = true;
         scoped_value<qualified_type> deduced(declaration_deduced,
                                              qualified_type());
         scoped_value<bool> group(placeholder_group, false);
-        r = decl_specifier_seq(children[0].index(), s, false);
+        r = decl_specifier_seq(node[0].index(), s, false);
         if (r == analysis_result::well_formed &&
             (s.typedef_ || s.static_ || s.extern_ || s.inline_))
             /* [stmt.pre]/8: "In the decl-specifier-seq of a condition, each
@@ -684,8 +683,7 @@ analysis_result semantic_analysis::condition(syntax_child c, bool for_switch,
             bool claimable = declarations_claimable;
             declarations_claimable = false;
             in_condition = true;
-            r = declare_with_initializer(at, children[1], children[2], true, s,
-                                         false);
+            r = declare_with_initializer(at, node[1], node[2], true, s, false);
             in_condition = false;
             declarations_claimable = claimable;
         }
@@ -707,8 +705,8 @@ analysis_result semantic_analysis::condition(syntax_child c, bool for_switch,
             m.type = record.operand;
             m.entity = 0;
         }
-        m.node = expression_node(semantic_kind::entity, m,
-                                 first_token(children[1]), last_declared);
+        m.node = expression_node(semantic_kind::entity, m, first_token(node[1]),
+                                 last_declared);
     } else {
         r = expression(c, m);
         if (r != analysis_result::well_formed)
@@ -725,7 +723,7 @@ analysis_result semantic_analysis::condition(syntax_child c, bool for_switch,
 }
 
 /* [stmt.switch]/2: the value of a switch's condition, m */
-analysis_result semantic_analysis::switch_condition(node_index at,
+analysis_result semantic_analysis::switch_condition(SyntaxRef at,
                                                     expression_meaning &m)
 {
     analysis_result r = operand_value(at, m);

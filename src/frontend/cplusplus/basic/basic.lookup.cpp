@@ -321,8 +321,8 @@ semantic_analysis::lookup_unqualified(uint32_t name, lookup_filter filter) const
     if (lookup_horizon && r.entity && is_namespace(r.found_in))
         for (entity_index o = r.entity; o; o = entity_table[o].next_overload) {
             uint32_t d = entity_table[o].first_declaration;
-            if (d && tree[entity_table.declaration(d).node].first_token >
-                         lookup_horizon)
+            if (d &&
+                entity_table.declaration(d).node.first_token() > lookup_horizon)
                 r.unknown = true;
             if (entity_table[o].kind != entity_kind::function)
                 break;
@@ -705,43 +705,36 @@ bool semantic_analysis::argument_dependent_lookup(
  * nominate.  A simple-template-id names its class template's
  * specialization; a decltype-specifier has no rules yet.
  */
-analysis_result semantic_analysis::nested_name_specifier(node_index n,
+analysis_result semantic_analysis::nested_name_specifier(NestedNameSpecifier n,
                                                          nominated_scope &scope,
                                                          bool dependent_allowed)
 {
-    const syntax_node &node = tree[n];
-    const syntax_child *parts = tree.children(n);
+    auto node = n;
     uint32_t i = 0;
     bool qualified = false;
     scope = nominated_scope();
-    if (node.child_count &&
-        syntax_is_punctuator(tokens, parts[0],
-                             preprocessing_op_or_punc::COLON_COLON)) {
+    if (node.size() && node[0].is(preprocessing_op_or_punc::COLON_COLON)) {
         scope.global = true;
         qualified = true;
         i = 1;
     }
-    for (; i < node.child_count; i += 2) {
+    for (; i < node.size(); i += 2) {
         if (scope.dependent) {
             /* [temp.dep.type]/6: "A qualified-id in which the
                nested-name-specifier names a dependent type that is not the
                current instantiation" is a member of an unknown
                specialization, a dependent type (/9): Q::name */
-            if (!parts[i].is_token() ||
-                tokens[parts[i].index()].kind != token_kind::identifier ||
-                i + 1 >= node.child_count ||
-                !syntax_is_punctuator(tokens, parts[i + 1],
-                                      preprocessing_op_or_punc::COLON_COLON))
+            if (!node[i].is_identifier() || i + 1 >= node.size() ||
+                !node[i + 1].is(preprocessing_op_or_punc::COLON_COLON))
                 return not_supported(n, "temp.res");
             scope.dependent = dependent_member_type(
-                scope.dependent, tokens.identifier(parts[i].index()));
+                scope.dependent, tokens.identifier(node[i].token()));
             continue;
         }
-        if (!parts[i].is_token() &&
-            syntax_is(tree, parts[i], syntax_kind::simple_template_id) &&
-            i + 1 < node.child_count &&
-            syntax_is_punctuator(tokens, parts[i + 1],
-                                 preprocessing_op_or_punc::COLON_COLON)) {
+        if (!node[i].is_token() &&
+            node[i].is(syntax_kind::simple_template_id) &&
+            i + 1 < node.size() &&
+            node[i + 1].is(preprocessing_op_or_punc::COLON_COLON)) {
             /* [temp.names]/1: a simple-template-id naming a class template
                names the specialization ([temp.spec]/4), a class; its
                members are looked up there ([class.qual]/1) */
@@ -751,7 +744,7 @@ analysis_result semantic_analysis::nested_name_specifier(node_index n,
             uint32_t declaring = declaring_specializations;
             declaring_specializations = 0;
             analysis_result r =
-                template_type(parts[i].index(), scope.entity, qualified, named);
+                template_type(node[i], scope.entity, qualified, named);
             declaring_specializations = declaring;
             if (r != analysis_result::well_formed)
                 return r;
@@ -773,18 +766,15 @@ analysis_result semantic_analysis::nested_name_specifier(node_index n,
             qualified = true;
             continue;
         }
-        if (!parts[i].is_token() ||
-            tokens[parts[i].index()].kind != token_kind::identifier ||
-            i + 1 >= node.child_count ||
-            !syntax_is_punctuator(tokens, parts[i + 1],
-                                  preprocessing_op_or_punc::COLON_COLON)) {
+        if (!node[i].is_identifier() || i + 1 >= node.size() ||
+            !node[i + 1].is(preprocessing_op_or_punc::COLON_COLON)) {
             /* [temp.names]: template before a simple-template-id */
-            if (!parts[i].is_token() &&
-                syntax_is(tree, parts[i], syntax_kind::simple_template_id))
+            if (!node[i].is_token() &&
+                node[i].is(syntax_kind::simple_template_id))
                 return not_supported(n, "temp.names");
             return not_supported(n, "basic.lookup.qual");
         }
-        token_index t = parts[i].index();
+        token_index t = node[i].token();
         uint32_t name = tokens.identifier(t);
         lookup_result r;
         if (qualified)

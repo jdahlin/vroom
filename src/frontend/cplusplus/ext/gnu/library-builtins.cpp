@@ -452,17 +452,15 @@ entity_index semantic_analysis::library_builtin(uint32_t name)
    object or function referenced by r, even in the presence of an
    overloaded operator&"; a call of the name unqualified lookup finds
    nothing for, with one argument */
-bool semantic_analysis::builtin_addressof_call(node_index n)
+bool semantic_analysis::builtin_addressof_call(SyntaxRef n)
 {
-    const syntax_node &node = tree[n];
-    const syntax_child *children = tree.children(n);
-    if (node.child_count != 4 || !children[0].is_token() ||
-        tokens[children[0].index()].kind != token_kind::identifier ||
-        syntax_is(tree, children[2], syntax_kind::initializer_list) ||
+    auto node = n;
+    if (node.size() != 4 || !node[0].is_identifier() ||
+        node[2].is(syntax_kind::initializer_list) ||
         !tokens.files.behavior.has(extension::gnu_library_builtins))
         return false;
     static const char spelled[] = "__builtin_addressof";
-    uint32_t name = tokens.identifier(children[0].index());
+    uint32_t name = tokens.identifier(node[0].token());
     if (name != tokens.pp.identifier(spelled, sizeof spelled - 1) + 1)
         return false;
     lookup_result x = lookup_unqualified(name, lookup_filter::any);
@@ -471,10 +469,10 @@ bool semantic_analysis::builtin_addressof_call(node_index n)
 
 /* the built-in & of [expr.unary.op]/3.2 on the lvalue operand: a prvalue
    "pointer to T" (cv kept), constant where &x is ([expr.const]/11) */
-analysis_result semantic_analysis::builtin_addressof(node_index n,
+analysis_result semantic_analysis::builtin_addressof(SyntaxRef n,
                                                      expression_meaning &m)
 {
-    syntax_child operand = tree.children(n)[2];
+    SyntaxElement operand = n[2];
     analysis_result r = expression(operand, m);
     if (r != analysis_result::well_formed)
         return r;
@@ -484,8 +482,8 @@ analysis_result semantic_analysis::builtin_addressof(node_index n,
                           "lvalue",
                           "specialized.addressof");
     if (m.bit_field_width)
-        return address_of_bit_field(tree[n].first_token);
-    address_of_glvalue(tree[n].first_token, m);
+        return address_of_bit_field(n.first_token());
+    address_of_glvalue(n.first_token(), m);
     return analysis_result::well_formed;
 }
 

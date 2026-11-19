@@ -343,58 +343,50 @@ semantic_analysis::lambda_context *semantic_analysis::current_lambda()
  * class scope, or namespace scope that contains the corresponding
  * lambda-expression."
  */
-analysis_result semantic_analysis::lambda_expression(node_index n,
+analysis_result semantic_analysis::lambda_expression(LambdaExpression n,
                                                      expression_meaning &m)
 {
-    const syntax_node &node = tree[n];
-    const syntax_child *children = tree.children(n);
+    auto node = n;
     /* a lambda in a default argument or member initializer, in an
        unevaluated operand or while a candidate template is substituted;
        outside a function body only at namespace scope */
     if ((!function_state.active && !is_namespace(current_scope)) ||
-        unevaluated || substituting || node.child_count < 2)
+        unevaluated || substituting || node.size() < 2)
         return not_supported(n, "expr.prim.lambda");
     /* [expr.prim.lambda]/5: a template-parameter-list makes a generic
        lambda, whose call operator is a template
        ([expr.prim.lambda.closure]/3); its requires-clause is the
        template's (lambda_constraint) */
-    syntax_child declarator, template_list;
-    for (uint32_t i = 1; i + 1 < node.child_count; i++) {
-        syntax_child x = children[i];
-        if (syntax_is(tree, x, syntax_kind::lambda_declarator) &&
-            !declarator.index())
+    SyntaxElement declarator, template_list;
+    for (uint32_t i = 1; i + 1 < node.size(); i++) {
+        SyntaxElement x = node[i];
+        if (x.is(syntax_kind::lambda_declarator) && !declarator)
             declarator = x;
-        else if (syntax_is(tree, x, syntax_kind::template_parameter_list) ||
-                 syntax_is(tree, x, syntax_kind::type_parameter) ||
-                 syntax_is(tree, x, syntax_kind::parameter_declaration))
+        else if (x.is(syntax_kind::template_parameter_list) ||
+                 x.is(syntax_kind::type_parameter) ||
+                 x.is(syntax_kind::parameter_declaration))
             /* (a list of one template-parameter is that parameter) */
             template_list = x;
-        else if (!x.is_token() &&
-                 !syntax_is(tree, x, syntax_kind::requires_clause))
+        else if (!x.is_token() && !x.is(syntax_kind::requires_clause))
             return not_supported(n, "expr.prim.lambda");
     }
-    syntax_child body = children[node.child_count - 1];
-    if (!syntax_is(tree, children[0], syntax_kind::lambda_introducer) ||
-        !syntax_is(tree, body, syntax_kind::compound_statement))
+    SyntaxElement body = node[node.size() - 1];
+    if (!node[0].is(syntax_kind::lambda_introducer) ||
+        !body.is(syntax_kind::compound_statement))
         return not_supported(n, "expr.prim.lambda");
-    if (declarator.index()) {
+    if (declarator) {
         /* [expr.prim.lambda]/5: "A lambda is a generic lambda if the
            lambda-expression has any generic parameter type placeholders"
            (auto in a parameter's decl-specifier-seq) */
-        const syntax_node &d = tree[declarator.index()];
-        for (token_index t = d.first_token; t < d.end_token; t++)
+        auto d = declarator;
+        for (token_index t = d.first_token(); t < d.end_token(); t++)
             if (tokens[t].kind == token_kind::keyword &&
                 p.keyword_of(tokens[t]) == standard_keyword::auto_)
                 return not_supported(n, "expr.prim.lambda.closure");
         /* a requires-clause after the parameters: a generic lambda's,
            (lambda_constraint) */
-        if (!template_list.index() &&
-            syntax_is(
-                tree,
-                tree.children(
-                    declarator
-                        .index())[tree[declarator.index()].child_count - 1],
-                syntax_kind::requires_clause))
+        if (!template_list &&
+            declarator[declarator.size() - 1].is(syntax_kind::requires_clause))
             return not_supported(n, "temp.constr");
     }
 
@@ -437,22 +429,21 @@ analysis_result semantic_analysis::lambda_expression(node_index n,
     entity_table.add_declaration(c, n);
     l.closure = c;
     l.first_capture = static_cast<uint32_t>(lambda_captures.size());
-    analysis_result r = lambda_introducer(children[0].index(), l);
+    analysis_result r = lambda_introducer(node[0], l);
     if (r != analysis_result::well_formed) {
         lambda_captures.resize(l.first_capture);
         entity_table[c].kind = entity_kind::none;
         return r;
     }
-    bool has_capture = tree[children[0].index()].child_count > 2;
+    bool has_capture = node[0].size() > 2;
 
     qualified_type type;
     owned_array<parameter_meaning> parameters;
-    if (template_list.index())
-        r = generic_lambda(n, template_list.index(), declarator.index(), l,
-                           has_capture, m);
+    if (template_list)
+        r = generic_lambda(n, template_list, declarator, l, has_capture, m);
     else
-        r = lambda_call_type(n, declarator.index(), l, type, parameters);
-    if (r != analysis_result::well_formed || template_list.index()) {
+        r = lambda_call_type(n, declarator, l, type, parameters);
+    if (r != analysis_result::well_formed || template_list) {
         lambda_captures.resize(l.first_capture);
         if (r != analysis_result::well_formed)
             entity_table[c].kind = entity_kind::none;
@@ -505,8 +496,8 @@ analysis_result semantic_analysis::lambda_expression(node_index n,
  * scope: a generic lambda's template-parameters' or a specialization's.
  */
 analysis_result
-semantic_analysis::lambda_call_type(node_index n, node_index d,
-                                    lambda_context &l, qualified_type &type,
+semantic_analysis::lambda_call_type(SyntaxRef n, SyntaxRef d, lambda_context &l,
+                                    qualified_type &type,
                                     owned_array<parameter_meaning> &parameters)
 {
     /* [expr.prim.lambda]/4: "If a lambda-expression does not include a
@@ -526,24 +517,20 @@ semantic_analysis::lambda_call_type(node_index n, node_index d,
     type = returns;
     if (d) {
         bool closed = false;
-        for (uint32_t i = 0;
-             i < tree[d].child_count && r == analysis_result::well_formed;
+        for (uint32_t i = 0; i < d.size() && r == analysis_result::well_formed;
              i++) {
-            syntax_child part = tree.children(d)[i];
-            if (syntax_is_punctuator(
-                    tokens, part,
-                    preprocessing_op_or_punc::RIGHT_PARENTHESIS)) {
+            SyntaxElement part = d[i];
+            if (part.is(preprocessing_op_or_punc::RIGHT_PARENTHESIS)) {
                 closed = true;
                 continue;
             }
             if (!closed)
                 continue;
-            owned_array<syntax_child> specifiers;
-            if (syntax_is(tree, part, syntax_kind::decl_specifier_seq)) {
-                for (uint32_t k = 0; k < tree[part.index()].child_count; k++)
-                    specifiers.append(tree.children(part.index())[k]);
-            } else if (syntax_is(tree, part,
-                                 syntax_kind::gnu_attribute_specifier)) {
+            owned_array<SyntaxElement> specifiers;
+            if (part.is(syntax_kind::decl_specifier_seq)) {
+                for (auto child : part.elements())
+                    specifiers.append(child);
+            } else if (part.is(syntax_kind::gnu_attribute_specifier)) {
                 /* [ext:gnu_attributes] always_inline and the like: no
                    effect on the closure type */
                 gnu_attributes g;
@@ -553,10 +540,10 @@ semantic_analysis::lambda_call_type(node_index n, node_index d,
             } else if (part.is_token()) {
                 specifiers.append(part);
             }
-            for (syntax_child sp : specifiers) {
+            for (SyntaxElement sp : specifiers) {
                 standard_keyword kw = standard_keyword::none;
                 if (sp.is_token())
-                    kw = p.keyword_of(tokens[sp.index()]);
+                    kw = p.keyword_of(tokens[sp.token()]);
                 if (kw == standard_keyword::mutable_)
                     l.mutable_ = true;
                 else if (kw == standard_keyword::constexpr_)
@@ -572,11 +559,10 @@ semantic_analysis::lambda_call_type(node_index n, node_index d,
                     /* consteval ([dcl.constexpr]) */
                     r = not_supported(n, "dcl.constexpr");
             }
-            if (syntax_is(tree, part, syntax_kind::trailing_return_type)) {
-                node_index trailing = part.index();
-                if (tree[trailing].child_count != 2 ||
-                    !syntax_is(tree, tree.children(trailing)[1],
-                               syntax_kind::type_id)) {
+            if (part.is(syntax_kind::trailing_return_type)) {
+                auto trailing = part;
+                if (trailing.size() != 2 ||
+                    !trailing[1].is(syntax_kind::type_id)) {
                     r = not_supported(n, "dcl.fct");
                     continue;
                 }
@@ -590,7 +576,7 @@ semantic_analysis::lambda_call_type(node_index n, node_index d,
                         r = not_supported(n, "expr.prim.lambda.capture");
                 if (r != analysis_result::well_formed)
                     continue;
-                r = type_id(tree.children(trailing)[1].index(), returns);
+                r = type_id(trailing[1], returns);
                 if (r == analysis_result::well_formed &&
                     abstract_class(returns))
                     r = not_supported(n, "class.abstract");
@@ -614,7 +600,7 @@ semantic_analysis::lambda_call_type(node_index n, node_index d,
         if (r != analysis_result::well_formed)
             break;
         /* a default argument ([dcl.fct.default]) or a parameter pack */
-        if (parameter.default_argument.index() || parameter.pack_name)
+        if (parameter.default_argument || parameter.pack_name)
             r = not_supported(n, "dcl.fct.default");
         /* [expr.prim.lambda.capture]/5: "If an identifier in a
            simple-capture appears as the declarator-id of a parameter of the
@@ -641,7 +627,7 @@ semantic_analysis::lambda_call_type(node_index n, node_index d,
  * parameters; the captures it made appended to captures.
  */
 analysis_result
-semantic_analysis::lambda_body(node_index n, syntax_child body,
+semantic_analysis::lambda_body(SyntaxRef n, SyntaxElement body,
                                lambda_context &l,
                                owned_array<parameter_meaning> &parameters,
                                owned_array<capture_record> &captures)
@@ -676,7 +662,7 @@ semantic_analysis::lambda_body(node_index n, syntax_child body,
     function_empty_pack = 0;
     last_declared = l.call;
     lambdas.append(l);
-    analysis_result r = function_body(n, body);
+    analysis_result r = analyse_function_body(n, body);
     /* the captures the body made, and the lambda off the stack (an
        enclosing lambda's captures go on after its own) */
     l = lambdas.back();
@@ -718,8 +704,8 @@ semantic_analysis::lambda_body(node_index n, syntax_child body,
  * lambda-capture only: the captures an instantiation's body makes would
  * change the closure type after its use.
  */
-analysis_result semantic_analysis::generic_lambda(node_index n, node_index list,
-                                                  node_index declarator,
+analysis_result semantic_analysis::generic_lambda(SyntaxRef n, SyntaxRef list,
+                                                  SyntaxRef declarator,
                                                   lambda_context &l,
                                                   bool has_capture,
                                                   expression_meaning &m)
@@ -727,15 +713,14 @@ analysis_result semantic_analysis::generic_lambda(node_index n, node_index list,
     entity_index c = l.closure;
     if (has_capture)
         return not_supported(n, "expr.prim.lambda.capture");
-    owned_array<syntax_child> list_items;
-    if (syntax_is(tree, syntax_child::node(list),
-                  syntax_kind::template_parameter_list))
-        for (uint32_t i = 0; i < tree[list].child_count; i++)
-            list_items.append(tree.children(list)[i]);
+    owned_array<SyntaxElement> list_items;
+    if (list.is(syntax_kind::template_parameter_list))
+        for (uint32_t i = 0; i < list.size(); i++)
+            list_items.append(list[i]);
     else
-        list_items.append(syntax_child::node(list));
-    owned_array<node_index> parameters;
-    for (syntax_child p : list_items) {
+        list_items.append(list);
+    owned_array<SyntaxRef> parameters;
+    for (SyntaxElement p : list_items) {
         if (p.is_token())
             continue;
         template_parameter_parts x;
@@ -745,13 +730,10 @@ analysis_result semantic_analysis::generic_lambda(node_index n, node_index list,
         parameters.append(p.index());
     }
     uint32_t clauses = 0;
-    for (uint32_t i = 1; i + 1 < tree[n].child_count; i++)
-        clauses +=
-            syntax_is(tree, tree.children(n)[i], syntax_kind::requires_clause);
+    for (uint32_t i = 1; i + 1 < n.size(); i++)
+        clauses += n[i].is(syntax_kind::requires_clause);
     if (clauses && declarator &&
-        syntax_is(tree,
-                  tree.children(declarator)[tree[declarator].child_count - 1],
-                  syntax_kind::requires_clause))
+        declarator[declarator.size() - 1].is(syntax_kind::requires_clause))
         return not_supported(n, "temp.constr");
     uint32_t index = 0, first = 0;
     entity_index scope = 0;
@@ -806,22 +788,21 @@ analysis_result semantic_analysis::generic_lambda(node_index n, node_index list,
  * template-parameter-list or its lambda-declarator (generic_lambda
  * refuses both), or none
  */
-syntax_child semantic_analysis::lambda_constraint(node_index n,
-                                                  bool *trailing) const
+SyntaxElement semantic_analysis::lambda_constraint(SyntaxRef n,
+                                                   bool *trailing) const
 {
-    for (uint32_t i = 1; i + 1 < tree[n].child_count; i++) {
-        syntax_child c = tree.children(n)[i];
-        bool in_declarator = syntax_is(tree, c, syntax_kind::lambda_declarator);
+    for (uint32_t i = 1; i + 1 < n.size(); i++) {
+        SyntaxElement c = n[i];
+        bool in_declarator = c.is(syntax_kind::lambda_declarator);
         if (in_declarator)
-            c = tree.children(c.index())[tree[c.index()].child_count - 1];
-        if (!syntax_is(tree, c, syntax_kind::requires_clause) ||
-            tree[c.index()].child_count != 2)
+            c = c[c.size() - 1];
+        if (!c.is(syntax_kind::requires_clause) || c.size() != 2)
             continue;
         if (trailing)
             *trailing = in_declarator;
-        return tree.children(c.index())[1];
+        return c[1];
     }
-    return syntax_child();
+    return SyntaxElement();
 }
 
 /*
@@ -831,13 +812,12 @@ syntax_child semantic_analysis::lambda_constraint(node_index n,
  * compound-statement too, as specialization's body.
  */
 analysis_result semantic_analysis::lambda_specialization(
-    node_index n, bool body, qualified_type &type, entity_index specialization)
+    SyntaxRef n, bool body, qualified_type &type, entity_index specialization)
 {
-    node_index declarator = 0;
-    for (uint32_t i = 1; i + 1 < tree[n].child_count; i++)
-        if (syntax_is(tree, tree.children(n)[i],
-                      syntax_kind::lambda_declarator))
-            declarator = tree.children(n)[i].index();
+    SyntaxRef declarator = 0;
+    for (uint32_t i = 1; i + 1 < n.size(); i++)
+        if (n[i].is(syntax_kind::lambda_declarator))
+            declarator = n[i].index();
     lambda_context l;
     l.at = n;
     l.closure = entity_table[current_scope].enclosing;
@@ -850,8 +830,7 @@ analysis_result semantic_analysis::lambda_specialization(
     if (r != analysis_result::well_formed || !body)
         return r;
     owned_array<capture_record> captures;
-    r = lambda_body(n, tree.children(n)[tree[n].child_count - 1], l, parameters,
-                    captures);
+    r = lambda_body(n, n[n.size() - 1], l, parameters, captures);
     if (r == analysis_result::well_formed && captures.size())
         return not_supported(n, "expr.prim.lambda.capture");
     return r;

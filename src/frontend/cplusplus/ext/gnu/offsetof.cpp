@@ -63,34 +63,32 @@ node_index parser::gnu_offsetof_expression()
    object of the type.  A member found in a base class or through an
    anonymous union is not handled yet; a template's own operand is
    dependent, analysed when it is instantiated */
-analysis_result semantic_analysis::gnu_offsetof(node_index n,
+analysis_result semantic_analysis::gnu_offsetof(SyntaxRef n,
                                                 expression_meaning &m)
 {
-    const syntax_node &node = tree[n];
-    const syntax_child *children = tree.children(n);
+    auto node = n;
     qualified_type t;
-    analysis_result r = type_id(children[2].index(), t);
+    analysis_result r = type_id(node[2], t);
     if (r != analysis_result::well_formed)
         return r;
     if (depends_on_template_parameter(t))
         return not_supported(n, "temp.dep.constexpr");
     const implementation_defined_behavior &b = tokens.files.behavior;
     uint64_t offset = 0;
-    /* children[4 .. child_count - 1): the member-designator */
-    for (uint32_t i = 4; i + 1 < node.child_count; i++) {
-        syntax_child c = children[i];
-        if (syntax_is_punctuator(tokens, c, preprocessing_op_or_punc::DOT))
+    /* node[4 .. child_count - 1): the member-designator */
+    for (uint32_t i = 4; i + 1 < node.size(); i++) {
+        SyntaxElement c = node[i];
+        if (c.is(preprocessing_op_or_punc::DOT))
             continue;
         const struct type record = type_table[t.unqualified()];
-        if (syntax_is_punctuator(tokens, c,
-                                 preprocessing_op_or_punc::LEFT_BRACKET)) {
+        if (c.is(preprocessing_op_or_punc::LEFT_BRACKET)) {
             if (record.kind != type_kind::array)
                 return ill_formed(n,
                                   "a subscript in the member-designator "
                                   "shall designate an array element",
                                   "ext.gnu");
             expression_meaning e;
-            r = expression(children[++i], e);
+            r = expression(node[++i], e);
             if (r == analysis_result::well_formed)
                 r = operand_value(n, e);
             bool constant = false;
@@ -112,7 +110,7 @@ analysis_result semantic_analysis::gnu_offsetof(node_index n,
             return ill_formed(n, "offsetof requires a complete class type",
                               "ext.gnu");
         entity_index member = declared_in(
-            record.entity, tokens.identifier(c.index()), lookup_filter::any);
+            record.entity, tokens.identifier(c.token()), lookup_filter::any);
         if (!member)
             return not_supported(n, "ext.gnu");
         const entity &e = entity_table[member];
@@ -123,7 +121,7 @@ analysis_result semantic_analysis::gnu_offsetof(node_index n,
         t = e.type;
     }
     m = integer_constant(fundamental_type::unsigned_long_int, offset,
-                         node.first_token);
+                         node.first_token());
     return analysis_result::well_formed;
 }
 

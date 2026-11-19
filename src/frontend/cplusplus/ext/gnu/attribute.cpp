@@ -147,7 +147,7 @@ VPRIV bool has_gnu_attribute(const syntax_tree &tree, node_index n)
     for (uint32_t i = 0; i < tree[n].child_count; i++) {
         syntax_child c = tree.children(n)[i];
         if (!c.is_token() &&
-            tree[c.index()].kind == syntax_kind::gnu_attribute_specifier)
+            tree[c.node()].kind == syntax_kind::gnu_attribute_specifier)
             return true;
     }
     return false;
@@ -162,7 +162,7 @@ VPRIV bool only_gnu_attributes(const syntax_tree &tree, node_index n)
     for (uint32_t i = 0; i < tree[n].child_count; i++) {
         syntax_child c = tree.children(n)[i];
         if (c.is_token() ||
-            tree[c.index()].kind != syntax_kind::gnu_attribute_specifier)
+            tree[c.node()].kind != syntax_kind::gnu_attribute_specifier)
             return false;
     }
     return true;
@@ -371,61 +371,57 @@ node_index parser::clang_availability_arguments()
  * x86-64, as clang's).  An attribute analysis has no rule for is
  * unsupported with ext.gnu.
  */
-analysis_result semantic_analysis::gnu_attribute_specifier(node_index n,
+analysis_result semantic_analysis::gnu_attribute_specifier(SyntaxRef n,
                                                            gnu_attributes &g)
 {
     /* (standard attributes without effect, or [[noreturn]]:
        leading_gnu_attributes) */
     uint32_t standard = 0;
-    if (tree[n].kind == syntax_kind::attribute_specifier &&
-        attributes_as_gnu(syntax_child::node(n), standard)) {
+    if (n.is(syntax_kind::attribute_specifier) &&
+        attributes_as_gnu(n, standard)) {
         g.flags |= standard;
         return analysis_result::well_formed;
     }
-    owned_array<syntax_child> attributes;
-    owned_array<node_index> work;
+    owned_array<SyntaxElement> attributes;
+    owned_array<SyntaxRef> work;
     work.append(n);
     while (!work.empty()) {
-        node_index next = work.back();
+        SyntaxRef next = work.back();
         work.resize(work.size() - 1);
-        for (uint32_t i = 0; i < tree[next].child_count; i++) {
-            syntax_child c = tree.children(next)[i];
+        for (uint32_t i = 0; i < next.size(); i++) {
+            SyntaxElement c = next[i];
             if (next == n && i == 0 && c.is_token())
                 continue; /* __attribute__ */
-            if (syntax_is(tree, c, syntax_kind::gnu_attribute))
+            if (c.is(syntax_kind::gnu_attribute))
                 attributes.append(c);
-            else if (syntax_is(tree, c, syntax_kind::gnu_attribute_list) ||
-                     syntax_is(tree, c, syntax_kind::gnu_attribute_specifier))
+            else if (c.is(syntax_kind::gnu_attribute_list) ||
+                     c.is(syntax_kind::gnu_attribute_specifier))
                 work.append(c.index());
-            else if (syntax_is(tree, c, syntax_kind::attribute_specifier) &&
+            else if (c.is(syntax_kind::attribute_specifier) &&
                      attributes_as_gnu(c, standard))
                 g.flags |= standard;
             else if (!c.is_token())
                 return not_supported(n, "ext.gnu");
-            else if (tokens[c.index()].kind !=
+            else if (tokens[c.token()].kind !=
                      token_kind::operator_or_punctuator)
                 /* an attribute without arguments: its token (or
                    __attribute__) */
                 attributes.append(c);
         }
     }
-    for (syntax_child a : attributes) {
-        token_index name_token = a.index();
-        uint32_t count = 0;
-        const syntax_child *children = nullptr;
+    for (SyntaxElement a : attributes) {
+        token_index name_token = a.token();
+        uint32_t count = a.size();
         if (!a.is_token()) {
-            const syntax_node &node = tree[a.index()];
-            children = tree.children(a.index());
-            count = node.child_count;
-            if (!count || !children[0].is_token())
+            if (!count || !a[0].is_token())
                 return not_supported(a.index(), "ext.gnu");
-            name_token = children[0].index();
+            name_token = a[0].token();
         }
         owned_buffer spelling;
         tokens.spelling(name_token, spelling.get());
         const gnu_attribute_rule *rule = gnu_attribute_rule_of(
             reinterpret_cast<const char *>(spelling.data()), spelling.size());
-        node_index at = n;
+        SyntaxRef at = n;
         if (!a.is_token())
             at = a.index();
         if (a.is_token() && ((spelling.size() == 13 &&
@@ -435,7 +431,7 @@ analysis_result semantic_analysis::gnu_attribute_specifier(node_index n,
             continue;
         if (!rule && g.ext_vector_allowed && count == 4 &&
             spelling_is_ext_vector_type(spelling)) {
-            analysis_result r = clang_ext_vector_count(at, children[2], g);
+            analysis_result r = clang_ext_vector_count(at, a[2], g);
             if (r != analysis_result::well_formed)
                 return r;
             continue;
@@ -457,7 +453,7 @@ analysis_result semantic_analysis::gnu_attribute_specifier(node_index n,
                 return not_supported(at, "ext.gnu");
             bool constant = false, value = false;
             analysis_result r =
-                bool_constant_expression(at, children[2], constant, value);
+                bool_constant_expression(at, a[2], constant, value);
             if (r != analysis_result::well_formed)
                 return r;
             if (!constant || !value)
@@ -469,7 +465,7 @@ analysis_result semantic_analysis::gnu_attribute_specifier(node_index n,
             uint64_t alignment = 16;
             if (count == 4) {
                 expression_meaning e;
-                analysis_result r = expression(children[2], e);
+                analysis_result r = expression(a[2], e);
                 if (r != analysis_result::well_formed)
                     return r;
                 if (!is_integral(e.type) ||
@@ -495,23 +491,22 @@ analysis_result semantic_analysis::gnu_attribute_specifier(node_index n,
         }
         if (rule->flag == gnu_section) {
             /* one ordinary string-literal: "section-name" */
-            if (count != 4 || !children[2].is_token() ||
-                tokens[children[2].index()].literal !=
-                    literal_kind::string_literal)
+            if (count != 4 || !a[2].is_token() ||
+                tokens[a[2].token()].literal != literal_kind::string_literal)
                 return not_supported(at, "ext.gnu");
             owned_buffer name;
-            tokens.spelling(children[2].index(), name.get());
+            tokens.spelling(a[2].token(), name.get());
             if (name.size() < 2 || name.data()[0] != '"' ||
                 memchr(name.data(), '\\', name.size()))
                 return not_supported(at, "ext.gnu");
-            g.section = children[2].index();
+            g.section = a[2].token();
             g.flags |= gnu_section;
             continue;
         }
         if (rule->flag == gnu_default_visibility) {
             owned_buffer value;
-            if (count == 4 && children[2].is_token())
-                tokens.spelling(children[2].index(), value.get());
+            if (count == 4 && a[2].is_token())
+                tokens.spelling(a[2].token(), value.get());
             if (value.size() == 9 && !memcmp(value.data(), "\"default\"", 9))
                 continue;
             /* visibility("hidden") on a function or variable (the
@@ -526,12 +521,11 @@ analysis_result semantic_analysis::gnu_attribute_specifier(node_index n,
         }
         if (rule->flag == gnu_abi_tag) {
             /* one ordinary string-literal of identifier characters */
-            if (count != 4 || !children[2].is_token() ||
-                tokens[children[2].index()].literal !=
-                    literal_kind::string_literal)
+            if (count != 4 || !a[2].is_token() ||
+                tokens[a[2].token()].literal != literal_kind::string_literal)
                 return not_supported(at, "ext.gnu");
             owned_buffer tag;
-            tokens.spelling(children[2].index(), tag.get());
+            tokens.spelling(a[2].token(), tag.get());
             if (tag.size() < 3 || tag.data()[0] != '"')
                 return not_supported(at, "ext.gnu");
             for (size_t i = 1; i + 1 < tag.size(); i++) {
@@ -548,7 +542,7 @@ analysis_result semantic_analysis::gnu_attribute_specifier(node_index n,
                     memcmp(before.data(), tag.data(), tag.size()))
                     return not_supported(at, "ext.gnu");
             }
-            g.abi_tag = children[2].index();
+            g.abi_tag = a[2].token();
             g.flags |= gnu_abi_tag;
             continue;
         }
@@ -563,7 +557,7 @@ analysis_result semantic_analysis::gnu_attribute_specifier(node_index n,
 
 /* ... of a declarator, and among (or before) a decl-specifier-seq */
 analysis_result
-semantic_analysis::gnu_attribute_specifier(node_index n, declarator_meaning &m)
+semantic_analysis::gnu_attribute_specifier(SyntaxRef n, declarator_meaning &m)
 {
     gnu_attributes g;
     g.aligned = m.aligned;
@@ -578,7 +572,7 @@ semantic_analysis::gnu_attribute_specifier(node_index n, declarator_meaning &m)
     return r;
 }
 
-analysis_result semantic_analysis::gnu_attribute_specifier(node_index n,
+analysis_result semantic_analysis::gnu_attribute_specifier(SyntaxRef n,
                                                            specified &s)
 {
     gnu_attributes g;

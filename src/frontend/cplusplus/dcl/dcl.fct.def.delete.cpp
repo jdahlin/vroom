@@ -20,27 +20,25 @@
 namespace cplusplus
 {
 
-bool semantic_analysis::deleted_body(syntax_child body) const
+bool semantic_analysis::deleted_body(SyntaxElement body) const
 {
     return explicit_body(body, standard_keyword::delete_);
 }
 
 /* the function-body = delete ... ; or = default ; (keyword k) */
-bool semantic_analysis::explicit_body(syntax_child body,
+bool semantic_analysis::explicit_body(SyntaxElement body,
                                       standard_keyword k) const
 {
-    if (body.is_token() || !body.index() ||
-        tree[body.index()].kind != syntax_kind::function_body ||
-        tree[body.index()].child_count < 3)
+    if (body.is_token() || !body || !body.is(syntax_kind::function_body) ||
+        body.size() < 3)
         return false;
-    const syntax_child *children = tree.children(body.index());
-    return syntax_is_punctuator(tokens, children[0],
-                                preprocessing_op_or_punc::EQUAL) &&
+    auto children = body;
+    return children[0].is(preprocessing_op_or_punc::EQUAL) &&
            children[1].is_token() &&
-           p.keyword_of(tokens[children[1].index()]) == k;
+           p.keyword_of(tokens[children[1].token()]) == k;
 }
 
-analysis_result semantic_analysis::deleted_definition(node_index n,
+analysis_result semantic_analysis::deleted_definition(SyntaxRef n,
                                                       entity_index f)
 {
     entity &x = entity_table[f];

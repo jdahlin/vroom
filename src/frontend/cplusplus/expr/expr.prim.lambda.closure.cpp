@@ -18,7 +18,7 @@
 namespace cplusplus
 {
 
-analysis_result semantic_analysis::closure_class(entity_index c, node_index n,
+analysis_result semantic_analysis::closure_class(entity_index c, SyntaxRef n,
                                                  bool has_capture)
 {
     /* [expr.prim.lambda.closure]/13: "The closure type associated with a
@@ -49,7 +49,7 @@ analysis_result semantic_analysis::closure_class(entity_index c, node_index n,
         static_cast<owned_array<entity_index> &&>(block_variables);
     block_variables = owned_array<entity_index>();
     entity_index enclosing_scope = current_scope;
-    node_index declaration = current_declaration;
+    SyntaxRef declaration = current_declaration;
     /* (a generic lambda's conversion function template is not
        declared) */
     entity_index call = entity_table[c].call_operator;
@@ -82,13 +82,13 @@ analysis_result semantic_analysis::closure_class(entity_index c, node_index n,
  */
 analysis_result semantic_analysis::closure_conversion(entity_index c,
                                                       entity_index call,
-                                                      node_index n)
+                                                      SyntaxRef n)
 {
     qualified_type function_type = entity_table[call].type;
     const struct type f = type_table[function_type.unqualified()];
     if (f.variadic || contains_placeholder(f.operand))
         return not_supported(n, "expr.prim.lambda.closure");
-    token_index at = tree[n].first_token;
+    token_index at = n.first_token();
     static const char invoke_spelling[] = "__invoke";
     uint32_t invoke_name =
         tokens.pp.identifier(invoke_spelling, sizeof invoke_spelling - 1) + 1;

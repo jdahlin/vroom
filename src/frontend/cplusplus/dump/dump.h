@@ -50,6 +50,9 @@ namespace cplusplus
     X(declarations, "declarations", parsing,                                   \
       "per declaration: its kind, first and last token, erroneous and "        \
       "unparsed parts")                                                        \
+    X(syntax_conformance, "syntax-conformance", parsing,                       \
+      "per child node its productions do not allow (syntax-views.inc): "       \
+      "parent kind, child kind, FILE:LINE:COL")                                \
     X(parser_stats, "parser-stats", parsing,                                   \
       "tokens, nodes, tentative parses, lookups, unparsed nodes")              \
     X(analysis, "analysis", analysis,                                          \

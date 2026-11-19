@@ -29,9 +29,9 @@ namespace cplusplus
  * c: the template declared, its definition kept for instantiation.
  */
 analysis_result semantic_analysis::member_function_template(
-    entity_index c, node_index n, node_index definition, uint8_t access)
+    entity_index c, SyntaxRef n, SyntaxRef definition, uint8_t access)
 {
-    owned_array<node_index> parameters;
+    owned_array<SyntaxRef> parameters;
     /* (the template-head's rules are a namespace-scope template's) */
     entity_index saved_class = defining_class;
     defining_class = 0;
@@ -40,24 +40,21 @@ analysis_result semantic_analysis::member_function_template(
     defining_class = saved_class;
     if (head != analysis_result::well_formed)
         return head;
-    const syntax_node &d = tree[definition];
+    auto d = definition;
     uint32_t lead = leading_gnu_attributes(definition);
-    const syntax_child *dc = tree.children(definition) + lead;
     /* a constructor template's decl-specifier-seq is optional
        ([class.ctor]/1) */
     uint32_t specifiers =
-        d.child_count > lead &&
-        syntax_is(tree, dc[0], syntax_kind::decl_specifier_seq);
-    bool constructor = declares_special_member(c, dc[specifiers]);
+        d.size() > lead && d[lead].is(syntax_kind::decl_specifier_seq);
+    bool constructor = declares_special_member(c, d[lead + specifiers]);
     /* [dcl.decl]/4: a trailing requires-clause (trailing_constraint),
        where the template-head has none */
-    uint32_t trailing = trailing_constraint(n).bits != 0;
-    if (trailing && head_constraint(n).bits)
+    uint32_t trailing = static_cast<bool>(trailing_constraint(n));
+    if (trailing && head_constraint(n))
         return not_supported(n, "temp.constr");
-    if (d.child_count != lead + 2 + specifiers + trailing ||
-        (!specifiers && !constructor) || dc[specifiers].is_token() ||
-        !syntax_is(tree, dc[specifiers + 1 + trailing],
-                   syntax_kind::function_body))
+    if (d.size() != lead + 2 + specifiers + trailing ||
+        (!specifiers && !constructor) || d[lead + specifiers].is_token() ||
+        !d[lead + specifiers + 1 + trailing].is(syntax_kind::function_body))
         return not_supported(n, "temp.mem");
     uint32_t index = 0, first = 0;
     entity_index scope = 0;
@@ -157,7 +154,7 @@ analysis_result semantic_analysis::member_function_template(
  * candidates as member candidates ([over.match.funcs]/2).
  */
 analysis_result semantic_analysis::member_template_candidates(
-    node_index n, entity_index held, const expression_meaning *arguments,
+    SyntaxRef n, entity_index held, const expression_meaning *arguments,
     uint32_t count, owned_array<overload_candidate> &candidates)
 {
     owned_array<uint32_t> group;
@@ -182,7 +179,7 @@ analysis_result semantic_analysis::member_template_candidates(
  * ([class.conv.ctor]/1: not explicit).
  */
 analysis_result semantic_analysis::constructor_template_candidates(
-    node_index n, entity_index c, const expression_meaning *arguments,
+    SyntaxRef n, entity_index c, const expression_meaning *arguments,
     uint32_t count, bool copy, owned_array<overload_candidate> &candidates,
     owned_array<uint32_t> *first_arguments, owned_array<template_argument> *all)
 {
@@ -215,14 +212,14 @@ analysis_result semantic_analysis::constructor_template_candidates(
  * ([temp.inst]/4) and called.
  */
 analysis_result semantic_analysis::member_template_call(
-    node_index n, entity_index held, const expression_meaning &object,
-    const owned_array<syntax_child> &arguments,
+    SyntaxRef n, entity_index held, const expression_meaning &object,
+    const owned_array<SyntaxElement> &arguments,
     owned_array<expression_meaning> &early, expression_meaning &m)
 {
     if (early.empty())
-        for (syntax_child a : arguments) {
+        for (SyntaxElement a : arguments) {
             token_index set_at = 0;
-            if (syntax_is(tree, a, syntax_kind::braced_init_list) ||
+            if (a.is(syntax_kind::braced_init_list) ||
                 named_overload_set(a, set_at))
                 return not_supported(n, "temp.deduct.call");
             expression_meaning e;
@@ -269,11 +266,11 @@ analysis_result semantic_analysis::member_template_call(
 /* member function f called on object (of its class or a class derived
    from it) with the arguments: [expr.call]/2's class member access */
 analysis_result semantic_analysis::bound_member_call(
-    node_index n, entity_index f, const expression_meaning &object,
-    const owned_array<syntax_child> &arguments,
+    SyntaxRef n, entity_index f, const expression_meaning &object,
+    const owned_array<SyntaxElement> &arguments,
     owned_array<expression_meaning> &early, expression_meaning &m)
 {
-    token_index at = tree[n].first_token;
+    token_index at = n.first_token();
     expression_meaning e = object;
     entity_index object_class = type_table[e.type.unqualified()].entity;
     const entity x = entity_table[f];

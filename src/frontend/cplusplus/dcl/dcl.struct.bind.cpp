@@ -102,7 +102,7 @@ static bool binding_data_member(const entity &m)
 
 /* /3: element i of the array object, "*(e + i)" by built-in [expr.sub]:
    object becomes the element */
-analysis_result semantic_analysis::array_element(node_index n, token_index at,
+analysis_result semantic_analysis::array_element(SyntaxRef n, token_index at,
                                                  expression_meaning &object,
                                                  uint64_t i)
 {
@@ -112,12 +112,12 @@ analysis_result semantic_analysis::array_element(node_index n, token_index at,
     analysis_result r = builtin_binary(n, at, preprocessing_op_or_punc::PLUS,
                                        object, index, sum);
     if (r == analysis_result::well_formed)
-        r = indirection_of(n, at, syntax_child(), sum);
+        r = indirection_of(n, at, SyntaxElement(), sum);
     object = sum;
     return r;
 }
 
-analysis_result semantic_analysis::binding_variable(node_index n,
+analysis_result semantic_analysis::binding_variable(SyntaxRef n,
                                                     expression_meaning &m,
                                                     qualified_type type,
                                                     bool named, bool direct,
@@ -174,7 +174,7 @@ analysis_result semantic_analysis::binding_variable(node_index n,
  * reference bound to it, whose elements initialize e's.
  */
 analysis_result semantic_analysis::array_binding_object(
-    node_index n, token_index at, expression_meaning &m, const specified &s,
+    SyntaxRef n, token_index at, expression_meaning &m, const specified &s,
     bool direct, entity_index &e)
 {
     entity_index from = 0;
@@ -218,7 +218,7 @@ analysis_result semantic_analysis::array_binding_object(
 
 /* std::NAME, found as [namespace.qual] finds it (in an inline namespace
    of std too) */
-analysis_result semantic_analysis::std_class_template(node_index n,
+analysis_result semantic_analysis::std_class_template(SyntaxRef n,
                                                       const char *name,
                                                       uint32_t &template_index)
 {
@@ -245,7 +245,7 @@ analysis_result semantic_analysis::std_class_template(node_index n,
 /* /4: get<i> and std::tuple_element<i, E>'s argument i, "an index
    prvalue of type std::size_t", for the first parameter of the template
    (a non-type one of integral type) */
-analysis_result semantic_analysis::index_argument(node_index n,
+analysis_result semantic_analysis::index_argument(SyntaxRef n,
                                                   uint32_t template_index,
                                                   uint32_t i,
                                                   template_argument &out)
@@ -274,7 +274,7 @@ analysis_result semantic_analysis::index_argument(node_index n,
  * such member
  */
 analysis_result semantic_analysis::tuple_trait_member(
-    node_index n, const char *trait, bool indexed, uint32_t i,
+    SyntaxRef n, const char *trait, bool indexed, uint32_t i,
     qualified_type type, const char *member, entity_index &found)
 {
     found = 0;
@@ -320,7 +320,7 @@ analysis_result semantic_analysis::tuple_trait_member(
  * with a member named value, the expression std::tuple_size<E>::value
  * shall be a well-formed integral constant expression"
  */
-analysis_result semantic_analysis::tuple_size_of(node_index n,
+analysis_result semantic_analysis::tuple_size_of(SyntaxRef n,
                                                  qualified_type type,
                                                  bool &found, uint64_t &value)
 {
@@ -337,8 +337,8 @@ analysis_result semantic_analysis::tuple_size_of(node_index n,
         for (const analysed_declaration &d : declarations) {
             if (d.result == analysis_result::well_formed)
                 continue;
-            for (token_index t = tree[d.node].first_token;
-                 t < tree[d.node].end_token; t++)
+            for (token_index t = d.node.first_token(); t < d.node.end_token();
+                 t++)
                 if (tokens[t].kind == token_kind::identifier &&
                     tokens.identifier(t) == name)
                     return not_supported(n, "temp.expl.spec");
@@ -355,7 +355,7 @@ analysis_result semantic_analysis::tuple_size_of(node_index n,
 }
 
 /* /4: "the type Ti designated by std::tuple_element<i, E>::type" */
-analysis_result semantic_analysis::tuple_element_of(node_index n, uint32_t i,
+analysis_result semantic_analysis::tuple_element_of(SyntaxRef n, uint32_t i,
                                                     qualified_type type,
                                                     qualified_type &element)
 {
@@ -383,9 +383,8 @@ analysis_result semantic_analysis::tuple_element_of(node_index n, uint32_t i,
  * The function templates of the name are candidates with the explicit
  * template argument i ([temp.over]/1).
  */
-analysis_result semantic_analysis::binding_get_call(node_index n,
-                                                    token_index at, uint32_t i,
-                                                    entity_index e,
+analysis_result semantic_analysis::binding_get_call(SyntaxRef n, token_index at,
+                                                    uint32_t i, entity_index e,
                                                     qualified_type type,
                                                     expression_meaning &m)
 {
@@ -441,7 +440,8 @@ analysis_result semantic_analysis::binding_get_call(node_index n,
         owned_array<uint32_t> one;
         one.append(g);
         r = template_candidates(n, one, &object, 1, candidates,
-                                &first_arguments, &all, nullptr, 0, &given);
+                                &first_arguments, &all, nullptr, SyntaxRef(),
+                                &given);
         if (r != analysis_result::well_formed)
             return r;
     }
@@ -486,7 +486,7 @@ uint32_t semantic_analysis::binding_member_count(entity_index c) const
  * of the same base class of E, ... E shall not have an anonymous union
  * member": the class whose members they are
  */
-analysis_result semantic_analysis::binding_members_class(node_index n,
+analysis_result semantic_analysis::binding_members_class(SyntaxRef n,
                                                          entity_index c,
                                                          entity_index &holder)
 {
@@ -525,43 +525,38 @@ analysis_result semantic_analysis::binding_members_class(node_index n,
 }
 
 analysis_result semantic_analysis::structured_binding_declaration(
-    node_index declaration, uint32_t first, const specified &s,
+    SyntaxRef declaration, uint32_t first, const specified &s,
     const expression_meaning *supplied)
 {
-    const syntax_node &node = tree[declaration];
-    const syntax_child *children = tree.children(declaration);
+    auto node = declaration;
     uint32_t i = first;
     bool reference = false, rvalue = false;
-    if (syntax_is_punctuator(tokens, children[i],
-                             preprocessing_op_or_punc::AMPERSAND)) {
+    if (node[i].is(preprocessing_op_or_punc::AMPERSAND)) {
         reference = true;
         i++;
-    } else if (syntax_is_punctuator(
-                   tokens, children[i],
-                   preprocessing_op_or_punc::AMPERSAND_AMPERSAND)) {
+    } else if (node[i].is(preprocessing_op_or_punc::AMPERSAND_AMPERSAND)) {
         reference = rvalue = true;
         i++;
     }
-    if (i + 3 > node.child_count)
+    if (i + 3 > node.size())
         return not_supported(declaration, "dcl.struct.bind");
-    token_index at = children[i].index();
+    token_index at = node[i].token();
     owned_array<token_index> names;
-    syntax_child list = children[i + 1];
+    SyntaxElement list = node[i + 1];
     if (list.is_token()) {
-        names.append(list.index());
+        names.append(list.token());
     } else {
-        for (uint32_t k = 0; k < tree[list.index()].child_count; k++) {
-            syntax_child c = tree.children(list.index())[k];
+        for (SyntaxElement c : list.elements()) {
             if (c.is_token() &&
-                tokens[c.index()].kind == token_kind::identifier)
-                names.append(c.index());
+                tokens[c.token()].kind == token_kind::identifier)
+                names.append(c.token());
         }
     }
-    syntax_child init;
+    SyntaxElement init;
     if (!supplied) {
-        if (i + 4 > node.child_count)
+        if (i + 4 > node.size())
             return not_supported(declaration, "dcl.struct.bind");
-        init = children[i + 3];
+        init = node[i + 3];
     }
     /* [dcl.pre]/8: "If the decl-specifier-seq contains any decl-specifier
        other than static, thread_local, auto ([dcl.spec.auto]), or
@@ -640,7 +635,7 @@ analysis_result semantic_analysis::structured_binding_declaration(
     if (supplied) {
         m = *supplied;
     } else {
-        syntax_child clause;
+        SyntaxElement clause;
         /* [dcl.pre]/8: "The initializer shall be of the form "=
            assignment-expression", of the form "{ assignment-expression }",
            or of the form "( assignment-expression )"" */

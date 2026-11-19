@@ -41,10 +41,10 @@ node_index parser::clang_bit_int_type_specifier()
    signed _BitInt shall be greater than or equal to 2", and no more than
    BITINT_MAXWIDTH.  In a template's own declaration N may be a non-type
    template-parameter ([temp.dep.constexpr]/2), as for an array's bound */
-analysis_result semantic_analysis::clang_bit_int_type(node_index n,
+analysis_result semantic_analysis::clang_bit_int_type(SyntaxRef n,
                                                       qualified_type &type)
 {
-    syntax_child width = tree.children(n)[2];
+    SyntaxElement width = n[2];
     if (entity_index named = value_parameter_named(width)) {
         if (!is_integral(entity_table[named].type))
             return not_supported(n, "temp.dep.constexpr");

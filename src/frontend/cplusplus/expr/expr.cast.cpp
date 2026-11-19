@@ -118,7 +118,7 @@ static const char *cast_rule_of(uint8_t kinds, const char *&label)
     }
 }
 
-analysis_result semantic_analysis::no_cast(node_index at, uint8_t kinds)
+analysis_result semantic_analysis::no_cast(SyntaxRef at, uint8_t kinds)
 {
     const char *label = nullptr;
     const char *rule = cast_rule_of(kinds, label);
@@ -129,7 +129,7 @@ analysis_result semantic_analysis::no_cast(node_index at, uint8_t kinds)
     return ill_formed(at, rule, label);
 }
 
-analysis_result semantic_analysis::explicit_conversion(node_index at,
+analysis_result semantic_analysis::explicit_conversion(SyntaxRef at,
                                                        qualified_type to,
                                                        expression_meaning &m,
                                                        uint8_t kinds)
@@ -379,7 +379,7 @@ analysis_result semantic_analysis::explicit_conversion(node_index at,
  * the null member pointer value of the destination type."  The const_casts
  * and reinterpret_casts of pointers to members are not analysed.
  */
-analysis_result semantic_analysis::member_pointer_cast(node_index at,
+analysis_result semantic_analysis::member_pointer_cast(SyntaxRef at,
                                                        qualified_type to,
                                                        expression_meaning &m,
                                                        uint8_t kinds)
@@ -417,7 +417,7 @@ analysis_result semantic_analysis::member_pointer_cast(node_index at,
                               "conversion is ill-formed",
                               "conv.mem");
         r = member_pointer_along_path(
-            tree[at].first_token, b, d,
+            at.first_token(), b, d,
             qualified_type::make(
                 type_table.pointer_to_member(b, source.operand), cv_none),
             false, false, m);
@@ -436,7 +436,7 @@ analysis_result semantic_analysis::member_pointer_cast(node_index at,
     /* [expr.cast]/4: "in performing a static_cast in the following
        situations the conversion is valid even if the base class is
        inaccessible" */
-    return member_pointer_along_path(tree[at].first_token, d, b, to, true,
+    return member_pointer_along_path(at.first_token(), d, b, to, true,
                                      kinds == cast_static, m);
 }
 
@@ -471,7 +471,7 @@ analysis_result semantic_analysis::member_pointer_cast(node_index at,
  * conversion from type cv void* to a pointer-to-object type", "a
  * reinterpret_cast").
  */
-analysis_result semantic_analysis::pointer_conversion(node_index at,
+analysis_result semantic_analysis::pointer_conversion(SyntaxRef at,
                                                       qualified_type to,
                                                       expression_meaning &m,
                                                       uint8_t kinds)
@@ -570,7 +570,7 @@ analysis_result semantic_analysis::pointer_conversion(node_index at,
  * the base class is inaccessible": the cast notation's here only on one
  * path of non-virtual bases.  handled is false for the other pointers.
  */
-analysis_result semantic_analysis::class_pointer_cast(node_index at,
+analysis_result semantic_analysis::class_pointer_cast(SyntaxRef at,
                                                       qualified_type to,
                                                       expression_meaning &m,
                                                       uint8_t kinds,
@@ -618,7 +618,7 @@ analysis_result semantic_analysis::class_pointer_cast(node_index at,
         type_table.pointer_to(qualified_type::make(
             target_pointee.unqualified(), target_pointee.cv() | pointee.cv())),
         cv_none);
-    token_index t = tree[at].first_token;
+    token_index t = at.first_token();
     analysis_result r = analysis_result::well_formed;
     if (kinds != cast_static)
         /* [expr.cast]/4: "in performing a static_cast in the following
@@ -663,7 +663,7 @@ analysis_result semantic_analysis::class_pointer_cast(node_index at,
  * of a class, a prvalue operand otherwise, an xvalue of another type and
  * a function are not analysed.
  */
-analysis_result semantic_analysis::reference_cast(node_index at,
+analysis_result semantic_analysis::reference_cast(SyntaxRef at,
                                                   qualified_type to,
                                                   expression_meaning &m,
                                                   uint8_t kinds)
@@ -720,7 +720,7 @@ analysis_result semantic_analysis::reference_cast(node_index at,
                temporary of the converted value */
             return not_supported(at, "expr.static.cast");
     }
-    token_index t = tree[at].first_token;
+    token_index t = at.first_token();
     expression_meaning address;
     address.type = qualified_type::make(type_table.pointer_to(m.type), cv_none);
     address.category = value_category::prvalue;
@@ -751,25 +751,23 @@ analysis_result semantic_analysis::reference_cast(node_index at,
  * rvalue reference to function type and an xvalue if T is an rvalue
  * reference to object type; otherwise the result is a prvalue."
  */
-analysis_result semantic_analysis::cast(node_index n, expression_meaning &m)
+analysis_result semantic_analysis::cast(SyntaxRef n, expression_meaning &m)
 {
-    const syntax_node &node = tree[n];
-    const syntax_child *children = tree.children(n);
-    if (node.child_count != 4 ||
-        !syntax_is(tree, children[1], syntax_kind::type_id))
+    auto node = n;
+    if (node.size() != 4 || !node[1].is(syntax_kind::type_id))
         return not_supported(n, "expr.cast");
     qualified_type to;
-    analysis_result r = type_id(children[1].index(), to);
+    analysis_result r = type_id(node[1], to);
     /* [over.over]/1: "an explicit type conversion" */
     if (r == analysis_result::well_formed)
-        r = target_expression(children[3], to, m);
+        r = target_expression(node[3], to, m);
     if (r != analysis_result::well_formed)
         return r;
     /* C++03 [expr.const]/1: "Floating literals can appear only if they are
        cast to integral or enumeration types." */
     bool floating_literal_to_integral =
-        children[3].is_token() &&
-        tokens[children[3].index()].literal ==
+        node[3].is_token() &&
+        tokens[node[3].token()].literal ==
             literal_kind::floating_point_literal &&
         is_integral(to);
     r = explicit_conversion(n, to, m);

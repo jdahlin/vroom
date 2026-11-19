@@ -53,25 +53,22 @@ node_index parser::type_id()
  * construction were a declarator in a declaration.  The named type is then
  * the same as the type of the hypothetical identifier."
  */
-analysis_result semantic_analysis::type_id(node_index n, qualified_type &type)
+analysis_result semantic_analysis::type_id(TypeId n, qualified_type &type)
 {
-    const syntax_node &node = tree[n];
-    const syntax_child *children = tree.children(n);
-    if (!node.child_count ||
-        !syntax_is(tree, children[0], syntax_kind::type_specifier_seq) ||
-        node.child_count > 2)
+    auto node = n;
+    if (!node.size() || !node[0].is(syntax_kind::type_specifier_seq) ||
+        node.size() > 2)
         return not_supported(n, "dcl.name");
     /* [temp.variadic]/5: a template-argument's pack expansion, T ...
        (type_id_expansion: its pattern analysed) */
-    uint32_t count = node.child_count;
+    uint32_t count = node.size();
     bool expansion = type_id_expansion;
     type_id_expansion = false;
     if (expansion && count == 2 &&
-        syntax_is_punctuator(tokens, children[1],
-                             preprocessing_op_or_punc::ELLIPSIS))
+        node[1].is(preprocessing_op_or_punc::ELLIPSIS))
         count = 1;
     specified s;
-    analysis_result r = decl_specifier_seq(children[0].index(), s, false);
+    analysis_result r = decl_specifier_seq(node[0].index(), s, false);
     if (r != analysis_result::well_formed)
         return r;
     if (!s.has_type)
@@ -80,7 +77,7 @@ analysis_result semantic_analysis::type_id(node_index n, qualified_type &type)
     if (count == 1)
         return analysis_result::well_formed;
     declarator_meaning m;
-    r = declarator(current_declaration, children[1], type, m);
+    r = declarator(current_declaration, node[1], type, m);
     if (r == analysis_result::well_formed && m.has_id)
         return not_supported(n, "dcl.name");
     return r;

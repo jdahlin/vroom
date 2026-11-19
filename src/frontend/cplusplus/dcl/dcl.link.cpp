@@ -22,16 +22,15 @@
 namespace cplusplus
 {
 
-analysis_result semantic_analysis::linkage_specification(node_index n)
+analysis_result semantic_analysis::linkage_specification(LinkageSpecification n)
 {
-    const syntax_node &node = tree[n];
-    const syntax_child *children = tree.children(n);
-    if (node.child_count < 3 || !children[1].is_token())
+    auto node = n;
+    if (node.size() < 3 || !node[1].is_token())
         return not_supported(n, "dcl.link");
     /* [dcl.link]/4: "A linkage-specification shall inhabit a namespace
        scope." */
     owned_buffer spelling;
-    tokens.spelling(children[1].index(), spelling.get());
+    tokens.spelling(node[1].token(), spelling.get());
     bool c = false;
     if (spelling.size() == 3 && !memcmp(spelling.data(), "\"C\"", 3))
         c = true;
@@ -40,17 +39,15 @@ analysis_result semantic_analysis::linkage_specification(node_index n)
            conditionally-supported, with implementation-defined
            semantics." */
         return not_supported(n, "dcl.link");
-    owned_array<node_index> inner;
+    owned_array<SyntaxRef> inner;
     bool braces = false;
-    for (uint32_t i = 2; i < node.child_count; i++) {
-        syntax_child x = children[i];
+    for (auto x : node.elements(2)) {
         if (x.is_token()) {
             braces = true;
             continue;
         }
-        if (syntax_is(tree, x, syntax_kind::declaration_seq)) {
-            for (uint32_t k = 0; k < tree[x.index()].child_count; k++) {
-                syntax_child y = tree.children(x.index())[k];
+        if (x.is(syntax_kind::declaration_seq)) {
+            for (SyntaxElement y : x.elements()) {
                 if (!y.is_token())
                     inner.append(y.index());
             }
@@ -63,7 +60,7 @@ analysis_result semantic_analysis::linkage_specification(node_index n)
     c_language = c;
     linkage_without_braces = !braces;
     analysis_result result = analysis_result::well_formed;
-    for (node_index d : inner) {
+    for (SyntaxRef d : inner) {
         current_declaration = d;
         if (!parsed_completely(d)) {
             result = worse(result, analysis_result::not_parsed);

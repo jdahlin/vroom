@@ -26,7 +26,7 @@
 namespace cplusplus
 {
 
-analysis_result semantic_analysis::default_arguments(node_index n,
+analysis_result semantic_analysis::default_arguments(SyntaxRef n,
                                                      entity_index f,
                                                      entity_kind kind,
                                                      bool specialization)
@@ -37,7 +37,7 @@ analysis_result semantic_analysis::default_arguments(node_index n,
         entity_table[f].unknown_defaults = true;
     bool any = false;
     for (const parameter_meaning &p : function_parameters)
-        if (p.default_argument.index())
+        if (p.default_argument)
             any = true;
     if (any && entity_table[current_scope].kind == entity_kind::class_type &&
         entity_table[current_scope].instantiation)
@@ -92,7 +92,7 @@ analysis_result semantic_analysis::default_arguments(node_index n,
     }
     for (size_t i = 0; i < count; i++) {
         const parameter_meaning &p = function_parameters[i];
-        if (!p.default_argument.index())
+        if (!p.default_argument)
             continue;
         /* /4 (Note 2): "A default argument cannot be redefined by a later
            declaration (not even to the same value)" */
@@ -105,11 +105,11 @@ analysis_result semantic_analysis::default_arguments(node_index n,
            are in scope and can hide namespace and class member names": not
            so here, so a default argument that may name one is not
            analysed */
-        node_index clause = node_of(p.default_argument);
-        token_index first = tree[clause].first_token;
-        token_index end = tree[clause].end_token;
+        SyntaxRef clause = node_of(p.default_argument);
+        token_index first = clause.first_token();
+        token_index end = clause.end_token();
         if (p.default_argument.is_token()) {
-            first = p.default_argument.index();
+            first = p.default_argument.token();
             end = first + 1;
         }
         for (token_index t = first; t < end && member; t++) {
@@ -202,7 +202,7 @@ analysis_result semantic_analysis::member_default_arguments(entity_index c)
 }
 
 void semantic_analysis::defer_default_arguments(
-    entity_index f, node_index declaration,
+    entity_index f, SyntaxRef declaration,
     const owned_array<parameter_meaning> &list)
 {
     pending_default_arguments p;

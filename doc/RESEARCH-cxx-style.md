@@ -269,7 +269,7 @@ or matcher that reports the same thing, for section 6.4.
 | 11 | A class with a destructor deletes copying (and defines moving if it moves) | 28 classes copy implicitly | S | `cppcoreguidelines-special-member-functions` with `AllowMissingMoveFunctionsWhenCopyIsDeleted` |
 | 12 | `struct`: data, all public, no invariant.  `class`: private data behind member functions | 329 public members in classes | S | `misc-non-private-member-variables-in-classes` |
 | 13 | One way to give a name internal linkage | 66 `static`, 57 unnamed namespaces | S | `llvm-prefer-static-over-anonymous-namespace` or `misc-use-anonymous-namespace` |
-| 14 | `auto` for a lambda and in a range-`for`, a type's name elsewhere | 50 of 51 | S | none (`modernize-use-auto` is the opposite rule) |
+| 14 | `auto` for a lambda, in a range-`for`, and for a syntax view (`auto body = n.function_definition().function_body();`: the initializer names the view's type); a type's name elsewhere | 50 of 51 before the views; about 290 `auto x =` now, nearly all views | S | none (`modernize-use-auto` is the opposite rule) |
 | 15 | A lambda that captures by reference does not outlive its scope | not known | D | none |
 | 16 | Templates for owners, containers and parse helpers; no computation in types | 10 | S (count) | none |
 | 17 | Macros: include guards and X-macro tables; code is a `constexpr` or `inline` function | 36 `#define` | T | `cppcoreguidelines-macro-usage` |
@@ -502,7 +502,8 @@ fast code are in `RESEARCH-cxx-performance.md`.
    Recommended: distinct types; a lint rule is the weaker tool here.
 6. **`[[nodiscard]]`** (22) on every function that returns failure?
    Recommended: yes.
-7. **`auto`** (14) as the code has it: lambdas and range-`for` only?
+7. **`auto`** (14): lambdas, range-`for` and syntax views (`syntax.h`), whose
+   initializer shows the type; a type's name elsewhere?
 8. **Out of memory in `owned.h`** (30): `abort()` or `vout_of_memory`?
 9. **Findings are errors from the first day**, with a baseline for what
    exists, or warnings until the tree is clean?  Recommended: errors with a

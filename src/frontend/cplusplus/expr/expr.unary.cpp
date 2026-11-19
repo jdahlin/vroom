@@ -312,18 +312,16 @@ uint64_t semantic_analysis::alignment_of_type(qualified_type t) const
  * the alignment requirement of its operand type."  [expr.sizeof]/5 and
  * [expr.alignof]/2: "The result ... is a prvalue of type std::size_t."
  */
-analysis_result semantic_analysis::size_of(node_index n, bool alignment,
+analysis_result semantic_analysis::size_of(SyntaxRef n, bool alignment,
                                            expression_meaning &m)
 {
-    const syntax_node &node = tree[n];
-    const syntax_child *children = tree.children(n);
+    auto node = n;
     qualified_type operand;
-    if (node.child_count == 4 &&
-        syntax_is(tree, children[2], syntax_kind::type_id)) {
-        analysis_result r = type_id(children[2].index(), operand);
+    if (node.size() == 4 && node[2].is(syntax_kind::type_id)) {
+        analysis_result r = type_id(node[2], operand);
         if (r != analysis_result::well_formed)
             return r;
-    } else if (node.child_count == 2 && !alignment) {
+    } else if (node.size() == 2 && !alignment) {
         /* [expr.sizeof]/3: "The lvalue-to-rvalue, array-to-pointer, and
            function-to-pointer standard conversions are not applied to the
            operand of sizeof." */
@@ -331,7 +329,7 @@ analysis_result semantic_analysis::size_of(node_index n, bool alignment,
         /* [expr.sizeof]/1: "The operand is either an expression, which is
            an unevaluated operand ([expr.prop])" */
         unevaluated++;
-        analysis_result r = expression(children[1], e);
+        analysis_result r = expression(node[1], e);
         unevaluated--;
         if (r != analysis_result::well_formed)
             return r;
@@ -340,17 +338,16 @@ analysis_result semantic_analysis::size_of(node_index n, bool alignment,
         if (e.bit_field_width)
             return not_supported(n, "class.bit");
         operand = e.type;
-    } else if (!alignment && node.child_count == 5 &&
-               syntax_is_punctuator(tokens, children[1],
-                                    preprocessing_op_or_punc::ELLIPSIS) &&
-               children[3].is_token() &&
-               tokens[children[3].index()].kind == token_kind::identifier) {
+    } else if (!alignment && node.size() == 5 &&
+               node[1].is(preprocessing_op_or_punc::ELLIPSIS) &&
+               node[3].is_token() &&
+               tokens[node[3].token()].kind == token_kind::identifier) {
         /* [expr.sizeof]/4: "The identifier in a sizeof... expression shall
            name a pack.  The sizeof... operator yields the number of
            elements in the pack ([temp.variadic]).  A sizeof... expression
            is a pack expansion ([temp.variadic])."  An instantiation's pack;
            a template's own is not analysed */
-        entity_index pack = find_pack(tokens.identifier(children[3].index()));
+        entity_index pack = find_pack(tokens.identifier(node[3].token()));
         if (!pack)
             return not_supported(n, "expr.sizeof");
         m.type = qualified_type::make(
@@ -359,7 +356,8 @@ analysis_result semantic_analysis::size_of(node_index n, bool alignment,
         m.category = value_category::prvalue;
         m.evaluation = constness::constant;
         m.value = entity_table[pack].member_count;
-        m.node = expression_node(semantic_kind::constant, m, node.first_token);
+        m.node =
+            expression_node(semantic_kind::constant, m, node.first_token());
         return analysis_result::well_formed;
     } else {
         /* alignof of an expression (GCC's) */
@@ -395,7 +393,7 @@ analysis_result semantic_analysis::size_of(node_index n, bool alignment,
     m.evaluation = constness::constant;
     m.value = size;
     /* the operand is unevaluated ([expr.sizeof]/1): the constant alone */
-    m.node = expression_node(semantic_kind::constant, m, node.first_token);
+    m.node = expression_node(semantic_kind::constant, m, node.first_token());
     return analysis_result::well_formed;
 }
 
@@ -408,20 +406,20 @@ analysis_result semantic_analysis::size_of(node_index n, bool alignment,
  * type of the operand."  The operand is modified: never a constant
  * expression here ([expr.const]/5.16).
  */
-analysis_result semantic_analysis::increment(node_index n, syntax_child operand,
+analysis_result semantic_analysis::increment(SyntaxRef n, SyntaxElement operand,
                                              bool decrement, bool postfix,
                                              expression_meaning &m)
 {
     analysis_result r = expression(operand, m);
     if (r != analysis_result::well_formed)
         return r;
-    return increment_of(n, tree[n].first_token, operand, decrement, postfix, m);
+    return increment_of(n, n.first_token(), operand, decrement, postfix, m);
 }
 
 /* ... of the operand analysed as m (its syntax operand, none for an
    operand [stmt.ranged]/1 makes) */
-analysis_result semantic_analysis::increment_of(node_index n, token_index at,
-                                                syntax_child operand,
+analysis_result semantic_analysis::increment_of(SyntaxRef n, token_index at,
+                                                SyntaxElement operand,
                                                 bool decrement, bool postfix,
                                                 expression_meaning &m)
 {
@@ -500,13 +498,12 @@ analysis_result semantic_analysis::increment_of(node_index n, token_index at,
  * [expr.unary.op]: the unary operators *, &, +, -, ! and ~; [expr.pre.incr]
  * prefix ++ and --; [expr.sizeof] and [expr.alignof].
  */
-analysis_result semantic_analysis::unary(node_index n, expression_meaning &m)
+analysis_result semantic_analysis::unary(SyntaxRef n, expression_meaning &m)
 {
-    const syntax_node &node = tree[n];
-    const syntax_child *children = tree.children(n);
-    if (node.child_count < 2 || !children[0].is_token())
+    auto node = n;
+    if (node.size() < 2 || !node[0].is_token())
         return not_supported(n, "expr.unary");
-    const token &op = tokens[children[0].index()];
+    const token &op = tokens[node[0].token()];
     if (op.kind == token_kind::keyword) {
         standard_keyword kw = p.keyword_of(op);
         if (kw == standard_keyword::sizeof_)
@@ -515,36 +512,36 @@ analysis_result semantic_analysis::unary(node_index n, expression_meaning &m)
             return size_of(n, true, m);
         return not_supported(n, "expr.unary");
     }
-    if (op.kind != token_kind::operator_or_punctuator || node.child_count != 2)
+    if (op.kind != token_kind::operator_or_punctuator || node.size() != 2)
         return not_supported(n, "expr.unary");
     preprocessing_op_or_punc o =
         preprocessing_op_or_punc_primary(op.op_or_punc);
     if (o == preprocessing_op_or_punc::PLUS_PLUS ||
         o == preprocessing_op_or_punc::MINUS_MINUS)
-        return increment(n, children[1],
-                         o == preprocessing_op_or_punc::MINUS_MINUS, false, m);
+        return increment(n, node[1], o == preprocessing_op_or_punc::MINUS_MINUS,
+                         false, m);
     /* [expr.unary.op]/4: "A pointer to member is only formed when an
        explicit & is used and its operand is a qualified-id not enclosed in
        parentheses." */
-    node_index outer_operand = member_pointer_operand;
+    SyntaxRef outer_operand = member_pointer_operand;
     member_pointer_operand = 0;
     if (o == preprocessing_op_or_punc::AMPERSAND &&
-        syntax_is(tree, children[1], syntax_kind::qualified_id))
-        member_pointer_operand = children[1].index();
-    analysis_result r = expression(children[1], m);
+        node[1].is(syntax_kind::qualified_id))
+        member_pointer_operand = node[1].index();
+    analysis_result r = expression(node[1], m);
     member_pointer_operand = outer_operand;
     if (r != analysis_result::well_formed)
         return r;
     if (m.node && semantics[m.node].kind == semantic_kind::member_pointer)
         return analysis_result::well_formed;
     const implementation_defined_behavior &b = tokens.files.behavior;
-    token_index at = children[0].index();
+    token_index at = node[0].token();
     if (o == preprocessing_op_or_punc::STAR)
-        return indirection_of(n, at, children[1], m);
+        return indirection_of(n, at, node[1], m);
     /* [over.unary]: an operand of class or enumeration type
        ([over.match.oper]/2) */
     bool handled = false;
-    r = unary_operator_function(n, at, o, false, children[1], m, handled);
+    r = unary_operator_function(n, at, o, false, node[1], m, handled);
     if (r != analysis_result::well_formed || handled)
         return r;
     switch (o) {
@@ -564,7 +561,7 @@ analysis_result semantic_analysis::unary(node_index n, expression_meaning &m)
                               "be an lvalue",
                               "expr.unary.op");
         if (m.bit_field_width)
-            return address_of_bit_field(tree[n].first_token);
+            return address_of_bit_field(n.first_token());
         address_of_glvalue(at, m);
         return analysis_result::well_formed;
     }
@@ -636,8 +633,8 @@ analysis_result semantic_analysis::unary(node_index n, expression_meaning &m)
 
 /* [expr.unary.op]/1: *m of the operand analysed as m (its syntax operand,
    none for an operand [stmt.ranged]/1 makes) */
-analysis_result semantic_analysis::indirection_of(node_index n, token_index at,
-                                                  syntax_child operand,
+analysis_result semantic_analysis::indirection_of(SyntaxRef n, token_index at,
+                                                  SyntaxElement operand,
                                                   expression_meaning &m)
 {
     {
@@ -768,19 +765,19 @@ semantic_analysis::member_pointer_constant(token_index t, entity_index e,
  * operand's semantic tree is walked; a node analysis has no rule for here
  * refuses.
  */
-analysis_result semantic_analysis::noexcept_operator(node_index n,
+analysis_result semantic_analysis::noexcept_operator(SyntaxRef n,
                                                      expression_meaning &m)
 {
-    const syntax_node &node = tree[n];
+    auto node = n;
     /* before C++17 a function's exception specification is not part of
        its type, and not kept (dcl.fct.cpp) */
-    if (node.child_count != 4 ||
+    if (node.size() != 4 ||
         !tokens.files.behavior.has(
             language_feature::exception_specification_in_type))
         return not_supported(n, "expr.unary.noexcept");
     expression_meaning e;
     unevaluated++;
-    analysis_result r = expression(tree.children(n)[2], e);
+    analysis_result r = expression(node[2], e);
     unevaluated--;
     if (r != analysis_result::well_formed)
         return r;
@@ -788,13 +785,13 @@ analysis_result semantic_analysis::noexcept_operator(node_index n,
     r = potentially_throwing(n, e.node, throwing);
     if (r != analysis_result::well_formed)
         return r;
-    m = integer_constant(fundamental_type::bool_, !throwing, node.first_token);
+    m = integer_constant(fundamental_type::bool_, !throwing,
+                         node.first_token());
     return analysis_result::well_formed;
 }
 
 /* [except.spec]/6 of the semantic node x (0: none) */
-analysis_result semantic_analysis::potentially_throwing(node_index n,
-                                                        uint32_t x,
+analysis_result semantic_analysis::potentially_throwing(SyntaxRef n, uint32_t x,
                                                         bool &throwing)
 {
     owned_array<uint32_t> work;

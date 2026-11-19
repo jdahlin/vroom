@@ -51,17 +51,16 @@ node_index parser::delete_expression()
  * incomplete class (/5), a destroying operator delete and
  * new-extended alignment (/10).
  */
-analysis_result semantic_analysis::delete_expression(node_index n,
+analysis_result semantic_analysis::delete_expression(DeleteExpression n,
                                                      expression_meaning &m)
 {
-    const syntax_node &node = tree[n];
-    const syntax_child *children = tree.children(n);
-    token_index at = node.first_token;
-    uint32_t count = node.child_count;
+    auto node = n;
+    token_index at = node.first_token();
+    uint32_t count = node.size();
     uint32_t i = 0;
     bool global = false;
-    if (children[0].is_token() && tokens[children[0].index()].kind ==
-                                      token_kind::operator_or_punctuator) {
+    if (node[0].is_token() &&
+        tokens[node[0].token()].kind == token_kind::operator_or_punctuator) {
         global = true;
         i++;
     }
@@ -71,7 +70,7 @@ analysis_result semantic_analysis::delete_expression(node_index n,
     /* delete [ ] cast-expression */
     bool array = count - i == 3;
     expression_meaning operand;
-    analysis_result r = expression(children[count - 1], operand);
+    analysis_result r = expression(node[count - 1], operand);
     if (r != analysis_result::well_formed)
         return r;
     if (type_table[operand.type.unqualified()].kind == type_kind::class_type)
@@ -227,7 +226,7 @@ analysis_result semantic_analysis::delete_expression(node_index n,
  * two, the one without the size is selected; of the global ones, clang
  * selects the unsized one for an array without a cookie).
  */
-analysis_result semantic_analysis::array_cookie(node_index n, entity_index c,
+analysis_result semantic_analysis::array_cookie(SyntaxRef n, entity_index c,
                                                 qualified_type element,
                                                 bool global, uint64_t &cookie)
 {
@@ -272,7 +271,7 @@ analysis_result semantic_analysis::array_cookie(node_index n, entity_index c,
  * array; sized when it takes the size.
  */
 analysis_result semantic_analysis::usual_deallocation(
-    node_index n, entity_index c, bool global, bool array,
+    SyntaxRef n, entity_index c, bool global, bool array,
     entity_index &function, bool &is_sized, bool class_complete, bool cookie)
 {
     /* /9: "When the keyword delete in a delete-expression is preceded by

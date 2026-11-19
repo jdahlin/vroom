@@ -103,7 +103,7 @@ qualified_type semantic_analysis::function_returning(qualified_type f,
 /* a type deduced as an array, a function or void: what the declaration
    then means (an object of that type, a function returning it) is not
    analysed */
-analysis_result semantic_analysis::deduced_type_supported(node_index at,
+analysis_result semantic_analysis::deduced_type_supported(SyntaxRef at,
                                                           qualified_type t)
 {
     const struct type record = type_table[t.unqualified()];
@@ -133,7 +133,7 @@ analysis_result semantic_analysis::deduced_type_supported(node_index at,
  * being the variable's).
  */
 analysis_result semantic_analysis::placeholder_declaration(
-    node_index declaration, const declarator_meaning &m, qualified_type type,
+    SyntaxRef declaration, const declarator_meaning &m, qualified_type type,
     entity_kind kind, bool placeholder, bool initialized)
 {
     /* [dcl.spec.auto]/7: "If the init-declarator-list contains more than
@@ -217,7 +217,7 @@ analysis_result semantic_analysis::placeholder_declaration(
  * [dcl.type.simple], as though E had been the operand of the decltype."
  */
 analysis_result semantic_analysis::deduce_placeholder(
-    node_index at, qualified_type declared, const expression_meaning &e,
+    SyntaxRef at, qualified_type declared, const expression_meaning &e,
     bool named, qualified_type &deduced, qualified_type &replacement)
 {
     bool decltype_auto = false;
@@ -267,7 +267,7 @@ analysis_result semantic_analysis::deduce_placeholder(
  * satisfied."  ([temp.param]/4: of C, C<U>.)
  */
 analysis_result semantic_analysis::placeholder_constraint(
-    node_index at, entity_index named_concept, qualified_type u)
+    SyntaxRef at, entity_index named_concept, qualified_type u)
 {
     if (!named_concept)
         return analysis_result::well_formed;
@@ -290,33 +290,29 @@ analysis_result semantic_analysis::placeholder_constraint(
 
 /* the assignment-expression of an initializer "= E", "( E )" or "{ E }"
    (direct: not the first; list: the last), false for another form */
-bool semantic_analysis::initializer_form(syntax_child init,
-                                         syntax_child &clause, bool &direct,
+bool semantic_analysis::initializer_form(SyntaxElement init,
+                                         SyntaxElement &clause, bool &direct,
                                          bool &list) const
 {
     if (init.is_token())
         return false;
-    node_index n = init.index();
-    const syntax_node &node = tree[n];
-    const syntax_child *children = tree.children(n);
+    auto n = init;
+    auto node = n;
     direct = false;
     list = false;
-    if (node.kind == syntax_kind::brace_or_equal_initializer &&
-        node.child_count == 2 &&
-        !syntax_is(tree, children[1], syntax_kind::braced_init_list)) {
-        clause = children[1];
-    } else if (node.kind == syntax_kind::initializer && node.child_count == 3 &&
-               !syntax_is(tree, children[1], syntax_kind::initializer_list) &&
-               !syntax_is(tree, children[1], syntax_kind::braced_init_list)) {
-        clause = children[1];
+    if (node.is(syntax_kind::brace_or_equal_initializer) && node.size() == 2 &&
+        !node[1].is(syntax_kind::braced_init_list)) {
+        clause = node[1];
+    } else if (node.is(syntax_kind::initializer) && node.size() == 3 &&
+               !node[1].is(syntax_kind::initializer_list) &&
+               !node[1].is(syntax_kind::braced_init_list)) {
+        clause = node[1];
         direct = true;
-    } else if (node.kind == syntax_kind::braced_init_list &&
-               node.child_count == 3 &&
-               !syntax_is(tree, children[1], syntax_kind::initializer_list) &&
-               !syntax_is(tree, children[1], syntax_kind::braced_init_list) &&
-               !syntax_is_punctuator(tokens, children[1],
-                                     preprocessing_op_or_punc::RIGHT_BRACE)) {
-        clause = children[1];
+    } else if (node.is(syntax_kind::braced_init_list) && node.size() == 3 &&
+               !node[1].is(syntax_kind::initializer_list) &&
+               !node[1].is(syntax_kind::braced_init_list) &&
+               !node[1].is(preprocessing_op_or_punc::RIGHT_BRACE)) {
+        clause = node[1];
         direct = true;
         list = true;
     } else {
@@ -334,14 +330,14 @@ bool semantic_analysis::initializer_form(syntax_child init,
  * [dcl.spec.auto]/4: "In an initializer of the form ( expression-list ) the
  * expression-list shall be a single assignment-expression."
  */
-analysis_result semantic_analysis::deduced_initializer(syntax_child init,
+analysis_result semantic_analysis::deduced_initializer(SyntaxElement init,
                                                        entity_index e,
                                                        qualified_type &type,
                                                        initialized_value &value)
 {
     if (init.is_token())
         return not_supported(current_declaration, "dcl.init");
-    syntax_child clause;
+    SyntaxElement clause;
     bool direct = false, list = false;
     if (!initializer_form(init, clause, direct, list))
         /* copy-list-initialization (std::initializer_list<U>), an
@@ -352,14 +348,14 @@ analysis_result semantic_analysis::deduced_initializer(syntax_child init,
     analysis_result r = expression(clause, m);
     if (r != analysis_result::well_formed)
         return r;
-    return deduced_initialization(init.index(), m, names_entity(clause), direct,
-                                  list, e, type, value);
+    return deduced_initialization(init, m, names_entity(clause), direct, list,
+                                  e, type, value);
 }
 
 /* ... the initializer's expression analysed as m (named: names_entity of
    it) */
 analysis_result semantic_analysis::deduced_initialization(
-    node_index n, expression_meaning &m, bool named, bool direct, bool list,
+    SyntaxRef n, expression_meaning &m, bool named, bool direct, bool list,
     entity_index e, qualified_type &type, initialized_value &value)
 {
     qualified_type replacement;
@@ -418,7 +414,7 @@ analysis_result semantic_analysis::deduced_initialization(
  * in a function, however, the return type deduced from that statement can
  * be used in the rest of the function".
  */
-analysis_result semantic_analysis::deduce_return(node_index at,
+analysis_result semantic_analysis::deduce_return(SyntaxRef at,
                                                  const expression_meaning *e,
                                                  bool named)
 {
@@ -506,30 +502,27 @@ analysis_result semantic_analysis::undeduced_use(token_index t, entity_index e)
  * trailing-return-type in the scope of the parameters
  * ([basic.scope.param]/1).
  */
-analysis_result semantic_analysis::trailing_return(node_index declaration,
-                                                   node_index n,
+analysis_result semantic_analysis::trailing_return(SyntaxRef declaration,
+                                                   SyntaxRef n,
                                                    qualified_type &type,
                                                    declarator_meaning &m)
 {
-    const syntax_node &node = tree[n];
-    const syntax_child *children = tree.children(n);
-    if (node.child_count != 2 ||
-        !syntax_is(tree, children[1], syntax_kind::trailing_return_type))
+    auto node = n;
+    if (node.size() != 2 || !node[1].is(syntax_kind::trailing_return_type))
         return not_supported(n, "dcl.fct");
     qualified_type auto_type = placeholder_type(false);
     /* (T other than auto: clang takes S(s)()->m, which [dcl.ambig.res]/1
        makes such a declaration, for an expression) */
     if (!(type == auto_type))
         return not_supported(n, "dcl.fct");
-    analysis_result r = declarator(declaration, children[0], type, m);
+    analysis_result r = declarator(declaration, node[0], type, m);
     if (r != analysis_result::well_formed)
         return r;
     const struct type f = type_table[type.unqualified()];
     if (f.kind != type_kind::function || !(f.operand == auto_type))
         return not_supported(n, "dcl.fct");
-    node_index trailing = children[1].index();
-    if (tree[trailing].child_count != 2 ||
-        !syntax_is(tree, tree.children(trailing)[1], syntax_kind::type_id))
+    auto trailing = node[1];
+    if (trailing.size() != 2 || !trailing[1].is(syntax_kind::type_id))
         return not_supported(n, "dcl.fct");
     /* the type-id's own function declarators would replace the
        parameters and cv-qualifier-seq this declarator's has */
@@ -540,7 +533,7 @@ analysis_result semantic_analysis::trailing_return(node_index declaration,
     qualified_type returned;
     entity_index outer = current_scope;
     open_parameter_scope();
-    r = type_id(tree.children(trailing)[1].index(), returned);
+    r = type_id(trailing[1], returned);
     current_scope = outer;
     function_parameters.clear();
     for (const parameter_meaning &parameter : parameters)
@@ -579,7 +572,7 @@ void semantic_analysis::begin_return_deduction(qualified_type returns)
    type is deduced as though from a return statement with no operand at the
    closing brace of the function body." */
 analysis_result semantic_analysis::finish_return_deduction(
-    node_index definition, analysis_result result, qualified_type &returns)
+    SyntaxRef definition, analysis_result result, qualified_type &returns)
 {
     if (function_state.deducing && !function_state.deduced &&
         result == analysis_result::well_formed)

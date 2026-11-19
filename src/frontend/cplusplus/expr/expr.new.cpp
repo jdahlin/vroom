@@ -187,50 +187,48 @@ node_index parser::new_declarator()
  * ([expr.new]/6), its bound the expression returned.  More bounds, an
  * omitted one and attributes are not analysed.
  */
-analysis_result semantic_analysis::new_type_id(node_index n,
+analysis_result semantic_analysis::new_type_id(NewTypeId n,
                                                qualified_type &type,
-                                               syntax_child &bound)
+                                               SyntaxElement &bound)
 {
-    const syntax_node &node = tree[n];
-    const syntax_child *children = tree.children(n);
-    if (!node.child_count || node.child_count > 2 ||
-        !syntax_is(tree, children[0], syntax_kind::type_specifier_seq))
+    auto node = n;
+    if (!node.size() || node.size() > 2 ||
+        !node[0].is(syntax_kind::type_specifier_seq))
         return not_supported(n, "expr.new");
     specified s;
-    analysis_result r = decl_specifier_seq(children[0].index(), s, false);
+    analysis_result r = decl_specifier_seq(node[0].index(), s, false);
     if (r != analysis_result::well_formed)
         return r;
     if (!s.has_type)
         return not_supported(n, "expr.new");
     type = s.type;
-    if (node.child_count == 1)
+    if (node.size() == 1)
         return analysis_result::well_formed;
-    syntax_child d = children[1];
+    SyntaxElement d = node[1];
     for (;;) {
-        if (syntax_is(tree, d, syntax_kind::noptr_new_declarator)) {
-            const syntax_node &bounds = tree[d.index()];
-            if (bounds.child_count != 3)
+        if (d.is(syntax_kind::noptr_new_declarator)) {
+            auto bounds = d;
+            if (bounds.size() != 3)
                 return not_supported(d.index(), "expr.new");
-            bound = tree.children(d.index())[1];
+            bound = d[1];
             return analysis_result::well_formed;
         }
-        if (!syntax_is(tree, d, syntax_kind::new_declarator))
+        if (!d.is(syntax_kind::new_declarator))
             return not_supported(n, "expr.new");
-        const syntax_node &declarator = tree[d.index()];
-        const syntax_child *parts = tree.children(d.index());
-        if (!declarator.child_count || declarator.child_count > 2 ||
-            !syntax_is(tree, parts[0], syntax_kind::ptr_operator))
+        auto declarator = d;
+        if (!declarator.size() || declarator.size() > 2 ||
+            !declarator[0].is(syntax_kind::ptr_operator))
             return not_supported(d.index(), "expr.new");
         declarator_meaning ignored;
-        r = pointer_operator(parts[0].index(), type, ignored);
-        if (r != analysis_result::well_formed || declarator.child_count == 1)
+        r = pointer_operator(declarator[0], type, ignored);
+        if (r != analysis_result::well_formed || declarator.size() == 1)
             return r;
-        d = parts[1];
+        d = declarator[1];
     }
 }
 
 analysis_result semantic_analysis::allocation_functions(
-    node_index n, allocation_function kind, entity_index c,
+    SyntaxRef n, allocation_function kind, entity_index c,
     owned_array<entity_index> &set, bool &in_class, bool class_complete)
 {
     implicit_allocation_functions();
@@ -273,51 +271,47 @@ analysis_result semantic_analysis::allocation_functions(
  * new-extended alignment (/18), the deallocation when the initialization
  * throws (/25).
  */
-analysis_result semantic_analysis::new_expression(node_index n,
+analysis_result semantic_analysis::new_expression(NewExpression n,
                                                   expression_meaning &m)
 {
-    const syntax_node &node = tree[n];
-    const syntax_child *children = tree.children(n);
-    token_index at = node.first_token;
-    uint32_t count = node.child_count;
+    auto node = n;
+    token_index at = node.first_token();
+    uint32_t count = node.size();
     uint32_t i = 0;
     /* [expr.new]/11: "If the new-expression begins with a unary ::
        operator, the allocation function's name is looked up in the global
        scope." */
     bool global = false;
-    if (i < count &&
-        syntax_is_punctuator(tokens, children[i],
-                             preprocessing_op_or_punc::COLON_COLON)) {
+    if (i < count && node[i].is(preprocessing_op_or_punc::COLON_COLON)) {
         global = true;
         i++;
     }
     i++; /* new */
-    syntax_child placement{};
-    if (i < count && syntax_is(tree, children[i], syntax_kind::new_placement))
-        placement = children[i++];
+    SyntaxElement placement{};
+    if (i < count && node[i].is(syntax_kind::new_placement))
+        placement = node[i++];
     qualified_type type;
-    syntax_child bound{};
+    SyntaxElement bound{};
     analysis_result r = analysis_result::well_formed;
-    if (i < count && syntax_is(tree, children[i], syntax_kind::new_type_id)) {
-        r = new_type_id(children[i++].index(), type, bound);
-    } else if (i + 2 < count &&
-               syntax_is(tree, children[i + 1], syntax_kind::type_id)) {
-        r = type_id(children[i + 1].index(), type);
+    if (i < count && node[i].is(syntax_kind::new_type_id)) {
+        r = new_type_id(node[i++], type, bound);
+    } else if (i + 2 < count && node[i + 1].is(syntax_kind::type_id)) {
+        r = type_id(node[i + 1], type);
         i += 3;
     } else {
         return not_supported(n, "expr.new");
     }
     if (r != analysis_result::well_formed)
         return r;
-    syntax_child init{};
+    SyntaxElement init{};
     if (i < count)
-        init = children[i++];
+        init = node[i++];
     if (i < count)
         return not_supported(n, "expr.new");
     /* [expr.new]/6: an array: "the new-expression yields a pointer to the
        initial element (if any) of the array"; a type-id of array type is
        one too */
-    bool array = bound.bits != 0;
+    bool array = static_cast<bool>(bound);
     uint64_t known_count = 0;
     if (!array && type_table[type.unqualified()].kind == type_kind::array) {
         const struct type &a = type_table[type.unqualified()];
@@ -367,7 +361,7 @@ analysis_result semantic_analysis::new_expression(node_index n,
     uint64_t cookie = 0;
     expression_meaning element_count;
     if (array) {
-        if (init.bits)
+        if (init)
             return not_supported(n, "expr.new");
         /* the class's operator delete[], as clang looks it up, ::new or
            not */
@@ -378,7 +372,7 @@ analysis_result semantic_analysis::new_expression(node_index n,
     bool elements =
         array && c &&
         (entity_table[c].first_constructor || destroys(c) || cookie);
-    if (array && bound.bits) {
+    if (array && bound) {
         /* [expr.new]/9: "If the expression in a noptr-new-declarator is
            present, it is implicitly converted to std::size_t." */
         expression_meaning b;
@@ -462,12 +456,11 @@ analysis_result semantic_analysis::new_expression(node_index n,
        the succeeding arguments." */
     owned_array<expression_meaning> arguments;
     arguments.append(requested);
-    if (placement.bits) {
-        const syntax_node &p = tree[placement.index()];
-        if (p.child_count != 3)
+    if (placement) {
+        auto p = placement;
+        if (p.size() != 3)
             return not_supported(placement.index(), "expr.new");
-        r = expression_list_meanings(tree.children(placement.index())[1],
-                                     arguments);
+        r = expression_list_meanings(placement[1], arguments);
         if (r != analysis_result::well_formed)
             return r;
     }
@@ -527,7 +520,7 @@ analysis_result semantic_analysis::new_expression(node_index n,
         expression_node(semantic_kind::indirection, object, at, pointer.node);
     initialized_value value;
     owned_array<expression_meaning> none;
-    if (!init.bits) {
+    if (!init) {
         /* [dcl.init]/7: "To default-initialize an object of type T means:
            (7.1) If T is a (possibly cv-qualified) class type, constructors
            are considered. ... (7.3) Otherwise, no initialization is
@@ -548,12 +541,11 @@ analysis_result semantic_analysis::new_expression(node_index n,
                                   "const-default-constructible class type",
                                   "dcl.init");
         }
-    } else if (syntax_is(tree, init, syntax_kind::braced_init_list)) {
-        r = list_initialization(init.index(), type, true, value);
-    } else if (syntax_is(tree, init, syntax_kind::new_initializer)) {
-        const syntax_node &k = tree[init.index()];
-        const syntax_child *parts = tree.children(init.index());
-        if (k.child_count == 2) {
+    } else if (init.is(syntax_kind::braced_init_list)) {
+        r = list_initialization(init, type, true, value);
+    } else if (init.is(syntax_kind::new_initializer)) {
+        auto k = init;
+        if (k.size() == 2) {
             /* [dcl.init]/11: "An object whose initializer is an empty set
                of parentheses, i.e., (), shall be value-initialized."; /8:
                (8.3) "Otherwise, the object is zero-initialized." */
@@ -582,11 +574,10 @@ analysis_result semantic_analysis::new_expression(node_index n,
                 zero.evaluation = constness::constant;
                 value.node = expression_node(semantic_kind::zero, zero, at);
             }
-        } else if (k.child_count == 3 &&
-                   syntax_is(tree, parts[1], syntax_kind::initializer_list)) {
+        } else if (k.size() == 3 && k[1].is(syntax_kind::initializer_list)) {
             /* [dcl.init]/17.6.2: the constructor called with the
                expression-list as its arguments */
-            if (has_pack_expansion(parts[1]))
+            if (has_pack_expansion(k[1]))
                 return not_supported(n, "temp.variadic");
             if (!c)
                 return ill_formed(n,
@@ -598,12 +589,12 @@ analysis_result semantic_analysis::new_expression(node_index n,
             if (!entity_table[c].first_constructor)
                 return not_supported(n, "dcl.init");
             owned_array<expression_meaning> list;
-            r = expression_list_meanings(parts[1], list);
+            r = expression_list_meanings(k[1], list);
             if (r != analysis_result::well_formed)
                 return r;
             r = construct(n, type, list, object.node, value);
-        } else if (k.child_count == 3) {
-            r = initialize_from(n, parts[1], type, true, false, value);
+        } else if (k.size() == 3) {
+            r = initialize_from(n, k[1], type, true, false, value);
         } else {
             return not_supported(n, "expr.new");
         }

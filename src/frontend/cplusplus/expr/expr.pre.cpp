@@ -14,7 +14,7 @@
 namespace cplusplus
 {
 
-analysis_result semantic_analysis::expression(syntax_child e,
+analysis_result semantic_analysis::expression(SyntaxElement e,
                                               expression_meaning &m)
 {
     m = expression_meaning();
@@ -55,7 +55,7 @@ analysis_result semantic_analysis::expression(syntax_child e,
        complete declarator ([dcl.decl]) and before its initializer (if
        any)", but the initializer can complete the type (an array's bound),
        so after the declaration the name may have another type */
-    if (e.is_token() && tokens[e.index()].kind == token_kind::identifier) {
+    if (e.is_token() && tokens[e.token()].kind == token_kind::identifier) {
         const struct type &named = type_table[m.type.unqualified()];
         if (named.kind == type_kind::array && !named.bound_known)
             x.placeable = false;
@@ -64,37 +64,37 @@ analysis_result semantic_analysis::expression(syntax_child e,
     return analysis_result::well_formed;
 }
 
-analysis_result semantic_analysis::expression_kind(syntax_child e,
+analysis_result semantic_analysis::expression_kind(SyntaxElement e,
                                                    expression_meaning &m)
 {
     if (e.is_token()) {
-        const token &t = tokens[e.index()];
+        const token &t = tokens[e.token()];
         /* true, false and nullptr are keywords that are literals */
         if (t.literal == literal_kind::user_defined_literal)
-            return user_defined_literal(e.index(), m);
+            return user_defined_literal(e.token(), m);
         if (t.literal != literal_kind::none) {
             /* the value of a literal analysis does not evaluate (a long
                double's) is the token's */
-            analysis_result r = literal(e.index(), m);
+            analysis_result r = literal(e.token(), m);
             semantic_kind kind = semantic_kind::constant;
             if (t.literal == literal_kind::string_literal)
                 kind = semantic_kind::string_literal;
             if (r == analysis_result::well_formed)
-                m.node = expression_node(kind, m, e.index());
+                m.node = expression_node(kind, m, e.token());
             return r;
         }
         if (t.kind == token_kind::identifier)
-            return id_expression(e.index(), m);
+            return id_expression(e.token(), m);
         if (t.kind == token_kind::keyword &&
             p.keyword_of(t) == standard_keyword::this_)
-            return this_pointer(e.index(), m);
+            return this_pointer(e.token(), m);
         return not_supported(current_declaration, "expr.prim");
     }
-    node_index n = e.index();
-    switch (tree[n].kind) {
+    auto n = e;
+    switch (n.kind()) {
     case syntax_kind::gnu_extension_expression:
         /* [ext:gnu_extension_keyword]: __extension__ changes no meaning */
-        return expression(tree.children(n)[1], m);
+        return expression(n[1], m);
     case syntax_kind::primary_expression:
         return parenthesized(n, m);
     case syntax_kind::qualified_id:

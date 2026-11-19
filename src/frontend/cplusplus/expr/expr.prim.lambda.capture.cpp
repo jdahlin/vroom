@@ -29,20 +29,17 @@ namespace cplusplus
 /* the captures of a lambda-introducer (its lambda-capture, capture-list or
    capture passed through), in order, the capture-default first */
 analysis_result
-semantic_analysis::lambda_captures_of(node_index n,
-                                      owned_array<syntax_child> &out)
+semantic_analysis::lambda_captures_of(SyntaxRef n,
+                                      owned_array<SyntaxElement> &out)
 {
-    for (uint32_t i = 0; i < tree[n].child_count; i++) {
-        syntax_child c = tree.children(n)[i];
-        if (syntax_is_punctuator(tokens, c, preprocessing_op_or_punc::COMMA) ||
-            syntax_is_punctuator(tokens, c,
-                                 preprocessing_op_or_punc::LEFT_BRACKET) ||
-            syntax_is_punctuator(tokens, c,
-                                 preprocessing_op_or_punc::RIGHT_BRACKET))
+    for (auto c : n.elements()) {
+        if (c.is(preprocessing_op_or_punc::COMMA) ||
+            c.is(preprocessing_op_or_punc::LEFT_BRACKET) ||
+            c.is(preprocessing_op_or_punc::RIGHT_BRACKET))
             continue;
-        if (syntax_is(tree, c, syntax_kind::lambda_capture) ||
-            syntax_is(tree, c, syntax_kind::capture_list)) {
-            analysis_result r = lambda_captures_of(c.index(), out);
+        if (c.is(syntax_kind::lambda_capture) ||
+            c.is(syntax_kind::capture_list)) {
+            analysis_result r = lambda_captures_of(c, out);
             if (r != analysis_result::well_formed)
                 return r;
             continue;
@@ -74,7 +71,7 @@ entity_index semantic_analysis::capture_member_of(entity_index closure,
  * to a function, or the type of the corresponding captured entity
  * otherwise."  By reference (/12), a reference to the object.
  */
-analysis_result semantic_analysis::capture_type(node_index at, qualified_type t,
+analysis_result semantic_analysis::capture_type(SyntaxRef at, qualified_type t,
                                                 bool by_reference,
                                                 qualified_type &type)
 {
@@ -166,27 +163,23 @@ qualified_type semantic_analysis::enclosing_capture_type(entity_index e,
  * find a local entity.  The simple-captures this and * this denote the
  * local entity *this."
  */
-analysis_result semantic_analysis::lambda_introducer(node_index n,
+analysis_result semantic_analysis::lambda_introducer(LambdaIntroducer n,
                                                      lambda_context &l)
 {
-    owned_array<syntax_child> captures;
+    owned_array<SyntaxElement> captures;
     analysis_result r = lambda_captures_of(n, captures);
     if (r != analysis_result::well_formed)
         return r;
     for (size_t i = 0; i < captures.size(); i++) {
-        syntax_child c = captures[i];
+        SyntaxElement c = captures[i];
         capture_record record;
         token_index name = 0;
         if (c.is_token()) {
-            const token &t = tokens[c.index()];
-            if (i == 0 &&
-                (syntax_is_punctuator(tokens, c,
-                                      preprocessing_op_or_punc::EQUAL) ||
-                 syntax_is_punctuator(tokens, c,
-                                      preprocessing_op_or_punc::AMPERSAND))) {
+            const token &t = tokens[c.token()];
+            if (i == 0 && (c.is(preprocessing_op_or_punc::EQUAL) ||
+                           c.is(preprocessing_op_or_punc::AMPERSAND))) {
                 l.default_capture = capture_default::copy;
-                if (syntax_is_punctuator(tokens, c,
-                                         preprocessing_op_or_punc::AMPERSAND))
+                if (c.is(preprocessing_op_or_punc::AMPERSAND))
                     l.default_capture = capture_default::reference;
                 /* [expr.prim.lambda.capture]/3: "A lambda-expression shall
                    not have a capture-default or simple-capture in its
@@ -195,7 +188,7 @@ analysis_result semantic_analysis::lambda_introducer(node_index n,
                    within a default member initializer" */
                 if (!l.enclosing_function)
                     return ill_formed_at_token(
-                        c.index(),
+                        c.token(),
                         "a lambda-expression shall not have a "
                         "capture-default unless its innermost enclosing "
                         "scope is a block scope",
@@ -204,9 +197,9 @@ analysis_result semantic_analysis::lambda_introducer(node_index n,
             }
             if (t.kind == token_kind::keyword &&
                 p.keyword_of(t) == standard_keyword::this_) {
-                record.at = c.index();
+                record.at = c.token();
             } else if (t.kind == token_kind::identifier) {
-                name = c.index();
+                name = c.token();
                 /* "shall be of the form & identifier ..." with = */
                 if (l.default_capture == capture_default::copy)
                     return ill_formed_at_token(name,
@@ -218,29 +211,23 @@ analysis_result semantic_analysis::lambda_introducer(node_index n,
             } else {
                 return not_supported(n, "expr.prim.lambda.capture");
             }
-        } else if (syntax_is(tree, c, syntax_kind::init_capture)) {
-            r = init_capture(c.index(), l, record);
+        } else if (c.is(syntax_kind::init_capture)) {
+            r = init_capture(c, l, record);
             if (r != analysis_result::well_formed)
                 return r;
             lambda_captures.append(record);
             continue;
-        } else if (syntax_is(tree, c, syntax_kind::simple_capture)) {
-            const syntax_node &sc = tree[c.index()];
-            const syntax_child *parts = tree.children(c.index());
-            if (sc.child_count == 2 &&
-                syntax_is_punctuator(tokens, parts[0],
-                                     preprocessing_op_or_punc::STAR)) {
+        } else if (c.is(syntax_kind::simple_capture)) {
+            auto sc = c;
+            if (sc.size() == 2 && sc[0].is(preprocessing_op_or_punc::STAR)) {
                 /* * this: *this captured by copy (/10) */
-                record.at = parts[1].index();
+                record.at = sc[1].token();
                 record.star_this = true;
-            } else if (sc.child_count == 2 &&
-                       syntax_is_punctuator(
-                           tokens, parts[0],
-                           preprocessing_op_or_punc::AMPERSAND) &&
-                       parts[1].is_token() &&
-                       tokens[parts[1].index()].kind ==
-                           token_kind::identifier) {
-                name = parts[1].index();
+            } else if (sc.size() == 2 &&
+                       sc[0].is(preprocessing_op_or_punc::AMPERSAND) &&
+                       sc[1].is_token() &&
+                       tokens[sc[1].token()].kind == token_kind::identifier) {
+                name = sc[1].token();
                 record.by_reference = true;
                 if (l.default_capture == capture_default::reference)
                     return ill_formed_at_token(name,
@@ -345,20 +332,18 @@ analysis_result semantic_analysis::lambda_introducer(node_index n,
  * (bind_init_captures).  The member is initialized as the variable would
  * be; a name of the variable designates the member (named_entity).
  */
-analysis_result semantic_analysis::init_capture(node_index n, lambda_context &l,
+analysis_result semantic_analysis::init_capture(InitCapture n,
+                                                lambda_context &l,
                                                 capture_record &record)
 {
-    const syntax_node &node = tree[n];
-    const syntax_child *parts = tree.children(n);
+    auto node = n;
     uint32_t i = 0;
-    bool by_reference = syntax_is_punctuator(
-        tokens, parts[0], preprocessing_op_or_punc::AMPERSAND);
+    bool by_reference = node[0].is(preprocessing_op_or_punc::AMPERSAND);
     if (by_reference)
         i = 1;
-    if (node.child_count != i + 2 || !parts[i].is_token() ||
-        tokens[parts[i].index()].kind != token_kind::identifier)
+    if (node.size() != i + 2 || !node[i].is_identifier())
         return not_supported(n, "temp.variadic");
-    token_index name = parts[i].index();
+    token_index name = node[i].token();
     for (size_t k = l.first_capture; k < lambda_captures.size(); k++)
         if (lambda_captures[k].variable &&
             entity_table[lambda_captures[k].variable].name ==
@@ -381,7 +366,7 @@ analysis_result semantic_analysis::init_capture(node_index n, lambda_context &l,
     declaration_deduced = qualified_type();
     deducing_variable = v;
     initialized_value value;
-    analysis_result r = deduced_initializer(parts[i + 1], v, type, value);
+    analysis_result r = deduced_initializer(node[i + 1], v, type, value);
     declaration_deduced = outer_deduced;
     deducing_variable = outer_variable;
     if (r != analysis_result::well_formed)
@@ -581,7 +566,7 @@ semantic_analysis::closure_object(lambda_context &l,
                                   const owned_array<capture_record> &captures,
                                   expression_meaning &m)
 {
-    token_index at = tree[l.at].first_token;
+    token_index at = l.at.first_token();
     owned_array<uint32_t> elements;
     for (const capture_record &c : captures) {
         if (c.init_capture) {

@@ -84,12 +84,12 @@ bool bit_cast_kept(const implementation_defined_behavior &behavior,
    pointer types (a class's object representation is not known to it
    yet).  [bit.cast]/3: a constant expression unless a type is a pointer
    type (among others); folded here for arithmetic types up to 64 bits */
-analysis_result semantic_analysis::clang_bit_cast(node_index n,
+analysis_result semantic_analysis::clang_bit_cast(SyntaxRef n,
                                                   expression_meaning &m)
 {
-    const syntax_child *children = tree.children(n);
+    auto children = n;
     qualified_type to;
-    analysis_result r = type_id(children[2].index(), to);
+    analysis_result r = type_id(children[2], to);
     if (r != analysis_result::well_formed)
         return r;
     r = expression(children[4], m);

@@ -151,10 +151,11 @@ static transformation transformation_named(const char *s, size_t n)
    the same keyword and operand ([temp.over.link]), and a template's
    instantiation analyses it again with its arguments */
 analysis_result
-semantic_analysis::clang_type_transformation(node_index n, qualified_type &type)
+semantic_analysis::clang_type_transformation(ClangTypeTransformation n,
+                                             qualified_type &type)
 {
-    const syntax_child *children = tree.children(n);
-    token_index keyword = children[0].index();
+    auto children_syntax = n;
+    token_index keyword = children_syntax[0].token();
     owned_buffer written;
     tokens.spelling(keyword, written.get());
     transformation which = transformation_named(
@@ -162,7 +163,7 @@ semantic_analysis::clang_type_transformation(node_index n, qualified_type &type)
     if (which == transformation::none)
         return not_supported(n, "ext.clang");
     qualified_type t;
-    analysis_result r = type_id(children[2].index(), t);
+    analysis_result r = type_id(children_syntax[2], t);
     if (r != analysis_result::well_formed)
         return r;
     if (depends_on_template_parameter(t)) {
@@ -275,31 +276,29 @@ semantic_analysis::clang_type_transformation(node_index n, qualified_type &type)
      "T and U name the same type with the same cv-qualifications".
    A template's own operands are dependent: the template is analysed with
    its arguments when instantiated, as sizeof's operand is */
-analysis_result semantic_analysis::clang_type_trait(node_index n,
+analysis_result semantic_analysis::clang_type_trait(SyntaxRef n,
                                                     expression_meaning &m)
 {
-    const syntax_node &node = tree[n];
-    const syntax_child *children = tree.children(n);
+    auto node = n;
     owned_buffer written;
-    tokens.spelling(children[0].index(), written.get());
+    tokens.spelling(node[0].token(), written.get());
     const char *name = reinterpret_cast<const char *>(written.data());
     bool same = spelled(name, written.size(), "__is_same") ||
                 spelled(name, written.size(), "__is_same_as");
     /* ( type-id , type-id ) */
-    if (!same || node.child_count != 6 ||
-        !syntax_is(tree, children[2], syntax_kind::type_id) ||
-        !syntax_is(tree, children[4], syntax_kind::type_id))
+    if (!same || node.size() != 6 || !node[2].is(syntax_kind::type_id) ||
+        !node[4].is(syntax_kind::type_id))
         return not_supported(n, "ext.clang");
     qualified_type t, u;
-    analysis_result r = type_id(children[2].index(), t);
+    analysis_result r = type_id(node[2], t);
     if (r != analysis_result::well_formed)
         return r;
-    r = type_id(children[4].index(), u);
+    r = type_id(node[4], u);
     if (r != analysis_result::well_formed)
         return r;
     if (depends_on_template_parameter(t) || depends_on_template_parameter(u))
         return not_supported(n, "temp.dep.constexpr");
-    m = integer_constant(fundamental_type::bool_, t == u, node.first_token);
+    m = integer_constant(fundamental_type::bool_, t == u, node.first_token());
     return analysis_result::well_formed;
 }
 
@@ -340,20 +339,19 @@ bool semantic_analysis::is_builtin_common_type(uint32_t name) const
 /* a builtin template's template-arguments as written, each with whether
    it is a pack expansion */
 analysis_result semantic_analysis::builtin_template_arguments(
-    node_index id, owned_array<syntax_child> &written,
+    SyntaxRef id, owned_array<SyntaxElement> &written,
     owned_array<bool> &expansion)
 {
-    const syntax_child *parts = tree.children(id);
-    for (uint32_t i = 2; i + 1 < tree[id].child_count; i++) {
-        if (syntax_is_punctuator(tokens, parts[i],
-                                 preprocessing_op_or_punc::ELLIPSIS)) {
+    auto parts = id;
+    for (uint32_t i = 2; i + 1 < parts.size(); i++) {
+        if (parts[i].is(preprocessing_op_or_punc::ELLIPSIS)) {
             if (written.empty() || expansion.back())
                 return not_supported(id, "temp.variadic");
             expansion.back() = true;
             continue;
         }
-        if (syntax_is(tree, parts[i], syntax_kind::template_argument_list)) {
-            if (!expansion_list(parts[i].index(), written, expansion))
+        if (parts[i].is(syntax_kind::template_argument_list)) {
+            if (!expansion_list(parts[i], written, expansion))
                 return not_supported(id, "temp.variadic");
         } else {
             written.append(parts[i]);
@@ -361,10 +359,8 @@ analysis_result semantic_analysis::builtin_template_arguments(
         }
     }
     for (size_t w = 0; w < written.size(); w++)
-        if (syntax_is(tree, written[w], syntax_kind::type_id) &&
-            tree[written[w].index()].child_count == 2 &&
-            syntax_is_punctuator(tokens, tree.children(written[w].index())[1],
-                                 preprocessing_op_or_punc::ELLIPSIS))
+        if (written[w].is(syntax_kind::type_id) && written[w].size() == 2 &&
+            written[w][1].is(preprocessing_op_or_punc::ELLIPSIS))
             expansion[w] = true;
     return analysis_result::well_formed;
 }
@@ -373,21 +369,20 @@ analysis_result semantic_analysis::builtin_template_arguments(
    expansion's once per element; dependent when one is, or when it expands
    a template's own pack not bound to elements */
 analysis_result semantic_analysis::builtin_template_types(
-    node_index id, const owned_array<syntax_child> &written,
+    SyntaxRef id, const owned_array<SyntaxElement> &written,
     const owned_array<bool> &expansion, size_t from,
     owned_array<qualified_type> &types, bool &dependent)
 {
     for (size_t w = from; w < written.size(); w++) {
-        syntax_child a = written[w];
-        if (!syntax_is(tree, a, syntax_kind::type_id))
+        SyntaxElement a = written[w];
+        if (!a.is(syntax_kind::type_id))
             return not_supported(id, "ext.clang");
         uint32_t times = 1;
         if (expansion[w]) {
             token_index first = first_token(a);
-            token_index end = tree[a.index()].end_token;
-            if (end > first + 1 &&
-                syntax_is_punctuator(tokens, syntax_child::token(end - 1),
-                                     preprocessing_op_or_punc::ELLIPSIS))
+            token_index end = a.end_token();
+            if (end > first + 1 && SyntaxElement::from_token(end - 1).is(
+                                       preprocessing_op_or_punc::ELLIPSIS))
                 end--;
             /* a template's own pack, not bound to elements: a dependent
                template-id */
@@ -405,7 +400,7 @@ analysis_result semantic_analysis::builtin_template_types(
                 type_id_expansion = true;
             }
             qualified_type t;
-            analysis_result r = type_id(a.index(), t);
+            analysis_result r = type_id(a, t);
             type_id_expansion = false;
             expanding = saved;
             expansion_element = saved_element;
@@ -419,10 +414,10 @@ analysis_result semantic_analysis::builtin_template_types(
     return analysis_result::well_formed;
 }
 
-analysis_result semantic_analysis::builtin_common_type(node_index id,
+analysis_result semantic_analysis::builtin_common_type(SyntaxRef id,
                                                        type_index &type)
 {
-    owned_array<syntax_child> written;
+    owned_array<SyntaxElement> written;
     owned_array<bool> expansion;
     analysis_result r = builtin_template_arguments(id, written, expansion);
     if (r != analysis_result::well_formed)
@@ -432,11 +427,11 @@ analysis_result semantic_analysis::builtin_common_type(node_index id,
     /* the two templates, by name */
     entity_index templates[2] = {0, 0};
     for (uint32_t i = 0; i < 2; i++) {
-        syntax_child a = written[i];
+        SyntaxElement a = written[i];
         token_index first = first_token(a);
         token_index end = first + 1;
         if (!a.is_token())
-            end = tree[a.index()].end_token;
+            end = a.end_token();
         if (end != first + 1 || tokens[first].kind != token_kind::identifier)
             return not_supported(id, "ext.clang");
         lookup_result x =
@@ -453,9 +448,9 @@ analysis_result semantic_analysis::builtin_common_type(node_index id,
         templates[i] = e;
     }
     qualified_type empty;
-    if (!syntax_is(tree, written[2], syntax_kind::type_id))
+    if (!written[2].is(syntax_kind::type_id))
         return not_supported(id, "ext.clang");
-    r = type_id(written[2].index(), empty);
+    r = type_id(written[2], empty);
     if (r != analysis_result::well_formed)
         return r;
     owned_array<qualified_type> types;
@@ -495,16 +490,15 @@ bool semantic_analysis::is_builtin_type_pack_element(uint32_t name) const
     return name == tokens.pp.identifier(spelled, sizeof spelled - 1) + 1;
 }
 
-analysis_result semantic_analysis::builtin_type_pack_element(node_index id,
+analysis_result semantic_analysis::builtin_type_pack_element(SyntaxRef id,
                                                              type_index &type)
 {
-    owned_array<syntax_child> written;
+    owned_array<SyntaxElement> written;
     owned_array<bool> expansion;
     analysis_result r = builtin_template_arguments(id, written, expansion);
     if (r != analysis_result::well_formed)
         return r;
-    if (written.empty() || expansion[0] ||
-        syntax_is(tree, written[0], syntax_kind::type_id))
+    if (written.empty() || expansion[0] || written[0].is(syntax_kind::type_id))
         return not_supported(id, "ext.clang");
     owned_array<qualified_type> types;
     bool dependent = false;
@@ -513,11 +507,11 @@ analysis_result semantic_analysis::builtin_type_pack_element(node_index id,
         return r;
     /* N: value-dependent when it names a template's own parameter
        ([temp.dep.constexpr]/2) */
-    syntax_child n = written[0];
+    SyntaxElement n = written[0];
     token_index first = first_token(n);
     token_index end = first + 1;
     if (!n.is_token())
-        end = tree[n.index()].end_token;
+        end = n.end_token();
     if (dependent || names_dependent_entity(first, end)) {
         /* [temp.dep.type]/9: a template-id of dependent arguments */
         type = dependent_written_type(id);
@@ -563,21 +557,20 @@ bool semantic_analysis::is_builtin_make_integer_seq(uint32_t name) const
     return name == tokens.pp.identifier(spelled, sizeof spelled - 1) + 1;
 }
 
-analysis_result semantic_analysis::builtin_make_integer_seq(node_index id,
+analysis_result semantic_analysis::builtin_make_integer_seq(SyntaxRef id,
                                                             type_index &type)
 {
-    owned_array<syntax_child> written;
+    owned_array<SyntaxElement> written;
     owned_array<bool> expansion;
     analysis_result r = builtin_template_arguments(id, written, expansion);
     if (r != analysis_result::well_formed)
         return r;
     if (written.size() != 3 || expansion[0] || expansion[1] || expansion[2] ||
-        syntax_is(tree, written[2], syntax_kind::type_id))
+        written[2].is(syntax_kind::type_id))
         return not_supported(id, "ext.clang");
     /* B, by name */
     token_index first = first_token(written[0]);
-    if ((!written[0].is_token() &&
-         tree[written[0].index()].end_token != first + 1) ||
+    if ((!written[0].is_token() && written[0].end_token() != first + 1) ||
         tokens[first].kind != token_kind::identifier)
         return not_supported(id, "ext.clang");
     lookup_result x =
@@ -590,18 +583,18 @@ analysis_result semantic_analysis::builtin_make_integer_seq(node_index id,
         t = alias_template_of(b);
     if (!t)
         return not_supported(id, "ext.clang");
-    if (!syntax_is(tree, written[1], syntax_kind::type_id))
+    if (!written[1].is(syntax_kind::type_id))
         return not_supported(id, "ext.clang");
     qualified_type element;
-    r = type_id(written[1].index(), element);
+    r = type_id(written[1], element);
     if (r != analysis_result::well_formed)
         return r;
     /* N: value-dependent when it names a template's own parameter
        ([temp.dep.constexpr]/2) */
-    syntax_child n = written[2];
+    SyntaxElement n = written[2];
     token_index end = first_token(n) + 1;
     if (!n.is_token())
-        end = tree[n.index()].end_token;
+        end = n.end_token();
     if (function_templates[t - 1].is_parameter ||
         depends_on_template_parameter(element) ||
         names_dependent_entity(first_token(n), end)) {
@@ -660,7 +653,7 @@ analysis_result semantic_analysis::builtin_make_integer_seq(node_index id,
 
 /* [meta.trans.other]/3: the common type of count types */
 analysis_result
-semantic_analysis::common_type_of(node_index id, entity_index base,
+semantic_analysis::common_type_of(SyntaxRef id, entity_index base,
                                   const qualified_type *types, uint32_t count,
                                   common_found &found, qualified_type &out)
 {
@@ -701,7 +694,7 @@ semantic_analysis::common_type_of(node_index id, entity_index base,
 
 /* [meta.trans.other]/3.3: the common type of two types */
 analysis_result
-semantic_analysis::common_type_pair(node_index id, entity_index base,
+semantic_analysis::common_type_pair(SyntaxRef id, entity_index base,
                                     qualified_type a, qualified_type b,
                                     common_found &found, qualified_type &out)
 {
@@ -752,7 +745,7 @@ semantic_analysis::common_type_pair(node_index id, entity_index base,
 }
 
 /* decltype(false ? declval<A>() : declval<B>()), if it is a type */
-analysis_result semantic_analysis::common_conditional(node_index id,
+analysis_result semantic_analysis::common_conditional(SyntaxRef id,
                                                       qualified_type a,
                                                       qualified_type b,
                                                       common_found &found,
@@ -822,7 +815,7 @@ analysis_result semantic_analysis::common_conditional(node_index id,
 /* the type the template named (a class or alias template) denotes with
    type arguments, its last parameter a pack taking the rest */
 analysis_result
-semantic_analysis::template_with_types(node_index id, entity_index named,
+semantic_analysis::template_with_types(SyntaxRef id, entity_index named,
                                        const qualified_type *types,
                                        uint32_t count, type_index &type)
 {
@@ -888,7 +881,7 @@ semantic_analysis::template_with_types(node_index id, entity_index named,
  * corresponding types are signed char and unsigned char; the character
  * types and enumerations take the third rule.)
  */
-analysis_result semantic_analysis::changed_signedness(node_index n,
+analysis_result semantic_analysis::changed_signedness(SyntaxRef n,
                                                       qualified_type t,
                                                       bool to_signed,
                                                       qualified_type &type)

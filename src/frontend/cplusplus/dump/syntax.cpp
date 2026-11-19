@@ -102,7 +102,7 @@ bool dump_parsing_selftest(vbuffer *out)
         node_index seq = tree.make(syntax_kind::declaration_seq, both, 3, 0, 4);
         ok &= parsing_check(out,
                             tree[seq].child_count == 3 &&
-                                tree.children(seq)[1].index() == b &&
+                                tree.children(seq)[1].node() == b &&
                                 !tree.children(seq)[1].is_token() &&
                                 tree.children(seq)[2].is_token() &&
                                 tree.children(seq)[2].index() == 3,
@@ -118,7 +118,7 @@ bool dump_parsing_selftest(vbuffer *out)
         node_index c = tree.make(syntax_kind::declaration_seq, both, 1, 0, 2);
         ok &= parsing_check(out,
                             c == b && tree[c].first_child == 0 &&
-                                tree.children(c)[0].index() == a,
+                                tree.children(c)[0].node() == a,
                             "the tree is built on after a truncation");
     }
     return ok;
@@ -211,7 +211,7 @@ static void dump_parenthesized(const syntax_tree &tree, token_stream &tokens,
         } else if (c.is_token())
             dump_spelled_tokens(tokens, c.index(), c.index() + 1, out);
         else
-            enter(c.index());
+            enter(c.node());
     }
 }
 
@@ -261,8 +261,49 @@ static void dump_expression_claims(const syntax_tree &tree,
     for (uint32_t i = 0; i < s.child_count; i++) {
         syntax_child c = tree.children(n)[i];
         if (!c.is_token())
-            dump_expression_claims(tree, tokens, c.index(), declaration,
+            dump_expression_claims(tree, tokens, c.node(), declaration,
                                    s.kind == syntax_kind::declaration_seq, out);
+    }
+}
+
+#define SYNTAX_VIEWS_CONFORMANCE
+#include "frontend/cplusplus/syntax-views.inc"
+#undef SYNTAX_VIEWS_CONFORMANCE
+
+/* each child node the grammar does not allow where it is (the views read
+   the tree as the grammar has it), and a list in a list of its kind (a
+   list's range takes its children as the elements) */
+static void dump_syntax_conformance(const syntax_tree &tree,
+                                    token_stream &tokens, vbuffer *out)
+{
+    owned_array<node_index> work;
+    if (tree.root)
+        work.append(tree.root);
+    while (!work.empty()) {
+        node_index n = work.back();
+        work.resize(work.size() - 1);
+        syntax_kind parent = tree[n].kind;
+        const uint64_t *allowed =
+            syntax_allowed_children[static_cast<uint32_t>(parent)];
+        for (uint32_t i = 0; i < tree[n].child_count; i++) {
+            syntax_child c = tree.children(n)[i];
+            if (c.is_token() || !c.index())
+                continue;
+            syntax_kind kind = tree[c.node()].kind;
+            const char *why = nullptr;
+            if (!syntax_kind_in(kind, allowed))
+                why = "not-allowed";
+            else if (kind == parent && syntax_kind_in(kind, syntax_list_kinds))
+                why = "nested-list";
+            if (why) {
+                source_position at =
+                    tokens.position(tree[c.node()].first_token);
+                vbuffer_format_append(
+                    out, "%s %s %s %s:%u:%u\n", why, syntax_kind_name(parent),
+                    syntax_kind_name(kind), at.file_name, at.line, at.column);
+            }
+            work.append(c.node());
+        }
     }
 }
 
@@ -289,13 +330,13 @@ void dump_parsing(const dump_request &r, const syntax_tree &tree,
         {
             for (node_index declaration : declarations) {
                 syntax_child c = syntax_child::node(declaration);
-                const syntax_node &d = tree[c.index()];
+                const syntax_node &d = tree[c.node()];
                 bool erroneous = false, fallback = false;
                 owned_buffer opaque;
                 if (d.kind == syntax_kind::unparsed)
                     fallback = true;
                 owned_array<node_index> work;
-                work.append(c.index());
+                work.append(c.node());
                 while (!work.empty()) {
                     node_index n = work.back();
                     work.resize(work.size() - 1);
@@ -320,11 +361,11 @@ void dump_parsing(const dump_request &r, const syntax_tree &tree,
                         syntax_child y = tree.children(n)[k];
                         if (y.is_token())
                             continue;
-                        if (tree[y.index()].kind == syntax_kind::unparsed &&
+                        if (tree[y.node()].kind == syntax_kind::unparsed &&
                             (x.kind == syntax_kind::declaration_seq ||
                              x.kind == syntax_kind::linkage_specification))
                             fallback = true;
-                        work.append(y.index());
+                        work.append(y.node());
                     }
                 }
                 source_position first = tokens.position(d.first_token);
@@ -349,6 +390,8 @@ void dump_parsing(const dump_request &r, const syntax_tree &tree,
             }
         }
     }
+    if (r.has(dump_output::syntax_conformance))
+        dump_syntax_conformance(tree, tokens, out);
     if (r.has(dump_output::parser_stats)) {
         parser_statistics s = p.statistics();
         vbuffer_format_append(

@@ -191,9 +191,9 @@ void semantic_analysis::evaluate_analysed_expressions()
         /* a function defined after the expression is undefined at its
            point ([expr.const]/5.3) */
         if (x.at.is_token())
-            state.defined_before = x.at.index();
+            state.defined_before = x.at.token();
         else
-            state.defined_before = tree[x.at.index()].first_token;
+            state.defined_before = x.at.first_token();
         constant_value v;
         if (evaluate_node(state, m.node, v) == constness::constant &&
             is_value(v))
@@ -201,7 +201,7 @@ void semantic_analysis::evaluate_analysed_expressions()
     }
 }
 
-analysis_result semantic_analysis::evaluate_constant(node_index at,
+analysis_result semantic_analysis::evaluate_constant(SyntaxRef at,
                                                      uint32_t node,
                                                      constant_value &v,
                                                      bool &constant)

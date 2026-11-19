@@ -54,7 +54,7 @@ enum class viability : uint8_t { not_viable, viable, unknown };
 } // namespace
 
 analysis_result semantic_analysis::best_viable_function(
-    node_index at, const owned_array<overload_candidate> &candidates,
+    SyntaxRef at, const owned_array<overload_candidate> &candidates,
     const expression_meaning *object,
     const owned_array<expression_meaning> &arguments, size_t &chosen,
     bool *none_viable)

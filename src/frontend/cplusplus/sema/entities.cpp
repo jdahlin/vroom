@@ -106,7 +106,7 @@ entity_index entities::make(entity_kind kind, uint32_t name,
     return static_cast<entity_index>(records.size() - 1);
 }
 
-void entities::add_declaration(entity_index e, node_index node)
+void entities::add_declaration(entity_index e, SyntaxRef node)
 {
     entity_declaration d;
     d.node = node;

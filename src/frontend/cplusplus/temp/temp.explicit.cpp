@@ -12,59 +12,47 @@ namespace cplusplus
 
 /* [temp.expl.spec]/1: "An explicit specialization of any of the following
    ... can be declared by a declaration introduced by template<>" */
-analysis_result semantic_analysis::explicit_specialization(node_index n)
+analysis_result
+semantic_analysis::explicit_specialization(ExplicitSpecialization n)
 {
     /* template < > declaration: a class's definition, its class-head
        a simple-template-id */
-    const syntax_node &x = tree[n];
-    if (x.child_count == 4 &&
-        syntax_is(tree, tree.children(n)[3], syntax_kind::simple_declaration)) {
-        node_index only = sole_decl_specifier(tree.children(n)[3].index());
-        if (only && tree[only].kind == syntax_kind::class_specifier) {
-            owned_array<node_index> none;
+    auto x = n;
+    if (x.size() == 4 && x[3].is(syntax_kind::simple_declaration)) {
+        SyntaxRef only = sole_decl_specifier(x[3]);
+        if (only && only.is(syntax_kind::class_specifier)) {
+            owned_array<SyntaxRef> none;
             return class_specialization_definition(n, only, none);
         }
         /* template<> class-key simple-template-id ; declared only */
-        node_index d = tree.children(n)[3].index();
-        const syntax_child *dc = tree.children(d);
-        if (only && tree[only].kind == syntax_kind::elaborated_type_specifier &&
-            tree[d].child_count == 2 && tree[only].child_count == 2 &&
-            tree.children(only)[0].is_token() &&
-            syntax_is(tree, tree.children(only)[1],
-                      syntax_kind::simple_template_id) &&
-            syntax_is_punctuator(tokens, dc[1],
-                                 preprocessing_op_or_punc::SEMICOLON) &&
+        auto d = x[3];
+        auto dc = d;
+        if (only && only.is(syntax_kind::elaborated_type_specifier) &&
+            d.size() == 2 && only.size() == 2 && only[0].is_token() &&
+            only[1].is(syntax_kind::simple_template_id) &&
+            dc[1].is(preprocessing_op_or_punc::SEMICOLON) &&
             !leading_gnu_attributes(d)) {
-            standard_keyword key =
-                p.keyword_of(tokens[tree.children(only)[0].index()]);
+            standard_keyword key = p.keyword_of(tokens[only[0].token()]);
             if (key == standard_keyword::struct_ ||
                 key == standard_keyword::class_) {
-                owned_array<node_index> none;
+                owned_array<SyntaxRef> none;
                 return class_specialization_definition(n, only, none);
             }
         }
     }
     /* ... or a function template's specialization, declared or defined */
-    if (x.child_count != 4 || tree.children(n)[3].is_token())
+    if (x.size() != 4 || x[3].is_token())
         return not_supported(n, "temp.expl.spec");
-    node_index inner = tree.children(n)[3].index();
-    if (node_index id = variable_specialization_id(inner))
+    auto inner = x[3];
+    if (SyntaxRef id = variable_specialization_id(inner))
         return variable_specialization(n, inner, id);
-    if (!syntax_is(tree, syntax_child::node(inner),
-                   syntax_kind::function_definition) &&
-        !syntax_is(tree, syntax_child::node(inner),
-                   syntax_kind::simple_declaration))
+    if (!inner.is(syntax_kind::function_definition) &&
+        !inner.is(syntax_kind::simple_declaration))
         return not_supported(n, "temp.expl.spec");
-    bool defines = tree[inner].kind == syntax_kind::function_definition;
+    bool defines = inner.is(syntax_kind::function_definition);
     /* [dcl.fct.def.delete], = default: not yet */
-    if (defines) {
-        syntax_child body = tree.children(inner)[tree[inner].child_count - 1];
-        if (!syntax_is(tree, body, syntax_kind::function_body) ||
-            tree[body.index()].child_count != 1 ||
-            !syntax_is(tree, tree.children(body.index())[0],
-                       syntax_kind::compound_statement))
-            return not_supported(n, "temp.expl.spec");
-    }
+    if (defines && !inner.function_definition().function_body().plain())
+        return not_supported(n, "temp.expl.spec");
     specified s;
     uint32_t index = 0;
     analysis_result r = named_specialization(n, inner, true, false, s, index);
@@ -102,54 +90,45 @@ analysis_result semantic_analysis::explicit_specialization(node_index n)
 
 /* [temp.explicit]/1: "A class, function, variable, or member template
    specialization can be explicitly instantiated from its template." */
-analysis_result semantic_analysis::explicit_instantiation(node_index n)
+analysis_result
+semantic_analysis::explicit_instantiation(ExplicitInstantiation n)
 {
     /* [extern] template declaration */
-    const syntax_node &x = tree[n];
-    const syntax_child *c = tree.children(n);
-    bool extern_ = x.child_count == 3;
-    if ((x.child_count != 2 && x.child_count != 3) ||
-        c[x.child_count - 1].is_token())
+    auto x = n;
+    bool extern_ = x.size() == 3;
+    if ((x.size() != 2 && x.size() != 3) || x[x.size() - 1].is_token())
         return not_supported(n, "temp.explicit");
     /* [temp.explicit]/3: "An explicit instantiation shall appear in an
        enclosing namespace of its template": here, its own */
     if (!is_namespace(current_scope) || defining_class || function_state.active)
         return not_supported(n, "temp.explicit");
-    node_index d = c[x.child_count - 1].index();
-    if (tree[d].kind != syntax_kind::simple_declaration ||
-        leading_gnu_attributes(d))
+    auto d = x[x.size() - 1];
+    if (!d.is(syntax_kind::simple_declaration) || leading_gnu_attributes(d))
         return not_supported(n, "temp.explicit");
-    const syntax_child *dc = tree.children(d);
-    if (tree[d].child_count == 2 &&
-        syntax_is(tree, dc[0], syntax_kind::decl_specifier_seq) &&
-        tree[dc[0].index()].child_count == 1 &&
-        syntax_is(tree, tree.children(dc[0].index())[0],
-                  syntax_kind::elaborated_type_specifier)) {
+    auto dc = d;
+    if (d.size() == 2 && dc[0].is(syntax_kind::decl_specifier_seq) &&
+        dc[0].size() == 1 &&
+        dc[0][0].is(syntax_kind::elaborated_type_specifier)) {
         /* [temp.explicit]/3: "If the explicit instantiation is for a
            class or member class, the elaborated-type-specifier in the
            declaration shall include a simple-template-id": class-key
            simple-template-id */
-        node_index e = tree.children(dc[0].index())[0].index();
-        const syntax_child *ec = tree.children(e);
-        if (tree[e].child_count != 2 || !ec[0].is_token() ||
-            !syntax_is(tree, ec[1], syntax_kind::simple_template_id) ||
-            (p.keyword_of(tokens[ec[0].index()]) != standard_keyword::struct_ &&
-             p.keyword_of(tokens[ec[0].index()]) != standard_keyword::class_))
+        auto e = dc[0][0];
+        auto ec = e;
+        if (e.size() != 2 || !ec[0].is_token() ||
+            !ec[1].is(syntax_kind::simple_template_id) ||
+            (p.keyword_of(tokens[ec[0].token()]) != standard_keyword::struct_ &&
+             p.keyword_of(tokens[ec[0].token()]) != standard_keyword::class_))
             return not_supported(n, "temp.explicit");
-        return class_explicit_instantiation(n, ec[1].index(), extern_);
+        return class_explicit_instantiation(n, ec[1], extern_);
     }
-    if (tree[d].child_count != 3 ||
-        !syntax_is(tree, dc[0], syntax_kind::decl_specifier_seq) ||
-        dc[1].is_token() ||
-        !syntax_is_punctuator(tokens, dc[2],
-                              preprocessing_op_or_punc::SEMICOLON))
+    if (d.size() != 3 || !dc[0].is(syntax_kind::decl_specifier_seq) ||
+        dc[1].is_token() || !dc[2].is(preprocessing_op_or_punc::SEMICOLON))
         return not_supported(n, "temp.explicit");
     /* a member function of a class template's specialization:
        S<A>::f(...) */
-    if (syntax_is(tree, dc[1], syntax_kind::noptr_declarator) &&
-        tree[dc[1].index()].child_count &&
-        syntax_is(tree, tree.children(dc[1].index())[0],
-                  syntax_kind::qualified_id))
+    if (dc[1].is(syntax_kind::noptr_declarator) && dc[1].size() &&
+        dc[1][0].is(syntax_kind::qualified_id))
         return member_explicit_instantiation(n, d, extern_);
     specified s;
     uint32_t index = 0;
@@ -208,18 +187,16 @@ semantic_analysis::record_instantiation(const function_template &ft,
 /* the simple-template-id a simple-declaration of one declarator with an
    initializer declares (the declarator-id of a variable template's
    explicit specialization), or 0 */
-node_index semantic_analysis::variable_specialization_id(node_index d) const
+SyntaxRef semantic_analysis::variable_specialization_id(SyntaxRef d) const
 {
-    const syntax_node &node = tree[d];
-    if (node.kind != syntax_kind::simple_declaration || node.child_count != 3 ||
-        !syntax_is(tree, tree.children(d)[1], syntax_kind::init_declarator))
+    auto node = d;
+    if (!node.is(syntax_kind::simple_declaration) || node.size() != 3 ||
+        !node[1].is(syntax_kind::init_declarator))
         return 0;
-    node_index item = tree.children(d)[1].index();
-    if (tree[item].child_count != 2 ||
-        !syntax_is(tree, tree.children(item)[0],
-                   syntax_kind::simple_template_id))
+    auto item = node[1];
+    if (item.size() != 2 || !item[0].is(syntax_kind::simple_template_id))
         return 0;
-    node_index id = tree.children(item)[0].index();
+    auto id = item[0];
     lookup_result x;
     entity_index named = 0;
     if (!template_id_name(id, x, named) || x.ambiguous ||
@@ -236,9 +213,9 @@ node_index semantic_analysis::variable_specialization_id(node_index d) const
  * inline only if declared so ([temp.expl.spec]/12).  One the program used
  * before is not analysed ([temp.expl.spec]/7: clang's error).
  */
-analysis_result semantic_analysis::variable_specialization(node_index n,
-                                                           node_index inner,
-                                                           node_index id)
+analysis_result semantic_analysis::variable_specialization(SyntaxRef n,
+                                                           SyntaxRef inner,
+                                                           SyntaxRef id)
 {
     lookup_result x;
     entity_index named = 0;
@@ -287,7 +264,7 @@ analysis_result semantic_analysis::variable_specialization(node_index n,
  * declared before a use that would instantiate it).
  */
 analysis_result
-semantic_analysis::named_specialization(node_index n, node_index declaration,
+semantic_analysis::named_specialization(SyntaxRef n, SyntaxRef declaration,
                                         bool specialization, bool extern_,
                                         specified &s, uint32_t &index)
 {
@@ -295,20 +272,17 @@ semantic_analysis::named_specialization(node_index n, node_index declaration,
     const char *rule = "temp.explicit";
     if (specialization)
         rule = "temp.expl.spec";
-    const syntax_node &d = tree[declaration];
-    const syntax_child *dc = tree.children(declaration);
-    if (leading_gnu_attributes(declaration) || d.child_count != 3 ||
-        !syntax_is(tree, dc[0], syntax_kind::decl_specifier_seq) ||
-        dc[1].is_token() ||
-        (!syntax_is(tree, dc[1], syntax_kind::noptr_declarator) &&
-         !syntax_is(tree, dc[1], syntax_kind::ptr_declarator)))
+    auto d = declaration;
+    if (leading_gnu_attributes(declaration) || d.size() != 3 ||
+        !d[0].is(syntax_kind::decl_specifier_seq) || d[1].is_token() ||
+        (!d[1].is(syntax_kind::noptr_declarator) &&
+         !d[1].is(syntax_kind::ptr_declarator)))
         return not_supported(n, rule);
-    if (d.kind == syntax_kind::function_definition &&
-        !syntax_is(tree, dc[2], syntax_kind::function_body))
+    if (d.is(syntax_kind::function_definition) &&
+        !d.function_definition().plain())
         return not_supported(n, rule);
-    if (d.kind == syntax_kind::simple_declaration &&
-        !syntax_is_punctuator(tokens, dc[2],
-                              preprocessing_op_or_punc::SEMICOLON))
+    if (d.is(syntax_kind::simple_declaration) &&
+        !d[2].is(preprocessing_op_or_punc::SEMICOLON))
         return not_supported(n, rule);
     if (!is_namespace(current_scope) || defining_class || function_state.active)
         return not_supported(n, rule);
@@ -322,20 +296,20 @@ semantic_analysis::named_specialization(node_index n, node_index declaration,
         static_cast<owned_array<parameter_meaning> &&>(function_parameters);
     declarator_meaning m;
     qualified_type type;
-    analysis_result r = decl_specifier_seq(dc[0].index(), s, false);
+    analysis_result r = decl_specifier_seq(d[0].index(), s, false);
     uint32_t cv = 0;
     if (r == analysis_result::well_formed) {
         type = s.type;
         function_cv = 0;
         function_parameters.clear();
         declarator_template_id = true;
-        r = declarator(declaration, dc[1], type, m);
+        r = declarator(declaration, d[1], type, m);
         declarator_template_id = false;
         cv = function_cv;
     }
     bool defaults = false;
     for (const parameter_meaning &p : function_parameters)
-        if (p.default_argument.index())
+        if (p.default_argument)
             defaults = true;
     current_scope = outer;
     function_cv = saved_cv;
@@ -364,9 +338,9 @@ semantic_analysis::named_specialization(node_index n, node_index declaration,
     uint32_t ft = 0;
     owned_array<template_argument> values;
     bool qualified = false;
-    syntax_child callee = syntax_child::token(m.id);
+    SyntaxElement callee = SyntaxElement::from_token(m.id);
     if (m.template_id)
-        callee = syntax_child::node(m.template_id);
+        callee = m.template_id;
     else
         ft = function_template_of(
             lookup_unqualified(tokens.identifier(m.id), lookup_filter::any)
@@ -488,8 +462,8 @@ semantic_analysis::named_specialization(node_index n, node_index declaration,
  * functions are then emitted (explicitly_instantiated), or, for an
  * explicit instantiation declaration (/11), not.
  */
-analysis_result semantic_analysis::class_explicit_instantiation(node_index n,
-                                                                node_index id,
+analysis_result semantic_analysis::class_explicit_instantiation(SyntaxRef n,
+                                                                SyntaxRef id,
                                                                 bool extern_)
 {
     lookup_result x;
@@ -559,9 +533,9 @@ analysis_result semantic_analysis::class_explicit_instantiation(node_index n,
  * class template's specialization, S<A>::f(...), defined.
  */
 analysis_result semantic_analysis::member_explicit_instantiation(
-    node_index n, node_index declaration, bool extern_)
+    SyntaxRef n, SyntaxRef declaration, bool extern_)
 {
-    const syntax_child *dc = tree.children(declaration);
+    auto dc = declaration;
     size_t expressions_before = expressions.size();
     size_t uses_before = name_uses.size();
     entity_index outer = current_scope;
@@ -582,7 +556,7 @@ analysis_result semantic_analysis::member_explicit_instantiation(
     }
     bool defaults = false;
     for (const parameter_meaning &p : function_parameters)
-        if (p.default_argument.index())
+        if (p.default_argument)
             defaults = true;
     current_scope = outer;
     function_cv = saved_cv;
