@@ -927,8 +927,13 @@ analysis_result semantic_analysis::declarator(SyntaxRef declaration,
            is a qualified-id, names used before the qualified-id being declared
            are looked up in the defining namespace scope; names following the
            qualified-id are looked up in the scope of the member's class or
-           namespace.": the parameters are analysed in that scope */
-        if (m.qualifier)
+           namespace.": the parameters are analysed in that scope (of a
+           member template defined outside its class, [temp.mem]/1: the
+           member's template-parameters' scope, whose enclosing scope is
+           the class's, [temp.local]) */
+        if (m.qualifier && entity_table[scope_before].enclosing == m.qualifier)
+            current_scope = scope_before;
+        else if (m.qualifier)
             current_scope = m.qualifier;
         else
             current_scope = m.namespace_qualifier;

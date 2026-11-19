@@ -52,9 +52,18 @@ analysis_result semantic_analysis::member_function_template(
     uint32_t trailing = static_cast<bool>(trailing_constraint(n));
     if (trailing && head_constraint(n))
         return not_supported(n, "temp.constr");
-    if (tail.size() != 2 + specifiers + trailing ||
-        (!specifiers && !constructor) || tail[specifiers].is_token() ||
-        !tail[specifiers + 1 + trailing].is(syntax_kind::function_body))
+    /* [temp.mem]/1: a member template declared in the class, defined
+       outside it (member_template_definition_of_template): a
+       member-declaration of a decl-specifier-seq and a declarator */
+    bool defines = definition.is(syntax_kind::function_definition);
+    if (!defines && (constructor || !specifiers || trailing ||
+                     tail.size() != 3 || tail[1].is_token() ||
+                     !tail[2].is(preprocessing_op_or_punc::SEMICOLON)))
+        return not_supported(n, "temp.mem");
+    if (defines &&
+        (tail.size() != 2 + specifiers + trailing ||
+         (!specifiers && !constructor) || tail[specifiers].is_token() ||
+         !tail[specifiers + 1 + trailing].is(syntax_kind::function_body)))
         return not_supported(n, "temp.mem");
     uint32_t index = 0, first = 0;
     entity_index scope = 0;
@@ -103,11 +112,12 @@ analysis_result semantic_analysis::member_function_template(
         name, c, n, index, first, static_cast<uint32_t>(parameters.size()));
     record.gnu_flags = gnu_flags;
     record.abi_tag = abi_tag;
-    record.definition = definition;
+    if (defines)
+        record.definition = definition;
     record.declarator = definition;
     entity_index t = record.entity;
     entity_table[t].type = type;
-    entity_table[t].defined = true;
+    entity_table[t].defined = defines;
     entity_table[t].linkage_of_name = entity_table[c].linkage_of_name;
     entity_table[t].nonstatic_member = !s.static_;
     entity_table[t].member_cv = function_cv;

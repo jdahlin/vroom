@@ -215,6 +215,10 @@ analysis_result semantic_analysis::instantiate_definition(SyntaxRef at,
        ([temp.mem]): its declarator's cv-qualifier-seq the member's */
     member_template_declarator(
         2 * !is_namespace(entity_table[template_entity].enclosing));
+    /* (defined outside its class, [temp.mem]/1: its qualified declarator-id
+       is at the scope of the template-parameters' names) */
+    if (ft.definition != ft.declarator)
+        template_member_scope = instantiations[index].scope;
     analysis_result r = analysis_result::well_formed;
     if (entity_table[template_entity].special == special_member::constructor) {
         /* a constructor template's ([temp.mem]/1): its declarator again

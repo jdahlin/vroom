@@ -1122,6 +1122,16 @@ analysis_result semantic_analysis::declare_with_initializer(
         }
     } restore = {current_scope, current_scope};
     entity_index declared_in_scope = current_scope;
+    if (m.qualifier && instantiating &&
+        type_table[type.unqualified()].kind == type_kind::function) {
+        /* [temp.mem]/1: the definition outside the class of a member
+           function template's specialization declares the specialization
+           (instantiate_definition) */
+        entity_index declared = 0;
+        VTRY(r, declare_specialization(declaration, m.id, type, s, declared));
+        last_declared = declared;
+        return r;
+    }
     if (m.qualifier &&
         type_table[type.unqualified()].kind == type_kind::function) {
         if (initialized)

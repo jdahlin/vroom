@@ -3806,6 +3806,9 @@ class semantic_analysis
        (define_template_member) */
     struct template_member_definition {
         SyntaxRef declaration = 0, definition = 0;
+        /* a member template's ([temp.mem]/1) own template-declaration,
+           which the definition is the declaration of */
+        SyntaxRef inner = 0;
         /* the class template, and the partial specialization whose member
            it is (function_templates' index plus one; 0 the primary) */
         entity_index template_entity = 0;
@@ -3815,9 +3818,15 @@ class semantic_analysis
     /* the simple-template-id before the declarator-id's :: of a
        function-definition (box<T>::f), or 0; and the member's name */
     SyntaxRef out_of_class_member(SyntaxRef definition,
-                                  token_index *name = nullptr) const;
+                                  token_index *name = nullptr,
+                                  bool operators = false) const;
     analysis_result member_definition_of_template(SyntaxRef n,
-                                                  SyntaxRef definition);
+                                                  SyntaxRef definition,
+                                                  SyntaxRef inner = 0);
+    analysis_result define_member_template(uint32_t member, uint32_t index,
+                                           bool recorded);
+    analysis_result member_definition_unsupported(SyntaxRef declaration,
+                                                  bool recorded);
     /* template_member_definitions[member] for the class of
        instantiations[index]; after the template-declaration was analysed
        (declarations has it), a failure makes that unsupported */

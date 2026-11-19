@@ -120,6 +120,12 @@ analysis_result semantic_analysis::member_template_declaration(
           inner[at].is(syntax_kind::decl_specifier_seq) &&
           declares_special_member(c, inner[at + 1])))
         return member_function_template(c, n, inner, access);
+    /* [temp.mem]/1: a member function template only declared (defined
+       outside the class) */
+    if (inner.is(syntax_kind::member_declaration) && at + 1 < inner.size() &&
+        inner[at].is(syntax_kind::decl_specifier_seq) &&
+        !declares_special_member(c, inner[at + 1]))
+        return member_function_template(c, n, inner, access);
     /* a constrained constructor template ([temp.constr.decl]) */
     if (head_constraint(n))
         return not_supported(n, "temp.constr");
