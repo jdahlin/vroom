@@ -223,7 +223,10 @@ analysis_result semantic_analysis::instantiate_definition(node_index at,
                                             m);
         last_declared = instantiations[index].specialization;
         if (r == analysis_result::well_formed)
-            r = special_member_body(ft.definition, d[specifiers + 1]);
+            r = special_member_body(
+                ft.definition,
+                d[specifiers + 1 +
+                  (trailing_constraint(ft.declaration).bits != 0)]);
     } else if (syntax_is(tree, syntax_child::node(ft.definition),
                          syntax_kind::lambda_expression)) {
         /* a generic lambda's ([expr.prim.lambda.closure]/3) */

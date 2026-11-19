@@ -921,6 +921,10 @@ analysis_result semantic_analysis::init_declarators(node_index declaration,
         syntax_child c = tree.children(declaration)[i];
         if (syntax_is(tree, c, syntax_kind::function_body))
             break;
+        /* [dcl.decl]/4: a function template's trailing requires-clause,
+           checked at deduction (template_constraints_satisfied) */
+        if (instantiating && syntax_is(tree, c, syntax_kind::requires_clause))
+            continue;
         /* [dcl.struct.bind]/1: ref-qualifier_opt [ identifier-list ] */
         if (syntax_is_punctuator(tokens, c,
                                  preprocessing_op_or_punc::LEFT_BRACKET) ||

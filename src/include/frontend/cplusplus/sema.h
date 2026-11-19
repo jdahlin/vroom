@@ -3457,6 +3457,7 @@ class semantic_analysis
                              bool pack_anywhere = false,
                              bool type_constraints = false);
     syntax_child head_constraint(node_index n) const;
+    syntax_child trailing_constraint(node_index n) const;
     /* [temp.constr.atomic]/3: the satisfaction of a concept-id, once per
        concept and arguments (a later different result would be ill-formed,
        no diagnostic required; clang keeps the first, as here).  Its
@@ -3927,6 +3928,7 @@ class semantic_analysis
     /* [abi:mangle.requires-clause]: the requires-clause of the function
        template t's template-head (none: no bits), its template parameter
        and the concept a token of it names (0: neither) */
+    syntax_child template_trailing_constraint(entity_index t) const;
     syntax_child template_constraint(entity_index t) const;
     /* [expr.prim.lambda]/1: a generic lambda's requires-clause's
        constraint-expression (none: no bits); trailing: whether it follows

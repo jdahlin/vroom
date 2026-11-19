@@ -161,9 +161,13 @@ analysis_result semantic_analysis::placeholder_declaration(
     if (placeholder && kind == entity_kind::function &&
         !tokens.files.behavior.has(language_feature::return_type_deduction))
         return not_supported(declaration, "dcl.spec.auto");
-    if (placeholder && (kind == entity_kind::typedef_name || m.qualifier ||
-                        m.qualified_namespace || m.operator_function ||
-                        m.literal_operator || m.template_id || m.destructor))
+    if (placeholder &&
+        (kind == entity_kind::typedef_name || m.qualifier ||
+         m.qualified_namespace ||
+         /* (a member function template's: its name is the
+                           template's, held by the class, temp.mem.cpp) */
+         (m.operator_function && !in_member_template_declarator) ||
+         m.literal_operator || m.template_id || m.destructor))
         return not_supported(declaration, "dcl.spec.auto");
     if (tokens[m.id].kind != token_kind::identifier)
         return analysis_result::well_formed;

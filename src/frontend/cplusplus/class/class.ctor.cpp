@@ -101,6 +101,20 @@ analysis_result semantic_analysis::member_template_declaration(entity_index c,
         current_scope = saved;
         return r;
     }
+    /* [temp.class]/1: a member class template (template<...> struct X
+       { ... };), a class template declared in the class's scope */
+    if (d.kind == syntax_kind::member_declaration) {
+        node_index only = sole_decl_specifier(inner);
+        if (only && tree[only].kind == syntax_kind::class_specifier) {
+            entity_index saved = current_scope, saved_class = defining_class;
+            current_scope = c;
+            defining_class = 0;
+            analysis_result r = class_template_definition(n, only);
+            current_scope = saved;
+            defining_class = saved_class;
+            return r;
+        }
+    }
     if ((d.kind != syntax_kind::function_definition &&
          d.kind != syntax_kind::member_declaration) ||
         !is_namespace(entity_table[c].enclosing))

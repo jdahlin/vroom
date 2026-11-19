@@ -171,6 +171,24 @@ syntax_child semantic_analysis::head_constraint(node_index n) const
     return syntax_child();
 }
 
+/* [dcl.decl]/4: a function template's trailing requires-clause, the
+   function-definition's child before its function-body, or none */
+syntax_child semantic_analysis::trailing_constraint(node_index n) const
+{
+    if (tree[n].child_count != 2 || tree.children(n)[1].is_token())
+        return syntax_child();
+    node_index d = tree.children(n)[1].index();
+    if (tree[d].kind != syntax_kind::function_definition)
+        return syntax_child();
+    for (uint32_t i = 0; i < tree[d].child_count; i++) {
+        syntax_child c = tree.children(d)[i];
+        if (syntax_is(tree, c, syntax_kind::requires_clause) &&
+            tree[c.index()].child_count == 2)
+            return tree.children(c.index())[1];
+    }
+    return syntax_child();
+}
+
 analysis_result semantic_analysis::template_head_parameters(
     node_index n, owned_array<node_index> &parameters, bool packs,
     bool constrained, bool pack_anywhere, bool type_constraints)
@@ -185,7 +203,12 @@ analysis_result semantic_analysis::template_head_parameters(
         entity_table[current_scope].kind == entity_kind::class_type &&
         is_namespace(entity_table[current_scope].enclosing) &&
         syntax_is(tree, tree.children(n)[1], syntax_kind::alias_declaration);
-    if (!member_alias && (!is_namespace(current_scope) || defining_class))
+    /* ... and a member class template (member_template_declaration) */
+    bool member_class =
+        entity_table[current_scope].kind == entity_kind::class_type &&
+        syntax_is(tree, tree.children(n)[1], syntax_kind::member_declaration);
+    if (!member_alias && !member_class &&
+        (!is_namespace(current_scope) || defining_class))
         return not_supported(n, "temp.mem");
     /* template-head: template < template-parameter-list >; a
        requires-clause is [temp.constr] */
@@ -359,10 +382,16 @@ semantic_analysis::function_template_definition(node_index n,
     bool defines = d.kind == syntax_kind::function_definition;
     uint32_t lead = leading_gnu_attributes(definition);
     const syntax_child *dc = tree.children(definition) + lead;
-    if (d.child_count != lead + 3 ||
+    /* [dcl.decl]/4: a trailing requires-clause (trailing_constraint),
+       where the template-head has none */
+    uint32_t trailing = trailing_constraint(n).bits != 0;
+    if (trailing && head_constraint(n).bits)
+        return not_supported(n, "temp.constr");
+    if (d.child_count != lead + 3 + trailing ||
         !syntax_is(tree, dc[0], syntax_kind::decl_specifier_seq) ||
         dc[1].is_token() ||
-        (defines && !syntax_is(tree, dc[2], syntax_kind::function_body)) ||
+        (defines &&
+         !syntax_is(tree, dc[2 + trailing], syntax_kind::function_body)) ||
         (!defines && (!syntax_is_punctuator(
                           tokens, dc[2], preprocessing_op_or_punc::SEMICOLON) ||
                       (!syntax_is(tree, dc[1], syntax_kind::noptr_declarator) &&

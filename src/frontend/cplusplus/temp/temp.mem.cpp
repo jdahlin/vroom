@@ -49,9 +49,15 @@ analysis_result semantic_analysis::member_function_template(
         d.child_count > lead &&
         syntax_is(tree, dc[0], syntax_kind::decl_specifier_seq);
     bool constructor = declares_special_member(c, dc[specifiers]);
-    if (d.child_count != lead + 2 + specifiers ||
+    /* [dcl.decl]/4: a trailing requires-clause (trailing_constraint),
+       where the template-head has none */
+    uint32_t trailing = trailing_constraint(n).bits != 0;
+    if (trailing && head_constraint(n).bits)
+        return not_supported(n, "temp.constr");
+    if (d.child_count != lead + 2 + specifiers + trailing ||
         (!specifiers && !constructor) || dc[specifiers].is_token() ||
-        !syntax_is(tree, dc[specifiers + 1], syntax_kind::function_body))
+        !syntax_is(tree, dc[specifiers + 1 + trailing],
+                   syntax_kind::function_body))
         return not_supported(n, "temp.mem");
     uint32_t index = 0, first = 0;
     entity_index scope = 0;
