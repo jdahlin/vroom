@@ -231,6 +231,7 @@ SYNTAX_NODE(gnu_label_address, "gnu-label-address", "ext.gnu")
 SYNTAX_NODE(gnu_computed_goto, "gnu-computed-goto", "ext.gnu")
 SYNTAX_NODE(gnu_initializer_list, "gnu-initializer-list", "ext.gnu")
 SYNTAX_NODE(gnu_designation, "gnu-designation", "ext.gnu")
+SYNTAX_NODE(gnu_offsetof_expression, "gnu-offsetof-expression", "ext.gnu")
 SYNTAX_NODE(clang_type_trait_expression, "clang-type-trait-expression", "ext.clang")
 SYNTAX_NODE(clang_type_transformation, "clang-type-transformation", "ext.clang")
 

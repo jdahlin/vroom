@@ -56,6 +56,9 @@ EXTENSION(gnu_designated_initializers, gnu,
           "mixes clauses with designators, [first ... last] =, and the obsolete field:")
 EXTENSION(gnu_compound_literals, gnu,
           "GCC manual 6.30, Compound Literals: C99's (type-id) { initializer-list } in C++")
+EXTENSION(gnu_offsetof, gnu,
+          "GCC manual 6.53, Support for offsetof: __builtin_offsetof (type, member), "
+          "<cstddef>'s offsetof ([support.types.layout]/1)")
 
 /* clang */
 EXTENSION(clang_feature_checks, clang,

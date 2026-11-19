@@ -130,6 +130,14 @@ PRODUCTION(gnu_designated_initializers, "designator", "[ constant-expression ...
 PRODUCTION(gnu_compound_literals, "postfix-expression", "gnu-compound-literal")
 PRODUCTION(gnu_compound_literals, "gnu-compound-literal", "( type-id ) braced-init-list")
 
+/* ---- GCC manual 6.53, Support for offsetof ---- */
+
+PRODUCTION(gnu_offsetof, "primary-expression", "gnu-offsetof-expression")
+PRODUCTION(gnu_offsetof, "gnu-offsetof-expression", "__builtin_offsetof ( type-id , gnu-offsetof-member-designator )")
+PRODUCTION(gnu_offsetof, "gnu-offsetof-member-designator", "identifier")
+PRODUCTION(gnu_offsetof, "gnu-offsetof-member-designator", "gnu-offsetof-member-designator . identifier")
+PRODUCTION(gnu_offsetof, "gnu-offsetof-member-designator", "gnu-offsetof-member-designator [ expression ]")
+
 /* ---- clang Language Extensions, Type Trait Primitives ---- */
 
 PRODUCTION(clang_type_traits, "primary-expression", "clang-type-trait-expression")

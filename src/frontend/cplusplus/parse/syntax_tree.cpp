@@ -69,6 +69,7 @@ bool syntax_kind_is_expression(syntax_kind kind)
     case syntax_kind::gnu_compound_literal:
     case syntax_kind::gnu_label_address:
     case syntax_kind::clang_type_trait_expression:
+    case syntax_kind::gnu_offsetof_expression:
         return true;
     default:
         return false;

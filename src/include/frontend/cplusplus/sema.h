@@ -2312,6 +2312,7 @@ class semantic_analysis
     analysis_result conditional(node_index n, expression_meaning &m);
     analysis_result noexcept_operator(node_index n, expression_meaning &m);
     analysis_result clang_type_trait(node_index n, expression_meaning &m);
+    analysis_result gnu_offsetof(node_index n, expression_meaning &m);
     analysis_result potentially_throwing(node_index n, uint32_t x,
                                          bool &throwing);
     analysis_result conditional_operands(node_index n,
