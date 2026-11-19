@@ -2443,6 +2443,10 @@ class semantic_analysis
     analysis_result conditional(node_index n, expression_meaning &m);
     analysis_result noexcept_operator(node_index n, expression_meaning &m);
     analysis_result clang_type_trait(node_index n, expression_meaning &m);
+    /* [ext:clang_type_traits] the answer of the trait of one type-id
+       numbered which (ext/clang/unary-traits.inc) for the non-dependent
+       t; false if the analysis has none */
+    bool unary_trait(int which, qualified_type t, int64_t &value);
     analysis_result gnu_offsetof(node_index n, expression_meaning &m);
     analysis_result clang_bit_cast(node_index n, expression_meaning &m);
     analysis_result clang_convertvector(node_index n, expression_meaning &m);

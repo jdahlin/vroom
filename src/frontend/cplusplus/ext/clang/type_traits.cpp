@@ -269,10 +269,165 @@ semantic_analysis::clang_type_transformation(node_index n, qualified_type &type)
     return analysis_result::well_formed;
 }
 
+/* the traits of one type-id: [meta.unary.cat], [meta.unary.comp],
+   [meta.unary.prop]'s cv and sign questions, [meta.unary.prop.query]'s
+   rank; clang's spellings */
+enum class unary_trait_kind {
+#define UNARY_TRAIT(kind, spelling) kind,
+#include "unary-traits.inc"
+#undef UNARY_TRAIT
+};
+
+static int unary_trait_named(const char *s, size_t n)
+{
+    static const char *const names[] = {
+#define UNARY_TRAIT(kind, spelling) spelling,
+#include "unary-traits.inc"
+#undef UNARY_TRAIT
+    };
+    for (size_t i = 0; i < sizeof names / sizeof names[0]; i++)
+        if (spelled(s, n, names[i]))
+            return int(i);
+    return -1;
+}
+
+bool semantic_analysis::unary_trait(int which, qualified_type t, int64_t &value)
+{
+    const struct type *record = &type_table[t.unqualified()];
+    type_kind kind = record->kind;
+    fundamental_type f = fundamental_of(t);
+    if (kind == type_kind::atomic || kind == type_kind::none ||
+        kind == type_kind::placeholder || kind == type_kind::pack_expansion ||
+        kind == type_kind::template_parameter || kind == type_kind::dependent ||
+        f == fundamental_type::builtin_va_list)
+        return false;
+    bool is_void =
+        kind == type_kind::fundamental && f == fundamental_type::void_;
+    bool reference = kind == type_kind::lvalue_reference ||
+                     kind == type_kind::rvalue_reference;
+    bool is_union =
+        kind == type_kind::class_type && entity_table[record->entity].union_;
+    bool member_pointer = kind == type_kind::pointer_to_member;
+    /* [basic.fundamental]/15: void, std::nullptr_t, the arithmetic types */
+    bool fundamental = kind == type_kind::fundamental;
+    const implementation_defined_behavior &b = tokens.files.behavior;
+    bool answer = false;
+    switch (static_cast<unary_trait_kind>(which)) {
+    case unary_trait_kind::is_void:
+        answer = is_void;
+        break;
+    case unary_trait_kind::is_integral:
+        answer = is_integral(t);
+        break;
+    case unary_trait_kind::is_floating_point:
+        answer = is_floating(t);
+        break;
+    case unary_trait_kind::is_arithmetic:
+        answer = is_arithmetic(t);
+        break;
+    case unary_trait_kind::is_array:
+        answer = kind == type_kind::array;
+        break;
+    case unary_trait_kind::is_bounded_array:
+        answer = kind == type_kind::array && record->bound_known;
+        break;
+    case unary_trait_kind::is_unbounded_array:
+        answer = kind == type_kind::array && !record->bound_known;
+        break;
+    case unary_trait_kind::is_pointer:
+        answer = kind == type_kind::pointer;
+        break;
+    case unary_trait_kind::is_lvalue_reference:
+        answer = kind == type_kind::lvalue_reference;
+        break;
+    case unary_trait_kind::is_rvalue_reference:
+        answer = kind == type_kind::rvalue_reference;
+        break;
+    case unary_trait_kind::is_reference:
+        answer = reference;
+        break;
+    case unary_trait_kind::is_function:
+        answer = kind == type_kind::function;
+        break;
+    case unary_trait_kind::is_enum:
+        answer = kind == type_kind::enumeration;
+        break;
+    case unary_trait_kind::is_scoped_enum:
+        answer = kind == type_kind::enumeration &&
+                 entity_table[record->entity].scoped;
+        break;
+    case unary_trait_kind::is_class:
+        answer = kind == type_kind::class_type && !is_union;
+        break;
+    case unary_trait_kind::is_union:
+        answer = is_union;
+        break;
+    case unary_trait_kind::is_member_pointer:
+        answer = member_pointer;
+        break;
+    case unary_trait_kind::is_member_function_pointer:
+        answer = is_member_function_pointer(t);
+        break;
+    case unary_trait_kind::is_member_object_pointer:
+        answer = member_pointer && !is_member_function_pointer(t);
+        break;
+    case unary_trait_kind::is_fundamental:
+        answer = fundamental;
+        break;
+    /* [basic.types]/9: "Arithmetic types, enumeration types,
+       pointer types, pointer-to-member types, std::nullptr_t, and
+       cv-qualified versions of these types are collectively called scalar
+       types." */
+    case unary_trait_kind::is_scalar:
+        answer = is_arithmetic(t) || kind == type_kind::enumeration ||
+                 kind == type_kind::pointer || member_pointer ||
+                 f == fundamental_type::std_nullptr_t;
+        break;
+    /* [basic.compound]/1 */
+    case unary_trait_kind::is_compound:
+        answer = !fundamental;
+        break;
+    /* [basic.types]/8: "An object type is a (possibly
+       cv-qualified) type that is not a function type, not a reference
+       type, and not cv void." */
+    case unary_trait_kind::is_object:
+        answer = kind != type_kind::function && !reference && !is_void;
+        break;
+    case unary_trait_kind::is_const:
+        answer = (t.cv() & cv_const) != 0;
+        break;
+    case unary_trait_kind::is_volatile:
+        answer = (t.cv() & cv_volatile) != 0;
+        break;
+    /* [meta.unary.prop] is_signed: "If is_arithmetic_v<T> is true, the
+       same result as T(-1) < T(0); otherwise, false" */
+    case unary_trait_kind::is_signed:
+        answer =
+            is_floating(t) || (is_integral(t) && f != fundamental_type::bool_ &&
+                               fundamental_type_is_signed(b, f));
+        break;
+    case unary_trait_kind::is_unsigned:
+        answer = is_integral(t) && (f == fundamental_type::bool_ ||
+                                    !fundamental_type_is_signed(b, f));
+        break;
+    /* [meta.unary.prop.query] rank: the number of dimensions */
+    case unary_trait_kind::array_rank:
+        value = 0;
+        while (type_table[t.unqualified()].kind == type_kind::array) {
+            t = type_table[t.unqualified()].operand;
+            value++;
+        }
+        return true;
+    }
+    value = answer;
+    return true;
+}
+
 /* [ext:clang_type_traits] clang-type-trait-expression: a prvalue of type
    bool, a constant.  The traits analysis answers so far:
      __is_same(T, U) (GCC's spelling __is_same_as): [meta.rel] is_same,
-     "T and U name the same type with the same cv-qualifications".
+     "T and U name the same type with the same cv-qualifications";
+     unary-traits.inc's traits of one type, by its category.
    A template's own operands are dependent: the template is analysed with
    its arguments when instantiated, as sizeof's operand is */
 analysis_result semantic_analysis::clang_type_trait(node_index n,
@@ -285,6 +440,27 @@ analysis_result semantic_analysis::clang_type_trait(node_index n,
     const char *name = reinterpret_cast<const char *>(written.data());
     bool same = spelled(name, written.size(), "__is_same") ||
                 spelled(name, written.size(), "__is_same_as");
+    /* ( type-id ): a trait of the type's category */
+    if (!same && node.child_count == 4 &&
+        syntax_is(tree, children[2], syntax_kind::type_id)) {
+        int which = unary_trait_named(name, written.size());
+        if (which < 0)
+            return not_supported(n, "ext.clang");
+        qualified_type t;
+        analysis_result r = type_id(children[2].index(), t);
+        if (r != analysis_result::well_formed)
+            return r;
+        if (depends_on_template_parameter(t))
+            return not_supported(n, "temp.dep.constexpr");
+        int64_t value = 0;
+        if (!unary_trait(which, t, value))
+            return not_supported(n, "ext.clang");
+        fundamental_type result = fundamental_type::bool_;
+        if (which == int(unary_trait_kind::array_rank))
+            result = fundamental_type::unsigned_long_int;
+        m = integer_constant(result, value, node.first_token);
+        return analysis_result::well_formed;
+    }
     /* ( type-id , type-id ) */
     if (!same || node.child_count != 6 ||
         !syntax_is(tree, children[2], syntax_kind::type_id) ||
