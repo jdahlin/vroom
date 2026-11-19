@@ -49,6 +49,27 @@ bool is_comparison(preprocessing_op_or_punc op)
 
 } // namespace
 
+/* whether class c may convert to a built-in candidate's parameter type:
+   [over.built] has no class-typed parameters, and a conversion function to
+   a class type ([over.best.ics]/4: no second user-defined conversion)
+   never makes one viable.  A base class's or a template conversion
+   function is not analysed: assumed to convert */
+bool semantic_analysis::converts_to_non_class(entity_index c) const
+{
+    if (entity_table[c].kind != entity_kind::class_type ||
+        base_has_conversion_functions(c))
+        return true;
+    for (entity_index f = own_conversion_functions(c); f;
+         f = entity_table[f].next_overload) {
+        if (!entity_table[f].conversion_function)
+            return true;
+        qualified_type to = conversion_function_result(f).type;
+        if (type_table[to.unqualified()].kind != type_kind::class_type)
+            return true;
+    }
+    return false;
+}
+
 analysis_result semantic_analysis::overloaded_operator(
     node_index n, token_index at, preprocessing_op_or_punc op, bool postfix,
     const owned_array<syntax_child> &syntax,
@@ -76,8 +97,7 @@ analysis_result semantic_analysis::overloaded_operator(
     bool converts = false;
     for (const expression_meaning &e : operands) {
         const struct type &t = type_table[e.type.unqualified()];
-        if (t.kind == type_kind::class_type &&
-            has_conversion_functions(t.entity))
+        if (t.kind == type_kind::class_type && converts_to_non_class(t.entity))
             converts = true;
     }
     /* [over.call.object]/2: a captureless lambda's surrogate call function
