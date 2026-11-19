@@ -243,15 +243,24 @@ semantic_analysis::parameter_declaration(node_index n, qualified_type &type,
     default_argument = syntax_child();
     /* [dcl.fct]/3: the attribute-specifier-seq_opt before the
        decl-specifier-seq appertains to the parameter: those without effect
-       (libc++'s [[__maybe_unused__]]) are left out */
+       (libc++'s [[__maybe_unused__]]), and GCC's whose rules set nothing
+       (libc++'s __attribute__((noescape))), are left out */
     uint32_t lead = 0;
-    while (lead < tree[n].child_count && !tree.children(n)[lead].is_token() &&
-           (syntax_is(tree, tree.children(n)[lead],
-                      syntax_kind::attribute_specifier_seq) ||
-            syntax_is(tree, tree.children(n)[lead],
-                      syntax_kind::attribute_specifier)) &&
-           attributes_without_effect(tree.children(n)[lead]))
+    while (lead < tree[n].child_count && !tree.children(n)[lead].is_token()) {
+        syntax_child c = tree.children(n)[lead];
+        if (syntax_is(tree, c, syntax_kind::gnu_attribute_specifier)) {
+            gnu_attributes g;
+            analysis_result r = gnu_attribute_specifier(c.index(), g);
+            if (r != analysis_result::well_formed)
+                return r;
+            if (g.flags || g.aligned || g.section || g.abi_tag)
+                break;
+        } else if ((!syntax_is(tree, c, syntax_kind::attribute_specifier_seq) &&
+                    !syntax_is(tree, c, syntax_kind::attribute_specifier)) ||
+                   !attributes_without_effect(c))
+            break;
         lead++;
+    }
     const syntax_child *children = tree.children(n) + lead;
     uint32_t child_count = tree[n].child_count - lead;
     if (!child_count ||

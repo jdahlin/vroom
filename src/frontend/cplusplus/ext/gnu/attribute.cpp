@@ -261,6 +261,9 @@ static const gnu_attribute_rule gnu_attribute_rules[] = {
     {"artificial", 0},
     {"no_instrument_function", 0},
     {"no_sanitize", 0},
+    /* clang's noescape: a pointer parameter does not escape the call
+       (libc++'s _LIBCPP_NOESCAPE), a promise vcc does not use */
+    {"noescape", 0},
     /* clang's availability(PLATFORM, introduced = V, ...): a diagnostic
        when the deployment target is older (libc++'s
        _LIBCPP_INTRODUCED_IN_LLVM_N_ATTRIBUTE) */
