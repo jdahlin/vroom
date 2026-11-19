@@ -1195,15 +1195,35 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
                     class_type = invented.unqualified();
                     cv |= invented.cv();
                     r = analysis_result::well_formed;
-                } else if (!allow_placeholder ||
-                           !tokens.files.behavior.has(
-                               language_feature::return_type_deduction) ||
-                           !parts[0].is_token() ||
-                           p.keyword_of(tokens[parts[0].index()]) !=
-                               standard_keyword::decltype_)
-                    return not_supported(seq, "dcl.spec.auto");
-                else {
-                    class_type = placeholder_type(true).unqualified();
+                } else {
+                    /* [dcl.spec.auto]/1: type-constraint_opt auto,
+                       type-constraint_opt decltype(auto); a type-constraint
+                       of a concept-name alone, C<U> ([temp.param]/4) */
+                    entity_index named_concept = 0;
+                    uint32_t last = tree[c.index()].child_count - 1;
+                    if (syntax_is(tree, parts[0],
+                                  syntax_kind::type_constraint)) {
+                        const syntax_child *q = tree.children(parts[0].index());
+                        if (tree[parts[0].index()].child_count == 1 &&
+                            q[0].is_token())
+                            named_concept =
+                                constraint_concept(current_scope, q[0].index());
+                        if (!named_concept ||
+                            function_templates[concept_of(named_concept) - 1]
+                                    .parameter_count != 1)
+                            return not_supported(parts[0].index(),
+                                                 "temp.param");
+                    }
+                    bool decltype_auto =
+                        !parts[last].is_token() ||
+                        p.keyword_of(tokens[parts[last].index()]) !=
+                            standard_keyword::auto_;
+                    if (!allow_placeholder ||
+                        !tokens.files.behavior.has(
+                            language_feature::return_type_deduction))
+                        return not_supported(seq, "dcl.spec.auto");
+                    class_type = placeholder_type(decltype_auto, named_concept)
+                                     .unqualified();
                     r = analysis_result::well_formed;
                 }
             } else if (syntax_is(tree, c,

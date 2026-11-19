@@ -23,30 +23,36 @@
 namespace cplusplus
 {
 
-qualified_type semantic_analysis::placeholder_type(bool decltype_auto)
+/* (the type's entity: 1 auto, 2 decltype(auto), with the concept's entity
+   above those two bits) */
+qualified_type semantic_analysis::placeholder_type(bool decltype_auto,
+                                                   entity_index named_concept)
 {
-    uint32_t which = 1;
+    uint32_t which = named_concept << 2 | 1;
     if (decltype_auto)
-        which = 2;
+        which = named_concept << 2 | 2;
     return qualified_type::make(
         type_table.of_entity(type_kind::placeholder, which), cv_none);
 }
 
 bool semantic_analysis::contains_placeholder(qualified_type t,
-                                             bool *decltype_auto) const
+                                             bool *decltype_auto,
+                                             entity_index *named_concept) const
 {
     const struct type &r = type_table[t.unqualified()];
     switch (r.kind) {
     case type_kind::placeholder:
         if (decltype_auto)
-            *decltype_auto = r.entity == 2;
+            *decltype_auto = (r.entity & 3) == 2;
+        if (named_concept)
+            *named_concept = r.entity >> 2;
         return true;
     case type_kind::pointer:
     case type_kind::lvalue_reference:
     case type_kind::rvalue_reference:
     case type_kind::array:
     case type_kind::function:
-        return contains_placeholder(r.operand, decltype_auto);
+        return contains_placeholder(r.operand, decltype_auto, named_concept);
     default:
         return false;
     }
@@ -215,7 +221,8 @@ analysis_result semantic_analysis::deduce_placeholder(
     bool named, qualified_type &deduced, qualified_type &replacement)
 {
     bool decltype_auto = false;
-    contains_placeholder(declared, &decltype_auto);
+    entity_index named_concept = 0;
+    contains_placeholder(declared, &decltype_auto, &named_concept);
     const struct type argument = type_table[e.type.unqualified()];
     if (argument.kind == type_kind::none ||
         argument.kind == type_kind::placeholder ||
@@ -226,7 +233,7 @@ analysis_result semantic_analysis::deduce_placeholder(
         if (!decltype_of(e, named, deduced))
             return not_supported(at, "dcl.type.auto.deduct");
         replacement = deduced;
-        return analysis_result::well_formed;
+        return placeholder_constraint(at, named_concept, replacement);
     }
     if (!invented_parameter) {
         invented_parameter = entity_table.make(entity_kind::typedef_name, 0, 0);
@@ -250,7 +257,35 @@ analysis_result semantic_analysis::deduce_placeholder(
         return not_supported(at, "dcl.type.auto.deduct");
     replacement = values[0].type;
     deduced = replace_placeholder(declared, replacement);
-    return analysis_result::well_formed;
+    return placeholder_constraint(at, named_concept, replacement);
+}
+
+/*
+ * [dcl.type.auto.deduct]/6: "For a placeholder-type-specifier with a
+ * type-constraint, the immediately-declared constraint ([temp.param]) of
+ * the type-constraint for the type deduced for the placeholder shall be
+ * satisfied."  ([temp.param]/4: of C, C<U>.)
+ */
+analysis_result semantic_analysis::placeholder_constraint(
+    node_index at, entity_index named_concept, qualified_type u)
+{
+    if (!named_concept)
+        return analysis_result::well_formed;
+    owned_array<template_argument> arguments;
+    template_argument a;
+    a.kind = template_argument::kind_t::type;
+    a.type = u;
+    arguments.append(a);
+    bool satisfied = false;
+    analysis_result r =
+        concept_satisfied(at, concept_of(named_concept), arguments, satisfied);
+    if (r != analysis_result::well_formed || satisfied)
+        return r;
+    return ill_formed(at,
+                      "the immediately-declared constraint of the "
+                      "type-constraint for the type deduced for the "
+                      "placeholder shall be satisfied",
+                      "dcl.type.auto.deduct");
 }
 
 /* the assignment-expression of an initializer "= E", "( E )" or "{ E }"

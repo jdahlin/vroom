@@ -1809,12 +1809,14 @@ bool itanium_mangler::type(qualified_type t)
 
                <builtin-type> ::= Da
                               ::= Dc
-        */
-        if (r.entity == 2)
-            text("Dc");
-        else
-            text("Da");
-        return true;
+
+           Constrained by a concept C ([dcl.spec.auto]/1), Dk (DK of
+           decltype(auto)) then C's <name>, as clang (the ABI's
+           <type-constraint>, later than the version fetched) */
+        static const char *const codes[2][2] = {{"Da", "Dc"}, {"Dk", "DK"}};
+        entity_index constraint = r.entity >> 2;
+        text(codes[constraint != 0][(r.entity & 3) == 2]);
+        return !constraint || name(constraint);
     }
     if (substitution(t))
         return true;
