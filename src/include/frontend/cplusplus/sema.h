@@ -315,6 +315,10 @@ enum gnu_attribute_flag : uint32_t {
 const uint32_t gnu_function_symbol_flags =
     gnu_hidden_visibility | gnu_abi_tag |
     gnu_exclude_from_explicit_instantiation;
+/* noinline, always_inline and noreturn, which lowering gives a member
+   function or function template's specialization as a non-member's */
+const uint32_t gnu_inline_flags =
+    gnu_noinline | gnu_always_inline | gnu_noreturn;
 
 struct entity {
     entity_kind kind = entity_kind::none;
@@ -1972,6 +1976,13 @@ class semantic_analysis
     /* in a member function template's declarator: 1 the template's own
        (temp.mem.cpp), 2 a specialization's (instantiation.cpp) */
     uint8_t in_member_template_declarator = 0;
+    /* enters (which 1 or 2) or leaves (0) a member function template's
+       declarator, a member declarator */
+    void member_template_declarator(uint8_t which)
+    {
+        in_member_declarator = which != 0;
+        in_member_template_declarator = which;
+    }
     /* [dcl.fct.spec]/2: virtual is analysed on a member-declaration's
        decl-specifier-seq only; a member-declarator's virt-specifiers and
        pure-specifier ([class.mem]/1) for the declarator it holds */
@@ -2713,7 +2724,19 @@ class semantic_analysis
         node_index n, entity_index f, const expression_meaning &object,
         const owned_array<syntax_child> &arguments,
         owned_array<expression_meaning> &early, expression_meaning &m);
-    uint32_t member_function_template_of(entity_index held) const;
+    uint32_t member_function_template_of(entity_index held) const
+    {
+        return function_template_of(held, true);
+    }
+    analysis_result
+    function_template_declarator(node_index definition, uint32_t lead,
+                                 entity_index scope, bool member, specified &s,
+                                 declarator_meaning &m, qualified_type &type);
+    analysis_result
+    function_template_attributes(node_index n, const specified &s,
+                                 const declarator_meaning &m, uint32_t allowed,
+                                 const char *subclause, uint32_t &gnu_flags,
+                                 token_index &abi_tag);
     analysis_result member_declaration(entity_index c, syntax_child n,
                                        uint8_t access,
                                        owned_array<node_index> &bodies);
@@ -3204,8 +3227,9 @@ class semantic_analysis
        name declared after it is not the template's to find
        (lookup_unqualified) */
     token_index lookup_horizon = 0;
-    /* the function template whose name the held entity is, plus one */
-    uint32_t function_template_of(entity_index held) const;
+    /* the function template (member: member function template) whose name
+       the held entity is, plus one */
+    uint32_t function_template_of(entity_index held, bool member = false) const;
     /* the class template the entity names (its held name, or one of its
        specializations as its injected-class-name), plus one */
     uint32_t class_template_of(entity_index e) const;
@@ -3938,6 +3962,11 @@ class semantic_analysis
        arguments start in all */
     /* specified: template arguments already analysed, put before what
        is deduced (as written's are) */
+    /* [temp.over]/1: the member function templates named held, as member
+       candidates (temp.mem.cpp) */
+    analysis_result member_template_candidates(
+        node_index n, entity_index held, const expression_meaning *arguments,
+        uint32_t count, owned_array<overload_candidate> &candidates);
     analysis_result template_candidates(
         node_index n, const owned_array<uint32_t> &group,
         const expression_meaning *meanings, uint32_t count,

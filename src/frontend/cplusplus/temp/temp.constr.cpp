@@ -92,13 +92,8 @@ analysis_result semantic_analysis::concept_id(node_index n, uint32_t ct,
     r = concept_satisfied(n, ct, arguments, satisfied);
     if (r != analysis_result::well_formed)
         return r;
-    m = expression_meaning();
-    m.type = qualified_type::make(
-        type_table.fundamental(fundamental_type::bool_), cv_none);
-    m.category = value_category::prvalue;
-    m.evaluation = constness::constant;
-    m.value = satisfied;
-    m.node = expression_node(semantic_kind::constant, m, tree[n].first_token);
+    m = integer_constant(fundamental_type::bool_, satisfied,
+                         tree[n].first_token);
     return analysis_result::well_formed;
 }
 

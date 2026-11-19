@@ -752,13 +752,7 @@ analysis_result semantic_analysis::noexcept_operator(node_index n,
     r = potentially_throwing(n, e.node, throwing);
     if (r != analysis_result::well_formed)
         return r;
-    m = expression_meaning();
-    m.type = qualified_type::make(
-        type_table.fundamental(fundamental_type::bool_), cv_none);
-    m.category = value_category::prvalue;
-    m.evaluation = constness::constant;
-    m.value = !throwing;
-    m.node = expression_node(semantic_kind::constant, m, node.first_token);
+    m = integer_constant(fundamental_type::bool_, !throwing, node.first_token);
     return analysis_result::well_formed;
 }
 

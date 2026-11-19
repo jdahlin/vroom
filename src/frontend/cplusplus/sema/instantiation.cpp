@@ -76,11 +76,9 @@ semantic_analysis::instantiate(node_index at, entity_index template_entity,
             function_cv = 0;
             /* (a member function template's cv-qualifier-seq,
                [temp.mem]) */
-            in_member_declarator = !is_namespace(t.enclosing);
-            in_member_template_declarator = in_member_declarator * 2;
+            member_template_declarator(2 * !is_namespace(t.enclosing));
             r = declarator(ft.declarator, d[1], type, m);
-            in_member_template_declarator = 0;
-            in_member_declarator = false;
+            member_template_declarator(0);
         }
         entity_index e = 0;
         if (r == analysis_result::well_formed) {
@@ -160,12 +158,10 @@ analysis_result semantic_analysis::instantiate_definition(node_index at,
     instantiations[index].pending = false;
     /* a member function template's definition, in its class
        ([temp.mem]): its declarator's cv-qualifier-seq the member's */
-    bool member = !is_namespace(entity_table[template_entity].enclosing);
-    in_member_declarator = member;
-    in_member_template_declarator = member * 2;
+    member_template_declarator(
+        2 * !is_namespace(entity_table[template_entity].enclosing));
     analysis_result r = function_definition(ft.definition);
-    in_member_template_declarator = 0;
-    in_member_declarator = false;
+    member_template_declarator(0);
     instantiations[index].defining = false;
     leave_instantiation(context);
     instantiations[index].defined = true;
@@ -496,11 +492,6 @@ analysis_result semantic_analysis::declare_variable_specialization(
     entity_table[e].constexpr_ = s.constexpr_;
     entity_table[e].defined = true;
     entity_table[e].instantiation = index + 1;
-    /* a member function template's specialization: a member function of
-       its class ([temp.mem]) */
-    entity_table[e].nonstatic_member = t.nonstatic_member;
-    entity_table[e].member_cv = t.member_cv;
-    entity_table[e].access = t.access;
     entity_table.add_declaration(e, declaration);
     instantiations[index].specialization = e;
     declared_name d;

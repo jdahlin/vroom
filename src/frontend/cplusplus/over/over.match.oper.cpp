@@ -138,30 +138,21 @@ analysis_result semantic_analysis::overloaded_operator(
                 !entity_table[c].size)
                 return not_supported(n, "over.match.oper");
             lookup_result found = lookup_qualified(c, name, lookup_filter::any);
-            uint32_t member_template = 0;
-            if (found.unknown && !found.ambiguous && !found.entity)
-                member_template =
-                    member_function_template_of(found.unknown_entity);
-            if (member_template) {
+            if (found.unknown && !found.ambiguous && !found.entity &&
+                member_function_template_of(found.unknown_entity)) {
                 /* [temp.mem]/1: member operator function templates, their
                    specializations deduced from the other operands
                    ([temp.over]/1) member candidates */
-                owned_array<uint32_t> group;
-                function_template_overloads(
-                    function_templates[member_template - 1].name, group);
                 owned_array<expression_meaning> rest;
                 for (size_t i = 1; i < count; i++)
                     rest.append(operand(i));
                 size_t first = candidates.size();
-                analysis_result r = template_candidates(
-                    n, group, rest.data(), static_cast<uint32_t>(rest.size()),
-                    candidates);
+                analysis_result r = member_template_candidates(
+                    n, found.unknown_entity, rest.data(),
+                    static_cast<uint32_t>(rest.size()), candidates);
                 if (r != analysis_result::well_formed)
                     return r;
                 for (size_t i = first; i < candidates.size(); i++) {
-                    if (!entity_table[candidates[i].function].nonstatic_member)
-                        return not_supported(n, "temp.mem");
-                    candidates[i].member = true;
                     candidates[i].rewritten = rewritten;
                     candidates[i].reversed = reversed;
                 }

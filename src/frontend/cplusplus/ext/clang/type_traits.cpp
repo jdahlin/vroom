@@ -112,6 +112,12 @@ enum class transformation : uint8_t {
     underlying_type,
 };
 
+/* whether the n bytes at s spell the keyword k */
+static bool spelled(const char *s, size_t n, const char *k)
+{
+    return strlen(k) == n && !memcmp(k, s, n);
+}
+
 static transformation transformation_named(const char *s, size_t n)
 {
     static const struct {
@@ -135,7 +141,7 @@ static transformation transformation_named(const char *s, size_t n)
         {"__underlying_type", transformation::underlying_type},
     };
     for (const auto &k : names)
-        if (strlen(k.name) == n && !memcmp(k.name, s, n))
+        if (spelled(s, n, k.name))
             return k.which;
     return transformation::none;
 }
@@ -277,9 +283,8 @@ analysis_result semantic_analysis::clang_type_trait(node_index n,
     owned_buffer written;
     tokens.spelling(children[0].index(), written.get());
     const char *name = reinterpret_cast<const char *>(written.data());
-    size_t length = written.size();
-    bool same = (length == 9 && !memcmp(name, "__is_same", 9)) ||
-                (length == 12 && !memcmp(name, "__is_same_as", 12));
+    bool same = spelled(name, written.size(), "__is_same") ||
+                spelled(name, written.size(), "__is_same_as");
     /* ( type-id , type-id ) */
     if (!same || node.child_count != 6 ||
         !syntax_is(tree, children[2], syntax_kind::type_id) ||
@@ -294,13 +299,7 @@ analysis_result semantic_analysis::clang_type_trait(node_index n,
         return r;
     if (depends_on_template_parameter(t) || depends_on_template_parameter(u))
         return not_supported(n, "temp.dep.constexpr");
-    m = expression_meaning();
-    m.type = qualified_type::make(
-        type_table.fundamental(fundamental_type::bool_), cv_none);
-    m.category = value_category::prvalue;
-    m.evaluation = constness::constant;
-    m.value = t == u;
-    m.node = expression_node(semantic_kind::constant, m, node.first_token);
+    m = integer_constant(fundamental_type::bool_, t == u, node.first_token);
     return analysis_result::well_formed;
 }
 

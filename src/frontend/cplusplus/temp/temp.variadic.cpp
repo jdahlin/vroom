@@ -436,13 +436,10 @@ analysis_result semantic_analysis::fold(node_index n, expression_meaning &m)
         if (op != preprocessing_op_or_punc::AMPERSAND_AMPERSAND &&
             op != preprocessing_op_or_punc::BAR_BAR)
             return not_supported(n, "temp.variadic");
-        m = expression_meaning();
-        m.type = qualified_type::make(
-            type_table.fundamental(fundamental_type::bool_), cv_none);
-        m.category = value_category::prvalue;
-        m.evaluation = constness::constant;
-        m.value = op == preprocessing_op_or_punc::AMPERSAND_AMPERSAND;
-        m.node = expression_node(semantic_kind::constant, m, node.first_token);
+        m = integer_constant(fundamental_type::bool_,
+                             op ==
+                                 preprocessing_op_or_punc::AMPERSAND_AMPERSAND,
+                             node.first_token);
         return analysis_result::well_formed;
     }
     auto combine = [&](expression_meaning left, expression_meaning right,
