@@ -96,6 +96,11 @@ name_class classify(parser &p, unsigned ahead, unsigned *length,
             else
                 kind =
                     p.names.lookup_unqualified(name, &found, &found_dependent);
+            /* [ext:gnu_library_builtins] a builtin function clang declares
+               at its first use: a function's name, no type */
+            if (!qualified && kind == name_kind::not_declared &&
+                p.names_compiler_builtin(name))
+                kind = name_kind::function;
         }
         unsigned after = i + 1;
         bool arguments = false;
@@ -1519,7 +1524,10 @@ analysis_result semantic_analysis::qualified_type_name(node_index n,
             analysis_result r = nested_name_specifier(parts[0].index(), scope);
             if (r != analysis_result::well_formed)
                 return r;
-            if (!is_namespace(scope.entity))
+            /* a namespace's member template or a class's (a member
+               alias template, member_template_declaration) */
+            if (!is_namespace(scope.entity) &&
+                entity_table[scope.entity].kind != entity_kind::class_type)
                 return not_supported(n, "temp.names");
             return template_type(parts[1].index(), scope.entity, true, type);
         }

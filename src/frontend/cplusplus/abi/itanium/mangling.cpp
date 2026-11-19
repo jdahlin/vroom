@@ -421,6 +421,7 @@ bool itanium_mangler::constraint_expression(entity_index t, syntax_child c)
  * written with its function parameters, class member accesses and calls:
  *
  *     <expression> ::= cl <expression>+ E
+ *                  ::= <unresolved-name>
  *                  ::= dt <expression> <unresolved-name>
  *                  ::= pt <expression> <unresolved-name>
  *                  ::= <function-param>
@@ -468,7 +469,17 @@ bool itanium_mangler::dependent_expression(syntax_child c)
         node.child_count > 4)
         return false;
     text("cl");
-    if (!dependent_expression(parts[0]))
+    /* a callee named by an identifier that is no function parameter: its
+       <unresolved-name>, the <source-name> (the overload set is resolved
+       per instantiation, [temp.dep]/2) */
+    syntax_child callee = parts[0];
+    if (callee.is_token() &&
+        !analysis.function_parameter_position(encoding_template,
+                                              callee.index()) &&
+        analysis.token_identifier(callee.index())) {
+        if (!source_name(analysis.token_identifier(callee.index())))
+            return false;
+    } else if (!dependent_expression(callee))
         return false;
     if (node.child_count == 4) {
         syntax_child a = parts[2];

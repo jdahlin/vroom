@@ -1017,6 +1017,7 @@ class parser
     bool at_virt_specifier(unsigned ahead = 0);
     /* an identifier with the special meaning word ([lex.name]/2 Table 4) */
     bool at_word(const char *word, unsigned ahead = 0);
+    bool names_compiler_builtin(uint32_t name);
     /* ( at tokens[ahead] begins a constructor's parameters ([class.ctor]) */
     bool constructor_parameters_follow(unsigned ahead);
     node_index ctor_initializer();

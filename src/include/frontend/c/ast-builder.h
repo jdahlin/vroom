@@ -117,6 +117,14 @@ void ast_builder_toplevel(cc *c, uint32_t s);
 uint32_t ast_builder_node(cc *c, int op, ast_qualified_type t, uint32_t a,
                           uint32_t b, uint32_t c_, uint16_t aux, uint8_t flags);
 uint32_t ast_builder_list(cc *c, const uint32_t *items, uint32_t count);
+/* a builtin of the C front end's table named so (name[0..length)): its
+   signature in the table's letters (the result, then the parameters), or
+   NULL; ast_builder_builtin_call is its call of type t, the arguments
+   converted to the parameters' types (0 if there is no such builtin) */
+const char *ast_builder_builtin_signature(const char *name, size_t length);
+uint32_t ast_builder_builtin_call(cc *c, const char *name, size_t length,
+                                  ast_qualified_type t, const uint32_t *args,
+                                  uint32_t count);
 /* __atomic_load_n(pointer, order): a load of type t, pointer a node of
    type t * */
 uint32_t ast_builder_atomic_load(cc *c, ast_qualified_type t, uint32_t pointer,
