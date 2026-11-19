@@ -414,6 +414,13 @@ entity_index semantic_analysis::compiler_builtin(uint32_t name,
                            types_of.size() - 1, generic, flags);
 }
 
+bool semantic_analysis::builtin_spelled(uint32_t name) const
+{
+    size_t length = 0;
+    const char *spelling = tokens.pp.identifier_spelling(name - 1, &length);
+    return length > 10 && !memcmp(spelling, "__builtin_", 10);
+}
+
 entity_index semantic_analysis::library_builtin(uint32_t name)
 {
     if (!tokens.files.behavior.has(extension::gnu_library_builtins))

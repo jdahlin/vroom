@@ -2037,6 +2037,10 @@ class semantic_analysis
     /* [ext:gnu_library_builtins] the function __builtin_NAME (an
        identifier) declares at its first use, 0 if it is not one */
     entity_index library_builtin(uint32_t name);
+    /* [ext:gnu_library_builtins] whether the name is spelled __builtin_...:
+       [lex.name]/3 reserves it to the implementation, so a scope with
+       names analysis did not follow does not hide the builtin */
+    bool builtin_spelled(uint32_t name) const;
     entity_index compiler_builtin(uint32_t name, const char *spelling,
                                   size_t length);
     entity_index declare_builtin(uint32_t name, uint32_t symbol,

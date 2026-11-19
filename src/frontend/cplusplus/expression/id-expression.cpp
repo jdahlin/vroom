@@ -563,6 +563,12 @@ analysis_result semantic_analysis::id_expression(token_index t,
     entity_index e = found.entity;
     if (!e && !found.unknown)
         e = library_builtin(name);
+    /* [lex.name]/3: a name spelled __builtin_ is the implementation's; a
+       scope with names analysis did not follow (found.unknown with no
+       entity) does not declare it */
+    if (!e && !found.ambiguous && found.unknown && !found.unknown_entity &&
+        builtin_spelled(name))
+        e = library_builtin(name);
     if (!e)
         return not_supported(current_declaration,
                              unknown_name_subclause(found.unknown_entity,
