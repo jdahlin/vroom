@@ -4140,6 +4140,7 @@ class semantic_analysis
     bool has_conversion_functions(entity_index c) const;
     /* ... a base class of c does */
     bool base_has_conversion_functions(entity_index c) const;
+    bool converts_to_non_class(entity_index c) const;
     /* the first conversion function class c itself declares (the others
        follow by next_overload), 0 if none */
     entity_index own_conversion_functions(entity_index c) const;
