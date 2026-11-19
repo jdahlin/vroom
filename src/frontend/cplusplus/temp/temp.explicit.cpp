@@ -57,14 +57,8 @@ analysis_result semantic_analysis::explicit_specialization(node_index n)
         return not_supported(n, "temp.expl.spec");
     bool defines = tree[inner].kind == syntax_kind::function_definition;
     /* [dcl.fct.def.delete], = default: not yet */
-    if (defines) {
-        syntax_child body = tree.children(inner)[tree[inner].child_count - 1];
-        if (!syntax_is(tree, body, syntax_kind::function_body) ||
-            tree[body.index()].child_count != 1 ||
-            !syntax_is(tree, tree.children(body.index())[0],
-                       syntax_kind::compound_statement))
-            return not_supported(n, "temp.expl.spec");
-    }
+    if (defines && !definition_body(inner).plain())
+        return not_supported(n, "temp.expl.spec");
     specified s;
     uint32_t index = 0;
     analysis_result r = named_specialization(n, inner, true, false, s, index);

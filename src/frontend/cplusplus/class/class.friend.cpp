@@ -198,10 +198,7 @@ semantic_analysis::friend_function(entity_index c, node_index n,
             !syntax_is(tree, children[0], syntax_kind::decl_specifier_seq) ||
             !syntax_is(tree, children[2], syntax_kind::function_body))
             return not_supported(n, "class.friend");
-        const syntax_node &b = tree[children[2].index()];
-        if (b.child_count != 1 ||
-            !syntax_is(tree, tree.children(children[2].index())[0],
-                       syntax_kind::compound_statement))
+        if (!function_body_of(children[2]).plain())
             return not_supported(n, "dcl.fct.def.general");
     } else if (node.kind != syntax_kind::member_declaration ||
                node.child_count != 3 ||
@@ -355,7 +352,7 @@ analysis_result semantic_analysis::friend_function_body(entity_index c,
     }
     if (r == analysis_result::well_formed) {
         last_declared = f;
-        r = function_body(n, tree.children(children[2].index())[0]);
+        r = function_body(n, function_body_of(children[2]).compound_statement);
     }
     current_scope = scope;
     return r;

@@ -196,6 +196,55 @@ node_index parser::function_body(const declarator_facts &declarator,
 
 /* ---- semantic analysis ---------------------------------------------- */
 
+function_body_view semantic_analysis::function_body_of(syntax_child body) const
+{
+    using form = function_body_view::form;
+    function_body_view v;
+    if (body.is_token() || !body.index())
+        return v;
+    const auto &b = tree[body.index()];
+    if (b.kind == syntax_kind::function_try_block) {
+        v.kind = form::function_try_block;
+        return v;
+    }
+    if (b.kind != syntax_kind::function_body || !b.child_count)
+        return v;
+    const auto *parts = tree.children(body.index());
+    if (b.child_count == 1 &&
+        syntax_is(tree, parts[0], syntax_kind::unparsed)) {
+        v.kind = form::unparsed;
+    } else if (b.child_count == 1 &&
+               syntax_is(tree, parts[0], syntax_kind::compound_statement)) {
+        v.kind = form::compound;
+        v.compound_statement = parts[0];
+    } else if (b.child_count == 2 &&
+               syntax_is(tree, parts[0], syntax_kind::ctor_initializer) &&
+               syntax_is(tree, parts[1], syntax_kind::compound_statement)) {
+        v.kind = form::compound;
+        v.ctor_initializer = parts[0];
+        v.compound_statement = parts[1];
+    } else if (b.child_count >= 3 && parts[1].is_token() &&
+               syntax_is_punctuator(tokens, parts[0],
+                                    preprocessing_op_or_punc::EQUAL)) {
+        /* = default ; = delete ; = delete ( string-literal ) ; */
+        standard_keyword k = p.keyword_of(tokens[parts[1].index()]);
+        if (k == standard_keyword::default_ && b.child_count == 3)
+            v.kind = form::defaulted;
+        else if (k == standard_keyword::delete_)
+            v.kind = form::deleted;
+    }
+    return v;
+}
+
+function_body_view
+semantic_analysis::definition_body(node_index definition) const
+{
+    const auto &d = tree[definition];
+    if (d.kind != syntax_kind::function_definition || !d.child_count)
+        return {};
+    return function_body_of(tree.children(definition)[d.child_count - 1]);
+}
+
 /*
  * [dcl.fct.def.general]/1: the function-body of a function definition
  * whose declarator analysis has given its entity (last_declared) and its

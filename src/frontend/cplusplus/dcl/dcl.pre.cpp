@@ -844,22 +844,16 @@ analysis_result semantic_analysis::function_definition(node_index n)
     if (r != analysis_result::well_formed)
         return r;
     entity_index f = last_declared;
-    syntax_child body;
-    for (uint32_t i = 0; i < node.child_count; i++)
-        if (syntax_is(tree, tree.children(n)[i], syntax_kind::function_body))
-            body = tree.children(n)[i];
-    if (!f || entity_table[f].kind != entity_kind::function ||
-        body.is_token() || !body.index())
+    if (!f || entity_table[f].kind != entity_kind::function)
         return not_supported(n, "dcl.fct.def.general");
     /* function-body: compound-statement, = delete ; a ctor-initializer, a
        function-try-block and = default are not analysed yet */
-    if (deleted_body(body))
+    auto body = definition_body(n);
+    if (body.deleted())
         return deleted_definition(n, f);
-    const syntax_node &b = tree[body.index()];
-    if (b.child_count != 1 || !syntax_is(tree, tree.children(body.index())[0],
-                                         syntax_kind::compound_statement))
+    if (!body.plain())
         return not_supported(n, "dcl.fct.def.general");
-    return function_body(n, tree.children(body.index())[0]);
+    return function_body(n, body.compound_statement);
 }
 
 /*

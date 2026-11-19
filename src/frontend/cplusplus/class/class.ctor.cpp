@@ -545,7 +545,8 @@ analysis_result semantic_analysis::defaulted_or_deleted_special_member(
     uint8_t access, bool constexpr_specified, bool virtual_specified,
     bool explicit_specified)
 {
-    if (deleted_body(body)) {
+    auto form = function_body_of(body);
+    if (form.deleted()) {
         if (explicit_specified)
             return not_supported(n, "dcl.fct.def.delete");
         analysis_result r = special_member_declarator(
@@ -577,10 +578,7 @@ analysis_result semantic_analysis::defaulted_or_deleted_special_member(
         }
         return deleted_definition(n, last_declared);
     }
-    const syntax_node &b = tree[body.index()];
-    if (b.child_count != 3 || !tree.children(body.index())[1].is_token() ||
-        p.keyword_of(tokens[tree.children(body.index())[1].index()]) !=
-            standard_keyword::default_)
+    if (!form.defaulted())
         return not_supported(n, "dcl.fct.def.general");
     if (access || constexpr_specified)
         return not_supported(n, "dcl.fct.def.default");
@@ -1917,27 +1915,16 @@ uint32_t semantic_analysis::subobject_destructions(entity_index c,
 analysis_result semantic_analysis::special_member_body(node_index definition,
                                                        syntax_child body)
 {
-    const syntax_node &b = tree[body.index()];
-    const syntax_child *parts = tree.children(body.index());
-    syntax_child init;
-    syntax_child compound;
-    if (b.child_count == 1 &&
-        syntax_is(tree, parts[0], syntax_kind::compound_statement)) {
-        compound = parts[0];
-    } else if (b.child_count == 2 &&
-               syntax_is(tree, parts[0], syntax_kind::ctor_initializer) &&
-               syntax_is(tree, parts[1], syntax_kind::compound_statement)) {
-        init = parts[0];
-        compound = parts[1];
-        if (entity_table[last_declared].special != special_member::constructor)
-            return ill_formed(init.index(),
-                              "a ctor-initializer shall appear only in the "
-                              "definition of a constructor",
-                              "class.base.init");
-    } else {
+    auto b = function_body_of(body);
+    if (b.kind != function_body_view::form::compound)
         return not_supported(definition, "dcl.fct.def.general");
-    }
-    return function_body(definition, compound, init);
+    if (b.ctor_initializer.bits &&
+        entity_table[last_declared].special != special_member::constructor)
+        return ill_formed(b.ctor_initializer.index(),
+                          "a ctor-initializer shall appear only in the "
+                          "definition of a constructor",
+                          "class.base.init");
+    return function_body(definition, b.compound_statement, b.ctor_initializer);
 }
 
 /*
