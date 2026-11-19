@@ -3,12 +3,14 @@
    (libc++'s char_traits<char16_t>::compare) */
 typedef decltype(sizeof 0) size_t;
 template <class T> struct ct {};
+template <class T> struct base {
+  typedef T char_type;
+};
 template <> struct ct<char> {
   typedef char char_type;
   static int f(const char_type*, size_t) noexcept;
 };
-template <> struct ct<short> {
-  typedef short char_type;
+template <> struct ct<short> : base<short> {
   static int f(const char_type*, size_t) noexcept;
 };
 [[nodiscard]] inline int ct<char>::f(const char_type* a, size_t n) noexcept {

@@ -829,7 +829,7 @@ node_index parser::elaborated_or_class_specifier(decl_specifier_facts &facts)
     uint32_t name = 0;
     bool template_id = false;
     scope_index primary = 0;
-    token_index template_id_first = 0;
+    token_index template_id_first = 0, template_id_end = 0;
     if (qualifier)
         accept(standard_keyword::template_);
     if (at_identifier()) {
@@ -860,6 +860,7 @@ node_index parser::elaborated_or_class_specifier(decl_specifier_facts &facts)
                 return 0;
             template_id = true;
             template_id_first = id_first;
+            template_id_end = position;
         }
     } else if (qualifier) {
         return expected("an identifier after the nested-name-specifier",
@@ -915,7 +916,7 @@ node_index parser::elaborated_or_class_specifier(decl_specifier_facts &facts)
                             "class.pre");
         if (template_id && explicit_declaration && primary)
             specialization_regions.append(
-                {primary, region, template_id_first, position});
+                {primary, region, template_id_first, template_id_end});
         class_body(name, region, template_id);
         if (failed())
             return 0;
