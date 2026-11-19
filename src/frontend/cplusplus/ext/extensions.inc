@@ -92,6 +92,9 @@ EXTENSION(clang_deleted_function_message, clang,
           "C++26's = delete(\"reason\") (P2573R2) in earlier editions, with a warning")
 EXTENSION(clang_no_operator_names, clang,
           "-fno-operator-names: and, or, ... are identifiers ([lex.digraph]/2 off)")
+EXTENSION(clang_atomic, clang,
+          "clang Language Extensions, C11 _Atomic in C++: _Atomic(T) a type with C11's "
+          "atomic type's layout (C23 6.2.5)")
 EXTENSION(clang_bit_cast, clang,
           "clang Language Extensions: __builtin_bit_cast (type, expression), "
           "std::bit_cast ([bit.cast]) as a primitive")

@@ -48,6 +48,11 @@ ast_qualified_type ast_builder_type_pointer(cc *c, ast_qualified_type to)
     return cc_type_pointer(c, to);
 }
 
+ast_qualified_type ast_builder_type_atomic(cc *c, ast_qualified_type value)
+{
+    return cc_type_atomic(c, value, 0);
+}
+
 ast_qualified_type ast_builder_type_array(cc *c, ast_qualified_type element,
                                           uint64_t count, bool known)
 {

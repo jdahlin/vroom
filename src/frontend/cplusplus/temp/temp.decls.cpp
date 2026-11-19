@@ -1359,6 +1359,7 @@ static bool depends(const types &table, qualified_type t,
     case type_kind::lvalue_reference:
     case type_kind::rvalue_reference:
     case type_kind::pack_expansion:
+    case type_kind::atomic:
         return depends(table, r.operand, parameters, from);
     case type_kind::function: {
         if (depends(table, r.operand, parameters, from))

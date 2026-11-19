@@ -225,6 +225,8 @@ uint64_t semantic_analysis::size_of_type(qualified_type t) const
     case type_kind::lvalue_reference:
     case type_kind::rvalue_reference:
         return size_of_type(record.operand);
+    case type_kind::atomic:
+        return atomic_layout(record.operand, false);
     case type_kind::array:
         if (!record.bound_known)
             return 0;
@@ -244,10 +246,30 @@ uint64_t semantic_analysis::size_of_type(qualified_type t) const
     }
 }
 
+/* [ext:clang_atomic] [impl.clang] _Atomic(T)'s size, or alignment: a T
+   of up to 16 bytes is widened to the next power of two, aligned to it
+   (C11's atomic types as clang lays them out) */
+uint64_t semantic_analysis::atomic_layout(qualified_type value,
+                                          bool alignment) const
+{
+    uint64_t size = size_of_type(value);
+    if (!size || size > 16) {
+        if (alignment)
+            return alignment_of_type(value);
+        return size;
+    }
+    uint64_t widened = 1;
+    while (widened < size)
+        widened <<= 1;
+    return widened;
+}
+
 uint64_t semantic_analysis::alignment_of_type(qualified_type t) const
 {
     const struct type record = type_table[t.unqualified()];
     switch (record.kind) {
+    case type_kind::atomic:
+        return atomic_layout(record.operand, true);
     case type_kind::lvalue_reference:
     case type_kind::rvalue_reference:
     case type_kind::array:

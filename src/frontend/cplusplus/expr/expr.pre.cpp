@@ -21,6 +21,13 @@ analysis_result semantic_analysis::expression(syntax_child e,
     analysis_result r = expression_kind(e, m);
     if (r != analysis_result::well_formed)
         return r;
+    /* [ext:clang_atomic] the operations on an atomic object are not
+       analysed yet */
+    if (type_table[m.type.unqualified()].kind == type_kind::atomic) {
+        if (e.is_token())
+            return not_supported(current_declaration, "ext.clang");
+        return not_supported(e.index(), "ext.clang");
+    }
     /* [expr.type]/2: "If a prvalue initially has the type "cv T", where T
        is a cv-unqualified non-class, non-array type, the type of the
        expression is adjusted to T prior to any further analysis." */

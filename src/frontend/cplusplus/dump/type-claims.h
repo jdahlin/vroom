@@ -78,6 +78,7 @@ static bool write_type_claim_unqualified(const types &table, type_index t,
     case type_kind::dependent:
     case type_kind::placeholder:
     case type_kind::pack_expansion:
+    case type_kind::atomic:
         return false;
     }
     if (!write_type_claim(table, record.operand, out))

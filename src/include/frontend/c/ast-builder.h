@@ -46,6 +46,8 @@ ast_qualified_type ast_builder_type_basic(int kind); /* AST_TYPE_VOID .. */
 ast_qualified_type ast_builder_type_qualified(cc *c, ast_qualified_type t,
                                               int qualifiers);
 ast_qualified_type ast_builder_type_pointer(cc *c, ast_qualified_type to);
+/* _Atomic(value), with C11's layout */
+ast_qualified_type ast_builder_type_atomic(cc *c, ast_qualified_type value);
 /* known false: an array of unknown bound */
 ast_qualified_type ast_builder_type_array(cc *c, ast_qualified_type element,
                                           uint64_t count, bool known);

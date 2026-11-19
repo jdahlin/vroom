@@ -510,6 +510,14 @@ node_index parser::decl_specifier_seq(decl_specifier_facts &facts,
             if (failed())
                 return 0;
             facts.has_defining_type_specifier = true;
+        } else if (at(extension_keyword::atomic)) {
+            /* [ext:clang_atomic] a simple-type-specifier */
+            if (facts.has_defining_type_specifier)
+                break;
+            clang_atomic_type_specifier();
+            if (failed())
+                return 0;
+            facts.has_defining_type_specifier = true;
         } else if (at(extension_keyword::int128)) {
             /* [ext:gnu_int128] a simple-type-specifier */
             add_token();
@@ -1042,6 +1050,7 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
             syntax_is(tree, c, syntax_kind::simple_template_id) ||
             syntax_is(tree, c, syntax_kind::decltype_specifier) ||
             syntax_is(tree, c, syntax_kind::clang_type_transformation) ||
+            syntax_is(tree, c, syntax_kind::clang_atomic_type_specifier) ||
             syntax_is(tree, c, syntax_kind::placeholder_type_specifier))
             continue;
         /* an attribute specifier has rules unless a class-specifier is
@@ -1149,6 +1158,12 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
                 class_type = denoted.unqualified();
                 cv |= denoted.cv();
             } else if (syntax_is(tree, c,
+                                 syntax_kind::clang_atomic_type_specifier)) {
+                /* [ext:clang_atomic] */
+                qualified_type denoted;
+                r = clang_atomic_type(c.index(), denoted);
+                class_type = denoted.unqualified();
+            } else if (syntax_is(tree, c,
                                  syntax_kind::placeholder_type_specifier)) {
                 /* [dcl.spec.auto]: decltype(auto); a type-constraint is
                    [temp.param]'s */
@@ -1188,6 +1203,7 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
                 !syntax_is(tree, c, syntax_kind::typename_specifier) &&
                 !syntax_is(tree, c, syntax_kind::decltype_specifier) &&
                 !syntax_is(tree, c, syntax_kind::clang_type_transformation) &&
+                !syntax_is(tree, c, syntax_kind::clang_atomic_type_specifier) &&
                 !syntax_is(tree, c, syntax_kind::placeholder_type_specifier))
                 declares_class = true;
             continue;

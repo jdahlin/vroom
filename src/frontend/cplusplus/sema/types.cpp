@@ -210,4 +210,13 @@ type_index types::pack_expansion_of(qualified_type pattern)
     return intern(t, nullptr);
 }
 
+/* [ext:clang_atomic] _Atomic(T) */
+type_index types::atomic_of(qualified_type value)
+{
+    type t;
+    t.kind = type_kind::atomic;
+    t.operand = value;
+    return intern(t, nullptr);
+}
+
 } // namespace cplusplus

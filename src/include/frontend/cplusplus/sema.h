@@ -110,6 +110,8 @@ enum class type_kind : uint8_t {
        template parameter pack, the type of a function parameter pack
        ([dcl.fct]/21) in a template's own declaration */
     pack_expansion,
+    /* [ext:clang_atomic] _Atomic(T): operand T */
+    atomic,
 };
 
 struct type {
@@ -167,6 +169,7 @@ class types
     type_index of_entity(type_kind kind, uint32_t entity);
     type_index pointer_to_member(uint32_t class_entity, qualified_type member);
     type_index pack_expansion_of(qualified_type pattern);
+    type_index atomic_of(qualified_type value);
 
     const type &operator[](type_index t) const
     {
@@ -2324,6 +2327,8 @@ class semantic_analysis
     analysis_result clang_type_trait(node_index n, expression_meaning &m);
     analysis_result gnu_offsetof(node_index n, expression_meaning &m);
     analysis_result clang_bit_cast(node_index n, expression_meaning &m);
+    analysis_result clang_atomic_type(node_index n, qualified_type &type);
+    uint64_t atomic_layout(qualified_type value, bool alignment) const;
     analysis_result potentially_throwing(node_index n, uint32_t x,
                                          bool &throwing);
     analysis_result conditional_operands(node_index n,
