@@ -459,6 +459,7 @@ enum class extension_keyword : uint8_t {
     nullability,
     offsetof_,
     bit_cast,
+    convertvector,
     atomic,
     bit_int,
     source_location,
@@ -890,6 +891,8 @@ class parser
     node_index gnu_offsetof_expression();
     /* ---- ext/clang/bit_cast.cpp: __builtin_bit_cast(T, e) */
     node_index clang_bit_cast_expression();
+    /* ---- ext/clang/convertvector.cpp: __builtin_convertvector(e, T) */
+    node_index clang_convertvector_expression();
     /* ---- ext/clang/source_location.cpp: __builtin_source_location() */
     node_index clang_source_location_expression();
     /* ---- ext/clang/atomic.cpp: _Atomic(T) */

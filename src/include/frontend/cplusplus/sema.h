@@ -1228,6 +1228,9 @@ enum class conversion_kind : uint8_t {
     /* [ext:clang_bit_cast] [bit.cast]/1: the operand's object
        representation as a value of another type of the same size */
     bit_cast,
+    /* [ext:clang_convertvector] each element of a vector converted to
+       the element type of a vector type of as many elements */
+    vector_convert,
 };
 
 /* [expr.cast]/4: the casts that may perform an explicit conversion */
@@ -2440,6 +2443,7 @@ class semantic_analysis
     analysis_result clang_type_trait(node_index n, expression_meaning &m);
     analysis_result gnu_offsetof(node_index n, expression_meaning &m);
     analysis_result clang_bit_cast(node_index n, expression_meaning &m);
+    analysis_result clang_convertvector(node_index n, expression_meaning &m);
     bool builtin_addressof_call(node_index n);
     analysis_result builtin_addressof(node_index n, expression_meaning &m);
     analysis_result clang_source_location(node_index n, expression_meaning &m);

@@ -2184,6 +2184,8 @@ uint32_t c_lowering::conversion(const semantic_node &n)
         return cast(expression(n.a), t, AST_CAST_POINTER_TO_INTEGER);
     case conversion_kind::bit_cast:
         return cast(expression(n.a), t, AST_CAST_BIT_CAST);
+    case conversion_kind::vector_convert:
+        return ast_builder_convert_vector(c, t, expression(n.a));
     case conversion_kind::integral_to_pointer:
         return cast(expression(n.a), t, AST_CAST_INTEGER_TO_POINTER);
     case conversion_kind::to_void:

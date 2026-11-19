@@ -157,6 +157,11 @@ PRODUCTION(gnu_offsetof, "gnu-offsetof-member-designator", "gnu-offsetof-member-
 PRODUCTION(clang_bit_cast, "primary-expression", "clang-bit-cast-expression")
 PRODUCTION(clang_bit_cast, "clang-bit-cast-expression", "__builtin_bit_cast ( type-id , assignment-expression )")
 
+/* ---- clang Language Extensions, __builtin_convertvector ---- */
+
+PRODUCTION(clang_convertvector, "primary-expression", "clang-convertvector-expression")
+PRODUCTION(clang_convertvector, "clang-convertvector-expression", "__builtin_convertvector ( assignment-expression , type-id )")
+
 /* ---- clang Language Extensions, C11 _Atomic in C++ ---- */
 
 PRODUCTION(clang_atomic, "simple-type-specifier", "clang-atomic-type-specifier")

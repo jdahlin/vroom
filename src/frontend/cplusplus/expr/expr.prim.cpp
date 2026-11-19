@@ -73,6 +73,8 @@ node_index parser::primary_expression()
         return gnu_offsetof_expression();
     if (at(extension_keyword::bit_cast)) /* [ext.clang] */
         return clang_bit_cast_expression();
+    if (at(extension_keyword::convertvector)) /* [ext.clang] */
+        return clang_convertvector_expression();
     if (at(extension_keyword::source_location)) /* [ext.clang] */
         return clang_source_location_expression();
     switch (keyword_of(peek())) {

@@ -128,6 +128,10 @@ const char *ast_builder_builtin_signature(const char *name, size_t length);
 uint32_t ast_builder_builtin_call(cc *c, const char *name, size_t length,
                                   ast_qualified_type t, const uint32_t *args,
                                   uint32_t count);
+/* __builtin_convertvector(vector, t): each element of vector converted
+   to the element type of t, a vector type of as many elements */
+uint32_t ast_builder_convert_vector(cc *c, ast_qualified_type t,
+                                    uint32_t vector);
 /* __atomic_load_n(pointer, order): a load of type t, pointer a node of
    type t * */
 uint32_t ast_builder_atomic_load(cc *c, ast_qualified_type t, uint32_t pointer,

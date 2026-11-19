@@ -116,6 +116,9 @@ EXTENSION(clang_source_location, clang,
 EXTENSION(clang_bit_cast, clang,
           "clang Language Extensions: __builtin_bit_cast (type, expression), "
           "std::bit_cast ([bit.cast]) as a primitive")
+EXTENSION(clang_convertvector, clang,
+          "clang Language Extensions, Vector Operations: __builtin_convertvector (vector, type), "
+          "each element converted to the vector type's element type")
 
 /* Microsoft (-fms-extensions) */
 EXTENSION(microsoft_pragma_operator, microsoft, "MSVC: __pragma(pp-tokens), the #pragma operator")

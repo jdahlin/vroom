@@ -266,6 +266,10 @@ node_index parser::lambda_declarator(scope_index *parameters)
     if (!accept(preprocessing_op_or_punc::RIGHT_PARENTHESIS))
         return expected("')' to close the lambda's parameters",
                         "expr.prim.lambda");
+    /* [ext:gnu_attributes] right after the parameters, as clang */
+    gnu_attributes_opt();
+    if (failed())
+        return 0;
     size_t specifiers_mark = begin_node();
     token_index specifiers_first = position;
     unsigned specifiers = 0;
@@ -538,6 +542,14 @@ semantic_analysis::lambda_call_type(node_index n, node_index d,
             if (syntax_is(tree, part, syntax_kind::decl_specifier_seq)) {
                 for (uint32_t k = 0; k < tree[part.index()].child_count; k++)
                     specifiers.append(tree.children(part.index())[k]);
+            } else if (syntax_is(tree, part,
+                                 syntax_kind::gnu_attribute_specifier)) {
+                /* [ext:gnu_attributes] always_inline and the like: no
+                   effect on the closure type */
+                gnu_attributes g;
+                analysis_result a = gnu_attribute_specifier(part.index(), g);
+                if (a != analysis_result::well_formed)
+                    r = a;
             } else if (part.is_token()) {
                 specifiers.append(part);
             }

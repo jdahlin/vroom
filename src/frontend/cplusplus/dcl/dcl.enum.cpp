@@ -683,8 +683,17 @@ analysis_result semantic_analysis::enum_specifier_rules(node_index n,
             init = tree.children(c.index())[2];
             has_init = true;
         }
+        /* [dcl.enum]/2: "The optional attribute-specifier-seq in an
+           enumerator appertains to that enumerator": one without effect
+           (Apple's availability) is passed over */
+        if (syntax_is(tree, id, syntax_kind::enumerator)) {
+            const syntax_child *attrs = tree.children(id.index());
+            for (uint32_t i = 1; i < tree[id.index()].child_count; i++)
+                if (!class_head_attributes_without_effect(attrs[i]))
+                    return not_supported(n, "dcl.enum");
+            id = attrs[0];
+        }
         if (!id.is_token() || tokens[id.index()].kind != token_kind::identifier)
-            /* an attribute-specifier-seq on the enumerator */
             return not_supported(n, "dcl.enum");
         token_index at = id.index();
         __int128 value;
