@@ -620,7 +620,7 @@ analysis_result semantic_analysis::defaulted_or_deleted_special_member(
     }
     if (!form.defaulted())
         return not_supported(n, "dcl.fct.def.general");
-    if (access || constexpr_specified)
+    if (access)
         return not_supported(n, "dcl.fct.def.default");
     qualified_type type = qualified_type::make(
         type_table.fundamental(fundamental_type::void_), cv_none);
@@ -641,6 +641,14 @@ analysis_result semantic_analysis::defaulted_or_deleted_special_member(
     if (f.variadic)
         return not_supported(n, "dcl.fct.def.default");
     entity &x = entity_table[c];
+    /* [dcl.fct.def.default]/3: constexpr only if constexpr-compatible.  The
+       default constructor of a class without virtual bases is
+       ([class.default.ctor]/4 with [dcl.constexpr]/4 as of C++20, which
+       no longer asks for every member to be initialized); the other
+       functions are not analysed */
+    if (constexpr_specified &&
+        (m.destructor || f.parameter_count || x.virtual_base_count))
+        return not_supported(n, "dcl.fct.def.default");
     if (m.destructor) {
         /* [class.dtor]/4: as the implicitly-declared destructor */
         if (x.destructor || f.parameter_count || explicit_specified)
