@@ -102,7 +102,7 @@ static bool binding_data_member(const entity &m)
 
 /* /3: element i of the array object, "*(e + i)" by built-in [expr.sub]:
    object becomes the element */
-analysis_result semantic_analysis::array_element(node_index n, token_index at,
+analysis_result semantic_analysis::array_element(SyntaxRef n, token_index at,
                                                  expression_meaning &object,
                                                  uint64_t i)
 {
@@ -117,7 +117,7 @@ analysis_result semantic_analysis::array_element(node_index n, token_index at,
     return r;
 }
 
-analysis_result semantic_analysis::binding_variable(node_index n,
+analysis_result semantic_analysis::binding_variable(SyntaxRef n,
                                                     expression_meaning &m,
                                                     qualified_type type,
                                                     bool named, bool direct,
@@ -174,7 +174,7 @@ analysis_result semantic_analysis::binding_variable(node_index n,
  * reference bound to it, whose elements initialize e's.
  */
 analysis_result semantic_analysis::array_binding_object(
-    node_index n, token_index at, expression_meaning &m, const specified &s,
+    SyntaxRef n, token_index at, expression_meaning &m, const specified &s,
     bool direct, entity_index &e)
 {
     entity_index from = 0;
@@ -218,7 +218,7 @@ analysis_result semantic_analysis::array_binding_object(
 
 /* std::NAME, found as [namespace.qual] finds it (in an inline namespace
    of std too) */
-analysis_result semantic_analysis::std_class_template(node_index n,
+analysis_result semantic_analysis::std_class_template(SyntaxRef n,
                                                       const char *name,
                                                       uint32_t &template_index)
 {
@@ -245,7 +245,7 @@ analysis_result semantic_analysis::std_class_template(node_index n,
 /* /4: get<i> and std::tuple_element<i, E>'s argument i, "an index
    prvalue of type std::size_t", for the first parameter of the template
    (a non-type one of integral type) */
-analysis_result semantic_analysis::index_argument(node_index n,
+analysis_result semantic_analysis::index_argument(SyntaxRef n,
                                                   uint32_t template_index,
                                                   uint32_t i,
                                                   template_argument &out)
@@ -274,7 +274,7 @@ analysis_result semantic_analysis::index_argument(node_index n,
  * such member
  */
 analysis_result semantic_analysis::tuple_trait_member(
-    node_index n, const char *trait, bool indexed, uint32_t i,
+    SyntaxRef n, const char *trait, bool indexed, uint32_t i,
     qualified_type type, const char *member, entity_index &found)
 {
     found = 0;
@@ -320,7 +320,7 @@ analysis_result semantic_analysis::tuple_trait_member(
  * with a member named value, the expression std::tuple_size<E>::value
  * shall be a well-formed integral constant expression"
  */
-analysis_result semantic_analysis::tuple_size_of(node_index n,
+analysis_result semantic_analysis::tuple_size_of(SyntaxRef n,
                                                  qualified_type type,
                                                  bool &found, uint64_t &value)
 {
@@ -355,7 +355,7 @@ analysis_result semantic_analysis::tuple_size_of(node_index n,
 }
 
 /* /4: "the type Ti designated by std::tuple_element<i, E>::type" */
-analysis_result semantic_analysis::tuple_element_of(node_index n, uint32_t i,
+analysis_result semantic_analysis::tuple_element_of(SyntaxRef n, uint32_t i,
                                                     qualified_type type,
                                                     qualified_type &element)
 {
@@ -383,9 +383,8 @@ analysis_result semantic_analysis::tuple_element_of(node_index n, uint32_t i,
  * The function templates of the name are candidates with the explicit
  * template argument i ([temp.over]/1).
  */
-analysis_result semantic_analysis::binding_get_call(node_index n,
-                                                    token_index at, uint32_t i,
-                                                    entity_index e,
+analysis_result semantic_analysis::binding_get_call(SyntaxRef n, token_index at,
+                                                    uint32_t i, entity_index e,
                                                     qualified_type type,
                                                     expression_meaning &m)
 {
@@ -441,7 +440,8 @@ analysis_result semantic_analysis::binding_get_call(node_index n,
         owned_array<uint32_t> one;
         one.append(g);
         r = template_candidates(n, one, &object, 1, candidates,
-                                &first_arguments, &all, nullptr, 0, &given);
+                                &first_arguments, &all, nullptr, SyntaxRef(),
+                                &given);
         if (r != analysis_result::well_formed)
             return r;
     }
@@ -486,7 +486,7 @@ uint32_t semantic_analysis::binding_member_count(entity_index c) const
  * of the same base class of E, ... E shall not have an anonymous union
  * member": the class whose members they are
  */
-analysis_result semantic_analysis::binding_members_class(node_index n,
+analysis_result semantic_analysis::binding_members_class(SyntaxRef n,
                                                          entity_index c,
                                                          entity_index &holder)
 {
@@ -525,10 +525,10 @@ analysis_result semantic_analysis::binding_members_class(node_index n,
 }
 
 analysis_result semantic_analysis::structured_binding_declaration(
-    node_index declaration, uint32_t first, const specified &s,
+    SyntaxRef declaration, uint32_t first, const specified &s,
     const expression_meaning *supplied)
 {
-    auto node = syntax(declaration);
+    auto node = declaration;
     uint32_t i = first;
     bool reference = false, rvalue = false;
     if (node[i].is(preprocessing_op_or_punc::AMPERSAND)) {
@@ -862,7 +862,7 @@ analysis_result semantic_analysis::structured_binding_use(token_index t,
         if (r == analysis_result::well_formed && x.binding_target) {
             r = member_access(t, x.binding_target, m);
         } else if (r == analysis_result::well_formed) {
-            r = array_element(current_declaration, t, m, x.field);
+            r = array_element(syntax(current_declaration), t, m, x.field);
         }
     }
     if (r != analysis_result::well_formed)

@@ -322,7 +322,7 @@ semantic_analysis::class_sequence(const expression_meaning &a,
         constructors.append(k);
     if (entity_table[c1].constructor_templates) {
         owned_array<overload_candidate> specializations;
-        if (constructor_template_candidates(0, c1, &a, 1, true,
+        if (constructor_template_candidates(SyntaxRef(), c1, &a, 1, true,
                                             specializations) !=
             analysis_result::well_formed)
             return of_form(sequence::form::unknown);

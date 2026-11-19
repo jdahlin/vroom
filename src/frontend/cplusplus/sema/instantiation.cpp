@@ -79,9 +79,10 @@ semantic_analysis::instantiate(node_index at, entity_index template_entity,
         bool lambda = syntax(ft.declarator).is(syntax_kind::lambda_expression);
         qualified_type lambda_type;
         if (lambda)
-            r = lambda_specialization(ft.declarator, false, lambda_type, 0);
+            r = lambda_specialization(syntax(ft.declarator), false, lambda_type,
+                                      0);
         else if (constructor && specifiers)
-            r = constructor_specifiers(d_syntax[d_skip].index(), s);
+            r = constructor_specifiers(syntax(d_syntax[d_skip].index()), s);
         else if (specifiers)
             r = decl_specifier_seq(d_syntax[d_skip].index(), s, false);
         qualified_type type = s.type;
@@ -96,7 +97,8 @@ semantic_analysis::instantiate(node_index at, entity_index template_entity,
             member_template_declarator(2 * !is_namespace(t.enclosing));
             if (constructor)
                 r = constructor_template_declarator(
-                    ft.declarator, d_syntax[d_skip + specifiers], type, m);
+                    syntax(ft.declarator), d_syntax[d_skip + specifiers], type,
+                    m);
             else
                 r = declarator(ft.declarator, d_syntax[d_skip + specifiers],
                                type, m);
@@ -105,7 +107,7 @@ semantic_analysis::instantiate(node_index at, entity_index template_entity,
         entity_index e = 0;
         if (r == analysis_result::well_formed) {
             instantiating = index + 1;
-            r = declare_specialization(ft.declarator, m.id, type, s, e);
+            r = declare_specialization(syntax(ft.declarator), m.id, type, s, e);
             instantiating = 0;
         }
         /* [dcl.fct.def.delete]/2: a specialization of a deleted template
@@ -127,7 +129,8 @@ semantic_analysis::instantiate(node_index at, entity_index template_entity,
            uses it */
         if (r == analysis_result::well_formed && ft.default_arguments) {
             size_t unsupported_before = unsupported.size();
-            if (default_arguments(ft.declarator, e, entity_kind::function,
+            if (default_arguments(syntax(ft.declarator), e,
+                                  entity_kind::function,
                                   true) != analysis_result::well_formed) {
                 unsupported.resize(unsupported_before);
                 entity_table[e].unknown_defaults = true;
@@ -206,7 +209,8 @@ analysis_result semantic_analysis::instantiate_definition(node_index at,
     /* (leave_instantiation drops the claims of the template's expressions:
        they are about one specialization, which clang makes none of) */
     instantiation_context context;
-    enter_instantiation(context, instantiations[index].scope, ft.declaration);
+    enter_instantiation(context, instantiations[index].scope,
+                        syntax(ft.declaration));
     expanding = false;
     instantiating = index + 1;
     instantiations[index].defining = true;
@@ -227,18 +231,18 @@ analysis_result semantic_analysis::instantiate_definition(node_index at,
         function_cv = 0;
         function_parameters.clear();
         r = constructor_template_declarator(
-            ft.definition, d_syntax[d_skip + specifiers], type, m);
+            syntax(ft.definition), d_syntax[d_skip + specifiers], type, m);
         last_declared = instantiations[index].specialization;
         if (r == analysis_result::well_formed)
             r = special_member_body(
                 d_syntax, d_syntax[d_skip + specifiers + 1 +
-                                   (static_cast<bool>(
-                                       trailing_constraint(ft.declaration)))]
+                                   (static_cast<bool>(trailing_constraint(
+                                       syntax(ft.declaration))))]
                               .function_body());
     } else if (syntax(ft.definition).is(syntax_kind::lambda_expression)) {
         /* a generic lambda's ([expr.prim.lambda.closure]/3) */
         qualified_type type;
-        r = lambda_specialization(ft.definition, true, type,
+        r = lambda_specialization(syntax(ft.definition), true, type,
                                   instantiations[index].specialization);
     } else {
         r = function_definition(syntax(ft.definition));
@@ -430,7 +434,7 @@ analysis_result semantic_analysis::define_class_instantiation(node_index at,
     size_t unsupported_before = unsupported.size();
     instantiation_context context;
     enter_instantiation(context, entity_table[ft.entity].enclosing,
-                        definition.declaration);
+                        syntax(definition.declaration));
     declaration_access = 0;
     instantiating = 0;
     class_instantiating = index + 1;
@@ -471,8 +475,8 @@ void semantic_analysis::instantiate_pending()
     for (size_t i = 0; i < postponed_bodies.size(); i++) {
         const postponed_body b = postponed_bodies[i];
         instantiation_context context;
-        enter_instantiation(context, b.scope, b.declaration);
-        member_function_body(b.c, b.body);
+        enter_instantiation(context, b.scope, syntax(b.declaration));
+        member_function_body(b.c, syntax(b.body));
         leave_instantiation(context);
     }
     postponed_bodies.clear();
@@ -504,7 +508,7 @@ void semantic_analysis::instantiate_pending()
  * body finds them (its parameter scope's enclosing scope is the function).
  */
 analysis_result semantic_analysis::declare_specialization(
-    node_index declaration, token_index id, qualified_type type,
+    SyntaxRef declaration, token_index id, qualified_type type,
     const specified &s, entity_index &declared_entity)
 {
     uint32_t index = instantiating - 1;
@@ -578,7 +582,7 @@ analysis_result semantic_analysis::declare_specialization(
  * which clang emits linkonce_odr where used).
  */
 analysis_result semantic_analysis::declare_variable_specialization(
-    node_index declaration, qualified_type type, const specified &s,
+    SyntaxRef declaration, qualified_type type, const specified &s,
     entity_index &declared_entity)
 {
     uint32_t index = variable_instantiating - 1;
@@ -737,7 +741,7 @@ bool semantic_analysis::specialization_address(entity_index e, uint32_t i,
  */
 void semantic_analysis::enter_instantiation(instantiation_context &c,
                                             entity_index scope,
-                                            node_index declaration)
+                                            SyntaxRef declaration)
 {
     c.scope = current_scope;
     c.defining_class = defining_class;
@@ -763,7 +767,7 @@ void semantic_analysis::enter_instantiation(instantiation_context &c,
     c.uses_before = name_uses.size();
     current_scope = scope;
     current_declaration = declaration;
-    lookup_horizon = syntax(declaration).first_token();
+    lookup_horizon = declaration.first_token();
     defining_class = 0;
     in_condition = false;
     overloaded_callee = 0;

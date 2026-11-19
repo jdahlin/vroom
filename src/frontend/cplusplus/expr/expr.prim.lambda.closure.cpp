@@ -18,7 +18,7 @@
 namespace cplusplus
 {
 
-analysis_result semantic_analysis::closure_class(entity_index c, node_index n,
+analysis_result semantic_analysis::closure_class(entity_index c, SyntaxRef n,
                                                  bool has_capture)
 {
     /* [expr.prim.lambda.closure]/13: "The closure type associated with a
@@ -82,13 +82,13 @@ analysis_result semantic_analysis::closure_class(entity_index c, node_index n,
  */
 analysis_result semantic_analysis::closure_conversion(entity_index c,
                                                       entity_index call,
-                                                      node_index n)
+                                                      SyntaxRef n)
 {
     qualified_type function_type = entity_table[call].type;
     const struct type f = type_table[function_type.unqualified()];
     if (f.variadic || contains_placeholder(f.operand))
         return not_supported(n, "expr.prim.lambda.closure");
-    token_index at = syntax(n).first_token();
+    token_index at = n.first_token();
     static const char invoke_spelling[] = "__invoke";
     uint32_t invoke_name =
         tokens.pp.identifier(invoke_spelling, sizeof invoke_spelling - 1) + 1;
@@ -195,7 +195,7 @@ analysis_result semantic_analysis::closure_conversion(entity_index c,
     uint32_t items[2] = {declared, statement};
     uint32_t block = statement_node(semantic_kind::block, at);
     semantics.set_list(block, items, 2);
-    finish_synthesized(sf, current_declaration, at, block);
+    finish_synthesized(sf, syntax(current_declaration), at, block);
 
     /* the conversion function: __invoke's address */
     begin_synthesized(
@@ -216,7 +216,7 @@ analysis_result semantic_analysis::closure_conversion(entity_index c,
     statement = statement_node(semantic_kind::return_statement, at, value.node);
     block = statement_node(semantic_kind::block, at);
     semantics.set_list(block, &statement, 1);
-    finish_synthesized(sf, current_declaration, at, block);
+    finish_synthesized(sf, syntax(current_declaration), at, block);
     return analysis_result::well_formed;
 }
 

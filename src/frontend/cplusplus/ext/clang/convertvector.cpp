@@ -42,10 +42,10 @@ node_index parser::clang_convertvector_expression()
 /* [ext:clang_convertvector] a prvalue of the type-id's type; the operand
    and the type-id are vectors of as many elements.  A dependent one waits
    for the instantiation ([temp.dep.constexpr]) */
-analysis_result semantic_analysis::clang_convertvector(node_index n,
+analysis_result semantic_analysis::clang_convertvector(SyntaxRef n,
                                                        expression_meaning &m)
 {
-    auto children = syntax(n);
+    auto children = n;
     analysis_result r = expression(children[2], m);
     if (r != analysis_result::well_formed)
         return r;

@@ -276,10 +276,10 @@ semantic_analysis::clang_type_transformation(ClangTypeTransformation n,
      "T and U name the same type with the same cv-qualifications".
    A template's own operands are dependent: the template is analysed with
    its arguments when instantiated, as sizeof's operand is */
-analysis_result semantic_analysis::clang_type_trait(node_index n,
+analysis_result semantic_analysis::clang_type_trait(SyntaxRef n,
                                                     expression_meaning &m)
 {
-    auto node = syntax(n);
+    auto node = n;
     owned_buffer written;
     tokens.spelling(node[0].token(), written.get());
     const char *name = reinterpret_cast<const char *>(written.data());
@@ -339,10 +339,10 @@ bool semantic_analysis::is_builtin_common_type(uint32_t name) const
 /* a builtin template's template-arguments as written, each with whether
    it is a pack expansion */
 analysis_result semantic_analysis::builtin_template_arguments(
-    node_index id, owned_array<SyntaxElement> &written,
+    SyntaxRef id, owned_array<SyntaxElement> &written,
     owned_array<bool> &expansion)
 {
-    auto parts = syntax(id);
+    auto parts = id;
     for (uint32_t i = 2; i + 1 < parts.size(); i++) {
         if (parts[i].is(preprocessing_op_or_punc::ELLIPSIS)) {
             if (written.empty() || expansion.back())
@@ -351,7 +351,7 @@ analysis_result semantic_analysis::builtin_template_arguments(
             continue;
         }
         if (parts[i].is(syntax_kind::template_argument_list)) {
-            if (!expansion_list(parts[i].index(), written, expansion))
+            if (!expansion_list(syntax(parts[i].index()), written, expansion))
                 return not_supported(id, "temp.variadic");
         } else {
             written.append(parts[i]);
@@ -371,7 +371,7 @@ analysis_result semantic_analysis::builtin_template_arguments(
    expansion's once per element; dependent when one is, or when it expands
    a template's own pack not bound to elements */
 analysis_result semantic_analysis::builtin_template_types(
-    node_index id, const owned_array<SyntaxElement> &written,
+    SyntaxRef id, const owned_array<SyntaxElement> &written,
     const owned_array<bool> &expansion, size_t from,
     owned_array<qualified_type> &types, bool &dependent)
 {
@@ -416,7 +416,7 @@ analysis_result semantic_analysis::builtin_template_types(
     return analysis_result::well_formed;
 }
 
-analysis_result semantic_analysis::builtin_common_type(node_index id,
+analysis_result semantic_analysis::builtin_common_type(SyntaxRef id,
                                                        type_index &type)
 {
     owned_array<SyntaxElement> written;
@@ -492,7 +492,7 @@ bool semantic_analysis::is_builtin_type_pack_element(uint32_t name) const
     return name == tokens.pp.identifier(spelled, sizeof spelled - 1) + 1;
 }
 
-analysis_result semantic_analysis::builtin_type_pack_element(node_index id,
+analysis_result semantic_analysis::builtin_type_pack_element(SyntaxRef id,
                                                              type_index &type)
 {
     owned_array<SyntaxElement> written;
@@ -560,7 +560,7 @@ bool semantic_analysis::is_builtin_make_integer_seq(uint32_t name) const
     return name == tokens.pp.identifier(spelled, sizeof spelled - 1) + 1;
 }
 
-analysis_result semantic_analysis::builtin_make_integer_seq(node_index id,
+analysis_result semantic_analysis::builtin_make_integer_seq(SyntaxRef id,
                                                             type_index &type)
 {
     owned_array<SyntaxElement> written;
@@ -656,7 +656,7 @@ analysis_result semantic_analysis::builtin_make_integer_seq(node_index id,
 
 /* [meta.trans.other]/3: the common type of count types */
 analysis_result
-semantic_analysis::common_type_of(node_index id, entity_index base,
+semantic_analysis::common_type_of(SyntaxRef id, entity_index base,
                                   const qualified_type *types, uint32_t count,
                                   common_found &found, qualified_type &out)
 {
@@ -697,7 +697,7 @@ semantic_analysis::common_type_of(node_index id, entity_index base,
 
 /* [meta.trans.other]/3.3: the common type of two types */
 analysis_result
-semantic_analysis::common_type_pair(node_index id, entity_index base,
+semantic_analysis::common_type_pair(SyntaxRef id, entity_index base,
                                     qualified_type a, qualified_type b,
                                     common_found &found, qualified_type &out)
 {
@@ -748,7 +748,7 @@ semantic_analysis::common_type_pair(node_index id, entity_index base,
 }
 
 /* decltype(false ? declval<A>() : declval<B>()), if it is a type */
-analysis_result semantic_analysis::common_conditional(node_index id,
+analysis_result semantic_analysis::common_conditional(SyntaxRef id,
                                                       qualified_type a,
                                                       qualified_type b,
                                                       common_found &found,
@@ -818,7 +818,7 @@ analysis_result semantic_analysis::common_conditional(node_index id,
 /* the type the template named (a class or alias template) denotes with
    type arguments, its last parameter a pack taking the rest */
 analysis_result
-semantic_analysis::template_with_types(node_index id, entity_index named,
+semantic_analysis::template_with_types(SyntaxRef id, entity_index named,
                                        const qualified_type *types,
                                        uint32_t count, type_index &type)
 {
@@ -884,7 +884,7 @@ semantic_analysis::template_with_types(node_index id, entity_index named,
  * corresponding types are signed char and unsigned char; the character
  * types and enumerations take the third rule.)
  */
-analysis_result semantic_analysis::changed_signedness(node_index n,
+analysis_result semantic_analysis::changed_signedness(SyntaxRef n,
                                                       qualified_type t,
                                                       bool to_signed,
                                                       qualified_type &type)

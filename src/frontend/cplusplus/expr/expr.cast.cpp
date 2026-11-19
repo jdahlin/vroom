@@ -167,7 +167,8 @@ analysis_result semantic_analysis::explicit_conversion(node_index at,
            variable as the result of the conversion" */
         owned_array<expression_meaning> arguments;
         arguments.append(m);
-        return class_direct_initialization(at, target.entity, arguments, m);
+        return class_direct_initialization(syntax(at), target.entity, arguments,
+                                           m);
     }
     if (type_table[m.type.unqualified()].kind == type_kind::class_type) {
         if (!by_static)
@@ -751,9 +752,9 @@ analysis_result semantic_analysis::reference_cast(node_index at,
  * rvalue reference to function type and an xvalue if T is an rvalue
  * reference to object type; otherwise the result is a prvalue."
  */
-analysis_result semantic_analysis::cast(node_index n, expression_meaning &m)
+analysis_result semantic_analysis::cast(SyntaxRef n, expression_meaning &m)
 {
-    auto node = syntax(n);
+    auto node = n;
     if (node.size() != 4 || !node[1].is(syntax_kind::type_id))
         return not_supported(n, "expr.cast");
     qualified_type to;

@@ -26,7 +26,7 @@
 namespace cplusplus
 {
 
-analysis_result semantic_analysis::default_arguments(node_index n,
+analysis_result semantic_analysis::default_arguments(SyntaxRef n,
                                                      entity_index f,
                                                      entity_kind kind,
                                                      bool specialization)
@@ -184,8 +184,8 @@ analysis_result semantic_analysis::member_default_arguments(entity_index c)
             function_parameters.append(member_default_parameters[p.first + i]);
         current_scope = c;
         analysing_member_defaults = true;
-        analysis_result r =
-            default_arguments(p.declaration, p.function, entity_kind::function);
+        analysis_result r = default_arguments(syntax(p.declaration), p.function,
+                                              entity_kind::function);
         analysing_member_defaults = false;
         current_scope = scope;
         if (r != analysis_result::well_formed)
@@ -202,7 +202,7 @@ analysis_result semantic_analysis::member_default_arguments(entity_index c)
 }
 
 void semantic_analysis::defer_default_arguments(
-    entity_index f, node_index declaration,
+    entity_index f, SyntaxRef declaration,
     const owned_array<parameter_meaning> &list)
 {
     pending_default_arguments p;

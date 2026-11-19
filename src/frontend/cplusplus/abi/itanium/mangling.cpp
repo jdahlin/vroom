@@ -351,7 +351,8 @@ bool itanium_mangler::specialization_encoding(entity_index e)
        is the closure type's, closure_type_name) */
     bool trailing = false;
     if (table[scope].lambda)
-        constraint = analysis.lambda_constraint(table[scope].lambda, &trailing);
+        constraint = analysis.lambda_constraint(
+            analysis.syntax(table[scope].lambda), &trailing);
     else if ((constraint = analysis.template_trailing_constraint(pattern_of)))
         trailing = true;
     if (constraint && trailing) {
@@ -1675,8 +1676,8 @@ bool itanium_mangler::closure_type_name(entity_index c)
         /* [impl.clang] the template-head's requires-clause: Q and its
            expression */
         bool trailing = false;
-        SyntaxElement constraint =
-            analysis.lambda_constraint(table[c].lambda, &trailing);
+        SyntaxElement constraint = analysis.lambda_constraint(
+            analysis.syntax(table[c].lambda), &trailing);
         if (constraint && !trailing) {
             text("Q");
             if (!constraint_expression(call, constraint))

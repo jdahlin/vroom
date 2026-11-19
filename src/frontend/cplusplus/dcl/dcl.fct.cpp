@@ -328,7 +328,7 @@ analysis_result semantic_analysis::parameter_declaration(
  * noexcept_opt function of parameter-type-list cv-qualifier-seq_opt
  * ref-qualifier_opt returning T".
  */
-analysis_result semantic_analysis::function(node_index parameters,
+analysis_result semantic_analysis::function(SyntaxRef parameters,
                                             qualified_type &type)
 {
     /* [dcl.fct]/11: "Functions shall not have a return type of type array or
@@ -340,7 +340,7 @@ analysis_result semantic_analysis::function(node_index parameters,
                           "array or function",
                           "dcl.fct");
     using enum preprocessing_op_or_punc;
-    auto node = syntax(parameters);
+    auto node = parameters;
     /* the parameter-declarations and the ellipsis, from the clause and its
        list: ( clause ) is the first and last child */
     owned_array<node_index> declarations;
@@ -436,7 +436,7 @@ analysis_result semantic_analysis::function(node_index parameters,
         uint32_t elements = 0;
         token_index ellipsis = 0;
         analysis_result r = parameter_pack_expansion(
-            declarations[k], k + 1 == declarations.size() && !variadic,
+            syntax(declarations[k]), k + 1 == declarations.size() && !variadic,
             elements, ellipsis);
         if (r != analysis_result::well_formed)
             return r;
@@ -545,8 +545,8 @@ analysis_result semantic_analysis::function(node_index parameters,
     function_cv = cv;
     function_exceptions_specified = specified_exceptions;
     if (exceptions) {
-        analysis_result r =
-            parameter_scope_noexcept(exceptions, may_qualify, non_throwing);
+        analysis_result r = parameter_scope_noexcept(syntax(exceptions),
+                                                     may_qualify, non_throwing);
         if (r != analysis_result::well_formed)
             return r;
     }
@@ -570,9 +570,9 @@ analysis_result semantic_analysis::function(node_index parameters,
    type template-parameter for each generic parameter type placeholder of
    the function declaration, in order of appearance": auto or
    type-constraint auto among a parameter's decl-specifiers */
-bool semantic_analysis::generic_placeholder(node_index seq) const
+bool semantic_analysis::generic_placeholder(SyntaxRef seq) const
 {
-    for (auto c : syntax(seq).elements()) {
+    for (auto c : seq.elements()) {
         if (c.placeholder_type_specifier())
             c = c.back();
         if (c.is(standard_keyword::auto_))
@@ -582,9 +582,9 @@ bool semantic_analysis::generic_placeholder(node_index seq) const
 }
 
 bool semantic_analysis::abbreviated_parameters(
-    node_index declaration, owned_array<node_index> &parameters) const
+    SyntaxRef declaration, owned_array<node_index> &parameters) const
 {
-    auto d = syntax(declaration);
+    auto d = declaration;
     if (d.template_declaration()) {
         if (d.size() != 2 || !d[1].is_node())
             return true;
@@ -638,14 +638,15 @@ bool semantic_analysis::abbreviated_parameters(
     return true;
 }
 
-uint32_t semantic_analysis::invented_parameter_name(node_index seq) const
+uint32_t semantic_analysis::invented_parameter_name(SyntaxRef seq) const
 {
     char spelling[24];
-    int length = snprintf(spelling, sizeof spelling, "auto:%u", seq.index());
+    int length =
+        snprintf(spelling, sizeof spelling, "auto:%u", seq.index().index());
     return tokens.pp.identifier(spelling, static_cast<size_t>(length)) + 1;
 }
 
-bool semantic_analysis::invented_parameter_type(node_index seq,
+bool semantic_analysis::invented_parameter_type(SyntaxRef seq,
                                                 qualified_type &type) const
 {
     entity_index e = lookup(invented_parameter_name(seq));

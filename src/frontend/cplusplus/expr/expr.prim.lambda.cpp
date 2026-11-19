@@ -441,10 +441,11 @@ analysis_result semantic_analysis::lambda_expression(LambdaExpression n,
     qualified_type type;
     owned_array<parameter_meaning> parameters;
     if (template_list)
-        r = generic_lambda(n, template_list.index(), declarator.index(), l,
-                           has_capture, m);
+        r = generic_lambda(n, syntax(template_list.index()),
+                           syntax(declarator.index()), l, has_capture, m);
     else
-        r = lambda_call_type(n, declarator.index(), l, type, parameters);
+        r = lambda_call_type(n, syntax(declarator.index()), l, type,
+                             parameters);
     if (r != analysis_result::well_formed || template_list) {
         lambda_captures.resize(l.first_capture);
         if (r != analysis_result::well_formed)
@@ -498,8 +499,8 @@ analysis_result semantic_analysis::lambda_expression(LambdaExpression n,
  * scope: a generic lambda's template-parameters' or a specialization's.
  */
 analysis_result
-semantic_analysis::lambda_call_type(node_index n, node_index d,
-                                    lambda_context &l, qualified_type &type,
+semantic_analysis::lambda_call_type(SyntaxRef n, SyntaxRef d, lambda_context &l,
+                                    qualified_type &type,
                                     owned_array<parameter_meaning> &parameters)
 {
     /* [expr.prim.lambda]/4: "If a lambda-expression does not include a
@@ -519,9 +520,9 @@ semantic_analysis::lambda_call_type(node_index n, node_index d,
     type = returns;
     if (d) {
         bool closed = false;
-        for (uint32_t i = 0;
-             i < syntax(d).size() && r == analysis_result::well_formed; i++) {
-            SyntaxElement part = syntax(d)[i];
+        for (uint32_t i = 0; i < d.size() && r == analysis_result::well_formed;
+             i++) {
+            SyntaxElement part = d[i];
             if (syntax(part).is(preprocessing_op_or_punc::RIGHT_PARENTHESIS)) {
                 closed = true;
                 continue;
@@ -562,9 +563,9 @@ semantic_analysis::lambda_call_type(node_index n, node_index d,
                     r = not_supported(n, "dcl.constexpr");
             }
             if (syntax(part).is(syntax_kind::trailing_return_type)) {
-                node_index trailing = part.index();
-                if (syntax(trailing).size() != 2 ||
-                    !syntax(trailing)[1].is(syntax_kind::type_id)) {
+                auto trailing = part;
+                if (trailing.size() != 2 ||
+                    !trailing[1].is(syntax_kind::type_id)) {
                     r = not_supported(n, "dcl.fct");
                     continue;
                 }
@@ -578,7 +579,7 @@ semantic_analysis::lambda_call_type(node_index n, node_index d,
                         r = not_supported(n, "expr.prim.lambda.capture");
                 if (r != analysis_result::well_formed)
                     continue;
-                r = type_id(syntax(trailing)[1], returns);
+                r = type_id(trailing[1], returns);
                 if (r == analysis_result::well_formed &&
                     abstract_class(returns))
                     r = not_supported(n, "class.abstract");
@@ -629,7 +630,7 @@ semantic_analysis::lambda_call_type(node_index n, node_index d,
  * parameters; the captures it made appended to captures.
  */
 analysis_result
-semantic_analysis::lambda_body(node_index n, SyntaxElement body,
+semantic_analysis::lambda_body(SyntaxRef n, SyntaxElement body,
                                lambda_context &l,
                                owned_array<parameter_meaning> &parameters,
                                owned_array<capture_record> &captures)
@@ -706,8 +707,8 @@ semantic_analysis::lambda_body(node_index n, SyntaxElement body,
  * lambda-capture only: the captures an instantiation's body makes would
  * change the closure type after its use.
  */
-analysis_result semantic_analysis::generic_lambda(node_index n, node_index list,
-                                                  node_index declarator,
+analysis_result semantic_analysis::generic_lambda(SyntaxRef n, SyntaxRef list,
+                                                  SyntaxRef declarator,
                                                   lambda_context &l,
                                                   bool has_capture,
                                                   expression_meaning &m)
@@ -716,9 +717,9 @@ analysis_result semantic_analysis::generic_lambda(node_index n, node_index list,
     if (has_capture)
         return not_supported(n, "expr.prim.lambda.capture");
     owned_array<SyntaxElement> list_items;
-    if (syntax(list).is(syntax_kind::template_parameter_list))
-        for (uint32_t i = 0; i < syntax(list).size(); i++)
-            list_items.append(syntax(list)[i]);
+    if (list.is(syntax_kind::template_parameter_list))
+        for (uint32_t i = 0; i < list.size(); i++)
+            list_items.append(list[i]);
     else
         list_items.append(element(list));
     owned_array<node_index> parameters;
@@ -732,11 +733,10 @@ analysis_result semantic_analysis::generic_lambda(node_index n, node_index list,
         parameters.append(p.index());
     }
     uint32_t clauses = 0;
-    for (uint32_t i = 1; i + 1 < syntax(n).size(); i++)
-        clauses += syntax(n)[i].is(syntax_kind::requires_clause);
+    for (uint32_t i = 1; i + 1 < n.size(); i++)
+        clauses += n[i].is(syntax_kind::requires_clause);
     if (clauses && declarator &&
-        syntax(declarator)[syntax(declarator).size() - 1].is(
-            syntax_kind::requires_clause))
+        declarator[declarator.size() - 1].is(syntax_kind::requires_clause))
         return not_supported(n, "temp.constr");
     uint32_t index = 0, first = 0;
     entity_index scope = 0;
@@ -791,11 +791,11 @@ analysis_result semantic_analysis::generic_lambda(node_index n, node_index list,
  * template-parameter-list or its lambda-declarator (generic_lambda
  * refuses both), or none
  */
-SyntaxElement semantic_analysis::lambda_constraint(node_index n,
+SyntaxElement semantic_analysis::lambda_constraint(SyntaxRef n,
                                                    bool *trailing) const
 {
-    for (uint32_t i = 1; i + 1 < syntax(n).size(); i++) {
-        SyntaxElement c = syntax(n)[i];
+    for (uint32_t i = 1; i + 1 < n.size(); i++) {
+        SyntaxElement c = n[i];
         bool in_declarator = syntax(c).is(syntax_kind::lambda_declarator);
         if (in_declarator)
             c = syntax(c)[syntax(c).size() - 1];
@@ -816,12 +816,12 @@ SyntaxElement semantic_analysis::lambda_constraint(node_index n,
  * compound-statement too, as specialization's body.
  */
 analysis_result semantic_analysis::lambda_specialization(
-    node_index n, bool body, qualified_type &type, entity_index specialization)
+    SyntaxRef n, bool body, qualified_type &type, entity_index specialization)
 {
     node_index declarator = 0;
-    for (uint32_t i = 1; i + 1 < syntax(n).size(); i++)
-        if (syntax(n)[i].is(syntax_kind::lambda_declarator))
-            declarator = syntax(n)[i].index();
+    for (uint32_t i = 1; i + 1 < n.size(); i++)
+        if (n[i].is(syntax_kind::lambda_declarator))
+            declarator = n[i].index();
     lambda_context l;
     l.at = n;
     l.closure = entity_table[current_scope].enclosing;
@@ -830,12 +830,12 @@ analysis_result semantic_analysis::lambda_specialization(
     l.call = specialization;
     l.first_capture = static_cast<uint32_t>(lambda_captures.size());
     owned_array<parameter_meaning> parameters;
-    analysis_result r = lambda_call_type(n, declarator, l, type, parameters);
+    analysis_result r =
+        lambda_call_type(n, syntax(declarator), l, type, parameters);
     if (r != analysis_result::well_formed || !body)
         return r;
     owned_array<capture_record> captures;
-    r = lambda_body(n, syntax(n)[syntax(n).size() - 1], l, parameters,
-                    captures);
+    r = lambda_body(n, n[n.size() - 1], l, parameters, captures);
     if (r == analysis_result::well_formed && captures.size())
         return not_supported(n, "expr.prim.lambda.capture");
     return r;

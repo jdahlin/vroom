@@ -275,7 +275,7 @@ void walk_constexpr_body(const semantic_tree &tree, uint32_t n,
 } // namespace
 
 analysis_result semantic_analysis::analyse_function_body(
-    node_index definition, SyntaxElement compound, SyntaxElement ctor_init)
+    SyntaxRef definition, SyntaxElement compound, SyntaxElement ctor_init)
 {
     entity_index f = last_declared;
     qualified_type returns =
@@ -403,7 +403,7 @@ analysis_result semantic_analysis::analyse_function_body(
         result = worse(result, defaulted_equality(first_token(compound),
                                                   parameter_entities, block));
     else
-        result = worse(result, block_items(compound.index(), block));
+        result = worse(result, block_items(syntax(compound.index()), block));
     result = finish_return_deduction(definition, result, returns);
     uint32_t destructions = 0;
     if (entity_table[f].special == special_member::destructor)
@@ -613,7 +613,7 @@ entity_index semantic_analysis::synthesized_variable(synthesized_function &s,
 }
 
 void semantic_analysis::finish_synthesized(synthesized_function &s,
-                                           node_index declaration,
+                                           SyntaxRef declaration,
                                            token_index at, uint32_t block,
                                            uint32_t members,
                                            uint32_t destructions)

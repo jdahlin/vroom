@@ -202,7 +202,7 @@ bool semantic_analysis::const_default_constructible(entity_index c) const
  * "it contains the extern specifier or a linkage-specification and neither
  * an initializer nor a function-body"); a typedef declaration is none.
  */
-analysis_result semantic_analysis::declare(node_index declaration,
+analysis_result semantic_analysis::declare(SyntaxRef declaration,
                                            token_index id, entity_kind kind,
                                            qualified_type type,
                                            const specified &s, bool definition,
@@ -810,7 +810,7 @@ analysis_result semantic_analysis::declare(node_index declaration,
  * that follow, in a block or in its namespace.
  */
 analysis_result semantic_analysis::declare_in_block_with_linkage(
-    node_index declaration, token_index id, entity_kind kind,
+    SyntaxRef declaration, token_index id, entity_kind kind,
     qualified_type type, const specified &s, bool initialized,
     entity_index &declared_entity)
 {
@@ -1017,7 +1017,7 @@ void semantic_analysis::no_claims_after_hiding(uint32_t name)
  * object's rules checked by declare.
  */
 analysis_result semantic_analysis::declare_local(
-    node_index declaration, token_index id, entity_kind kind,
+    SyntaxRef declaration, token_index id, entity_kind kind,
     qualified_type type, const specified &s, entity_index &declared_entity)
 {
     uint32_t name = tokens.identifier(id);

@@ -62,11 +62,11 @@ analysis_result semantic_analysis::linkage_specification(LinkageSpecification n)
     analysis_result result = analysis_result::well_formed;
     for (node_index d : inner) {
         current_declaration = d;
-        if (!parsed_completely(d)) {
+        if (!parsed_completely(syntax(d))) {
             result = worse(result, analysis_result::not_parsed);
             continue;
         }
-        result = worse(result, declaration_by_kind(d));
+        result = worse(result, declaration_by_kind(syntax(d)));
     }
     c_language = saved;
     linkage_without_braces = saved_braces;

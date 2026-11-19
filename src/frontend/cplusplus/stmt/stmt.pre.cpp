@@ -683,13 +683,14 @@ analysis_result semantic_analysis::condition(SyntaxElement c, bool for_switch,
             bool claimable = declarations_claimable;
             declarations_claimable = false;
             in_condition = true;
-            r = declare_with_initializer(at, node[1], node[2], true, s, false);
+            r = declare_with_initializer(syntax(at), node[1], node[2], true, s,
+                                         false);
             in_condition = false;
             declarations_claimable = claimable;
         }
         if (r != analysis_result::well_formed) {
             block_variables.resize(first);
-            hold_names(at);
+            hold_names(syntax(at));
             return r;
         }
         declaration = declaration_statements(first, first_token(c));

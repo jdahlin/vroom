@@ -95,7 +95,7 @@ bool semantic_analysis::in_system_header(token_index at) const
                                                diagnostics.location_base);
 }
 
-bool semantic_analysis::parsed_completely(node_index n) const
+bool semantic_analysis::parsed_completely(SyntaxRef n) const
 {
     /* the nodes under n, without recursion: a tree is as deep as its
        source is nested */
@@ -125,7 +125,7 @@ static bool is_namespace_definition(const syntax_tree &tree, node_index n)
            kind == syntax_kind::nested_namespace_definition;
 }
 
-analysis_result semantic_analysis::declaration(node_index n)
+analysis_result semantic_analysis::declaration(SyntaxRef n)
 {
     analysed_declaration d;
     d.node = n;
@@ -152,7 +152,7 @@ analysis_result semantic_analysis::declaration(node_index n)
     return d.result;
 }
 
-analysis_result semantic_analysis::declaration_by_kind(node_index n)
+analysis_result semantic_analysis::declaration_by_kind(SyntaxRef n)
 {
     /* (a node the grammar does not place among declarations, (unparsed)
        or an extension's, goes to the default case) */
@@ -228,7 +228,7 @@ void semantic_analysis::translation_unit()
     owned_array<node_index> all;
     tree.declarations(&all);
     for (node_index n : all)
-        declaration(n);
+        declaration(syntax(n));
     instantiate_pending();
 }
 

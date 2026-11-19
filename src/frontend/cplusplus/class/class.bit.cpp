@@ -33,7 +33,7 @@ namespace cplusplus
  * analysed yet.
  */
 analysis_result semantic_analysis::member_bit_field(entity_index c,
-                                                    node_index declaration,
+                                                    SyntaxRef declaration,
                                                     SyntaxElement d,
                                                     const specified &s,
                                                     uint8_t access)

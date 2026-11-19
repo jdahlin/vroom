@@ -426,8 +426,7 @@ unsigned signed_bits(__int128 v)
  * promoted type of such an enumeration ([conv.prom]/4) is int when every
  * value fits in it.
  */
-analysis_result semantic_analysis::enum_specifier(node_index n,
-                                                  type_index &type)
+analysis_result semantic_analysis::enum_specifier(SyntaxRef n, type_index &type)
 {
     type = 0;
     analysis_result r = enum_specifier_rules(n, type);
@@ -444,11 +443,11 @@ analysis_result semantic_analysis::enum_specifier(node_index n,
     return r;
 }
 
-analysis_result semantic_analysis::enum_specifier_rules(node_index n,
+analysis_result semantic_analysis::enum_specifier_rules(SyntaxRef n,
                                                         type_index &type)
 {
     const implementation_defined_behavior &b = tokens.files.behavior;
-    auto node = syntax(n);
+    auto node = n;
     owned_array<SyntaxElement> head;
     uint32_t i = 0;
     /* [dcl.enum]/3: "An opaque-enum-declaration is either a redeclaration

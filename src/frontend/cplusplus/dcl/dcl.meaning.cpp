@@ -49,7 +49,7 @@ qualified_type semantic_analysis::add_cv(qualified_type t, uint32_t cv)
  * (C's restrict, [C11 6.7.3]/2: on a pointer type only) and
  * [ext:clang_nullability]'s keywords, which do not change the type.
  */
-analysis_result semantic_analysis::pointer_qualifier(node_index op,
+analysis_result semantic_analysis::pointer_qualifier(SyntaxRef op,
                                                      token_index t,
                                                      qualified_type &type)
 {
@@ -147,13 +147,13 @@ analysis_result semantic_analysis::reference(node_index at, bool rvalue,
  * ... the type of the identifier of D is derived-declarator-type-list
  * cv-qualifier-seq pointer to T."
  */
-analysis_result semantic_analysis::pointer_operator(node_index op,
+analysis_result semantic_analysis::pointer_operator(SyntaxRef op,
                                                     qualified_type &type,
                                                     declarator_meaning &m)
 {
     using enum preprocessing_op_or_punc;
     entity_index member_class = 0;
-    for (auto c : syntax(op).elements()) {
+    for (auto c : op.elements()) {
         if (c.is_attribute())
             return not_supported(op, "dcl.attr");
         if (c.nested_name_specifier()) {
@@ -431,10 +431,10 @@ static bool declares_by_declarator(SyntaxRef d)
  * found are bound to an entity of no kind, which makes such a declaration
  * unsupported too.
  */
-void semantic_analysis::hold_names(node_index declaration)
+void semantic_analysis::hold_names(SyntaxRef declaration)
 {
     owned_array<token_index> ids;
-    auto node = syntax(declaration);
+    auto node = declaration;
     /* [over.oper]/1: an operator function, or a conversion function, it
        may declare: the meaning of operators on classes and enumerations is
        not known from now on */
@@ -483,7 +483,7 @@ void semantic_analysis::hold_names(node_index declaration)
        specialization's name is a template-id: all its names held) */
     if (!by_declarator && node.is(syntax_kind::template_declaration) &&
         parsed_completely(declaration))
-        by_declarator = declares_by_declarator(syntax(declaration));
+        by_declarator = declares_by_declarator(declaration);
     if (node.is(syntax_kind::using_directive)) {
         /* [namespace.udir]: what it makes visible is not known */
         entity_table[current_scope].unknown_names = true;
@@ -632,7 +632,7 @@ void semantic_analysis::hold_names(node_index declaration)
         inner = syntax(inner)[t.size() - 1].index();
         if ((syntax(inner).is(syntax_kind::simple_declaration) ||
              syntax(inner).is(syntax_kind::function_definition)) &&
-            parsed_completely(inner))
+            parsed_completely(syntax(inner)))
             declarator_ids(inner);
     }
     for (token_index id : ids) {
@@ -706,7 +706,7 @@ void semantic_analysis::hold_names(node_index declaration)
 }
 
 /* whether the node is one of the entity's declarations */
-bool semantic_analysis::declared_by(entity_index e, node_index node) const
+bool semantic_analysis::declared_by(entity_index e, SyntaxRef node) const
 {
     for (uint32_t d = entity_table[e].first_declaration; d;
          d = entity_table.declaration(d).next)
@@ -725,11 +725,11 @@ bool semantic_analysis::declared_by(entity_index e, node_index node) const
  * declarator-id."  Such a declaration is one of namespace scope
  * ([class.mfct]/2, [namespace.memdef]/2).
  */
-analysis_result semantic_analysis::declarator_qualifier(node_index nested,
+analysis_result semantic_analysis::declarator_qualifier(SyntaxRef nested,
                                                         declarator_meaning &m)
 {
     nominated_scope scope;
-    analysis_result r = nested_name_specifier(syntax(nested), scope);
+    analysis_result r = nested_name_specifier(nested, scope);
     if (r != analysis_result::well_formed)
         return r;
     if (at_block_scope() || defining_class || function_state.active)
@@ -785,7 +785,7 @@ analysis_result semantic_analysis::declarator(node_index declaration,
     }
     case syntax_kind::parameters_and_qualifiers:
         /* an abstract declarator that is only its parameters */
-        return function(n, type);
+        return function(syntax(n), type);
     case syntax_kind::noptr_declarator:
     case syntax_kind::noptr_abstract_declarator:
         break;
@@ -804,7 +804,7 @@ analysis_result semantic_analysis::declarator(node_index declaration,
         return analysis_result::well_formed;
     }
     case syntax_kind::declarator:
-        return trailing_return(declaration, n, type, m);
+        return trailing_return(syntax(declaration), syntax(n), type, m);
     case syntax_kind::gnu_declarator: {
         /* [ext:gnu_asm_labels] declarator gnu-asm-label_opt
            gnu-attribute-specifier-seq_opt: the label is the symbol, one

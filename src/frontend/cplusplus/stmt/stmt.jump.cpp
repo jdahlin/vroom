@@ -127,10 +127,10 @@ analysis_result semantic_analysis::jump_statement(JumpStatement n,
  * copy-initialization from the operand."  clang's -Wreturn-mismatch for
  * the first and the last, an error by default.
  */
-analysis_result semantic_analysis::return_statement(node_index n,
+analysis_result semantic_analysis::return_statement(SyntaxRef n,
                                                     uint32_t &operand_node)
 {
-    auto node = syntax(n);
+    auto node = n;
     qualified_type returns = function_state.returns;
     bool returns_void = fundamental_of(returns) == fundamental_type::void_;
     if (function_state.deducing && node.size() == 2) {
@@ -167,7 +167,7 @@ analysis_result semantic_analysis::return_statement(node_index n,
                               "stmt.return");
         qualified_type type = returns;
         analysis_result r =
-            list_initialization(operand.index(), type, false, result);
+            list_initialization(syntax(operand.index()), type, false, result);
         operand_node = result.node;
         return r;
     }

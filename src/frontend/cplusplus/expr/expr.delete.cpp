@@ -226,7 +226,7 @@ analysis_result semantic_analysis::delete_expression(DeleteExpression n,
  * two, the one without the size is selected; of the global ones, clang
  * selects the unsized one for an array without a cookie).
  */
-analysis_result semantic_analysis::array_cookie(node_index n, entity_index c,
+analysis_result semantic_analysis::array_cookie(SyntaxRef n, entity_index c,
                                                 qualified_type element,
                                                 bool global, uint64_t &cookie)
 {
@@ -271,7 +271,7 @@ analysis_result semantic_analysis::array_cookie(node_index n, entity_index c,
  * array; sized when it takes the size.
  */
 analysis_result semantic_analysis::usual_deallocation(
-    node_index n, entity_index c, bool global, bool array,
+    SyntaxRef n, entity_index c, bool global, bool array,
     entity_index &function, bool &is_sized, bool class_complete, bool cookie)
 {
     /* /9: "When the keyword delete in a delete-expression is preceded by

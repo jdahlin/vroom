@@ -27,7 +27,7 @@ namespace cplusplus
  *   - long can be combined with double.
  *   - long can be combined with long."
  */
-analysis_result semantic_analysis::simple_type(node_index seq,
+analysis_result semantic_analysis::simple_type(SyntaxRef seq,
                                                const simple_type_keywords &k,
                                                type_index &type)
 {

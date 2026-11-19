@@ -133,7 +133,7 @@ analysis_result semantic_analysis::deduced_type_supported(node_index at,
  * being the variable's).
  */
 analysis_result semantic_analysis::placeholder_declaration(
-    node_index declaration, const declarator_meaning &m, qualified_type type,
+    SyntaxRef declaration, const declarator_meaning &m, qualified_type type,
     entity_kind kind, bool placeholder, bool initialized)
 {
     /* [dcl.spec.auto]/7: "If the init-declarator-list contains more than
@@ -296,8 +296,8 @@ bool semantic_analysis::initializer_form(SyntaxElement init,
 {
     if (init.is_token())
         return false;
-    node_index n = init.index();
-    auto node = syntax(n);
+    auto n = init;
+    auto node = n;
     direct = false;
     list = false;
     if (node.is(syntax_kind::brace_or_equal_initializer) && node.size() == 2 &&
@@ -348,14 +348,14 @@ analysis_result semantic_analysis::deduced_initializer(SyntaxElement init,
     analysis_result r = expression(clause, m);
     if (r != analysis_result::well_formed)
         return r;
-    return deduced_initialization(init.index(), m, names_entity(clause), direct,
-                                  list, e, type, value);
+    return deduced_initialization(syntax(init.index()), m, names_entity(clause),
+                                  direct, list, e, type, value);
 }
 
 /* ... the initializer's expression analysed as m (named: names_entity of
    it) */
 analysis_result semantic_analysis::deduced_initialization(
-    node_index n, expression_meaning &m, bool named, bool direct, bool list,
+    SyntaxRef n, expression_meaning &m, bool named, bool direct, bool list,
     entity_index e, qualified_type &type, initialized_value &value)
 {
     qualified_type replacement;
@@ -502,12 +502,12 @@ analysis_result semantic_analysis::undeduced_use(token_index t, entity_index e)
  * trailing-return-type in the scope of the parameters
  * ([basic.scope.param]/1).
  */
-analysis_result semantic_analysis::trailing_return(node_index declaration,
-                                                   node_index n,
+analysis_result semantic_analysis::trailing_return(SyntaxRef declaration,
+                                                   SyntaxRef n,
                                                    qualified_type &type,
                                                    declarator_meaning &m)
 {
-    auto node = syntax(n);
+    auto node = n;
     if (node.size() != 2 || !node[1].is(syntax_kind::trailing_return_type))
         return not_supported(n, "dcl.fct");
     qualified_type auto_type = placeholder_type(false);
@@ -521,9 +521,8 @@ analysis_result semantic_analysis::trailing_return(node_index declaration,
     const struct type f = type_table[type.unqualified()];
     if (f.kind != type_kind::function || !(f.operand == auto_type))
         return not_supported(n, "dcl.fct");
-    node_index trailing = node[1].index();
-    if (syntax(trailing).size() != 2 ||
-        !syntax(trailing)[1].is(syntax_kind::type_id))
+    auto trailing = node[1];
+    if (trailing.size() != 2 || !trailing[1].is(syntax_kind::type_id))
         return not_supported(n, "dcl.fct");
     /* the type-id's own function declarators would replace the
        parameters and cv-qualifier-seq this declarator's has */
@@ -534,7 +533,7 @@ analysis_result semantic_analysis::trailing_return(node_index declaration,
     qualified_type returned;
     entity_index outer = current_scope;
     open_parameter_scope();
-    r = type_id(syntax(trailing)[1], returned);
+    r = type_id(trailing[1], returned);
     current_scope = outer;
     function_parameters.clear();
     for (const parameter_meaning &parameter : parameters)
@@ -573,7 +572,7 @@ void semantic_analysis::begin_return_deduction(qualified_type returns)
    type is deduced as though from a return statement with no operand at the
    closing brace of the function body." */
 analysis_result semantic_analysis::finish_return_deduction(
-    node_index definition, analysis_result result, qualified_type &returns)
+    SyntaxRef definition, analysis_result result, qualified_type &returns)
 {
     if (function_state.deducing && !function_state.deduced &&
         result == analysis_result::well_formed)

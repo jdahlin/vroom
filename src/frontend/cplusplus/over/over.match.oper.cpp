@@ -71,7 +71,7 @@ bool semantic_analysis::converts_to_non_class(entity_index c) const
 }
 
 analysis_result semantic_analysis::overloaded_operator(
-    node_index n, token_index at, preprocessing_op_or_punc op, bool postfix,
+    SyntaxRef n, token_index at, preprocessing_op_or_punc op, bool postfix,
     const owned_array<SyntaxElement> &syntax,
     owned_array<expression_meaning> &operands, bool &handled,
     expression_meaning &m)
@@ -553,7 +553,7 @@ analysis_result semantic_analysis::overloaded_operator(
 }
 
 analysis_result semantic_analysis::unary_operator_function(
-    node_index n, token_index at, preprocessing_op_or_punc op, bool postfix,
+    SyntaxRef n, token_index at, preprocessing_op_or_punc op, bool postfix,
     SyntaxElement s, expression_meaning &operand, bool &handled)
 {
     owned_array<SyntaxElement> syntax;
@@ -569,7 +569,7 @@ analysis_result semantic_analysis::unary_operator_function(
 }
 
 analysis_result semantic_analysis::binary_operator_function(
-    node_index n, token_index at, preprocessing_op_or_punc op,
+    SyntaxRef n, token_index at, preprocessing_op_or_punc op,
     SyntaxElement left_syntax, const expression_meaning &left,
     SyntaxElement right_syntax, const expression_meaning &right, bool &handled,
     expression_meaning &m)

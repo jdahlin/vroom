@@ -256,7 +256,7 @@ bool parser::parenthesized_expression_list(const char *what,
  * (expr.cast.cpp) with that cast alone.  dynamic_cast needs the run-time
  * type information, not analysed.
  */
-analysis_result semantic_analysis::named_cast(node_index n,
+analysis_result semantic_analysis::named_cast(SyntaxRef n,
                                               standard_keyword keyword,
                                               expression_meaning &m)
 {
@@ -267,7 +267,7 @@ analysis_result semantic_analysis::named_cast(node_index n,
         kinds = cast_reinterpret;
     else if (keyword != standard_keyword::static_cast_)
         return not_supported(n, "expr.dynamic.cast");
-    auto children = syntax(n);
+    auto children = n;
     qualified_type to;
     analysis_result r = type_id(children[2], to);
     /* [over.over]/1: "an explicit type conversion" */
@@ -278,9 +278,9 @@ analysis_result semantic_analysis::named_cast(node_index n,
     return explicit_conversion(n, to, m, kinds);
 }
 
-analysis_result semantic_analysis::postfix(node_index n, expression_meaning &m)
+analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
 {
-    auto node = syntax(n);
+    auto node = n;
     if (node.size() == 2 && node[1].is_token()) {
         preprocessing_op_or_punc op = preprocessing_op_or_punc_primary(
             tokens[node[1].token()].op_or_punc);
@@ -318,7 +318,7 @@ analysis_result semantic_analysis::postfix(node_index n, expression_meaning &m)
     if ((parenthesized || braced) &&
         node[0].is(syntax_kind::simple_type_specifier)) {
         analysis_result r =
-            qualified_type_name(node[0].index(), named, named_cv);
+            qualified_type_name(syntax(node[0].index()), named, named_cv);
         if (r != analysis_result::well_formed)
             return r;
         if (type_table[named].kind == type_kind::class_type &&
@@ -416,7 +416,8 @@ analysis_result semantic_analysis::postfix(node_index n, expression_meaning &m)
                 found = x.unknown_entity;
             if (class_template_of(found)) {
                 type_index t = 0;
-                analysis_result r = template_type(node[0].index(), 0, false, t);
+                analysis_result r =
+                    template_type(syntax(node[0].index()), 0, false, t);
                 if (r != analysis_result::well_formed)
                     return r;
                 if (type_table[t].kind != type_kind::class_type)
@@ -480,7 +481,7 @@ analysis_result semantic_analysis::postfix(node_index n, expression_meaning &m)
                 return not_supported(n, "expr.type.conv");
             initialized_value result;
             analysis_result r =
-                list_initialization(node[1].index(), to, true, result);
+                list_initialization(syntax(node[1].index()), to, true, result);
             if (r != analysis_result::well_formed)
                 return r;
             m = expression_meaning();
@@ -583,9 +584,9 @@ analysis_result semantic_analysis::postfix(node_index n, expression_meaning &m)
  * the name of a function declared twice with different parameters), so
  * overload resolution ([over.match]) has one candidate: viable or not.
  */
-analysis_result semantic_analysis::call(node_index n, expression_meaning &m)
+analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
 {
-    auto node = syntax(n);
+    auto node = n;
     if (builtin_addressof_call(n))
         return builtin_addressof(n, m);
     owned_array<SyntaxElement> arguments;
@@ -597,7 +598,7 @@ analysis_result semantic_analysis::call(node_index n, expression_meaning &m)
         if (syntax(c).is(syntax_kind::initializer_list)) {
             owned_array<SyntaxElement> written;
             owned_array<bool> expansion;
-            if (!expansion_list(c.index(), written, expansion))
+            if (!expansion_list(syntax(c.index()), written, expansion))
                 return not_supported(n, "temp.variadic");
             bool any = false;
             for (bool x : expansion)
@@ -1070,7 +1071,7 @@ uint32_t semantic_analysis::explicit_argument_position(uint32_t ft,
  * both form them here.
  */
 analysis_result semantic_analysis::template_candidates(
-    node_index n, const owned_array<uint32_t> &group,
+    SyntaxRef n, const owned_array<uint32_t> &group,
     const expression_meaning *meanings, uint32_t count,
     owned_array<overload_candidate> &candidates,
     owned_array<uint32_t> *first_arguments, owned_array<template_argument> *all,
@@ -1152,7 +1153,7 @@ analysis_result semantic_analysis::template_candidates(
 }
 
 analysis_result semantic_analysis::template_call(
-    node_index n, token_index name, uint32_t function_template,
+    SyntaxRef n, token_index name, uint32_t function_template,
     owned_array<template_argument> &specified, bool qualified,
     const owned_array<SyntaxElement> &arguments,
     owned_array<expression_meaning> &early, expression_meaning &f)
@@ -1244,7 +1245,7 @@ analysis_result semantic_analysis::template_call(
             given_written = &written;
         analysis_result added = template_candidates(
             n, group, meanings, static_cast<uint32_t>(early.size()), candidates,
-            &first_arguments, &all, given_written, written_at);
+            &first_arguments, &all, given_written, syntax(written_at));
         if (added != analysis_result::well_formed)
             return added;
         if (candidates.empty())
@@ -1301,7 +1302,7 @@ analysis_result semantic_analysis::template_call(
  * with its corresponding argument."  The call of f, its function chosen.
  */
 analysis_result semantic_analysis::call_function(
-    node_index n, token_index at, entity_index f,
+    SyntaxRef n, token_index at, entity_index f,
     const owned_array<expression_meaning> &arguments, expression_meaning &m)
 {
     analysis_result r = deleted_use(at, f);
@@ -1321,13 +1322,13 @@ analysis_result semantic_analysis::call_function(
 }
 
 analysis_result semantic_analysis::call_with(
-    node_index n, expression_meaning &f, qualified_type function_type,
+    SyntaxRef n, expression_meaning &f, qualified_type function_type,
     uint32_t object, entity_index member,
     const owned_array<SyntaxElement> &arguments,
     const owned_array<expression_meaning> &early, expression_meaning &m)
 {
     analysis_result r = analysis_result::well_formed;
-    auto node = syntax(n);
+    auto node = n;
     const struct type function = type_table[function_type.unqualified()];
     size_t count = function.parameter_count;
     owned_array<uint32_t> argument_nodes;
@@ -1364,7 +1365,8 @@ analysis_result semantic_analysis::call_with(
             qualified_type parameter =
                 type_table.parameters(function_type.unqualified())[i];
             if (syntax(a).is(syntax_kind::braced_init_list)) {
-                r = list_initialization(a.index(), parameter, false, value);
+                r = list_initialization(syntax(a.index()), parameter, false,
+                                        value);
             } else {
                 expression_meaning e;
                 if (i < early.size() && early[i].node)
@@ -1482,7 +1484,7 @@ analysis_result semantic_analysis::call_with(
     if (member && entity_table[member].virtual_) {
         if (!node.size())
             return not_supported(n, "class.virtual");
-        SyntaxElement name = syntax(n)[0];
+        SyntaxElement name = n[0];
         if (!name.is_token() &&
             syntax(name).is(syntax_kind::postfix_expression) &&
             syntax(name).size() == 3 &&
@@ -1515,7 +1517,7 @@ analysis_result semantic_analysis::call_with(
  * invocation shall be a constant expression."  Its value replaces the
  * call (lowering emits no call, so no definition of the function).
  */
-analysis_result semantic_analysis::immediate_invocation(node_index n,
+analysis_result semantic_analysis::immediate_invocation(SyntaxRef n,
                                                         expression_meaning &m)
 {
     if (unevaluated || (function_state.function &&

@@ -284,8 +284,10 @@ int semantic_analysis::function_template_order(uint32_t f, uint32_t g,
         function_templates[f - 1].parameter_count !=
             function_templates[g - 1].parameter_count)
         return 0;
-    bool fc = template_head_constrained(function_templates[f - 1].declaration);
-    bool gc = template_head_constrained(function_templates[g - 1].declaration);
+    bool fc = template_head_constrained(
+        syntax(function_templates[f - 1].declaration));
+    bool gc = template_head_constrained(
+        syntax(function_templates[g - 1].declaration));
     return static_cast<int>(fc) - static_cast<int>(gc);
 }
 

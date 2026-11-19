@@ -34,7 +34,7 @@ node_index parser::clang_source_location_expression()
    and column" of the place it is evaluated at.  Only its type is
    analysed (decltype of it, libc++'s __bsl_ty): the object it points to
    is not made yet */
-analysis_result semantic_analysis::clang_source_location(node_index n,
+analysis_result semantic_analysis::clang_source_location(SyntaxRef n,
                                                          expression_meaning &m)
 {
     entity_index impl = 0;

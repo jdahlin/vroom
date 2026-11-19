@@ -63,10 +63,10 @@ node_index parser::gnu_offsetof_expression()
    object of the type.  A member found in a base class or through an
    anonymous union is not handled yet; a template's own operand is
    dependent, analysed when it is instantiated */
-analysis_result semantic_analysis::gnu_offsetof(node_index n,
+analysis_result semantic_analysis::gnu_offsetof(SyntaxRef n,
                                                 expression_meaning &m)
 {
-    auto node = syntax(n);
+    auto node = n;
     qualified_type t;
     analysis_result r = type_id(node[2], t);
     if (r != analysis_result::well_formed)

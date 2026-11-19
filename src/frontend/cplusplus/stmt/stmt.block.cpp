@@ -60,10 +60,10 @@ analysis_result semantic_analysis::compound_statement(CompoundStatement n,
 
 /* the statements of a block, each with the place for the claims about its
    expressions just after it */
-analysis_result semantic_analysis::block_items(node_index n, uint32_t &built)
+analysis_result semantic_analysis::block_items(SyntaxRef n, uint32_t &built)
 {
     owned_array<SyntaxElement> items;
-    auto node = syntax(n);
+    auto node = n;
     for (auto c : node.elements()) {
         if (syntax(c).is(preprocessing_op_or_punc::LEFT_BRACE) ||
             syntax(c).is(preprocessing_op_or_punc::RIGHT_BRACE))

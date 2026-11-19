@@ -301,7 +301,7 @@ bool only_unary(preprocessing_op_or_punc op)
 
 } // namespace
 
-analysis_result semantic_analysis::operator_function_declaration(node_index n,
+analysis_result semantic_analysis::operator_function_declaration(SyntaxRef n,
                                                                  entity_index f)
 {
     if (entity_table[f].allocation != allocation_function::none)

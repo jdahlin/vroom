@@ -91,10 +91,10 @@ bool semantic_analysis::decltype_of(const expression_meaning &m, bool named,
  *
  * "The operand of the decltype specifier is an unevaluated operand".
  */
-analysis_result semantic_analysis::decltype_type(node_index n,
+analysis_result semantic_analysis::decltype_type(SyntaxRef n,
                                                  qualified_type &type)
 {
-    auto node = syntax(n);
+    auto node = n;
     if (node.size() != 4)
         return not_supported(n, "dcl.type.decltype");
     SyntaxElement operand = node[2];
@@ -156,9 +156,9 @@ bool semantic_analysis::names_dependent_entity(token_index first,
 
 /* the dependent type of decltype-specifier n: one for the operands of the
    same tokens */
-type_index semantic_analysis::dependent_written_type(node_index n)
+type_index semantic_analysis::dependent_written_type(SyntaxRef n)
 {
-    auto x = syntax(n);
+    auto x = n;
     for (entity_index e : dependent_written_types) {
         auto y = syntax(static_cast<node_index>(entity_table[e].value));
         bool same =

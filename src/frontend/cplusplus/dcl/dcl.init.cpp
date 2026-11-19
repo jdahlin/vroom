@@ -623,7 +623,8 @@ analysis_result semantic_analysis::initialize_from(node_index at,
                                                    initialized_value &result)
 {
     if (syntax(clause).is(syntax_kind::braced_init_list))
-        return list_initialization(clause.index(), type, direct, result);
+        return list_initialization(syntax(clause.index()), type, direct,
+                                   result);
     const struct type target = type_table[type.unqualified()];
     expression_meaning m;
     if (target.kind == type_kind::array) {
@@ -820,7 +821,7 @@ analysis_result semantic_analysis::initialize_with(node_index at,
  * "Otherwise, the program is ill-formed").
  */
 analysis_result
-semantic_analysis::list_initialization(node_index list, qualified_type &type,
+semantic_analysis::list_initialization(SyntaxRef list, qualified_type &type,
                                        bool direct, initialized_value &result)
 {
     owned_array<SyntaxElement> clauses;
@@ -831,10 +832,10 @@ semantic_analysis::list_initialization(node_index list, qualified_type &type,
 }
 
 analysis_result
-semantic_analysis::list_clauses(node_index list,
+semantic_analysis::list_clauses(SyntaxRef list,
                                 owned_array<SyntaxElement> &clauses)
 {
-    auto node = syntax(list);
+    auto node = list;
     for (auto c : node.elements()) {
         if (c.is(preprocessing_op_or_punc::LEFT_BRACE) ||
             c.is(preprocessing_op_or_punc::RIGHT_BRACE) ||
@@ -860,10 +861,10 @@ semantic_analysis::list_clauses(node_index list,
 }
 
 analysis_result semantic_analysis::list_initialization_of(
-    node_index list, const owned_array<SyntaxElement> &clauses,
+    SyntaxRef list, const owned_array<SyntaxElement> &clauses,
     qualified_type &type, bool direct, initialized_value &result)
 {
-    auto node = syntax(list);
+    auto node = list;
     const struct type target = type_table[type.unqualified()];
     if (target.kind == type_kind::array) {
         /* [dcl.init.list]/3.3: "if T is a character array and the
@@ -964,8 +965,8 @@ analysis_result semantic_analysis::initializer(SyntaxElement init,
 {
     if (init.is_token())
         return not_supported(current_declaration, "dcl.init");
-    node_index n = init.index();
-    auto node = syntax(n);
+    auto n = init;
+    auto node = n;
     switch (node.kind()) {
     case syntax_kind::braced_init_list:
         return list_initialization(n, type, true, result);
@@ -973,7 +974,8 @@ analysis_result semantic_analysis::initializer(SyntaxElement init,
         if (node.size() != 2)
             return not_supported(n, "dcl.init");
         if (node[1].is(syntax_kind::braced_init_list))
-            return list_initialization(node[1].index(), type, false, result);
+            return list_initialization(syntax(node[1].index()), type, false,
+                                       result);
         return initialize_from(n, node[1], type, false, false, result);
     case syntax_kind::initializer:
         if (node.size() != 3)
@@ -1031,7 +1033,7 @@ analysis_result semantic_analysis::initializer(SyntaxElement init,
  * aggregate takes a braced-init-list.
  */
 analysis_result semantic_analysis::class_list_initialization(
-    node_index list, const owned_array<SyntaxElement> &clauses,
+    SyntaxRef list, const owned_array<SyntaxElement> &clauses,
     qualified_type type, bool direct, initialized_value &result)
 {
     entity_index c = type_table[type.unqualified()].entity;
@@ -1135,7 +1137,7 @@ analysis_result semantic_analysis::class_list_initialization(
  * initialization ([over.match.list]/1).
  */
 analysis_result semantic_analysis::constructor_list_initialization(
-    node_index list, const owned_array<SyntaxElement> &clauses,
+    SyntaxRef list, const owned_array<SyntaxElement> &clauses,
     qualified_type type, bool direct, initialized_value &result)
 {
     entity_index c = type_table[type.unqualified()].entity;
@@ -1232,7 +1234,7 @@ analysis_result semantic_analysis::constructor_list_initialization(
 /* [dcl.init.aggr]/11: "An initializer-list is ill-formed if the number of
    initializer-clauses exceeds the number of elements of the aggregate." */
 analysis_result semantic_analysis::too_many_clauses(
-    node_index list, const owned_array<SyntaxElement> &clauses, size_t next)
+    SyntaxRef list, const owned_array<SyntaxElement> &clauses, size_t next)
 {
     if (next < clauses.size())
         return ill_formed(list,
@@ -1258,7 +1260,7 @@ analysis_result semantic_analysis::too_many_clauses(
  * element": without designators, the first.
  */
 analysis_result semantic_analysis::aggregate_elements(
-    node_index list, const owned_array<SyntaxElement> &clauses, size_t &next,
+    SyntaxRef list, const owned_array<SyntaxElement> &clauses, size_t &next,
     qualified_type type, initialized_value &result)
 {
     const struct type target = type_table[type.unqualified()];
@@ -1335,8 +1337,8 @@ analysis_result semantic_analysis::aggregate_elements(
             zero.type = qualified_type::make(element.unqualified(), cv_none);
             zero.evaluation = constness::constant;
             one.evaluation = constness::constant;
-            one.node = expression_node(semantic_kind::zero, zero,
-                                       syntax(list).first_token());
+            one.node =
+                expression_node(semantic_kind::zero, zero, list.first_token());
         }
         all = combined_constness(all, one.evaluation);
         elements.append(one.node);
@@ -1349,7 +1351,7 @@ analysis_result semantic_analysis::aggregate_elements(
         list_meaning.type = type;
     list_meaning.evaluation = all;
     result.node = expression_node(semantic_kind::initializer_list, list_meaning,
-                                  syntax(list).first_token());
+                                  list.first_token());
     semantics.set_list(result.node, elements.data(), elements.size());
     return analysis_result::well_formed;
 }
@@ -1368,7 +1370,7 @@ analysis_result semantic_analysis::aggregate_elements(
  * of the subaggregate".
  */
 analysis_result semantic_analysis::aggregate_element(
-    node_index list, const owned_array<SyntaxElement> &clauses, size_t &next,
+    SyntaxRef list, const owned_array<SyntaxElement> &clauses, size_t &next,
     qualified_type element, initialized_value &one)
 {
     SyntaxElement clause = clauses[next];

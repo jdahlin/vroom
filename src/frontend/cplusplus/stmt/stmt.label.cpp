@@ -164,7 +164,7 @@ analysis_result semantic_analysis::labeled_statement(LabeledStatement n,
  * adjusted type of the switch condition.  No two of the case constants in
  * the same switch shall have the same value after conversion."
  */
-analysis_result semantic_analysis::case_label(node_index n, SyntaxElement value,
+analysis_result semantic_analysis::case_label(SyntaxRef n, SyntaxElement value,
                                               size_t innermost)
 {
     expression_meaning m;

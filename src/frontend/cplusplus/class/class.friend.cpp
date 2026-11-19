@@ -81,7 +81,7 @@ entity_index semantic_analysis::declared_unbound(entity_index scope,
  * has been previously declared shall not consider any scopes outside the
  * innermost enclosing namespace."
  */
-analysis_result semantic_analysis::friend_class(entity_index c, node_index n,
+analysis_result semantic_analysis::friend_class(entity_index c, SyntaxRef n,
                                                 SyntaxElement type)
 {
     entity_index space = enclosing_namespace(c);
@@ -111,8 +111,8 @@ analysis_result semantic_analysis::friend_class(entity_index c, node_index n,
     }
     if (!syntax(type).is(syntax_kind::elaborated_type_specifier))
         return not_supported(n, "class.friend");
-    node_index t = type.index();
-    auto node = syntax(t);
+    auto t = type;
+    auto node = t;
     standard_keyword key = leading_keyword(t);
     if (!is_class_key(key))
         return not_supported(n, "class.friend");
@@ -120,7 +120,7 @@ analysis_result semantic_analysis::friend_class(entity_index c, node_index n,
         /* a qualified name: [basic.lookup.elab]/3, a class declared
            before */
         type_index named = 0;
-        analysis_result r = elaborated_type_specifier(syntax(t), named);
+        analysis_result r = elaborated_type_specifier(t, named);
         if (r != analysis_result::well_formed)
             return r;
         const struct type &record = type_table[named];
@@ -187,18 +187,18 @@ analysis_result semantic_analysis::friend_class(entity_index c, node_index n,
  * function's (bodies).
  */
 analysis_result
-semantic_analysis::friend_function(entity_index c, node_index n,
+semantic_analysis::friend_function(entity_index c, SyntaxRef n,
                                    owned_array<node_index> &bodies)
 {
     /* [ext:gnu_attributes] before it all: GCC's, which a friend's
        definition has no rules for beyond its form (visibility as the
        class's members') */
     uint32_t leading = leading_gnu_attributes(n);
-    auto children_syntax = syntax(n);
+    auto children_syntax = n;
     uint32_t count = children_syntax.size() - leading;
     bool defines = children_syntax.is(syntax_kind::function_definition);
     if (defines) {
-        auto body = syntax(n).function_definition().function_body();
+        auto body = n.function_definition().function_body();
         if (count != 3 ||
             !children_syntax[leading].is(syntax_kind::decl_specifier_seq) ||
             !body.is(syntax_kind::function_body))
@@ -334,7 +334,7 @@ bool semantic_analysis::defined_by_friend(entity_index f) const
 /* the function a friend definition n in class c defines (a class
    template's defines one per specialization, [temp.friend]), 0 if n is
    not one */
-entity_index semantic_analysis::friend_defined_by(node_index n,
+entity_index semantic_analysis::friend_defined_by(SyntaxRef n,
                                                   entity_index c) const
 {
     for (const friend_definition &d : friend_definitions)
@@ -439,9 +439,10 @@ analysis_result semantic_analysis::defaulted_equality(
             if (r != analysis_result::well_formed)
                 return r;
         }
-        analysis_result r = binary_of(
-            current_declaration, at, preprocessing_op_or_punc::EQUAL_EQUAL,
-            SyntaxElement(), sides[0], SyntaxElement(), sides[1], equal);
+        analysis_result r =
+            binary_of(syntax(current_declaration), at,
+                      preprocessing_op_or_punc::EQUAL_EQUAL, SyntaxElement(),
+                      sides[0], SyntaxElement(), sides[1], equal);
         if (r != analysis_result::well_formed)
             return r;
         /* a bool prvalue each ([class.eq]/2), joined by && ([expr.log.and]) */
@@ -462,14 +463,14 @@ analysis_result semantic_analysis::defaulted_equality(
 
 /* a member-declaration whose decl-specifier-seq has friend */
 analysis_result
-semantic_analysis::friend_declaration(entity_index c, node_index n,
+semantic_analysis::friend_declaration(entity_index c, SyntaxRef n,
                                       owned_array<node_index> &bodies)
 {
     /* [class.friend]/11: a friend declaration in a local class */
     for (entity_index k = c; !is_namespace(k); k = entity_table[k].enclosing)
         if (entity_table[k].kind != entity_kind::class_type)
             return not_supported(n, "class.friend");
-    return syntax(n).member_declaration().visit(Overloaded{
+    return n.member_declaration().visit(Overloaded{
         [&](FunctionDefinition f) { return friend_function(c, f, bodies); },
         [&](MemberSimpleDeclaration d) {
             return friend_member_declaration(c, d, bodies);
@@ -489,10 +490,10 @@ analysis_result semantic_analysis::friend_member_declaration(
         return not_supported(n, "class.friend");
     if (node.size() == leading + 2) {
         /* friend class-key identifier ; friend type-name ; */
-        node_index seq = children_syntax[leading].index();
+        auto seq = children_syntax[leading];
         SyntaxElement type = {};
         unsigned friends_seen = 0, others = 0;
-        for (SyntaxElement x : syntax(seq).elements()) {
+        for (SyntaxElement x : seq.elements()) {
             if (is_keyword(x, standard_keyword::friend_)) {
                 friends_seen++;
                 continue;
@@ -502,9 +503,9 @@ analysis_result semantic_analysis::friend_member_declaration(
         }
         if (friends_seen != 1 || others != 1)
             return not_supported(n, "class.friend");
-        return friend_class(c, n, type);
+        return friend_class(c, syntax(n), type);
     }
-    return friend_function(c, n, bodies);
+    return friend_function(c, syntax(n), bodies);
 }
 
 } // namespace cplusplus

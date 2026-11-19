@@ -103,10 +103,10 @@ node_index parser::assignment_expression()
  * operand."  The left operand is modified: no constant expression here
  * ([expr.const]/5.16).
  */
-analysis_result semantic_analysis::assignment(node_index n,
+analysis_result semantic_analysis::assignment(SyntaxRef n,
                                               expression_meaning &m)
 {
-    auto node = syntax(n);
+    auto node = n;
     if (node.size() != 3 || !node[1].is_token() ||
         node[2].is(syntax_kind::braced_init_list))
         return not_supported(n, "expr.ass");
@@ -262,7 +262,7 @@ bool semantic_analysis::copy_assignment_deleted(entity_index c) const
  * Its result is the left operand, an lvalue ([class.copy.assign]/12:
  * "returns an lvalue reference to the object assigned to").
  */
-analysis_result semantic_analysis::class_assignment(node_index n,
+analysis_result semantic_analysis::class_assignment(SyntaxRef n,
                                                     preprocessing_op_or_punc op,
                                                     expression_meaning &left,
                                                     expression_meaning &right,
@@ -320,9 +320,8 @@ analysis_result semantic_analysis::class_assignment(node_index n,
     m.evaluation = constness::not_constant;
     m.entity = 0;
     m.beyond_integral_constant = true;
-    m.node =
-        expression_node(semantic_kind::assignment, m, syntax(n).first_token(),
-                        assigned, right.node, static_cast<uint8_t>(op));
+    m.node = expression_node(semantic_kind::assignment, m, n.first_token(),
+                             assigned, right.node, static_cast<uint8_t>(op));
     semantics[m.node].computation = left.type;
     return analysis_result::well_formed;
 }

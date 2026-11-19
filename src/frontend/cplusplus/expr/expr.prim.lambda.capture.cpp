@@ -29,17 +29,17 @@ namespace cplusplus
 /* the captures of a lambda-introducer (its lambda-capture, capture-list or
    capture passed through), in order, the capture-default first */
 analysis_result
-semantic_analysis::lambda_captures_of(node_index n,
+semantic_analysis::lambda_captures_of(SyntaxRef n,
                                       owned_array<SyntaxElement> &out)
 {
-    for (auto c : syntax(n).elements()) {
+    for (auto c : n.elements()) {
         if (c.is(preprocessing_op_or_punc::COMMA) ||
             c.is(preprocessing_op_or_punc::LEFT_BRACKET) ||
             c.is(preprocessing_op_or_punc::RIGHT_BRACKET))
             continue;
         if (c.is(syntax_kind::lambda_capture) ||
             c.is(syntax_kind::capture_list)) {
-            analysis_result r = lambda_captures_of(c.index(), out);
+            analysis_result r = lambda_captures_of(syntax(c.index()), out);
             if (r != analysis_result::well_formed)
                 return r;
             continue;

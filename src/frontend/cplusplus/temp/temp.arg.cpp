@@ -138,7 +138,7 @@ entity_index semantic_analysis::dependent_value_entity(SyntaxElement written)
             return x.entity;
     }
     if (!negated && syntax(written).is(syntax_kind::simple_template_id))
-        return dependent_variable_specialization(written.index(), e);
+        return dependent_variable_specialization(syntax(written.index()), e);
     if (!syntax(written).is(syntax_kind::qualified_id) ||
         syntax(written).size() != 2)
         return e;
@@ -154,7 +154,7 @@ entity_index semantic_analysis::dependent_value_entity(SyntaxElement written)
     size_t unsupported_before = unsupported.size();
     type_index q = 0;
     analysis_result r =
-        template_type(syntax(qualifier)[0].index(), 0, false, q);
+        template_type(syntax(syntax(qualifier)[0].index()), 0, false, q);
     unsupported.resize(unsupported_before);
     if (r != analysis_result::well_formed ||
         type_table[q].kind != type_kind::dependent ||
@@ -184,10 +184,10 @@ entity_index semantic_analysis::dependent_value_entity(SyntaxElement written)
    spells X <source-name> <template-args> E (value 4); e if it is not
    one */
 entity_index
-semantic_analysis::dependent_variable_specialization(node_index id,
+semantic_analysis::dependent_variable_specialization(SyntaxRef id,
                                                      entity_index e)
 {
-    auto t = syntax(id);
+    auto t = id;
     if (t.size() < 3 || !t[0].is_identifier())
         return e;
     lookup_result x =

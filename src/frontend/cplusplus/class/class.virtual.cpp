@@ -48,7 +48,7 @@ bool semantic_analysis::overrides_function(entity_index e, entity_index g) const
  */
 analysis_result semantic_analysis::virtual_member(entity_index c,
                                                   entity_index e,
-                                                  node_index declaration,
+                                                  SyntaxRef declaration,
                                                   token_index id,
                                                   bool virtual_specified)
 {
@@ -230,7 +230,7 @@ bool semantic_analysis::primary_base_choice(entity_index c,
  * function that is not inline at the point of class definition".
  */
 analysis_result semantic_analysis::dynamic_class_record(entity_index c,
-                                                        node_index n)
+                                                        SyntaxRef n)
 {
     /* a copy: declare_implicit below adds an entity, which may move
        entity_table's (its bases, members and type, read here, stay) */

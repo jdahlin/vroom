@@ -87,7 +87,7 @@ analysis_result semantic_analysis::literal_operator_id(LiteralOperatorId id,
     return analysis_result::well_formed;
 }
 
-analysis_result semantic_analysis::literal_operator_declaration(node_index n,
+analysis_result semantic_analysis::literal_operator_declaration(SyntaxRef n,
                                                                 entity_index f)
 {
     const entity &x = entity_table[f];
@@ -316,7 +316,7 @@ analysis_result semantic_analysis::user_defined_literal(token_index t,
     }
     /* the call's node is the literal's own: its first token */
     analysis_result r =
-        call_function(current_declaration, t, chosen, arguments, m);
+        call_function(syntax(current_declaration), t, chosen, arguments, m);
     if (r == analysis_result::well_formed)
         used(t, chosen);
     return r;

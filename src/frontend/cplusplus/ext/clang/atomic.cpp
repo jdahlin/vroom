@@ -40,11 +40,11 @@ node_index parser::clang_atomic_type_specifier()
 /* [ext:clang_atomic] _Atomic(T): clang's rules, as for C (C23 6.7.3.5/3:
    "The type name in an atomic type specifier shall not refer to an array
    type, a function type, an atomic type, or a qualified type") */
-analysis_result semantic_analysis::clang_atomic_type(node_index n,
+analysis_result semantic_analysis::clang_atomic_type(SyntaxRef n,
                                                      qualified_type &type)
 {
     qualified_type value;
-    analysis_result r = type_id(syntax(n)[2], value);
+    analysis_result r = type_id(n[2], value);
     if (r != analysis_result::well_formed)
         return r;
     type_kind k = type_table[value.unqualified()].kind;

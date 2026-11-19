@@ -21,7 +21,7 @@ namespace cplusplus
  * ([conv.ptr]/3: the base class subobject) and the pointer to member.
  */
 analysis_result semantic_analysis::member_pointer_operator(
-    node_index n, token_index at, bool arrow, expression_meaning &left,
+    SyntaxRef n, token_index at, bool arrow, expression_meaning &left,
     expression_meaning &right, expression_meaning &m)
 {
     analysis_result r = operand_value(n, right);

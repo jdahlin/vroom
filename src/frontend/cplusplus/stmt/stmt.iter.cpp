@@ -253,7 +253,7 @@ analysis_result semantic_analysis::iteration_statement(IterationStatement n,
    the current scope) of type type, initialized by m: its declaration
    statement, and the variable named (an lvalue) in named */
 analysis_result semantic_analysis::exposition_variable(
-    node_index n, token_index at, expression_meaning &m, qualified_type type,
+    SyntaxRef n, token_index at, expression_meaning &m, qualified_type type,
     bool named, uint32_t &declaration, expression_meaning &variable)
 {
     entity_index v = entity_table.make(entity_kind::variable, 0, current_scope);
@@ -275,7 +275,7 @@ analysis_result semantic_analysis::exposition_variable(
 /* [stmt.ranged]/1: begin-expr or end-expr (name begin or end) for range,
    the variable range named: range.name() (member, of class type) or
    name(range) */
-analysis_result semantic_analysis::range_call(node_index n, token_index at,
+analysis_result semantic_analysis::range_call(SyntaxRef n, token_index at,
                                               const expression_meaning &range,
                                               uint32_t name, bool member,
                                               expression_meaning &m)
@@ -363,11 +363,11 @@ analysis_result semantic_analysis::range_call(node_index n, token_index at,
  * the variables range, begin and end unnamed.  declaration is the index
  * of the for-range-declaration among n's children.
  */
-analysis_result semantic_analysis::range_based_for(node_index n,
+analysis_result semantic_analysis::range_based_for(SyntaxRef n,
                                                    uint32_t declaration,
                                                    uint32_t &built)
 {
-    auto node = syntax(n);
+    auto node = n;
     if (declaration + 5 != node.size())
         return not_supported(n, "stmt.ranged");
     SyntaxElement range_declaration = node[declaration];
@@ -559,8 +559,8 @@ analysis_result semantic_analysis::for_range_declaration(
     {
         /* "The decl-specifier-seq shall not define a class or
            enumeration." */
-        node_index seq = node[0].index();
-        for (SyntaxElement c : syntax(seq).elements()) {
+        auto seq = node[0];
+        for (SyntaxElement c : seq.elements()) {
             if (syntax(c).is(syntax_kind::class_specifier) ||
                 syntax(c).is(syntax_kind::enum_specifier))
                 return ill_formed(at,
@@ -573,14 +573,14 @@ analysis_result semantic_analysis::for_range_declaration(
     bool claimable = declarations_claimable;
     declarations_claimable = false;
     if (binding)
-        r = structured_binding_declaration(at, 1, s, &element);
+        r = structured_binding_declaration(syntax(at), 1, s, &element);
     else
-        r = declare_with_initializer(at, node[1], SyntaxElement(), true, s,
-                                     false, &element);
+        r = declare_with_initializer(syntax(at), node[1], SyntaxElement(), true,
+                                     s, false, &element);
     declarations_claimable = claimable;
     if (r != analysis_result::well_formed) {
         block_variables.resize(first);
-        hold_names(at);
+        hold_names(syntax(at));
         return r;
     }
     built = declaration_statements(first, first_token(d));

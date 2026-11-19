@@ -29,7 +29,7 @@ namespace cplusplus
  * c: the template declared, its definition kept for instantiation.
  */
 analysis_result semantic_analysis::member_function_template(
-    entity_index c, node_index n, node_index definition, uint8_t access)
+    entity_index c, SyntaxRef n, SyntaxRef definition, uint8_t access)
 {
     owned_array<node_index> parameters;
     /* (the template-head's rules are a namespace-scope template's) */
@@ -40,7 +40,7 @@ analysis_result semantic_analysis::member_function_template(
     defining_class = saved_class;
     if (head != analysis_result::well_formed)
         return head;
-    auto d = syntax(definition);
+    auto d = definition;
     uint32_t lead = leading_gnu_attributes(definition);
     /* a constructor template's decl-specifier-seq is optional
        ([class.ctor]/1) */
@@ -154,7 +154,7 @@ analysis_result semantic_analysis::member_function_template(
  * candidates as member candidates ([over.match.funcs]/2).
  */
 analysis_result semantic_analysis::member_template_candidates(
-    node_index n, entity_index held, const expression_meaning *arguments,
+    SyntaxRef n, entity_index held, const expression_meaning *arguments,
     uint32_t count, owned_array<overload_candidate> &candidates)
 {
     owned_array<uint32_t> group;
@@ -179,7 +179,7 @@ analysis_result semantic_analysis::member_template_candidates(
  * ([class.conv.ctor]/1: not explicit).
  */
 analysis_result semantic_analysis::constructor_template_candidates(
-    node_index n, entity_index c, const expression_meaning *arguments,
+    SyntaxRef n, entity_index c, const expression_meaning *arguments,
     uint32_t count, bool copy, owned_array<overload_candidate> &candidates,
     owned_array<uint32_t> *first_arguments, owned_array<template_argument> *all)
 {
@@ -212,7 +212,7 @@ analysis_result semantic_analysis::constructor_template_candidates(
  * ([temp.inst]/4) and called.
  */
 analysis_result semantic_analysis::member_template_call(
-    node_index n, entity_index held, const expression_meaning &object,
+    SyntaxRef n, entity_index held, const expression_meaning &object,
     const owned_array<SyntaxElement> &arguments,
     owned_array<expression_meaning> &early, expression_meaning &m)
 {
@@ -266,11 +266,11 @@ analysis_result semantic_analysis::member_template_call(
 /* member function f called on object (of its class or a class derived
    from it) with the arguments: [expr.call]/2's class member access */
 analysis_result semantic_analysis::bound_member_call(
-    node_index n, entity_index f, const expression_meaning &object,
+    SyntaxRef n, entity_index f, const expression_meaning &object,
     const owned_array<SyntaxElement> &arguments,
     owned_array<expression_meaning> &early, expression_meaning &m)
 {
-    token_index at = syntax(n).first_token();
+    token_index at = n.first_token();
     expression_meaning e = object;
     entity_index object_class = type_table[e.type.unqualified()].entity;
     const entity x = entity_table[f];

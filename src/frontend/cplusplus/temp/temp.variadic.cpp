@@ -25,7 +25,7 @@
 namespace cplusplus
 {
 
-token_index semantic_analysis::template_parameter_id(node_index p) const
+token_index semantic_analysis::template_parameter_id(SyntaxRef p) const
 {
     template_parameter_parts x;
     template_parameter_form(p, x);
@@ -106,9 +106,9 @@ bool semantic_analysis::template_parameter_form(
 }
 
 bool semantic_analysis::template_head_list(
-    node_index head, owned_array<node_index> &parameters) const
+    SyntaxRef head, owned_array<node_index> &parameters) const
 {
-    for (SyntaxElement c : syntax(head).elements()) {
+    for (SyntaxElement c : head.elements()) {
         if (c.is_token())
             continue;
         if (syntax(c).is(syntax_kind::type_parameter) ||
@@ -248,17 +248,17 @@ bool semantic_analysis::expansion_count(token_index first, token_index end,
 }
 
 analysis_result semantic_analysis::parameter_pack_expansion(
-    node_index d, bool last, uint32_t &elements, token_index &ellipsis)
+    SyntaxRef d, bool last, uint32_t &elements, token_index &ellipsis)
 {
     elements = 0;
     ellipsis = 0;
-    token_index first = syntax(d).first_token(), end = syntax(d).end_token();
+    token_index first = d.first_token(), end = d.end_token();
     /* [dcl.fct]/21: the ellipsis of a function parameter pack is the
        declarator's; one in the decl-specifier-seq is a template
        argument's (tuple<Ts...>&) */
     token_index from = first;
-    if (syntax(d).size() && syntax(d)[0].is(syntax_kind::decl_specifier_seq))
-        from = syntax(d)[0].end_token();
+    if (d.size() && d[0].is(syntax_kind::decl_specifier_seq))
+        from = d[0].end_token();
     token_index found = 0;
     uint32_t ellipses = 0;
     for (token_index t = from; t < end; t++)
@@ -335,9 +335,9 @@ static void child_tokens(const syntax_tree &tree, syntax_child c,
  * on operands of neither class nor enumeration type (whose operator
  * functions [over.match.oper] would consider).
  */
-analysis_result semantic_analysis::fold(node_index n, expression_meaning &m)
+analysis_result semantic_analysis::fold(SyntaxRef n, expression_meaning &m)
 {
-    auto node = syntax(n);
+    auto node = n;
     SyntaxElement pattern = {}, init = {};
     bool right = false, has_init = false;
     token_index at = 0;

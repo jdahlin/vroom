@@ -67,7 +67,7 @@ token_index semantic_analysis::callee_name(SyntaxElement c) const
  * arguments are analysed into early.
  */
 analysis_result
-semantic_analysis::resolve_call(node_index n,
+semantic_analysis::resolve_call(SyntaxRef n,
                                 const owned_array<SyntaxElement> &arguments,
                                 owned_array<expression_meaning> &early,
                                 const owned_array<entity_index> &set,
@@ -97,7 +97,7 @@ semantic_analysis::resolve_call(node_index n,
         if (!syntax(arguments[i]).is(syntax_kind::braced_init_list))
             continue;
         owned_array<SyntaxElement> clauses;
-        analysis_result r = list_clauses(arguments[i].index(), clauses);
+        analysis_result r = list_clauses(syntax(arguments[i].index()), clauses);
         if (r != analysis_result::well_formed)
             return r;
         if (clauses.size() != 1 ||

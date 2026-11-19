@@ -93,16 +93,16 @@ uint32_t semantic_analysis::conversion_function_name() const
  * type-specifier-seq, then each ptr-operator of the conversion-declarator,
  * first to last.
  */
-analysis_result semantic_analysis::conversion_type(node_index id,
+analysis_result semantic_analysis::conversion_type(SyntaxRef id,
                                                    qualified_type &type)
 {
-    auto node = syntax(id);
+    auto node = id;
     if (node.size() != 2 || node[1].is_token())
         return not_supported(id, "class.conv.fct");
-    node_index t = node[1].index();
+    auto t = node[1];
     node_index seq = t;
-    if (syntax(t).is(syntax_kind::conversion_type_id))
-        seq = syntax(t)[0].index();
+    if (t.is(syntax_kind::conversion_type_id))
+        seq = t[0].index();
     specified s;
     analysis_result r = decl_specifier_seq(seq, s, false);
     if (r != analysis_result::well_formed)
@@ -116,9 +116,9 @@ analysis_result semantic_analysis::conversion_type(node_index id,
     /* the ptr-operators, in source order (a conversion-declarator nests
        the rest after its first) */
     owned_array<node_index> work;
-    for (uint32_t i = syntax(t).size(); i-- > 1;)
-        if (!syntax(t)[i].is_token())
-            work.append(syntax(t)[i].index());
+    for (uint32_t i = t.size(); i-- > 1;)
+        if (!t[i].is_token())
+            work.append(t[i].index());
     while (!work.empty()) {
         node_index k = work.back();
         work.resize(work.size() - 1);
@@ -131,7 +131,7 @@ analysis_result semantic_analysis::conversion_type(node_index id,
         if (!syntax(k).is(syntax_kind::ptr_operator))
             return not_supported(k, "class.conv.fct");
         declarator_meaning m;
-        r = pointer_operator(k, type, m);
+        r = pointer_operator(syntax(k), type, m);
         if (r != analysis_result::well_formed)
             return r;
     }
@@ -153,11 +153,11 @@ analysis_result semantic_analysis::conversion_type(node_index id,
  * decl-specifier-seq's.
  */
 analysis_result
-semantic_analysis::conversion_function_member(entity_index c, node_index n,
-                                              node_index id, uint8_t access,
+semantic_analysis::conversion_function_member(entity_index c, SyntaxRef n,
+                                              SyntaxRef id, uint8_t access,
                                               owned_array<node_index> &bodies)
 {
-    auto children_syntax = syntax(n);
+    auto children_syntax = n;
     specified s;
     uint32_t first = 0;
     /* [ext:gnu_attributes] attributes before the declaration */
@@ -171,7 +171,7 @@ semantic_analysis::conversion_function_member(entity_index c, node_index n,
     }
     if (first < children_syntax.size() &&
         children_syntax[first].is(syntax_kind::decl_specifier_seq)) {
-        node_index seq = children_syntax[first].index();
+        auto seq = children_syntax[first];
         first++;
         bool outer_virtual = virtual_allowed, outer_explicit = explicit_allowed;
         virtual_allowed = explicit_allowed = true;
@@ -210,10 +210,10 @@ semantic_analysis::conversion_function_member(entity_index c, node_index n,
 
 /* [class.conv.fct]/1: the declarator-id is found in the declarator, not
    in the decl-specifier-seq, the parameters or the body */
-node_index semantic_analysis::conversion_function_id_of(node_index n) const
+node_index semantic_analysis::conversion_function_id_of(SyntaxRef n) const
 {
     owned_array<node_index> work;
-    for (SyntaxElement x : syntax(n).elements()) {
+    for (SyntaxElement x : n.elements()) {
         if (!x.is_token() && !syntax(x).is(syntax_kind::decl_specifier_seq) &&
             !syntax(x).is(syntax_kind::function_body))
             work.append(x.index());
@@ -242,7 +242,7 @@ entity_index semantic_analysis::own_conversion_functions(entity_index c) const
 
 entity_index
 semantic_analysis::conversion_function_declared_by(entity_index c,
-                                                   node_index definition)
+                                                   SyntaxRef definition)
 {
     for (entity_index f = own_conversion_functions(c); f;
          f = entity_table[f].next_overload)
@@ -440,8 +440,8 @@ analysis_result semantic_analysis::conversion_function_call(
     owned_array<SyntaxElement> syntax;
     owned_array<expression_meaning> arguments;
     expression_meaning result;
-    r = call_with(at, callee, x.type, address.node, f, syntax, arguments,
-                  result);
+    r = call_with(this->syntax(at), callee, x.type, address.node, f, syntax,
+                  arguments, result);
     if (r != analysis_result::well_formed)
         return r;
     m = result;

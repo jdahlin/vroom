@@ -694,10 +694,9 @@ semantic_analysis::static_assert_declaration(StaticAssertDeclaration n)
  * neither defines nor declares a class or enumeration here, and the
  * alias-declaration has no attributes.
  */
-analysis_result semantic_analysis::alias_type(node_index n,
-                                              qualified_type &type)
+analysis_result semantic_analysis::alias_type(SyntaxRef n, qualified_type &type)
 {
-    auto node = syntax(n);
+    auto node = n;
     /* using identifier attribute-specifier-seq_opt = defining-type-id ;
        the attributes only those that change nothing vcc generates */
     uint32_t type_at = 3;
@@ -719,8 +718,8 @@ analysis_result semantic_analysis::alias_type(node_index n,
     if (node.size() != type_at + 2 ||
         !node[type_at].is(syntax_kind::defining_type_id))
         return not_supported(n, "dcl.attr");
-    node_index id = node[type_at].index();
-    auto d = syntax(id);
+    auto id = node[type_at];
+    auto d = id;
     if (!d.size() || d.size() > 2 || d[0].is_token())
         return not_supported(n, "dcl.typedef");
     /* (a simple-template-id counts as declares_class too: the
@@ -781,13 +780,12 @@ analysis_result semantic_analysis::alias_declaration(AliasDeclaration n)
  * At global namespace scope, the declarations S1 of doc/PLAN-cxx-sema.md
  * has rules for: declarators with no initializer, no attributes.
  */
-analysis_result semantic_analysis::simple_declaration(node_index n)
+analysis_result semantic_analysis::simple_declaration(SyntaxRef n)
 {
     uint32_t k = leading_gnu_attributes(n);
-    if (k >= syntax(n).size() ||
-        !syntax(n)[k].is(syntax_kind::decl_specifier_seq))
+    if (k >= n.size() || !n[k].is(syntax_kind::decl_specifier_seq))
         return not_supported(n, "dcl.attr");
-    return init_declarators(n, syntax(n)[k].index(), false);
+    return init_declarators(n, syntax(n[k].index()), false);
 }
 
 /* [ext:gnu_attributes] the number of gnu-attribute-specifiers (or
@@ -797,7 +795,7 @@ uint32_t semantic_analysis::leading_gnu_attributes(node_index n) const
 {
     uint32_t k = 0;
     while (k < syntax(n).size() && !syntax(n)[k].is_token() &&
-           gnu_or_without_effect(syntax(n)[k].index()))
+           gnu_or_without_effect(syntax(syntax(n)[k].index())))
         k++;
     return k;
 }
@@ -805,18 +803,18 @@ uint32_t semantic_analysis::leading_gnu_attributes(node_index n) const
 /* GCC's attributes, or standard ones without effect
    (attributes_without_effect), which gnu_attribute_specifier passes over:
    [[nodiscard]] before libc++'s functions */
-bool semantic_analysis::gnu_or_without_effect(node_index n) const
+bool semantic_analysis::gnu_or_without_effect(SyntaxRef n) const
 {
     uint32_t flags = 0;
-    if (syntax(n).is(syntax_kind::attribute_specifier))
+    if (n.is(syntax_kind::attribute_specifier))
         return attributes_as_gnu(element(n), flags);
-    if (!syntax(n).is(syntax_kind::attribute_specifier_seq))
+    if (!n.is(syntax_kind::attribute_specifier_seq))
         return only_gnu_attributes(tree, n);
-    for (SyntaxElement c : syntax(n).elements()) {
+    for (SyntaxElement c : n.elements()) {
         if (c.is_token())
             return false;
         if (!syntax(c).is(syntax_kind::gnu_attribute_specifier) &&
-            !gnu_or_without_effect(c.index()))
+            !gnu_or_without_effect(syntax(c.index())))
             return false;
     }
     return true;
@@ -846,16 +844,18 @@ semantic_analysis::function_definition(FunctionDefinition definition)
     if (node.size() && !syntax(n)[k].is(syntax_kind::decl_specifier_seq))
         /* [class.mem]/12: a constructor or destructor (or a conversion
            function) defined outside its class */
-        return special_member_definition(n, 0);
+        return special_member_definition(syntax(n), 0);
     bool constexpr_specified = false;
     if (!k && node.size() == 3 &&
-        function_specifiers_only(syntax(n)[0].index(), constexpr_specified))
+        function_specifiers_only(syntax(syntax(n)[0].index()),
+                                 constexpr_specified))
         /* the same, constexpr ([class.ctor]/1): a decl-specifier-seq of
            constexpr alone has no type, so names no other function */
-        return special_member_definition(n, 1);
+        return special_member_definition(syntax(n), 1);
     if (!node.size())
         return not_supported(n, "dcl.fct.def.general");
-    analysis_result r = init_declarators(n, syntax(n)[k].index(), true);
+    analysis_result r =
+        init_declarators(syntax(n), syntax(syntax(n)[k].index()), true);
     if (r != analysis_result::well_formed)
         return r;
     entity_index f = last_declared;
@@ -865,10 +865,10 @@ semantic_analysis::function_definition(FunctionDefinition definition)
        function-try-block and = default are not analysed yet */
     auto body = definition.function_body();
     if (body.deleted())
-        return deleted_definition(n, f);
+        return deleted_definition(syntax(n), f);
     if (!body.plain())
         return not_supported(n, "dcl.fct.def.general");
-    return analyse_function_body(n, body.compound_statement());
+    return analyse_function_body(syntax(n), body.compound_statement());
 }
 
 /*
@@ -877,8 +877,8 @@ semantic_analysis::function_definition(FunctionDefinition definition)
  * is analyzed separately as if it was in a declaration by itself."  The
  * declaration is ill-formed if one of them is, and unsupported if one is.
  */
-analysis_result semantic_analysis::init_declarators(node_index declaration,
-                                                    node_index specifiers,
+analysis_result semantic_analysis::init_declarators(SyntaxRef declaration,
+                                                    SyntaxRef specifiers,
                                                     bool definition)
 {
     specified s;
@@ -886,11 +886,11 @@ analysis_result semantic_analysis::init_declarators(node_index declaration,
        attribute-specifier-seq_opt identifier ; "the identifier is declared to
        be a class-name in the scope that contains the declaration" */
     sole_elaborated = 0;
-    if (!definition && syntax(specifiers).size() == 1 &&
-        syntax(specifiers)[0].is(syntax_kind::elaborated_type_specifier)) {
+    if (!definition && specifiers.size() == 1 &&
+        specifiers[0].is(syntax_kind::elaborated_type_specifier)) {
         bool declarators = false;
         bool after = false;
-        for (SyntaxElement c : syntax(declaration).elements()) {
+        for (SyntaxElement c : declaration.elements()) {
             if (!c.is_token() && c.index() == specifiers) {
                 after = true;
                 continue;
@@ -899,7 +899,7 @@ analysis_result semantic_analysis::init_declarators(node_index declaration,
                 declarators = true;
         }
         if (!declarators)
-            sole_elaborated = syntax(specifiers)[0].index();
+            sole_elaborated = specifiers[0].index();
     }
     placeholder_allowed = true;
     /* (a declaration nested in an initializer has its own) */
@@ -909,7 +909,7 @@ analysis_result semantic_analysis::init_declarators(node_index declaration,
     sole_elaborated = 0;
     if (r != analysis_result::well_formed)
         return r;
-    auto node = syntax(declaration);
+    auto node = declaration;
     uint32_t first = 0;
     while (first < node.size() &&
            !(node[first].is(syntax_kind::decl_specifier_seq) &&
@@ -1002,7 +1002,7 @@ analysis_result semantic_analysis::init_declarators(node_index declaration,
  * is immediately after its complete declarator and before its initializer
  * (if any)".
  */
-analysis_result semantic_analysis::init_declarator(node_index declaration,
+analysis_result semantic_analysis::init_declarator(SyntaxRef declaration,
                                                    SyntaxElement item,
                                                    const specified &s,
                                                    bool definition)
@@ -1023,7 +1023,7 @@ analysis_result semantic_analysis::init_declarator(node_index declaration,
 }
 
 analysis_result semantic_analysis::declare_with_initializer(
-    node_index declaration, SyntaxElement d, SyntaxElement init,
+    SyntaxRef declaration, SyntaxElement d, SyntaxElement init,
     bool initialized, const specified &s, bool definition,
     const expression_meaning *supplied)
 {

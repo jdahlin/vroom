@@ -294,9 +294,9 @@ node_index parser::linkage_specification()
  * declaration of its own in semantic_analysis::declarations: the definition
  * itself has a record only when it is not well-formed.
  */
-analysis_result semantic_analysis::namespace_definition(node_index n)
+analysis_result semantic_analysis::namespace_definition(SyntaxRef n)
 {
-    auto node = syntax(n);
+    auto node = n;
     /* [namespace.def]/1 (the grammar): a namespace-definition is a
        declaration of a namespace-body or the translation unit */
     if (!is_namespace(current_scope) || defining_class || function_state.active)
@@ -462,14 +462,14 @@ analysis_result semantic_analysis::namespace_definition(node_index n)
  * is "a synonym for the name of the namespace" it was defined to).
  */
 analysis_result semantic_analysis::named_namespace(node_index at,
-                                                   node_index qualifier,
+                                                   SyntaxRef qualifier,
                                                    token_index name,
                                                    entity_index &n)
 {
     lookup_result found;
     if (qualifier) {
         nominated_scope scope;
-        analysis_result r = nested_name_specifier(syntax(qualifier), scope);
+        analysis_result r = nested_name_specifier(qualifier, scope);
         if (r != analysis_result::well_formed)
             return r;
         if (!is_namespace(scope.entity))
@@ -535,7 +535,7 @@ analysis_result semantic_analysis::using_directive(UsingDirective n)
     if (!name)
         return unknown(not_supported(n, "namespace.udir"));
     entity_index nominated = 0;
-    analysis_result r = named_namespace(n, qualifier, name, nominated);
+    analysis_result r = named_namespace(n, syntax(qualifier), name, nominated);
     if (r != analysis_result::well_formed)
         return unknown(r);
     for (const using_directive_record &u : using_directives)
@@ -586,7 +586,7 @@ semantic_analysis::namespace_alias_definition(NamespaceAliasDefinition n)
         return not_supported(n, "namespace.alias");
     }
     entity_index nominated = 0;
-    analysis_result r = named_namespace(n, qualifier, name, nominated);
+    analysis_result r = named_namespace(n, syntax(qualifier), name, nominated);
     if (r != analysis_result::well_formed)
         return r;
     entity_index scope = current_scope;
@@ -612,9 +612,9 @@ semantic_analysis::namespace_alias_definition(NamespaceAliasDefinition n)
 }
 
 /* the declarations between the braces of a namespace-definition */
-void semantic_analysis::declaration_seq_in(node_index container)
+void semantic_analysis::declaration_seq_in(SyntaxRef container)
 {
-    auto namespace_body = syntax(container);
+    auto namespace_body = container;
     for (auto child : namespace_body.elements())
         for (auto d : child.declaration_seq().declarations())
             declaration(d);

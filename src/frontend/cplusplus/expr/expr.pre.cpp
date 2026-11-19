@@ -90,15 +90,15 @@ analysis_result semantic_analysis::expression_kind(SyntaxElement e,
             return this_pointer(e.token(), m);
         return not_supported(current_declaration, "expr.prim");
     }
-    node_index n = e.index();
-    switch (syntax(n).kind()) {
+    auto n = e;
+    switch (n.kind()) {
     case syntax_kind::gnu_extension_expression:
         /* [ext:gnu_extension_keyword]: __extension__ changes no meaning */
-        return expression(syntax(n)[1], m);
+        return expression(n[1], m);
     case syntax_kind::primary_expression:
         return parenthesized(n, m);
     case syntax_kind::qualified_id:
-        return qualified_id(syntax(n), m);
+        return qualified_id(n, m);
     case syntax_kind::unary_expression:
         return unary(n, m);
     case syntax_kind::postfix_expression:
@@ -125,19 +125,19 @@ analysis_result semantic_analysis::expression_kind(SyntaxElement e,
     case syntax_kind::expression:
         return comma(n, m);
     case syntax_kind::new_expression:
-        return new_expression(syntax(n), m);
+        return new_expression(n, m);
     case syntax_kind::delete_expression:
-        return delete_expression(syntax(n), m);
+        return delete_expression(n, m);
     case syntax_kind::fold_expression:
         return fold(n, m);
     case syntax_kind::lambda_expression:
-        return lambda_expression(syntax(n), m);
+        return lambda_expression(n, m);
     case syntax_kind::noexcept_expression:
         return noexcept_operator(n, m);
     case syntax_kind::simple_template_id:
         return variable_template_id(n, m);
     case syntax_kind::requires_expression:
-        return requires_expression(syntax(n), m);
+        return requires_expression(n, m);
     case syntax_kind::clang_type_trait_expression:
         return clang_type_trait(n, m);
     case syntax_kind::gnu_offsetof_expression:

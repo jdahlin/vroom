@@ -165,13 +165,13 @@ node_index parser::class_or_decltype(scope_index *region)
  * template's specialization ([temp.names]/1; decltype has no rules yet)
  */
 analysis_result semantic_analysis::base_class_name(SyntaxElement name,
-                                                   node_index n,
+                                                   SyntaxRef n,
                                                    entity_index &base,
                                                    token_index &id)
 {
     if (syntax(name).is(syntax_kind::simple_template_id)) {
         type_index t = 0;
-        analysis_result r = template_type(name.index(), 0, false, t);
+        analysis_result r = template_type(syntax(name.index()), 0, false, t);
         if (r != analysis_result::well_formed)
             return r;
         id = syntax(name).first_token();

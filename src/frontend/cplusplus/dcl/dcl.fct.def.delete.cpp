@@ -38,7 +38,7 @@ bool semantic_analysis::explicit_body(SyntaxElement body,
            p.keyword_of(tokens[children[1].token()]) == k;
 }
 
-analysis_result semantic_analysis::deleted_definition(node_index n,
+analysis_result semantic_analysis::deleted_definition(SyntaxRef n,
                                                       entity_index f)
 {
     entity &x = entity_table[f];

@@ -88,9 +88,9 @@ analysis_result semantic_analysis::class_specifier(ClassSpecifier n,
 
 /* whether a decl-specifier-seq has a class-specifier of an unnamed
    class */
-bool semantic_analysis::declares_unnamed_class(node_index seq) const
+bool semantic_analysis::declares_unnamed_class(SyntaxRef seq) const
 {
-    for (auto c : syntax(seq).elements()) {
+    for (auto c : seq.elements()) {
         auto head = c.class_specifier().class_head();
         if (head && head.size() == 1)
             return true;
@@ -113,7 +113,7 @@ bool semantic_analysis::declares_unnamed_class(node_index seq) const
  * says which object it is in (entity::anonymous_object).
  */
 analysis_result semantic_analysis::anonymous_union_member(entity_index c,
-                                                          node_index n,
+                                                          SyntaxRef n,
                                                           const specified &s,
                                                           uint8_t access)
 {
@@ -144,7 +144,7 @@ analysis_result semantic_analysis::anonymous_union_member(entity_index c,
 /* the names of the members of anonymous union u, and of the anonymous
    unions among them, bound in c ([class.union.anon]/1) */
 analysis_result semantic_analysis::bind_anonymous_members(entity_index c,
-                                                          node_index n,
+                                                          SyntaxRef n,
                                                           entity_index u)
 {
     const entity &x = entity_table[u];
@@ -180,7 +180,7 @@ analysis_result semantic_analysis::bind_anonymous_members(entity_index c,
 }
 
 /* (class_definition) */
-analysis_result semantic_analysis::class_definition(node_index n,
+analysis_result semantic_analysis::class_definition(SyntaxRef n,
                                                     type_index &type)
 {
     /* a class template's specialization defined while another class is
@@ -189,7 +189,7 @@ analysis_result semantic_analysis::class_definition(node_index n,
     postpone_member_bodies = false;
     entity_index postponed_scope = current_scope;
     node_index postponed_declaration = current_declaration;
-    auto node = syntax(n);
+    auto node = n;
     auto head = node.class_specifier().class_head();
     if (!head)
         return not_supported(n, "class.pre");
@@ -215,7 +215,7 @@ analysis_result semantic_analysis::class_definition(node_index n,
             alignas_list.append(c.index());
         } else if (class_head_attributes_without_effect(c)) {
             /* [dcl.attr.deprecated] and the like: nothing generated */
-        } else if (c.is_node() && gnu_or_without_effect(c.index())) {
+        } else if (c.is_node() && gnu_or_without_effect(syntax(c.index()))) {
             /* one attribute-specifier, or a seq of them */
             if (c.is(syntax_kind::attribute_specifier_seq)) {
                 for (auto each : c.elements()) {
@@ -650,12 +650,13 @@ analysis_result semantic_analysis::class_definition(node_index n,
     } else {
         size_t nested_end = nested_bodies.size();
         for (node_index body : bodies) {
-            result = worse(result, member_function_body(c, body));
+            result = worse(result, member_function_body(c, syntax(body)));
             current_declaration = outer_declaration;
         }
         for (size_t i = nested_start; i < nested_end; i++) {
-            result = worse(result, member_function_body(nested_bodies[i].c,
-                                                        nested_bodies[i].body));
+            result = worse(result,
+                           member_function_body(nested_bodies[i].c,
+                                                syntax(nested_bodies[i].body)));
             current_declaration = outer_declaration;
         }
         nested_bodies.resize(nested_start);
@@ -1123,7 +1124,7 @@ analysis_result semantic_analysis::member_declaration_with_specifiers(
     entity_index c, SyntaxRef node, uint8_t access,
     owned_array<node_index> &bodies)
 {
-    node_index n = node.index();
+    auto n = node;
     /* [ext:gnu_attributes] before it all (libc++'s _LIBCPP_HIDE_FROM_ABI
        friend ...) */
     uint32_t leading = leading_gnu_attributes(n);
@@ -1139,7 +1140,7 @@ analysis_result semantic_analysis::member_declaration_with_specifiers(
         is_namespace(entity_table[c].enclosing) && abbreviated_function(n))
         return member_function_template(c, n, n, access);
     if (node_index id = conversion_function_id_of(n))
-        return conversion_function_member(c, n, id, access, bodies);
+        return conversion_function_member(c, n, syntax(id), access, bodies);
 
     /* a constructor or destructor: no decl-specifier-seq, or one of
        function-specifiers alone ([class.ctor]/1: "Each decl-specifier in
@@ -1171,8 +1172,9 @@ analysis_result semantic_analysis::member_declaration_with_specifiers(
     };
     if (node.size() > lead + 1 &&
         node[lead].is(syntax_kind::decl_specifier_seq) &&
-        function_specifiers_only(node[lead].index(), constexpr_specified,
-                                 &virtual_specified, &explicit_specified) &&
+        function_specifiers_only(syntax(node[lead].index()),
+                                 constexpr_specified, &virtual_specified,
+                                 &explicit_specified) &&
         declares_special_member(c, special(node[lead + 1])))
         at = lead + 1;
     if (lead == node.size() || at > lead ||
@@ -1261,10 +1263,10 @@ analysis_result semantic_analysis::member_declaration_with_specifiers(
  * class c from node[first] on, after its decl-specifier-seq s.
  */
 analysis_result semantic_analysis::member_declarators(
-    entity_index c, node_index n, const specified &s, uint8_t access,
+    entity_index c, SyntaxRef n, const specified &s, uint8_t access,
     uint32_t first, owned_array<node_index> &bodies)
 {
-    auto node = syntax(n);
+    auto node = n;
     analysis_result r = analysis_result::well_formed;
     if (node.is(syntax_kind::function_definition)) {
         /* [dcl.fct.def.general]/1: declarator virt-specifier-seq_opt
@@ -1311,7 +1313,7 @@ analysis_result semantic_analysis::member_declarators(
         if (s.declares_enumeration && plain)
             return analysis_result::well_formed;
         auto seq = node[first - 1];
-        if (declares_unnamed_class(seq.index()))
+        if (declares_unnamed_class(syntax(seq.index())))
             return anonymous_union_member(c, n, s, access);
         /* [class.nest]/1: a nested class's definition, or its declaration
            ([class.nest]/3) */
@@ -1339,7 +1341,7 @@ analysis_result semantic_analysis::member_declarators(
  * node is one with a bit-field, an initializer or a specifier.
  */
 analysis_result
-semantic_analysis::member_declarator(entity_index c, node_index declaration,
+semantic_analysis::member_declarator(entity_index c, SyntaxRef declaration,
                                      SyntaxElement d, const specified &s,
                                      uint8_t access, bool definition)
 {
@@ -1389,7 +1391,7 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
         entity_index e = last_declared;
         if (e && entity_table[e].kind == entity_kind::variable &&
             !entity_table[e].nonstatic_member)
-            return static_member_initializer(d.index(), e, node[1], s);
+            return static_member_initializer(syntax(d.index()), e, node[1], s);
         if (!e || entity_table[e].kind != entity_kind::variable)
             /* a pure-specifier ([class.abstract]) */
             return not_supported(d.index(), "class.abstract");
@@ -1613,10 +1615,9 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
             /* (one deleted on this, its first, declaration: not counted,
                layout's pod_for_layout reads the count at the class's end,
                before the bodies) */
-            bool deleted_here = definition && syntax(declaration)
-                                                  .function_definition()
-                                                  .function_body()
-                                                  .deleted();
+            bool deleted_here =
+                definition &&
+                declaration.function_definition().function_body().deleted();
             if (copy_assignment_operator(e, entity_table[e].enclosing) &&
                 !deleted_here)
                 entity_table[entity_table[e].enclosing].user_copy_assignments++;
@@ -1803,7 +1804,7 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
  * not in a class) and attributes on it have no rules yet.
  */
 analysis_result semantic_analysis::member_typedef(
-    entity_index c, node_index declaration, token_index id, qualified_type type,
+    entity_index c, SyntaxRef declaration, token_index id, qualified_type type,
     const specified &s, const declarator_meaning &m, uint8_t access)
 {
     if (s.static_ || s.inline_ || s.constexpr_ || s.virtual_ || s.gnu_flags ||
@@ -1834,9 +1835,9 @@ analysis_result semantic_analysis::member_typedef(
  * parameters (function_body reads them), then the body.
  */
 analysis_result semantic_analysis::member_function_body(entity_index c,
-                                                        node_index n)
+                                                        SyntaxRef n)
 {
-    auto definition = syntax(n).function_definition();
+    auto definition = n.function_definition();
     if (entity_index f = friend_defined_by(definition, c))
         return friend_function_body(c, definition, f);
     current_declaration = definition;
@@ -1876,7 +1877,7 @@ semantic_analysis::member_function_definition(entity_index c,
     uint32_t at = 0;
     auto seq = definition.decl_specifier_seq();
     if (seq && definition.size() > leading_gnu_attributes(definition) + 2 &&
-        function_specifiers_only(seq.index(), constexpr_specified,
+        function_specifiers_only(syntax(seq.index()), constexpr_specified,
                                  &body_virtual, &body_explicit) &&
         declares_special_member(c, definition.declarator()))
         at = 1;
@@ -1960,7 +1961,7 @@ semantic_analysis::member_function_definition(entity_index c,
  * definition").
  */
 analysis_result semantic_analysis::member_redeclaration(
-    node_index declaration, token_index id, entity_index qualifier,
+    SyntaxRef declaration, token_index id, entity_index qualifier,
     qualified_type type, const specified &s, bool definition)
 {
     last_declared = 0;
@@ -2016,7 +2017,7 @@ analysis_result semantic_analysis::member_redeclaration(
  * (an inline variable, R9) is not analysed.
  */
 analysis_result
-semantic_analysis::static_member_initializer(node_index declarator,
+semantic_analysis::static_member_initializer(SyntaxRef declarator,
                                              entity_index e, SyntaxElement init,
                                              const specified &s)
 {
@@ -2070,7 +2071,7 @@ semantic_analysis::static_member_initializer(node_index declarator,
  * type (an array's bound may be given here, [dcl.array]/8).
  */
 analysis_result semantic_analysis::static_member_definition(
-    node_index declaration, token_index id, entity_index qualifier,
+    SyntaxRef declaration, token_index id, entity_index qualifier,
     qualified_type type, const specified &s, bool definition,
     entity_index &declared_entity)
 {
@@ -2180,12 +2181,12 @@ bool semantic_analysis::virt_specifier(SyntaxElement d, bool &override_,
 
 /* a class-head's class-head-name (or what is in its place), after the
    class-key and alignment-specifiers; none in an unnamed class's */
-SyntaxElement semantic_analysis::class_head_name(node_index head) const
+SyntaxElement semantic_analysis::class_head_name(SyntaxRef head) const
 {
-    auto h = syntax(head);
+    auto h = head;
     for (auto c : h.elements(1)) {
         if (c.is(syntax_kind::alignment_specifier) ||
-            (c.is_node() && gnu_or_without_effect(c.index())))
+            (c.is_node() && gnu_or_without_effect(syntax(c.index()))))
             continue;
         bool only_alignment = c.is(syntax_kind::attribute_specifier_seq);
         for (auto k : c.elements())

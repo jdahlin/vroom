@@ -312,10 +312,10 @@ uint64_t semantic_analysis::alignment_of_type(qualified_type t) const
  * the alignment requirement of its operand type."  [expr.sizeof]/5 and
  * [expr.alignof]/2: "The result ... is a prvalue of type std::size_t."
  */
-analysis_result semantic_analysis::size_of(node_index n, bool alignment,
+analysis_result semantic_analysis::size_of(SyntaxRef n, bool alignment,
                                            expression_meaning &m)
 {
-    auto node = syntax(n);
+    auto node = n;
     qualified_type operand;
     if (node.size() == 4 && node[2].is(syntax_kind::type_id)) {
         analysis_result r = type_id(node[2], operand);
@@ -406,21 +406,19 @@ analysis_result semantic_analysis::size_of(node_index n, bool alignment,
  * type of the operand."  The operand is modified: never a constant
  * expression here ([expr.const]/5.16).
  */
-analysis_result semantic_analysis::increment(node_index n,
-                                             SyntaxElement operand,
+analysis_result semantic_analysis::increment(SyntaxRef n, SyntaxElement operand,
                                              bool decrement, bool postfix,
                                              expression_meaning &m)
 {
     analysis_result r = expression(operand, m);
     if (r != analysis_result::well_formed)
         return r;
-    return increment_of(n, syntax(n).first_token(), operand, decrement, postfix,
-                        m);
+    return increment_of(n, n.first_token(), operand, decrement, postfix, m);
 }
 
 /* ... of the operand analysed as m (its syntax operand, none for an
    operand [stmt.ranged]/1 makes) */
-analysis_result semantic_analysis::increment_of(node_index n, token_index at,
+analysis_result semantic_analysis::increment_of(SyntaxRef n, token_index at,
                                                 SyntaxElement operand,
                                                 bool decrement, bool postfix,
                                                 expression_meaning &m)
@@ -500,9 +498,9 @@ analysis_result semantic_analysis::increment_of(node_index n, token_index at,
  * [expr.unary.op]: the unary operators *, &, +, -, ! and ~; [expr.pre.incr]
  * prefix ++ and --; [expr.sizeof] and [expr.alignof].
  */
-analysis_result semantic_analysis::unary(node_index n, expression_meaning &m)
+analysis_result semantic_analysis::unary(SyntaxRef n, expression_meaning &m)
 {
-    auto node = syntax(n);
+    auto node = n;
     if (node.size() < 2 || !node[0].is_token())
         return not_supported(n, "expr.unary");
     const token &op = tokens[node[0].token()];
@@ -563,7 +561,7 @@ analysis_result semantic_analysis::unary(node_index n, expression_meaning &m)
                               "be an lvalue",
                               "expr.unary.op");
         if (m.bit_field_width)
-            return address_of_bit_field(syntax(n).first_token());
+            return address_of_bit_field(n.first_token());
         address_of_glvalue(at, m);
         return analysis_result::well_formed;
     }
@@ -635,7 +633,7 @@ analysis_result semantic_analysis::unary(node_index n, expression_meaning &m)
 
 /* [expr.unary.op]/1: *m of the operand analysed as m (its syntax operand,
    none for an operand [stmt.ranged]/1 makes) */
-analysis_result semantic_analysis::indirection_of(node_index n, token_index at,
+analysis_result semantic_analysis::indirection_of(SyntaxRef n, token_index at,
                                                   SyntaxElement operand,
                                                   expression_meaning &m)
 {
@@ -767,10 +765,10 @@ semantic_analysis::member_pointer_constant(token_index t, entity_index e,
  * operand's semantic tree is walked; a node analysis has no rule for here
  * refuses.
  */
-analysis_result semantic_analysis::noexcept_operator(node_index n,
+analysis_result semantic_analysis::noexcept_operator(SyntaxRef n,
                                                      expression_meaning &m)
 {
-    auto node = syntax(n);
+    auto node = n;
     /* before C++17 a function's exception specification is not part of
        its type, and not kept (dcl.fct.cpp) */
     if (node.size() != 4 ||
@@ -793,8 +791,7 @@ analysis_result semantic_analysis::noexcept_operator(node_index n,
 }
 
 /* [except.spec]/6 of the semantic node x (0: none) */
-analysis_result semantic_analysis::potentially_throwing(node_index n,
-                                                        uint32_t x,
+analysis_result semantic_analysis::potentially_throwing(SyntaxRef n, uint32_t x,
                                                         bool &throwing)
 {
     owned_array<uint32_t> work;

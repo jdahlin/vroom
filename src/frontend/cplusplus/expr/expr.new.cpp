@@ -220,7 +220,7 @@ analysis_result semantic_analysis::new_type_id(NewTypeId n,
             !declarator[0].is(syntax_kind::ptr_operator))
             return not_supported(d.index(), "expr.new");
         declarator_meaning ignored;
-        r = pointer_operator(declarator[0].index(), type, ignored);
+        r = pointer_operator(syntax(declarator[0].index()), type, ignored);
         if (r != analysis_result::well_formed || declarator.size() == 1)
             return r;
         d = declarator[1];
@@ -228,7 +228,7 @@ analysis_result semantic_analysis::new_type_id(NewTypeId n,
 }
 
 analysis_result semantic_analysis::allocation_functions(
-    node_index n, allocation_function kind, entity_index c,
+    SyntaxRef n, allocation_function kind, entity_index c,
     owned_array<entity_index> &set, bool &in_class, bool class_complete)
 {
     implicit_allocation_functions();
@@ -542,7 +542,7 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
                                   "dcl.init");
         }
     } else if (syntax(init).is(syntax_kind::braced_init_list)) {
-        r = list_initialization(init.index(), type, true, value);
+        r = list_initialization(syntax(init.index()), type, true, value);
     } else if (syntax(init).is(syntax_kind::new_initializer)) {
         auto k = syntax(init);
         if (k.size() == 2) {

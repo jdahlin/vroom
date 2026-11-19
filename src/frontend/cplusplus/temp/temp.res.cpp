@@ -83,10 +83,10 @@ node_index parser::typename_specifier()
  * arguments.  Otherwise the name found shall be a type (clang rejects one
  * that is not, at the instantiation; analysis says not supported).
  */
-analysis_result semantic_analysis::typename_type(node_index n, type_index &type,
+analysis_result semantic_analysis::typename_type(SyntaxRef n, type_index &type,
                                                  uint32_t &cv)
 {
-    auto node = syntax(n);
+    auto node = n;
     type = 0;
     cv = 0;
     /* a type-requirement ([expr.prim.req.type]) is one with a ';' */
@@ -115,7 +115,8 @@ analysis_result semantic_analysis::typename_type(node_index n, type_index &type,
         }
         if (!scope.entity)
             return not_supported(n, "temp.res");
-        return template_type(last.index(), scope.entity, true, type, &cv);
+        return template_type(syntax(last.index()), scope.entity, true, type,
+                             &cv);
     }
     if (count != 3)
         return not_supported(n, "temp.res");

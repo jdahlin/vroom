@@ -80,10 +80,11 @@ analysis_result semantic_analysis::member_template_declaration(
         node[1].is_token())
         return not_supported(n, "temp.mem");
     owned_array<node_index> parameters;
-    if (!template_head_list(node[0].index(), parameters) || parameters.empty())
+    if (!template_head_list(syntax(node[0].index()), parameters) ||
+        parameters.empty())
         return not_supported(n, "temp.mem");
-    node_index inner = node[1].index();
-    auto d = syntax(inner);
+    auto inner = node[1];
+    auto d = inner;
     /* [temp.alias]/1: a member alias template, of a class of namespace
        scope: an alias template declared in the class's scope */
     if (d.is(syntax_kind::alias_declaration) &&
@@ -102,7 +103,7 @@ analysis_result semantic_analysis::member_template_declaration(
             entity_index saved = current_scope, saved_class = defining_class;
             current_scope = c;
             defining_class = 0;
-            analysis_result r = class_template_definition(n, only);
+            analysis_result r = class_template_definition(n, syntax(only));
             current_scope = saved;
             defining_class = saved_class;
             return r;
@@ -127,7 +128,7 @@ analysis_result semantic_analysis::member_template_declaration(
         return not_supported(n, "temp.constr");
     if (at < d.size() && d[at].is(syntax_kind::decl_specifier_seq)) {
         specified s;
-        analysis_result r = constructor_specifiers(d[at].index(), s);
+        analysis_result r = constructor_specifiers(syntax(d[at].index()), s);
         if (r != analysis_result::well_formed)
             return r;
         at++;
@@ -150,10 +151,10 @@ analysis_result semantic_analysis::member_template_declaration(
  * told apart), inline, explicit and GNU attributes; any other is not
  * analysed.
  */
-analysis_result semantic_analysis::constructor_specifiers(node_index seq,
+analysis_result semantic_analysis::constructor_specifiers(SyntaxRef seq,
                                                           specified &s)
 {
-    for (SyntaxElement x : syntax(seq).elements()) {
+    for (SyntaxElement x : seq.elements()) {
         if (syntax(x).is(syntax_kind::gnu_attribute_specifier)) {
             analysis_result r = gnu_attribute_specifier(x.index(), s);
             if (r != analysis_result::well_formed)
@@ -185,7 +186,7 @@ analysis_result semantic_analysis::constructor_specifiers(node_index seq,
  * function returning void, as a constructor's (special_member_declarator).
  */
 analysis_result semantic_analysis::constructor_template_declarator(
-    node_index definition, SyntaxElement d, qualified_type &type,
+    SyntaxRef definition, SyntaxElement d, qualified_type &type,
     declarator_meaning &m)
 {
     type = qualified_type::make(type_table.fundamental(fundamental_type::void_),
@@ -346,7 +347,7 @@ bool semantic_analysis::copies_bytes(entity_index c) const
  * left to special_member_declarator).  A constexpr destructor is C++20's
  * and is not analysed.
  */
-bool semantic_analysis::function_specifiers_only(node_index seq,
+bool semantic_analysis::function_specifiers_only(SyntaxRef seq,
                                                  bool &constexpr_specified,
                                                  bool *virtual_specified,
                                                  bool *explicit_specified) const
@@ -357,7 +358,7 @@ bool semantic_analysis::function_specifiers_only(node_index seq,
         *explicit_specified = false;
     if (virtual_specified)
         *virtual_specified = false;
-    for (SyntaxElement c : syntax(seq).elements()) {
+    for (SyntaxElement c : seq.elements()) {
         if (!c.is_token())
             return false;
         switch (p.keyword_of(tokens[c.token()])) {
@@ -397,7 +398,7 @@ bool semantic_analysis::function_specifiers_only(node_index seq,
  * be friend, inline, virtual, constexpr, or consteval."
  */
 analysis_result semantic_analysis::special_member_declarator(
-    entity_index c, node_index declaration, SyntaxElement d, uint8_t access,
+    entity_index c, SyntaxRef declaration, SyntaxElement d, uint8_t access,
     bool definition, bool constexpr_specified, bool virtual_specified,
     bool explicit_specified)
 {
@@ -414,7 +415,7 @@ analysis_result semantic_analysis::special_member_declarator(
     /* [ext:gnu_attributes] before the declaration (libc++'s
        _LIBCPP_HIDE_FROM_ABI) */
     for (uint32_t i = 0; i < leading_gnu_attributes(declaration); i++) {
-        r = gnu_attribute_specifier(syntax(declaration)[i].index(), m);
+        r = gnu_attribute_specifier(declaration[i].index(), m);
         if (r != analysis_result::well_formed)
             return r;
     }
@@ -581,7 +582,7 @@ analysis_result semantic_analysis::special_member_declarator(
  * entity when it is trivial); a public one only, without constexpr.
  */
 analysis_result semantic_analysis::defaulted_or_deleted_special_member(
-    entity_index c, node_index n, SyntaxElement d, SyntaxElement body,
+    entity_index c, SyntaxRef n, SyntaxElement d, SyntaxElement body,
     uint8_t access, bool constexpr_specified, bool virtual_specified,
     bool explicit_specified)
 {
@@ -706,7 +707,7 @@ analysis_result semantic_analysis::defaulted_or_deleted_special_member(
  * [class.copy.assign]/4), which analysis does not declare either.
  */
 analysis_result semantic_analysis::defaulted_copy_assignment(entity_index c,
-                                                             node_index n,
+                                                             SyntaxRef n,
                                                              SyntaxElement d,
                                                              const specified &s,
                                                              uint8_t access)
@@ -858,8 +859,9 @@ semantic_analysis::construct(node_index at, qualified_type type,
     owned_array<template_argument> deduced;
     if (x.constructor_templates) {
         analysis_result r = constructor_template_candidates(
-            at, c, arguments.data(), static_cast<uint32_t>(arguments.size()),
-            copy, candidates, &first_arguments, &deduced);
+            syntax(at), c, arguments.data(),
+            static_cast<uint32_t>(arguments.size()), copy, candidates,
+            &first_arguments, &deduced);
         if (r != analysis_result::well_formed)
             return r;
     }
@@ -1066,8 +1068,8 @@ analysis_result semantic_analysis::ctor_initializer(SyntaxElement list,
     for (uint32_t &i : initialized)
         i = 0;
     for (SyntaxElement item : items) {
-        node_index n = item.index();
-        auto node = syntax(n);
+        auto n = item;
+        auto node = n;
         if (!node.size())
             return not_supported(n, "class.base.init");
         token_index id = 0;
@@ -1198,7 +1200,7 @@ analysis_result semantic_analysis::ctor_initializer(SyntaxElement list,
         }
         initialized_value value;
         if (node.size() == 2 && node[1].is(syntax_kind::braced_init_list)) {
-            r = list_initialization(node[1].index(), type, true, value);
+            r = list_initialization(syntax(node[1].index()), type, true, value);
         } else if (node.size() == 3) {
             /* ( ): value-initialization ([dcl.init]/11): zero for the
                members analysis has */
@@ -1485,7 +1487,7 @@ bool semantic_analysis::destroys(entity_index c) const
  * construction or destruction runs code are not analysed.
  */
 analysis_result semantic_analysis::implicit_special_members(entity_index c,
-                                                            node_index n)
+                                                            SyntaxRef n)
 {
     const entity &x = entity_table[c];
     for (uint32_t i = 0; i < x.member_count; i++) {
@@ -1783,7 +1785,7 @@ void semantic_analysis::declare_implicit(entity_index c, special_member kind,
  * members, at the end of its definition n.
  */
 analysis_result semantic_analysis::implicit_definitions(entity_index c,
-                                                        node_index n)
+                                                        SyntaxRef n)
 {
     owned_array<entity_index> implicit;
     for (entity_index k = entity_table[c].first_constructor; k;
@@ -1794,7 +1796,7 @@ analysis_result semantic_analysis::implicit_definitions(entity_index c,
         entity_table[entity_table[c].destructor].implicit)
         implicit.append(entity_table[c].destructor);
     current_declaration = n;
-    token_index at = syntax(n).first_token();
+    token_index at = n.first_token();
     for (entity_index f : implicit) {
         synthesized_function sf;
         begin_synthesized(
@@ -1837,11 +1839,11 @@ analysis_result semantic_analysis::implicit_definitions(entity_index c,
 
 /* [class.copy.ctor]/14: each base and member of *this direct-initialized
    from the corresponding one of the source (the parameter, a const X&) */
-analysis_result semantic_analysis::implicit_copy(entity_index c, node_index n,
+analysis_result semantic_analysis::implicit_copy(entity_index c, SyntaxRef n,
                                                  entity_index source,
                                                  uint32_t &built)
 {
-    token_index at = syntax(n).first_token();
+    token_index at = n.first_token();
     owned_array<entity_index> order;
     construction_order(c, order);
     owned_array<uint32_t> statements;
@@ -1991,10 +1993,10 @@ semantic_analysis::special_member_body(FunctionDefinition definition,
  * class definition."  [dcl.meaning]/1: the qualified declarator-id refers
  * to a constructor or the destructor declared in the class.
  */
-analysis_result semantic_analysis::special_member_definition(node_index n,
+analysis_result semantic_analysis::special_member_definition(SyntaxRef n,
                                                              uint32_t at)
 {
-    auto node = syntax(n);
+    auto node = n;
     /* a decl-specifier-seq before the declarator holds constexpr alone
        (function_specifiers_only) */
     bool constexpr_specified = at == 1;
@@ -2074,11 +2076,10 @@ static void class_prvalue(qualified_type type, constness evaluation,
  * initializer."  For a class with constructors, ( expression-list_opt )
  * and {}; a class without them only copied from its own type.
  */
-analysis_result semantic_analysis::class_conversion(node_index n,
-                                                    entity_index c,
+analysis_result semantic_analysis::class_conversion(SyntaxRef n, entity_index c,
                                                     expression_meaning &m)
 {
-    auto node = syntax(n);
+    auto node = n;
     qualified_type type = entity_table[c].type;
     if (!entity_table[c].size)
         return not_supported(n, "expr.type.conv");
@@ -2088,7 +2089,7 @@ analysis_result semantic_analysis::class_conversion(node_index n,
     if (node[1].is(syntax_kind::braced_init_list)) {
         if (node.size() != 2)
             return not_supported(n, "expr.type.conv");
-        r = list_initialization(node[1].index(), type, true, value);
+        r = list_initialization(syntax(node[1].index()), type, true, value);
     } else {
         if (node.size() == 4) {
             r = expression_list_meanings(node[2], arguments);
@@ -2111,7 +2112,7 @@ analysis_result semantic_analysis::class_conversion(node_index n,
  * for a class T.
  */
 analysis_result semantic_analysis::class_direct_initialization(
-    node_index n, entity_index c, owned_array<expression_meaning> &arguments,
+    SyntaxRef n, entity_index c, owned_array<expression_meaning> &arguments,
     expression_meaning &m)
 {
     qualified_type type = entity_table[c].type;

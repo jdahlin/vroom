@@ -743,8 +743,8 @@ analysis_result semantic_analysis::nested_name_specifier(NestedNameSpecifier n,
                specialization's head) */
             uint32_t declaring = declaring_specializations;
             declaring_specializations = 0;
-            analysis_result r =
-                template_type(node[i].index(), scope.entity, qualified, named);
+            analysis_result r = template_type(syntax(node[i].index()),
+                                              scope.entity, qualified, named);
             declaring_specializations = declaring;
             if (r != analysis_result::well_formed)
                 return r;

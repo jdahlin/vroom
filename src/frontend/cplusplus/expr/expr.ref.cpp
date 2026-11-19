@@ -289,10 +289,10 @@ analysis_result semantic_analysis::implicit_member_access(token_index at,
  * ... The id-expression shall name a member of the class or of one of its
  * base classes."
  */
-analysis_result semantic_analysis::member_reference(node_index n,
+analysis_result semantic_analysis::member_reference(SyntaxRef n,
                                                     expression_meaning &m)
 {
-    auto children = syntax(n);
+    auto children = n;
     bool arrow = children[1].is(preprocessing_op_or_punc::ARROW);
     if (!children[2].is_identifier())
         /* template, a qualified-id, a destructor's name, an operator
