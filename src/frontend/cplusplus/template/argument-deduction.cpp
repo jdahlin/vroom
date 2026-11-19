@@ -637,18 +637,14 @@ analysis_result semantic_analysis::deduce_from_call(
        arguments determined for preceding template parameters into the
        default argument"; /1's "all of the template arguments shall have
        values" otherwise */
-    analysis_result r =
-        default_template_arguments(at, function_template, values, set);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, default_template_arguments(at, function_template, values, set));
     /* [temp.deduct]/5: "If the function template has associated
        constraints ([temp.constr.decl]), those constraints are checked for
        satisfaction ([temp.constr.constr]).  If the constraints are not
        satisfied, type deduction fails." */
     bool satisfied = true;
-    r = template_constraints_satisfied(function_template, values, satisfied);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY_SET(r, template_constraints_satisfied(function_template, values,
+                                               satisfied));
     if (!satisfied) {
         if (!failed)
             return not_supported(at, "temp.deduct");

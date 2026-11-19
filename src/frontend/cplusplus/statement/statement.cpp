@@ -542,19 +542,17 @@ analysis_result semantic_analysis::attributed_statement(Statement n,
                                                         uint32_t &built)
 {
     /* the attribute-specifiers, then the statement */
-    auto node = n;
-    if (node.size() < 2)
+    if (n.size() < 2)
         return not_supported(n, "stmt.pre");
-    SyntaxElement inner = node[node.size() - 1];
+    SyntaxElement inner = n[n.size() - 1];
     if (inner.is(syntax_kind::simple_declaration))
         return not_supported(n, "dcl.attr");
-    for (uint32_t i = 0; i + 1 < node.size(); i++) {
-        SyntaxElement c = node[i];
-        if (!c.is(syntax_kind::attribute_specifier) &&
-            !c.is(syntax_kind::attribute_specifier_seq))
+    for (uint32_t i = 0; i + 1 < n.size(); i++) {
+        SyntaxElement c = n[i];
+        if (!c.is(syntax_kind::attribute_specifier,
+                  syntax_kind::attribute_specifier_seq))
             return not_supported(n, "dcl.attr");
-        auto a = c;
-        for (token_index t = a.first_token(); t < a.end_token(); t++) {
+        for (token_index t = c.first_token(); t < c.end_token(); t++) {
             if (tokens[t].kind == token_kind::operator_or_punctuator)
                 continue;
             owned_buffer spelling;
@@ -659,15 +657,14 @@ analysis_result semantic_analysis::condition(SyntaxElement c, bool for_switch,
     analysis_result r = analysis_result::well_formed;
     uint32_t declaration = 0;
     if (c.is(syntax_kind::condition)) {
-        auto node = at;
-        if (node.size() != 3 || !node[0].is(syntax_kind::decl_specifier_seq))
+        if (at.size() != 3 || !at[0].is(syntax_kind::decl_specifier_seq))
             return not_supported(at, "dcl.attr");
         specified s;
         placeholder_allowed = true;
         scoped_value<qualified_type> deduced(declaration_deduced,
                                              qualified_type());
         scoped_value<bool> group(placeholder_group, false);
-        r = decl_specifier_seq(node[0].index(), s, false);
+        r = decl_specifier_seq(at[0], s, false);
         if (r == analysis_result::well_formed &&
             (s.typedef_ || s.static_ || s.extern_ || s.inline_))
             /* [stmt.pre]/8: "In the decl-specifier-seq of a condition, each
@@ -683,7 +680,7 @@ analysis_result semantic_analysis::condition(SyntaxElement c, bool for_switch,
             bool claimable = declarations_claimable;
             declarations_claimable = false;
             in_condition = true;
-            r = declare_with_initializer(at, node[1], node[2], true, s, false);
+            r = declare_with_initializer(at, at[1], at[2], true, s, false);
             in_condition = false;
             declarations_claimable = claimable;
         }
@@ -705,12 +702,10 @@ analysis_result semantic_analysis::condition(SyntaxElement c, bool for_switch,
             m.type = record.operand;
             m.entity = 0;
         }
-        m.node = expression_node(semantic_kind::entity, m, first_token(node[1]),
+        m.node = expression_node(semantic_kind::entity, m, first_token(at[1]),
                                  last_declared);
     } else {
-        r = expression(c, m);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY_SET(r, expression(c, m));
     }
     if (!for_switch)
         r = contextual_bool(at, m);
@@ -726,9 +721,7 @@ analysis_result semantic_analysis::condition(SyntaxElement c, bool for_switch,
 analysis_result semantic_analysis::switch_condition(SyntaxRef at,
                                                     expression_meaning &m)
 {
-    analysis_result r = operand_value(at, m);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, operand_value(at, m));
     /* [stmt.switch]/2: "The condition shall be of integral type,
        enumeration type, or class type. ... If the (possibly converted) type
        is subject to integral promotions, the condition is converted to the

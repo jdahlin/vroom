@@ -45,21 +45,14 @@ node_index parser::clang_convertvector_expression()
 analysis_result semantic_analysis::clang_convertvector(SyntaxRef n,
                                                        expression_meaning &m)
 {
-    auto children = n;
-    analysis_result r = expression(children[2], m);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, expression(n[2], m));
     qualified_type to;
-    r = type_id(children[4], to);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY_SET(r, type_id(n[4], to));
     if (depends_on_template_parameter(to) ||
         depends_on_template_parameter(m.type))
         return not_supported(n, "temp.dep.constexpr");
     to = qualified_type::make(to.unqualified(), cv_none);
-    r = operand_value(n, m);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY_SET(r, operand_value(n, m));
     const struct type &from_type = type_table[m.type.unqualified()];
     const struct type &to_type = type_table[to.unqualified()];
     if (from_type.kind != type_kind::ext_vector ||

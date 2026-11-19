@@ -24,9 +24,7 @@ analysis_result semantic_analysis::member_pointer_operator(
     SyntaxRef n, token_index at, bool arrow, expression_meaning &left,
     expression_meaning &right, expression_meaning &m)
 {
-    analysis_result r = operand_value(n, right);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, operand_value(n, right));
     if (!is_member_pointer(right.type)) {
         if (fundamental_of(right.type) == fundamental_type::none &&
             !is_pointer(right.type))
@@ -44,9 +42,7 @@ analysis_result semantic_analysis::member_pointer_operator(
     expression_meaning object = left;
     value_category category = value_category::lvalue;
     if (arrow) {
-        r = operand_value(n, object);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY_SET(r, operand_value(n, object));
         if (!is_pointer(object.type) ||
             type_table[type_table[object.type.unqualified()]
                            .operand.unqualified()]
@@ -105,15 +101,14 @@ analysis_result semantic_analysis::member_pointer_operator(
                               "class of which T is an unambiguous and "
                               "accessible base class",
                               "expr.mptr.oper");
-        r = implicit_conversion(
-            n, object,
-            qualified_type::make(
-                type_table.pointer_to(qualified_type::make(
-                    entity_table[t].type.unqualified(), pointee.cv())),
-                cv_none),
-            false);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY_SET(r,
+                 implicit_conversion(
+                     n, object,
+                     qualified_type::make(
+                         type_table.pointer_to(qualified_type::make(
+                             entity_table[t].type.unqualified(), pointee.cv())),
+                         cv_none),
+                     false));
     }
     m = expression_meaning();
     if (function) {

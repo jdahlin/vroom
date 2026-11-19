@@ -1026,7 +1026,6 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
                                                       specified &s,
                                                       bool parameter)
 {
-    auto node = seq;
     /* [dcl.spec.auto]/6: "A program that uses a placeholder type in a
        context not explicitly allowed in this subclause is ill-formed": the
        contexts analysed allow it (placeholder_allowed) */
@@ -1050,25 +1049,25 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
     /* a specifier with no rules yet (an attribute after a class-specifier
        may change the class's layout) before any class is defined */
     trailing_class_alignment = 0;
-    for (uint32_t i = 0; i < node.size(); i++) {
-        SyntaxElement c = node[i];
-        if (c.is_token() || c.is(syntax_kind::class_specifier) ||
-            c.is(syntax_kind::elaborated_type_specifier) ||
-            c.is(syntax_kind::enum_specifier) ||
-            c.is(syntax_kind::elaborated_enum_specifier) ||
-            c.is(syntax_kind::simple_type_specifier) ||
-            c.is(syntax_kind::typename_specifier) ||
-            c.is(syntax_kind::simple_template_id) ||
-            c.is(syntax_kind::decltype_specifier) ||
-            c.is(syntax_kind::clang_type_transformation) ||
-            c.is(syntax_kind::clang_atomic_type_specifier) ||
-            c.is(syntax_kind::clang_bit_int_type_specifier) ||
-            c.is(syntax_kind::placeholder_type_specifier))
+    for (uint32_t i = 0; i < seq.size(); i++) {
+        SyntaxElement c = seq[i];
+        if (c.is_token() || c.is(syntax_kind::class_specifier,
+                                 syntax_kind::elaborated_type_specifier,
+                                 syntax_kind::enum_specifier,
+                                 syntax_kind::elaborated_enum_specifier,
+                                 syntax_kind::simple_type_specifier,
+                                 syntax_kind::typename_specifier,
+                                 syntax_kind::simple_template_id,
+                                 syntax_kind::decltype_specifier,
+                                 syntax_kind::clang_type_transformation,
+                                 syntax_kind::clang_atomic_type_specifier,
+                                 syntax_kind::clang_bit_int_type_specifier,
+                                 syntax_kind::placeholder_type_specifier))
             continue;
         /* an attribute specifier has rules unless a class-specifier is
            among the specifiers */
         bool defines_class = false;
-        for (auto child : node.elements())
+        for (auto child : seq.elements())
             if (child.is(syntax_kind::class_specifier))
                 defines_class = true;
         if (!defines_class && c.is(syntax_kind::gnu_attribute_specifier))
@@ -1078,9 +1077,7 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
         if (c.is(syntax_kind::gnu_attribute_specifier) &&
             class_specifier_before(seq, i)) {
             gnu_attributes g;
-            analysis_result r = gnu_attribute_specifier(c.index(), g);
-            if (r != analysis_result::well_formed)
-                return r;
+            VTRY(r, gnu_attribute_specifier(c, g));
             if (g.aligned && !(g.flags & ~gnu_aligned) && !g.section &&
                 !g.abi_tag) {
                 if (g.aligned > trailing_class_alignment)
@@ -1090,7 +1087,7 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
         }
         /* the class names the declaration would define are held, as
            hold_names holds its declarators' */
-        for (auto spec : node.elements()) {
+        for (auto spec : seq.elements()) {
             if (!spec.is(syntax_kind::class_specifier) || !spec.size() ||
                 !spec[0].is(syntax_kind::class_head))
                 continue;
@@ -1122,8 +1119,8 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
             return not_supported(c.index(), "dcl.align");
         return not_supported(c.index());
     }
-    for (uint32_t i = 0; i < node.size(); i++) {
-        SyntaxElement c = node[i];
+    for (uint32_t i = 0; i < seq.size(); i++) {
+        SyntaxElement c = seq[i];
         if (!c.is_token()) {
             /* [dcl.type.class]... a class-specifier or an
                elaborated-type-specifier: the class is the type */
@@ -1175,7 +1172,6 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
             } else if (c.is(syntax_kind::placeholder_type_specifier)) {
                 /* [dcl.spec.auto]: decltype(auto); a type-constraint is
                    [temp.param]'s */
-                auto parts = c;
                 qualified_type invented;
                 if (parameter && invented_parameter_type(seq, invented)) {
                     /* [dcl.fct]/22: C auto's invented template-parameter */
@@ -1188,21 +1184,19 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
                        of a concept-name alone, C<U> ([temp.param]/4) */
                     entity_index named_concept = 0;
                     uint32_t last = c.size() - 1;
-                    if (parts[0].is(syntax_kind::type_constraint)) {
-                        auto q = parts[0];
-                        if (parts[0].size() == 1 && q[0].is_token())
+                    if (c[0].is(syntax_kind::type_constraint)) {
+                        auto q = c[0];
+                        if (c[0].size() == 1 && q[0].is_token())
                             named_concept =
                                 constraint_concept(current_scope, q[0].token());
                         if (!named_concept ||
                             function_templates[concept_of(named_concept) - 1]
                                     .parameter_count != 1)
-                            return not_supported(parts[0].index(),
-                                                 "temp.param");
+                            return not_supported(c[0].index(), "temp.param");
                     }
                     bool decltype_auto =
-                        !parts[last].is_token() ||
-                        p.keyword_of(tokens[parts[last].token()]) !=
-                            standard_keyword::auto_;
+                        !c[last].is_token() ||
+                        c[last].keyword() != standard_keyword::auto_;
                     if (!allow_placeholder ||
                         !tokens.files.behavior.has(
                             language_feature::return_type_deduction))
@@ -1218,9 +1212,7 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
                     continue;
                 /* [ext:gnu_attributes] a decl-specifier: it applies to
                    the declaration */
-                r = gnu_attribute_specifier(c.index(), s);
-                if (r != analysis_result::well_formed)
-                    return r;
+                VTRY_SET(r, gnu_attribute_specifier(c, s));
                 continue;
             } else
                 return not_supported(c.index());
@@ -1232,13 +1224,13 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
                 k.alone++;
             named = class_type;
             named_at = c.first_token();
-            if (!c.is(syntax_kind::simple_type_specifier) &&
-                !c.is(syntax_kind::typename_specifier) &&
-                !c.is(syntax_kind::decltype_specifier) &&
-                !c.is(syntax_kind::clang_type_transformation) &&
-                !c.is(syntax_kind::clang_atomic_type_specifier) &&
-                !c.is(syntax_kind::clang_bit_int_type_specifier) &&
-                !c.is(syntax_kind::placeholder_type_specifier))
+            if (!c.is(syntax_kind::simple_type_specifier,
+                      syntax_kind::typename_specifier,
+                      syntax_kind::decltype_specifier,
+                      syntax_kind::clang_type_transformation,
+                      syntax_kind::clang_atomic_type_specifier,
+                      syntax_kind::clang_bit_int_type_specifier,
+                      syntax_kind::placeholder_type_specifier))
                 declares_class = true;
             continue;
         }
@@ -1507,18 +1499,13 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
     if (named) {
         type = named;
     } else if (keywords) {
-        analysis_result r = simple_type(seq, k, type);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r, simple_type(seq, k, type));
     }
     /* [dcl.spec]/2: "Each decl-specifier shall appear at most once in a
        complete decl-specifier-seq, except that long may appear twice." */
     if (duplicate) {
-        analysis_result r =
-            extension_used(diagnostic_id::sema_duplicate_specifier, duplicate,
-                           duplicate_spelling);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r, extension_used(diagnostic_id::sema_duplicate_specifier,
+                               duplicate, duplicate_spelling));
     }
     s.has_type = type != 0;
     s.declares_class = declares_class;
@@ -1552,33 +1539,27 @@ analysis_result semantic_analysis::qualified_type_name(SyntaxRef n,
                                                        type_index &type,
                                                        uint32_t &cv)
 {
-    auto node = n;
     cv = 0;
-    if (node.size() != 2 || !node[0].is(syntax_kind::nested_name_specifier) ||
-        !node[1].is_identifier()) {
+    if (n.size() != 2 || !n[0].is(syntax_kind::nested_name_specifier) ||
+        !n[1].is_identifier()) {
         /* [temp.names]: nested-name-specifier template_opt
            simple-template-id */
-        if (node.size() == 2 &&
-            node[0].is(syntax_kind::nested_name_specifier) &&
-            node[1].is(syntax_kind::simple_template_id)) {
+        if (n.size() == 2 && n[0].is(syntax_kind::nested_name_specifier) &&
+            n[1].is(syntax_kind::simple_template_id)) {
             nominated_scope scope;
-            analysis_result r = nested_name_specifier(node[0], scope);
-            if (r != analysis_result::well_formed)
-                return r;
+            VTRY(r, nested_name_specifier(n[0], scope));
             /* a namespace's member template or a class's (a member
                alias template, member_template_declaration) */
             if (!is_namespace(scope.entity) &&
                 entity_table[scope.entity].kind != entity_kind::class_type)
                 return not_supported(n, "temp.names");
-            return template_type(node[1], scope.entity, true, type, &cv);
+            return template_type(n[1], scope.entity, true, type, &cv);
         }
         return not_supported(n, "dcl.type.simple");
     }
     nominated_scope scope;
-    analysis_result r = nested_name_specifier(node[0], scope, true);
-    if (r != analysis_result::well_formed)
-        return r;
-    token_index t = node[1].token();
+    VTRY(r, nested_name_specifier(n[0], scope, true));
+    token_index t = n[1].token();
     if (scope.dependent) {
         /* [temp.res]/5: a qualified name in a context the parser assumes
            names a type (C++20's implicit typename), with a dependent
@@ -1657,17 +1638,14 @@ analysis_result semantic_analysis::named_class(SyntaxElement name, SyntaxRef at,
         id = name.token();
         found = lookup_unqualified(tokens.identifier(id), lookup_filter::types);
     } else {
-        auto node = name;
-        if (node.size() != 2 ||
-            !node[0].is(syntax_kind::nested_name_specifier) ||
-            !node[1].is_identifier())
+        if (name.size() != 2 ||
+            !name[0].is(syntax_kind::nested_name_specifier) ||
+            !name[1].is_identifier())
             /* a simple-template-id, a decltype-specifier */
             return not_supported(at, "basic.lookup.qual");
         nominated_scope scope;
-        analysis_result r = nested_name_specifier(node[0], scope);
-        if (r != analysis_result::well_formed)
-            return r;
-        id = node[1].token();
+        VTRY(r, nested_name_specifier(name[0], scope));
+        id = name[1].token();
         found = lookup_qualified(scope.entity, tokens.identifier(id),
                                  lookup_filter::types);
     }

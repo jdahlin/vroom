@@ -197,11 +197,9 @@ analysis_result semantic_analysis::literal(token_index t, expression_meaning &m)
 analysis_result semantic_analysis::parenthesized(SyntaxRef n,
                                                  expression_meaning &m)
 {
-    auto node = n;
-    if (node.size() != 3 ||
-        !node[0].is(preprocessing_op_or_punc::LEFT_PARENTHESIS))
+    if (n.size() != 3 || !n[0].is(preprocessing_op_or_punc::LEFT_PARENTHESIS))
         return not_supported(n, "expr.prim");
-    return expression(node[1], m);
+    return expression(n[1], m);
 }
 
 bool semantic_analysis::string_literal_meaning(token_index t,

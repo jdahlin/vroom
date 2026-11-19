@@ -394,9 +394,9 @@ analysis_result semantic_analysis::gnu_attribute_specifier(SyntaxRef n,
                 continue; /* __attribute__ */
             if (c.is(syntax_kind::gnu_attribute))
                 attributes.append(c);
-            else if (c.is(syntax_kind::gnu_attribute_list) ||
-                     c.is(syntax_kind::gnu_attribute_specifier))
-                work.append(c.index());
+            else if (c.is(syntax_kind::gnu_attribute_list,
+                          syntax_kind::gnu_attribute_specifier))
+                work.append(c);
             else if (c.is(syntax_kind::attribute_specifier) &&
                      attributes_as_gnu(c, standard))
                 g.flags |= standard;
@@ -431,9 +431,7 @@ analysis_result semantic_analysis::gnu_attribute_specifier(SyntaxRef n,
             continue;
         if (!rule && g.ext_vector_allowed && count == 4 &&
             spelling_is_ext_vector_type(spelling)) {
-            analysis_result r = clang_ext_vector_count(at, a[2], g);
-            if (r != analysis_result::well_formed)
-                return r;
+            VTRY(r, clang_ext_vector_count(at, a[2], g));
             continue;
         }
         if (!rule)
@@ -452,10 +450,7 @@ analysis_result semantic_analysis::gnu_attribute_specifier(SyntaxRef n,
             if (count != 6)
                 return not_supported(at, "ext.gnu");
             bool constant = false, value = false;
-            analysis_result r =
-                bool_constant_expression(at, a[2], constant, value);
-            if (r != analysis_result::well_formed)
-                return r;
+            VTRY(r, bool_constant_expression(at, a[2], constant, value));
             if (!constant || !value)
                 return not_supported(at, "ext.gnu");
             g.flags |= gnu_enable_if;
@@ -465,16 +460,12 @@ analysis_result semantic_analysis::gnu_attribute_specifier(SyntaxRef n,
             uint64_t alignment = 16;
             if (count == 4) {
                 expression_meaning e;
-                analysis_result r = expression(a[2], e);
-                if (r != analysis_result::well_formed)
-                    return r;
+                VTRY(r, expression(a[2], e));
                 if (!is_integral(e.type) ||
                     e.category != value_category::prvalue)
                     return not_supported(at, "ext.gnu");
                 bool constant = false;
-                r = constant_expression(at, e, constant);
-                if (r != analysis_result::well_formed)
-                    return r;
+                VTRY_SET(r, constant_expression(at, e, constant));
                 if (!constant)
                     return not_supported(at, "ext.gnu");
                 alignment = e.value;

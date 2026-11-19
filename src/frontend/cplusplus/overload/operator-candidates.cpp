@@ -167,11 +167,9 @@ analysis_result semantic_analysis::overloaded_operator(
                 for (size_t i = 1; i < count; i++)
                     rest.append(operand(i));
                 size_t first = candidates.size();
-                analysis_result r = member_template_candidates(
-                    n, found.unknown_entity, rest.data(),
-                    static_cast<uint32_t>(rest.size()), candidates);
-                if (r != analysis_result::well_formed)
-                    return r;
+                VTRY(r, member_template_candidates(
+                            n, found.unknown_entity, rest.data(),
+                            static_cast<uint32_t>(rest.size()), candidates));
                 for (size_t i = first; i < candidates.size(); i++) {
                     candidates[i].rewritten = rewritten;
                     candidates[i].reversed = reversed;
@@ -236,11 +234,9 @@ analysis_result semantic_analysis::overloaded_operator(
             for (size_t i = 0; i < count; i++)
                 in_order.append(operand(i));
             size_t first = candidates.size();
-            analysis_result r =
-                template_candidates(n, group, in_order.data(),
-                                    static_cast<uint32_t>(count), candidates);
-            if (r != analysis_result::well_formed)
-                return r;
+            VTRY(r,
+                 template_candidates(n, group, in_order.data(),
+                                     static_cast<uint32_t>(count), candidates));
             for (size_t i = first; i < candidates.size(); i++) {
                 candidates[i].rewritten = rewritten;
                 candidates[i].reversed = reversed;
@@ -321,9 +317,7 @@ analysis_result semantic_analysis::overloaded_operator(
         op != preprocessing_op_or_punc::SPACESHIP)
         r = collect(spaceship, true, false);
     if (r == analysis_result::well_formed && three_way)
-        r = collect(spaceship, true, true);
-    if (r != analysis_result::well_formed)
-        return r;
+        VTRY_SET(r, collect(spaceship, true, true));
     if (candidates.empty())
         return analysis_result::well_formed;
     if (converts)
@@ -386,11 +380,10 @@ analysis_result semantic_analysis::overloaded_operator(
                              static_cast<uint32_t>(in_order.size() - skip),
                              deduced);
         if (r == analysis_result::well_formed)
-            r = instantiate(n, function_templates[c.template_index - 1].entity,
+            VTRY_SET(r, instantiate(
+                            n, function_templates[c.template_index - 1].entity,
                             deduced.data(),
-                            static_cast<uint32_t>(deduced.size()), f);
-        if (r != analysis_result::well_formed)
-            return r;
+                            static_cast<uint32_t>(deduced.size()), f));
     }
     const entity &x = entity_table[f];
     const struct type &type = type_table[x.type.unqualified()];
@@ -464,9 +457,7 @@ analysis_result semantic_analysis::overloaded_operator(
                               "class.access");
     }
     /* [dcl.fct.def.delete]/2 */
-    r = deleted_use(at, f);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY_SET(r, deleted_use(at, f));
     expression_meaning callee;
     callee.type = x.type;
     callee.category = value_category::lvalue;
@@ -505,10 +496,8 @@ analysis_result semantic_analysis::overloaded_operator(
         call_arguments.append(ordered[i]);
         call_syntax.append(ordered_syntax[i]);
     }
-    r = call_with(n, callee, x.type, object, member, call_syntax,
-                  call_arguments, m);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY_SET(r, call_with(n, callee, x.type, object, member, call_syntax,
+                          call_arguments, m));
     if (from_three_way) {
         /* /8: "If a rewritten operator<=> candidate is selected by overload
            resolution for an operator @, x @ y is interpreted as 0 @ (y <=>
@@ -532,9 +521,7 @@ analysis_result semantic_analysis::overloaded_operator(
             r = operand_value(n, *right);
         if (r == analysis_result::well_formed)
             r = comparison(n, op, *left, *right, m);
-        r = binary_built(r, at, op, *left, *right, m);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY_SET(r, binary_built(r, at, op, *left, *right, m));
     }
     if (c.rewritten && op == preprocessing_op_or_punc::EXCLAMATION_EQUAL) {
         /* /9: x != y is "!(x == y)", or "!(y == x)" */

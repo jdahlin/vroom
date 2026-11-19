@@ -331,7 +331,7 @@ def extras():
     """type -> names declared in syntax.h's SyntaxExtra<type>"""
     text = open(SYNTAX_H, encoding='utf-8').read()
     out = {}
-    for m in re.finditer(r'template <>\s*struct SyntaxExtra<(\w+)>\s*:\s*SyntaxRef\s*\{(.*?)\n\};', text, re.S):
+    for m in re.finditer(r'template <>\s*struct SyntaxExtra<(\w+)>\s*:\s*SyntaxExtraBase\s*\{(.*?)\n\};', text, re.S):
         out[m.group(1)] = set(re.findall(r'(\w+)\([^()]*\) const', m.group(2)))
     return out
 
@@ -491,7 +491,7 @@ def generate():
             w('    %s() = default;' % t)
             w('    template <class V>')
             w('        requires syntax_converts<V, %s>' % t)
-            w('    %s(V v) : SyntaxExtra<%s>(v.context(), v.index())' % (t, t))
+            w('    %s(V v) : SyntaxExtra<%s>(v.index())' % (t, t))
             w('    {')
             w('    }')
         w('    static bool accepts(syntax_kind k);')
@@ -544,8 +544,8 @@ def generate():
             w('        return {};')
             cond = ' || '.join('is(syntax_kind::%s)' % k for k in own)
             w('    if (%s)' % cond)
-            w('        return SyntaxRange<%s>(context(), children(), size());' % nt_type[e])
-            w('    return SyntaxRange<%s>(context(), child());' % nt_type[e])
+            w('        return SyntaxRange<%s>(children(), size());' % nt_type[e])
+            w('    return SyntaxRange<%s>(child());' % nt_type[e])
             w('}')
         for name, rt in accessors.get(t, []):
             w('')
@@ -571,7 +571,7 @@ def generate():
         w('        if constexpr (syntax_converts<%s, S>)' % kind_type[k])
         within = sorted((x for x in sums if k in sums[x] and x != kind_type[k]),
                         key=lambda x: (len(sums[x]), x))
-        w('            return syntax_call<%s>(f, %s(s.context(), s.index()));' %
+        w('            return syntax_call<%s>(f, %s(s.index()));' %
           (', '.join(within), kind_type[k]))
         w('        break;')
     w('    default:')

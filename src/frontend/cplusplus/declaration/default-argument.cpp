@@ -137,10 +137,8 @@ analysis_result semantic_analysis::default_arguments(SyntaxRef n,
                     return not_supported(p.declaration, "dcl.fct.default");
         qualified_type type = types[i];
         initialized_value value;
-        analysis_result r = initialize_from(p.declaration, p.default_argument,
-                                            type, false, false, value);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r, initialize_from(p.declaration, p.default_argument, type, false,
+                                false, value));
         nodes[i] = value.node;
     }
     /* /4: "In a given function declaration, each parameter subsequent to a

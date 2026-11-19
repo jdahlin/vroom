@@ -296,7 +296,6 @@ node_index parser::linkage_specification()
  */
 analysis_result semantic_analysis::namespace_definition(SyntaxRef n)
 {
-    auto node = n;
     /* [namespace.def]/1 (the grammar): a namespace-definition is a
        declaration of a namespace-body or the translation unit */
     if (!is_namespace(current_scope) || defining_class || function_state.active)
@@ -312,8 +311,8 @@ analysis_result semantic_analysis::namespace_definition(SyntaxRef n)
     /* the tokens before the '{': inline, namespace, the names and ::, and
        those of an enclosing-namespace-specifier */
     owned_array<SyntaxElement> head;
-    for (uint32_t i = 0; i < node.size() && !body; i++) {
-        SyntaxElement c = node[i];
+    for (uint32_t i = 0; i < n.size() && !body; i++) {
+        SyntaxElement c = n[i];
         if (c.is(syntax_kind::enclosing_namespace_specifier)) {
             for (auto child : c.elements())
                 head.append(child);
@@ -323,9 +322,7 @@ analysis_result semantic_analysis::namespace_definition(SyntaxRef n)
             /* GNU attributes that change nothing a namespace's members
                get (abi_tag, which changes their symbols, has no rule) */
             gnu_attributes g;
-            analysis_result r = gnu_attribute_specifier(c.index(), g);
-            if (r != analysis_result::well_formed)
-                return r;
+            VTRY(r, gnu_attribute_specifier(c, g));
             if (g.flags || g.aligned || g.section)
                 return not_supported(n, "dcl.attr");
             continue;
@@ -358,7 +355,7 @@ analysis_result semantic_analysis::namespace_definition(SyntaxRef n)
     }
     if (components.empty()) {
         component unnamed;
-        unnamed.at = node.first_token();
+        unnamed.at = n.first_token();
         unnamed.inline_ = inline_next;
         components.append(unnamed);
     }
@@ -469,9 +466,7 @@ analysis_result semantic_analysis::named_namespace(SyntaxRef at,
     lookup_result found;
     if (qualifier) {
         nominated_scope scope;
-        analysis_result r = nested_name_specifier(qualifier, scope);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r, nested_name_specifier(qualifier, scope));
         if (!is_namespace(scope.entity))
             return not_supported(at, "basic.lookup.udir");
         found = lookup_in_namespace(scope.entity, tokens.identifier(name),
@@ -508,7 +503,6 @@ analysis_result semantic_analysis::named_namespace(SyntaxRef at,
  */
 analysis_result semantic_analysis::using_directive(UsingDirective n)
 {
-    auto node = n;
     entity_index scope = current_scope;
     /* until the directive is analysed, what it makes visible is not
        known */
@@ -521,7 +515,7 @@ analysis_result semantic_analysis::using_directive(UsingDirective n)
         return unknown(not_supported(n, "namespace.udir"));
     SyntaxRef qualifier = 0;
     token_index name = 0;
-    for (auto c : node.elements()) {
+    for (auto c : n.elements()) {
         if (c.is(syntax_kind::nested_name_specifier)) {
             qualifier = c.index();
             continue;
@@ -529,7 +523,7 @@ analysis_result semantic_analysis::using_directive(UsingDirective n)
         if (!c.is_token())
             /* an attribute-specifier-seq */
             return unknown(not_supported(n, "dcl.attr"));
-        if (tokens[c.token()].kind == token_kind::identifier)
+        if (c.is_identifier())
             name = c.token();
     }
     if (!name)
@@ -564,31 +558,26 @@ analysis_result semantic_analysis::using_directive(UsingDirective n)
 analysis_result
 semantic_analysis::namespace_alias_definition(NamespaceAliasDefinition n)
 {
-    auto node = n;
-    if (defining_class || node.size() < 4 || !node[1].is_identifier())
+    if (defining_class || n.size() < 4 || !n[1].is_identifier())
         return not_supported(n, "namespace.alias");
-    token_index alias = node[1].token();
+    token_index alias = n[1].token();
     SyntaxRef qualifier = 0;
     token_index name = 0;
-    SyntaxElement named = node[3];
+    SyntaxElement named = n[3];
     if (named.is(syntax_kind::qualified_namespace_specifier)) {
-        auto parts = named;
         if (named.size() != 2 ||
-            !parts[0].is(syntax_kind::nested_name_specifier) ||
-            !parts[1].is_token())
+            !named[0].is(syntax_kind::nested_name_specifier) ||
+            !named[1].is_token())
             return not_supported(n, "namespace.alias");
-        qualifier = parts[0].index();
-        name = parts[1].token();
-    } else if (named.is_token() &&
-               tokens[named.token()].kind == token_kind::identifier) {
+        qualifier = named[0].index();
+        name = named[1].token();
+    } else if (named.is_token() && named.is_identifier()) {
         name = named.token();
     } else {
         return not_supported(n, "namespace.alias");
     }
     entity_index nominated = 0;
-    analysis_result r = named_namespace(n, qualifier, name, nominated);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, named_namespace(n, qualifier, name, nominated));
     entity_index scope = current_scope;
     uint32_t alias_name = tokens.identifier(alias);
     entity_index prior = entity_table.find(scope, alias_name);
@@ -614,8 +603,7 @@ semantic_analysis::namespace_alias_definition(NamespaceAliasDefinition n)
 /* the declarations between the braces of a namespace-definition */
 void semantic_analysis::declaration_seq_in(SyntaxRef container)
 {
-    auto namespace_body = container;
-    for (auto child : namespace_body.elements())
+    for (auto child : container.elements())
         for (auto d : child.declaration_seq().declarations())
             declaration(d);
 }

@@ -447,27 +447,25 @@ analysis_result semantic_analysis::enum_specifier_rules(SyntaxRef n,
                                                         type_index &type)
 {
     const implementation_defined_behavior &b = tokens.files.behavior;
-    auto node = n;
     owned_array<SyntaxElement> head;
     uint32_t i = 0;
     /* [dcl.enum]/3: "An opaque-enum-declaration is either a redeclaration
        of an enumeration in the current scope or a declaration of a new
        enumeration": its head and no enumerator-list */
-    bool opaque = node.is(syntax_kind::opaque_enum_declaration);
-    if (node.size() && node[0].is(syntax_kind::enum_head)) {
-        auto h = node[0];
+    bool opaque = n.is(syntax_kind::opaque_enum_declaration);
+    if (n.size() && n[0].is(syntax_kind::enum_head)) {
+        auto h = n[0];
         for (uint32_t k = 0; k < h.size(); k++)
-            head.append(node[0][k]);
+            head.append(n[0][k]);
         i = 1;
     } else {
-        for (; i < node.size() &&
-               !node[i].is(preprocessing_op_or_punc::LEFT_BRACE);
+        for (; i < n.size() && !n[i].is(preprocessing_op_or_punc::LEFT_BRACE);
              i++)
-            head.append(node[i]);
+            head.append(n[i]);
     }
     bool scoped = false;
     uint32_t name = 0;
-    token_index name_at = node.first_token();
+    token_index name_at = n.first_token();
     SyntaxRef base = 0;
     for (SyntaxElement c : head) {
         if (c.is(syntax_kind::enum_key)) {
@@ -478,12 +476,11 @@ analysis_result semantic_analysis::enum_specifier_rules(SyntaxRef n,
             base = c.index();
             continue;
         }
-        if (c.is_token() &&
-            p.keyword_of(tokens[c.token()]) == standard_keyword::enum_)
+        if (c.is_token() && c.keyword() == standard_keyword::enum_)
             continue;
         if (opaque && c.is(preprocessing_op_or_punc::SEMICOLON))
             continue;
-        if (c.is_token() && tokens[c.token()].kind == token_kind::identifier) {
+        if (c.is_identifier()) {
             name = tokens.identifier(c.token());
             name_at = c.token();
             continue;
@@ -492,22 +489,21 @@ analysis_result semantic_analysis::enum_specifier_rules(SyntaxRef n,
         return not_supported(n, "dcl.enum");
     }
     if (!opaque &&
-        (i >= node.size() || !node[i].is(preprocessing_op_or_punc::LEFT_BRACE)))
+        (i >= n.size() || !n[i].is(preprocessing_op_or_punc::LEFT_BRACE)))
         return not_supported(n, "dcl.enum");
     owned_array<SyntaxElement> enumerators;
-    for (i++; i < node.size(); i++) {
-        SyntaxElement c = node[i];
+    for (i++; i < n.size(); i++) {
+        SyntaxElement c = n[i];
         if (c.is(syntax_kind::enumerator_list)) {
-            auto list = c;
-            for (uint32_t k = 0; k < list.size(); k++) {
+            for (uint32_t k = 0; k < c.size(); k++) {
                 SyntaxElement item = c[k];
                 if (!item.is(preprocessing_op_or_punc::COMMA))
                     enumerators.append(item);
             }
             continue;
         }
-        if (c.is(preprocessing_op_or_punc::COMMA) ||
-            c.is(preprocessing_op_or_punc::RIGHT_BRACE))
+        if (c.is(preprocessing_op_or_punc::COMMA,
+                 preprocessing_op_or_punc::RIGHT_BRACE))
             continue;
         enumerators.append(c);
     }
@@ -519,13 +515,10 @@ analysis_result semantic_analysis::enum_specifier_rules(SyntaxRef n,
     if (scoped)
         fixed = fundamental_type::int_;
     if (base) {
-        auto bn = base;
-        if (bn.size() != 2 || !base[1].is(syntax_kind::type_specifier_seq))
+        if (base.size() != 2 || !base[1].is(syntax_kind::type_specifier_seq))
             return not_supported(n, "dcl.enum");
         specified s;
-        analysis_result r = decl_specifier_seq(base[1].index(), s, true);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r, decl_specifier_seq(base[1], s, true));
         /* [dcl.enum]/2: "The type-specifier-seq of an enum-base shall name
            an integral type; any cv-qualification is ignored." */
         if (!s.has_type)
@@ -665,8 +658,7 @@ analysis_result semantic_analysis::enum_specifier_rules(SyntaxRef n,
         SyntaxElement init;
         bool has_init = false;
         if (c.is(syntax_kind::enumerator_definition)) {
-            auto d = c;
-            if (d.size() != 3)
+            if (c.size() != 3)
                 return not_supported(n, "dcl.enum");
             id = c[0];
             init = c[2];
@@ -691,9 +683,7 @@ analysis_result semantic_analysis::enum_specifier_rules(SyntaxRef n,
             expression_meaning m;
             analysis_result r = expression(init, m);
             if (r == analysis_result::well_formed)
-                r = operand_value(node_of(init), m);
-            if (r != analysis_result::well_formed)
-                return r;
+                VTRY_SET(r, operand_value(node_of(init), m));
             /* "If the expression has unscoped enumeration type, the
                enumerator has the underlying type of that enumeration
                type" */
@@ -714,9 +704,7 @@ analysis_result semantic_analysis::enum_specifier_rules(SyntaxRef n,
                     "dcl.enum");
             }
             bool constant = false;
-            r = integral_constant_expression(n, m, constant);
-            if (r != analysis_result::well_formed)
-                return r;
+            VTRY_SET(r, integral_constant_expression(n, m, constant));
             if (!constant)
                 return not_supported(n, "expr.const");
             fundamental_type f = fundamental_of(m.type);
@@ -905,10 +893,9 @@ analysis_result
 semantic_analysis::elaborated_enum_specifier(ElaboratedEnumSpecifier n,
                                              type_index &type)
 {
-    auto node = n;
-    if (node.size() != 2 || !node[1].is_identifier())
+    if (n.size() != 2 || !n[1].is_identifier())
         return not_supported(n, "dcl.type.elab");
-    entity_index e = lookup(tokens.identifier(node[1].token()));
+    entity_index e = lookup(tokens.identifier(n[1].token()));
     if (!e || entity_table[e].kind != entity_kind::enumeration)
         return not_supported(n, "basic.lookup.elab");
     type = entity_table[e].type.unqualified();

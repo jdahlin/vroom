@@ -31,21 +31,18 @@ namespace cplusplus
 token_index semantic_analysis::callee_name(SyntaxElement c) const
 {
     if (c.is_token()) {
-        if (tokens[c.token()].kind == token_kind::identifier)
+        if (c.is_identifier())
             return c.token();
         return 0;
     }
-    auto node = c;
-    if (node.is(syntax_kind::qualified_id) && node.size() == 2 &&
-        node[1].is_token() &&
-        tokens[node[1].token()].kind == token_kind::identifier)
-        return node[1].token();
-    if (node.is(syntax_kind::postfix_expression) && node.size() == 3 &&
-        (node[1].is(preprocessing_op_or_punc::DOT) ||
-         node[1].is(preprocessing_op_or_punc::ARROW)) &&
-        node[2].is_token() &&
-        tokens[node[2].token()].kind == token_kind::identifier)
-        return node[2].token();
+    if (c.is(syntax_kind::qualified_id) && c.size() == 2 && c[1].is_token() &&
+        c[1].is_identifier())
+        return c[1].token();
+    if (c.is(syntax_kind::postfix_expression) && c.size() == 3 &&
+        (c[1].is(preprocessing_op_or_punc::DOT,
+                 preprocessing_op_or_punc::ARROW)) &&
+        c[2].is_identifier())
+        return c[2].token();
     return 0;
 }
 
@@ -97,9 +94,7 @@ semantic_analysis::resolve_call(SyntaxRef n,
         if (!arguments[i].is(syntax_kind::braced_init_list))
             continue;
         owned_array<SyntaxElement> clauses;
-        analysis_result r = list_clauses(arguments[i], clauses);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r, list_clauses(arguments[i], clauses));
         if (clauses.size() != 1 || clauses[0].is(syntax_kind::braced_init_list))
             return not_supported(n, "over.ics.list");
         for (entity_index e : set) {
@@ -125,9 +120,7 @@ semantic_analysis::resolve_call(SyntaxRef n,
     for (size_t i = early.size(); i < arguments.size(); i++) {
         expression_meaning e;
         if (!arguments[i].is(syntax_kind::braced_init_list)) {
-            analysis_result r = expression(arguments[i], e);
-            if (r != analysis_result::well_formed)
-                return r;
+            VTRY(r, expression(arguments[i], e));
         }
         early.append(e);
     }
@@ -135,9 +128,7 @@ semantic_analysis::resolve_call(SyntaxRef n,
     for (size_t i = 0; i < arguments.size(); i++) {
         if (!arguments[i].is(syntax_kind::braced_init_list))
             continue;
-        analysis_result r = expression(lists[list++], early[i]);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r, expression(lists[list++], early[i]));
     }
     expression_meaning implied;
     if (object) {
@@ -162,10 +153,7 @@ semantic_analysis::resolve_call(SyntaxRef n,
     const expression_meaning *implied_object = nullptr;
     if (object)
         implied_object = &implied;
-    analysis_result r =
-        best_viable_function(n, candidates, implied_object, early, chosen);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, best_viable_function(n, candidates, implied_object, early, chosen));
     entity_index c = set[chosen];
     /* a copy: deleted_use may define an implicit member, adding entities
        that may move entity_table's */
@@ -186,9 +174,7 @@ semantic_analysis::resolve_call(SyntaxRef n,
     /* [dcl.fct.def.delete]/2: "If a function is overloaded, it is
        referenced only if the function is selected by overload
        resolution." */
-    r = deleted_use(callee().at, c);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY_SET(r, deleted_use(callee().at, c));
     if (use < name_uses.size() && !name_uses[use].entity)
         name_uses[use].entity = c;
     /* the expression the name is, as analysed: its type and entity are

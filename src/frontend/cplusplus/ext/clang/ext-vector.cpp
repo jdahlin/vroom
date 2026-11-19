@@ -36,9 +36,7 @@ analysis_result semantic_analysis::clang_ext_vector_count(SyntaxRef at,
         r = operand_value(at, m);
     bool constant = false;
     if (r == analysis_result::well_formed && is_integral(m.type))
-        r = integral_constant_expression(at, m, constant);
-    if (r != analysis_result::well_formed)
-        return r;
+        VTRY_SET(r, integral_constant_expression(at, m, constant));
     if (!constant)
         return not_supported(at, "ext.clang");
     __int128 n =

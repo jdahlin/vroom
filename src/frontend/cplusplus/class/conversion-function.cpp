@@ -96,17 +96,14 @@ uint32_t semantic_analysis::conversion_function_name() const
 analysis_result semantic_analysis::conversion_type(SyntaxRef id,
                                                    qualified_type &type)
 {
-    auto node = id;
-    if (node.size() != 2 || node[1].is_token())
+    if (id.size() != 2 || id[1].is_token())
         return not_supported(id, "class.conv.fct");
-    auto t = node[1];
+    auto t = id[1];
     SyntaxRef seq = t;
     if (t.is(syntax_kind::conversion_type_id))
         seq = t[0].index();
     specified s;
-    analysis_result r = decl_specifier_seq(seq, s, false);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, decl_specifier_seq(seq, s, false));
     if (!s.has_type || s.typedef_ || s.static_ || s.extern_ || s.inline_ ||
         s.constexpr_ || s.virtual_ || s.friend_ || s.gnu_flags || s.aligned)
         return not_supported(seq, "class.conv.fct");
@@ -118,22 +115,20 @@ analysis_result semantic_analysis::conversion_type(SyntaxRef id,
     owned_array<SyntaxRef> work;
     for (uint32_t i = t.size(); i-- > 1;)
         if (!t[i].is_token())
-            work.append(t[i].index());
+            work.append(t[i]);
     while (!work.empty()) {
         SyntaxRef k = work.back();
         work.resize(work.size() - 1);
         if (k.is(syntax_kind::conversion_declarator)) {
             for (uint32_t i = k.size(); i-- > 0;)
                 if (!k[i].is_token())
-                    work.append(k[i].index());
+                    work.append(k[i]);
             continue;
         }
         if (!k.is(syntax_kind::ptr_operator))
             return not_supported(k, "class.conv.fct");
         declarator_meaning m;
-        r = pointer_operator(k, type, m);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY_SET(r, pointer_operator(k, type, m));
     }
     return analysis_result::well_formed;
 }
@@ -157,21 +152,16 @@ semantic_analysis::conversion_function_member(entity_index c, SyntaxRef n,
                                               SyntaxRef id, uint8_t access,
                                               owned_array<SyntaxRef> &bodies)
 {
-    auto children_syntax = n;
     specified s;
     uint32_t first = 0;
     /* [ext:gnu_attributes] attributes before the declaration */
     uint32_t lead = leading_gnu_attributes(n);
     while (first < lead) {
-        analysis_result r =
-            gnu_attribute_specifier(children_syntax[first].index(), s);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r, gnu_attribute_specifier(n[first], s));
         first++;
     }
-    if (first < children_syntax.size() &&
-        children_syntax[first].is(syntax_kind::decl_specifier_seq)) {
-        auto seq = children_syntax[first];
+    if (first < n.size() && n[first].is(syntax_kind::decl_specifier_seq)) {
+        auto seq = n[first];
         first++;
         bool outer_virtual = virtual_allowed, outer_explicit = explicit_allowed;
         virtual_allowed = explicit_allowed = true;
@@ -200,9 +190,7 @@ semantic_analysis::conversion_function_member(entity_index c, SyntaxRef n,
             return not_supported(n, "class.conv.fct");
     }
     qualified_type type;
-    analysis_result r = conversion_type(id, type);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, conversion_type(id, type));
     s.type = type;
     s.has_type = true;
     return member_declarators(c, n, s, access, first, bodies);
@@ -214,9 +202,9 @@ SyntaxRef semantic_analysis::conversion_function_id_of(SyntaxRef n) const
 {
     owned_array<SyntaxRef> work;
     for (SyntaxElement x : n.elements()) {
-        if (!x.is_token() && !x.is(syntax_kind::decl_specifier_seq) &&
-            !x.is(syntax_kind::function_body))
-            work.append(x.index());
+        if (!x.is_token() &&
+            !x.is(syntax_kind::decl_specifier_seq, syntax_kind::function_body))
+            work.append(x);
     }
     while (!work.empty()) {
         SyntaxRef k = work.back();
@@ -230,7 +218,7 @@ SyntaxRef semantic_analysis::conversion_function_id_of(SyntaxRef n) const
             continue;
         for (auto child : k.elements())
             if (!child.is_token())
-                work.append(child.index());
+                work.append(child);
     }
     return 0;
 }
@@ -417,9 +405,7 @@ semantic_analysis::conversion_function_call(SyntaxRef at, expression_meaning &m,
                           "it is declared",
                           "class.access");
     token_index t = at.first_token();
-    analysis_result r = deleted_use(t, f);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, deleted_use(t, f));
     /* (a captureless lambda's closure object has no members: its
        temporary is the call's object argument, as for its call operator) */
     if ((aggregate_prvalue(m) && !entity_table[c].lambda) ||
@@ -441,10 +427,8 @@ semantic_analysis::conversion_function_call(SyntaxRef at, expression_meaning &m,
     owned_array<SyntaxElement> syntax;
     owned_array<expression_meaning> arguments;
     expression_meaning result;
-    r = call_with(at, callee, x.type, address.node, f, syntax, arguments,
-                  result);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY_SET(r, call_with(at, callee, x.type, address.node, f, syntax,
+                          arguments, result));
     m = result;
     converted = true;
     return analysis_result::well_formed;

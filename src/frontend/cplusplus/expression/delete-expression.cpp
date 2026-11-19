@@ -54,13 +54,12 @@ node_index parser::delete_expression()
 analysis_result semantic_analysis::delete_expression(DeleteExpression n,
                                                      expression_meaning &m)
 {
-    auto node = n;
-    token_index at = node.first_token();
-    uint32_t count = node.size();
+    token_index at = n.first_token();
+    uint32_t count = n.size();
     uint32_t i = 0;
     bool global = false;
-    if (node[0].is_token() &&
-        tokens[node[0].token()].kind == token_kind::operator_or_punctuator) {
+    if (n[0].is_token() &&
+        tokens[n[0].token()].kind == token_kind::operator_or_punctuator) {
         global = true;
         i++;
     }
@@ -70,16 +69,12 @@ analysis_result semantic_analysis::delete_expression(DeleteExpression n,
     /* delete [ ] cast-expression */
     bool array = count - i == 3;
     expression_meaning operand;
-    analysis_result r = expression(node[count - 1], operand);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, expression(n[count - 1], operand));
     if (type_table[operand.type.unqualified()].kind == type_kind::class_type)
         /* /2: "the operand is converted to a pointer type by calling the
            above-mentioned conversion function" */
         return not_supported(n, "expr.delete");
-    r = operand_value(n, operand);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY_SET(r, operand_value(n, operand));
     const struct type &pointer = type_table[operand.type.unqualified()];
     if (pointer.kind != type_kind::pointer)
         return ill_formed(n,
@@ -128,17 +123,13 @@ analysis_result semantic_analysis::delete_expression(DeleteExpression n,
        destructor has its count before its elements */
     uint64_t cookie = 0;
     if (array) {
-        r = array_cookie(n, c, object_type, global, cookie);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY_SET(r, array_cookie(n, c, object_type, global, cookie));
     }
     if (c && destroys(c)) {
         entity_index destructor = entity_table[c].destructor;
         if (!destructor)
             return not_supported(n, "expr.delete");
-        r = deleted_use(at, destructor);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY_SET(r, deleted_use(at, destructor));
         expression_meaning target;
         target.type = unqualified;
         target.category = value_category::lvalue;
@@ -155,10 +146,8 @@ analysis_result semantic_analysis::delete_expression(DeleteExpression n,
     }
     entity_index function = 0;
     bool sized = false;
-    r = usual_deallocation(n, c, global, array, function, sized, false,
-                           cookie != 0);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY_SET(r, usual_deallocation(n, c, global, array, function, sized, false,
+                                   cookie != 0));
     owned_array<expression_meaning> arguments;
     arguments.append(deleted);
     if (sized)
@@ -189,9 +178,7 @@ analysis_result semantic_analysis::delete_expression(DeleteExpression n,
         }
     }
     expression_meaning call;
-    r = call_function(n, at, function, arguments, call);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY_SET(r, call_function(n, at, function, arguments, call));
     m = expression_meaning();
     m.type = qualified_type::make(
         type_table.fundamental(fundamental_type::void_), cv_none);
@@ -237,10 +224,8 @@ analysis_result semantic_analysis::array_cookie(SyntaxRef n, entity_index c,
     if (!needed && !global) {
         owned_array<entity_index> set;
         bool in_class = false;
-        analysis_result r = allocation_functions(
-            n, allocation_function::delete_array, c, set, in_class);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r, allocation_functions(n, allocation_function::delete_array, c,
+                                     set, in_class));
         qualified_type size_type = qualified_type::make(
             type_table.fundamental(fundamental_type::unsigned_long_int),
             cv_none);
@@ -288,10 +273,8 @@ analysis_result semantic_analysis::usual_deallocation(
     entity_index scope = c;
     if (global)
         scope = 0;
-    analysis_result r =
-        allocation_functions(n, kind, scope, set, in_class, class_complete);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r,
+         allocation_functions(n, kind, scope, set, in_class, class_complete));
     /* [basic.stc.dynamic.deallocation]/3: "A usual deallocation function
        is a deallocation function whose parameters after the first are ...
        optionally, a parameter of type std::size_t" (the other forms are

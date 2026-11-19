@@ -165,9 +165,7 @@ analysis_result semantic_analysis::pointer_operator(SyntaxRef op,
                cv-qualifier-seq pointer to member of class
                nested-name-specifier of type T"." */
             nominated_scope scope;
-            analysis_result r = nested_name_specifier(c, scope);
-            if (r != analysis_result::well_formed)
-                return r;
+            VTRY(r, nested_name_specifier(c, scope));
             if (!scope.global && !scope.dependent &&
                 (is_namespace(scope.entity) ||
                  entity_table[scope.entity].kind == entity_kind::enumeration))
@@ -219,30 +217,22 @@ analysis_result semantic_analysis::pointer_operator(SyntaxRef op,
             type = qualified_type::make(type_table.block_pointer_to(type),
                                         cv_none);
         } else if (c.is(AMPERSAND)) {
-            analysis_result r = reference(op, false, type, m);
-            if (r != analysis_result::well_formed)
-                return r;
+            VTRY(r, reference(op, false, type, m));
         } else if (c.is(AMPERSAND_AMPERSAND)) {
             if (!tokens.files.behavior.has(language_feature::rvalue_references))
                 /* [ext.clang] an rvalue reference before C++11, an
                    extension (an error with -pedantic-errors) */
                 return not_supported(op, "ext.clang");
-            analysis_result r = reference(op, true, type, m);
-            if (r != analysis_result::well_formed)
-                return r;
+            VTRY(r, reference(op, true, type, m));
         } else if (c.cv_qualifier_seq()) {
             /* [dcl.ptr]/1: the cv-qualifiers apply to the pointer */
             for (auto q : c.elements()) {
                 if (!q.is_token())
                     return not_supported(op, "dcl.ptr");
-                analysis_result r = pointer_qualifier(op, q.token(), type);
-                if (r != analysis_result::well_formed)
-                    return r;
+                VTRY(r, pointer_qualifier(op, q.token(), type));
             }
         } else if (c.is_token()) {
-            analysis_result r = pointer_qualifier(op, c.token(), type);
-            if (r != analysis_result::well_formed)
-                return r;
+            VTRY(r, pointer_qualifier(op, c.token(), type));
         } else {
             return not_supported(op, "dcl.ptr");
         }
@@ -321,12 +311,8 @@ analysis_result semantic_analysis::array(SyntaxRef at, SyntaxElement bound,
         return analysis_result::well_formed;
     }
     expression_meaning m;
-    analysis_result r = expression(bound, m);
-    if (r != analysis_result::well_formed)
-        return r;
-    r = operand_value(at, m);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, expression(bound, m));
+    VTRY_SET(r, operand_value(at, m));
     /* [expr.const]/10: an integral promotion of an unscoped
        enumeration */
     promote_enumeration(m);
@@ -343,9 +329,7 @@ analysis_result semantic_analysis::array(SyntaxRef at, SyntaxElement bound,
     /* a bound that is not a constant expression: a variable length array
        (C99's, clang's extension), or one clang folds */
     bool constant = false;
-    r = integral_constant_expression(at, m, constant);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY_SET(r, integral_constant_expression(at, m, constant));
     if (!constant)
         return not_supported(at, "expr.const");
     const implementation_defined_behavior &b = tokens.files.behavior;
@@ -363,10 +347,8 @@ analysis_result semantic_analysis::array(SyntaxRef at, SyntaxElement bound,
         return not_supported(at, "dcl.array");
     /* "N shall be greater than zero": zero is clang's extension */
     if (!value) {
-        r = extension_used(diagnostic_id::sema_zero_length_array,
-                           at.first_token(), nullptr);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY_SET(r, extension_used(diagnostic_id::sema_zero_length_array,
+                                   at.first_token(), nullptr));
     }
     type = qualified_type::make(type_table.array_of(type, uint64_t(value)),
                                 cv_none);
@@ -384,15 +366,14 @@ analysis_result semantic_analysis::array(SyntaxRef at, SyntaxElement bound,
  */
 token_index semantic_analysis::declarator_id(SyntaxElement d) const
 {
-    auto e = d;
-    if (e.is_identifier())
-        return e.token();
-    if (e.is_token())
+    if (d.is_identifier())
+        return d.token();
+    if (d.is_token())
         return 0;
-    if (!e.is(syntax_kind::init_declarator, syntax_kind::declarator,
+    if (!d.is(syntax_kind::init_declarator, syntax_kind::declarator,
               syntax_kind::ptr_declarator, syntax_kind::noptr_declarator))
         return 0;
-    for (auto c : e.elements()) {
+    for (auto c : d.elements()) {
         if (c.is_token()) {
             if (c.is_identifier())
                 return c.token();
@@ -434,17 +415,17 @@ static bool declares_by_declarator(SyntaxRef d)
 void semantic_analysis::hold_names(SyntaxRef declaration)
 {
     owned_array<token_index> ids;
-    auto node = declaration;
     /* [over.oper]/1: an operator function, or a conversion function, it
        may declare: the meaning of operators on classes and enumerations is
        not known from now on */
-    for (token_index t = node.first_token(); t < node.end_token(); t++)
+    for (token_index t = declaration.first_token(); t < declaration.end_token();
+         t++)
         if (tokens[t].kind == token_kind::keyword &&
             p.keyword_of(tokens[t]) == standard_keyword::operator_)
             operators_held = true;
-    if (node.is(syntax_kind::linkage_specification)) {
+    if (declaration.is(syntax_kind::linkage_specification)) {
         /* extern "C" { ... }: the declarations in it are the scope's */
-        for (auto c : node.elements()) {
+        for (auto c : declaration.elements()) {
             if (c.is_token())
                 continue;
             if (c.declarations()) {
@@ -475,22 +456,22 @@ void semantic_analysis::hold_names(SyntaxRef declaration)
         }
     };
     bool by_declarator = parsed_completely(declaration) &&
-                         (node.is(syntax_kind::simple_declaration) ||
-                          node.is(syntax_kind::function_definition) ||
-                          node.is(syntax_kind::condition));
+                         (declaration.is(syntax_kind::simple_declaration,
+                                         syntax_kind::function_definition,
+                                         syntax_kind::condition));
     /* a template of a function or of declarators: what its declarator-ids
        name (below), not the types its declaration names (an explicit
        specialization's name is a template-id: all its names held) */
-    if (!by_declarator && node.is(syntax_kind::template_declaration) &&
+    if (!by_declarator && declaration.is(syntax_kind::template_declaration) &&
         parsed_completely(declaration))
         by_declarator = declares_by_declarator(declaration);
-    if (node.is(syntax_kind::using_directive)) {
+    if (declaration.is(syntax_kind::using_directive)) {
         /* [namespace.udir]: what it makes visible is not known */
         entity_table[current_scope].unknown_names = true;
         return;
     }
-    if (node.is(syntax_kind::using_declaration) ||
-        node.is(syntax_kind::namespace_alias_definition)) {
+    if (declaration.is(syntax_kind::using_declaration,
+                       syntax_kind::namespace_alias_definition)) {
         /* the names they bring into the scope: each using-declarator's
            last identifier, the alias; not the namespaces and classes
            named on the way */
@@ -499,14 +480,14 @@ void semantic_analysis::hold_names(SyntaxRef declaration)
         while (!work.empty()) {
             SyntaxRef x = work.back();
             work.resize(work.size() - 1);
-            if (x.is(syntax_kind::nested_name_specifier) ||
-                x.is(syntax_kind::qualified_namespace_specifier))
+            if (x.is(syntax_kind::nested_name_specifier,
+                     syntax_kind::qualified_namespace_specifier))
                 continue;
             for (uint32_t i = 0; i < x.size(); i++) {
                 SyntaxElement c = x[i];
                 if (!c.is_token())
-                    work.append(c.index());
-                else if (tokens[c.token()].kind == token_kind::identifier &&
+                    work.append(c);
+                else if (c.is_identifier() &&
                          (x.is(syntax_kind::using_declarator) ||
                           (x == declaration && i == 1)))
                     ids.append(c.token());
@@ -533,32 +514,32 @@ void semantic_analysis::hold_names(SyntaxRef declaration)
         };
         /* not a template-head's: its names are the template's parameters
            and what their types and defaults name ([temp.param]) */
-        token_index start = node.first_token();
+        token_index start = declaration.first_token();
         for (SyntaxRef x = declaration;
              x.is(syntax_kind::template_declaration) && x.size() >= 2 &&
              x[0].is(syntax_kind::template_head) && !x[x.size() - 1].is_token();
              x = x[x.size() - 1].index())
             start = x[0].end_token();
-        for (token_index t = start; t < node.end_token(); t++) {
+        for (token_index t = start; t < declaration.end_token(); t++) {
             const token &tok = tokens[t];
             /* a name before or after :: is a qualifier or a member of
                another scope declared again ([dcl.meaning]/1), not a name
                this declaration brings into the scope */
             bool qualified =
-                (t + 1 < node.end_token() && is_scope_operator(t + 1)) ||
-                (t > node.first_token() && is_scope_operator(t - 1));
+                (t + 1 < declaration.end_token() && is_scope_operator(t + 1)) ||
+                (t > declaration.first_token() && is_scope_operator(t - 1));
             /* a typename-specifier's simple-template-id before ::
                (typename only_int<T>::type) names a type, never what the
                declaration declares; its template-arguments neither */
             if (tok.kind == token_kind::identifier && !depth && !qualified &&
-                t > node.first_token() &&
+                t > declaration.first_token() &&
                 p.keyword_of(tokens[t - 1]) == standard_keyword::typename_ &&
-                t + 1 < node.end_token() &&
+                t + 1 < declaration.end_token() &&
                 is_punctuator_at(t + 1, preprocessing_op_or_punc::LESS)) {
                 token_index close = 0;
                 int angles = 0, nested = 0;
-                for (token_index k = t + 1; k < node.end_token() && !close;
-                     k++) {
+                for (token_index k = t + 1;
+                     k < declaration.end_token() && !close; k++) {
                     if (is_punctuator_at(
                             k, preprocessing_op_or_punc::LEFT_PARENTHESIS) ||
                         is_punctuator_at(
@@ -585,7 +566,7 @@ void semantic_analysis::hold_names(SyntaxRef declaration)
                     if (nested < 0)
                         break;
                 }
-                if (close && close + 1 < node.end_token() &&
+                if (close && close + 1 < declaration.end_token() &&
                     is_scope_operator(close + 1)) {
                     t = close;
                     continue;
@@ -610,26 +591,26 @@ void semantic_analysis::hold_names(SyntaxRef declaration)
                 break;
             }
         }
-    } else if (node.is(syntax_kind::condition)) {
-        if (node.size() > 1)
-            ids.append(declarator_id(node[1]));
-    } else if (!node.is(syntax_kind::template_declaration)) {
+    } else if (declaration.is(syntax_kind::condition)) {
+        if (declaration.size() > 1)
+            ids.append(declarator_id(declaration[1]));
+    } else if (!declaration.is(syntax_kind::template_declaration)) {
         /* (a template's: its declaration's, below) */
         declarator_ids(declaration);
     }
     /* a template's declaration: its declarator-ids too, which may be in
        parentheses (template<class T> void (f)(T);) */
-    bool by_template = node.is(syntax_kind::template_declaration) ||
-                       node.is(syntax_kind::explicit_specialization);
+    bool by_template = declaration.is(syntax_kind::template_declaration,
+                                      syntax_kind::explicit_specialization);
     for (SyntaxRef inner = declaration;
-         inner.is(syntax_kind::template_declaration) ||
-         inner.is(syntax_kind::explicit_specialization);) {
+         inner.is(syntax_kind::template_declaration,
+                  syntax_kind::explicit_specialization);) {
         auto t = inner;
         if (!t.size() || inner[t.size() - 1].is_token())
             break;
         inner = inner[t.size() - 1].index();
-        if ((inner.is(syntax_kind::simple_declaration) ||
-             inner.is(syntax_kind::function_definition)) &&
+        if ((inner.is(syntax_kind::simple_declaration,
+                      syntax_kind::function_definition)) &&
             parsed_completely(inner))
             declarator_ids(inner);
     }
@@ -639,9 +620,9 @@ void semantic_analysis::hold_names(SyntaxRef declaration)
         uint32_t name = tokens.identifier(id);
         entity_index found = entity_table.find(current_scope, name);
         bool defines_namespace =
-            node.is(syntax_kind::named_namespace_definition) ||
-            node.is(syntax_kind::unnamed_namespace_definition) ||
-            node.is(syntax_kind::nested_namespace_definition);
+            declaration.is(syntax_kind::named_namespace_definition,
+                           syntax_kind::unnamed_namespace_definition,
+                           syntax_kind::nested_namespace_definition);
         if (found && defines_namespace &&
             entity_table[found].kind == entity_kind::namespace_entity &&
             entity_table[found].name == name &&
@@ -727,9 +708,7 @@ analysis_result semantic_analysis::declarator_qualifier(SyntaxRef nested,
                                                         declarator_meaning &m)
 {
     nominated_scope scope;
-    analysis_result r = nested_name_specifier(nested, scope);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, nested_name_specifier(nested, scope));
     if (at_block_scope() || defining_class || function_state.active)
         return not_supported(nested, "dcl.meaning");
     if (is_namespace(scope.entity)) {
@@ -759,27 +738,26 @@ analysis_result semantic_analysis::declarator(SyntaxRef declaration,
                                               declarator_meaning &m)
 {
     using enum preprocessing_op_or_punc;
-    auto e = d;
-    if (e.is_token()) {
-        if (!e.is_identifier())
+    if (d.is_token()) {
+        if (!d.is_identifier())
             return not_supported(declaration, "dcl.decl");
         m.has_id = true;
-        m.id = e.token();
+        m.id = d.token();
         return analysis_result::well_formed;
     }
-    SyntaxRef n = e;
-    switch (e.kind()) {
+    SyntaxRef n = d;
+    switch (d.kind()) {
     case syntax_kind::ptr_declarator:
     case syntax_kind::ptr_abstract_declarator: {
         /* ptr-operator ptr-declarator */
-        if (!e[0].ptr_operator())
+        if (!d[0].ptr_operator())
             return not_supported(n, "dcl.decl");
-        analysis_result r = pointer_operator(e[0], type, m);
-        if (r != analysis_result::well_formed || e.size() == 1)
+        analysis_result r = pointer_operator(d[0], type, m);
+        if (r != analysis_result::well_formed || d.size() == 1)
             return r;
-        if (e.size() != 2)
+        if (d.size() != 2)
             return not_supported(n, "dcl.decl");
-        return declarator(declaration, e[1], type, m);
+        return declarator(declaration, d[1], type, m);
     }
     case syntax_kind::parameters_and_qualifiers:
         /* an abstract declarator that is only its parameters */
@@ -791,12 +769,10 @@ analysis_result semantic_analysis::declarator(SyntaxRef declaration,
         /* [dcl.meaning]/1: a member of a class declared again, the
            declarator-id alone (a static data member's definition,
            [class.static.data]): class-name :: identifier */
-        auto q = e.qualified_id();
+        auto q = d.qualified_id();
         if (q.size() != 2 || !q.nested_name_specifier() || !q.identifier())
             return not_supported(n, "dcl.meaning");
-        analysis_result r = declarator_qualifier(q.nested_name_specifier(), m);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r, declarator_qualifier(q.nested_name_specifier(), m));
         m.has_id = true;
         m.id = q.identifier().token();
         return analysis_result::well_formed;
@@ -808,11 +784,9 @@ analysis_result semantic_analysis::declarator(SyntaxRef declaration,
            gnu-attribute-specifier-seq_opt: the label is the symbol, one
            ordinary string-literal (concatenated or not) without escape
            sequences here */
-        for (auto c : e.elements(1)) {
+        for (auto c : d.elements(1)) {
             if (c.gnu_attribute_specifier()) {
-                analysis_result r = gnu_attribute_specifier(c, m);
-                if (r != analysis_result::well_formed)
-                    return r;
+                VTRY(r, gnu_attribute_specifier(c, m));
                 continue;
             }
             auto literal = c.gnu_asm_label().string_literal();
@@ -825,7 +799,7 @@ analysis_result semantic_analysis::declarator(SyntaxRef declaration,
                 return not_supported(n, "ext.gnu");
             m.asm_label = literal.token();
         }
-        return declarator(declaration, e[0], type, m);
+        return declarator(declaration, d[0], type, m);
     }
     case syntax_kind::operator_function_id:
         return operator_function_id(n, m);
@@ -835,19 +809,19 @@ analysis_result semantic_analysis::declarator(SyntaxRef declaration,
         /* [class.conv.fct]/1: the type is the declaration's
            (conversion_function_member) */
         m.has_id = true;
-        m.id = SyntaxElement(e[0]).token();
+        m.id = SyntaxElement(d[0]).token();
         m.conversion_function = true;
         tokens.name_token(m.id, conversion_function_name());
         return analysis_result::well_formed;
     case syntax_kind::simple_template_id:
         /* [temp.expl.spec]/1: a specialization's template-id, the whole
            declarator (a variable template's) */
-        if (!declarator_template_id || !e[0].is_identifier())
+        if (!declarator_template_id || !d[0].is_identifier())
             return not_supported(n);
         declarator_template_id = false;
         m.template_id = n;
         m.has_id = true;
-        m.id = e[0].token();
+        m.id = d[0].token();
         return analysis_result::well_formed;
     default:
         return not_supported(n);
@@ -858,9 +832,9 @@ analysis_result semantic_analysis::declarator(SyntaxRef declaration,
     uint32_t i = 0;
     bool has_head = false;
     SyntaxElement head = {};
-    auto parts = NoptrDeclaratorParts(e.context(), n);
+    auto parts = NoptrDeclaratorParts(n);
     auto id = parts.declarator_id();
-    if (e[0].is(LEFT_PARENTHESIS)) {
+    if (d[0].is(LEFT_PARENTHESIS)) {
         auto inner = parts.parenthesized();
         if (!inner)
             return not_supported(n, "dcl.decl");
@@ -926,9 +900,7 @@ analysis_result semantic_analysis::declarator(SyntaxRef declaration,
         if (q.size() != 2 || !q.nested_name_specifier() ||
             (!operator_name && !name.is_identifier()))
             return not_supported(q, "dcl.meaning");
-        analysis_result r = declarator_qualifier(q.nested_name_specifier(), m);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r, declarator_qualifier(q.nested_name_specifier(), m));
         if (m.destructor && !m.qualifier)
             return not_supported(q, "class.dtor");
         has_head = true;
@@ -971,12 +943,10 @@ analysis_result semantic_analysis::declarator(SyntaxRef declaration,
         }
     } restore = {current_scope, scope_before};
     owned_array<suffix> suffixes;
-    while (i < e.size()) {
-        auto c = e[i];
+    while (i < d.size()) {
+        auto c = d[i];
         if (c.gnu_attribute_specifier()) {
-            analysis_result r = gnu_attribute_specifier(c, m);
-            if (r != analysis_result::well_formed)
-                return r;
+            VTRY(r, gnu_attribute_specifier(c, m));
             i++;
             continue;
         }
@@ -986,14 +956,12 @@ analysis_result semantic_analysis::declarator(SyntaxRef declaration,
             /* [ext:gnu_attributes] after the parameters */
             for (auto a : c.elements())
                 if (a.is_node() && only_gnu_attributes(tree, a)) {
-                    analysis_result r = gnu_attribute_specifier(a, m);
-                    if (r != analysis_result::well_formed)
-                        return r;
+                    VTRY(r, gnu_attribute_specifier(a, m));
                 }
             suffixes.append({true, i, false});
             i++;
         } else if (c.is(LEFT_BRACKET)) {
-            bool has_bound = e[i + 1] && !e[i + 1].is(RIGHT_BRACKET);
+            bool has_bound = d[i + 1] && !d[i + 1].is(RIGHT_BRACKET);
             suffixes.append({false, i + 1, has_bound});
             i += 2;
             if (has_bound)
@@ -1006,13 +974,11 @@ analysis_result semantic_analysis::declarator(SyntaxRef declaration,
         const suffix &x = suffixes[k];
         analysis_result r;
         if (x.function)
-            r = function(e[x.child], type);
+            r = function(d[x.child], type);
         else if (x.has_bound)
-            r = array(n, e[x.child], type);
+            r = array(n, d[x.child], type);
         else
-            r = array(n, {}, type);
-        if (r != analysis_result::well_formed)
-            return r;
+            VTRY_SET(r, array(n, {}, type));
         /* a reference the suffix's operand was is no longer the
            declarator's outermost type */
         m.reference_made = false;

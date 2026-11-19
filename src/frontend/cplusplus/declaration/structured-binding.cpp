@@ -179,11 +179,8 @@ analysis_result semantic_analysis::array_binding_object(
 {
     entity_index from = 0;
     /* (automatic only: structured_binding_declaration) */
-    analysis_result r =
-        binding_variable(n, m, reference_to(placeholder_type(false), true),
-                         false, false, false, from);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, binding_variable(n, m, reference_to(placeholder_type(false), true),
+                             false, false, false, from));
     qualified_type array = add_cv(
         qualified_type::make(m.type.unqualified(), m.type.cv()), s.type.cv());
     const struct type a = type_table[array.unqualified()];
@@ -196,9 +193,7 @@ analysis_result semantic_analysis::array_binding_object(
             r = array_element(n, at, x, i);
         initialized_value value;
         if (r == analysis_result::well_formed)
-            r = initialize_with(n, x, element, direct, false, value);
-        if (r != analysis_result::well_formed)
-            return r;
+            VTRY_SET(r, initialize_with(n, x, element, direct, false, value));
         elements.append(value.node);
     }
     expression_meaning list;
@@ -293,15 +288,11 @@ analysis_result semantic_analysis::tuple_trait_member(
         return not_supported(n, "dcl.struct.bind");
     template_argument a[2];
     if (indexed) {
-        r = index_argument(n, ct, i, a[0]);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY_SET(r, index_argument(n, ct, i, a[0]));
     }
     a[count - 1].type = type;
     entity_index c = 0;
-    r = instantiate_class(n, ct, a, count, c);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY_SET(r, instantiate_class(n, ct, a, count, c));
     if (entity_table[c].kind != entity_kind::class_type ||
         !entity_table[c].size)
         return analysis_result::well_formed;
@@ -326,10 +317,7 @@ analysis_result semantic_analysis::tuple_size_of(SyntaxRef n,
 {
     found = false;
     entity_index v = 0;
-    analysis_result r =
-        tuple_trait_member(n, "tuple_size", false, 0, type, "value", v);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, tuple_trait_member(n, "tuple_size", false, 0, type, "value", v));
     if (!v) {
         /* not complete, or no member value: a specialization of
            std::tuple_size analysis did not follow may give it one */
@@ -360,10 +348,7 @@ analysis_result semantic_analysis::tuple_element_of(SyntaxRef n, uint32_t i,
                                                     qualified_type &element)
 {
     entity_index t = 0;
-    analysis_result r =
-        tuple_trait_member(n, "tuple_element", true, i, type, "type", t);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, tuple_trait_member(n, "tuple_element", true, i, type, "type", t));
     if (!t || entity_table[t].kind != entity_kind::typedef_name ||
         depends_on_template_parameter(entity_table[t].type))
         return not_supported(n, "dcl.struct.bind");
@@ -415,9 +400,7 @@ analysis_result semantic_analysis::binding_get_call(SyntaxRef n, token_index at,
     if (!held)
         return not_supported(n, "dcl.struct.bind");
     expression_meaning object;
-    analysis_result r = named_entity(at, e, object, false);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, named_entity(at, e, object, false));
     if (type_table[entity_table[e].type.unqualified()].kind !=
         type_kind::lvalue_reference) {
         object.category = value_category::xvalue;
@@ -433,33 +416,26 @@ analysis_result semantic_analysis::binding_get_call(SyntaxRef n, token_index at,
         template_argument index;
         /* a template whose first parameter is no integral non-type one
            is no candidate (deduction fails): not analysed */
-        r = index_argument(n, g, i, index);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY_SET(r, index_argument(n, g, i, index));
         given.append(index);
         owned_array<uint32_t> one;
         one.append(g);
-        r = template_candidates(n, one, &object, 1, candidates,
-                                &first_arguments, &all, nullptr, SyntaxRef(),
-                                &given);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY_SET(r, template_candidates(n, one, &object, 1, candidates,
+                                        &first_arguments, &all, nullptr,
+                                        SyntaxRef(), &given));
     }
     if (candidates.empty())
         return not_supported(n, "temp.over");
     owned_array<expression_meaning> arguments;
     arguments.append(object);
     size_t chosen = 0;
-    r = best_viable_function(n, candidates, nullptr, arguments, chosen);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY_SET(r,
+             best_viable_function(n, candidates, nullptr, arguments, chosen));
     const function_template ft =
         function_templates[candidates[chosen].template_index - 1];
     entity_index specialization = 0;
-    r = instantiate(n, ft.entity, &all[first_arguments[chosen]],
-                    ft.parameter_count, specialization);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY_SET(r, instantiate(n, ft.entity, &all[first_arguments[chosen]],
+                            ft.parameter_count, specialization));
     return call_function(n, at, specialization, arguments, m);
 }
 
@@ -528,35 +504,34 @@ analysis_result semantic_analysis::structured_binding_declaration(
     SyntaxRef declaration, uint32_t first, const specified &s,
     const expression_meaning *supplied)
 {
-    auto node = declaration;
     uint32_t i = first;
     bool reference = false, rvalue = false;
-    if (node[i].is(preprocessing_op_or_punc::AMPERSAND)) {
+    if (declaration[i].is(preprocessing_op_or_punc::AMPERSAND)) {
         reference = true;
         i++;
-    } else if (node[i].is(preprocessing_op_or_punc::AMPERSAND_AMPERSAND)) {
+    } else if (declaration[i].is(
+                   preprocessing_op_or_punc::AMPERSAND_AMPERSAND)) {
         reference = rvalue = true;
         i++;
     }
-    if (i + 3 > node.size())
+    if (i + 3 > declaration.size())
         return not_supported(declaration, "dcl.struct.bind");
-    token_index at = node[i].token();
+    token_index at = declaration[i].token();
     owned_array<token_index> names;
-    SyntaxElement list = node[i + 1];
+    SyntaxElement list = declaration[i + 1];
     if (list.is_token()) {
         names.append(list.token());
     } else {
         for (SyntaxElement c : list.elements()) {
-            if (c.is_token() &&
-                tokens[c.token()].kind == token_kind::identifier)
+            if (c.is_token() && c.is_identifier())
                 names.append(c.token());
         }
     }
     SyntaxElement init;
     if (!supplied) {
-        if (i + 4 > node.size())
+        if (i + 4 > declaration.size())
             return not_supported(declaration, "dcl.struct.bind");
-        init = node[i + 3];
+        init = declaration[i + 3];
     }
     /* [dcl.pre]/8: "If the decl-specifier-seq contains any decl-specifier
        other than static, thread_local, auto ([dcl.spec.auto]), or

@@ -346,40 +346,38 @@ semantic_analysis::lambda_context *semantic_analysis::current_lambda()
 analysis_result semantic_analysis::lambda_expression(LambdaExpression n,
                                                      expression_meaning &m)
 {
-    auto node = n;
     /* a lambda in a default argument or member initializer, in an
        unevaluated operand or while a candidate template is substituted;
        outside a function body only at namespace scope */
     if ((!function_state.active && !is_namespace(current_scope)) ||
-        unevaluated || substituting || node.size() < 2)
+        unevaluated || substituting || n.size() < 2)
         return not_supported(n, "expr.prim.lambda");
     /* [expr.prim.lambda]/5: a template-parameter-list makes a generic
        lambda, whose call operator is a template
        ([expr.prim.lambda.closure]/3); its requires-clause is the
        template's (lambda_constraint) */
     SyntaxElement declarator, template_list;
-    for (uint32_t i = 1; i + 1 < node.size(); i++) {
-        SyntaxElement x = node[i];
+    for (uint32_t i = 1; i + 1 < n.size(); i++) {
+        SyntaxElement x = n[i];
         if (x.is(syntax_kind::lambda_declarator) && !declarator)
             declarator = x;
-        else if (x.is(syntax_kind::template_parameter_list) ||
-                 x.is(syntax_kind::type_parameter) ||
-                 x.is(syntax_kind::parameter_declaration))
+        else if (x.is(syntax_kind::template_parameter_list,
+                      syntax_kind::type_parameter,
+                      syntax_kind::parameter_declaration))
             /* (a list of one template-parameter is that parameter) */
             template_list = x;
         else if (!x.is_token() && !x.is(syntax_kind::requires_clause))
             return not_supported(n, "expr.prim.lambda");
     }
-    SyntaxElement body = node[node.size() - 1];
-    if (!node[0].is(syntax_kind::lambda_introducer) ||
-        !body.is(syntax_kind::compound_statement))
+    SyntaxElement body = n.compound_statement();
+    if (!n.lambda_introducer() || !body)
         return not_supported(n, "expr.prim.lambda");
     if (declarator) {
         /* [expr.prim.lambda]/5: "A lambda is a generic lambda if the
            lambda-expression has any generic parameter type placeholders"
            (auto in a parameter's decl-specifier-seq) */
-        auto d = declarator;
-        for (token_index t = d.first_token(); t < d.end_token(); t++)
+        for (token_index t = declarator.first_token();
+             t < declarator.end_token(); t++)
             if (tokens[t].kind == token_kind::keyword &&
                 p.keyword_of(tokens[t]) == standard_keyword::auto_)
                 return not_supported(n, "expr.prim.lambda.closure");
@@ -429,13 +427,13 @@ analysis_result semantic_analysis::lambda_expression(LambdaExpression n,
     entity_table.add_declaration(c, n);
     l.closure = c;
     l.first_capture = static_cast<uint32_t>(lambda_captures.size());
-    analysis_result r = lambda_introducer(node[0], l);
+    analysis_result r = lambda_introducer(n.lambda_introducer(), l);
     if (r != analysis_result::well_formed) {
         lambda_captures.resize(l.first_capture);
         entity_table[c].kind = entity_kind::none;
         return r;
     }
-    bool has_capture = node[0].size() > 2;
+    bool has_capture = n.lambda_introducer().size() > 2;
 
     qualified_type type;
     owned_array<parameter_meaning> parameters;
@@ -534,7 +532,7 @@ semantic_analysis::lambda_call_type(SyntaxRef n, SyntaxRef d, lambda_context &l,
                 /* [ext:gnu_attributes] always_inline and the like: no
                    effect on the closure type */
                 gnu_attributes g;
-                analysis_result a = gnu_attribute_specifier(part.index(), g);
+                analysis_result a = gnu_attribute_specifier(part, g);
                 if (a != analysis_result::well_formed)
                     r = a;
             } else if (part.is_token()) {
@@ -543,7 +541,7 @@ semantic_analysis::lambda_call_type(SyntaxRef n, SyntaxRef d, lambda_context &l,
             for (SyntaxElement sp : specifiers) {
                 standard_keyword kw = standard_keyword::none;
                 if (sp.is_token())
-                    kw = p.keyword_of(tokens[sp.token()]);
+                    kw = sp.keyword();
                 if (kw == standard_keyword::mutable_)
                     l.mutable_ = true;
                 else if (kw == standard_keyword::constexpr_)
@@ -560,9 +558,7 @@ semantic_analysis::lambda_call_type(SyntaxRef n, SyntaxRef d, lambda_context &l,
                     r = not_supported(n, "dcl.constexpr");
             }
             if (part.is(syntax_kind::trailing_return_type)) {
-                auto trailing = part;
-                if (trailing.size() != 2 ||
-                    !trailing[1].is(syntax_kind::type_id)) {
+                if (part.size() != 2 || !part[1].is(syntax_kind::type_id)) {
                     r = not_supported(n, "dcl.fct");
                     continue;
                 }
@@ -576,7 +572,7 @@ semantic_analysis::lambda_call_type(SyntaxRef n, SyntaxRef d, lambda_context &l,
                         r = not_supported(n, "expr.prim.lambda.capture");
                 if (r != analysis_result::well_formed)
                     continue;
-                r = type_id(trailing[1], returns);
+                r = type_id(part[1], returns);
                 if (r == analysis_result::well_formed &&
                     abstract_class(returns))
                     r = not_supported(n, "class.abstract");
@@ -724,10 +720,10 @@ analysis_result semantic_analysis::generic_lambda(SyntaxRef n, SyntaxRef list,
         if (p.is_token())
             continue;
         template_parameter_parts x;
-        if (!template_parameter_form(p.index(), x) || !x.type || x.pack ||
+        if (!template_parameter_form(p, x) || !x.type || x.pack ||
             x.template_template || x.constraint)
             return not_supported(p.index(), "temp.param");
-        parameters.append(p.index());
+        parameters.append(p);
     }
     uint32_t clauses = 0;
     for (uint32_t i = 1; i + 1 < n.size(); i++)
@@ -737,10 +733,7 @@ analysis_result semantic_analysis::generic_lambda(SyntaxRef n, SyntaxRef list,
         return not_supported(n, "temp.constr");
     uint32_t index = 0, first = 0;
     entity_index scope = 0;
-    analysis_result r =
-        template_parameter_scope(n, parameters, c, 0, index, scope, first);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, template_parameter_scope(n, parameters, c, 0, index, scope, first));
     /* the template's declarator, in the template-parameters' scope; what
        it records for claims is the template's, which clang has none of */
     size_t expressions_before = expressions.size();
@@ -776,9 +769,7 @@ analysis_result semantic_analysis::generic_lambda(SyntaxRef n, SyntaxRef list,
     entity_table[t].implemented = preprocessing_op_or_punc::LEFT_PARENTHESIS;
     hold_template_name(record, call_name, c);
     entity_table[c].call_operator = t;
-    r = closure_class(c, n, false);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY_SET(r, closure_class(c, n, false));
     owned_array<capture_record> none;
     return closure_object(l, none, m);
 }

@@ -19,9 +19,7 @@ analysis_result semantic_analysis::expression(SyntaxElement e,
                                               expression_meaning &m)
 {
     m = expression_meaning();
-    analysis_result r = expression_kind(e, m);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, expression_kind(e, m));
     /* [ext:clang_atomic], [ext:clang_bit_int] the operations on an atomic
        object or a _BitInt are not analysed yet */
     type_kind k = type_table[m.type.unqualified()].kind;
@@ -56,7 +54,7 @@ analysis_result semantic_analysis::expression(SyntaxElement e,
        complete declarator ([dcl.decl]) and before its initializer (if
        any)", but the initializer can complete the type (an array's bound),
        so after the declaration the name may have another type */
-    if (e.is_token() && tokens[e.token()].kind == token_kind::identifier) {
+    if (e.is_identifier()) {
         const struct type &named = type_table[m.type.unqualified()];
         if (named.kind == type_kind::array && !named.bound_known)
             x.placeable = false;
@@ -91,21 +89,20 @@ analysis_result semantic_analysis::expression_kind(SyntaxElement e,
             return this_pointer(e.token(), m);
         return not_supported(current_declaration, "expr.prim");
     }
-    auto n = e;
-    switch (n.kind()) {
+    switch (e.kind()) {
     case syntax_kind::gnu_extension_expression:
         /* [ext:gnu_extension_keyword]: __extension__ changes no meaning */
-        return expression(n[1], m);
+        return expression(e[1], m);
     case syntax_kind::primary_expression:
-        return parenthesized(n, m);
+        return parenthesized(e, m);
     case syntax_kind::qualified_id:
-        return qualified_id(n, m);
+        return qualified_id(e, m);
     case syntax_kind::unary_expression:
-        return unary(n, m);
+        return unary(e, m);
     case syntax_kind::postfix_expression:
-        return postfix(n, m);
+        return postfix(e, m);
     case syntax_kind::cast_expression:
-        return cast(n, m);
+        return cast(e, m);
     case syntax_kind::pm_expression:
     case syntax_kind::compare_expression:
     case syntax_kind::multiplicative_expression:
@@ -118,41 +115,41 @@ analysis_result semantic_analysis::expression_kind(SyntaxElement e,
     case syntax_kind::inclusive_or_expression:
     case syntax_kind::logical_and_expression:
     case syntax_kind::logical_or_expression:
-        return binary(n, m);
+        return binary(e, m);
     case syntax_kind::conditional_expression:
-        return conditional(n, m);
+        return conditional(e, m);
     case syntax_kind::assignment_expression:
-        return assignment(n, m);
+        return assignment(e, m);
     case syntax_kind::expression:
-        return comma(n, m);
+        return comma(e, m);
     case syntax_kind::new_expression:
-        return new_expression(n, m);
+        return new_expression(e, m);
     case syntax_kind::delete_expression:
-        return delete_expression(n, m);
+        return delete_expression(e, m);
     case syntax_kind::throw_expression:
-        return throw_expression(n, m);
+        return throw_expression(e, m);
     case syntax_kind::fold_expression:
-        return fold(n, m);
+        return fold(e, m);
     case syntax_kind::lambda_expression:
-        return lambda_expression(n, m);
+        return lambda_expression(e, m);
     case syntax_kind::noexcept_expression:
-        return noexcept_operator(n, m);
+        return noexcept_operator(e, m);
     case syntax_kind::simple_template_id:
-        return variable_template_id(n, m);
+        return variable_template_id(e, m);
     case syntax_kind::requires_expression:
-        return requires_expression(n, m);
+        return requires_expression(e, m);
     case syntax_kind::clang_type_trait_expression:
-        return clang_type_trait(n, m);
+        return clang_type_trait(e, m);
     case syntax_kind::gnu_offsetof_expression:
-        return gnu_offsetof(n, m);
+        return gnu_offsetof(e, m);
     case syntax_kind::clang_bit_cast_expression:
-        return clang_bit_cast(n, m);
+        return clang_bit_cast(e, m);
     case syntax_kind::clang_convertvector_expression:
-        return clang_convertvector(n, m);
+        return clang_convertvector(e, m);
     case syntax_kind::clang_source_location_expression:
-        return clang_source_location(n, m);
+        return clang_source_location(e, m);
     default:
-        return not_supported(n);
+        return not_supported(e);
     }
 }
 

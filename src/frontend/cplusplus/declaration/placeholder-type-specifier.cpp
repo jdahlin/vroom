@@ -297,23 +297,21 @@ bool semantic_analysis::initializer_form(SyntaxElement init,
 {
     if (init.is_token())
         return false;
-    auto n = init;
-    auto node = n;
     direct = false;
     list = false;
-    if (node.is(syntax_kind::brace_or_equal_initializer) && node.size() == 2 &&
-        !node[1].is(syntax_kind::braced_init_list)) {
-        clause = node[1];
-    } else if (node.is(syntax_kind::initializer) && node.size() == 3 &&
-               !node[1].is(syntax_kind::initializer_list) &&
-               !node[1].is(syntax_kind::braced_init_list)) {
-        clause = node[1];
+    if (init.is(syntax_kind::brace_or_equal_initializer) && init.size() == 2 &&
+        !init[1].is(syntax_kind::braced_init_list)) {
+        clause = init[1];
+    } else if (init.is(syntax_kind::initializer) && init.size() == 3 &&
+               !init[1].is(syntax_kind::initializer_list,
+                           syntax_kind::braced_init_list)) {
+        clause = init[1];
         direct = true;
-    } else if (node.is(syntax_kind::braced_init_list) && node.size() == 3 &&
-               !node[1].is(syntax_kind::initializer_list) &&
-               !node[1].is(syntax_kind::braced_init_list) &&
-               !node[1].is(preprocessing_op_or_punc::RIGHT_BRACE)) {
-        clause = node[1];
+    } else if (init.is(syntax_kind::braced_init_list) && init.size() == 3 &&
+               !init[1].is(syntax_kind::initializer_list,
+                           syntax_kind::braced_init_list) &&
+               !init[1].is(preprocessing_op_or_punc::RIGHT_BRACE)) {
+        clause = init[1];
         direct = true;
         list = true;
     } else {
@@ -346,9 +344,7 @@ analysis_result semantic_analysis::deduced_initializer(SyntaxElement init,
            expression */
         return not_supported(init.index(), "dcl.type.auto.deduct");
     expression_meaning m;
-    analysis_result r = expression(clause, m);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, expression(clause, m));
     return deduced_initialization(init, m, names_entity(clause), direct, list,
                                   e, type, value);
 }
@@ -360,10 +356,7 @@ analysis_result semantic_analysis::deduced_initialization(
     entity_index e, qualified_type &type, initialized_value &value)
 {
     qualified_type replacement;
-    analysis_result r =
-        deduce_placeholder(n, type, m, named, type, replacement);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, deduce_placeholder(n, type, m, named, type, replacement));
     /* [dcl.spec.auto]/7: "if the type that replaces the placeholder type is
        not the same in each deduction, the program is ill-formed" */
     if (declaration_deduced.unqualified() &&
@@ -396,9 +389,7 @@ analysis_result semantic_analysis::deduced_initialization(
         entity_table[e].linkage_of_name = linkage::internal;
         entity_table[e].unnamed_type_linkage = true;
     }
-    r = deduced_type_supported(n, type);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY_SET(r, deduced_type_supported(n, type));
     return initialize_with(n, m, type, direct, list, value);
 }
 
@@ -438,13 +429,9 @@ analysis_result semantic_analysis::deduce_return(SyntaxRef at,
             type_table.fundamental(fundamental_type::void_), cv_none);
     } else {
         qualified_type replacement;
-        analysis_result r =
-            deduce_placeholder(at, declared, *e, named, deduced, replacement);
-        if (r != analysis_result::well_formed)
-            return r;
-        r = deduced_type_supported(at, deduced);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r,
+             deduce_placeholder(at, declared, *e, named, deduced, replacement));
+        VTRY_SET(r, deduced_type_supported(at, deduced));
     }
     if (function_state.deduced) {
         if (!(deduced == function_state.returns))
@@ -508,21 +495,18 @@ analysis_result semantic_analysis::trailing_return(SyntaxRef declaration,
                                                    qualified_type &type,
                                                    declarator_meaning &m)
 {
-    auto node = n;
-    if (node.size() != 2 || !node[1].is(syntax_kind::trailing_return_type))
+    if (n.size() != 2 || !n[1].is(syntax_kind::trailing_return_type))
         return not_supported(n, "dcl.fct");
     qualified_type auto_type = placeholder_type(false);
     /* (T other than auto: clang takes S(s)()->m, which [dcl.ambig.res]/1
        makes such a declaration, for an expression) */
     if (!(type == auto_type))
         return not_supported(n, "dcl.fct");
-    analysis_result r = declarator(declaration, node[0], type, m);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, declarator(declaration, n[0], type, m));
     const struct type f = type_table[type.unqualified()];
     if (f.kind != type_kind::function || !(f.operand == auto_type))
         return not_supported(n, "dcl.fct");
-    auto trailing = node[1];
+    auto trailing = n[1];
     if (trailing.size() != 2 || !trailing[1].is(syntax_kind::type_id))
         return not_supported(n, "dcl.fct");
     /* the type-id's own function declarators would replace the

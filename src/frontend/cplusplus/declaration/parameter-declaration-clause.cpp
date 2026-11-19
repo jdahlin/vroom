@@ -245,15 +245,12 @@ analysis_result semantic_analysis::parameter_declaration(
        (libc++'s [[__maybe_unused__]]), and GCC's whose rules set nothing
        (libc++'s __attribute__((noescape))), are left out */
     using enum preprocessing_op_or_punc;
-    auto parameter = n;
     uint32_t lead = 0;
-    while (parameter[lead].is_node()) {
-        auto c = parameter[lead];
+    while (n[lead].is_node()) {
+        auto c = n[lead];
         if (c.gnu_attribute_specifier()) {
             gnu_attributes g;
-            analysis_result r = gnu_attribute_specifier(c, g);
-            if (r != analysis_result::well_formed)
-                return r;
+            VTRY(r, gnu_attribute_specifier(c, g));
             if (g.flags || g.aligned || g.section || g.abi_tag)
                 break;
         } else if (!c.is(syntax_kind::attribute_specifier_seq,
@@ -263,14 +260,12 @@ analysis_result semantic_analysis::parameter_declaration(
         lead++;
     }
     /* the children after the attributes left out */
-    auto at = [&](uint32_t i) { return parameter[lead + i]; };
-    uint32_t child_count = parameter.size() - lead;
+    auto at = [&](uint32_t i) { return n[lead + i]; };
+    uint32_t child_count = n.size() - lead;
     if (!at(0).decl_specifier_seq())
         return not_supported(n, "dcl.attr");
     specified s;
-    analysis_result r = decl_specifier_seq(at(0), s, true);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, decl_specifier_seq(at(0), s, true));
     /* [dcl.type]/3: "at least one defining-type-specifier that is not a
        cv-qualifier shall appear in a complete type-specifier-seq or a
        complete decl-specifier-seq" */
@@ -340,7 +335,6 @@ analysis_result semantic_analysis::function(SyntaxRef parameters,
                           "array or function",
                           "dcl.fct");
     using enum preprocessing_op_or_punc;
-    auto node = parameters;
     /* the parameter-declarations and the ellipsis, from the clause and its
        list: ( clause ) is the first and last child */
     owned_array<SyntaxRef> declarations;
@@ -351,14 +345,14 @@ analysis_result semantic_analysis::function(SyntaxRef parameters,
     /* [except.spec]/1: the noexcept-specifier */
     bool specified_exceptions = false, non_throwing = false;
     SyntaxRef exceptions = 0;
-    for (uint32_t i = node.size(); i-- > 0;) {
-        auto c = node[i];
+    for (uint32_t i = parameters.size(); i-- > 0;) {
+        auto c = parameters[i];
         if (c.is(RIGHT_PARENTHESIS)) {
             closed = true;
         } else if (!closed) {
             /* a lambda-declarator's decl-specifier-seq (mutable, constexpr,
                consteval) and trailing-return-type: lambda_expression's */
-            if (node.lambda_declarator() &&
+            if (parameters.lambda_declarator() &&
                 (c.decl_specifier_seq() || c.trailing_return_type() ||
                  (c.is_token() &&
                   tokens[c.token()].kind == token_kind::keyword)))
@@ -371,7 +365,7 @@ analysis_result semantic_analysis::function(SyntaxRef parameters,
                declarator ([class.mfct.non-static]/5) */
             standard_keyword kw = standard_keyword::none;
             if (c.is_token())
-                kw = p.keyword_of(tokens[c.token()]);
+                kw = c.keyword();
             if (may_qualify && kw == standard_keyword::const_ &&
                 !(cv & cv_const)) {
                 cv |= cv_const;
@@ -398,7 +392,7 @@ analysis_result semantic_analysis::function(SyntaxRef parameters,
     }
     /* a function declarator of the parameters is not the member's */
     in_member_declarator = false;
-    for (auto c : node.elements()) {
+    for (auto c : parameters.elements()) {
         if (c.is(RIGHT_PARENTHESIS))
             break;
         if (!c.is(LEFT_PARENTHESIS))
@@ -435,11 +429,9 @@ analysis_result semantic_analysis::function(SyntaxRef parameters,
            element */
         uint32_t elements = 0;
         token_index ellipsis = 0;
-        analysis_result r = parameter_pack_expansion(
-            declarations[k], k + 1 == declarations.size() && !variadic,
-            elements, ellipsis);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r, parameter_pack_expansion(
+                    declarations[k], k + 1 == declarations.size() && !variadic,
+                    elements, ellipsis));
         if (ellipsis) {
             uint32_t pack_name = 0;
             if (tokens[ellipsis + 1].kind == token_kind::identifier)
@@ -479,10 +471,8 @@ analysis_result semantic_analysis::function(SyntaxRef parameters,
                 empty_pack = pack_name;
             continue;
         }
-        r = parameter_declaration(declarations[k], t, unnamed, id,
-                                  default_argument);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY_SET(r, parameter_declaration(declarations[k], t, unnamed, id,
+                                          default_argument));
         if (declared_pack) {
             /* [temp.variadic]/5: a template's own function parameter
                pack, of a type that names a template parameter pack
@@ -545,10 +535,8 @@ analysis_result semantic_analysis::function(SyntaxRef parameters,
     function_cv = cv;
     function_exceptions_specified = specified_exceptions;
     if (exceptions) {
-        analysis_result r =
-            parameter_scope_noexcept(exceptions, may_qualify, non_throwing);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r,
+             parameter_scope_noexcept(exceptions, may_qualify, non_throwing));
     }
     if (abstract_class(type))
         /* a return type of abstract class type: as a parameter's */
