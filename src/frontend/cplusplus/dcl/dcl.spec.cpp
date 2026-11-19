@@ -987,6 +987,16 @@ const char *specifier_subclause(standard_keyword k)
 
 } // namespace
 
+/* a class-specifier among the decl-specifiers of seq before its i-th */
+bool semantic_analysis::class_specifier_before(node_index seq, uint32_t i) const
+{
+    for (uint32_t k = 0; k < i; k++)
+        if (syntax_is(tree, tree.children(seq)[k],
+                      syntax_kind::class_specifier))
+            return true;
+    return false;
+}
+
 /*
  * [dcl.spec]/1: the decl-specifiers of a declaration (or of a
  * parameter-declaration, when parameter): its type ([dcl.meaning]/4:
@@ -1020,6 +1030,7 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
     };
     /* a specifier with no rules yet (an attribute after a class-specifier
        may change the class's layout) before any class is defined */
+    trailing_class_alignment = 0;
     for (uint32_t i = 0; i < node.child_count; i++) {
         syntax_child c = tree.children(seq)[i];
         if (c.is_token() || syntax_is(tree, c, syntax_kind::class_specifier) ||
@@ -1043,6 +1054,21 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
         if (!defines_class &&
             syntax_is(tree, c, syntax_kind::gnu_attribute_specifier))
             continue;
+        /* [ext:gnu_attributes] aligned after the class-specifier's closing
+           brace: GCC raises the class's alignment (clang's layout too) */
+        if (syntax_is(tree, c, syntax_kind::gnu_attribute_specifier) &&
+            class_specifier_before(seq, i)) {
+            gnu_attributes g;
+            analysis_result r = gnu_attribute_specifier(c.index(), g);
+            if (r != analysis_result::well_formed)
+                return r;
+            if (g.aligned && !(g.flags & ~gnu_aligned) && !g.section &&
+                !g.abi_tag) {
+                if (g.aligned > trailing_class_alignment)
+                    trailing_class_alignment = static_cast<uint32_t>(g.aligned);
+                continue;
+            }
+        }
         /* the class names the declaration would define are held, as
            hold_names holds its declarators' */
         for (uint32_t k = 0; k < node.child_count; k++) {
@@ -1138,6 +1164,10 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
                 r = analysis_result::well_formed;
             } else if (syntax_is(tree, c,
                                  syntax_kind::gnu_attribute_specifier)) {
+                /* (after a class-specifier: the class's alignment, taken
+                   above) */
+                if (class_specifier_before(seq, i))
+                    continue;
                 /* [ext:gnu_attributes] a decl-specifier: it applies to
                    the declaration */
                 r = gnu_attribute_specifier(c.index(), s);

@@ -124,6 +124,8 @@ analysis_result semantic_analysis::expression_kind(syntax_child e,
         return noexcept_operator(n, m);
     case syntax_kind::simple_template_id:
         return variable_template_id(n, m);
+    case syntax_kind::clang_type_trait_expression:
+        return clang_type_trait(n, m);
     default:
         return not_supported(n);
     }
