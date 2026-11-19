@@ -1827,6 +1827,14 @@ class semantic_analysis
        for a friend function defined in a class, the class
        ([basic.lookup.unqual]/1) */
     entity_index lexical_parent(entity_index s) const;
+    /* [class.compare.default]: = default; the class of the defaulted
+       comparison function whose body function_body makes */
+    bool defaulted_equality_declared(entity_index c, uint32_t name,
+                                     qualified_type type);
+    entity_index defaulted_comparison = 0;
+    analysis_result defaulted_equality(token_index at,
+                                       const owned_array<uint32_t> &parameters,
+                                       uint32_t &block);
     analysis_result friend_function_body(entity_index c, node_index n,
                                          entity_index f);
     bool friend_names(const friend_record &f, entity_index e) const;
@@ -4155,6 +4163,7 @@ class semantic_analysis
     /* [dcl.fct.def.delete]: whether a function-body is = delete ;, the
        function f so defined by the definition n, and (ill-formed) a
        reference to f if it is deleted */
+    bool explicit_body(syntax_child body, standard_keyword k) const;
     bool deleted_body(syntax_child body) const;
     analysis_result deleted_definition(node_index n, entity_index f);
     analysis_result deleted_use(token_index at, entity_index f);

@@ -1100,9 +1100,12 @@ semantic_analysis::member_declaration(entity_index c, syntax_child member,
     if (node.kind != syntax_kind::member_declaration &&
         node.kind != syntax_kind::function_definition)
         return not_supported(n);
-    if (node.child_count &&
-        syntax_is(tree, children[0], syntax_kind::decl_specifier_seq)) {
-        node_index seq = children[0].index();
+    /* [ext:gnu_attributes] before it all (libc++'s _LIBCPP_HIDE_FROM_ABI
+       friend ...) */
+    uint32_t leading = leading_gnu_attributes(n);
+    if (leading < node.child_count &&
+        syntax_is(tree, children[leading], syntax_kind::decl_specifier_seq)) {
+        node_index seq = children[leading].index();
         for (uint32_t i = 0; i < tree[seq].child_count; i++) {
             syntax_child x = tree.children(seq)[i];
             if (is_keyword(x, standard_keyword::friend_))
