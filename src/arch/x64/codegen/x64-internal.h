@@ -290,6 +290,10 @@ VPRIV void
 x64_call_xmms(codegen_context *e,
               const walk_argument *
                   r); /* abi.c, both conventions: a result in xmm0, xmm1, ... */
+VPRIV void x64_temporaries_save(codegen_context *e, uint32_t saved,
+                                uint32_t fsaved);
+VPRIV void x64_temporaries_restore(codegen_context *e, uint32_t saved,
+                                   uint32_t fsaved);
 VPRIV void x64_call_park(
     codegen_context *e,
     ast_qualified_type

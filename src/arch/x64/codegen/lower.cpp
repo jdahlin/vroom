@@ -892,21 +892,7 @@ VPRIV int x64_tlsaddr(codegen_context *e, uint32_t ref, int model)
                  fsaved = X->temporaries_in_use & X64_FLOAT_TEMPORARIES;
         int pad;
 
-        for (int q = 0; q < 16; q++)
-            if (saved & (1u << q)) {
-                x64_record_emit_three_registers(
-                    e, X64_OP_PUSH, 8, X64_REGISTER_NONE, q, X64_REGISTER_NONE);
-                X->outstanding_pushes++;
-            }
-        for (int q = XMM8; q < XMM15; q++)
-            if (fsaved & (1u << q)) {
-                codegen_lvalue d = {.kind = CODEGEN_LVALUE_REGISTER,
-                                    .register_number = RSP};
-
-                x64_record_emit(e, X64_OP_ADJSP)->immediate = -8;
-                x64_record_emit_memory(e, X64_OP_ST, 8, q, &d, false);
-                X->outstanding_pushes++;
-            }
+        x64_temporaries_save(e, saved, fsaved);
         pad = X->outstanding_pushes % 2 ? 8 : 0;
         if (pad)
             x64_record_emit(e, X64_OP_ADJSP)->immediate = -pad;
@@ -917,21 +903,7 @@ VPRIV int x64_tlsaddr(codegen_context *e, uint32_t ref, int model)
         if (pad)
             x64_record_emit(e, X64_OP_ADJSP)->immediate = pad;
         x64_mov(e, R11, RAX);
-        for (int q = XMM15 - 1; q >= XMM8; q--)
-            if (fsaved & (1u << q)) {
-                codegen_lvalue s = {.kind = CODEGEN_LVALUE_REGISTER,
-                                    .register_number = RSP};
-
-                x64_record_emit_memory(e, X64_OP_LD, 8, q, &s, false);
-                x64_record_emit(e, X64_OP_ADJSP)->immediate = 8;
-                X->outstanding_pushes--;
-            }
-        for (int q = 15; q >= 0; q--)
-            if (saved & (1u << q)) {
-                x64_record_emit_three_registers(
-                    e, X64_OP_POP, 8, q, X64_REGISTER_NONE, X64_REGISTER_NONE);
-                X->outstanding_pushes--;
-            }
+        x64_temporaries_restore(e, saved, fsaved);
         r = x64_treg(e);
         x64_mov(e, r, R11);
         return r;
