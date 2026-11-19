@@ -265,6 +265,9 @@ static const gnu_attribute_rule gnu_attribute_rules[] = {
        when the deployment target is older (libc++'s
        _LIBCPP_INTRODUCED_IN_LLVM_N_ATTRIBUTE) */
     {"availability", 0},
+    /* clang's swift_attr("..."): an annotation for Swift's importer (the
+       SDK's __swift_nonisolated_unsafe) */
+    {"swift_attr", 0},
     /* clang's enable_if(condition, message) (below) */
     {"enable_if", gnu_enable_if},
 };
@@ -420,11 +423,23 @@ analysis_result semantic_analysis::gnu_attribute_specifier(node_index n,
            condition holds; on a constructor template's declarator
            (enable_if_allowed: libc++'s _CmpUnspecifiedParam, which allows
            the literal 0 alone) unchecked, so a call it would refuse is
-           accepted; elsewhere (libc++'s _LIBCPP_PREFERRED_OVERLOAD, which
-           makes an overload preferred) not analysed */
+           accepted; elsewhere a constant true condition (libc++'s
+           _LIBCPP_PREFERRED_OVERLOAD) makes the function one of its own,
+           preferred over one without (basic.link.cpp, over.match.cpp);
+           any other condition is not analysed */
         if (rule->flag == gnu_enable_if) {
-            if (!enable_if_allowed)
+            if (enable_if_allowed)
+                continue;
+            if (count != 6)
                 return not_supported(at, "ext.gnu");
+            bool constant = false, value = false;
+            analysis_result r =
+                bool_constant_expression(at, children[2], constant, value);
+            if (r != analysis_result::well_formed)
+                return r;
+            if (!constant || !value)
+                return not_supported(at, "ext.gnu");
+            g.flags |= gnu_enable_if;
             continue;
         }
         if (rule->flag == gnu_aligned) {

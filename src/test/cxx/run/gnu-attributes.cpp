@@ -26,6 +26,9 @@ struct Plain {
     int i;
 };
 
+/* the SDK's __swift_nonisolated_unsafe (stdio.h's __stdinp) */
+int swift_one __attribute__((__swift_attr__("nonisolated(unsafe)"))) = 1;
+
 u128 widen(void) { return 0xfedcba9876543210ULL; }
 
 int main() {
@@ -47,5 +50,5 @@ int main() {
         (unsigned long long)w != 0xfedcba9876543210ULL)
         return 5;
     return before(1) + among(1) + after(1) + weak_one() + aligned_eight +
-           in_section + kept + local - 38;
+           in_section + kept + local + swift_one - 39;
 }

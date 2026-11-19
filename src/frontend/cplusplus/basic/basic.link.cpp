@@ -541,11 +541,14 @@ analysis_result semantic_analysis::declare(node_index declaration,
     }
     if (prior && kind == entity_kind::function &&
         entity_table[prior].kind == entity_kind::function) {
+        /* [ext:gnu_attributes] [impl.clang] a function with clang's
+           enable_if is another than one of the same parameters without */
         entity_index same = 0;
         for (entity_index o = prior; o && !same;
              o = entity_table[o].next_overload)
             if (same_parameters(type_table, entity_table[o].type.unqualified(),
-                                type.unqualified()))
+                                type.unqualified()) &&
+                !((entity_table[o].gnu_flags ^ s.gnu_flags) & gnu_enable_if))
                 same = o;
         /* a function declared before by a friend declaration only
            ([namespace.memdef]/3), whose name is bound to others */
