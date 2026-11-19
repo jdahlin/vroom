@@ -203,7 +203,12 @@ analysis_result semantic_analysis::template_head_parameters(
         entity_table[current_scope].kind == entity_kind::class_type &&
         is_namespace(entity_table[current_scope].enclosing) &&
         syntax_is(tree, tree.children(n)[1], syntax_kind::alias_declaration);
-    if (!member_alias && (!is_namespace(current_scope) || defining_class))
+    /* ... and a member class template (member_template_declaration) */
+    bool member_class =
+        entity_table[current_scope].kind == entity_kind::class_type &&
+        syntax_is(tree, tree.children(n)[1], syntax_kind::member_declaration);
+    if (!member_alias && !member_class &&
+        (!is_namespace(current_scope) || defining_class))
         return not_supported(n, "temp.mem");
     /* template-head: template < template-parameter-list >; a
        requires-clause is [temp.constr] */

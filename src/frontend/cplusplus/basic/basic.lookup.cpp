@@ -222,6 +222,14 @@ semantic_analysis::lookup_unqualified(uint32_t name, lookup_filter filter) const
     entity_index first = current_scope;
     if (is_namespace(first) && defining_class)
         first = defining_class;
+    /* (a member class template's specialization, defined in its
+       enclosing class's scope: the specialization's first) */
+    for (entity_index s = defining_class; s && !is_namespace(first);
+         s = entity_table[s].enclosing)
+        if (entity_table[s].enclosing == first) {
+            first = defining_class;
+            break;
+        }
     for (entity_index s = first;; s = lexical_parent(s)) {
         if (entity_table[s].has_using_directive) {
             entity_index from = enclosing_namespace(s);
