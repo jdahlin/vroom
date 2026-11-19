@@ -1064,6 +1064,13 @@ analysis_result semantic_analysis::declare_with_initializer(
         abi_tag = s.abi_tag;
     bool is_function_type =
         type_table[type.unqualified()].kind == type_kind::function;
+    /* [ext:gnu_attributes] aligned on a typedef-name changes the alignment
+       of the type through that name (a type this table does not tell
+       apart from the aliased one); one equal to the type's own changes
+       nothing (linux/types.h's __u128, __aligned_u64) */
+    if (aligned && s.typedef_ && !is_function_type &&
+        aligned == alignment_of_type(type))
+        aligned = 0;
     if ((aligned && (s.typedef_ || is_function_type)) ||
         ((aligned || gnu_flags) && (m.qualifier || m.qualified_namespace)))
         return not_supported(declaration, "ext.gnu");

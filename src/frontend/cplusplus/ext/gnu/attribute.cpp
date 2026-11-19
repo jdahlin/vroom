@@ -275,6 +275,11 @@ static const gnu_attribute_rule gnu_attribute_rules[] = {
     /* clang's swift_attr("..."): an annotation for Swift's importer (the
        SDK's __swift_nonisolated_unsafe) */
     {"swift_attr", 0},
+    /* clang's diagnose_if(condition, message, "warning" | "error"): a
+       diagnostic at a call where the condition holds (libc++'s
+       _LIBCPP_DIAGNOSE_WARNING and _LIBCPP_CHECK_*_MEMORY_ORDER); accepted
+       and not evaluated, so a call it would diagnose is accepted */
+    {"diagnose_if", 0},
     /* clang's enable_if(condition, message) (below) */
     {"enable_if", gnu_enable_if},
 };
