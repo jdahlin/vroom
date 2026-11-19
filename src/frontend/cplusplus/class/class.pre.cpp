@@ -59,7 +59,7 @@ analysis_result semantic_analysis::class_specifier(node_index n,
                                                    type_index &type)
 {
     analysis_result r = class_definition(n, type);
-    auto head = syntax(n)[0].class_head();
+    auto head = syntax(n).class_specifier().class_head();
     if (r == analysis_result::well_formed || !head)
         return r;
     /* a class whose definition is not analysed: its name is held in the
@@ -92,7 +92,7 @@ analysis_result semantic_analysis::class_specifier(node_index n,
 bool semantic_analysis::declares_unnamed_class(node_index seq) const
 {
     for (auto c : syntax(seq).elements()) {
-        auto head = c.class_specifier()[0].class_head();
+        auto head = c.class_specifier().class_head();
         if (head && head.size() == 1)
             return true;
     }
@@ -191,7 +191,7 @@ analysis_result semantic_analysis::class_definition(node_index n,
     entity_index postponed_scope = current_scope;
     node_index postponed_declaration = current_declaration;
     auto node = syntax(n);
-    auto head = node[0].class_head();
+    auto head = node.class_specifier().class_head();
     if (!head)
         return not_supported(n, "class.pre");
     /* class-key attribute-specifier-seq_opt class-head-name ...: the
@@ -255,18 +255,16 @@ analysis_result semantic_analysis::class_definition(node_index n,
         /* a partial or explicit specialization's definition, instantiated
            (instantiate_class): the template's name */
         head_name = name_syntax[0].token();
-    } else if (name_syntax.is(syntax_kind::class_head_name)) {
-        if (name_syntax.size() != 2 ||
-            !name_syntax[0].nested_name_specifier() ||
-            !name_syntax[1].is_identifier())
+    } else if (auto qualified = name_syntax.qualified_class_head_name()) {
+        if (!qualified.nested_name_specifier() || !qualified.identifier())
             /* a simple-template-id: an explicit or partial
                specialization's class-head ([temp.spec]/4: "A
                specialization is a class, variable, function, or class
                member that is either instantiated ... from a templated entity
                or is an explicit specialization") */
             return not_supported(n, "temp.spec");
-        head_qualifier = name_syntax[0].index();
-        head_name = name_syntax[1].token();
+        head_qualifier = qualified.nested_name_specifier().index();
+        head_name = qualified.identifier().token();
     } else if (!unnamed) {
         /* attributes */
         return not_supported(n, "class.pre");
@@ -558,32 +556,30 @@ analysis_result semantic_analysis::class_definition(node_index n,
     }
     owned_array<node_index> bodies;
     size_t nested_start = nested_bodies.size();
-    for (uint32_t i = 1; i < node.size(); i++) {
-        auto spec = node[i].member_specification();
-        for (auto member : spec.elements()) {
-            if (member.is_token()) {
-                switch (p.keyword_of(tokens[member.token()])) {
-                case standard_keyword::public_:
-                    access = 0;
-                    continue;
-                case standard_keyword::protected_:
-                    access = 1;
-                    continue;
-                case standard_keyword::private_:
-                    access = 2;
-                    continue;
-                default:
-                    break;
-                }
-                if (member.is(preprocessing_op_or_punc::COLON))
-                    continue;
-                result = worse(result, not_supported(n, "class.mem"));
+    auto spec = node.class_specifier().member_specification();
+    for (auto member : spec.elements()) {
+        if (member.is_token()) {
+            switch (p.keyword_of(tokens[member.token()])) {
+            case standard_keyword::public_:
+                access = 0;
                 continue;
+            case standard_keyword::protected_:
+                access = 1;
+                continue;
+            case standard_keyword::private_:
+                access = 2;
+                continue;
+            default:
+                break;
             }
-            result =
-                worse(result, member_declaration(c, member, access, bodies));
+            if (member.is(preprocessing_op_or_punc::COLON))
+                continue;
+            result = worse(result, not_supported(n, "class.mem"));
+            continue;
         }
+        result = worse(result, member_declaration(c, member, access, bodies));
     }
+
     /* [class.mem]/7: complete at the closing }, where its bases and
        members get their offsets and the class its size
        ([abi:class-types]) */
@@ -687,18 +683,16 @@ analysis_result semantic_analysis::elaborated_type_specifier(node_index n,
        _LIBCPP_EXPORTED_FROM_ABI) after the class-key: left out when none
        changes what vcc generates (class_head_attributes_without_effect) */
     auto e = syntax(n);
-    bool skip = e.size() > 2 && class_head_attributes_without_effect(e[1]);
-    owned_array<SyntaxElement> children;
-    for (uint32_t i = 0; i < e.size(); i++)
-        if (i != 1 || !skip)
-            children.append(e[i]);
-    size_t count = children.size();
+    uint32_t at = 1;
+    if (e.size() > 2 && class_head_attributes_without_effect(e[1]))
+        at = 2;
+    size_t count = e.size() - (at - 1);
     standard_keyword key = leading_keyword(n);
     if (!is_class_key(key))
         return not_supported(n, "dcl.type.elab");
     bool is_union = key == standard_keyword::union_;
-    if (count == 3 && children[1].nested_name_specifier() &&
-        children[2].is_identifier()) {
+    if (count == 3 && e[at].nested_name_specifier() &&
+        e[at + 1].is_identifier()) {
         /* [basic.lookup.elab]/3: "If the elaborated-type-specifier has a
            nested-name-specifier, qualified name lookup is performed, as
            described in [basic.lookup.qual], but ignoring any non-type names
@@ -706,10 +700,10 @@ analysis_result semantic_analysis::elaborated_type_specifier(node_index n,
            previously declared type-name, the elaborated-type-specifier is
            ill-formed." */
         nominated_scope q;
-        analysis_result r = nested_name_specifier(children[1].index(), q);
+        analysis_result r = nested_name_specifier(e[at].index(), q);
         if (r != analysis_result::well_formed)
             return r;
-        token_index t = children[2].token();
+        token_index t = e[at + 1].token();
         lookup_result found = lookup_qualified(q.entity, tokens.identifier(t),
                                                lookup_filter::types);
         if (found.ambiguous)
@@ -742,9 +736,9 @@ analysis_result semantic_analysis::elaborated_type_specifier(node_index n,
         type = entity_table[c].type.unqualified();
         return analysis_result::well_formed;
     }
-    if (count != 2 || !children[1].is_identifier())
+    if (count != 2 || !e[at].is_identifier())
         return not_supported(n, "dcl.type.elab");
-    token_index id = children[1].token();
+    token_index id = e[at].token();
     uint32_t name = tokens.identifier(id);
     bool sole = sole_elaborated == n;
     /* [basic.scope.pdecl]/7.2: "if the elaborated-type-specifier is used in
@@ -1188,7 +1182,7 @@ semantic_analysis::member_declaration(entity_index c, syntax_child member,
             virt_override = virt_final = false;
             return r;
         }
-        auto body = syntax(n).function_definition().function_body();
+        auto body = node.function_definition().function_body();
         if (node.size() != at + 2 || !body || body.function_try_block())
             return not_supported(n, "dcl.fct.def.general");
         if (body.defaulted() || body.deleted()) {
@@ -1251,7 +1245,7 @@ analysis_result semantic_analysis::member_declarators(
         while (body_at < node.size() &&
                virt_specifier(node[body_at], override_, final_))
             body_at++;
-        auto body = syntax(n).function_definition().function_body();
+        auto body = node.function_definition().function_body();
         if (node.size() != body_at + 1 || !body || body.function_try_block())
             return not_supported(n, "dcl.fct.def.general");
         if (body_at == first + 1 && body.defaulted())
