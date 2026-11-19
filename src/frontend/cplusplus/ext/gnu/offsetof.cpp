@@ -68,7 +68,7 @@ analysis_result semantic_analysis::gnu_offsetof(node_index n,
 {
     auto node = syntax(n);
     qualified_type t;
-    analysis_result r = type_id(node[2].index(), t);
+    analysis_result r = type_id(node[2].type_id(), t);
     if (r != analysis_result::well_formed)
         return r;
     if (depends_on_template_parameter(t))

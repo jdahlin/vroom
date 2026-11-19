@@ -165,7 +165,8 @@ analysis_result semantic_analysis::pointer_operator(node_index op,
                cv-qualifier-seq pointer to member of class
                nested-name-specifier of type T"." */
             nominated_scope scope;
-            analysis_result r = nested_name_specifier(c, scope);
+            analysis_result r =
+                nested_name_specifier(c.nested_name_specifier(), scope);
             if (r != analysis_result::well_formed)
                 return r;
             if (!scope.global && !scope.dependent &&
@@ -729,7 +730,8 @@ analysis_result semantic_analysis::declarator_qualifier(node_index nested,
                                                         declarator_meaning &m)
 {
     nominated_scope scope;
-    analysis_result r = nested_name_specifier(nested, scope);
+    analysis_result r =
+        nested_name_specifier(syntax(nested).nested_name_specifier(), scope);
     if (r != analysis_result::well_formed)
         return r;
     if (at_block_scope() || defining_class || function_state.active)

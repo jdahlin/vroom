@@ -308,7 +308,8 @@ analysis_result semantic_analysis::class_definition(node_index n,
         if (outer || at_block_scope() || function_state.active)
             return not_supported(n, "class.pre");
         nominated_scope q;
-        analysis_result qr = nested_name_specifier(head_qualifier, q);
+        analysis_result qr = nested_name_specifier(
+            syntax(head_qualifier).nested_name_specifier(), q);
         if (qr != analysis_result::well_formed)
             return qr;
         if (!is_namespace(q.entity)) {
@@ -711,7 +712,8 @@ semantic_analysis::elaborated_type_specifier(ElaboratedTypeSpecifier n,
            previously declared type-name, the elaborated-type-specifier is
            ill-formed." */
         nominated_scope q;
-        analysis_result r = nested_name_specifier(e[at].index(), q);
+        analysis_result r =
+            nested_name_specifier(e[at].nested_name_specifier(), q);
         if (r != analysis_result::well_formed)
             return r;
         token_index t = e[at + 1].token();
@@ -2218,7 +2220,7 @@ analysis_result semantic_analysis::alignment_specifier(AlignmentSpecifier n,
         return not_supported(n, "dcl.align");
     if (parts[2].is(syntax_kind::type_id)) {
         qualified_type t;
-        analysis_result r = type_id(parts[2].index(), t);
+        analysis_result r = type_id(parts[2].type_id(), t);
         if (r != analysis_result::well_formed)
             return r;
         const struct type &record = type_table[t.unqualified()];

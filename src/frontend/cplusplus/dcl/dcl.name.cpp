@@ -53,7 +53,7 @@ node_index parser::type_id()
  * construction were a declarator in a declaration.  The named type is then
  * the same as the type of the hypothetical identifier."
  */
-analysis_result semantic_analysis::type_id(node_index n, qualified_type &type)
+analysis_result semantic_analysis::type_id(TypeId n, qualified_type &type)
 {
     auto node = syntax(n);
     if (!node.size() || !node[0].is(syntax_kind::type_specifier_seq) ||

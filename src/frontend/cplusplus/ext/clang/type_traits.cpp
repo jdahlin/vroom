@@ -163,7 +163,7 @@ semantic_analysis::clang_type_transformation(ClangTypeTransformation n,
     if (which == transformation::none)
         return not_supported(n, "ext.clang");
     qualified_type t;
-    analysis_result r = type_id(children_syntax[2].index(), t);
+    analysis_result r = type_id(children_syntax[2].type_id(), t);
     if (r != analysis_result::well_formed)
         return r;
     if (depends_on_template_parameter(t)) {
@@ -290,10 +290,10 @@ analysis_result semantic_analysis::clang_type_trait(node_index n,
         !node[4].is(syntax_kind::type_id))
         return not_supported(n, "ext.clang");
     qualified_type t, u;
-    analysis_result r = type_id(node[2].index(), t);
+    analysis_result r = type_id(node[2].type_id(), t);
     if (r != analysis_result::well_formed)
         return r;
-    r = type_id(node[4].index(), u);
+    r = type_id(node[4].type_id(), u);
     if (r != analysis_result::well_formed)
         return r;
     if (depends_on_template_parameter(t) || depends_on_template_parameter(u))
@@ -402,7 +402,7 @@ analysis_result semantic_analysis::builtin_template_types(
                 type_id_expansion = true;
             }
             qualified_type t;
-            analysis_result r = type_id(a.index(), t);
+            analysis_result r = type_id(a.type_id(), t);
             type_id_expansion = false;
             expanding = saved;
             expansion_element = saved_element;
@@ -452,7 +452,7 @@ analysis_result semantic_analysis::builtin_common_type(node_index id,
     qualified_type empty;
     if (!syntax(written[2]).is(syntax_kind::type_id))
         return not_supported(id, "ext.clang");
-    r = type_id(written[2].index(), empty);
+    r = type_id(written[2].type_id(), empty);
     if (r != analysis_result::well_formed)
         return r;
     owned_array<qualified_type> types;
@@ -589,7 +589,7 @@ analysis_result semantic_analysis::builtin_make_integer_seq(node_index id,
     if (!syntax(written[1]).is(syntax_kind::type_id))
         return not_supported(id, "ext.clang");
     qualified_type element;
-    r = type_id(written[1].index(), element);
+    r = type_id(written[1].type_id(), element);
     if (r != analysis_result::well_formed)
         return r;
     /* N: value-dependent when it names a template's own parameter

@@ -705,7 +705,7 @@ bool semantic_analysis::argument_dependent_lookup(
  * nominate.  A simple-template-id names its class template's
  * specialization; a decltype-specifier has no rules yet.
  */
-analysis_result semantic_analysis::nested_name_specifier(node_index n,
+analysis_result semantic_analysis::nested_name_specifier(NestedNameSpecifier n,
                                                          nominated_scope &scope,
                                                          bool dependent_allowed)
 {

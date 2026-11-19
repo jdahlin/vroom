@@ -318,7 +318,7 @@ analysis_result semantic_analysis::size_of(node_index n, bool alignment,
     auto node = syntax(n);
     qualified_type operand;
     if (node.size() == 4 && node[2].is(syntax_kind::type_id)) {
-        analysis_result r = type_id(node[2].index(), operand);
+        analysis_result r = type_id(node[2].type_id(), operand);
         if (r != analysis_result::well_formed)
             return r;
     } else if (node.size() == 2 && !alignment) {

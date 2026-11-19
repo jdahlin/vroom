@@ -44,7 +44,7 @@ analysis_result semantic_analysis::clang_atomic_type(node_index n,
                                                      qualified_type &type)
 {
     qualified_type value;
-    analysis_result r = type_id(syntax(n)[2].index(), value);
+    analysis_result r = type_id(syntax(syntax(n)[2].index()).type_id(), value);
     if (r != analysis_result::well_formed)
         return r;
     type_kind k = type_table[value.unqualified()].kind;

@@ -1919,7 +1919,8 @@ class semantic_analysis
            type (only when the caller allows one; entity is then 0) */
         type_index dependent = 0;
     };
-    analysis_result nested_name_specifier(node_index n, nominated_scope &scope,
+    analysis_result nested_name_specifier(NestedNameSpecifier n,
+                                          nominated_scope &scope,
                                           bool dependent_allowed = false);
     /* whether class c's scope, for unqualified lookup of name, is to be
        passed over: found only in a dependent base ([temp.dep]/3); unknown
@@ -2460,7 +2461,7 @@ class semantic_analysis
     /* [expr.comma] */
     analysis_result comma(node_index n, expression_meaning &m);
     /* a type-id ([dcl.name]) */
-    analysis_result type_id(node_index n, qualified_type &type);
+    analysis_result type_id(TypeId n, qualified_type &type);
     analysis_result alignment_specifier(AlignmentSpecifier n,
                                         uint64_t &alignment);
     SyntaxElement class_head_name(node_index head) const;

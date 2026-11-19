@@ -578,7 +578,8 @@ semantic_analysis::lambda_call_type(node_index n, node_index d,
                         r = not_supported(n, "expr.prim.lambda.capture");
                 if (r != analysis_result::well_formed)
                     continue;
-                r = type_id(syntax(trailing)[1].index(), returns);
+                r = type_id(syntax(syntax(trailing)[1].index()).type_id(),
+                            returns);
                 if (r == analysis_result::well_formed &&
                     abstract_class(returns))
                     r = not_supported(n, "class.abstract");

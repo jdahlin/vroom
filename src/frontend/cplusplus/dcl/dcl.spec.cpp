@@ -1568,7 +1568,8 @@ analysis_result semantic_analysis::qualified_type_name(node_index n,
             node[0].is(syntax_kind::nested_name_specifier) &&
             node[1].is(syntax_kind::simple_template_id)) {
             nominated_scope scope;
-            analysis_result r = nested_name_specifier(node[0].index(), scope);
+            analysis_result r =
+                nested_name_specifier(node[0].nested_name_specifier(), scope);
             if (r != analysis_result::well_formed)
                 return r;
             /* a namespace's member template or a class's (a member
@@ -1582,7 +1583,8 @@ analysis_result semantic_analysis::qualified_type_name(node_index n,
         return not_supported(n, "dcl.type.simple");
     }
     nominated_scope scope;
-    analysis_result r = nested_name_specifier(node[0].index(), scope, true);
+    analysis_result r =
+        nested_name_specifier(node[0].nested_name_specifier(), scope, true);
     if (r != analysis_result::well_formed)
         return r;
     token_index t = node[1].token();
@@ -1671,7 +1673,8 @@ analysis_result semantic_analysis::named_class(SyntaxElement name,
             /* a simple-template-id, a decltype-specifier */
             return not_supported(at, "basic.lookup.qual");
         nominated_scope scope;
-        analysis_result r = nested_name_specifier(node[0].index(), scope);
+        analysis_result r =
+            nested_name_specifier(node[0].nested_name_specifier(), scope);
         if (r != analysis_result::well_formed)
             return r;
         id = node[1].token();

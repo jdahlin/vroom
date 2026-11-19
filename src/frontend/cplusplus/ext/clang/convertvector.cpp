@@ -50,7 +50,7 @@ analysis_result semantic_analysis::clang_convertvector(node_index n,
     if (r != analysis_result::well_formed)
         return r;
     qualified_type to;
-    r = type_id(children[4].index(), to);
+    r = type_id(children[4].type_id(), to);
     if (r != analysis_result::well_formed)
         return r;
     if (depends_on_template_parameter(to) ||

@@ -534,7 +534,7 @@ analysis_result semantic_analysis::trailing_return(node_index declaration,
     qualified_type returned;
     entity_index outer = current_scope;
     open_parameter_scope();
-    r = type_id(syntax(trailing)[1].index(), returned);
+    r = type_id(syntax(syntax(trailing)[1].index()).type_id(), returned);
     current_scope = outer;
     function_parameters.clear();
     for (const parameter_meaning &parameter : parameters)
