@@ -256,7 +256,7 @@ analysis_result semantic_analysis::function_template_declarator(
  * [ext:gnu_attributes] a function template's attributes: its
  * specializations' symbols' (given them at instantiation) and the GNU
  * attributes of allowed, one abi_tag; any other is not analysed
- * (subclause), nor a default argument.
+ * (subclause).
  */
 analysis_result semantic_analysis::function_template_attributes(
     node_index n, const specified &s, const declarator_meaning &m,
@@ -269,9 +269,6 @@ analysis_result semantic_analysis::function_template_attributes(
         m.aligned || s.section || m.section || m.asm_label ||
         (s.abi_tag && m.abi_tag && s.abi_tag != m.abi_tag))
         return not_supported(n, subclause);
-    for (const parameter_meaning &p : function_parameters)
-        if (p.default_argument.index())
-            return not_supported(n, "dcl.fct.default");
     abi_tag = m.abi_tag;
     if (!abi_tag)
         abi_tag = s.abi_tag;
@@ -346,6 +343,15 @@ semantic_analysis::function_template_definition(node_index n,
                                      gnu_flags, abi_tag);
     if (r != analysis_result::well_formed)
         return r;
+    /* [dcl.fct.default]/4: the trailing parameters with a default
+       argument */
+    uint32_t defaults = 0;
+    for (const parameter_meaning &p : function_parameters) {
+        if (!p.default_argument.index())
+            defaults = 0;
+        else
+            defaults++;
+    }
     /* [temp.variadic]/7: "A pack whose name appears within the pattern of
        a pack expansion is expanded by that pack expansion"; a pack named
        outside one is ill-formed (/7), which the template's own declarator
@@ -439,6 +445,10 @@ semantic_analysis::function_template_definition(node_index n,
         if (f.definition && defines)
             /* [basic.def.odr]/1: a second definition */
             return not_supported(n, "basic.def.odr");
+        /* (default arguments of one declaration, which the other's
+           declarator the specializations are made from has not) */
+        if (defaults || f.default_arguments)
+            return not_supported(n, "dcl.fct.default");
         if (old.enclosing != outer || f.parameter_count != parameters.size() ||
             !same_template_parameters(first, f.first_parameter,
                                       f.parameter_count) ||
@@ -482,6 +492,7 @@ semantic_analysis::function_template_definition(node_index n,
         name, outer, n, index, first, static_cast<uint32_t>(parameters.size()));
     record.gnu_flags = gnu_flags;
     record.abi_tag = abi_tag;
+    record.default_arguments = defaults;
     entity_index t = record.entity;
     entity_table[t].type = type;
     entity_table[t].defined = defines;

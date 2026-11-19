@@ -86,6 +86,22 @@ semantic_analysis::instantiate(node_index at, entity_index template_entity,
             r = declare_specialization(ft.declarator, m.id, type, s, e);
             instantiating = 0;
         }
+        /* [temp.inst]/12: "If a function template f is called in a way
+           that requires a default argument to be used, the dependent names
+           are looked up, the semantics constraints are checked, and the
+           instantiation of any template used in the default argument is
+           done as if the default argument had been an initializer used in
+           a function template specialization"; here for each
+           specialization, one that is not well-formed left to a call that
+           uses it */
+        if (r == analysis_result::well_formed && ft.default_arguments) {
+            size_t unsupported_before = unsupported.size();
+            if (default_arguments(ft.declarator, e, entity_kind::function,
+                                  true) != analysis_result::well_formed) {
+                unsupported.resize(unsupported_before);
+                entity_table[e].unknown_defaults = true;
+            }
+        }
         current_scope = saved_scope;
         expanding = saved_expanding;
         function_cv = saved_cv;

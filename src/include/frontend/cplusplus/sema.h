@@ -1938,9 +1938,11 @@ class semantic_analysis
         uint32_t pack_name = 0;
     };
     /* [dcl.fct.default]: the default arguments of function_parameters,
-       which the declaration n of the function f gives it */
+       which the declaration n of the function f gives it (specialization:
+       f a function template's specialization, its template's) */
     analysis_result default_arguments(node_index n, entity_index f,
-                                      entity_kind kind);
+                                      entity_kind kind,
+                                      bool specialization = false);
     /* the member functions of the classes being defined whose default
        arguments wait for the class to be complete ([class.mem]/6): their
        parameters are member_default_parameters[first .. first + count) */
@@ -3134,6 +3136,9 @@ class semantic_analysis
            symbols (gnu_function_symbol_flags) and abi_tag */
         uint32_t gnu_flags = 0;
         token_index abi_tag = 0;
+        /* a function template: its trailing parameters with a default
+           argument ([dcl.fct.default]/1), its specializations' */
+        uint32_t default_arguments = 0;
         /* a class template ([temp.class]): definition is its
            class-specifier */
         bool is_class = false;

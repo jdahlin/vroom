@@ -410,10 +410,11 @@ analysis_result semantic_analysis::deduce_from_call(
         fixed--;
     if (f.variadic)
         return not_supported(at, "temp.deduct.call");
-    if (count < fixed || (fixed == f.parameter_count && count != fixed)) {
-        /* [over.match.viable]/2: no default argument is analysed in a
-           template, so a template of another number of parameters
-           cannot be called with these arguments */
+    if (count + ft.default_arguments < fixed ||
+        (fixed == f.parameter_count && count > fixed)) {
+        /* [over.match.viable]/2: a template of another number of
+           parameters, less those with a default argument, cannot be
+           called with these arguments */
         if (!failed)
             return not_supported(at, "temp.deduct.call");
         *failed = true;
