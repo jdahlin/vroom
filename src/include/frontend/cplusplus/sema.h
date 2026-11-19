@@ -3863,6 +3863,7 @@ class semantic_analysis
     owned_array<entity_index> pack_elements;
     bool expanding = false;
     uint32_t expansion_element = 0;
+    bool bound_pack_is_dependent(entity_index e) const;
     entity_index make_bound_pack(entity_index scope, uint32_t name,
                                  const entity_index *elements, uint32_t count);
     /* the pack an identifier names from the current scope, or 0 */

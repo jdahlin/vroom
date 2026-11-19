@@ -43,6 +43,23 @@ bool semantic_analysis::address_parameter_type(qualified_type t) const
     return k == type_kind::pointer || k == type_kind::lvalue_reference;
 }
 
+/* [temp.dep.type]/9: a pack bound to the arguments of a specialization
+   (make_bound_pack) one of which names a dependent type, as when an alias
+   template is used with an enclosing template's parameters */
+bool semantic_analysis::bound_pack_is_dependent(entity_index e) const
+{
+    const entity &p = entity_table[e];
+    if (p.kind != entity_kind::pack)
+        return false;
+    for (uint32_t i = 0; i < p.member_count; i++) {
+        const entity &x = entity_table[pack_elements[p.value + i]];
+        if (x.kind == entity_kind::typedef_name &&
+            depends_on_template_parameter(x.type))
+            return true;
+    }
+    return false;
+}
+
 /* the parameter's name in scope as its argument: [temp.arg.type]'s type,
    or [temp.arg.nontype]'s value, a prvalue ([temp.param]/8) that
    enumerator_value gives as an enumerator's */
@@ -395,12 +412,15 @@ analysis_result semantic_analysis::template_argument_for(
             lookup_unqualified(tokens.identifier(t), lookup_filter::any);
         entity_index e = x.entity;
         if (!e)
+            e = find_pack(tokens.identifier(t));
+        if (!e)
             continue;
         const entity &named = entity_table[e];
         /* (or an alias template's parameter bound to such an argument) */
         bool parameter = (named.kind == entity_kind::none &&
                           named.instantiation && !named.held_by_template) ||
-                         named.kind == entity_kind::dependent_value;
+                         named.kind == entity_kind::dependent_value ||
+                         bound_pack_is_dependent(e);
         if (!parameter && (named.kind == entity_kind::none ||
                            !depends_on_template_parameter(named.type)))
             continue;
