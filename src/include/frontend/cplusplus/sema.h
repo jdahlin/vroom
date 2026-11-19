@@ -3292,6 +3292,10 @@ class semantic_analysis
         /* a function template's declaration whose substitution failed
            while a candidate was considered ([temp.deduct]/8) */
         bool substitution_failed = false;
+        /* a class's definition that failed ([temp.inst]/1): the first
+           construct it could not analyse, for the uses that follow */
+        bool has_failure = false;
+        unsupported_construct failure;
     };
     /* [temp.fct]/1: a function template: its entity (template_entity,
        whose type is the function type with the type parameters' types,

@@ -286,8 +286,16 @@ semantic_analysis::instantiate_class(SyntaxRef at, uint32_t class_template,
         uint32_t k = prior - 1;
         const instantiation_record x = instantiations[k];
         c = x.specialization;
-        if (!c || entity_table[c].kind != entity_kind::class_type)
+        if (!c || entity_table[c].kind != entity_kind::class_type) {
+            /* the definition failed earlier, perhaps where the failure was
+               dropped (a substitution, a default argument): the use reports
+               what went wrong there, not a refusal of its own */
+            if (x.has_failure) {
+                unsupported.append(x.failure);
+                return analysis_result::unsupported;
+            }
             return not_supported(at, "temp.inst");
+        }
         /* a specialization named before its template was defined
            ([temp.inst]/2's "declared specialization" is not one): defined
            now that the template is */
@@ -455,7 +463,10 @@ analysis_result semantic_analysis::define_class_instantiation(SyntaxRef at,
        instantiation, not the template, ill-formed (clang reports it at the
        use, "in instantiation of"); the use cannot go on without the class
        and is not judged */
-    (void)unsupported_before;
+    if (unsupported.size() > unsupported_before) {
+        instantiations[index].failure = unsupported[unsupported_before];
+        instantiations[index].has_failure = true;
+    }
     c = 0;
     return not_supported(at, "temp.inst");
 }
