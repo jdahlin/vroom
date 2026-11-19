@@ -18,6 +18,7 @@
 #define VCC_CPLUSPLUS_SEMA_H
 
 #include "frontend/cplusplus/parse.h"
+#include "frontend/cplusplus/syntax.h"
 
 namespace cplusplus
 {
@@ -45,56 +46,6 @@ inline bool syntax_is_punctuator(token_stream &tokens, syntax_child c,
     return t.kind == token_kind::operator_or_punctuator &&
            preprocessing_op_or_punc_primary(t.op_or_punc) == op;
 }
-
-/*
- * A typed view of one nonterminal: the syntax tree keeps a node's children
- * in the order of the alternative that matched, and a view decodes that
- * order once, in one place, into named parts.  A view is a few indexes,
- * built where it is used (no storage in the tree, nothing allocated).
- *
- * [dcl.fct.def.general]/1:
- *
- *     function-body:
- *         ctor-initializer_opt compound-statement
- *         function-try-block
- *         = default ;
- *         = delete ;
- *
- * with [dcl.fct.def.delete]'s = delete ( string-literal ) ; and, in the
- * first pass over a member-specification, a body kept as its tokens
- * (unparsed).  The parser makes a function-try-block its own node, which
- * is the function-definition's last child in place of a function-body.
- */
-struct function_body_view {
-    enum class form : uint8_t {
-        /* not a function-body, or one of a shape not listed */
-        none,
-        /* ctor-initializer_opt compound-statement */
-        compound,
-        function_try_block,
-        defaulted,
-        deleted,
-        unparsed,
-    };
-    form kind = form::none;
-    /* with form::compound; ctor_initializer is {} when there is none */
-    syntax_child ctor_initializer, compound_statement;
-
-    bool deleted() const
-    {
-        return kind == form::deleted;
-    }
-    bool defaulted() const
-    {
-        return kind == form::defaulted;
-    }
-    /* a compound-statement alone, the body analysis handles for any
-       function (a ctor-initializer is a constructor's) */
-    bool plain() const
-    {
-        return kind == form::compound && !ctor_initializer.bits;
-    }
-};
 
 /* ---- types -------------------------------------------------------------- */
 
@@ -3798,8 +3749,9 @@ class semantic_analysis
     };
     owned_array<postponed_body> postponed_bodies;
     bool postpone_member_bodies = false;
-    analysis_result function_body(node_index definition, syntax_child compound,
-                                  syntax_child ctor_initializer = {});
+    analysis_result analyse_function_body(node_index definition,
+                                          syntax_child compound,
+                                          syntax_child ctor_initializer = {});
     /* [class.base.init]: a constructor's member initializations, the
        statements of a block (function_body's b) */
     analysis_result ctor_initializer(syntax_child list, uint32_t &built);
@@ -4202,10 +4154,15 @@ class semantic_analysis
        is, and the call's callee f made the best viable function of the
        set (its implied object argument's address object, 0 if none) */
     token_index callee_name(syntax_child c) const;
-    /* [dcl.fct.def.general]/1: a function-body decoded (function_body_view),
-       and the function-body of a function-definition, its last child */
-    function_body_view function_body_of(syntax_child body) const;
-    function_body_view definition_body(node_index definition) const;
+    /* the typed view of a node of the syntax tree (syntax.h) */
+    syntax_ref syntax(node_index n) const
+    {
+        return syntax_ref(syntax_cx, n);
+    }
+    syntax_ref syntax(syntax_child c) const
+    {
+        return syntax_ref(syntax_cx, c);
+    }
     /* [dcl.fct.def.delete]: the function f defined as deleted by the
        definition n, and (ill-formed) a reference to f if it is deleted */
     analysis_result deleted_definition(node_index n, entity_index f);
@@ -4391,6 +4348,7 @@ class semantic_analysis
     token_stream &tokens;
     const parser &p;
     diagnostic_consumer &diagnostics;
+    const syntax_context syntax_cx;
 };
 
 /* ---- the Itanium C++ ABI (abi/itanium/) ---- */

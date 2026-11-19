@@ -545,7 +545,7 @@ analysis_result semantic_analysis::defaulted_or_deleted_special_member(
     uint8_t access, bool constexpr_specified, bool virtual_specified,
     bool explicit_specified)
 {
-    auto form = function_body_of(body);
+    auto form = syntax(body).function_body();
     if (form.deleted()) {
         if (explicit_specified)
             return not_supported(n, "dcl.fct.def.delete");
@@ -1915,16 +1915,17 @@ uint32_t semantic_analysis::subobject_destructions(entity_index c,
 analysis_result semantic_analysis::special_member_body(node_index definition,
                                                        syntax_child body)
 {
-    auto b = function_body_of(body);
-    if (b.kind != function_body_view::form::compound)
+    auto b = syntax(body).function_body();
+    syntax_child init = b.ctor_initializer();
+    if (!b.compound_statement().bits)
         return not_supported(definition, "dcl.fct.def.general");
-    if (b.ctor_initializer.bits &&
+    if (init.bits &&
         entity_table[last_declared].special != special_member::constructor)
-        return ill_formed(b.ctor_initializer.index(),
+        return ill_formed(init.index(),
                           "a ctor-initializer shall appear only in the "
                           "definition of a constructor",
                           "class.base.init");
-    return function_body(definition, b.compound_statement, b.ctor_initializer);
+    return analyse_function_body(definition, b.compound_statement(), init);
 }
 
 /*

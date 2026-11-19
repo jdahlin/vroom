@@ -57,7 +57,7 @@ analysis_result semantic_analysis::explicit_specialization(node_index n)
         return not_supported(n, "temp.expl.spec");
     bool defines = tree[inner].kind == syntax_kind::function_definition;
     /* [dcl.fct.def.delete], = default: not yet */
-    if (defines && !definition_body(inner).plain())
+    if (defines && !syntax(inner).function_definition().body().plain())
         return not_supported(n, "temp.expl.spec");
     specified s;
     uint32_t index = 0;

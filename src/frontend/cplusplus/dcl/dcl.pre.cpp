@@ -848,12 +848,12 @@ analysis_result semantic_analysis::function_definition(node_index n)
         return not_supported(n, "dcl.fct.def.general");
     /* function-body: compound-statement, = delete ; a ctor-initializer, a
        function-try-block and = default are not analysed yet */
-    auto body = definition_body(n);
+    auto body = syntax(n).function_definition().body();
     if (body.deleted())
         return deleted_definition(n, f);
     if (!body.plain())
         return not_supported(n, "dcl.fct.def.general");
-    return function_body(n, body.compound_statement);
+    return analyse_function_body(n, body.compound_statement());
 }
 
 /*

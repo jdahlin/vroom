@@ -38,12 +38,9 @@ analysis_result semantic_analysis::member_function_template(
     defining_class = saved_class;
     if (head != analysis_result::well_formed)
         return head;
-    const syntax_node &d = tree[definition];
+    auto def = syntax(definition).function_definition();
     uint32_t lead = leading_gnu_attributes(definition);
-    const syntax_child *dc = tree.children(definition) + lead;
-    if (d.child_count != lead + 3 ||
-        !syntax_is(tree, dc[0], syntax_kind::decl_specifier_seq) ||
-        dc[1].is_token() || !syntax_is(tree, dc[2], syntax_kind::function_body))
+    if (!def.plain() || def.size() != lead + 3 || def.declarator().is_token())
         return not_supported(n, "temp.mem");
     uint32_t index = 0, first = 0;
     entity_index scope = 0;

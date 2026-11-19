@@ -2415,11 +2415,8 @@ semantic_analysis::member_definition_of_template(node_index n,
     analysis_result r = template_head_parameters(n, parameters);
     if (r != analysis_result::well_formed)
         return r;
-    if (leading_gnu_attributes(definition) ||
-        !syntax_is(tree, tree.children(definition)[0],
-                   syntax_kind::decl_specifier_seq) ||
-        !syntax_is(tree, tree.children(definition)[2],
-                   syntax_kind::function_body))
+    auto def = syntax(definition).function_definition();
+    if (leading_gnu_attributes(definition) || !def.plain() || def.size() != 3)
         return not_supported(n, "temp.mem.func");
     /* [temp.param]/12: "A default template-argument shall not be specified
        in the template-parameter-lists of the definition of a member of a

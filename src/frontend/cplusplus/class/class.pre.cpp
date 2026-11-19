@@ -1265,7 +1265,7 @@ analysis_result semantic_analysis::member_declarators(
         if (node.child_count != body_at + 1 ||
             !syntax_is(tree, children[body_at], syntax_kind::function_body))
             return not_supported(n, "dcl.fct.def.general");
-        auto body = function_body_of(children[body_at]);
+        auto body = syntax(children[body_at]).function_body();
         if (body_at == first + 1 && body.defaulted())
             return defaulted_copy_assignment(c, n, children[first], s, access);
         /* = delete: member_function_definition's deleted_definition */
@@ -1616,7 +1616,8 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
                layout's pod_for_layout reads the count at the class's end,
                before the bodies) */
             bool deleted_here =
-                definition && definition_body(declaration).deleted();
+                definition &&
+                syntax(declaration).function_definition().body().deleted();
             if (copy_assignment_operator(e, entity_table[e].enclosing) &&
                 !deleted_here)
                 entity_table[entity_table[e].enclosing].user_copy_assignments++;
@@ -1859,14 +1860,15 @@ analysis_result semantic_analysis::member_function_definition(
        declarator to bind, its body the function-body */
     if (entity_index f = conversion_function_declared_by(c, definition)) {
         last_declared = f;
-        auto body = definition_body(definition);
+        auto body = syntax(definition).function_definition().body();
         if (body.deleted())
             return deleted_definition(definition, f);
         if (!body.plain())
             return not_supported(definition, "dcl.fct.def.general");
         entity_index saved_class = defining_class;
         defining_class = c;
-        analysis_result r = function_body(definition, body.compound_statement);
+        analysis_result r =
+            analyse_function_body(definition, body.compound_statement());
         defining_class = saved_class;
         return r;
     }
@@ -1937,12 +1939,12 @@ analysis_result semantic_analysis::member_function_definition(
     if (!last_declared)
         return not_supported(definition, "class.mfct");
     /* the function-body after any virt-specifier-seq */
-    auto body = definition_body(definition);
+    auto body = syntax(definition).function_definition().body();
     if (body.deleted())
         return deleted_definition(definition, last_declared);
     if (!body.plain())
         return not_supported(definition, "dcl.fct.def.general");
-    return function_body(definition, body.compound_statement);
+    return analyse_function_body(definition, body.compound_statement());
 }
 
 /*

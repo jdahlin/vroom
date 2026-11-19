@@ -586,7 +586,7 @@ analysis_result semantic_analysis::lambda_expression(node_index n,
     function_empty_pack = 0;
     last_declared = f;
     lambdas.append(l);
-    r = function_body(n, body);
+    r = analyse_function_body(n, body);
     /* the captures the body made, and the lambda off the stack (an
        enclosing lambda's captures go on after its own) */
     l = lambdas.back();

@@ -194,11 +194,10 @@ semantic_analysis::friend_function(entity_index c, node_index n,
     const syntax_child *children = tree.children(n);
     bool defines = node.kind == syntax_kind::function_definition;
     if (defines) {
-        if (node.child_count != 3 ||
-            !syntax_is(tree, children[0], syntax_kind::decl_specifier_seq) ||
-            !syntax_is(tree, children[2], syntax_kind::function_body))
+        auto def = syntax(n).function_definition();
+        if (!def.plain() || def.size() != 3)
             return not_supported(n, "class.friend");
-        if (!function_body_of(children[2]).plain())
+        if (!def.body().plain())
             return not_supported(n, "dcl.fct.def.general");
     } else if (node.kind != syntax_kind::member_declaration ||
                node.child_count != 3 ||
@@ -334,25 +333,26 @@ analysis_result semantic_analysis::friend_function_body(entity_index c,
                                                         node_index n,
                                                         entity_index f)
 {
-    const syntax_child *children = tree.children(n);
+    auto def = syntax(n).function_definition();
     current_declaration = n;
     entity_index scope = current_scope;
     current_scope = c;
     specified s;
     bool outer = friend_allowed;
     friend_allowed = true;
-    analysis_result r = decl_specifier_seq(children[0].index(), s, false);
+    analysis_result r =
+        decl_specifier_seq(def.decl_specifier_seq().index(), s, false);
     friend_allowed = outer;
     qualified_type type = s.type;
     declarator_meaning m;
     if (r == analysis_result::well_formed) {
         function_cv = 0;
         function_parameters.clear();
-        r = declarator(n, children[1], type, m);
+        r = declarator(n, def.declarator(), type, m);
     }
     if (r == analysis_result::well_formed) {
         last_declared = f;
-        r = function_body(n, function_body_of(children[2]).compound_statement);
+        r = analyse_function_body(n, def.body().compound_statement());
     }
     current_scope = scope;
     return r;
