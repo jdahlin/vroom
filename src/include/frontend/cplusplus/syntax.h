@@ -21,6 +21,15 @@
  *     with visit(), and a range of the elements for a list (X-seq, X-list);
  *   - SyntaxRef::name() per nonterminal: the node as that view.
  *
+ * Handles.  ast::node (parse.h) is a node's index, 4 bytes, no context: what
+ * a record or a table holds.  A view is a node and the context to read it
+ * with (two registers): what a function takes and returns; a record never
+ * holds one (syntax-audit.clang-tidy).  semantic_analysis::syntax(n) makes
+ * a view of a stored node (or of a stored syntax_child), and a view
+ * converts to its ast::node implicitly.  A node and a token (token_index)
+ * are different types: neither converts to an integer, or to the other,
+ * without saying so.
+ *
  * An empty view (the node is of another kind, or absent) answers every
  * question with "none" (no child, false), so a chain needs no test between
  * its steps.  What the grammar does not tell (questions about tokens, a

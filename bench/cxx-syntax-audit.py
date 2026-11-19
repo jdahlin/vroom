@@ -1,19 +1,23 @@
 #!/usr/bin/env python3
 """
-bench/cxx-syntax-audit.py: token and node indexes mixed up through the syntax views.
+bench/cxx-syntax-audit.py: what the type system does not tell about the syntax views.
 
-SyntaxElement::index() is the node (0 for a token) and token() the token
-(0 for a node); both are plain uint32_t, so passing the wrong one compiles
-and, at run time, hands over 0.  clang-tidy's query-based custom checks
+A node (ast::node) and a token (token_index) are different types, and
+neither converts to an integer or to the other without saying so: the
+compiler finds a node used as a token.  Two things it cannot find, which
+clang-tidy's query-based custom checks report
 (src/frontend/cplusplus/syntax-audit.clang-tidy: clang-query matchers on
-the real types) report:
+the real types):
 
-  * an index() passed or assigned where a token_index is expected;
-  * a token() passed or assigned where a node_index is expected.
+  * an element's index() as a condition: it is 0 for a token, where the
+    question is whether there is a child (test the element: if (x));
+  * a view (16 bytes, the context included) stored in a field: records
+    hold the 4-byte node or child, and the view is made where it is read
+    (a file-local helper struct in an anonymous namespace may hold them).
 
-Only direct uses are found: through `auto` or a field typed uint32_t the
-trap of -DVCC_CHECK_SYNTAX_VIEWS, run by cxx-run.py and cxx-sema.py, is the
-net.  Skipped without clang-tidy.
+The trap of -DVCC_CHECK_SYNTAX_VIEWS (SyntaxElement::index() of a token, a
+node converted to a view of another kind), run by cxx-run.py and
+cxx-sema.py, is the net for the rest.  Skipped without clang-tidy.
 
   bench/cxx-syntax-audit.py [-j N] [FILE...]     exit 1 if any use is found
 """
