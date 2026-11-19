@@ -2,17 +2,6 @@
 
 #include "lowering-internal.h"
 
-VPRIV void *x64_vir_array_grow(void *p, uint32_t *cap, uint32_t n, size_t size)
-{
-    if (n <= *cap)
-        return p;
-    *cap = n + n / 2 + 16;
-    p = realloc(p, (size_t)*cap * size);
-    if (!p)
-        abort();
-    return p;
-}
-
 VPRIV int x64_vir_register_number(uint8_t r)
 {
     return r == VIR_REGISTER_SCRATCH0   ? R11

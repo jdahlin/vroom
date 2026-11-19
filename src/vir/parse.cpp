@@ -2181,7 +2181,7 @@ static void vir_parse_function_finish(vir_parse_state *p,
             uint32_t ty = in->a < nconst ? f->insns[in->a].type
                                          : p->blocks.v[in->a - nconst].type;
             uint32_t n = ps_->column_end - ps_->column_start,
-                     st = ty == VIR_TYPE_I64 ? 5 : 3;
+                     st = vir_switch_stride(ty);
             uint32_t *w;
 
             if (ty != VIR_TYPE_I32 && ty != VIR_TYPE_I64)

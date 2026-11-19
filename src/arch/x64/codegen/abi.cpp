@@ -417,6 +417,50 @@ static codegen_lvalue x64_fr(int64_t off)
                        .offset = off);
 }
 
+/* push the live temporaries a call clobbers (general registers in `saved`, xmm8-xmm14 in
+   `fsaved`) before it, and pop them after, in reverse */
+VPRIV void x64_temporaries_save(codegen_context *e, uint32_t saved,
+                                uint32_t fsaved)
+{
+    x64_lowering_context *X = e->x64_context;
+    codegen_lvalue d = {.kind = CODEGEN_LVALUE_REGISTER,
+                        .register_number = RSP};
+
+    for (int q = 0; q < 16; q++)
+        if (saved & (1u << q)) {
+            x64_record_emit_three_registers(
+                e, X64_OP_PUSH, 8, X64_REGISTER_NONE, q, X64_REGISTER_NONE);
+            X->outstanding_pushes++;
+        }
+    for (int q = XMM8; q < XMM15; q++)
+        if (fsaved & (1u << q)) {
+            x64_record_emit(e, X64_OP_ADJSP)->immediate = -8;
+            x64_record_emit_memory(e, X64_OP_ST, 8, q, &d, false);
+            X->outstanding_pushes++;
+        }
+}
+
+VPRIV void x64_temporaries_restore(codegen_context *e, uint32_t saved,
+                                   uint32_t fsaved)
+{
+    x64_lowering_context *X = e->x64_context;
+    codegen_lvalue s = {.kind = CODEGEN_LVALUE_REGISTER,
+                        .register_number = RSP};
+
+    for (int q = XMM15 - 1; q >= XMM8; q--)
+        if (fsaved & (1u << q)) {
+            x64_record_emit_memory(e, X64_OP_LD, 8, q, &s, false);
+            x64_record_emit(e, X64_OP_ADJSP)->immediate = 8;
+            X->outstanding_pushes--;
+        }
+    for (int q = 15; q >= 0; q--)
+        if (saved & (1u << q)) {
+            x64_record_emit_three_registers(
+                e, X64_OP_POP, 8, q, X64_REGISTER_NONE, X64_REGISTER_NONE);
+            X->outstanding_pushes--;
+        }
+}
+
 VPRIV codegen_value x64_call(codegen_context *e, uint32_t ref,
                              codegen_value *fn, const walk_argument *a, int n,
                              bool variadic, const walk_argument *r,
@@ -511,21 +555,7 @@ VPRIV codegen_value x64_call(codegen_context *e, uint32_t ref,
         place[k] = total;
         total += (int64_t)((a[k].size + 7) & ~(uint64_t)7);
     }
-    for (int q = 0; q < 16; q++)
-        if (saved & (1u << q)) {
-            x64_record_emit_three_registers(
-                e, X64_OP_PUSH, 8, X64_REGISTER_NONE, q, X64_REGISTER_NONE);
-            X->outstanding_pushes++;
-        }
-    for (int q = XMM8; q < XMM15; q++)
-        if (fsaved & (1u << q)) {
-            codegen_lvalue d = {.kind = CODEGEN_LVALUE_REGISTER,
-                                .register_number = RSP};
-
-            x64_record_emit(e, X64_OP_ADJSP)->immediate = -8;
-            x64_record_emit_memory(e, X64_OP_ST, 8, q, &d, false);
-            X->outstanding_pushes++;
-        }
+    x64_temporaries_save(e, saved, fsaved);
     if (stackalign > 16) {
         codegen_lvalue slot = x64_fr(savedsp = walk_slot_temporary(e, 8, 8));
 
@@ -708,21 +738,7 @@ VPRIV codegen_value x64_call(codegen_context *e, uint32_t ref,
     } else if (!r) {
         x64_call_park(e, rt);
     }
-    for (int q = XMM15 - 1; q >= XMM8; q--)
-        if (fsaved & (1u << q)) {
-            codegen_lvalue s = {.kind = CODEGEN_LVALUE_REGISTER,
-                                .register_number = RSP};
-
-            x64_record_emit_memory(e, X64_OP_LD, 8, q, &s, false);
-            x64_record_emit(e, X64_OP_ADJSP)->immediate = 8;
-            X->outstanding_pushes--;
-        }
-    for (int q = 15; q >= 0; q--)
-        if (saved & (1u << q)) {
-            x64_record_emit_three_registers(
-                e, X64_OP_POP, 8, q, X64_REGISTER_NONE, X64_REGISTER_NONE);
-            X->outstanding_pushes--;
-        }
+    x64_temporaries_restore(e, saved, fsaved);
     return x64_call_value(e, fn, rt, r);
 }
 

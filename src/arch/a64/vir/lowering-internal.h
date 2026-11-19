@@ -237,7 +237,7 @@ extern const uint8_t a64_vir_condition_swapped[10];
 
 VPRIV __attribute__((noreturn, cold)) void a64_vir_fail(a64_vir_context *L,
                                                         const char *why);
-VPRIV void *a64_vir_array_grow(void *p, uint32_t *cap, uint32_t n, size_t sz);
+#include "common/vector.h"
 VPRIV uint32_t a64_vir_arguments_assign(bool darwin, const uint32_t *w,
                                         a64_vir_argument *out, uint32_t max,
                                         int32_t *stk);

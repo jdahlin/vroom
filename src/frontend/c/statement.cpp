@@ -1158,7 +1158,7 @@ CC_PRIVATE uint32_t cc_statement_parse(cc *c)
                 cc_unused_set_only_check(c, e);
             if (!sed && !cmp &&
                 !(c->in_stmtexpr && AST_NODE(e)->op == AST_NODE_BINARY &&
-                  cc_operator_is_comparison(AST_NODE(e)->aux) &&
+                  lex_token_is_comparison(AST_NODE(e)->aux) &&
                   !(AST_NODE(e)->flags &
                     (AST_NODE_FLAG_PARENTHESIZED | AST_NODE_FLAG_FROM_MACRO))))
                 cc_unused_value_check(c, e, false);

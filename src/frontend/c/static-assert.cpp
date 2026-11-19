@@ -191,7 +191,7 @@ cc_static_assert_failure_report(cc *c, uint32_t e, const char *msg)
     while (AST_NODE(e)->op == AST_NODE_CAST && !c->span[e].e)
         e = AST_NODE(e)->a;
     if (AST_NODE(e)->op == AST_NODE_BINARY &&
-        cc_operator_is_comparison(AST_NODE(e)->aux)) {
+        lex_token_is_comparison(AST_NODE(e)->aux)) {
         i128 a, b;
 
         if (cc_constant_integer(c, AST_NODE(e)->a, &a) &&

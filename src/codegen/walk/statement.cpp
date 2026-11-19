@@ -192,35 +192,36 @@ VPRIV uint32_t walk_label_new(codegen_context *e)
     return ++e->walk_state->label_count;
 }
 
+/* the label at `i` of a table the walker keeps across functions: a new one the first time this
+   function (generation) and this inlined instance asks for it */
+static uint32_t walk_label_slot_get(codegen_context *e, uint32_t *generations,
+                                    uint32_t *instances, uint32_t *labels,
+                                    uint32_t i)
+{
+    walk_state *W = e->walk_state;
+
+    if (generations[i] != W->generation || instances[i] != W->instance) {
+        generations[i] = W->generation;
+        instances[i] = W->instance;
+        labels[i] = walk_label_new(e);
+    }
+    return labels[i];
+}
+
 static uint32_t walk_user_label_find(codegen_context *e, uint32_t l)
 {
     walk_state *W = e->walk_state;
 
-    if (W->label_generations[l] != W->generation ||
-        W->label_instances[l] != W->instance) {
-        W->label_generations[l] = W->generation;
-        W->label_instances[l] = W->instance;
-        W->user_labels[l] = walk_label_new(e);
-    }
-    return W->user_labels[l];
-}
-
-VPRIV uint32_t walk_user_label_get(codegen_context *e, uint32_t l)
-{
-    return walk_user_label_find(e, l);
+    return walk_label_slot_get(e, W->label_generations, W->label_instances,
+                               W->user_labels, l);
 }
 
 static uint32_t walk_case_label_get(codegen_context *e, uint32_t n)
 {
     walk_state *W = e->walk_state;
 
-    if (W->case_generations[n] != W->generation ||
-        W->case_instances[n] != W->instance) {
-        W->case_generations[n] = W->generation;
-        W->case_instances[n] = W->instance;
-        W->case_labels[n] = walk_label_new(e);
-    }
-    return W->case_labels[n];
+    return walk_label_slot_get(e, W->case_generations, W->case_instances,
+                               W->case_labels, n);
 }
 
 /* ---------------- initializers ---------------- */
@@ -1705,49 +1706,6 @@ VPRIV bool walk_symbol_constant_get(codegen_context *e, uint32_t s,
  */
 /* a tiny static function clang would inline: no opaque inline asm, no locals aligned above 16
    (either could need registers the caller's frame holds) */
-static bool walk_function_is_tiny(cc *c, uint32_t n)
-{
-    const node *x;
-
-    if (!n)
-        return true;
-    x = N(n);
-    switch (x->op) {
-    case AST_NODE_ASM:
-#ifdef WALK_PREFIX
-        /* This template becomes an ordinary register operation in VIR. */
-        return virbuild_asm_is_crc32q(c, &c->asms[x->a]);
-#else
-        return false;
-#endif
-    case AST_NODE_DECLARATION:
-        return c->syms[x->a].kind != AST_SYMBOL_VARIABLE ||
-               codegen_symbol_alignment(c, x->a) <= 16;
-    case AST_NODE_BLOCK:
-        for (uint32_t i = 0; i < x->c; i++)
-            if (!walk_function_is_tiny(c, c->lists[x->b + i]))
-                return false;
-        return true;
-    case AST_NODE_IF:
-        return walk_function_is_tiny(c, x->b) && walk_function_is_tiny(c, x->c);
-    case AST_NODE_WHILE:
-    case AST_NODE_DO:
-    case AST_NODE_SWITCH:
-    case AST_NODE_LABEL:
-    case AST_NODE_CASE:
-    case AST_NODE_DEFAULT:
-        return walk_function_is_tiny(c, x->op == AST_NODE_LABEL ||
-                                                x->op == AST_NODE_CASE ||
-                                                x->op == AST_NODE_DEFAULT
-                                            ? x->c
-                                            : x->b);
-    case AST_NODE_FOR:
-        return walk_function_is_tiny(c, c->lists[x->c + 1]);
-    default:
-        return true;
-    }
-}
-
 VPRIV bool walk_call_can_inline(codegen_context *e, uint32_t s, uint32_t call)
 {
     cc *c = e->compile_context;
@@ -1826,9 +1784,17 @@ VPRIV bool walk_call_can_inline(codegen_context *e, uint32_t s, uint32_t call)
         codegen_function_prepass_request(e, s);
         if (e->unit->function_node_counts[s] > lim)
             return false; /* (a tiny static function too, as clang: an empty stub drops its arguments) */
+        /* (VIR's instance, under WALK_PREFIX, accepts crc32q's asm: walk.h is included once
+           in the unity build, so this is tested here, not through a macro of walk.h) */
+#ifdef WALK_PREFIX
         if (!(y->flags & AST_SYMBOL_FLAG_INLINE) &&
-            !walk_function_is_tiny(c, y->body))
+            !codegen_statement_is_tiny(c, y->body, true))
             return false;
+#else
+        if (!(y->flags & AST_SYMBOL_FLAG_INLINE) &&
+            !codegen_statement_is_tiny(c, y->body, false))
+            return false;
+#endif
     }
     codegen_function_walk_ensure(e->unit, c, s);
     if (e->unit->symbol_flags[s] & CODEGEN_SYMBOL_NO_INLINE)

@@ -42,7 +42,7 @@ VPRIV uint32_t *virbuild_block_successor_pointer(virbuild_context *V,
     case VIR_OP_BRIF:
         return k ? &in->c : &in->b;
     default: {
-        uint32_t st = V->insns[in->a].insn.type == VIR_TYPE_I64 ? 5 : 3;
+        uint32_t st = vir_switch_stride(V->insns[in->a].insn.type);
 
         return k ? &V->extra[in->c + 1 + (k - 1) * st + st - 1] : &in->b;
     }

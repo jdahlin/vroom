@@ -6,13 +6,6 @@
 
 /* ---------------- expressions: operators ---------------- */
 
-CC_PRIVATE bool cc_operator_is_comparison(int op)
-{
-    return op == LEX_TOKEN_LESS || op == LEX_TOKEN_LESS_EQUAL ||
-           op == LEX_TOKEN_GREATER || op == LEX_TOKEN_GREATER_EQUAL ||
-           op == LEX_TOKEN_EQUAL_EQUAL || op == LEX_TOKEN_EXCLAMATION_EQUAL;
-}
-
 /* clang -pedantic: arithmetic on void * (GNU: element size 1) */
 static inline void cc_pointer_void_arithmetic_check(cc *c,
                                                     ast_qualified_type pt,
@@ -253,7 +246,7 @@ CC_PRIVATE uint32_t cc_binary_build(cc *c, int op, uint32_t l, uint32_t r,
 
         if (cc_type_is_bool_vector(c, vt) &&
             !(op == LEX_TOKEN_AMPERSAND || op == LEX_TOKEN_PIPE ||
-              op == LEX_TOKEN_CARET || cc_operator_is_comparison(op)))
+              op == LEX_TOKEN_CARET || lex_token_is_comparison(op)))
             cc_operands_invalid_report(c, op, l, r, loc);
 
         if ((both && AST_TYPE(c, lt)->size != AST_TYPE(c, rt)->size) ||
@@ -268,7 +261,7 @@ CC_PRIVATE uint32_t cc_binary_build(cc *c, int op, uint32_t l, uint32_t r,
                                          vt, loc))
             return cc_node_binary_new(
                 c, op,
-                cc_operator_is_comparison(op) ? cc_type_vector_mask(c, vt) : vt,
+                lex_token_is_comparison(op) ? cc_type_vector_mask(c, vt) : vt,
                 l, l, loc); /* (stands in; diagnosed) */
         if (both) {
             l = cc_conversion_apply(c, l, vt);
@@ -279,7 +272,7 @@ CC_PRIVATE uint32_t cc_binary_build(cc *c, int op, uint32_t l, uint32_t r,
         } else {
             l = cc_conversion_apply(c, l, et);
         }
-        if (cc_operator_is_comparison(op))
+        if (lex_token_is_comparison(op))
             res = cc_type_vector_mask(c, vt);
         return cc_node_binary_new(c, op, res, l, r, loc);
     }
@@ -299,7 +292,7 @@ CC_PRIVATE uint32_t cc_binary_build(cc *c, int op, uint32_t l, uint32_t r,
         l = cc_conversion_apply(c, l, ct), r = cc_conversion_apply(c, r, ct);
         return cc_node_binary_new(
             c, op,
-            cc_operator_is_comparison(op) ? cc_type_basic(AST_TYPE_INT) : ct, l,
+            lex_token_is_comparison(op) ? cc_type_basic(AST_TYPE_INT) : ct, l,
             r, loc);
     }
     if (op == LEX_TOKEN_PLUS && cc_type_is_pointer(c, rt) &&
@@ -320,7 +313,7 @@ CC_PRIVATE uint32_t cc_binary_build(cc *c, int op, uint32_t l, uint32_t r,
         cc_pointer_void_arithmetic_check(c, lt, loc, true);
         return cc_node_binary_new(c, op, c->t_ptrdiff, l, r, loc);
     }
-    if (cc_operator_is_comparison(op) &&
+    if (lex_token_is_comparison(op) &&
         (cc_type_is_pointer(c, lt) || cc_type_is_pointer(c, rt))) {
         ast_qualified_type ot = cc_type_is_pointer(c, lt) ? rt : lt;
 

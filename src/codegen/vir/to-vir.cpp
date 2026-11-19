@@ -108,7 +108,7 @@ VPRIV bool virbuild_to_vir_insn_emit(codegen_context *e, uint32_t i, uint32_t b)
     }
     case VIR_OP_SWITCH: {
         uint32_t n = V->extra[in.c],
-                 st = V->insns[in.a].insn.type == VIR_TYPE_I64 ? 5 : 3,
+                 st = vir_switch_stride(V->insns[in.a].insn.type),
                  o = vir_extra_add(f, &V->extra[in.c], 1 + n * st);
 
         for (uint32_t k = 0; k < n; k++)
