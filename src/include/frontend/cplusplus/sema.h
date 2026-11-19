@@ -1902,6 +1902,7 @@ class semantic_analysis
                                             declarator_meaning &m);
     analysis_result gnu_attribute_specifier(node_index n, specified &s);
     uint32_t leading_gnu_attributes(node_index n) const;
+    bool class_specifier_before(node_index seq, uint32_t i) const;
     bool gnu_or_without_effect(node_index n) const;
     /* [dcl.attr.grammar]: every attribute at n (an attribute-specifier,
        -seq or -list) changes nothing vcc generates */
@@ -2295,6 +2296,7 @@ class semantic_analysis
     /* [expr.cond] */
     analysis_result conditional(node_index n, expression_meaning &m);
     analysis_result noexcept_operator(node_index n, expression_meaning &m);
+    analysis_result clang_type_trait(node_index n, expression_meaning &m);
     analysis_result potentially_throwing(node_index n, uint32_t x,
                                          bool &throwing);
     analysis_result conditional_operands(node_index n,
@@ -2918,6 +2920,11 @@ class semantic_analysis
                              owned_array<expression_meaning> &out);
     /* the class whose member-specification is analysed, 0 if none */
     entity_index defining_class = 0;
+    /* [ext:gnu_attributes] the alignment aligned attributes after a
+       class-specifier's closing brace ask of the class the
+       decl-specifier-seq defines (GCC: they apply to the type), 0 if none;
+       class_specifier takes it before the class is laid out */
+    uint32_t trailing_class_alignment = 0;
     /* the access of the member-declaration analysed (an enumeration's and
        its enumerators' in a class) */
     uint8_t declaration_access = 0;

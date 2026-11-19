@@ -263,6 +263,47 @@ semantic_analysis::clang_type_transformation(node_index n, qualified_type &type)
     return analysis_result::well_formed;
 }
 
+/* [ext:clang_type_traits] clang-type-trait-expression: a prvalue of type
+   bool, a constant.  The traits analysis answers so far:
+     __is_same(T, U) (GCC's spelling __is_same_as): [meta.rel] is_same,
+     "T and U name the same type with the same cv-qualifications".
+   A template's own operands are dependent: the template is analysed with
+   its arguments when instantiated, as sizeof's operand is */
+analysis_result semantic_analysis::clang_type_trait(node_index n,
+                                                    expression_meaning &m)
+{
+    const syntax_node &node = tree[n];
+    const syntax_child *children = tree.children(n);
+    owned_buffer written;
+    tokens.spelling(children[0].index(), written.get());
+    const char *name = reinterpret_cast<const char *>(written.data());
+    size_t length = written.size();
+    bool same = (length == 9 && !memcmp(name, "__is_same", 9)) ||
+                (length == 12 && !memcmp(name, "__is_same_as", 12));
+    /* ( type-id , type-id ) */
+    if (!same || node.child_count != 6 ||
+        !syntax_is(tree, children[2], syntax_kind::type_id) ||
+        !syntax_is(tree, children[4], syntax_kind::type_id))
+        return not_supported(n, "ext.clang");
+    qualified_type t, u;
+    analysis_result r = type_id(children[2].index(), t);
+    if (r != analysis_result::well_formed)
+        return r;
+    r = type_id(children[4].index(), u);
+    if (r != analysis_result::well_formed)
+        return r;
+    if (depends_on_template_parameter(t) || depends_on_template_parameter(u))
+        return not_supported(n, "temp.dep.constexpr");
+    m = expression_meaning();
+    m.type = qualified_type::make(
+        type_table.fundamental(fundamental_type::bool_), cv_none);
+    m.category = value_category::prvalue;
+    m.evaluation = constness::constant;
+    m.value = t == u;
+    m.node = expression_node(semantic_kind::constant, m, node.first_token);
+    return analysis_result::well_formed;
+}
+
 /* [meta.trans.other] decay_t<T>: the type of a T passed by value */
 qualified_type semantic_analysis::decayed(qualified_type t)
 {

@@ -533,7 +533,8 @@ analysis_result semantic_analysis::class_definition(node_index n,
     analysis_result result = analysis_result::well_formed;
     if (has_bases)
         result = base_clause(c, head_children[2].index(), key);
-    entity_table[c].requested_alignment = 0;
+    entity_table[c].requested_alignment = trailing_class_alignment;
+    trailing_class_alignment = 0;
     for (node_index a : alignas_list) {
         uint64_t alignment = 0;
         if (result == analysis_result::well_formed)
@@ -1472,11 +1473,14 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
     if ((is_function && (m.aligned || (m.gnu_flags & gnu_packed))) ||
         (m.gnu_flags & gnu_used))
         return not_supported(declaration, "ext.gnu");
-    /* a member's symbol attributes (a member function's, a static data
-       member's) are not analysed yet; on a non-static data member they
-       are GCC's error */
-    if (m.gnu_flags & (gnu_noinline | gnu_always_inline | gnu_noreturn |
-                       gnu_weak | gnu_used | gnu_section))
+    /* a member's symbol attributes (a member function's weak and section,
+       a static data member's) are not analysed yet; on a non-static data
+       member they are GCC's error.  A member function's noinline,
+       always_inline and noreturn are a non-member function's (lowering's) */
+    if (m.gnu_flags & (gnu_weak | gnu_used | gnu_section))
+        return not_supported(declaration, "ext.gnu");
+    if (!is_function &&
+        (m.gnu_flags & (gnu_noinline | gnu_always_inline | gnu_noreturn)))
         return not_supported(declaration, "ext.gnu");
     if (!is_function && (m.gnu_flags & gnu_function_symbol_flags))
         /* a data member's */
@@ -1606,7 +1610,9 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
         entity_table[e].constexpr_ = s.constexpr_;
         entity_table[e].defined = definition;
         /* [ext:gnu_attributes] its symbol's */
-        entity_table[e].gnu_flags |= m.gnu_flags & gnu_function_symbol_flags;
+        entity_table[e].gnu_flags |=
+            m.gnu_flags & (gnu_function_symbol_flags | gnu_noinline |
+                           gnu_always_inline | gnu_noreturn);
         entity_table[e].abi_tag = m.abi_tag;
         if (m.operator_function) {
             entity_table[e].operator_function = true;
