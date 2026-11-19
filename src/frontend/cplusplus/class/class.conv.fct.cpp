@@ -71,7 +71,7 @@ node_index parser::conversion_type_id()
     for (unsigned i = operators; i-- > 1;) {
         size_t from = declarator_mark + i - 1;
         finish_node(syntax_kind::conversion_declarator, from,
-                    tree[pending[from].index()].first_token);
+                    tree[pending[from].node()].first_token);
     }
     if (!operators && pending.size() == mark + 1)
         return 0; /* a type-specifier-seq alone passes through */

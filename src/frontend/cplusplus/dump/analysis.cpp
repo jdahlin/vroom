@@ -98,17 +98,18 @@ bool dump_analysis_selftest(vbuffer *out)
         ok &=
             analysis_check(out, n && x && e[x].enclosing == n && e[x].name == 8,
                            "an entity and its enclosing entity");
-        e.add_declaration(x, 11);
-        e.add_declaration(n, 5);
-        e.add_declaration(x, 12);
+        e.add_declaration(x, node_index(11));
+        e.add_declaration(n, node_index(5));
+        e.add_declaration(x, node_index(12));
         uint32_t first = e[x].first_declaration;
         ok &= analysis_check(
             out,
-            e.declaration(first).node == 11 &&
-                e.declaration(e.declaration(first).next).node == 12 &&
+            e.declaration(first).node == node_index(11) &&
+                e.declaration(e.declaration(first).next).node ==
+                    node_index(12) &&
                 e[x].last_declaration == e.declaration(first).next &&
                 !e.declaration(e[x].last_declaration).next &&
-                e.declaration(e[n].first_declaration).node == 5,
+                e.declaration(e[n].first_declaration).node == node_index(5),
             "[basic.link]/1: an entity's declarations in order");
     }
     {
@@ -300,8 +301,8 @@ static void dump_type_claims(const semantic_analysis &analysis,
             continue;
         token_index first = x.at.index(), end = x.at.index() + 1;
         if (!x.at.is_token()) {
-            first = tree[x.at.index()].first_token;
-            end = tree[x.at.index()].end_token;
+            first = tree[x.at.node()].first_token;
+            end = tree[x.at.node()].end_token;
         }
         bool from_macro = false;
         spelling.clear();

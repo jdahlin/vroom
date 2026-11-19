@@ -247,7 +247,7 @@ node_index parser::statement()
         return n;
     }
     pending.resize(pending.size() - 1);
-    tree.truncate(n);
+    tree.truncate(n.index());
     n = tree.make(syntax_kind::erroneous, nullptr, 0, first, position);
     add(n);
     if (failed_with.beyond_step || failed_with.at > position) {

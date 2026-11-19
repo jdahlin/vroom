@@ -314,8 +314,8 @@ static void child_tokens(const syntax_tree &tree, syntax_child c,
         end = first + 1;
         return;
     }
-    first = tree[c.index()].first_token;
-    end = tree[c.index()].end_token;
+    first = tree[c.node()].first_token;
+    end = tree[c.node()].end_token;
 }
 
 /*

@@ -163,7 +163,7 @@ void syntax_tree::dump(node_index n, token_stream &tokens, vbuffer *out) const
         in_split = false;
     };
     auto write_line = [&](node_index node, size_t depth) {
-        const syntax_node &s = nodes[node];
+        const syntax_node &s = nodes[node.index()];
         for (size_t i = 0; i < depth; i++)
             vbuffer_append(out, "  ", 2);
         vbuffer_string_append(out, syntax_kind_name(s.kind));
@@ -183,7 +183,7 @@ void syntax_tree::dump(node_index n, token_stream &tokens, vbuffer *out) const
     write_line(n, 0);
     while (!path.empty()) {
         level &top = path.back();
-        const syntax_node &s = nodes[top.node];
+        const syntax_node &s = nodes[top.node.index()];
         if (top.next_child == s.child_count) {
             path.resize(path.size() - 1);
             continue;
@@ -195,8 +195,8 @@ void syntax_tree::dump(node_index n, token_stream &tokens, vbuffer *out) const
             write_child_token(c.index());
             vbuffer_append(out, "\n", 1);
         } else {
-            write_line(c.index(), path.size());
-            path.append({c.index(), 0});
+            write_line(c.node(), path.size());
+            path.append({c.node(), 0});
         }
     }
 }
@@ -204,33 +204,33 @@ void syntax_tree::dump(node_index n, token_stream &tokens, vbuffer *out) const
 void syntax_tree::declarations(owned_array<node_index> *out) const
 {
     auto add_seq = [&](node_index seq) {
-        for (uint32_t i = 0; i < nodes[seq].child_count; i++) {
+        for (uint32_t i = 0; i < nodes[seq.index()].child_count; i++) {
             syntax_child c = children(seq)[i];
             if (!c.is_token())
-                out->append(c.index());
+                out->append(c.node());
         }
     };
-    const syntax_node &unit = nodes[root];
+    const syntax_node &unit = nodes[root.index()];
     for (uint32_t u = 0; u < unit.child_count; u++) {
         syntax_child part = children(root)[u];
         if (part.is_token())
             continue;
         const syntax_node &x = nodes[part.index()];
         if (x.kind == syntax_kind::declaration_seq) {
-            add_seq(part.index());
+            add_seq(part.node());
         } else if (x.kind == syntax_kind::global_module_fragment ||
                    x.kind == syntax_kind::private_module_fragment) {
             for (uint32_t k = 0; k < x.child_count; k++) {
-                syntax_child y = children(part.index())[k];
+                syntax_child y = children(part.node())[k];
                 if (y.is_token())
                     continue;
                 if (nodes[y.index()].kind == syntax_kind::declaration_seq)
-                    add_seq(y.index());
+                    add_seq(y.node());
                 else
-                    out->append(y.index());
+                    out->append(y.node());
             }
         } else {
-            out->append(part.index());
+            out->append(part.node());
         }
     }
 }

@@ -186,7 +186,7 @@ class declarator_claims
                     /* a template-name alone: a deduced class type, whose
                        type the claim cannot say */
                     for (token_index n : tree.template_names_as_types)
-                        if (n == c.index())
+                        if (n == c.token())
                             return false;
                     /* a type-name */
                     tokens.spelling(c.token(), type.get());
@@ -345,7 +345,7 @@ class declarator_claims
                 if (i && is_kind(syntax(head)[i - 1],
                                  syntax_kind::nested_name_specifier))
                     first = syntax(head)[i - 1].first_token();
-                verbatim(first, c.index() + 1, type.get());
+                verbatim(first, c.token() + 1, type.get());
                 return true;
             }
             if (is_kind(c, syntax_kind::enum_head_name)) {
@@ -584,7 +584,7 @@ class declarator_claims
                 return false;
             d.has_id = true;
             d.id_first = declarator.token();
-            d.id_end = declarator.index() + 1;
+            d.id_end = declarator.token() + 1;
             return true;
         }
         node_index n = declarator.index();

@@ -412,7 +412,7 @@ size_t check_tree(const semantic_analysis &analysis, const syntax_tree &tree,
         if (!n) {
             token_index at = x.at.index();
             if (!x.at.is_token())
-                at = tree[x.at.index()].first_token;
+                at = tree[x.at.node()].first_token;
             source_position p = tokens.position(at);
             vbuffer_format_append(out,
                                   "tree %s:%u:%u: an expression without "

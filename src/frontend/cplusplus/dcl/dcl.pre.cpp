@@ -240,7 +240,7 @@ node_index parser::recover_declaration(node_index (parser::*alternative)())
                 diagnostics.error_count--;
             }
             pending.resize(pending.size() - 1);
-            tree.truncate(n);
+            tree.truncate(n.index());
             n = tree.make(syntax_kind::unparsed, nullptr, 0, first, position);
             add(n);
         }
@@ -259,7 +259,7 @@ node_index parser::recover_declaration(node_index (parser::*alternative)())
         /* the declaration is erroneous: the splitter found its end, the
            failed parse where it went wrong */
         pending.resize(pending.size() - 1);
-        tree.truncate(n);
+        tree.truncate(n.index());
         n = tree.make(syntax_kind::erroneous, nullptr, 0, first, position);
         add(n);
         diagnostics.issue(failed_with.id, tokens.location(failed_with.at))

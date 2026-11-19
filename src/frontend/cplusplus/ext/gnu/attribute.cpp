@@ -147,7 +147,7 @@ VPRIV bool has_gnu_attribute(const syntax_tree &tree, node_index n)
     for (uint32_t i = 0; i < tree[n].child_count; i++) {
         syntax_child c = tree.children(n)[i];
         if (!c.is_token() &&
-            tree[c.index()].kind == syntax_kind::gnu_attribute_specifier)
+            tree[c.node()].kind == syntax_kind::gnu_attribute_specifier)
             return true;
     }
     return false;
@@ -162,7 +162,7 @@ VPRIV bool only_gnu_attributes(const syntax_tree &tree, node_index n)
     for (uint32_t i = 0; i < tree[n].child_count; i++) {
         syntax_child c = tree.children(n)[i];
         if (c.is_token() ||
-            tree[c.index()].kind != syntax_kind::gnu_attribute_specifier)
+            tree[c.node()].kind != syntax_kind::gnu_attribute_specifier)
             return false;
     }
     return true;

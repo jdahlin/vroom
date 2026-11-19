@@ -78,7 +78,7 @@ class SyntaxRef
     SyntaxRef(const SyntaxContext &cx, syntax_child c) : cx(&cx)
     {
         if (!c.is_token())
-            n = c.index();
+            n = node_index(c.index());
     }
     SyntaxRef(const SyntaxContext &cx, node_index n) : cx(&cx), n(n)
     {
@@ -92,11 +92,6 @@ class SyntaxRef
     /* the node (0 for an empty view): a view goes wherever a node_index
        does, so a function can take a view before its callees do */
     operator node_index() const
-    {
-        return n;
-    }
-    /* (while node_index and uint32_t convert both ways) */
-    operator uint32_t() const
     {
         return n;
     }
@@ -177,11 +172,11 @@ class SyntaxRef
   protected:
     const syntax_node &node() const
     {
-        return cx->nodes[n];
+        return cx->nodes[n.index()];
     }
     const syntax_child *children() const
     {
-        return cx->child_lists + cx->nodes[n].first_child;
+        return cx->child_lists + cx->nodes[n.index()].first_child;
     }
     /* this node as view T, {} if it is of another kind */
     template <class T> T as() const
@@ -197,7 +192,7 @@ class SyntaxRef
             syntax_child c = children()[i];
             if (!c.is_token() && c.index() &&
                 T::accepts(cx->nodes[c.index()].kind))
-                return T(*cx, c.index());
+                return T(*cx, node_index(c.index()));
         }
         return {};
     }
@@ -395,7 +390,7 @@ template <class T> class SyntaxRange
         }
         T operator*() const
         {
-            return T(*cx, at->index());
+            return T(*cx, at->node());
         }
         iterator &operator++()
         {

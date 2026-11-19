@@ -171,7 +171,7 @@ type_index semantic_analysis::dependent_written_type(SyntaxRef n)
             return entity_table[e].type.unqualified();
     }
     entity_index e = entity_table.make(entity_kind::dependent_written, 0, 0);
-    entity_table[e].value = n;
+    entity_table[e].value = n.index().index();
     entity_table[e].type = qualified_type::make(
         type_table.of_entity(type_kind::dependent, e), cv_none);
     dependent_written_types.append(e);

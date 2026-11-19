@@ -107,23 +107,50 @@ namespace ast
 {
 /*
  * A node of the translation unit's syntax tree: its index in the tree's
- * node array; 0 is no node.  A strong type, so that a node and a token
- * (token_index) cannot be mixed without saying so; it still converts
- * to and from uint32_t implicitly while the front end moves to it.
+ * node array; 0 is no node.  A strong type: it does not convert to or from
+ * an integer without saying so (node(i), n.index()), so a node and a token
+ * (token_index) cannot be mixed up; 0 (the literal) is no node.
  */
 struct node {
     uint32_t i = 0;
     constexpr node() = default;
-    constexpr node(uint32_t i) : i(i)
+    constexpr node(decltype(nullptr))
     {
     }
-    constexpr operator uint32_t() const
+    explicit constexpr node(uint32_t i) : i(i)
     {
-        return i;
+    }
+    explicit constexpr operator bool() const
+    {
+        return i != 0;
     }
     constexpr uint32_t index() const
     {
         return i;
+    }
+    friend constexpr bool operator==(node a, node b)
+    {
+        return a.i == b.i;
+    }
+    friend constexpr bool operator!=(node a, node b)
+    {
+        return a.i != b.i;
+    }
+    friend constexpr bool operator<(node a, node b)
+    {
+        return a.i < b.i;
+    }
+    friend constexpr bool operator>(node a, node b)
+    {
+        return a.i > b.i;
+    }
+    friend constexpr bool operator<=(node a, node b)
+    {
+        return a.i <= b.i;
+    }
+    friend constexpr bool operator>=(node a, node b)
+    {
+        return a.i >= b.i;
     }
 };
 } // namespace ast
@@ -136,7 +163,7 @@ struct syntax_child {
     uint32_t bits = 0;
     static syntax_child node(node_index n)
     {
-        return {n << 1};
+        return {n.index() << 1};
     }
     static syntax_child token(token_index t)
     {
@@ -149,6 +176,11 @@ struct syntax_child {
     uint32_t index() const
     {
         return bits >> 1;
+    }
+    /* the node (the child is one: a token's index is no node's) */
+    node_index node() const
+    {
+        return node_index(bits >> 1);
     }
     /* false for no child at all (a token is one) */
     explicit operator bool() const
@@ -183,11 +215,11 @@ class syntax_tree
                     token_index end_token);
     const syntax_node &operator[](node_index n) const
     {
-        return nodes[n];
+        return nodes[n.index()];
     }
     const syntax_child *children(node_index n) const
     {
-        return child_lists.data() + nodes[n].first_child;
+        return child_lists.data() + nodes[n.index()].first_child;
     }
     /* the two arrays: for a reader that holds them (syntax.h) */
     const syntax_node *node_data() const
