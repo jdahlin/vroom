@@ -1524,6 +1524,7 @@ class semantic_analysis
        (temp/): the declarations of templates and of their
        specializations; no rules yet, each answers its subclause */
     analysis_result template_declaration(node_index n);
+    analysis_result template_of_declaration(node_index n, Declaration d);
     /* [temp.fct]: a function template defined at namespace scope */
     analysis_result function_template_definition(node_index n,
                                                  node_index definition);
@@ -1812,6 +1813,8 @@ class semantic_analysis
         uint32_t name = 0;
     };
     owned_array<friend_record> friends;
+    analysis_result friend_member_declaration(entity_index c, Declaration d,
+                                              owned_array<node_index> &bodies);
     analysis_result friend_declaration(entity_index c, node_index n,
                                        owned_array<node_index> &bodies);
     analysis_result friend_class(entity_index c, node_index n,

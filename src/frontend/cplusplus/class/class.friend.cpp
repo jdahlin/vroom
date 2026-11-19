@@ -366,10 +366,21 @@ semantic_analysis::friend_declaration(entity_index c, node_index n,
     for (entity_index k = c; !is_namespace(k); k = entity_table[k].enclosing)
         if (entity_table[k].kind != entity_kind::class_type)
             return not_supported(n, "class.friend");
+    return syntax(n).declaration().visit(Overloaded{
+        [&](FunctionDefinition f) { return friend_function(c, f, bodies); },
+        [&](Declaration d) {
+            return friend_member_declaration(c, d, bodies);
+        }});
+}
+
+/* a friend member-declaration that is not a function-definition */
+analysis_result
+semantic_analysis::friend_member_declaration(entity_index c, Declaration d,
+                                             owned_array<node_index> &bodies)
+{
+    node_index n = d;
     const syntax_node &node = tree[n];
     const syntax_child *children = tree.children(n);
-    if (node.kind == syntax_kind::function_definition)
-        return friend_function(c, n, bodies);
     if (node.kind != syntax_kind::member_declaration || node.child_count < 2)
         return not_supported(n, "class.friend");
     if (node.child_count == 2) {

@@ -27,8 +27,27 @@ analysis_result semantic_analysis::template_declaration(node_index n)
     const syntax_node &node = tree[n];
     if (!node.child_count || tree.children(n)[node.child_count - 1].is_token())
         return not_supported(n, "temp.pre");
-    node_index inner = tree.children(n)[node.child_count - 1].index();
-    switch (tree[inner].kind) {
+    auto inner = syntax(tree.children(n)[node.child_count - 1]).declaration();
+    return inner.visit(Overloaded{
+        /* [temp.fct]/1: "A function template defines an unbounded set of
+           related functions." */
+        [&](FunctionDefinition f) {
+            /* [temp.mem.func]/1: "A member function of a class template
+               may be defined outside of the class template definition in
+               which it is declared." */
+            if (out_of_class_member(f))
+                return member_definition_of_template(n, f);
+            return function_template_definition(n, f);
+        },
+        [&](Declaration d) { return template_of_declaration(n, d); }});
+}
+
+/* a template-declaration whose declaration is not a function-definition */
+analysis_result semantic_analysis::template_of_declaration(node_index n,
+                                                           Declaration d)
+{
+    node_index inner = d;
+    switch (d.kind()) {
     /* [temp.mem]/1: "A member template can be defined within or outside
        its class definition or class template definition" (template<...>
        template<...> ...) */
@@ -43,15 +62,6 @@ analysis_result semantic_analysis::template_declaration(node_index n)
        template." */
     case syntax_kind::alias_declaration:
         return alias_template_definition(n, inner);
-    /* [temp.fct]/1: "A function template defines an unbounded set of
-       related functions." */
-    case syntax_kind::function_definition:
-        /* [temp.mem.func]/1: "A member function of a class template may be
-           defined outside of the class template definition in which it is
-           declared." */
-        if (out_of_class_member(inner))
-            return member_definition_of_template(n, inner);
-        return function_template_definition(n, inner);
     case syntax_kind::simple_declaration: {
         /* [temp.class]/1: "A class template defines the layout and
            operations for an unbounded set of related types." (a
