@@ -55,8 +55,8 @@ semantic_analysis::instantiate(node_index at, entity_index template_entity,
         index = record_instantiation(ft, arguments, count);
         /* the declaration: the declarator, where its types are the
            arguments' */
-        const syntax_child *d = tree.children(ft.declarator) +
-                                leading_gnu_attributes(ft.declarator);
+        auto d_syntax = syntax(ft.declarator);
+        uint32_t d_skip = leading_gnu_attributes(ft.declarator);
         entity_index saved_scope = current_scope;
         uint32_t saved_cv = function_cv;
         owned_array<parameter_meaning> saved_parameters =
@@ -73,7 +73,7 @@ semantic_analysis::instantiate(node_index at, entity_index template_entity,
         placeholder_allowed = true;
         /* (a constructor template's: no type, the decl-specifier-seq
            optional, [class.ctor]/1) */
-        bool specifiers = syntax(d[0]).is(syntax_kind::decl_specifier_seq);
+        bool specifiers = d_syntax[d_skip].is(syntax_kind::decl_specifier_seq);
         bool constructor = t.special == special_member::constructor;
         analysis_result r = analysis_result::well_formed;
         bool lambda = syntax(syntax_child::node(ft.declarator))
@@ -82,9 +82,9 @@ semantic_analysis::instantiate(node_index at, entity_index template_entity,
         if (lambda)
             r = lambda_specialization(ft.declarator, false, lambda_type, 0);
         else if (constructor && specifiers)
-            r = constructor_specifiers(d[0].index(), s);
+            r = constructor_specifiers(d_syntax[d_skip].index(), s);
         else if (specifiers)
-            r = decl_specifier_seq(d[0].index(), s, false);
+            r = decl_specifier_seq(d_syntax[d_skip].index(), s, false);
         qualified_type type = s.type;
         if (lambda) {
             type = lambda_type;
@@ -96,10 +96,11 @@ semantic_analysis::instantiate(node_index at, entity_index template_entity,
                [temp.mem]) */
             member_template_declarator(2 * !is_namespace(t.enclosing));
             if (constructor)
-                r = constructor_template_declarator(ft.declarator,
-                                                    d[specifiers], type, m);
+                r = constructor_template_declarator(
+                    ft.declarator, d_syntax[d_skip + specifiers], type, m);
             else
-                r = declarator(ft.declarator, d[specifiers], type, m);
+                r = declarator(ft.declarator, d_syntax[d_skip + specifiers],
+                               type, m);
             member_template_declarator(0);
         }
         entity_index e = 0;
@@ -220,21 +221,21 @@ analysis_result semantic_analysis::instantiate_definition(node_index at,
     if (entity_table[template_entity].special == special_member::constructor) {
         /* a constructor template's ([temp.mem]/1): its declarator again
            (the parameters), then its function-body */
-        const syntax_child *d = tree.children(ft.definition) +
-                                leading_gnu_attributes(ft.definition);
-        bool specifiers = syntax(d[0]).is(syntax_kind::decl_specifier_seq);
+        auto d_syntax = syntax(ft.definition);
+        uint32_t d_skip = leading_gnu_attributes(ft.definition);
+        bool specifiers = d_syntax[d_skip].is(syntax_kind::decl_specifier_seq);
         qualified_type type;
         declarator_meaning m;
         function_cv = 0;
         function_parameters.clear();
-        r = constructor_template_declarator(ft.definition, d[specifiers], type,
-                                            m);
+        r = constructor_template_declarator(
+            ft.definition, d_syntax[d_skip + specifiers], type, m);
         last_declared = instantiations[index].specialization;
         if (r == analysis_result::well_formed)
             r = special_member_body(
-                syntax(ft.definition).function_definition(),
-                syntax(d[specifiers + 1 +
-                         (trailing_constraint(ft.declaration).bits != 0)])
+                d_syntax.function_definition(),
+                d_syntax[d_skip + specifiers + 1 +
+                         (trailing_constraint(ft.declaration).bits != 0)]
                     .function_body());
     } else if (syntax(syntax_child::node(ft.definition))
                    .is(syntax_kind::lambda_expression)) {

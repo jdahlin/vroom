@@ -32,14 +32,13 @@ analysis_result
 semantic_analysis::lambda_captures_of(node_index n,
                                       owned_array<syntax_child> &out)
 {
-    for (uint32_t i = 0; i < tree[n].child_count; i++) {
-        syntax_child c = tree.children(n)[i];
-        if (syntax(c).is(preprocessing_op_or_punc::COMMA) ||
-            syntax(c).is(preprocessing_op_or_punc::LEFT_BRACKET) ||
-            syntax(c).is(preprocessing_op_or_punc::RIGHT_BRACKET))
+    for (auto c : syntax(n).elements()) {
+        if (c.is(preprocessing_op_or_punc::COMMA) ||
+            c.is(preprocessing_op_or_punc::LEFT_BRACKET) ||
+            c.is(preprocessing_op_or_punc::RIGHT_BRACKET))
             continue;
-        if (syntax(c).is(syntax_kind::lambda_capture) ||
-            syntax(c).is(syntax_kind::capture_list)) {
+        if (c.is(syntax_kind::lambda_capture) ||
+            c.is(syntax_kind::capture_list)) {
             analysis_result r = lambda_captures_of(c.index(), out);
             if (r != analysis_result::well_formed)
                 return r;

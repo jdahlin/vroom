@@ -158,20 +158,21 @@ semantic_analysis::conversion_function_member(entity_index c, node_index n,
                                               owned_array<node_index> &bodies)
 {
     const syntax_node &node = tree[n];
-    const syntax_child *children = tree.children(n);
+    auto children_syntax = syntax(n);
     specified s;
     uint32_t first = 0;
     /* [ext:gnu_attributes] attributes before the declaration */
     uint32_t lead = leading_gnu_attributes(n);
     while (first < lead) {
-        analysis_result r = gnu_attribute_specifier(children[first].index(), s);
+        analysis_result r =
+            gnu_attribute_specifier(children_syntax[first].index(), s);
         if (r != analysis_result::well_formed)
             return r;
         first++;
     }
     if (first < node.child_count &&
-        syntax(children[first]).is(syntax_kind::decl_specifier_seq)) {
-        node_index seq = children[first].index();
+        children_syntax[first].is(syntax_kind::decl_specifier_seq)) {
+        node_index seq = children_syntax[first].index();
         first++;
         bool outer_virtual = virtual_allowed, outer_explicit = explicit_allowed;
         virtual_allowed = explicit_allowed = true;

@@ -1166,7 +1166,7 @@ analysis_result semantic_analysis::variable_template_id(node_index n,
     if (r != analysis_result::well_formed)
         return r;
     size_t uses_before = name_uses.size();
-    r = named_entity(syntax(n)[0].index(), e, m);
+    r = named_entity(syntax(n)[0].token(), e, m);
     /* (clang's lookup of the name finds the template, no claim here) */
     name_uses.resize(uses_before);
     return r;

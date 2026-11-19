@@ -834,28 +834,24 @@ analysis_result
 semantic_analysis::list_clauses(node_index list,
                                 owned_array<syntax_child> &clauses)
 {
-    const syntax_node &node = tree[list];
-    const syntax_child *children = tree.children(list);
-    for (uint32_t i = 0; i < node.child_count; i++) {
-        syntax_child c = children[i];
-        if (syntax(c).is(preprocessing_op_or_punc::LEFT_BRACE) ||
-            syntax(c).is(preprocessing_op_or_punc::RIGHT_BRACE) ||
-            syntax(c).is(preprocessing_op_or_punc::COMMA))
+    auto node = syntax(list);
+    for (auto c : node.elements()) {
+        if (c.is(preprocessing_op_or_punc::LEFT_BRACE) ||
+            c.is(preprocessing_op_or_punc::RIGHT_BRACE) ||
+            c.is(preprocessing_op_or_punc::COMMA))
             continue;
-        if (syntax(c).is(syntax_kind::initializer_list)) {
-            const syntax_node &items = tree[c.index()];
-            for (uint32_t k = 0; k < items.child_count; k++) {
-                syntax_child item = tree.children(c.index())[k];
-                if (syntax(item).is(preprocessing_op_or_punc::COMMA))
+        if (c.is(syntax_kind::initializer_list)) {
+            for (auto item : c.elements()) {
+                if (item.is(preprocessing_op_or_punc::COMMA))
                     continue;
-                if (syntax(item).is(preprocessing_op_or_punc::ELLIPSIS))
+                if (item.is(preprocessing_op_or_punc::ELLIPSIS))
                     return not_supported(list, "temp.variadic");
                 clauses.append(item);
             }
             continue;
         }
-        if (!c.is_token() && !syntax_kind_is_expression(tree[c.index()].kind) &&
-            !syntax(c).is(syntax_kind::braced_init_list))
+        if (c.is_node() && !syntax_kind_is_expression(c.kind()) &&
+            !c.is(syntax_kind::braced_init_list))
             /* a designated-initializer-list */
             return not_supported(list, "dcl.init.aggr");
         clauses.append(c);

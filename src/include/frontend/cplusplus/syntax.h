@@ -30,6 +30,7 @@
 #ifndef VCC_CPLUSPLUS_SYNTAX_H
 #define VCC_CPLUSPLUS_SYNTAX_H
 
+#include "common/fail.h"
 #include "frontend/cplusplus/parse.h"
 
 namespace cplusplus
@@ -217,6 +218,28 @@ class SyntaxElement : public SyntaxRef
     bool is_node() const
     {
         return c.bits && !c.is_token();
+    }
+    /* the node (0 for a token: read a token with token()).  With
+       -DVCC_CHECK_SYNTAX_VIEWS it is a bug to ask a token for its node
+       index, which would silently be 0 where the old child index was the
+       token's */
+#ifdef VCC_CHECK_SYNTAX_VIEWS
+    node_index index(const char *file = __builtin_FILE(),
+                     int line = __builtin_LINE()) const
+    {
+        if (c.is_token())
+            vbug(file, line, "SyntaxElement::index() of a token: use token()");
+        return SyntaxRef::index();
+    }
+#else
+    node_index index() const
+    {
+        return SyntaxRef::index();
+    }
+#endif
+    operator node_index() const
+    {
+        return SyntaxRef::index();
     }
     /* the token (0 for a node) */
     token_index token() const

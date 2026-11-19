@@ -153,8 +153,8 @@ static transformation transformation_named(const char *s, size_t n)
 analysis_result
 semantic_analysis::clang_type_transformation(node_index n, qualified_type &type)
 {
-    const syntax_child *children = tree.children(n);
-    token_index keyword = children[0].index();
+    auto children_syntax = syntax(n);
+    token_index keyword = children_syntax[0].token();
     owned_buffer written;
     tokens.spelling(keyword, written.get());
     transformation which = transformation_named(
@@ -162,7 +162,7 @@ semantic_analysis::clang_type_transformation(node_index n, qualified_type &type)
     if (which == transformation::none)
         return not_supported(n, "ext.clang");
     qualified_type t;
-    analysis_result r = type_id(children[2].index(), t);
+    analysis_result r = type_id(children_syntax[2].index(), t);
     if (r != analysis_result::well_formed)
         return r;
     if (depends_on_template_parameter(t)) {
