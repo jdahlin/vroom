@@ -297,6 +297,11 @@ bool itanium_mangler::specialization_encoding(entity_index e)
                       x.kind == entity_kind::function;
         if (table[scope].kind != entity_kind::namespace_entity && !member)
             return false;
+        /* (a member of a local class: its function scope first, as
+           name()'s) */
+        entity_index local = local_function(e);
+        if (member && local && !function_scope(local))
+            return false;
         text("N");
         if (member && x.nonstatic_member) {
             if (x.member_cv & cv_volatile)
@@ -320,7 +325,7 @@ bool itanium_mangler::specialization_encoding(entity_index e)
        requires-clause: I, the template-args, Q and the requires-clause's
        expression, E; the requires-clause of the template-head */
     syntax_child constraint = analysis.template_constraint(pattern_of);
-    if (constraint.bits) {
+    if (constraint.bits && !table[scope].lambda) {
         out->n--;
         text("Q");
         if (!constraint_expression(pattern_of, constraint))
@@ -339,7 +344,19 @@ bool itanium_mangler::specialization_encoding(entity_index e)
     if (table[e].special == special_member::none &&
         !type(record(pattern).operand))
         return false;
-    return bare_function_type(pattern);
+    if (!bare_function_type(pattern))
+        return false;
+    /* [impl.clang] a generic lambda's trailing requires-clause: Q and its
+       expression, after the parameters (one after its template-parameters
+       is the closure type's, closure_type_name) */
+    bool trailing = false;
+    if (table[scope].lambda)
+        constraint = analysis.lambda_constraint(table[scope].lambda, &trailing);
+    if (constraint.bits && trailing) {
+        text("Q");
+        return constraint_expression(pattern_of, constraint);
+    }
+    return true;
 }
 
 /*
@@ -1551,8 +1568,9 @@ bool itanium_mangler::closure_numbered(entity_index c) const
  * lexical order) with that same <lambda-sig> and context."  A closure type
  * unique to the translation unit has no encoding in the ABI: [impl.clang]
  * names it $_N, a <source-name>, N the closure's number among those of
- * its function in the order their names are first mangled (as clang's
- * code generator mangles them).
+ * its function (or of namespace scope, which a generic lambda's of a
+ * function counts too) in the order their names are first mangled (as
+ * clang's code generator mangles them).
  */
 bool itanium_mangler::closure_type_name(entity_index c)
 {
@@ -1571,7 +1589,11 @@ bool itanium_mangler::closure_type_name(entity_index c)
                 seen = true;
                 break;
             }
-            if (enclosing_function(table, k) == context)
+            /* ([impl.clang] a generic lambda's closure of a function takes
+               a number of the translation unit's too) */
+            if (enclosing_function(table, k) == context ||
+                (!context && table[table[k].call_operator].kind ==
+                                 entity_kind::template_entity))
                 n++;
         }
         if (!seen)
@@ -1583,8 +1605,9 @@ bool itanium_mangler::closure_type_name(entity_index c)
         vbuffer_append(out, written.data(), written.size());
         return true;
     }
-    /* <data-member-prefix> ::= <member source-name> [<template-args>] M,
-       the context of a closure type in an inline variable's initializer */
+    /* [impl.clang] the context of a closure type in an inline variable's
+       initializer (the ABI's later data-member-prefix): the variable's
+       <source-name> and M */
     entity_index variable = table[c].closure_variable;
     if (variable) {
         if (!source_name(table[variable].name))
@@ -1595,6 +1618,24 @@ bool itanium_mangler::closure_type_name(entity_index c)
         candidates.append(x);
     }
     text("Ul");
+    /* [impl.clang] (the ABI's later template-param-decl) before the
+       parameter types, one per template-parameter of a lambda's
+       template-parameter-list: Ty for a type-parameter (the only ones
+       analysed) */
+    if (table[call].kind == entity_kind::template_entity) {
+        for (uint32_t i = 0; i < analysis.template_parameter_count(call); i++)
+            text("Ty");
+        /* [impl.clang] the template-head's requires-clause: Q and its
+           expression */
+        bool trailing = false;
+        syntax_child constraint =
+            analysis.lambda_constraint(table[c].lambda, &trailing);
+        if (constraint.bits && !trailing) {
+            text("Q");
+            if (!constraint_expression(call, constraint))
+                return false;
+        }
+    }
     qualified_type signature = table[call].type;
     if (!bare_function_type(signature))
         return false;

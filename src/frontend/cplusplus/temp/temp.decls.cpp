@@ -129,6 +129,8 @@ analysis_result semantic_analysis::deduction_guide(node_index n)
    or none */
 syntax_child semantic_analysis::head_constraint(node_index n) const
 {
+    if (syntax_is(tree, syntax_child::node(n), syntax_kind::lambda_expression))
+        return lambda_constraint(n);
     if (!tree[n].child_count ||
         !syntax_is(tree, tree.children(n)[0], syntax_kind::template_head))
         return syntax_child();

@@ -2257,7 +2257,7 @@ class semantic_analysis
     struct lambda_context {
         entity_index closure = 0, call = 0, enclosing_function = 0;
         capture_default default_capture = capture_default::none;
-        bool mutable_ = false;
+        bool mutable_ = false, constexpr_ = false;
         qualified_type enclosing_this;
         node_index at = 0;
         uint32_t first_capture = 0;
@@ -2268,6 +2268,20 @@ class semantic_analysis
        local class's member function in it), nullptr if none */
     lambda_context *current_lambda();
     analysis_result lambda_expression(node_index n, expression_meaning &m);
+    analysis_result
+    lambda_call_type(node_index n, node_index d, lambda_context &l,
+                     qualified_type &type,
+                     owned_array<parameter_meaning> &parameters);
+    analysis_result lambda_body(node_index n, syntax_child body,
+                                lambda_context &l,
+                                owned_array<parameter_meaning> &parameters,
+                                owned_array<capture_record> &captures);
+    analysis_result generic_lambda(node_index n, node_index list,
+                                   node_index declarator, lambda_context &l,
+                                   bool has_capture, expression_meaning &m);
+    analysis_result lambda_specialization(node_index n, bool body,
+                                          qualified_type &type,
+                                          entity_index specialization);
     analysis_result lambda_introducer(node_index n, lambda_context &l);
     analysis_result lambda_captures_of(node_index n,
                                        owned_array<syntax_child> &out);
@@ -3898,6 +3912,17 @@ class semantic_analysis
        template t's template-head (none: no bits), its template parameter
        and the concept a token of it names (0: neither) */
     syntax_child template_constraint(entity_index t) const;
+    /* [expr.prim.lambda]/1: a generic lambda's requires-clause's
+       constraint-expression (none: no bits); trailing: whether it follows
+       the lambda-declarator's parameters */
+    syntax_child lambda_constraint(node_index n,
+                                   bool *trailing = nullptr) const;
+    /* the number of template-parameters of template entity t */
+    uint32_t template_parameter_count(entity_index t) const
+    {
+        return function_templates[entity_table[t].instantiation - 1]
+            .parameter_count;
+    }
     entity_index constraint_parameter(entity_index t, token_index i) const;
     entity_index constraint_concept(entity_index t, token_index i) const;
     /* [abi:mangle.function-param]: the position plus one of function

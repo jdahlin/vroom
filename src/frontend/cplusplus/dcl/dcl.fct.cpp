@@ -381,6 +381,9 @@ analysis_result semantic_analysis::function(node_index parameters,
                 exceptions = c.index();
                 continue;
             }
+            /* a generic lambda's requires-clause (lambda_constraint) */
+            if (syntax_is(tree, c, syntax_kind::requires_clause))
+                continue;
             /* a ref-qualifier, attributes, a cv-qualifier-seq of a type
                that is not a member function's */
             return not_supported(parameters, "dcl.fct");

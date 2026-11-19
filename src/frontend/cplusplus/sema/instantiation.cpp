@@ -77,12 +77,21 @@ semantic_analysis::instantiate(node_index at, entity_index template_entity,
             syntax_is(tree, d[0], syntax_kind::decl_specifier_seq);
         bool constructor = t.special == special_member::constructor;
         analysis_result r = analysis_result::well_formed;
-        if (constructor && specifiers)
+        bool lambda = syntax_is(tree, syntax_child::node(ft.declarator),
+                                syntax_kind::lambda_expression);
+        qualified_type lambda_type;
+        if (lambda)
+            r = lambda_specialization(ft.declarator, false, lambda_type, 0);
+        else if (constructor && specifiers)
             r = constructor_specifiers(d[0].index(), s);
         else if (specifiers)
             r = decl_specifier_seq(d[0].index(), s, false);
         qualified_type type = s.type;
-        if (r == analysis_result::well_formed) {
+        if (lambda) {
+            type = lambda_type;
+            s.constexpr_ = t.constexpr_;
+        }
+        if (r == analysis_result::well_formed && !lambda) {
             function_cv = 0;
             /* (a member function template's cv-qualifier-seq,
                [temp.mem]) */
@@ -215,6 +224,12 @@ analysis_result semantic_analysis::instantiate_definition(node_index at,
         last_declared = instantiations[index].specialization;
         if (r == analysis_result::well_formed)
             r = special_member_body(ft.definition, d[specifiers + 1]);
+    } else if (syntax_is(tree, syntax_child::node(ft.definition),
+                         syntax_kind::lambda_expression)) {
+        /* a generic lambda's ([expr.prim.lambda.closure]/3) */
+        qualified_type type;
+        r = lambda_specialization(ft.definition, true, type,
+                                  instantiations[index].specialization);
     } else {
         r = function_definition(ft.definition);
     }
