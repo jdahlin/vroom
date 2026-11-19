@@ -409,6 +409,13 @@ struct entity {
     bool explicit_default_constructor = false;
     /* X& operator=(const X&) = default (defaulted_copy_assignment) */
     bool defaulted_copy_assignment = false;
+    /* X(X&&) = default and X& operator=(X&&) = default, trivial
+       ([class.copy.ctor]/11, [class.copy.assign]/9): no entity; the move
+       constructor copies the bytes (construct) */
+    bool defaulted_move_constructor = false;
+    /* X(const X&) = default: no entity when trivial */
+    bool defaulted_copy_constructor = false;
+    bool defaulted_move_assignment = false;
     /* [class.default.ctor]/2: the implicit default constructor is deleted
        (a subobject without a usable default constructor) */
     bool implicit_default_deleted = false;

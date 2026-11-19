@@ -715,7 +715,9 @@ analysis_result semantic_analysis::initialize_with(node_index at,
                parameter may be initialized by one: not analysed */
             return not_supported(at, "over.match.copy");
         if (!(same && m.category == value_category::prvalue) &&
-            entity_table[target.entity].first_constructor) {
+            (entity_table[target.entity].first_constructor ||
+             /* its deleted implicit copy constructor (construct) */
+             entity_table[target.entity].implicit_copy_deleted)) {
             /* /17.6.2 by [over.match.ctor]; /17.6.3: a user-defined
                conversion by a converting constructor ([class.conv.ctor]),
                whose result initializes the object (the copy elided) */
