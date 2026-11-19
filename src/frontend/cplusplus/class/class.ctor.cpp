@@ -232,6 +232,11 @@ bool semantic_analysis::copies_bytes(entity_index c) const
        functions" fails: the copy stores the virtual table pointer of X */
     if (x.dynamic)
         return false;
+    /* [class.copy.ctor]/6: a declared move constructor or move assignment
+       operator makes the implicit copy constructor deleted */
+    if ((x.defaulted_move_constructor || x.defaulted_move_assignment) &&
+        !x.defaulted_copy_constructor)
+        return false;
     for (entity_index k = x.first_constructor; k;
          k = entity_table[k].next_constructor)
         if (is_copy_constructor(c, k))
@@ -587,9 +592,20 @@ analysis_result semantic_analysis::defaulted_or_deleted_special_member(
              k = entity_table[k].next_constructor)
             if (is_copy_constructor(c, k))
                 return not_supported(n, "class.mem");
+        x.defaulted_copy_constructor = true;
         return analysis_result::well_formed;
     }
-    /* X(X&) = default, a move constructor */
+    /* [class.copy.ctor]/3: X(X&&) = default, the move constructor as
+       implicitly declared; its triviality is checked with the class's
+       subobjects (implicit_special_members) */
+    if (f.parameter_count == 1 && first.kind == type_kind::rvalue_reference &&
+        first.operand == qualified_type::make(x.type.unqualified(), cv_none)) {
+        if (x.defaulted_move_constructor || declares_move_constructor(c))
+            return not_supported(n, "class.mem");
+        x.defaulted_move_constructor = true;
+        return analysis_result::well_formed;
+    }
+    /* X(X&) = default */
     return not_supported(n, "dcl.fct.def.default");
 }
 
@@ -640,17 +656,25 @@ analysis_result semantic_analysis::defaulted_copy_assignment(entity_index c,
     if (f.operand.cv() || result.kind != type_kind::lvalue_reference ||
         !(result.operand ==
           qualified_type::make(x.type.unqualified(), cv_none)) ||
-        first.kind != type_kind::lvalue_reference ||
-        !(first.operand ==
-          qualified_type::make(x.type.unqualified(), cv_const)))
+        !((first.kind == type_kind::lvalue_reference &&
+           first.operand ==
+               qualified_type::make(x.type.unqualified(), cv_const)) ||
+          /* [class.copy.assign]/3: X& operator=(X&&) = default */
+          (first.kind == type_kind::rvalue_reference &&
+           first.operand ==
+               qualified_type::make(x.type.unqualified(), cv_none))))
         return not_supported(n, "dcl.fct.def.default");
+    bool move = first.kind == type_kind::rvalue_reference;
     /* a second one, or beside a user-declared copy assignment operator */
     lookup_result found = lookup_qualified(
         c, operator_name(preprocessing_op_or_punc::EQUAL), lookup_filter::any);
     if (found.entity || found.unknown || found.ambiguous ||
-        x.defaulted_copy_assignment)
+        x.defaulted_copy_assignment || x.defaulted_move_assignment)
         return not_supported(n, "class.mem");
-    entity_table[c].defaulted_copy_assignment = true;
+    if (move)
+        entity_table[c].defaulted_move_assignment = true;
+    else
+        entity_table[c].defaulted_copy_assignment = true;
     return analysis_result::well_formed;
 }
 
@@ -717,7 +741,8 @@ semantic_analysis::construct(node_index at, qualified_type type,
     /* [class.copy.ctor]/10.1: which construction from arguments the
        deleted implicit copy constructor takes part in (copy elision,
        [dcl.init]/17.6.2's aggregate) is not analysed */
-    if (!arguments.empty() && x.implicit_copy_deleted)
+    if (!arguments.empty() && x.implicit_copy_deleted &&
+        !x.defaulted_move_constructor)
         return not_supported(at, "class.copy.ctor");
     if (arguments.empty() && trivial_defaulted_default_constructor(c))
         /* value-initialization through a trivial X() = default
@@ -748,7 +773,8 @@ semantic_analysis::construct(node_index at, qualified_type type,
        declare a copy constructor, a non-explicit one is declared
        implicitly"), trivial for the members analysis has; a class that
        declares a move constructor has it deleted, and is not told apart */
-    bool implicit_copy = true;
+    bool implicit_copy =
+        !x.defaulted_move_constructor || x.defaulted_copy_constructor;
     for (entity_index k = x.first_constructor; k && implicit_copy;
          k = entity_table[k].next_constructor) {
         const struct type &f = type_table[entity_table[k].type.unqualified()];
@@ -777,6 +803,23 @@ semantic_analysis::construct(node_index at, qualified_type type,
             cv_none);
         candidates.append(copy);
     }
+    /* X(X&&) = default, trivial (implicit_special_members): it copies the
+       bytes */
+    size_t move = candidates.size();
+    if (x.defaulted_move_constructor) {
+        qualified_type parameter = qualified_type::make(
+            type_table.rvalue_reference_to(
+                qualified_type::make(type.unqualified(), cv_none)),
+            cv_none);
+        overload_candidate moving;
+        moving.type = qualified_type::make(
+            type_table.function(
+                qualified_type::make(
+                    type_table.fundamental(fundamental_type::void_), cv_none),
+                &parameter, 1, false),
+            cv_none);
+        candidates.append(moving);
+    }
     size_t best = 0;
     analysis_result resolved =
         best_viable_function(at, candidates, nullptr, arguments, best);
@@ -784,7 +827,7 @@ semantic_analysis::construct(node_index at, qualified_type type,
         return resolved;
     entity_index chosen = candidates[best].function;
     if (!chosen) {
-        if (!copies_bytes(c))
+        if (!copies_bytes(c) && !(x.defaulted_move_constructor && best == move))
             /* [class.copy.ctor]/14: the implicitly-defined copy
                constructor copies each base and member by its own */
             return not_supported(at, "class.copy.ctor");
@@ -1470,6 +1513,24 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
          k = entity_table[k].next_constructor)
         if (is_copy_constructor(c, k))
             user_copy = true;
+    /* [class.copy.ctor]/11: X(X&&) = default is trivial when each
+       subobject's move is (the analysed case: each copies its bytes);
+       /6: it makes the implicit copy constructor deleted */
+    const entity &y = entity_table[c];
+    if (y.defaulted_move_constructor || y.defaulted_move_assignment) {
+        if (y.dynamic)
+            return not_supported(n, "class.copy.ctor");
+        for (entity_index k : classes)
+            if (!copies_bytes(k))
+                return not_supported(n, "class.copy.ctor");
+        /* [class.default.ctor]/1: a user-declared constructor and no
+           default one: no default constructor (not analysed) */
+        if (y.defaulted_move_constructor && !y.defaulted_default_constructor &&
+            !y.first_constructor)
+            return not_supported(n, "class.default.ctor");
+        if (!user_copy && !y.defaulted_copy_constructor)
+            copy_deleted = true;
+    }
     entity_table[c].implicit_copy_deleted = copy_deleted;
     if (copy && !user_copy && !copy_deleted)
         declare_implicit(c, special_member::constructor, true);
