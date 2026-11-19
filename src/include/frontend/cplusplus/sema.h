@@ -264,6 +264,10 @@ enum class constness : uint8_t { constant, not_constant, unknown };
 
 /* [special]: a member function a class's objects are made and ended by */
 enum class special_member : uint8_t { none, constructor, destructor };
+
+/* [except.spec]/7: what is known of a default member initializer's
+   exceptions */
+enum class initializer_exception : uint8_t { unknown, cannot_throw, may_throw };
 /* [temp.explicit]/2: "An explicit instantiation definition is an explicit
    instantiation that does not begin with the extern keyword" */
 enum class instantiation_kind : uint8_t { none, declaration, definition };
@@ -417,6 +421,9 @@ struct entity {
        ([class.mem]/10: a brace-or-equal-initializer or braced-init-list
        node), 0 if none */
     SyntaxRef default_initializer = 0;
+    /* ... and whether it can throw ([except.spec]/7), once a constructor
+       using it is defined (semantic_analysis::default_member_initializer) */
+    initializer_exception initializer_throws = initializer_exception::unknown;
     /* a class: its default constructor is declared = default
        ([dcl.fct.def.default]), declared as the implicit one is */
     bool defaulted_default_constructor = false;
@@ -1325,6 +1332,15 @@ struct analysed_expression {
        scope there) */
     token_index place = 0;
     bool placeable = true;
+};
+
+/* the traits of one type-id: [meta.unary.cat], [meta.unary.comp],
+   [meta.unary.prop]'s cv and sign questions, [meta.unary.prop.query]'s
+   rank; clang's spellings */
+enum class unary_trait_kind {
+#define UNARY_TRAIT(kind, spelling) kind,
+#include "../../../frontend/cplusplus/ext/clang/unary-traits.inc"
+#undef UNARY_TRAIT
 };
 
 class semantic_analysis
@@ -2482,10 +2498,42 @@ class semantic_analysis
     bool copy_constructible_from(entity_index c, value_category category,
                                  bool &known);
     bool convertible_types(qualified_type from, qualified_type to, bool &known);
+    /* [meta.unary.prop] is_constructible and is_nothrow_constructible
+       (ext/clang/constructible-traits.cpp): the analysis of T t(declval<
+       Args>()...); */
+    analysis_result clang_constructible_trait(SyntaxRef n, bool nothrow,
+                                              expression_meaning &m);
+    analysis_result constructible_types(SyntaxRef n, qualified_type t,
+                                        const qualified_type *types,
+                                        uint32_t count, bool nothrow,
+                                        bool &value);
+    bool class_destructible(entity_index c, bool &throws);
+    bool default_initializer_pending(entity_index c) const;
+    bool same_or_derived_class(const expression_meaning &a, entity_index c);
+    analysis_result
+    aggregate_paren_initialization(SyntaxRef n, entity_index c,
+                                   owned_array<expression_meaning> &arguments,
+                                   bool nothrow, bool &value);
+    analysis_result aggregate_value_initialization(SyntaxRef n, entity_index c,
+                                                   bool nothrow, bool &value);
+    /* [except.spec]/8-9 of the implicit constructor f; known is false
+       when it cannot be told */
+    bool implicit_constructor_throws(entity_index f, bool &known);
+    bool default_initializer_throws(entity_index e, bool &throws);
+    bool subobject_constructor_throws(entity_index k, bool copy, bool &known);
+    /* declval<T>() as an expression */
+    expression_meaning declval_meaning(qualified_type t);
     /* [ext:clang_type_traits] the answer of the trait of one type-id
        numbered which (ext/clang/unary-traits.inc) for the non-dependent
        t; false if the analysis has none */
     bool unary_trait(int which, qualified_type t, int64_t &value);
+    /* ext/clang/class-traits.cpp: the traits that ask about a class */
+    bool class_property_trait(int which, qualified_type t, bool &answer);
+    bool empty_class(entity_index c) const;
+    bool polymorphic_class(entity_index c) const;
+    bool virtual_destructor(entity_index c) const;
+    bool triviality_unknown(entity_index c) const;
+    bool class_trivially_copyable(entity_index c, bool &known);
     analysis_result gnu_offsetof(SyntaxRef n, expression_meaning &m);
     analysis_result clang_bit_cast(SyntaxRef n, expression_meaning &m);
     analysis_result clang_convertvector(SyntaxRef n, expression_meaning &m);
@@ -4543,6 +4591,11 @@ class semantic_analysis
     analysis_result initialize_with(SyntaxRef at, expression_meaning &m,
                                     qualified_type type, bool direct, bool list,
                                     initialized_value &result);
+    /* the same where failure is no error: ok false, what it issued taken
+       back ([temp.deduct]/8) */
+    analysis_result try_initialization(SyntaxRef n, expression_meaning &a,
+                                       qualified_type type, bool direct,
+                                       initialized_value &made, bool &ok);
     /* a declarator and its initializer (none if !initialized), as in an
        init-declarator or a condition; supplied, if not null, is an
        initializer analysed already ("= E", [stmt.ranged]/1; init none) */

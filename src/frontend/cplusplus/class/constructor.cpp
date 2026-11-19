@@ -212,6 +212,19 @@ semantic_analysis::default_member_initializer(token_index at, entity_index e,
     VTRY(r, subobject(at, e, object));
     initialized_value value;
     VTRY_SET(r, initializer(init, type, value));
+    /* [except.spec]/7: the initializer's own exceptions, which a
+       constructor's exception specification when implicit is made of */
+    bool throwing = false;
+    size_t unsupported_before = unsupported.size();
+    if (potentially_throwing(init, value.node, throwing) ==
+        analysis_result::well_formed) {
+        entity_table[e].initializer_throws =
+            initializer_exception::cannot_throw;
+        if (throwing)
+            entity_table[e].initializer_throws =
+                initializer_exception::may_throw;
+    }
+    unsupported.resize(unsupported_before);
     statement = subobject_store(object, type, at, value.node);
     return analysis_result::well_formed;
 }

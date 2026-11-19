@@ -794,6 +794,10 @@ analysis_result semantic_analysis::potentially_throwing(SyntaxRef n, uint32_t x,
     while (!work.empty() && !throwing) {
         uint32_t k = work.back();
         work.resize(work.size() - 1);
+        /* an operand with no node of its own (a declval<T>() of the
+           traits) cannot throw */
+        if (!k)
+            continue;
         const semantic_node s = semantics[k];
         switch (s.kind) {
         case semantic_kind::constant:
@@ -861,12 +865,18 @@ analysis_result semantic_analysis::potentially_throwing(SyntaxRef n, uint32_t x,
         }
         case semantic_kind::construct: {
             /* /6.2: the constructor; an implicit one's exception
-               specification ([except.spec]/8) is not worked out here */
+               specification is its subobjects' ([except.spec]/8-9) */
             if (s.b) {
                 const entity &c = entity_table[s.b];
-                if (c.implicit)
-                    return not_supported(n, "expr.unary.noexcept");
-                if (!type_table[c.type.unqualified()].non_throwing) {
+                if (c.implicit) {
+                    bool known = true;
+                    if (implicit_constructor_throws(s.b, known)) {
+                        throwing = true;
+                        break;
+                    }
+                    if (!known)
+                        return not_supported(n, "except.spec");
+                } else if (!type_table[c.type.unqualified()].non_throwing) {
                     throwing = true;
                     break;
                 }

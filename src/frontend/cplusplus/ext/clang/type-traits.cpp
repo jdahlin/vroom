@@ -267,15 +267,6 @@ semantic_analysis::clang_type_transformation(ClangTypeTransformation n,
     return analysis_result::well_formed;
 }
 
-/* the traits of one type-id: [meta.unary.cat], [meta.unary.comp],
-   [meta.unary.prop]'s cv and sign questions, [meta.unary.prop.query]'s
-   rank; clang's spellings */
-enum class unary_trait_kind {
-#define UNARY_TRAIT(kind, spelling) kind,
-#include "unary-traits.inc"
-#undef UNARY_TRAIT
-};
-
 static int unary_trait_named(const char *s, size_t n)
 {
     static const char *const names[] = {
@@ -409,6 +400,19 @@ bool semantic_analysis::unary_trait(int which, qualified_type t, int64_t &value)
     case unary_trait_kind::is_unsigned:
         answer = is_integral(t) && (f == fundamental_type::bool_ ||
                                     !fundamental_type_is_signed(b, f));
+        break;
+    /* ext/clang/class-traits.cpp: questions about a class's declaration */
+    case unary_trait_kind::is_abstract:
+    case unary_trait_kind::is_polymorphic:
+    case unary_trait_kind::is_aggregate:
+    case unary_trait_kind::is_empty:
+    case unary_trait_kind::is_trivial:
+    case unary_trait_kind::is_trivially_copyable:
+    case unary_trait_kind::is_trivially_destructible:
+    case unary_trait_kind::has_trivial_destructor:
+    case unary_trait_kind::has_virtual_destructor:
+        if (!class_property_trait(which, t, answer))
+            return false;
         break;
     /* [meta.unary.prop.query] rank: the number of dimensions */
     case unary_trait_kind::array_rank:
@@ -554,6 +558,10 @@ analysis_result semantic_analysis::clang_type_trait(SyntaxRef n,
                 spelled(name, written.size(), "__is_same_as");
     bool convertible = spelled(name, written.size(), "__is_convertible") ||
                        spelled(name, written.size(), "__is_convertible_to");
+    if (spelled(name, written.size(), "__is_constructible"))
+        return clang_constructible_trait(n, false, m);
+    if (spelled(name, written.size(), "__is_nothrow_constructible"))
+        return clang_constructible_trait(n, true, m);
     /* ( type-id ): a trait of the type's category */
     if (!same && !convertible && n.size() == 4 &&
         n[2].is(syntax_kind::type_id)) {
@@ -1010,6 +1018,31 @@ semantic_analysis::common_type_pair(SyntaxRef id, entity_index base,
     return r;
 }
 
+/* declval<T>(): add_rvalue_reference_t<T>'s call, an lvalue of a function
+   or of what an lvalue reference refers to, an xvalue of an object type, a
+   prvalue of void */
+expression_meaning semantic_analysis::declval_meaning(qualified_type given)
+{
+    qualified_type t = given;
+    const struct type &k = type_table[t.unqualified()];
+    value_category c = value_category::xvalue;
+    if (k.kind == type_kind::lvalue_reference) {
+        t = k.operand;
+        c = value_category::lvalue;
+    } else if (k.kind == type_kind::rvalue_reference) {
+        t = k.operand;
+    }
+    if (type_table[t.unqualified()].kind == type_kind::function)
+        c = value_category::lvalue;
+    if (fundamental_of(t) == fundamental_type::void_)
+        c = value_category::prvalue;
+    expression_meaning e;
+    e.type = t;
+    e.category = c;
+    e.evaluation = constness::not_constant;
+    return e;
+}
+
 /* decltype(false ? declval<A>() : declval<B>()), if it is a type */
 analysis_result semantic_analysis::common_conditional(SyntaxRef id,
                                                       qualified_type a,
@@ -1018,29 +1051,7 @@ analysis_result semantic_analysis::common_conditional(SyntaxRef id,
                                                       qualified_type &out)
 {
     found = common_found::none;
-    /* declval<T>(): add_rvalue_reference_t<T>'s call, an lvalue of a
-       function or of what an lvalue reference refers to, an xvalue of an
-       object type, a prvalue of void */
-    expression_meaning e[2];
-    qualified_type given[2] = {a, b};
-    for (uint32_t i = 0; i < 2; i++) {
-        qualified_type t = given[i];
-        const struct type &k = type_table[t.unqualified()];
-        value_category c = value_category::xvalue;
-        if (k.kind == type_kind::lvalue_reference) {
-            t = k.operand;
-            c = value_category::lvalue;
-        } else if (k.kind == type_kind::rvalue_reference) {
-            t = k.operand;
-        }
-        if (type_table[t.unqualified()].kind == type_kind::function)
-            c = value_category::lvalue;
-        if (fundamental_of(t) == fundamental_type::void_)
-            c = value_category::prvalue;
-        e[i].type = t;
-        e[i].category = c;
-        e[i].evaluation = constness::not_constant;
-    }
+    expression_meaning e[2] = {declval_meaning(a), declval_meaning(b)};
     /* [expr.cond]/2: both void: void; one: ill-formed (no throw) */
     bool v0 = fundamental_of(e[0].type) == fundamental_type::void_;
     bool v1 = fundamental_of(e[1].type) == fundamental_type::void_;
