@@ -1165,10 +1165,16 @@ analysis_result semantic_analysis::declare_with_initializer(
             return not_supported(declaration, "basic.types");
         /* an object of class type default-initialized: its default
            constructor ([dcl.init]/7.1), which the evaluator does not run
-           here yet */
-        if (!initialized && record.kind == type_kind::class_type)
-            return not_supported(declaration, "dcl.init");
-        if (!initialized)
+           here yet, except a trivial one of a class without non-static
+           data members, which leaves nothing to evaluate
+           ([dcl.init]/7.1) */
+        if (!initialized && record.kind == type_kind::class_type) {
+            const entity &c = entity_table[record.entity];
+            if (c.dynamic || c.member_count ||
+                (c.first_constructor &&
+                 !trivial_defaulted_default_constructor(record.entity)))
+                return not_supported(declaration, "dcl.init");
+        } else if (!initialized)
             return ill_formed_at_token(m.id,
                                        "a constexpr object shall be "
                                        "initialized",
