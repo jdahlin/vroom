@@ -53,6 +53,17 @@ ast_qualified_type ast_builder_type_atomic(cc *c, ast_qualified_type value)
     return cc_type_atomic(c, value, 0);
 }
 
+ast_qualified_type
+ast_builder_type_ext_vector(cc *c, ast_qualified_type element, uint64_t count)
+{
+    uint64_t size = 1;
+    while (size < count * cc_type_size(c, element))
+        size <<= 1;
+    ctype v = *AST_TYPE(c, cc_type_vector(c, element, (uint32_t)size));
+    v.ext = (uint16_t)count;
+    return AST_QUALIFIED_TYPE(cc_type_intern(c, &v), 0);
+}
+
 ast_qualified_type ast_builder_type_array(cc *c, ast_qualified_type element,
                                           uint64_t count, bool known)
 {

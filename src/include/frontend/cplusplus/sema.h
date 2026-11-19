@@ -119,6 +119,9 @@ enum class type_kind : uint8_t {
     /* [ext:clang_bit_int] _BitInt(N): bound N, or entity the non-type
        template-parameter N names in a template's own declaration */
     bit_int,
+    /* [ext:clang_ext_vector_type] a vector of bound elements of type
+       operand, or of the non-type template-parameter entity's value */
+    ext_vector,
 };
 
 struct type {
@@ -179,6 +182,8 @@ class types
     type_index atomic_of(qualified_type value);
     type_index block_pointer_to(qualified_type function);
     type_index bit_int(uint64_t width, uint32_t parameter);
+    type_index ext_vector_of(qualified_type element, uint64_t count,
+                             uint32_t parameter);
 
     const type &operator[](type_index t) const
     {
@@ -1982,6 +1987,12 @@ class semantic_analysis
         uint64_t aligned = 0;
         uint32_t flags = 0;
         token_index section = 0, abi_tag = 0;
+        /* [ext:clang_ext_vector_type] taken where allowed (an
+           alias-declaration): ext_vector_type(N)'s N, or the entity of the
+           non-type template-parameter N names */
+        bool ext_vector_allowed = false;
+        uint64_t ext_vector = 0;
+        entity_index ext_vector_parameter = 0;
     };
     analysis_result gnu_attribute_specifier(node_index n, gnu_attributes &g);
     analysis_result gnu_attribute_specifier(node_index n,
@@ -2435,6 +2446,12 @@ class semantic_analysis
     analysis_result clang_atomic_type(node_index n, qualified_type &type);
     uint64_t atomic_layout(qualified_type value, bool alignment) const;
     analysis_result clang_bit_int_type(node_index n, qualified_type &type);
+    analysis_result clang_ext_vector_count(node_index at, syntax_child count,
+                                           gnu_attributes &g);
+    analysis_result clang_ext_vector_type(node_index at,
+                                          const gnu_attributes &g,
+                                          qualified_type &type);
+    uint64_t ext_vector_layout(const type &record, bool alignment) const;
     uint64_t bit_int_layout(uint64_t width, bool alignment) const;
     entity_index value_parameter_named(syntax_child e);
     analysis_result potentially_throwing(node_index n, uint32_t x,

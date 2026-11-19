@@ -293,6 +293,18 @@ static const gnu_attribute_rule *gnu_attribute_rule_of(const char *name,
     return nullptr;
 }
 
+/* [ext:clang_ext_vector_type] ext_vector_type or __ext_vector_type__ */
+static bool spelling_is_ext_vector_type(const owned_buffer &spelling)
+{
+    const char *name = reinterpret_cast<const char *>(spelling.data());
+    size_t length = spelling.size();
+    if (length > 4 && name[0] == '_' && name[1] == '_') {
+        name += 2;
+        length -= 4;
+    }
+    return length == 15 && !memcmp(name, "ext_vector_type", 15);
+}
+
 /* [ext:clang_availability] the attribute at the token is clang's
    availability (or __availability__) */
 bool parser::at_availability()
@@ -421,6 +433,13 @@ analysis_result semantic_analysis::gnu_attribute_specifier(node_index n,
                              (spelling.size() == 11 &&
                               !memcmp(spelling.data(), "__attribute", 11))))
             continue;
+        if (!rule && g.ext_vector_allowed && count == 4 &&
+            spelling_is_ext_vector_type(spelling)) {
+            analysis_result r = clang_ext_vector_count(at, children[2], g);
+            if (r != analysis_result::well_formed)
+                return r;
+            continue;
+        }
         if (!rule)
             return not_supported(at, "ext.gnu");
         /* clang's enable_if: the function a candidate only where the
