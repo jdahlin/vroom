@@ -1749,10 +1749,6 @@ analysis_result semantic_analysis::class_specialization_definition(
     entity_index named = 0;
     if (!template_id_name(written, x, named))
         return not_supported(n, rule);
-    for (token_index i = specifier.first_token(); i < specifier.end_token();
-         i++)
-        if (p.keyword_of(tokens[i]) == standard_keyword::friend_)
-            return not_supported(n, "class.friend");
     uint32_t ct = class_template_of(named);
     /* [temp.class.spec]/6, [temp.expl.spec]/3: declared where the
        primary template is, by its name (not an injected-class-name) */
