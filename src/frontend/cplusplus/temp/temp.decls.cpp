@@ -1988,6 +1988,11 @@ analysis_result semantic_analysis::template_type(node_index id,
     entity_index named = x.entity;
     if (!named)
         named = x.unknown_entity;
+    if (!named && qualified && !x.unknown) {
+        analysis_result m = missing_member(parts[0].index(), scope);
+        if (m != analysis_result::well_formed)
+            return m;
+    }
     if (!named && !qualified && is_builtin_common_type(name))
         return builtin_common_type(id, type);
     if (!named && !qualified && is_builtin_type_pack_element(name))

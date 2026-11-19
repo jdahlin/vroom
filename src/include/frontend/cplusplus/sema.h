@@ -1868,6 +1868,7 @@ class semantic_analysis
                                 bool &unknown) const;
     /* [temp.res]/3: typename-specifier, as a type */
     analysis_result typename_type(node_index n, type_index &type, uint32_t &cv);
+    analysis_result missing_member(token_index t, entity_index scope);
     /* a dependent type of kind, one per name and value in list */
     type_index dependent_type(owned_array<entity_index> &list, entity_kind kind,
                               uint32_t name, uint64_t value);
