@@ -1726,7 +1726,13 @@ analysis_result semantic_analysis::class_specialization_definition(
     if (parameters.empty())
         rule = "temp.expl.spec";
     entity_index outer = current_scope;
-    if (!is_namespace(outer) || defining_class)
+    /* [temp.class.spec]/5: a partial specialization of a member class
+       template is declared in the member's class (member_template_declaration
+       leaves defining_class clear); [temp.expl.spec]'s are not analysed
+       there ([temp.expl.spec]/2) */
+    bool member = entity_table[outer].kind == entity_kind::class_type;
+    if ((!is_namespace(outer) && !(member && !parameters.empty())) ||
+        defining_class)
         return not_supported(n, rule);
     /* [temp.expl.spec]/1 also declares a specialization without defining
        it: class-key simple-template-id ; (an elaborated-type-specifier),
