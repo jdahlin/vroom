@@ -315,8 +315,8 @@ analysis_result semantic_analysis::namespace_definition(node_index n)
     for (uint32_t i = 0; i < node.size() && !body; i++) {
         SyntaxElement c = node[i];
         if (syntax(c).is(syntax_kind::enclosing_namespace_specifier)) {
-            for (uint32_t k = 0; k < syntax(c).size(); k++)
-                head.append(syntax(c)[k]);
+            for (auto child : syntax(c).elements())
+                head.append(child);
             continue;
         }
         if (syntax(c).is(syntax_kind::gnu_attribute_specifier)) {
@@ -521,8 +521,7 @@ analysis_result semantic_analysis::using_directive(UsingDirective n)
         return unknown(not_supported(n, "namespace.udir"));
     node_index qualifier = 0;
     token_index name = 0;
-    for (uint32_t i = 0; i < node.size(); i++) {
-        SyntaxElement c = node[i];
+    for (auto c : node.elements()) {
         if (syntax(c).is(syntax_kind::nested_name_specifier)) {
             qualifier = c.index();
             continue;
@@ -616,8 +615,8 @@ semantic_analysis::namespace_alias_definition(NamespaceAliasDefinition n)
 void semantic_analysis::declaration_seq_in(node_index container)
 {
     auto namespace_body = syntax(container);
-    for (uint32_t i = 0; i < namespace_body.size(); i++)
-        for (auto d : namespace_body[i].declaration_seq().declarations())
+    for (auto child : namespace_body.elements())
+        for (auto d : child.declaration_seq().declarations())
             declaration(d);
 }
 

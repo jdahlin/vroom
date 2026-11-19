@@ -69,8 +69,7 @@ analysis_result semantic_analysis::class_specifier(ClassSpecifier n,
     entity_index held_in = current_scope;
     if (defining_class)
         held_in = defining_class;
-    for (uint32_t i = 1; i < head.size(); i++) {
-        auto c = head[i];
+    for (auto c : head.elements(1)) {
         if (!c.is_identifier())
             continue;
         uint32_t name = tokens.identifier(c.token());
@@ -202,29 +201,31 @@ analysis_result semantic_analysis::class_definition(node_index n,
        symbols', c_lowering::gnu_attributes), abi_tag (its name's,
        [abi:mangle.abi-tag]) and exclude_from_explicit_instantiation */
     gnu_attributes gnu;
-    for (uint32_t i = 0; i < head.size(); i++) {
-        auto c = head[i];
-        bool only_alignment = i && c.is(syntax_kind::attribute_specifier_seq);
+    /* the class-key first, then what follows it */
+    head_list.append(head[0]);
+    for (auto c : head.elements(1)) {
+        bool only_alignment = c.is(syntax_kind::attribute_specifier_seq);
         for (auto k : c.elements())
             only_alignment =
                 only_alignment && k.is(syntax_kind::alignment_specifier);
         if (only_alignment) {
             for (auto k : c.elements())
                 alignas_list.append(k.index());
-        } else if (i && c.is(syntax_kind::alignment_specifier)) {
+        } else if (c.is(syntax_kind::alignment_specifier)) {
             alignas_list.append(c.index());
-        } else if (i && class_head_attributes_without_effect(c)) {
+        } else if (class_head_attributes_without_effect(c)) {
             /* [dcl.attr.deprecated] and the like: nothing generated */
-        } else if (i && c.is_node() && gnu_or_without_effect(c.index())) {
-            bool seq = c.is(syntax_kind::attribute_specifier_seq);
-            uint32_t count = 1;
-            if (seq)
-                count = c.size();
-            for (uint32_t k = 0; k < count; k++) {
-                node_index each = c.index();
-                if (seq)
-                    each = c[k].index();
-                analysis_result r = gnu_attribute_specifier(each, gnu);
+        } else if (c.is_node() && gnu_or_without_effect(c.index())) {
+            /* one attribute-specifier, or a seq of them */
+            if (c.is(syntax_kind::attribute_specifier_seq)) {
+                for (auto each : c.elements()) {
+                    analysis_result r =
+                        gnu_attribute_specifier(each.index(), gnu);
+                    if (r != analysis_result::well_formed)
+                        return r;
+                }
+            } else {
+                analysis_result r = gnu_attribute_specifier(c.index(), gnu);
                 if (r != analysis_result::well_formed)
                     return r;
             }
@@ -1163,8 +1164,8 @@ analysis_result semantic_analysis::member_declaration_with_specifiers(
             !d[0][0].is(syntax_kind::unqualified_id))
             return d;
         bool o = false, f = false;
-        for (uint32_t i = 1; i < d.size(); i++)
-            if (!virt_specifier(d[i], o, f))
+        for (auto child : d.elements(1))
+            if (!virt_specifier(child, o, f))
                 return d;
         override_ = o;
         final_ = f;
@@ -1294,8 +1295,7 @@ analysis_result semantic_analysis::member_declarators(
         return r;
     }
     owned_array<SyntaxElement> declarators;
-    for (uint32_t i = first; i < node.size(); i++) {
-        auto d = node[i];
+    for (auto d : node.elements(first)) {
         if (d.is(preprocessing_op_or_punc::SEMICOLON))
             continue;
         if (d.is(syntax_kind::member_declarator_list)) {
@@ -2185,8 +2185,7 @@ bool semantic_analysis::virt_specifier(SyntaxElement d, bool &override_,
 SyntaxElement semantic_analysis::class_head_name(node_index head) const
 {
     auto h = syntax(head);
-    for (uint32_t i = 1; i < h.size(); i++) {
-        auto c = h[i];
+    for (auto c : h.elements(1)) {
         if (c.is(syntax_kind::alignment_specifier) ||
             (c.is_node() && gnu_or_without_effect(c.index())))
             continue;

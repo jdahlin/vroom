@@ -227,8 +227,7 @@ analysis_result semantic_analysis::base_clause(entity_index c, BaseClause n,
        template's own definition they are not known) */
     owned_array<SyntaxElement> listed;
     owned_array<bool> expanded;
-    for (uint32_t i = 1; i < syntax(n).size(); i++) {
-        SyntaxElement item = syntax(n)[i];
+    for (auto item : syntax(n).elements(1)) {
         if (!syntax(item).is(syntax_kind::base_specifier_list)) {
             listed.append(item);
             expanded.append(false);

@@ -413,8 +413,8 @@ uint32_t semantic_analysis::function_parameter_position(entity_index t,
             continue;
         if (syntax(c).is(syntax_kind::parameter_declaration)) {
             position++;
-            for (uint32_t j = 1; j < syntax(c).size(); j++) {
-                token_index id = declarator_id(syntax(c)[j]);
+            for (auto child : syntax(c).elements(1)) {
+                token_index id = declarator_id(child);
                 if (id && tokens.identifier(id) == name)
                     return position;
             }

@@ -67,8 +67,8 @@ void semantic_analysis::collect_labels(SyntaxElement s)
         l.point.at = node[0].token();
         function_state.labels.append(l);
     }
-    for (uint32_t i = 0; i < node.size(); i++)
-        collect_labels(node[i]);
+    for (auto child : node.elements())
+        collect_labels(child);
 }
 
 /*

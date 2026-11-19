@@ -124,6 +124,8 @@ class SyntaxRef
     SyntaxElement back() const;
     /* every child, nodes and tokens, in order */
     SyntaxElements elements() const;
+    /* the children from the first-th on: for (auto c : x.elements(1)) */
+    SyntaxElements elements(uint32_t first) const;
     bool is(syntax_kind k) const
     {
         return n && node().kind == k;
@@ -353,6 +355,13 @@ inline SyntaxElements SyntaxRef::elements() const
     if (!n)
         return {};
     return SyntaxElements(*cx, children(), size());
+}
+
+inline SyntaxElements SyntaxRef::elements(uint32_t first) const
+{
+    if (!n || first >= size())
+        return {};
+    return SyntaxElements(*cx, children() + first, size() - first);
 }
 
 /* the node children of a node, each as a view of type T (tokens are

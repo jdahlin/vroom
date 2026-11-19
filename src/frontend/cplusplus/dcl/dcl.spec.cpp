@@ -1068,8 +1068,8 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
         /* an attribute specifier has rules unless a class-specifier is
            among the specifiers */
         bool defines_class = false;
-        for (uint32_t k = 0; k < node.size(); k++)
-            if (node[k].is(syntax_kind::class_specifier))
+        for (auto child : node.elements())
+            if (child.is(syntax_kind::class_specifier))
                 defines_class = true;
         if (!defines_class &&
             syntax(c).is(syntax_kind::gnu_attribute_specifier))
@@ -1091,8 +1091,7 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
         }
         /* the class names the declaration would define are held, as
            hold_names holds its declarators' */
-        for (uint32_t k = 0; k < node.size(); k++) {
-            SyntaxElement spec = node[k];
+        for (auto spec : node.elements()) {
             if (!syntax(spec).is(syntax_kind::class_specifier) ||
                 !syntax(spec).size() ||
                 !syntax(spec)[0].is(syntax_kind::class_head))
@@ -1118,8 +1117,8 @@ analysis_result semantic_analysis::decl_specifier_seq(node_index seq,
            constant expression" */
         bool alignment = syntax(c).is(syntax_kind::alignment_specifier);
         if (syntax(c).is(syntax_kind::attribute_specifier_seq))
-            for (uint32_t k = 0; k < syntax(c).size(); k++)
-                if (syntax(c)[k].is(syntax_kind::alignment_specifier))
+            for (auto child : syntax(c).elements())
+                if (child.is(syntax_kind::alignment_specifier))
                     alignment = true;
         if (alignment)
             return not_supported(c.index(), "dcl.align");

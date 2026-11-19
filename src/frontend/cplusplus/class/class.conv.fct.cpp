@@ -228,9 +228,9 @@ node_index semantic_analysis::conversion_function_id_of(node_index n) const
             kind == syntax_kind::brace_or_equal_initializer ||
             kind == syntax_kind::braced_init_list)
             continue;
-        for (uint32_t i = 0; i < syntax(k).size(); i++)
-            if (!syntax(k)[i].is_token())
-                work.append(syntax(k)[i].index());
+        for (auto child : syntax(k).elements())
+            if (!child.is_token())
+                work.append(child.index());
     }
     return 0;
 }

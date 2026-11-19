@@ -956,8 +956,7 @@ analysis_result semantic_analysis::template_callee_parts(
         name = t[0].token();
         for (uint32_t i = 2; i + 1 < t.size(); i++) {
             if (t[i].is(syntax_kind::template_argument_list)) {
-                for (uint32_t k = 0; k < t[i].size(); k++) {
-                    SyntaxElement a = t[i][k];
+                for (auto a : t[i].elements()) {
                     if (!syntax(a).is(preprocessing_op_or_punc::COMMA))
                         written.append(a);
                 }

@@ -530,8 +530,8 @@ semantic_analysis::lambda_call_type(node_index n, node_index d,
                 continue;
             owned_array<SyntaxElement> specifiers;
             if (syntax(part).is(syntax_kind::decl_specifier_seq)) {
-                for (uint32_t k = 0; k < syntax(part).size(); k++)
-                    specifiers.append(syntax(part)[k]);
+                for (auto child : syntax(part).elements())
+                    specifiers.append(child);
             } else if (syntax(part).is(syntax_kind::gnu_attribute_specifier)) {
                 /* [ext:gnu_attributes] always_inline and the like: no
                    effect on the closure type */

@@ -41,8 +41,7 @@ analysis_result semantic_analysis::linkage_specification(LinkageSpecification n)
         return not_supported(n, "dcl.link");
     owned_array<node_index> inner;
     bool braces = false;
-    for (uint32_t i = 2; i < node.size(); i++) {
-        SyntaxElement x = node[i];
+    for (auto x : node.elements(2)) {
         if (x.is_token()) {
             braces = true;
             continue;

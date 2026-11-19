@@ -48,10 +48,10 @@ bool semantic_analysis::template_parameter_form(
        its type-constraint the placeholder's (abbreviated_parameters) */
     if (x.is(syntax_kind::decl_specifier_seq)) {
         out.type = true;
-        for (uint32_t i = 0; i < x.size(); i++)
-            if (x[i].is(syntax_kind::placeholder_type_specifier) &&
-                x[i][0].is(syntax_kind::type_constraint))
-                out.constraint = x[i][0].index();
+        for (auto child : x.elements())
+            if (child.is(syntax_kind::placeholder_type_specifier) &&
+                child[0].is(syntax_kind::type_constraint))
+                out.constraint = child[0].index();
         return true;
     }
     uint32_t k = 1;
@@ -286,8 +286,8 @@ bool semantic_analysis::has_pack_expansion(SyntaxElement list) const
 {
     if (list.is_token())
         return false;
-    for (uint32_t i = 0; i < syntax(list).size(); i++)
-        if (syntax(list)[i].is(preprocessing_op_or_punc::ELLIPSIS))
+    for (auto child : syntax(list).elements())
+        if (child.is(preprocessing_op_or_punc::ELLIPSIS))
             return true;
     return false;
 }

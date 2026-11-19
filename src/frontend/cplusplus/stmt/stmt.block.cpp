@@ -64,14 +64,13 @@ analysis_result semantic_analysis::block_items(node_index n, uint32_t &built)
 {
     owned_array<SyntaxElement> items;
     auto node = syntax(n);
-    for (uint32_t i = 0; i < node.size(); i++) {
-        SyntaxElement c = node[i];
+    for (auto c : node.elements()) {
         if (syntax(c).is(preprocessing_op_or_punc::LEFT_BRACE) ||
             syntax(c).is(preprocessing_op_or_punc::RIGHT_BRACE))
             continue;
         if (syntax(c).is(syntax_kind::statement_seq)) {
-            for (uint32_t k = 0; k < syntax(c).size(); k++)
-                items.append(syntax(c)[k]);
+            for (auto child : syntax(c).elements())
+                items.append(child);
             continue;
         }
         items.append(c);

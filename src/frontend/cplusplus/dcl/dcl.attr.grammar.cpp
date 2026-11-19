@@ -566,8 +566,8 @@ bool semantic_analysis::attributes_as_gnu(SyntaxElement n,
             size_t ns_length;
             attribute_name(ns_spelling, &ns, &ns_length);
             owned_array<SyntaxElement> names;
-            for (uint32_t i = 3; i < node.size(); i++)
-                names.append(node[i]);
+            for (auto child : node.elements(3))
+                names.append(child);
             while (!names.empty()) {
                 SyntaxElement a = names.back();
                 names.resize(names.size() - 1);
@@ -605,8 +605,8 @@ bool semantic_analysis::attributes_as_gnu(SyntaxElement n,
         if (node.is(syntax_kind::attribute_specifier_seq) ||
             node.is(syntax_kind::attribute_specifier) ||
             node.is(syntax_kind::attribute_list)) {
-            for (uint32_t i = 0; i < node.size(); i++)
-                work.append(node[i]);
+            for (auto child : node.elements())
+                work.append(child);
             continue;
         }
         if (node.is(syntax_kind::attribute)) {
@@ -655,8 +655,8 @@ bool semantic_analysis::gnu_attributes_without_effect(SyntaxElement n) const
             auto node = syntax(c);
             if (node.is(syntax_kind::gnu_attribute_specifier) ||
                 node.is(syntax_kind::gnu_attribute_list)) {
-                for (uint32_t i = 0; i < node.size(); i++)
-                    work.append(node[i]);
+                for (auto child : node.elements())
+                    work.append(child);
                 continue;
             }
             /* an attribute with arguments: its name first */
@@ -712,8 +712,8 @@ bool semantic_analysis::class_head_attributes_without_effect(
         return attributes_without_effect(c);
     if (!syntax(c).is(syntax_kind::attribute_specifier_seq))
         return false;
-    for (uint32_t i = 0; i < syntax(c).size(); i++)
-        if (!class_head_attributes_without_effect(syntax(c)[i]))
+    for (auto child : syntax(c).elements())
+        if (!class_head_attributes_without_effect(child))
             return false;
     return true;
 }

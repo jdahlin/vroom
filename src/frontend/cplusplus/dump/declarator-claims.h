@@ -118,8 +118,7 @@ class declarator_claims
         auto node = syntax(n);
         if (node.is(syntax_kind::lambda_expression))
             return true;
-        for (uint32_t i = 0; i < node.size(); i++) {
-            SyntaxElement c = node[i];
+        for (auto c : node.elements()) {
             if (!c.is_token() && has_lambda(c.index()))
                 return true;
         }
@@ -178,8 +177,7 @@ class declarator_claims
         unsigned short_ = 0, long_ = 0, char_ = 0, int_ = 0, double_ = 0;
         bool named = false;
         type.clear();
-        for (uint32_t i = 0; i < node.size(); i++) {
-            SyntaxElement c = node[i];
+        for (auto c : node.elements()) {
             if (is_attribute(c))
                 continue;
             if (c.is_token()) {
@@ -441,8 +439,7 @@ class declarator_claims
         bool closed = false;
         unsigned count = 0;
         owned_array<node_index> work;
-        for (uint32_t i = 0; i < node.size(); i++) {
-            SyntaxElement c = node[i];
+        for (auto c : node.elements()) {
             if (is_attribute(c))
                 continue;
             if (!closed) {
@@ -729,8 +726,7 @@ class declarator_claims
     {
         auto d = syntax(declaration);
         token_index last = d.end_token() - 1;
-        for (uint32_t i = 0; i < d.size(); i++) {
-            SyntaxElement c = d[i];
+        for (auto c : d.elements()) {
             if (is_kind(c, syntax_kind::function_body) &&
                 syntax(c).first_token() > d.first_token())
                 last = syntax(c).first_token() - 1;
@@ -870,16 +866,16 @@ class declarator_claims
         owned_buffer type;
         parameter_names.resize(0);
         mentioned_names.resize(0);
-        for (uint32_t i = 2; i < node.size(); i++) {
-            if (!is_kind(node[i], syntax_kind::defining_type_id))
+        for (auto child : node.elements(2)) {
+            if (!is_kind(child, syntax_kind::defining_type_id))
                 continue;
-            auto id = node[i];
+            auto id = child;
             specifiers s;
             declared d;
-            if (!id.size() || node[i][0].is_token() ||
-                !specified_type(node[i][0].index(), type, s))
+            if (!id.size() || child[0].is_token() ||
+                !specified_type(child[0].index(), type, s))
                 return;
-            if (id.size() > 1 && !declared_type(node[i][1], type, s, d))
+            if (id.size() > 1 && !declared_type(child[1], type, s, d))
                 return;
             if (s.placeholder || names_a_parameter())
                 return;
@@ -922,8 +918,7 @@ class declarator_claims
                 break;
             }
         }
-        for (uint32_t i = 0; i < s.size(); i++) {
-            SyntaxElement c = s[i];
+        for (auto c : s.elements()) {
             if (!c.is_token())
                 declarations(c.index(), anchor,
                              s.is(syntax_kind::declaration_seq));

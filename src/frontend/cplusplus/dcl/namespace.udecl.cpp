@@ -124,11 +124,10 @@ analysis_result semantic_analysis::using_declaration(UsingDeclaration n)
        using-declarator-list */
     auto node = syntax(n);
     owned_array<SyntaxElement> items;
-    for (uint32_t i = 0; i < node.size(); i++) {
-        SyntaxElement c = node[i];
+    for (auto c : node.elements()) {
         if (syntax(c).is(syntax_kind::using_declarator_list)) {
-            for (uint32_t k = 0; k < syntax(c).size(); k++)
-                items.append(syntax(c)[k]);
+            for (auto child : syntax(c).elements())
+                items.append(child);
         } else if (!c.is_token()) {
             items.append(c);
         }

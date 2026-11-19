@@ -810,8 +810,7 @@ analysis_result semantic_analysis::declarator(node_index declaration,
            gnu-attribute-specifier-seq_opt: the label is the symbol, one
            ordinary string-literal (concatenated or not) without escape
            sequences here */
-        for (uint32_t k = 1; k < e.size(); k++) {
-            auto c = e[k];
+        for (auto c : e.elements(1)) {
             if (c.gnu_attribute_specifier()) {
                 analysis_result r = gnu_attribute_specifier(c, m);
                 if (r != analysis_result::well_formed)
