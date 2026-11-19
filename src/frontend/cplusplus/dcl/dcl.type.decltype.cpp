@@ -98,10 +98,6 @@ analysis_result semantic_analysis::decltype_type(node_index n,
     if (node.child_count != 4)
         return not_supported(n, "dcl.type.decltype");
     syntax_child operand = tree.children(n)[2];
-    /* in a class's member-specification: the names of members whose
-       declarations analysis has no rules for are not held */
-    if (defining_class)
-        return not_supported(n, "class.mem");
     /* an operand that names a template parameter (or a type that depends
        on one) is type-dependent ([temp.dep.expr]): not analysed */
     if (names_dependent_entity(tree[n].first_token, tree[n].end_token)) {
@@ -114,6 +110,11 @@ analysis_result semantic_analysis::decltype_type(node_index n,
         type = qualified_type::make(dependent_written_type(n), cv_none);
         return analysis_result::well_formed;
     }
+    /* in a class's member-specification: the names of members whose
+       declarations analysis has no rules for are not held (a dependent
+       operand, above, is not looked into) */
+    if (defining_class)
+        return not_supported(n, "class.mem");
     expression_meaning m;
     unevaluated++;
     analysis_result r = expression(operand, m);
