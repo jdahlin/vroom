@@ -297,23 +297,21 @@ bool semantic_analysis::initializer_form(SyntaxElement init,
 {
     if (init.is_token())
         return false;
-    auto n = init;
-    auto node = n;
     direct = false;
     list = false;
-    if (node.is(syntax_kind::brace_or_equal_initializer) && node.size() == 2 &&
-        !node[1].is(syntax_kind::braced_init_list)) {
-        clause = node[1];
-    } else if (node.is(syntax_kind::initializer) && node.size() == 3 &&
-               !node[1].is(syntax_kind::initializer_list) &&
-               !node[1].is(syntax_kind::braced_init_list)) {
-        clause = node[1];
+    if (init.is(syntax_kind::brace_or_equal_initializer) && init.size() == 2 &&
+        !init[1].is(syntax_kind::braced_init_list)) {
+        clause = init[1];
+    } else if (init.is(syntax_kind::initializer) && init.size() == 3 &&
+               !init[1].is(syntax_kind::initializer_list) &&
+               !init[1].is(syntax_kind::braced_init_list)) {
+        clause = init[1];
         direct = true;
-    } else if (node.is(syntax_kind::braced_init_list) && node.size() == 3 &&
-               !node[1].is(syntax_kind::initializer_list) &&
-               !node[1].is(syntax_kind::braced_init_list) &&
-               !node[1].is(preprocessing_op_or_punc::RIGHT_BRACE)) {
-        clause = node[1];
+    } else if (init.is(syntax_kind::braced_init_list) && init.size() == 3 &&
+               !init[1].is(syntax_kind::initializer_list) &&
+               !init[1].is(syntax_kind::braced_init_list) &&
+               !init[1].is(preprocessing_op_or_punc::RIGHT_BRACE)) {
+        clause = init[1];
         direct = true;
         list = true;
     } else {
@@ -508,21 +506,20 @@ analysis_result semantic_analysis::trailing_return(SyntaxRef declaration,
                                                    qualified_type &type,
                                                    declarator_meaning &m)
 {
-    auto node = n;
-    if (node.size() != 2 || !node[1].is(syntax_kind::trailing_return_type))
+    if (n.size() != 2 || !n[1].is(syntax_kind::trailing_return_type))
         return not_supported(n, "dcl.fct");
     qualified_type auto_type = placeholder_type(false);
     /* (T other than auto: clang takes S(s)()->m, which [dcl.ambig.res]/1
        makes such a declaration, for an expression) */
     if (!(type == auto_type))
         return not_supported(n, "dcl.fct");
-    analysis_result r = declarator(declaration, node[0], type, m);
+    analysis_result r = declarator(declaration, n[0], type, m);
     if (r != analysis_result::well_formed)
         return r;
     const struct type f = type_table[type.unqualified()];
     if (f.kind != type_kind::function || !(f.operand == auto_type))
         return not_supported(n, "dcl.fct");
-    auto trailing = node[1];
+    auto trailing = n[1];
     if (trailing.size() != 2 || !trailing[1].is(syntax_kind::type_id))
         return not_supported(n, "dcl.fct");
     /* the type-id's own function declarators would replace the

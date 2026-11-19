@@ -245,10 +245,9 @@ analysis_result semantic_analysis::parameter_declaration(
        (libc++'s [[__maybe_unused__]]), and GCC's whose rules set nothing
        (libc++'s __attribute__((noescape))), are left out */
     using enum preprocessing_op_or_punc;
-    auto parameter = n;
     uint32_t lead = 0;
-    while (parameter[lead].is_node()) {
-        auto c = parameter[lead];
+    while (n[lead].is_node()) {
+        auto c = n[lead];
         if (c.gnu_attribute_specifier()) {
             gnu_attributes g;
             analysis_result r = gnu_attribute_specifier(c, g);
@@ -263,8 +262,8 @@ analysis_result semantic_analysis::parameter_declaration(
         lead++;
     }
     /* the children after the attributes left out */
-    auto at = [&](uint32_t i) { return parameter[lead + i]; };
-    uint32_t child_count = parameter.size() - lead;
+    auto at = [&](uint32_t i) { return n[lead + i]; };
+    uint32_t child_count = n.size() - lead;
     if (!at(0).decl_specifier_seq())
         return not_supported(n, "dcl.attr");
     specified s;
@@ -340,7 +339,6 @@ analysis_result semantic_analysis::function(SyntaxRef parameters,
                           "array or function",
                           "dcl.fct");
     using enum preprocessing_op_or_punc;
-    auto node = parameters;
     /* the parameter-declarations and the ellipsis, from the clause and its
        list: ( clause ) is the first and last child */
     owned_array<SyntaxRef> declarations;
@@ -351,14 +349,14 @@ analysis_result semantic_analysis::function(SyntaxRef parameters,
     /* [except.spec]/1: the noexcept-specifier */
     bool specified_exceptions = false, non_throwing = false;
     SyntaxRef exceptions = 0;
-    for (uint32_t i = node.size(); i-- > 0;) {
-        auto c = node[i];
+    for (uint32_t i = parameters.size(); i-- > 0;) {
+        auto c = parameters[i];
         if (c.is(RIGHT_PARENTHESIS)) {
             closed = true;
         } else if (!closed) {
             /* a lambda-declarator's decl-specifier-seq (mutable, constexpr,
                consteval) and trailing-return-type: lambda_expression's */
-            if (node.lambda_declarator() &&
+            if (parameters.lambda_declarator() &&
                 (c.decl_specifier_seq() || c.trailing_return_type() ||
                  (c.is_token() &&
                   tokens[c.token()].kind == token_kind::keyword)))
@@ -398,7 +396,7 @@ analysis_result semantic_analysis::function(SyntaxRef parameters,
     }
     /* a function declarator of the parameters is not the member's */
     in_member_declarator = false;
-    for (auto c : node.elements()) {
+    for (auto c : parameters.elements()) {
         if (c.is(RIGHT_PARENTHESIS))
             break;
         if (!c.is(LEFT_PARENTHESIS))

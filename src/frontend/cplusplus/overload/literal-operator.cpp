@@ -50,29 +50,28 @@ uint32_t semantic_analysis::literal_operator_name(const char *suffix,
 analysis_result semantic_analysis::literal_operator_id(LiteralOperatorId id,
                                                        declarator_meaning &m)
 {
-    auto node = id;
     owned_buffer suffix;
-    if (node.size() == 3 && node[2].is_token() &&
-        tokens[node[2].token()].kind == token_kind::identifier) {
+    if (id.size() == 3 && id[2].is_token() &&
+        tokens[id[2].token()].kind == token_kind::identifier) {
         /* /1: "The string-literal or user-defined-string-literal in a
            literal-operator-id shall have no encoding-prefix and shall
            contain no characters other than the implicit terminating
            '\0'." */
         owned_buffer quotes;
-        tokens.spelling(node[1].token(), quotes.get());
+        tokens.spelling(id[1].token(), quotes.get());
         if (quotes.size() != 2)
             return ill_formed(id,
                               "the string-literal in a literal-operator-id "
                               "shall have no encoding-prefix and contain no "
                               "characters",
                               "over.literal");
-        tokens.spelling(node[2].token(), suffix.get());
-    } else if (node.size() == 2 && node[1].is_token()) {
+        tokens.spelling(id[2].token(), suffix.get());
+    } else if (id.size() == 2 && id[1].is_token()) {
         owned_buffer spelling;
-        tokens.spelling(node[1].token(), spelling.get());
+        tokens.spelling(id[1].token(), spelling.get());
         suffix_after_quote(spelling, suffix);
     }
-    if (!node.size() || !node[0].is_token() || !suffix.size())
+    if (!id.size() || !id[0].is_token() || !suffix.size())
         return not_supported(id, "over.literal");
     /* [usrlit.suffix]/1: "Literal suffix identifiers that do not start
        with an underscore are reserved for future standardization": the
@@ -80,7 +79,7 @@ analysis_result semantic_analysis::literal_operator_id(LiteralOperatorId id,
     if (suffix.data()[0] != '_')
         return not_supported(id, "over.literal");
     m.has_id = true;
-    m.id = node[0].token();
+    m.id = id[0].token();
     m.literal_operator = true;
     tokens.name_token(m.id,
                       literal_operator_name(suffix.data(), suffix.size()));

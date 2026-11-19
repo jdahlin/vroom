@@ -550,15 +550,14 @@ bool semantic_analysis::attributes_as_gnu(SyntaxElement n,
                 return false;
             continue;
         }
-        auto node = c;
-        if (node.is(syntax_kind::attribute_specifier) && node.size() > 2 &&
-            node[2].is(syntax_kind::attribute_using_prefix)) {
+        if (c.is(syntax_kind::attribute_specifier) && c.size() > 2 &&
+            c[2].is(syntax_kind::attribute_using_prefix)) {
             /* [dcl.attr.grammar]/3: "If an attribute-specifier contains an
                attribute-using-prefix, ... each attribute-token in that
                attribute-list is treated as if its identifier were prefixed
                with N::" */
-            auto prefix = node[2];
-            if (node[2].size() != 3 || !prefix[1].is_token())
+            auto prefix = c[2];
+            if (c[2].size() != 3 || !prefix[1].is_token())
                 return false;
             owned_buffer ns_spelling;
             tokens.spelling(prefix[1].token(), ns_spelling.get());
@@ -566,7 +565,7 @@ bool semantic_analysis::attributes_as_gnu(SyntaxElement n,
             size_t ns_length;
             attribute_name(ns_spelling, &ns, &ns_length);
             owned_array<SyntaxElement> names;
-            for (auto child : node.elements(3))
+            for (auto child : c.elements(3))
                 names.append(child);
             while (!names.empty()) {
                 SyntaxElement a = names.back();
@@ -602,28 +601,28 @@ bool semantic_analysis::attributes_as_gnu(SyntaxElement n,
             }
             continue;
         }
-        if (node.is(syntax_kind::attribute_specifier_seq) ||
-            node.is(syntax_kind::attribute_specifier) ||
-            node.is(syntax_kind::attribute_list)) {
-            for (auto child : node.elements())
+        if (c.is(syntax_kind::attribute_specifier_seq) ||
+            c.is(syntax_kind::attribute_specifier) ||
+            c.is(syntax_kind::attribute_list)) {
+            for (auto child : c.elements())
                 work.append(child);
             continue;
         }
-        if (node.is(syntax_kind::attribute)) {
+        if (c.is(syntax_kind::attribute)) {
             /* the token and an attribute-argument-clause, which none of
                these takes for anything vcc generates */
-            if (!node.size() || node[0].is(syntax_kind::attribute))
+            if (!c.size() || c[0].is(syntax_kind::attribute))
                 return false;
-            work.append(node[0]);
+            work.append(c[0]);
             continue;
         }
-        if (!node.is(syntax_kind::attribute_scoped_token) || node.size() != 3 ||
-            !node[0].is_token() || !node[2].is_token())
+        if (!c.is(syntax_kind::attribute_scoped_token) || c.size() != 3 ||
+            !c[0].is_token() || !c[2].is_token())
             /* an attribute-using-prefix, an alignment-specifier */
             return false;
         owned_buffer ns_spelling, spelling;
-        tokens.spelling(node[0].token(), ns_spelling.get());
-        tokens.spelling(node[2].token(), spelling.get());
+        tokens.spelling(c[0].token(), ns_spelling.get());
+        tokens.spelling(c[2].token(), spelling.get());
         const char *ns, *name;
         size_t ns_length, length;
         attribute_name(ns_spelling, &ns, &ns_length);
@@ -652,18 +651,17 @@ bool semantic_analysis::gnu_attributes_without_effect(SyntaxElement n) const
         work.resize(work.size() - 1);
         SyntaxElement name_token = c;
         if (!c.is_token()) {
-            auto node = c;
-            if (node.is(syntax_kind::gnu_attribute_specifier) ||
-                node.is(syntax_kind::gnu_attribute_list)) {
-                for (auto child : node.elements())
+            if (c.is(syntax_kind::gnu_attribute_specifier) ||
+                c.is(syntax_kind::gnu_attribute_list)) {
+                for (auto child : c.elements())
                     work.append(child);
                 continue;
             }
             /* an attribute with arguments: its name first */
-            if (!node.is(syntax_kind::gnu_attribute) || !node.size() ||
-                !node[0].is_token())
+            if (!c.is(syntax_kind::gnu_attribute) || !c.size() ||
+                !c[0].is_token())
                 return false;
-            name_token = node[0];
+            name_token = c[0];
             /* visibility("default") (libc++'s _LIBCPP_EXPORTED_FROM_ABI):
                the visibility every symbol vcc emits has already
                (gnu_attribute_specifier's rule) */
@@ -673,9 +671,9 @@ bool semantic_analysis::gnu_attributes_without_effect(SyntaxElement n) const
             size_t length;
             attribute_name(spelling, &name, &length);
             if (name_is(name, length, "visibility")) {
-                if (node.size() != 4 || !node[2].is_token())
+                if (c.size() != 4 || !c[2].is_token())
                     return false;
-                tokens.spelling(node[2].token(), value.get());
+                tokens.spelling(c[2].token(), value.get());
                 if (value.size() != 9 || memcmp(value.data(), "\"default\"", 9))
                     return false;
                 any = true;

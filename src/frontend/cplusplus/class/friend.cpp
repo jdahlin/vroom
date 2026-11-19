@@ -111,16 +111,14 @@ analysis_result semantic_analysis::friend_class(entity_index c, SyntaxRef n,
     }
     if (!type.is(syntax_kind::elaborated_type_specifier))
         return not_supported(n, "class.friend");
-    auto t = type;
-    auto node = t;
-    standard_keyword key = leading_keyword(t);
+    standard_keyword key = leading_keyword(type);
     if (!is_class_key(key))
         return not_supported(n, "class.friend");
-    if (node.size() == 3) {
+    if (type.size() == 3) {
         /* a qualified name: [basic.lookup.elab]/3, a class declared
            before */
         type_index named = 0;
-        analysis_result r = elaborated_type_specifier(t, named);
+        analysis_result r = elaborated_type_specifier(type, named);
         if (r != analysis_result::well_formed)
             return r;
         const struct type &record = type_table[named];
@@ -133,9 +131,9 @@ analysis_result semantic_analysis::friend_class(entity_index c, SyntaxRef n,
         friends.append(f);
         return analysis_result::well_formed;
     }
-    if (node.size() != 2 || !node[1].is_identifier())
+    if (type.size() != 2 || !type[1].is_identifier())
         return not_supported(n, "class.friend");
-    uint32_t name = tokens.identifier(node[1].token());
+    uint32_t name = tokens.identifier(type[1].token());
     if (entity_table[space].unknown_names)
         return not_supported(n, "class.friend");
     lookup_result found = lookup_unqualified(name, lookup_filter::types);
@@ -194,32 +192,25 @@ semantic_analysis::friend_function(entity_index c, SyntaxRef n,
        definition has no rules for beyond its form (visibility as the
        class's members') */
     uint32_t leading = leading_gnu_attributes(n);
-    auto children_syntax = n;
-    uint32_t count = children_syntax.size() - leading;
-    bool defines = children_syntax.is(syntax_kind::function_definition);
+    uint32_t count = n.size() - leading;
+    bool defines = n.is(syntax_kind::function_definition);
     if (defines) {
         auto body = n.function_definition().function_body();
-        if (count != 3 ||
-            !children_syntax[leading].is(syntax_kind::decl_specifier_seq) ||
+        if (count != 3 || !n[leading].is(syntax_kind::decl_specifier_seq) ||
             !body.is(syntax_kind::function_body))
             return not_supported(n, "class.friend");
         if (!body.defaulted() && !body.plain())
             return not_supported(n, "dcl.fct.def.general");
-    } else if (!children_syntax.is(syntax_kind::member_declaration) ||
-               count != 3 ||
-               !children_syntax[leading + 2].is(
-                   preprocessing_op_or_punc::SEMICOLON) ||
-               children_syntax[leading + 1].is(
-                   syntax_kind::member_declarator) ||
-               children_syntax[leading + 1].is(
-                   syntax_kind::member_declarator_list)) {
+    } else if (!n.is(syntax_kind::member_declaration) || count != 3 ||
+               !n[leading + 2].is(preprocessing_op_or_punc::SEMICOLON) ||
+               n[leading + 1].is(syntax_kind::member_declarator) ||
+               n[leading + 1].is(syntax_kind::member_declarator_list)) {
         return not_supported(n, "class.friend");
     }
     specified s;
     bool outer = friend_allowed;
     friend_allowed = true;
-    analysis_result r =
-        decl_specifier_seq(children_syntax[leading].index(), s, false);
+    analysis_result r = decl_specifier_seq(n[leading].index(), s, false);
     friend_allowed = outer;
     if (r != analysis_result::well_formed)
         return r;
@@ -232,7 +223,7 @@ semantic_analysis::friend_function(entity_index c, SyntaxRef n,
     declarator_meaning m;
     function_cv = 0;
     function_parameters.clear();
-    r = declarator(n, children_syntax[leading + 1], type, m);
+    r = declarator(n, n[leading + 1], type, m);
     if (r != analysis_result::well_formed)
         return r;
     /* an operator function only as a definition ([over.oper]: its
@@ -248,9 +239,7 @@ semantic_analysis::friend_function(entity_index c, SyntaxRef n,
         if (parameter.default_argument)
             return not_supported(n, "dcl.fct.default");
     uint32_t name = tokens.identifier(m.id);
-    if (defines &&
-        explicit_body(children_syntax[leading + 2],
-                      standard_keyword::default_) &&
+    if (defines && explicit_body(n[leading + 2], standard_keyword::default_) &&
         !defaulted_equality_declared(c, name, type))
         return not_supported(n, "class.compare.default");
     entity_index space = enclosing_namespace(c);
@@ -482,14 +471,12 @@ analysis_result semantic_analysis::friend_member_declaration(
     entity_index c, MemberSimpleDeclaration d, owned_array<SyntaxRef> &bodies)
 {
     SyntaxRef n = d;
-    auto node = n;
     uint32_t leading = leading_gnu_attributes(n);
-    auto children_syntax = n;
-    if (node.size() < leading + 2)
+    if (n.size() < leading + 2)
         return not_supported(n, "class.friend");
-    if (node.size() == leading + 2) {
+    if (n.size() == leading + 2) {
         /* friend class-key identifier ; friend type-name ; */
-        auto seq = children_syntax[leading];
+        auto seq = n[leading];
         SyntaxElement type = {};
         unsigned friends_seen = 0, others = 0;
         for (SyntaxElement x : seq.elements()) {

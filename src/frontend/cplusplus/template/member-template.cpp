@@ -40,21 +40,23 @@ analysis_result semantic_analysis::member_function_template(
     defining_class = saved_class;
     if (head != analysis_result::well_formed)
         return head;
-    auto d = definition;
     uint32_t lead = leading_gnu_attributes(definition);
     /* a constructor template's decl-specifier-seq is optional
        ([class.ctor]/1) */
-    uint32_t specifiers =
-        d.size() > lead && d[lead].is(syntax_kind::decl_specifier_seq);
-    bool constructor = declares_special_member(c, d[lead + specifiers]);
+    uint32_t specifiers = definition.size() > lead &&
+                          definition[lead].is(syntax_kind::decl_specifier_seq);
+    bool constructor =
+        declares_special_member(c, definition[lead + specifiers]);
     /* [dcl.decl]/4: a trailing requires-clause (trailing_constraint),
        where the template-head has none */
     uint32_t trailing = static_cast<bool>(trailing_constraint(n));
     if (trailing && head_constraint(n))
         return not_supported(n, "temp.constr");
-    if (d.size() != lead + 2 + specifiers + trailing ||
-        (!specifiers && !constructor) || d[lead + specifiers].is_token() ||
-        !d[lead + specifiers + 1 + trailing].is(syntax_kind::function_body))
+    if (definition.size() != lead + 2 + specifiers + trailing ||
+        (!specifiers && !constructor) ||
+        definition[lead + specifiers].is_token() ||
+        !definition[lead + specifiers + 1 + trailing].is(
+            syntax_kind::function_body))
         return not_supported(n, "temp.mem");
     uint32_t index = 0, first = 0;
     entity_index scope = 0;

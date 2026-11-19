@@ -267,12 +267,11 @@ analysis_result semantic_analysis::named_cast(SyntaxRef n,
         kinds = cast_reinterpret;
     else if (keyword != standard_keyword::static_cast_)
         return not_supported(n, "expr.dynamic.cast");
-    auto children = n;
     qualified_type to;
-    analysis_result r = type_id(children[2], to);
+    analysis_result r = type_id(n[2], to);
     /* [over.over]/1: "an explicit type conversion" */
     if (r == analysis_result::well_formed)
-        r = target_expression(children[5], to, m);
+        r = target_expression(n[5], to, m);
     if (r != analysis_result::well_formed)
         return r;
     return explicit_conversion(n, to, m, kinds);
@@ -280,44 +279,41 @@ analysis_result semantic_analysis::named_cast(SyntaxRef n,
 
 analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
 {
-    auto node = n;
-    if (node.size() == 2 && node[1].is_token()) {
-        preprocessing_op_or_punc op = preprocessing_op_or_punc_primary(
-            tokens[node[1].token()].op_or_punc);
+    if (n.size() == 2 && n[1].is_token()) {
+        preprocessing_op_or_punc op =
+            preprocessing_op_or_punc_primary(tokens[n[1].token()].op_or_punc);
         if (op == preprocessing_op_or_punc::PLUS_PLUS ||
             op == preprocessing_op_or_punc::MINUS_MINUS)
-            return increment(n, node[0],
-                             op == preprocessing_op_or_punc::MINUS_MINUS, true,
-                             m);
+            return increment(
+                n, n[0], op == preprocessing_op_or_punc::MINUS_MINUS, true, m);
         return not_supported(n, "expr.post");
     }
-    if (node.size() < 2)
+    if (n.size() < 2)
         return not_supported(n, "expr.post");
-    if (node.size() == 7 && node[0].is_token() &&
-        node[2].is(syntax_kind::type_id)) {
-        standard_keyword k = p.keyword_of(tokens[node[0].token()]);
+    if (n.size() == 7 && n[0].is_token() && n[2].is(syntax_kind::type_id)) {
+        standard_keyword k = p.keyword_of(tokens[n[0].token()]);
         if (k == standard_keyword::static_cast_ ||
             k == standard_keyword::const_cast_ ||
             k == standard_keyword::reinterpret_cast_ ||
             k == standard_keyword::dynamic_cast_)
             return named_cast(n, k, m);
     }
-    if (node.size() == 3 && (node[1].is(preprocessing_op_or_punc::DOT) ||
-                             node[1].is(preprocessing_op_or_punc::ARROW)))
+    if (n.size() == 3 && (n[1].is(preprocessing_op_or_punc::DOT) ||
+                          n[1].is(preprocessing_op_or_punc::ARROW)))
         return member_reference(n, m);
     /* [expr.type.conv]/1: "A simple-type-specifier or typename-specifier
        followed by a parenthesized optional expression-list or by a
        braced-init-list (the initializer) constructs a value of the
        specified type given the initializer." */
-    bool parenthesized = node[1].is(preprocessing_op_or_punc::LEFT_PARENTHESIS);
-    bool braced = node[1].is(syntax_kind::braced_init_list);
+    bool parenthesized = n[1].is(preprocessing_op_or_punc::LEFT_PARENTHESIS);
+    bool braced = n[1].is(syntax_kind::braced_init_list);
     type_index named = 0;
     /* [dcl.type.simple]/1: nested-name-specifier(opt) type-name */
     entity_index class_named = 0;
     uint32_t named_cv = 0;
     if ((parenthesized || braced) &&
-        node[0].is(syntax_kind::simple_type_specifier)) {
-        analysis_result r = qualified_type_name(node[0], named, named_cv);
+        n[0].is(syntax_kind::simple_type_specifier)) {
+        analysis_result r = qualified_type_name(n[0], named, named_cv);
         if (r != analysis_result::well_formed)
             return r;
         if (type_table[named].kind == type_kind::class_type &&
@@ -325,10 +321,10 @@ analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
                 entity_kind::class_type)
             class_named = type_table[named].entity;
     }
-    if ((parenthesized || braced) && node[0].is_token()) {
-        const token &t = tokens[node[0].token()];
+    if ((parenthesized || braced) && n[0].is_token()) {
+        const token &t = tokens[n[0].token()];
         if (t.kind == token_kind::identifier) {
-            entity_index e = lookup(tokens.identifier(node[0].token()));
+            entity_index e = lookup(tokens.identifier(n[0].token()));
             if (e && entity_table[e].kind == entity_kind::class_type)
                 class_named = e;
             else if (e && (entity_table[e].kind == entity_kind::typedef_name ||
@@ -400,13 +396,12 @@ analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
         return not_supported(n, "expr.type.conv");
     if (class_named)
         return class_conversion(n, class_named, m);
-    if ((parenthesized || braced) &&
-        node[0].is(syntax_kind::simple_template_id)) {
+    if ((parenthesized || braced) && n[0].is(syntax_kind::simple_template_id)) {
         /* [temp.names]/1 with [expr.type.conv]/1: a simple-template-id
            naming a class template is a simple-type-specifier
            ([dcl.type.simple]/1), the specialization's class */
-        auto id = node[0];
-        if (node[0].size() >= 3 && id[0].is_token() &&
+        auto id = n[0];
+        if (n[0].size() >= 3 && id[0].is_token() &&
             tokens[id[0].token()].kind == token_kind::identifier) {
             lookup_result x = lookup_unqualified(
                 tokens.identifier(id[0].token()), lookup_filter::any);
@@ -415,7 +410,7 @@ analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
                 found = x.unknown_entity;
             if (class_template_of(found)) {
                 type_index t = 0;
-                analysis_result r = template_type(node[0], 0, false, t);
+                analysis_result r = template_type(n[0], 0, false, t);
                 if (r != analysis_result::well_formed)
                     return r;
                 if (type_table[t].kind != type_kind::class_type)
@@ -436,7 +431,7 @@ analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
             return not_supported(n, "expr.type.conv");
         bool is_void = record.kind == type_kind::fundamental &&
                        record.fundamental == fundamental_type::void_;
-        if (parenthesized && node.size() == 3) {
+        if (parenthesized && n.size() == 3) {
             /* [expr.type.conv]/2: "Otherwise, if the type is cv void and the
                initializer is () or {}, the expression is a prvalue of the
                specified type that performs no initialization.  Otherwise,
@@ -449,12 +444,12 @@ analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
             m.evaluation = constness::constant;
             m.value = 0;
             m.node =
-                expression_node(semantic_kind::constant, m, node.first_token());
+                expression_node(semantic_kind::constant, m, n.first_token());
             return analysis_result::well_formed;
         }
-        if (parenthesized && node.size() == 4) {
-            if (node[2].is(syntax_kind::initializer_list)) {
-                if (has_pack_expansion(node[2]))
+        if (parenthesized && n.size() == 4) {
+            if (n[2].is(syntax_kind::initializer_list)) {
+                if (has_pack_expansion(n[2]))
                     return not_supported(n, "temp.variadic");
                 /* [dcl.init]/14: "If the entity being initialized does not
                    have class type, the expression-list in a parenthesized
@@ -469,16 +464,16 @@ analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
             /* "If the initializer is a parenthesized single expression, the
                type conversion expression is equivalent to the corresponding
                cast expression." */
-            analysis_result r = expression(node[2], m);
+            analysis_result r = expression(n[2], m);
             if (r != analysis_result::well_formed)
                 return r;
             return explicit_conversion(n, to, m);
         }
-        if (braced && node.size() == 2) {
+        if (braced && n.size() == 2) {
             if (is_void)
                 return not_supported(n, "expr.type.conv");
             initialized_value result;
-            analysis_result r = list_initialization(node[1], to, true, result);
+            analysis_result r = list_initialization(n[1], to, true, result);
             if (r != analysis_result::well_formed)
                 return r;
             m = expression_meaning();
@@ -492,8 +487,7 @@ analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
     }
     if (parenthesized)
         return call(n, m);
-    if (node.size() == 4 &&
-        node[1].is(preprocessing_op_or_punc::LEFT_BRACKET)) {
+    if (n.size() == 4 && n[1].is(preprocessing_op_or_punc::LEFT_BRACKET)) {
         /* [expr.sub]/1: "One of the expressions shall be a glvalue of type
            "array of T" or a prvalue of type "pointer to T" and the other
            shall be a prvalue of unscoped enumeration or integral type.  The
@@ -501,21 +495,21 @@ analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
            definition) to *((E1)+(E2)), except that in the case of an array
            operand, the result is an lvalue if that operand is an lvalue and
            an xvalue otherwise." */
-        if (node[2].is(syntax_kind::braced_init_list) ||
-            node[2].is(syntax_kind::initializer_list))
+        if (n[2].is(syntax_kind::braced_init_list) ||
+            n[2].is(syntax_kind::initializer_list))
             return not_supported(n, "expr.sub");
         expression_meaning a, i;
-        analysis_result r = expression(node[0], a);
+        analysis_result r = expression(n[0], a);
         if (r == analysis_result::well_formed)
-            r = expression(node[2], i);
+            r = expression(n[2], i);
         if (r != analysis_result::well_formed)
             return r;
         /* [over.sub]/1: "the operator function is selected by overload
            resolution ([over.match.oper])" */
         bool handled = false;
-        r = binary_operator_function(n, node[1].token(),
+        r = binary_operator_function(n, n[1].token(),
                                      preprocessing_op_or_punc::LEFT_BRACKET,
-                                     node[0], a, node[2], i, handled, m);
+                                     n[0], a, n[2], i, handled, m);
         if (r != analysis_result::well_formed || handled)
             return r;
         expression_meaning *base = &a, *index = &i;
@@ -561,8 +555,8 @@ analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
         m.evaluation = evaluation;
         if (m.evaluation == constness::constant)
             m.evaluation = constness::unknown;
-        m.node = expression_node(semantic_kind::subscript, m,
-                                 node.first_token(), base->node, index->node);
+        m.node = expression_node(semantic_kind::subscript, m, n.first_token(),
+                                 base->node, index->node);
         return analysis_result::well_formed;
     }
     return not_supported(n, "expr.post");
@@ -583,15 +577,14 @@ analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
  */
 analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
 {
-    auto node = n;
     if (builtin_addressof_call(n))
         return builtin_addressof(n, m);
     owned_array<SyntaxElement> arguments;
     /* [temp.variadic]/5: the arguments, pack expansions instantiated: each
        analysed now, one per element of the packs its pattern names */
     owned_array<expression_meaning> expanded;
-    if (node.size() == 4) {
-        SyntaxElement c = node[2];
+    if (n.size() == 4) {
+        SyntaxElement c = n[2];
         if (c.is(syntax_kind::initializer_list)) {
             owned_array<SyntaxElement> written;
             owned_array<bool> expansion;
@@ -635,7 +628,7 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
         } else {
             arguments.append(c);
         }
-    } else if (node.size() != 3) {
+    } else if (n.size() != 3) {
         return not_supported(n, "expr.call");
     }
     expression_meaning f;
@@ -652,10 +645,10 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
         /* [class.mfct.non-static]/2: a member function template's name
            in a member function of its class (or a class derived from
            it), called on (*this) */
-        if (node[0].is_token() &&
-            tokens[node[0].token()].kind == token_kind::identifier) {
+        if (n[0].is_token() &&
+            tokens[n[0].token()].kind == token_kind::identifier) {
             lookup_result x = lookup_unqualified(
-                tokens.identifier(node[0].token()), lookup_filter::any);
+                tokens.identifier(n[0].token()), lookup_filter::any);
             if (x.unknown && !x.entity && !x.ambiguous &&
                 member_function_template_of(x.unknown_entity)) {
                 bool ambiguous = false;
@@ -666,7 +659,7 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
                     ambiguous)
                     return not_supported(n, "temp.mem");
                 expression_meaning object;
-                r = this_object(node[0].token(), object);
+                r = this_object(n[0].token(), object);
                 if (r != analysis_result::well_formed)
                     return r;
                 owned_array<expression_meaning> early;
@@ -676,7 +669,7 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
                                             arguments, early, m);
             }
         }
-        r = template_callee(node[0], name, ft, specified, qualified);
+        r = template_callee(n[0], name, ft, specified, qualified);
         if (r != analysis_result::well_formed)
             return r;
         if (ft) {
@@ -698,8 +691,8 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
        lookup's */
     owned_array<entity_index> found_by_adl;
     bool looked_up = false;
-    if (node[0].is_token() &&
-        tokens[node[0].token()].kind == token_kind::identifier) {
+    if (n[0].is_token() &&
+        tokens[n[0].token()].kind == token_kind::identifier) {
         /* [basic.lookup.argdep]/3: "Let X be the lookup set produced by
            unqualified lookup and let Y be the lookup set produced by argument
            dependent lookup (defined as follows).  If X contains (3.1) a
@@ -710,7 +703,7 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
            associated with the argument types as described below.  The set of
            declarations found by the lookup of the name is the union of X and
            Y." */
-        token_index t = node[0].token();
+        token_index t = n[0].token();
         uint32_t name = tokens.identifier(t);
         lookup_result x = lookup_unqualified(name, lookup_filter::any);
         bool dependent = !x.ambiguous && !x.unknown;
@@ -783,9 +776,9 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
         for (const expression_meaning &e : expanded)
             early.append(e);
     if (!looked_up) {
-        overloaded_callee = callee_name(node[0]);
+        overloaded_callee = callee_name(n[0]);
         member_template_name = 0;
-        r = expression(node[0], f);
+        r = expression(n[0], f);
         overloaded_callee = 0;
     }
     if (entity_index held = member_template_name) {
@@ -806,7 +799,7 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
             return not_supported(n, "temp.variadic");
         owned_array<SyntaxElement> operand_syntax;
         owned_array<expression_meaning> operands;
-        operand_syntax.append(node[0]);
+        operand_syntax.append(n[0]);
         operands.append(f);
         for (SyntaxElement a : arguments) {
             if (a.is(syntax_kind::braced_init_list))
@@ -819,7 +812,7 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
             operands.append(e);
         }
         bool handled = false;
-        r = overloaded_operator(n, node[1].token(),
+        r = overloaded_operator(n, n[1].token(),
                                 preprocessing_op_or_punc::LEFT_PARENTHESIS,
                                 false, operand_syntax, operands, handled, m);
         if (r != analysis_result::well_formed || handled)
@@ -931,11 +924,11 @@ analysis_result semantic_analysis::template_callee_parts(
     nominated_scope scope;
     if (callee.is(syntax_kind::qualified_id)) {
         /* [namespace.qual]: a function template of a namespace */
-        auto q = callee;
-        if (q.size() != 2 || !q[0].is(syntax_kind::nested_name_specifier))
+        if (callee.size() != 2 ||
+            !callee[0].is(syntax_kind::nested_name_specifier))
             return analysis_result::well_formed;
-        id = q[1];
-        analysis_result r = nested_name_specifier(q[0], scope);
+        id = callee[1];
+        analysis_result r = nested_name_specifier(callee[0], scope);
         if (r != analysis_result::well_formed)
             return r;
         if (!is_namespace(scope.entity))
@@ -948,18 +941,17 @@ analysis_result semantic_analysis::template_callee_parts(
             return analysis_result::well_formed;
         name = id.token();
     } else if (id.is(syntax_kind::simple_template_id)) {
-        auto t = id;
-        if (t.size() < 3 || !t[0].is_identifier())
+        if (id.size() < 3 || !id[0].is_identifier())
             return analysis_result::well_formed;
-        name = t[0].token();
-        for (uint32_t i = 2; i + 1 < t.size(); i++) {
-            if (t[i].is(syntax_kind::template_argument_list)) {
-                for (auto a : t[i].elements()) {
+        name = id[0].token();
+        for (uint32_t i = 2; i + 1 < id.size(); i++) {
+            if (id[i].is(syntax_kind::template_argument_list)) {
+                for (auto a : id[i].elements()) {
                     if (!a.is(preprocessing_op_or_punc::COMMA))
                         written.append(a);
                 }
             } else {
-                written.append(t[i]);
+                written.append(id[i]);
             }
         }
     } else {
@@ -1324,7 +1316,6 @@ analysis_result semantic_analysis::call_with(
     const owned_array<expression_meaning> &early, expression_meaning &m)
 {
     analysis_result r = analysis_result::well_formed;
-    auto node = n;
     const struct type function = type_table[function_type.unqualified()];
     size_t count = function.parameter_count;
     owned_array<uint32_t> argument_nodes;
@@ -1470,14 +1461,14 @@ analysis_result semantic_analysis::call_with(
         named.category = value_category::lvalue;
         named.evaluation = constness::constant;
         named.entity = member;
-        callee = expression_node(semantic_kind::entity, named,
-                                 node.first_token(), member);
+        callee = expression_node(semantic_kind::entity, named, n.first_token(),
+                                 member);
     }
     /* [class.virtual]/16: "Explicit qualification with the scope operator
        ([expr.prim.id.qual]) suppresses the virtual call mechanism" */
     bool dispatched = false;
     if (member && entity_table[member].virtual_) {
-        if (!node.size())
+        if (!n.size())
             return not_supported(n, "class.virtual");
         SyntaxElement name = n[0];
         if (!name.is_token() && name.is(syntax_kind::postfix_expression) &&
@@ -1491,7 +1482,7 @@ analysis_result semantic_analysis::call_with(
         else if (!name.is(syntax_kind::qualified_id))
             return not_supported(n, "class.virtual");
     }
-    m.node = expression_node(semantic_kind::call, m, node.first_token(), callee,
+    m.node = expression_node(semantic_kind::call, m, n.first_token(), callee,
                              object);
     if (dispatched)
         semantics[m.node].c = 1;

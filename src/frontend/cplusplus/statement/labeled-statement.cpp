@@ -55,19 +55,17 @@ void semantic_analysis::collect_labels(SyntaxElement s)
 {
     if (s.is_token())
         return;
-    auto node = s;
-    if (node.is(syntax_kind::lambda_expression) ||
-        node.is(syntax_kind::class_specifier))
+    if (s.is(syntax_kind::lambda_expression) ||
+        s.is(syntax_kind::class_specifier))
         return;
-    if (node.is(syntax_kind::labeled_statement) && node.size() &&
-        node[0].is_token() &&
-        tokens[node[0].token()].kind == token_kind::identifier) {
+    if (s.is(syntax_kind::labeled_statement) && s.size() && s[0].is_token() &&
+        tokens[s[0].token()].kind == token_kind::identifier) {
         label_record l;
-        l.name = tokens.identifier(node[0].token());
-        l.point.at = node[0].token();
+        l.name = tokens.identifier(s[0].token());
+        l.point.at = s[0].token();
         function_state.labels.append(l);
     }
-    for (auto child : node.elements())
+    for (auto child : s.elements())
         collect_labels(child);
 }
 
@@ -82,14 +80,13 @@ void semantic_analysis::collect_labels(SyntaxElement s)
 analysis_result semantic_analysis::labeled_statement(LabeledStatement n,
                                                      uint32_t &built)
 {
-    auto node = n;
-    if (!node.size() || !node[0].is_token())
+    if (!n.size() || !n[0].is_token())
         return not_supported(n, "dcl.attr");
-    token_index first = node[0].token();
+    token_index first = n[0].token();
     const token &t = tokens[first];
-    SyntaxElement last = node[node.size() - 1];
+    SyntaxElement last = n[n.size() - 1];
     if (t.kind == token_kind::identifier) {
-        if (node.size() != 3)
+        if (n.size() != 3)
             return not_supported(n, "stmt.label");
         for (label_record &l : function_state.labels)
             if (l.point.at == first) {
@@ -124,7 +121,7 @@ analysis_result semantic_analysis::labeled_statement(LabeledStatement n,
     semantic_kind kind = semantic_kind::default_label;
     uint64_t value = 0;
     if (k == standard_keyword::default_) {
-        if (node.size() != 3)
+        if (n.size() != 3)
             return not_supported(n, "stmt.label");
         /* [stmt.switch]/3: "There shall be at most one label of the form
            default : within a switch statement." */
@@ -137,9 +134,9 @@ analysis_result semantic_analysis::labeled_statement(LabeledStatement n,
     } else {
         /* case constant-expression : statement; GNU's case ranges
            (case a ... b) are not analysed */
-        if (node.size() != 4)
+        if (n.size() != 4)
             return not_supported(n, "stmt.switch");
-        result = case_label(n, node[1], innermost);
+        result = case_label(n, n[1], innermost);
         kind = semantic_kind::case_label;
         if (result == analysis_result::well_formed)
             value = function_state.case_values.back();

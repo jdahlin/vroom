@@ -454,13 +454,12 @@ entity_index semantic_analysis::library_builtin(uint32_t name)
    nothing for, with one argument */
 bool semantic_analysis::builtin_addressof_call(SyntaxRef n)
 {
-    auto node = n;
-    if (node.size() != 4 || !node[0].is_identifier() ||
-        node[2].is(syntax_kind::initializer_list) ||
+    if (n.size() != 4 || !n[0].is_identifier() ||
+        n[2].is(syntax_kind::initializer_list) ||
         !tokens.files.behavior.has(extension::gnu_library_builtins))
         return false;
     static const char spelled[] = "__builtin_addressof";
-    uint32_t name = tokens.identifier(node[0].token());
+    uint32_t name = tokens.identifier(n[0].token());
     if (name != tokens.pp.identifier(spelled, sizeof spelled - 1) + 1)
         return false;
     lookup_result x = lookup_unqualified(name, lookup_filter::any);

@@ -63,8 +63,7 @@ analysis_result semantic_analysis::compound_statement(CompoundStatement n,
 analysis_result semantic_analysis::block_items(SyntaxRef n, uint32_t &built)
 {
     owned_array<SyntaxElement> items;
-    auto node = n;
-    for (auto c : node.elements()) {
+    for (auto c : n.elements()) {
         if (c.is(preprocessing_op_or_punc::LEFT_BRACE) ||
             c.is(preprocessing_op_or_punc::RIGHT_BRACE))
             continue;
@@ -90,7 +89,7 @@ analysis_result semantic_analysis::block_items(SyntaxRef n, uint32_t &built)
     }
     claim_place = place;
     claim_scope = place_scope;
-    built = block_statement(node.first_token(), statements);
+    built = block_statement(n.first_token(), statements);
     return result;
 }
 

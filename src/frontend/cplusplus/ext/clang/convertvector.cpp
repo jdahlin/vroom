@@ -45,12 +45,11 @@ node_index parser::clang_convertvector_expression()
 analysis_result semantic_analysis::clang_convertvector(SyntaxRef n,
                                                        expression_meaning &m)
 {
-    auto children = n;
-    analysis_result r = expression(children[2], m);
+    analysis_result r = expression(n[2], m);
     if (r != analysis_result::well_formed)
         return r;
     qualified_type to;
-    r = type_id(children[4], to);
+    r = type_id(n[4], to);
     if (r != analysis_result::well_formed)
         return r;
     if (depends_on_template_parameter(to) ||

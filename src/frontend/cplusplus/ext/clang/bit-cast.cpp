@@ -87,12 +87,11 @@ bool bit_cast_kept(const implementation_defined_behavior &behavior,
 analysis_result semantic_analysis::clang_bit_cast(SyntaxRef n,
                                                   expression_meaning &m)
 {
-    auto children = n;
     qualified_type to;
-    analysis_result r = type_id(children[2], to);
+    analysis_result r = type_id(n[2], to);
     if (r != analysis_result::well_formed)
         return r;
-    r = expression(children[4], m);
+    r = expression(n[4], m);
     if (r != analysis_result::well_formed)
         return r;
     if (depends_on_template_parameter(to) ||

@@ -189,8 +189,7 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
     postpone_member_bodies = false;
     entity_index postponed_scope = current_scope;
     SyntaxRef postponed_declaration = current_declaration;
-    auto node = n;
-    auto head = node.class_specifier().class_head();
+    auto head = n.class_specifier().class_head();
     if (!head)
         return not_supported(n, "class.pre");
     /* class-key attribute-specifier-seq_opt class-head-name ...: the
@@ -557,7 +556,7 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
     }
     owned_array<SyntaxRef> bodies;
     size_t nested_start = nested_bodies.size();
-    auto spec = node.class_specifier().member_specification();
+    auto spec = n.class_specifier().member_specification();
     for (auto member : spec.elements()) {
         if (member.is_token()) {
             switch (p.keyword_of(tokens[member.token()])) {
@@ -1123,23 +1122,22 @@ analysis_result semantic_analysis::member_declaration_with_specifiers(
     entity_index c, SyntaxRef node, uint8_t access,
     owned_array<SyntaxRef> &bodies)
 {
-    auto n = node;
     /* [ext:gnu_attributes] before it all (libc++'s _LIBCPP_HIDE_FROM_ABI
        friend ...) */
-    uint32_t leading = leading_gnu_attributes(n);
+    uint32_t leading = leading_gnu_attributes(node);
     if (leading < node.size() &&
         node[leading].is(syntax_kind::decl_specifier_seq)) {
         for (auto x : node[leading].elements())
             if (x.is(standard_keyword::friend_))
-                return friend_declaration(c, n, bodies);
+                return friend_declaration(c, node, bodies);
     }
 
     /* [dcl.fct]/18: an abbreviated member function template */
     if (node.is(syntax_kind::function_definition) &&
-        is_namespace(entity_table[c].enclosing) && abbreviated_function(n))
-        return member_function_template(c, n, n, access);
-    if (SyntaxRef id = conversion_function_id_of(n))
-        return conversion_function_member(c, n, id, access, bodies);
+        is_namespace(entity_table[c].enclosing) && abbreviated_function(node))
+        return member_function_template(c, node, node, access);
+    if (SyntaxRef id = conversion_function_id_of(node))
+        return conversion_function_member(c, node, id, access, bodies);
 
     /* a constructor or destructor: no decl-specifier-seq, or one of
        function-specifiers alone ([class.ctor]/1: "Each decl-specifier in
@@ -1147,7 +1145,7 @@ analysis_result semantic_analysis::member_declaration_with_specifiers(
        be friend, inline, constexpr, or an explicit-specifier") */
     /* [ext:gnu_attributes] before it all (special_member_declarator takes
        them) */
-    uint32_t lead = leading_gnu_attributes(n);
+    uint32_t lead = leading_gnu_attributes(node);
     uint32_t at = lead;
     bool constexpr_specified = false, virtual_specified = false,
          explicit_specified = false;
@@ -1196,37 +1194,37 @@ analysis_result semantic_analysis::member_declaration_with_specifiers(
                     if (x.is_node())
                         work.append(x.index());
             }
-            return not_supported(n, "class.ctor");
+            return not_supported(node, "class.ctor");
         }
         if (node.is(syntax_kind::member_declaration)) {
             if (node.size() != at + 2 ||
                 !node[at + 1].is(preprocessing_op_or_punc::SEMICOLON))
                 /* = default, = delete, a pure-specifier */
-                return not_supported(n, "dcl.fct.def");
+                return not_supported(node, "dcl.fct.def");
             virt_override = override_;
             virt_final = final_;
             analysis_result r = special_member_declarator(
-                c, n, special(node[at]), access, false, constexpr_specified,
+                c, node, special(node[at]), access, false, constexpr_specified,
                 virtual_specified, explicit_specified);
             virt_override = virt_final = false;
             return r;
         }
         auto body = node.function_definition().function_body();
         if (node.size() != at + 2 || !body || body.function_try_block())
-            return not_supported(n, "dcl.fct.def.general");
+            return not_supported(node, "dcl.fct.def.general");
         if (body.defaulted() || body.deleted()) {
             /* = default, = delete: no user-provided function
                ([dcl.fct.def.default]/5), which the layout ([abi:pod]) and
                triviality need to know before the class is complete */
             return defaulted_or_deleted_special_member(
-                c, n, node[at], node[at + 1], access, constexpr_specified,
+                c, node, node[at], node[at + 1], access, constexpr_specified,
                 virtual_specified, explicit_specified);
         }
         analysis_result r = special_member_declarator(
-            c, n, node[at], access, true, constexpr_specified,
+            c, node, node[at], access, true, constexpr_specified,
             virtual_specified, explicit_specified);
         if (r == analysis_result::well_formed)
-            bodies.append(n);
+            bodies.append(node);
         return r;
     }
     /* [ext:gnu_attributes] before the decl-specifier-seq: what follows
@@ -1253,7 +1251,7 @@ analysis_result semantic_analysis::member_declaration_with_specifiers(
         r = gnu_attribute_specifier(node[i].index(), s);
     if (r != analysis_result::well_formed)
         return r;
-    return member_declarators(c, n, s, access, lead + 1, bodies);
+    return member_declarators(c, node, s, access, lead + 1, bodies);
 }
 
 /*
@@ -1264,21 +1262,20 @@ analysis_result semantic_analysis::member_declarators(
     entity_index c, SyntaxRef n, const specified &s, uint8_t access,
     uint32_t first, owned_array<SyntaxRef> &bodies)
 {
-    auto node = n;
     analysis_result r = analysis_result::well_formed;
-    if (node.is(syntax_kind::function_definition)) {
+    if (n.is(syntax_kind::function_definition)) {
         /* [dcl.fct.def.general]/1: declarator virt-specifier-seq_opt
            function-body */
         uint32_t body_at = first + 1;
         bool override_ = false, final_ = false;
-        while (body_at < node.size() &&
-               virt_specifier(node[body_at], override_, final_))
+        while (body_at < n.size() &&
+               virt_specifier(n[body_at], override_, final_))
             body_at++;
-        auto body = node.function_definition().function_body();
-        if (node.size() != body_at + 1 || !body || body.function_try_block())
+        auto body = n.function_definition().function_body();
+        if (n.size() != body_at + 1 || !body || body.function_try_block())
             return not_supported(n, "dcl.fct.def.general");
         if (body_at == first + 1 && body.defaulted())
-            return defaulted_copy_assignment(c, n, node[first], s, access);
+            return defaulted_copy_assignment(c, n, n[first], s, access);
         /* = delete: member_function_definition's deleted_definition */
         if (!body.deleted() && !body.plain())
             /* a ctor-initializer, a function-try-block, = default */
@@ -1286,14 +1283,14 @@ analysis_result semantic_analysis::member_declarators(
         virt_override = override_;
         virt_final = final_;
         virt_pure = false;
-        r = member_declarator(c, n, node[first], s, access, true);
+        r = member_declarator(c, n, n[first], s, access, true);
         virt_override = virt_final = false;
         if (r == analysis_result::well_formed)
             bodies.append(n);
         return r;
     }
     owned_array<SyntaxElement> declarators;
-    for (auto d : node.elements(first)) {
+    for (auto d : n.elements(first)) {
         if (d.is(preprocessing_op_or_punc::SEMICOLON))
             continue;
         if (d.is(syntax_kind::member_declarator_list)) {
@@ -1310,7 +1307,7 @@ analysis_result semantic_analysis::member_declarators(
                      !s.constexpr_ && !s.type.cv();
         if (s.declares_enumeration && plain)
             return analysis_result::well_formed;
-        auto seq = node[first - 1];
+        auto seq = n[first - 1];
         if (declares_unnamed_class(seq))
             return anonymous_union_member(c, n, s, access);
         /* [class.nest]/1: a nested class's definition, or its declaration
@@ -1343,29 +1340,27 @@ semantic_analysis::member_declarator(entity_index c, SyntaxRef declaration,
                                      SyntaxElement d, const specified &s,
                                      uint8_t access, bool definition)
 {
-    auto node = d;
-    if (node.is(syntax_kind::member_declarator)) {
+    if (d.is(syntax_kind::member_declarator)) {
         /* identifier_opt attribute-specifier-seq_opt : constant-expression */
-        for (auto x : node.elements())
+        for (auto x : d.elements())
             if (x.is(preprocessing_op_or_punc::COLON))
                 return member_bit_field(c, declaration, d, s, access);
         /* declarator virt-specifier-seq_opt pure-specifier_opt */
         {
             bool override_ = false, final_ = false, pure = false;
             uint32_t i = 1;
-            while (i < node.size() &&
-                   virt_specifier(node[i], override_, final_))
+            while (i < d.size() && virt_specifier(d[i], override_, final_))
                 i++;
-            if (i < node.size() && node[i].is(syntax_kind::pure_specifier)) {
+            if (i < d.size() && d[i].is(syntax_kind::pure_specifier)) {
                 pure = true;
                 i++;
             }
-            if (i > 1 && i == node.size()) {
+            if (i > 1 && i == d.size()) {
                 virt_override = override_;
                 virt_final = final_;
                 virt_pure = pure;
-                analysis_result r = member_declarator(c, declaration, node[0],
-                                                      s, access, definition);
+                analysis_result r = member_declarator(c, declaration, d[0], s,
+                                                      access, definition);
                 virt_override = virt_final = virt_pure = false;
                 return r;
             }
@@ -1377,19 +1372,18 @@ semantic_analysis::member_declarator(entity_index c, SyntaxRef declaration,
            of a data member"; for a non-static one it is a default member
            initializer, analysed where a constructor uses it
            ([class.base.init]/9), a complete-class context ([class.mem]/6) */
-        if (node.size() != 2 ||
-            !node[1].is(syntax_kind::brace_or_equal_initializer,
-                        syntax_kind::braced_init_list))
+        if (d.size() != 2 || !d[1].is(syntax_kind::brace_or_equal_initializer,
+                                      syntax_kind::braced_init_list))
             return not_supported(d.index(), "class.mem");
         last_declared = 0;
         analysis_result r =
-            member_declarator(c, declaration, node[0], s, access, definition);
+            member_declarator(c, declaration, d[0], s, access, definition);
         if (r != analysis_result::well_formed)
             return r;
         entity_index e = last_declared;
         if (e && entity_table[e].kind == entity_kind::variable &&
             !entity_table[e].nonstatic_member)
-            return static_member_initializer(d, e, node[1], s);
+            return static_member_initializer(d, e, d[1], s);
         if (!e || entity_table[e].kind != entity_kind::variable)
             /* a pure-specifier ([class.abstract]) */
             return not_supported(d.index(), "class.abstract");
@@ -1397,7 +1391,7 @@ semantic_analysis::member_declarator(entity_index c, SyntaxRef declaration,
             /* [class.union.anon]: at most one variant member's; an unnamed
                class's members are initialized by no constructor of its own */
             return not_supported(d.index(), "class.union");
-        entity_table[e].default_initializer = node[1].index();
+        entity_table[e].default_initializer = d[1].index();
         return analysis_result::well_formed;
     }
     if (!s.has_type && declares_special_member(c, d))
@@ -2181,8 +2175,7 @@ bool semantic_analysis::virt_specifier(SyntaxElement d, bool &override_,
    class-key and alignment-specifiers; none in an unnamed class's */
 SyntaxElement semantic_analysis::class_head_name(SyntaxRef head) const
 {
-    auto h = head;
-    for (auto c : h.elements(1)) {
+    for (auto c : head.elements(1)) {
         if (c.is(syntax_kind::alignment_specifier) ||
             (c.is_node() && gnu_or_without_effect(c)))
             continue;
@@ -2210,12 +2203,11 @@ analysis_result semantic_analysis::alignment_specifier(AlignmentSpecifier n,
                                                        uint64_t &alignment)
 {
     alignment = 0;
-    auto parts = n;
-    if (parts.size() != 4)
+    if (n.size() != 4)
         return not_supported(n, "dcl.align");
-    if (parts[2].is(syntax_kind::type_id)) {
+    if (n[2].is(syntax_kind::type_id)) {
         qualified_type t;
-        analysis_result r = type_id(parts[2], t);
+        analysis_result r = type_id(n[2], t);
         if (r != analysis_result::well_formed)
             return r;
         const struct type &record = type_table[t.unqualified()];
@@ -2229,7 +2221,7 @@ analysis_result semantic_analysis::alignment_specifier(AlignmentSpecifier n,
         return analysis_result::well_formed;
     }
     expression_meaning e;
-    analysis_result r = expression(parts[2], e);
+    analysis_result r = expression(n[2], e);
     if (r != analysis_result::well_formed)
         return r;
     if (!is_integral(e.type) || e.category != value_category::prvalue)

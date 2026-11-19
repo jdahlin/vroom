@@ -44,10 +44,9 @@ bool semantic_analysis::declares_special_member(entity_index c,
 {
     if (!d.is(syntax_kind::noptr_declarator))
         return false;
-    auto node = d;
-    if (node.size() != 2 || !node[1].is(syntax_kind::parameters_and_qualifiers))
+    if (d.size() != 2 || !d[1].is(syntax_kind::parameters_and_qualifiers))
         return false;
-    SyntaxElement head = node[0];
+    SyntaxElement head = d[0];
     if (head.is(syntax_kind::unqualified_id)) {
         auto parts = head;
         if (parts.size() != 2 || !parts[0].is(preprocessing_op_or_punc::TILDE))
@@ -75,18 +74,16 @@ bool semantic_analysis::declares_special_member(entity_index c,
 analysis_result semantic_analysis::member_template_declaration(
     entity_index c, TemplateDeclaration n, uint8_t access)
 {
-    auto node = n;
-    if (node.size() != 2 || !node[0].is(syntax_kind::template_head) ||
-        node[1].is_token())
+    if (n.size() != 2 || !n[0].is(syntax_kind::template_head) ||
+        n[1].is_token())
         return not_supported(n, "temp.mem");
     owned_array<SyntaxRef> parameters;
-    if (!template_head_list(node[0], parameters) || parameters.empty())
+    if (!template_head_list(n[0], parameters) || parameters.empty())
         return not_supported(n, "temp.mem");
-    auto inner = node[1];
-    auto d = inner;
+    auto inner = n[1];
     /* [temp.alias]/1: a member alias template, of a class of namespace
        scope: an alias template declared in the class's scope */
-    if (d.is(syntax_kind::alias_declaration) &&
+    if (inner.is(syntax_kind::alias_declaration) &&
         is_namespace(entity_table[c].enclosing)) {
         entity_index saved = current_scope;
         current_scope = c;
@@ -96,7 +93,7 @@ analysis_result semantic_analysis::member_template_declaration(
     }
     /* [temp.class]/1: a member class template (template<...> struct X
        { ... };), a class template declared in the class's scope */
-    if (d.is(syntax_kind::member_declaration)) {
+    if (inner.is(syntax_kind::member_declaration)) {
         SyntaxRef only = sole_decl_specifier(inner);
         if (only && only.is(syntax_kind::class_specifier)) {
             entity_index saved = current_scope, saved_class = defining_class;
@@ -108,8 +105,8 @@ analysis_result semantic_analysis::member_template_declaration(
             return r;
         }
     }
-    if ((!d.is(syntax_kind::function_definition) &&
-         !d.is(syntax_kind::member_declaration)) ||
+    if ((!inner.is(syntax_kind::function_definition) &&
+         !inner.is(syntax_kind::member_declaration)) ||
         !is_namespace(entity_table[c].enclosing))
         return not_supported(n, "temp.mem");
     /* [ext:gnu_attributes] before it all; [class.ctor]/1: "Each
@@ -117,27 +114,28 @@ analysis_result semantic_analysis::member_template_declaration(
        declaration (if any) shall be friend, inline, constexpr, or an
        explicit-specifier" (and consteval, [dcl.consteval]) */
     uint32_t at = leading_gnu_attributes(inner);
-    if (d.is(syntax_kind::function_definition) && at < d.size() &&
-        !declares_special_member(c, d[at]) &&
-        !(at + 1 < d.size() && d[at].is(syntax_kind::decl_specifier_seq) &&
-          declares_special_member(c, d[at + 1])))
+    if (inner.is(syntax_kind::function_definition) && at < inner.size() &&
+        !declares_special_member(c, inner[at]) &&
+        !(at + 1 < inner.size() &&
+          inner[at].is(syntax_kind::decl_specifier_seq) &&
+          declares_special_member(c, inner[at + 1])))
         return member_function_template(c, n, inner, access);
     /* a constrained constructor template ([temp.constr.decl]) */
     if (head_constraint(n))
         return not_supported(n, "temp.constr");
-    if (at < d.size() && d[at].is(syntax_kind::decl_specifier_seq)) {
+    if (at < inner.size() && inner[at].is(syntax_kind::decl_specifier_seq)) {
         specified s;
-        analysis_result r = constructor_specifiers(d[at], s);
+        analysis_result r = constructor_specifiers(inner[at], s);
         if (r != analysis_result::well_formed)
             return r;
         at++;
     }
     /* a constructor's declarator, not a destructor's (which [temp.mem]/3
        does not allow a template of) */
-    if (at >= d.size() || !declares_special_member(c, d[at]) ||
-        d[at][0].is(syntax_kind::unqualified_id))
+    if (at >= inner.size() || !declares_special_member(c, inner[at]) ||
+        inner[at][0].is(syntax_kind::unqualified_id))
         return not_supported(n, "temp.mem");
-    if (d.is(syntax_kind::function_definition))
+    if (inner.is(syntax_kind::function_definition))
         return member_function_template(c, n, inner, access);
     if (!entity_table[c].constructor_template)
         entity_table[c].constructor_template = n;
@@ -1065,31 +1063,29 @@ analysis_result semantic_analysis::ctor_initializer(SyntaxElement list,
     for (uint32_t &i : initialized)
         i = 0;
     for (SyntaxElement item : items) {
-        auto n = item;
-        auto node = n;
-        if (!node.size())
-            return not_supported(n, "class.base.init");
+        if (!item.size())
+            return not_supported(item, "class.base.init");
         token_index id = 0;
         uint32_t name = 0;
         entity_index e = 0;
         /* a class-or-decltype with a nested-name-specifier: the class it
            names ([basic.lookup.qual]) */
         entity_index qualified_class = 0;
-        if (node[0].is(syntax_kind::class_or_decltype)) {
-            analysis_result r = named_class(node[0], n, qualified_class, id);
+        if (item[0].is(syntax_kind::class_or_decltype)) {
+            analysis_result r = named_class(item[0], item, qualified_class, id);
             if (r != analysis_result::well_formed)
                 return r;
             if (qualified_class == c)
-                return not_supported(n, "class.base.init");
+                return not_supported(item, "class.base.init");
             name = tokens.identifier(id);
         } else {
-            if (!node[0].is_identifier())
-                return not_supported(n, "class.base.init");
-            id = node[0].token();
+            if (!item[0].is_identifier())
+                return not_supported(item, "class.base.init");
+            id = item[0].token();
             name = tokens.identifier(id);
             if (name == entity_table[c].name)
                 /* [class.base.init]/6: a delegating constructor */
-                return not_supported(n, "class.base.init");
+                return not_supported(item, "class.base.init");
             e = entity_table.find(c, name);
         }
         if (!e) {
@@ -1123,10 +1119,10 @@ analysis_result semantic_analysis::ctor_initializer(SyntaxElement list,
         if (!e || entity_table[e].kind != entity_kind::variable ||
             !entity_table[e].nonstatic_member) {
             if (e && entity_table[e].kind == entity_kind::none)
-                return not_supported(n, "over");
+                return not_supported(item, "over");
             if (!e && (qualified_class || lookup(name)))
                 /* a name of an enclosing scope */
-                return not_supported(n, "class.base.init");
+                return not_supported(item, "class.base.init");
             return ill_formed_at_token(id,
                                        "unless the mem-initializer-id names "
                                        "the constructor's class, a "
@@ -1139,7 +1135,7 @@ analysis_result semantic_analysis::ctor_initializer(SyntaxElement list,
         if (entity_table[entity_table[e].enclosing].anonymous_object)
             /* [class.base.init]/2: a member of an anonymous union
                ([class.union.anon]), initialized in its unnamed object */
-            return not_supported(n, "class.base.init");
+            return not_supported(item, "class.base.init");
         size_t slot = 0;
         while (subobjects[slot] != e)
             slot++;
@@ -1157,7 +1153,7 @@ analysis_result semantic_analysis::ctor_initializer(SyntaxElement list,
            type_table's */
         const struct type record = type_table[type.unqualified()];
         if (record.kind == type_kind::array)
-            return not_supported(n, "class.base.init");
+            return not_supported(item, "class.base.init");
         expression_meaning object;
         analysis_result r = subobject(id, e, object);
         if (r != analysis_result::well_formed)
@@ -1166,11 +1162,11 @@ analysis_result semantic_analysis::ctor_initializer(SyntaxElement list,
             entity_table[record.entity].first_constructor) {
             /* [class.base.init]/7: direct-initialization: a constructor */
             owned_array<expression_meaning> arguments;
-            if (node.size() == 4)
-                r = expression_list_meanings(node[2], arguments);
-            else if (node.size() != 3)
+            if (item.size() == 4)
+                r = expression_list_meanings(item[2], arguments);
+            else if (item.size() != 3)
                 /* a braced-init-list */
-                return not_supported(n, "class.base.init");
+                return not_supported(item, "class.base.init");
             if (r != analysis_result::well_formed)
                 return r;
             /* [dcl.init]/17.6.1: a member initialized from a prvalue of
@@ -1179,16 +1175,16 @@ analysis_result semantic_analysis::ctor_initializer(SyntaxElement list,
             if (!entity_table[e].base_subobject && arguments.size() == 1 &&
                 arguments[0].category == value_category::prvalue &&
                 arguments[0].type.unqualified() == type.unqualified())
-                return not_supported(n, "class.copy.elision");
+                return not_supported(item, "class.copy.elision");
             initialized_value value;
             constructing_base = entity_table[e].base_subobject;
-            r = construct(n, type, arguments, object.node, value);
+            r = construct(item, type, arguments, object.node, value);
             constructing_base = false;
             if (r != analysis_result::well_formed)
                 return r;
             if (semantics[value.node].kind != semantic_kind::construct)
                 /* the implicit copy constructor */
-                return not_supported(n, "class.copy.ctor");
+                return not_supported(item, "class.copy.ctor");
             initialized[slot] = statement_node(
                 semantic_kind::expression_statement, id, value.node);
             if (entity_table[e].virtual_base)
@@ -1196,9 +1192,9 @@ analysis_result semantic_analysis::ctor_initializer(SyntaxElement list,
             continue;
         }
         initialized_value value;
-        if (node.size() == 2 && node[1].is(syntax_kind::braced_init_list)) {
-            r = list_initialization(node[1], type, true, value);
-        } else if (node.size() == 3) {
+        if (item.size() == 2 && item[1].is(syntax_kind::braced_init_list)) {
+            r = list_initialization(item[1], type, true, value);
+        } else if (item.size() == 3) {
             /* ( ): value-initialization ([dcl.init]/11): zero for the
                members analysis has */
             expression_meaning zero;
@@ -1206,28 +1202,28 @@ analysis_result semantic_analysis::ctor_initializer(SyntaxElement list,
             zero.evaluation = constness::constant;
             value.node =
                 expression_node(semantic_kind::zero, zero, first_token(item));
-        } else if (node.size() == 4) {
-            SyntaxElement init = node[2];
+        } else if (item.size() == 4) {
+            SyntaxElement init = item[2];
             if (init.is(syntax_kind::initializer_list)) {
                 if (has_pack_expansion(init))
-                    return not_supported(n, "temp.variadic");
+                    return not_supported(item, "temp.variadic");
                 if (record.kind != type_kind::class_type)
-                    return ill_formed(n,
+                    return ill_formed(item,
                                       "if the entity being initialized does "
                                       "not have class type, the "
                                       "expression-list in a parenthesized "
                                       "initializer shall be a single "
                                       "expression",
                                       "dcl.init");
-                return not_supported(n, "dcl.init");
+                return not_supported(item, "dcl.init");
             }
             if (entity_table[e].base_subobject)
                 /* a base copied from an expression: [conv.ptr]/3's
                    conversion of the source */
-                return not_supported(n, "class.base.init");
-            r = initialize_from(n, init, type, true, false, value);
+                return not_supported(item, "class.base.init");
+            r = initialize_from(item, init, type, true, false, value);
         } else {
-            return not_supported(n, "class.base.init");
+            return not_supported(item, "class.base.init");
         }
         if (r != analysis_result::well_formed)
             return r;
@@ -1993,12 +1989,11 @@ semantic_analysis::special_member_body(FunctionDefinition definition,
 analysis_result semantic_analysis::special_member_definition(SyntaxRef n,
                                                              uint32_t at)
 {
-    auto node = n;
     /* a decl-specifier-seq before the declarator holds constexpr alone
        (function_specifiers_only) */
     bool constexpr_specified = at == 1;
-    auto body = node.function_definition().function_body();
-    if (node.size() != at + 2 || !body || body.function_try_block() ||
+    auto body = n.function_definition().function_body();
+    if (n.size() != at + 2 || !body || body.function_try_block() ||
         at_block_scope() || function_state.active)
         return not_supported(n, "dcl.fct.def.general");
     qualified_type type = qualified_type::make(
@@ -2006,7 +2001,7 @@ analysis_result semantic_analysis::special_member_definition(SyntaxRef n,
     declarator_meaning m;
     function_cv = 0;
     function_parameters.clear();
-    analysis_result r = declarator(n, node[at], type, m);
+    analysis_result r = declarator(n, n[at], type, m);
     in_member_declarator = false;
     if (r != analysis_result::well_formed)
         return r;
@@ -2050,7 +2045,7 @@ analysis_result semantic_analysis::special_member_definition(SyntaxRef n,
     entity_table[e].defined = true;
     entity_table.add_declaration(e, n);
     last_declared = e;
-    return special_member_body(node, node[at + 1].function_body());
+    return special_member_body(n, n[at + 1].function_body());
 }
 
 /* the prvalue of class type type whose result object the node
@@ -2076,23 +2071,22 @@ static void class_prvalue(qualified_type type, constness evaluation,
 analysis_result semantic_analysis::class_conversion(SyntaxRef n, entity_index c,
                                                     expression_meaning &m)
 {
-    auto node = n;
     qualified_type type = entity_table[c].type;
     if (!entity_table[c].size)
         return not_supported(n, "expr.type.conv");
     owned_array<expression_meaning> arguments;
     initialized_value value;
     analysis_result r = analysis_result::well_formed;
-    if (node[1].is(syntax_kind::braced_init_list)) {
-        if (node.size() != 2)
+    if (n[1].is(syntax_kind::braced_init_list)) {
+        if (n.size() != 2)
             return not_supported(n, "expr.type.conv");
-        r = list_initialization(node[1], type, true, value);
+        r = list_initialization(n[1], type, true, value);
     } else {
-        if (node.size() == 4) {
-            r = expression_list_meanings(node[2], arguments);
+        if (n.size() == 4) {
+            r = expression_list_meanings(n[2], arguments);
             if (r != analysis_result::well_formed)
                 return r;
-        } else if (node.size() != 3) {
+        } else if (n.size() != 3) {
             return not_supported(n, "expr.type.conv");
         }
         return class_direct_initialization(n, c, arguments, m);

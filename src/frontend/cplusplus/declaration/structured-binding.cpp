@@ -528,21 +528,21 @@ analysis_result semantic_analysis::structured_binding_declaration(
     SyntaxRef declaration, uint32_t first, const specified &s,
     const expression_meaning *supplied)
 {
-    auto node = declaration;
     uint32_t i = first;
     bool reference = false, rvalue = false;
-    if (node[i].is(preprocessing_op_or_punc::AMPERSAND)) {
+    if (declaration[i].is(preprocessing_op_or_punc::AMPERSAND)) {
         reference = true;
         i++;
-    } else if (node[i].is(preprocessing_op_or_punc::AMPERSAND_AMPERSAND)) {
+    } else if (declaration[i].is(
+                   preprocessing_op_or_punc::AMPERSAND_AMPERSAND)) {
         reference = rvalue = true;
         i++;
     }
-    if (i + 3 > node.size())
+    if (i + 3 > declaration.size())
         return not_supported(declaration, "dcl.struct.bind");
-    token_index at = node[i].token();
+    token_index at = declaration[i].token();
     owned_array<token_index> names;
-    SyntaxElement list = node[i + 1];
+    SyntaxElement list = declaration[i + 1];
     if (list.is_token()) {
         names.append(list.token());
     } else {
@@ -554,9 +554,9 @@ analysis_result semantic_analysis::structured_binding_declaration(
     }
     SyntaxElement init;
     if (!supplied) {
-        if (i + 4 > node.size())
+        if (i + 4 > declaration.size())
             return not_supported(declaration, "dcl.struct.bind");
-        init = node[i + 3];
+        init = declaration[i + 3];
     }
     /* [dcl.pre]/8: "If the decl-specifier-seq contains any decl-specifier
        other than static, thread_local, auto ([dcl.spec.auto]), or

@@ -218,16 +218,15 @@ analysis_result semantic_analysis::lambda_introducer(LambdaIntroducer n,
             lambda_captures.append(record);
             continue;
         } else if (c.is(syntax_kind::simple_capture)) {
-            auto sc = c;
-            if (sc.size() == 2 && sc[0].is(preprocessing_op_or_punc::STAR)) {
+            if (c.size() == 2 && c[0].is(preprocessing_op_or_punc::STAR)) {
                 /* * this: *this captured by copy (/10) */
-                record.at = sc[1].token();
+                record.at = c[1].token();
                 record.star_this = true;
-            } else if (sc.size() == 2 &&
-                       sc[0].is(preprocessing_op_or_punc::AMPERSAND) &&
-                       sc[1].is_token() &&
-                       tokens[sc[1].token()].kind == token_kind::identifier) {
-                name = sc[1].token();
+            } else if (c.size() == 2 &&
+                       c[0].is(preprocessing_op_or_punc::AMPERSAND) &&
+                       c[1].is_token() &&
+                       tokens[c[1].token()].kind == token_kind::identifier) {
+                name = c[1].token();
                 record.by_reference = true;
                 if (l.default_capture == capture_default::reference)
                     return ill_formed_at_token(name,
@@ -336,14 +335,13 @@ analysis_result semantic_analysis::init_capture(InitCapture n,
                                                 lambda_context &l,
                                                 capture_record &record)
 {
-    auto node = n;
     uint32_t i = 0;
-    bool by_reference = node[0].is(preprocessing_op_or_punc::AMPERSAND);
+    bool by_reference = n[0].is(preprocessing_op_or_punc::AMPERSAND);
     if (by_reference)
         i = 1;
-    if (node.size() != i + 2 || !node[i].is_identifier())
+    if (n.size() != i + 2 || !n[i].is_identifier())
         return not_supported(n, "temp.variadic");
-    token_index name = node[i].token();
+    token_index name = n[i].token();
     for (size_t k = l.first_capture; k < lambda_captures.size(); k++)
         if (lambda_captures[k].variable &&
             entity_table[lambda_captures[k].variable].name ==
@@ -366,7 +364,7 @@ analysis_result semantic_analysis::init_capture(InitCapture n,
     declaration_deduced = qualified_type();
     deducing_variable = v;
     initialized_value value;
-    analysis_result r = deduced_initializer(node[i + 1], v, type, value);
+    analysis_result r = deduced_initializer(n[i + 1], v, type, value);
     declaration_deduced = outer_deduced;
     deducing_variable = outer_variable;
     if (r != analysis_result::well_formed)

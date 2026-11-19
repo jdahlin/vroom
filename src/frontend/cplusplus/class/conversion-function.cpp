@@ -96,10 +96,9 @@ uint32_t semantic_analysis::conversion_function_name() const
 analysis_result semantic_analysis::conversion_type(SyntaxRef id,
                                                    qualified_type &type)
 {
-    auto node = id;
-    if (node.size() != 2 || node[1].is_token())
+    if (id.size() != 2 || id[1].is_token())
         return not_supported(id, "class.conv.fct");
-    auto t = node[1];
+    auto t = id[1];
     SyntaxRef seq = t;
     if (t.is(syntax_kind::conversion_type_id))
         seq = t[0].index();
@@ -157,21 +156,18 @@ semantic_analysis::conversion_function_member(entity_index c, SyntaxRef n,
                                               SyntaxRef id, uint8_t access,
                                               owned_array<SyntaxRef> &bodies)
 {
-    auto children_syntax = n;
     specified s;
     uint32_t first = 0;
     /* [ext:gnu_attributes] attributes before the declaration */
     uint32_t lead = leading_gnu_attributes(n);
     while (first < lead) {
-        analysis_result r =
-            gnu_attribute_specifier(children_syntax[first].index(), s);
+        analysis_result r = gnu_attribute_specifier(n[first].index(), s);
         if (r != analysis_result::well_formed)
             return r;
         first++;
     }
-    if (first < children_syntax.size() &&
-        children_syntax[first].is(syntax_kind::decl_specifier_seq)) {
-        auto seq = children_syntax[first];
+    if (first < n.size() && n[first].is(syntax_kind::decl_specifier_seq)) {
+        auto seq = n[first];
         first++;
         bool outer_virtual = virtual_allowed, outer_explicit = explicit_allowed;
         virtual_allowed = explicit_allowed = true;

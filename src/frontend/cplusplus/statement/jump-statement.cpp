@@ -66,10 +66,9 @@ node_index parser::jump_statement()
 analysis_result semantic_analysis::jump_statement(JumpStatement n,
                                                   uint32_t &built)
 {
-    auto node = n;
-    if (!node.size() || !node[0].is_token())
+    if (!n.size() || !n[0].is_token())
         return not_supported(n, "stmt.jump");
-    token_index at = node[0].token();
+    token_index at = n[0].token();
     switch (p.keyword_of(tokens[at])) {
     case standard_keyword::break_:
         /* [stmt.break]/1: "The break statement shall occur only in an
@@ -92,13 +91,13 @@ analysis_result semantic_analysis::jump_statement(JumpStatement n,
         built = statement_node(semantic_kind::continue_statement, at);
         return analysis_result::well_formed;
     case standard_keyword::goto_: {
-        if (node.size() != 3 || !node[1].is_identifier())
+        if (n.size() != 3 || !n[1].is_identifier())
             /* GNU's computed goto */
             return not_supported(n, "stmt.goto");
         goto_record g;
-        g.name = tokens.identifier(node[1].token());
+        g.name = tokens.identifier(n[1].token());
         g.point.scope = current_scope;
-        g.point.at = node[0].token();
+        g.point.at = n[0].token();
         g.node = n;
         function_state.gotos.append(g);
         built = statement_node(semantic_kind::goto_statement, at);
@@ -130,10 +129,9 @@ analysis_result semantic_analysis::jump_statement(JumpStatement n,
 analysis_result semantic_analysis::return_statement(SyntaxRef n,
                                                     uint32_t &operand_node)
 {
-    auto node = n;
     qualified_type returns = function_state.returns;
     bool returns_void = fundamental_of(returns) == fundamental_type::void_;
-    if (function_state.deducing && node.size() == 2) {
+    if (function_state.deducing && n.size() == 2) {
         /* [dcl.type.auto.deduct]/2: "If the return statement has no
            operand, then E is void()" */
         analysis_result r = deduce_return(n, nullptr, false);
@@ -141,22 +139,22 @@ analysis_result semantic_analysis::return_statement(SyntaxRef n,
             return r;
         returns_void = true;
     }
-    if (function_state.deducing && node.size() == 3 &&
-        node[1].is(syntax_kind::braced_init_list))
+    if (function_state.deducing && n.size() == 3 &&
+        n[1].is(syntax_kind::braced_init_list))
         /* [dcl.type.auto.deduct]/3 */
         return ill_formed(n,
                           "if the deduction is for a return statement and E "
                           "is a braced-init-list, the program is ill-formed",
                           "dcl.type.auto.deduct");
-    if (node.size() == 2) {
+    if (n.size() == 2) {
         if (returns_void)
             return analysis_result::well_formed;
         return extension_used(diagnostic_id::sema_return_without_value,
-                              node[0].token(), nullptr);
+                              n[0].token(), nullptr);
     }
-    if (node.size() != 3)
+    if (n.size() != 3)
         return not_supported(n, "stmt.return");
-    SyntaxElement operand = node[1];
+    SyntaxElement operand = n[1];
     initialized_value result;
     if (operand.is(syntax_kind::braced_init_list)) {
         if (returns_void)
@@ -236,7 +234,7 @@ analysis_result semantic_analysis::return_statement(SyntaxRef n,
         if (void_operand)
             return analysis_result::well_formed;
         return extension_used(diagnostic_id::sema_return_with_value,
-                              node[0].token(), nullptr);
+                              n[0].token(), nullptr);
     }
     if (void_operand)
         return ill_formed(n,

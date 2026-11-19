@@ -753,22 +753,20 @@ analysis_result semantic_analysis::reference_cast(SyntaxRef at,
  */
 analysis_result semantic_analysis::cast(SyntaxRef n, expression_meaning &m)
 {
-    auto node = n;
-    if (node.size() != 4 || !node[1].is(syntax_kind::type_id))
+    if (n.size() != 4 || !n[1].is(syntax_kind::type_id))
         return not_supported(n, "expr.cast");
     qualified_type to;
-    analysis_result r = type_id(node[1], to);
+    analysis_result r = type_id(n[1], to);
     /* [over.over]/1: "an explicit type conversion" */
     if (r == analysis_result::well_formed)
-        r = target_expression(node[3], to, m);
+        r = target_expression(n[3], to, m);
     if (r != analysis_result::well_formed)
         return r;
     /* C++03 [expr.const]/1: "Floating literals can appear only if they are
        cast to integral or enumeration types." */
     bool floating_literal_to_integral =
-        node[3].is_token() &&
-        tokens[node[3].token()].literal ==
-            literal_kind::floating_point_literal &&
+        n[3].is_token() &&
+        tokens[n[3].token()].literal == literal_kind::floating_point_literal &&
         is_integral(to);
     r = explicit_conversion(n, to, m);
     if (r == analysis_result::well_formed && floating_literal_to_integral)

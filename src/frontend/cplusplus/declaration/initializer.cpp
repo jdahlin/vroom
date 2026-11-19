@@ -834,8 +834,7 @@ analysis_result
 semantic_analysis::list_clauses(SyntaxRef list,
                                 owned_array<SyntaxElement> &clauses)
 {
-    auto node = list;
-    for (auto c : node.elements()) {
+    for (auto c : list.elements()) {
         if (c.is(preprocessing_op_or_punc::LEFT_BRACE) ||
             c.is(preprocessing_op_or_punc::RIGHT_BRACE) ||
             c.is(preprocessing_op_or_punc::COMMA))
@@ -863,7 +862,6 @@ analysis_result semantic_analysis::list_initialization_of(
     SyntaxRef list, const owned_array<SyntaxElement> &clauses,
     qualified_type &type, bool direct, initialized_value &result)
 {
-    auto node = list;
     const struct type target = type_table[type.unqualified()];
     if (target.kind == type_kind::array) {
         /* [dcl.init.list]/3.3: "if T is a character array and the
@@ -894,7 +892,7 @@ analysis_result semantic_analysis::list_initialization_of(
             if (!bound) {
                 analysis_result r =
                     extension_used(diagnostic_id::sema_zero_length_array,
-                                   node.first_token(), nullptr);
+                                   list.first_token(), nullptr);
                 if (r != analysis_result::well_formed)
                     return r;
             }
@@ -935,7 +933,7 @@ analysis_result semantic_analysis::list_initialization_of(
         zero.type = qualified_type::make(type.unqualified(), cv_none);
         zero.evaluation = result.evaluation;
         result.node =
-            expression_node(semantic_kind::zero, zero, node.first_token());
+            expression_node(semantic_kind::zero, zero, list.first_token());
         return analysis_result::well_formed;
     }
     if (clauses.size() > 1)
@@ -964,50 +962,48 @@ analysis_result semantic_analysis::initializer(SyntaxElement init,
 {
     if (init.is_token())
         return not_supported(current_declaration, "dcl.init");
-    auto n = init;
-    auto node = n;
-    switch (node.kind()) {
+    switch (init.kind()) {
     case syntax_kind::braced_init_list:
-        return list_initialization(n, type, true, result);
+        return list_initialization(init, type, true, result);
     case syntax_kind::brace_or_equal_initializer:
-        if (node.size() != 2)
-            return not_supported(n, "dcl.init");
-        if (node[1].is(syntax_kind::braced_init_list))
-            return list_initialization(node[1], type, false, result);
-        return initialize_from(n, node[1], type, false, false, result);
+        if (init.size() != 2)
+            return not_supported(init, "dcl.init");
+        if (init[1].is(syntax_kind::braced_init_list))
+            return list_initialization(init[1], type, false, result);
+        return initialize_from(init, init[1], type, false, false, result);
     case syntax_kind::initializer:
-        if (node.size() != 3)
-            return not_supported(n, "dcl.init");
-        if (node[1].is(syntax_kind::initializer_list)) {
-            if (has_pack_expansion(node[1]))
-                return not_supported(n, "temp.variadic");
+        if (init.size() != 3)
+            return not_supported(init, "dcl.init");
+        if (init[1].is(syntax_kind::initializer_list)) {
+            if (has_pack_expansion(init[1]))
+                return not_supported(init, "temp.variadic");
             const struct type target = type_table[type.unqualified()];
             if (target.kind == type_kind::array)
-                return not_supported(n, "dcl.init");
+                return not_supported(init, "dcl.init");
             if (target.kind == type_kind::class_type) {
                 /* [dcl.init]/17.6.2: the constructor called with the
                    expression-list as its arguments */
                 if (entity_table[target.entity].kind !=
                         entity_kind::class_type ||
                     !entity_table[target.entity].first_constructor)
-                    return not_supported(n, "dcl.init");
+                    return not_supported(init, "dcl.init");
                 owned_array<expression_meaning> arguments;
                 analysis_result r =
-                    expression_list_meanings(node[1], arguments);
+                    expression_list_meanings(init[1], arguments);
                 if (r != analysis_result::well_formed)
                     return r;
-                return construct(n, type, arguments, 0, result);
+                return construct(init, type, arguments, 0, result);
             }
-            return ill_formed(n,
+            return ill_formed(init,
                               "if the entity being initialized does not have "
                               "class type, the expression-list in a "
                               "parenthesized initializer shall be a single "
                               "expression",
                               "dcl.init");
         }
-        return initialize_from(n, node[1], type, true, false, result);
+        return initialize_from(init, init[1], type, true, false, result);
     default:
-        return not_supported(n, "dcl.init");
+        return not_supported(init, "dcl.init");
     }
 }
 

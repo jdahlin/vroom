@@ -35,17 +35,14 @@ token_index semantic_analysis::callee_name(SyntaxElement c) const
             return c.token();
         return 0;
     }
-    auto node = c;
-    if (node.is(syntax_kind::qualified_id) && node.size() == 2 &&
-        node[1].is_token() &&
-        tokens[node[1].token()].kind == token_kind::identifier)
-        return node[1].token();
-    if (node.is(syntax_kind::postfix_expression) && node.size() == 3 &&
-        (node[1].is(preprocessing_op_or_punc::DOT) ||
-         node[1].is(preprocessing_op_or_punc::ARROW)) &&
-        node[2].is_token() &&
-        tokens[node[2].token()].kind == token_kind::identifier)
-        return node[2].token();
+    if (c.is(syntax_kind::qualified_id) && c.size() == 2 && c[1].is_token() &&
+        tokens[c[1].token()].kind == token_kind::identifier)
+        return c[1].token();
+    if (c.is(syntax_kind::postfix_expression) && c.size() == 3 &&
+        (c[1].is(preprocessing_op_or_punc::DOT) ||
+         c[1].is(preprocessing_op_or_punc::ARROW)) &&
+        c[2].is_token() && tokens[c[2].token()].kind == token_kind::identifier)
+        return c[2].token();
     return 0;
 }
 

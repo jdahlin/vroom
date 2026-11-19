@@ -24,13 +24,12 @@ namespace cplusplus
 
 analysis_result semantic_analysis::linkage_specification(LinkageSpecification n)
 {
-    auto node = n;
-    if (node.size() < 3 || !node[1].is_token())
+    if (n.size() < 3 || !n[1].is_token())
         return not_supported(n, "dcl.link");
     /* [dcl.link]/4: "A linkage-specification shall inhabit a namespace
        scope." */
     owned_buffer spelling;
-    tokens.spelling(node[1].token(), spelling.get());
+    tokens.spelling(n[1].token(), spelling.get());
     bool c = false;
     if (spelling.size() == 3 && !memcmp(spelling.data(), "\"C\"", 3))
         c = true;
@@ -41,7 +40,7 @@ analysis_result semantic_analysis::linkage_specification(LinkageSpecification n)
         return not_supported(n, "dcl.link");
     owned_array<SyntaxRef> inner;
     bool braces = false;
-    for (auto x : node.elements(2)) {
+    for (auto x : n.elements(2)) {
         if (x.is_token()) {
             braces = true;
             continue;

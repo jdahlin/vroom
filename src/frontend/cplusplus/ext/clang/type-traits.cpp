@@ -154,8 +154,7 @@ analysis_result
 semantic_analysis::clang_type_transformation(ClangTypeTransformation n,
                                              qualified_type &type)
 {
-    auto children_syntax = n;
-    token_index keyword = children_syntax[0].token();
+    token_index keyword = n[0].token();
     owned_buffer written;
     tokens.spelling(keyword, written.get());
     transformation which = transformation_named(
@@ -163,7 +162,7 @@ semantic_analysis::clang_type_transformation(ClangTypeTransformation n,
     if (which == transformation::none)
         return not_supported(n, "ext.clang");
     qualified_type t;
-    analysis_result r = type_id(children_syntax[2], t);
+    analysis_result r = type_id(n[2], t);
     if (r != analysis_result::well_formed)
         return r;
     if (depends_on_template_parameter(t)) {
@@ -434,9 +433,8 @@ bool semantic_analysis::unary_trait(int which, qualified_type t, int64_t &value)
 analysis_result semantic_analysis::clang_type_trait(SyntaxRef n,
                                                     expression_meaning &m)
 {
-    auto node = n;
     owned_buffer written;
-    tokens.spelling(node[0].token(), written.get());
+    tokens.spelling(n[0].token(), written.get());
     const char *name = reinterpret_cast<const char *>(written.data());
     bool same = spelled(name, written.size(), "__is_same") ||
                 spelled(name, written.size(), "__is_same_as");
@@ -461,19 +459,19 @@ analysis_result semantic_analysis::clang_type_trait(SyntaxRef n,
         return analysis_result::well_formed;
     }
     /* ( type-id , type-id ) */
-    if (!same || node.size() != 6 || !node[2].is(syntax_kind::type_id) ||
-        !node[4].is(syntax_kind::type_id))
+    if (!same || n.size() != 6 || !n[2].is(syntax_kind::type_id) ||
+        !n[4].is(syntax_kind::type_id))
         return not_supported(n, "ext.clang");
     qualified_type t, u;
-    analysis_result r = type_id(node[2], t);
+    analysis_result r = type_id(n[2], t);
     if (r != analysis_result::well_formed)
         return r;
-    r = type_id(node[4], u);
+    r = type_id(n[4], u);
     if (r != analysis_result::well_formed)
         return r;
     if (depends_on_template_parameter(t) || depends_on_template_parameter(u))
         return not_supported(n, "temp.dep.constexpr");
-    m = integer_constant(fundamental_type::bool_, t == u, node.first_token());
+    m = integer_constant(fundamental_type::bool_, t == u, n.first_token());
     return analysis_result::well_formed;
 }
 
@@ -517,19 +515,18 @@ analysis_result semantic_analysis::builtin_template_arguments(
     SyntaxRef id, owned_array<SyntaxElement> &written,
     owned_array<bool> &expansion)
 {
-    auto parts = id;
-    for (uint32_t i = 2; i + 1 < parts.size(); i++) {
-        if (parts[i].is(preprocessing_op_or_punc::ELLIPSIS)) {
+    for (uint32_t i = 2; i + 1 < id.size(); i++) {
+        if (id[i].is(preprocessing_op_or_punc::ELLIPSIS)) {
             if (written.empty() || expansion.back())
                 return not_supported(id, "temp.variadic");
             expansion.back() = true;
             continue;
         }
-        if (parts[i].is(syntax_kind::template_argument_list)) {
-            if (!expansion_list(parts[i], written, expansion))
+        if (id[i].is(syntax_kind::template_argument_list)) {
+            if (!expansion_list(id[i], written, expansion))
                 return not_supported(id, "temp.variadic");
         } else {
-            written.append(parts[i]);
+            written.append(id[i]);
             expansion.append(false);
         }
     }

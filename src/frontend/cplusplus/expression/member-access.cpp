@@ -292,17 +292,16 @@ analysis_result semantic_analysis::implicit_member_access(token_index at,
 analysis_result semantic_analysis::member_reference(SyntaxRef n,
                                                     expression_meaning &m)
 {
-    auto children = n;
-    bool arrow = children[1].is(preprocessing_op_or_punc::ARROW);
-    if (!children[2].is_identifier())
+    bool arrow = n[1].is(preprocessing_op_or_punc::ARROW);
+    if (!n[2].is_identifier())
         /* template, a qualified-id, a destructor's name, an operator
            function's */
         return not_supported(n, "expr.ref");
-    token_index name = children[2].token();
+    token_index name = n[2].token();
     /* (the call's callee name, which analysing the object expression's
        calls changes) */
     token_index callee = overloaded_callee;
-    analysis_result r = expression(children[0], m);
+    analysis_result r = expression(n[0], m);
     if (r != analysis_result::well_formed)
         return r;
     /* [over.ref]/1: "An expression x->m is interpreted as
@@ -316,9 +315,9 @@ analysis_result semantic_analysis::member_reference(SyntaxRef n,
             /* a chain of operator-> this long, or a cycle */
             return not_supported(n, "over.ref");
         bool handled = false;
-        r = unary_operator_function(n, children[1].token(),
+        r = unary_operator_function(n, n[1].token(),
                                     preprocessing_op_or_punc::ARROW, false,
-                                    children[0], m, handled);
+                                    n[0], m, handled);
         if (r != analysis_result::well_formed)
             return r;
         if (!handled)
@@ -344,8 +343,8 @@ analysis_result semantic_analysis::member_reference(SyntaxRef n,
         m.category = value_category::lvalue;
         if (m.evaluation != constness::not_constant)
             m.evaluation = constness::unknown;
-        m.node = expression_node(semantic_kind::indirection, m,
-                                 children.first_token(), m.node);
+        m.node = expression_node(semantic_kind::indirection, m, n.first_token(),
+                                 m.node);
     }
     const struct type object = type_table[m.type.unqualified()];
     if (object.kind != type_kind::class_type) {

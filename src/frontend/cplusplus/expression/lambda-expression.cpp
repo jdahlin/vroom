@@ -346,20 +346,19 @@ semantic_analysis::lambda_context *semantic_analysis::current_lambda()
 analysis_result semantic_analysis::lambda_expression(LambdaExpression n,
                                                      expression_meaning &m)
 {
-    auto node = n;
     /* a lambda in a default argument or member initializer, in an
        unevaluated operand or while a candidate template is substituted;
        outside a function body only at namespace scope */
     if ((!function_state.active && !is_namespace(current_scope)) ||
-        unevaluated || substituting || node.size() < 2)
+        unevaluated || substituting || n.size() < 2)
         return not_supported(n, "expr.prim.lambda");
     /* [expr.prim.lambda]/5: a template-parameter-list makes a generic
        lambda, whose call operator is a template
        ([expr.prim.lambda.closure]/3); its requires-clause is the
        template's (lambda_constraint) */
     SyntaxElement declarator, template_list;
-    for (uint32_t i = 1; i + 1 < node.size(); i++) {
-        SyntaxElement x = node[i];
+    for (uint32_t i = 1; i + 1 < n.size(); i++) {
+        SyntaxElement x = n[i];
         if (x.is(syntax_kind::lambda_declarator) && !declarator)
             declarator = x;
         else if (x.is(syntax_kind::template_parameter_list) ||
@@ -370,16 +369,16 @@ analysis_result semantic_analysis::lambda_expression(LambdaExpression n,
         else if (!x.is_token() && !x.is(syntax_kind::requires_clause))
             return not_supported(n, "expr.prim.lambda");
     }
-    SyntaxElement body = node[node.size() - 1];
-    if (!node[0].is(syntax_kind::lambda_introducer) ||
+    SyntaxElement body = n[n.size() - 1];
+    if (!n[0].is(syntax_kind::lambda_introducer) ||
         !body.is(syntax_kind::compound_statement))
         return not_supported(n, "expr.prim.lambda");
     if (declarator) {
         /* [expr.prim.lambda]/5: "A lambda is a generic lambda if the
            lambda-expression has any generic parameter type placeholders"
            (auto in a parameter's decl-specifier-seq) */
-        auto d = declarator;
-        for (token_index t = d.first_token(); t < d.end_token(); t++)
+        for (token_index t = declarator.first_token();
+             t < declarator.end_token(); t++)
             if (tokens[t].kind == token_kind::keyword &&
                 p.keyword_of(tokens[t]) == standard_keyword::auto_)
                 return not_supported(n, "expr.prim.lambda.closure");
@@ -429,13 +428,13 @@ analysis_result semantic_analysis::lambda_expression(LambdaExpression n,
     entity_table.add_declaration(c, n);
     l.closure = c;
     l.first_capture = static_cast<uint32_t>(lambda_captures.size());
-    analysis_result r = lambda_introducer(node[0], l);
+    analysis_result r = lambda_introducer(n[0], l);
     if (r != analysis_result::well_formed) {
         lambda_captures.resize(l.first_capture);
         entity_table[c].kind = entity_kind::none;
         return r;
     }
-    bool has_capture = node[0].size() > 2;
+    bool has_capture = n[0].size() > 2;
 
     qualified_type type;
     owned_array<parameter_meaning> parameters;
@@ -560,9 +559,7 @@ semantic_analysis::lambda_call_type(SyntaxRef n, SyntaxRef d, lambda_context &l,
                     r = not_supported(n, "dcl.constexpr");
             }
             if (part.is(syntax_kind::trailing_return_type)) {
-                auto trailing = part;
-                if (trailing.size() != 2 ||
-                    !trailing[1].is(syntax_kind::type_id)) {
+                if (part.size() != 2 || !part[1].is(syntax_kind::type_id)) {
                     r = not_supported(n, "dcl.fct");
                     continue;
                 }
@@ -576,7 +573,7 @@ semantic_analysis::lambda_call_type(SyntaxRef n, SyntaxRef d, lambda_context &l,
                         r = not_supported(n, "expr.prim.lambda.capture");
                 if (r != analysis_result::well_formed)
                     continue;
-                r = type_id(trailing[1], returns);
+                r = type_id(part[1], returns);
                 if (r == analysis_result::well_formed &&
                     abstract_class(returns))
                     r = not_supported(n, "class.abstract");

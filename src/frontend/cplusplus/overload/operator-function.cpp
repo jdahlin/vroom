@@ -218,15 +218,14 @@ uint32_t semantic_analysis::allocation_function_name(allocation_function kind)
 analysis_result semantic_analysis::operator_function_id(OperatorFunctionId id,
                                                         declarator_meaning &m)
 {
-    auto node = id;
     operators_held = true;
-    if ((node.size() == 2 || node.size() == 4) && node[1].is_token() &&
-        tokens[node[1].token()].kind == token_kind::keyword &&
-        (p.keyword_of(tokens[node[1].token()]) == standard_keyword::new_ ||
-         p.keyword_of(tokens[node[1].token()]) == standard_keyword::delete_)) {
+    if ((id.size() == 2 || id.size() == 4) && id[1].is_token() &&
+        tokens[id[1].token()].kind == token_kind::keyword &&
+        (p.keyword_of(tokens[id[1].token()]) == standard_keyword::new_ ||
+         p.keyword_of(tokens[id[1].token()]) == standard_keyword::delete_)) {
         bool is_new =
-            p.keyword_of(tokens[node[1].token()]) == standard_keyword::new_;
-        bool array = node.size() == 4;
+            p.keyword_of(tokens[id[1].token()]) == standard_keyword::new_;
+        bool array = id.size() == 4;
         allocation_function kind = allocation_function::delete_;
         if (is_new && array)
             kind = allocation_function::new_array;
@@ -239,20 +238,20 @@ analysis_result semantic_analysis::operator_function_id(OperatorFunctionId id,
         implicit_allocation_functions();
         operators_held = false;
         m.has_id = true;
-        m.id = node[0].token();
+        m.id = id[0].token();
         m.operator_function = true;
         m.allocation = kind;
         tokens.name_token(m.id, allocation_function_name(kind));
         return analysis_result::well_formed;
     }
-    if (node.size() < 2 || node.size() > 3 || !node[0].is_token() ||
-        !node[1].is_token() ||
-        tokens[node[1].token()].kind != token_kind::operator_or_punctuator)
+    if (id.size() < 2 || id.size() > 3 || !id[0].is_token() ||
+        !id[1].is_token() ||
+        tokens[id[1].token()].kind != token_kind::operator_or_punctuator)
         /* co_await */
         return not_supported(id, "over.oper");
     preprocessing_op_or_punc op =
-        preprocessing_op_or_punc_primary(tokens[node[1].token()].op_or_punc);
-    if (node.size() == 3 && op != preprocessing_op_or_punc::LEFT_PARENTHESIS &&
+        preprocessing_op_or_punc_primary(tokens[id[1].token()].op_or_punc);
+    if (id.size() == 3 && op != preprocessing_op_or_punc::LEFT_PARENTHESIS &&
         op != preprocessing_op_or_punc::LEFT_BRACKET)
         return not_supported(id, "over.oper");
     switch (op) {
@@ -266,7 +265,7 @@ analysis_result semantic_analysis::operator_function_id(OperatorFunctionId id,
     }
     operators_held = false;
     m.has_id = true;
-    m.id = node[0].token();
+    m.id = id[0].token();
     m.operator_function = true;
     m.implemented = op;
     tokens.name_token(m.id, operator_name(op));

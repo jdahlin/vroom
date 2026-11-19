@@ -54,13 +54,12 @@ node_index parser::delete_expression()
 analysis_result semantic_analysis::delete_expression(DeleteExpression n,
                                                      expression_meaning &m)
 {
-    auto node = n;
-    token_index at = node.first_token();
-    uint32_t count = node.size();
+    token_index at = n.first_token();
+    uint32_t count = n.size();
     uint32_t i = 0;
     bool global = false;
-    if (node[0].is_token() &&
-        tokens[node[0].token()].kind == token_kind::operator_or_punctuator) {
+    if (n[0].is_token() &&
+        tokens[n[0].token()].kind == token_kind::operator_or_punctuator) {
         global = true;
         i++;
     }
@@ -70,7 +69,7 @@ analysis_result semantic_analysis::delete_expression(DeleteExpression n,
     /* delete [ ] cast-expression */
     bool array = count - i == 3;
     expression_meaning operand;
-    analysis_result r = expression(node[count - 1], operand);
+    analysis_result r = expression(n[count - 1], operand);
     if (r != analysis_result::well_formed)
         return r;
     if (type_table[operand.type.unqualified()].kind == type_kind::class_type)

@@ -184,11 +184,10 @@ entity_index
 semantic_analysis::dependent_variable_specialization(SyntaxRef id,
                                                      entity_index e)
 {
-    auto t = id;
-    if (t.size() < 3 || !t[0].is_identifier())
+    if (id.size() < 3 || !id[0].is_identifier())
         return e;
-    lookup_result x =
-        lookup_unqualified(tokens.identifier(t[0].token()), lookup_filter::any);
+    lookup_result x = lookup_unqualified(tokens.identifier(id[0].token()),
+                                         lookup_filter::any);
     entity_index named = x.entity;
     if (!named)
         named = x.unknown_entity;
