@@ -153,6 +153,7 @@ analysis_result semantic_analysis::pointer_operator(SyntaxRef op,
 {
     using enum preprocessing_op_or_punc;
     entity_index member_class = 0;
+    type_index member_dependent = 0;
     for (auto c : op.elements()) {
         if (c.is_attribute())
             return not_supported(op, "dcl.attr");
@@ -165,7 +166,7 @@ analysis_result semantic_analysis::pointer_operator(SyntaxRef op,
                cv-qualifier-seq pointer to member of class
                nested-name-specifier of type T"." */
             nominated_scope scope;
-            VTRY(r, nested_name_specifier(c, scope));
+            VTRY(r, nested_name_specifier(c, scope, true));
             if (!scope.global && !scope.dependent &&
                 (is_namespace(scope.entity) ||
                  entity_table[scope.entity].kind == entity_kind::enumeration))
@@ -173,7 +174,13 @@ analysis_result semantic_analysis::pointer_operator(SyntaxRef op,
                                   "the nested-name-specifier of a pointer to "
                                   "member declarator shall denote a class",
                                   "dcl.mptr");
-            if (scope.global || scope.dependent ||
+            if (scope.dependent && !scope.global) {
+                /* [temp.dep.type]/9: a class that is a dependent type,
+                   known when the declaration is instantiated */
+                member_dependent = scope.dependent;
+                continue;
+            }
+            if (scope.global ||
                 entity_table[scope.entity].kind != entity_kind::class_type)
                 return not_supported(op, "dcl.mptr");
             member_class = scope.entity;
@@ -184,7 +191,7 @@ analysis_result semantic_analysis::pointer_operator(SyntaxRef op,
             type_kind k = type_table[type.unqualified()].kind;
             if (k == type_kind::lvalue_reference ||
                 k == type_kind::rvalue_reference) {
-                if (member_class)
+                if (member_class || member_dependent)
                     /* [dcl.mptr]/3: "A pointer to member shall not point
                        to ... a member with reference type" */
                     return ill_formed(op,
@@ -194,15 +201,22 @@ analysis_result semantic_analysis::pointer_operator(SyntaxRef op,
                 return ill_formed(
                     op, "there shall be no pointers to references", "dcl.ref");
             }
-            if (member_class) {
+            if (member_class || member_dependent) {
                 /* [dcl.mptr]/3: "or "cv void"" */
                 if (fundamental_of(type) == fundamental_type::void_)
                     return ill_formed(op,
                                       "a pointer to member shall not point "
                                       "to cv void",
                                       "dcl.mptr");
-                type = qualified_type::make(
-                    type_table.pointer_to_member(member_class, type), cv_none);
+                if (member_dependent)
+                    type = qualified_type::make(
+                        type_table.dependent_pointer_to_member(member_dependent,
+                                                               type),
+                        cv_none);
+                else
+                    type = qualified_type::make(
+                        type_table.pointer_to_member(member_class, type),
+                        cv_none);
                 continue;
             }
             type = qualified_type::make(type_table.pointer_to(type), cv_none);

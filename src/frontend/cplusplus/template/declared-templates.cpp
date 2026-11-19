@@ -1422,6 +1422,13 @@ static bool depends(const types &table, qualified_type t,
         if (r.entity && (!parameters || (*parameters)[r.entity].value >= from))
             return true;
         return depends(table, r.operand, parameters, from);
+    case type_kind::pointer_to_member:
+        /* [temp.dep.type]/9: a pointer to member of a dependent class, or
+           to a dependent member type */
+        if (!r.entity && depends(table, qualified_type::make(r.bound, cv_none),
+                                 parameters, from))
+            return true;
+        return depends(table, r.operand, parameters, from);
     case type_kind::pointer:
     case type_kind::lvalue_reference:
     case type_kind::rvalue_reference:
@@ -2456,9 +2463,12 @@ semantic_analysis::class_template_declaration(SyntaxRef n, SyntaxRef elaborated)
 SyntaxRef semantic_analysis::out_of_class_member(SyntaxRef definition,
                                                  token_index *name) const
 {
-    if (definition.size() != 3 || definition[1].is_token())
+    /* ([ext:gnu_attributes] before the declaration are not among its
+       parts) */
+    SyntaxTail parts(definition, leading_gnu_attributes(definition));
+    if (parts.size() != 3 || parts[1].is_token())
         return 0;
-    auto x = definition[1];
+    auto x = parts[1];
     while (x.is(syntax_kind::ptr_declarator)) {
         auto pd = x;
         if (pd.size() != 2 || x[1].is_token())
@@ -2503,7 +2513,8 @@ semantic_analysis::member_definition_of_template(SyntaxRef n,
     owned_array<SyntaxRef> parameters;
     VTRY(r, template_head_parameters(n, parameters));
     auto def = definition.function_definition();
-    if (leading_gnu_attributes(definition) || !def.plain() || def.size() != 3)
+    SyntaxTail parts(definition, leading_gnu_attributes(definition));
+    if (!def.plain() || parts.size() != 3)
         return not_supported(n, "temp.mem.func");
     /* [temp.param]/12: "A default template-argument shall not be specified
        in the template-parameter-lists of the definition of a member of a

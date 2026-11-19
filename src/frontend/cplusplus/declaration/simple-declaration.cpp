@@ -789,6 +789,18 @@ uint32_t semantic_analysis::leading_gnu_attributes(SyntaxRef n) const
     return k;
 }
 
+/* [ext:gnu_attributes] whether two abi_tag string-literals are the same tag
+   (a member's declaration and its definition write it twice) */
+bool semantic_analysis::same_abi_tag(token_index a, token_index b) const
+{
+    if (a == b)
+        return true;
+    owned_buffer x, y;
+    tokens.spelling(a, x.get());
+    tokens.spelling(b, y.get());
+    return x.size() == y.size() && !memcmp(x.data(), y.data(), x.size());
+}
+
 /* GCC's attributes, or standard ones without effect
    (attributes_without_effect), which gnu_attribute_specifier passes over:
    [[nodiscard]] before libc++'s functions */
@@ -1090,8 +1102,12 @@ analysis_result semantic_analysis::declare_with_initializer(
     if (!s.typedef_ && !is_function_type)
         object_alignment =
             typedef_alignment_of(s.type.unqualified(), type, s.typedef_aligned);
+    /* (a member defined outside its class may repeat the declaration's
+       abi_tag and visibility: checked against the member below) */
+    uint32_t others = gnu_flags & ~(gnu_abi_tag | gnu_hidden_visibility);
     if ((aligned && (s.typedef_ || is_function_type)) ||
-        ((aligned || gnu_flags) && (m.qualifier || m.qualified_namespace)))
+        ((aligned || others) && (m.qualifier || m.qualified_namespace)) ||
+        (gnu_flags && m.qualified_namespace))
         return not_supported(declaration, "ext.gnu");
     /* [basic.lookup.qual]/3: "names following the qualified-id are looked up in
        the scope of the member's class or namespace": the initializer of a
@@ -1260,8 +1276,11 @@ analysis_result semantic_analysis::declare_with_initializer(
         if ((gnu_flags & gnu_section) && x.automatic)
             return not_supported(declaration, "ext.gnu");
         if ((gnu_flags & (gnu_abi_tag | gnu_hidden_visibility)) &&
-            (x.automatic || (x.abi_tag && abi_tag && x.abi_tag != abi_tag)))
-            /* a local's, or a second tag */
+            (x.automatic ||
+             (x.abi_tag && abi_tag && !same_abi_tag(x.abi_tag, abi_tag)) ||
+             (m.qualifier && abi_tag != 0 && x.abi_tag == 0)))
+            /* a local's, a second tag, or a tag the member's declaration
+               lacks (clang: it must precede the definition) */
             return not_supported(declaration, "ext.gnu");
         x.gnu_flags |= gnu_flags;
         if (section)

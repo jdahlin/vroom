@@ -121,11 +121,14 @@ struct type {
        reference: the type pointed or referred to; pointer to member: the
        member's type */
     qualified_type operand;
-    /* class, enumeration: the entity; pointer to member: the class's */
+    /* class, enumeration: the entity; pointer to member: the class's (0
+       for a dependent class, whose type is bound) */
     uint32_t entity = 0;
     /* array: the bound N; in a template's own declaration a bound that is
        a non-type template-parameter's name (T[N], [temp.deduct.type]/8's
-       T[i]) is that parameter's entity, with bound_known and bound 0 */
+       T[i]) is that parameter's entity, with bound_known and bound 0;
+       pointer to member of a dependent class ([temp.dep.type]/9): the
+       class's type */
     uint64_t bound = 0;
     /* function: the parameter types are parameters[first_parameter ..
        first_parameter + parameter_count) */
@@ -157,6 +160,8 @@ class types
                         bool non_throwing = false);
     type_index of_entity(type_kind kind, uint32_t entity);
     type_index pointer_to_member(uint32_t class_entity, qualified_type member);
+    type_index dependent_pointer_to_member(type_index class_type,
+                                           qualified_type member);
     type_index pack_expansion_of(qualified_type pattern);
     type_index atomic_of(qualified_type value);
     type_index complex_of(qualified_type value);
@@ -2047,6 +2052,7 @@ class semantic_analysis
     analysis_result gnu_mode_type(SyntaxRef at, token_index mode,
                                   qualified_type &type);
     uint32_t leading_gnu_attributes(SyntaxRef n) const;
+    bool same_abi_tag(token_index a, token_index b) const;
     bool class_specifier_before(SyntaxRef seq, uint32_t i) const;
     bool gnu_or_without_effect(SyntaxRef n) const;
     /* [dcl.attr.grammar]: every attribute at n (an attribute-specifier,

@@ -221,6 +221,23 @@ bool semantic_analysis::deduce_type(qualified_type p, qualified_type a,
     case type_kind::rvalue_reference:
     case type_kind::pack_expansion:
         return deduce_type(pr.operand, ar.operand, deduced, set, exact);
+    case type_kind::pointer_to_member: {
+        /* [temp.deduct.type]/8's T C::*, "T (C::*)()": C deduced from the
+           class of A's, whose type is entity's */
+        if (pr.entity) {
+            if (pr.entity != ar.entity || pr.bound != ar.bound)
+                return false;
+        } else {
+            qualified_type pc = qualified_type::make(pr.bound, cv_none);
+            qualified_type ac = qualified_type::make(ar.bound, cv_none);
+            if (ar.entity)
+                ac = qualified_type::make(
+                    entity_table[ar.entity].type.unqualified(), cv_none);
+            if (!deduce_type(pc, ac, deduced, set, exact))
+                return false;
+        }
+        return deduce_type(pr.operand, ar.operand, deduced, set, exact);
+    }
     case type_kind::array:
         if (pr.entity && ar.entity && exact) {
             /* [temp.over.link]/7: the same parameter's position */

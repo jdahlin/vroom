@@ -200,6 +200,19 @@ type_index types::pointer_to_member(uint32_t class_entity,
     return intern(t, nullptr);
 }
 
+/* [dcl.mptr]/1 in a template's own declaration: a pointer to member of a
+   class that is a dependent type ([temp.dep.type]/9), a template parameter
+   or a member of one: R (C::*)(); its class is the type class_type */
+type_index types::dependent_pointer_to_member(type_index class_type,
+                                              qualified_type member)
+{
+    type t;
+    t.kind = type_kind::pointer_to_member;
+    t.bound = class_type;
+    t.operand = member;
+    return intern(t, nullptr);
+}
+
 /* [temp.variadic]/5: "A pack expansion consists of a pattern and an
    ellipsis" */
 type_index types::pack_expansion_of(qualified_type pattern)

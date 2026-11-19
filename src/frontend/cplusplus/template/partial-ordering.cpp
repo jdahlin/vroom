@@ -36,6 +36,11 @@ bool orderable(const types &table, qualified_type t, bool packs)
         return true;
     case type_kind::pack_expansion:
         return packs && orderable(table, r.operand, packs);
+    case type_kind::pointer_to_member:
+        if (!r.entity &&
+            !orderable(table, qualified_type::make(r.bound, cv_none), packs))
+            return false;
+        return orderable(table, r.operand, packs);
     case type_kind::pointer:
     case type_kind::lvalue_reference:
     case type_kind::rvalue_reference:
