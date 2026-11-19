@@ -306,10 +306,8 @@ analysis_result semantic_analysis::user_defined_literal(token_index t,
             candidates.append(c);
         }
         size_t index = 0;
-        analysis_result r = best_viable_function(
-            current_declaration, candidates, nullptr, arguments, index);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r, best_viable_function(current_declaration, candidates, nullptr,
+                                     arguments, index));
         chosen = set[index];
     }
     /* the call's node is the literal's own: its first token */

@@ -356,10 +356,7 @@ semantic_analysis::function_template_definition(SyntaxRef n,
     owned_array<SyntaxRef> parameters;
     /* [temp.param]/14: a function template's pack may be followed by
        parameters that are deduced or have defaults */
-    analysis_result head =
-        template_head_parameters(n, parameters, true, true, true, true);
-    if (head != analysis_result::well_formed)
-        return head;
+    VTRY(head, template_head_parameters(n, parameters, true, true, true, true));
     /* a function-definition, or a simple-declaration of one declarator
        without an initializer: the template declared, defined later;
        [ext:gnu_attributes] before it, its specializations' */
@@ -380,17 +377,13 @@ semantic_analysis::function_template_definition(SyntaxRef n,
         return not_supported(n, "temp.fct");
     uint32_t index = 0, first = 0;
     entity_index scope = 0;
-    analysis_result declared =
-        template_parameter_scope(n, parameters, outer, 0, index, scope, first);
-    if (declared != analysis_result::well_formed)
-        return declared;
+    VTRY(declared, template_parameter_scope(n, parameters, outer, 0, index,
+                                            scope, first));
     specified s;
     declarator_meaning m;
     qualified_type type;
-    analysis_result r =
-        function_template_declarator(definition, lead, 0, scope, s, m, type);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r,
+         function_template_declarator(definition, lead, 0, scope, s, m, type));
     /* an operator function template (libc++'s byte& operator<<=(byte&,
        _Integer)): its name is operator@ ([over.oper]); not new or delete */
     if (!m.has_id || m.qualifier || m.qualified_namespace ||
@@ -402,10 +395,8 @@ semantic_analysis::function_template_definition(SyntaxRef n,
         return not_supported(n, "temp.fct");
     uint32_t gnu_flags = 0;
     token_index abi_tag = 0;
-    r = function_template_attributes(n, s, m, gnu_inline_flags, "temp.fct",
-                                     gnu_flags, abi_tag);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY_SET(r, function_template_attributes(n, s, m, gnu_inline_flags,
+                                             "temp.fct", gnu_flags, abi_tag));
     /* [dcl.fct.default]/4: the trailing parameters with a default
        argument */
     uint32_t defaults = 0;
@@ -801,10 +792,7 @@ analysis_result semantic_analysis::declare_template_parameters(
         record.parameter_count = static_cast<uint32_t>(inner.size());
         record.is_class = true;
         record.is_parameter = true;
-        analysis_result r =
-            declare_template_parameters(n, inner, inner_scope, own, 0);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r, declare_template_parameters(n, inner, inner_scope, own, 0));
         entity_table[e].instantiation = own + 1;
         function_templates.append(record);
     }
@@ -907,10 +895,7 @@ analysis_result semantic_analysis::alias_template_definition(SyntaxRef n,
 {
     entity_index outer = current_scope;
     owned_array<SyntaxRef> parameters;
-    analysis_result r =
-        template_head_parameters(n, parameters, true, true, false, true);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, template_head_parameters(n, parameters, true, true, false, true));
     uint32_t name = tokens.identifier(alias.first_token() + 1);
     if (entity_index prior = entity_table.find(outer, name)) {
         /* a redeclaration of the same tokens (libc++'s __swap_result_t in
@@ -924,10 +909,8 @@ analysis_result semantic_analysis::alias_template_definition(SyntaxRef n,
     }
     uint32_t index = 0, first = 0;
     entity_index scope = 0;
-    r = template_parameter_scope(n, parameters, outer, name, index, scope,
-                                 first);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY_SET(r, template_parameter_scope(n, parameters, outer, name, index,
+                                         scope, first));
     /* [temp.param]/14's rule is a class template's: a default after which
        one is missing is left to clang */
     if (default_missing_after_one(parameters))
@@ -974,10 +957,7 @@ analysis_result semantic_analysis::variable_partial_specialization(
     owned_array<SyntaxRef> parameters;
     /* [temp.param]/14: a partial specialization's packs are deduced,
        wherever they are */
-    analysis_result r =
-        template_head_parameters(n, parameters, true, true, true, true);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, template_head_parameters(n, parameters, true, true, true, true));
     lookup_result x;
     entity_index named = 0;
     template_id_name(id, x, named);
@@ -993,9 +973,8 @@ analysis_result semantic_analysis::variable_partial_specialization(
             return not_supported(n, "temp.class.spec");
     uint32_t index = 0, first = 0;
     entity_index scope = 0;
-    r = template_parameter_scope(n, parameters, outer, 0, index, scope, first);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY_SET(r, template_parameter_scope(n, parameters, outer, 0, index, scope,
+                                         first));
     owned_array<template_argument> arguments;
     partial_arguments++;
     declaring_specializations++;
@@ -1077,9 +1056,7 @@ semantic_analysis::variable_template_definition(SyntaxRef n,
 {
     entity_index outer = current_scope;
     owned_array<SyntaxRef> parameters;
-    analysis_result r = template_head_parameters(n, parameters, true);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, template_head_parameters(n, parameters, true));
     uint32_t skip = attributes_without_effect_before(declaration);
     auto item = declaration[skip + 1];
     if (item.size() != 2 || item[1].is(syntax_kind::requires_clause))
@@ -1088,9 +1065,8 @@ semantic_analysis::variable_template_definition(SyntaxRef n,
        are checked against it below) */
     uint32_t index = 0, first = 0;
     entity_index scope = 0;
-    r = template_parameter_scope(n, parameters, outer, 0, index, scope, first);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY_SET(r, template_parameter_scope(n, parameters, outer, 0, index, scope,
+                                         first));
     if (default_missing_after_one(parameters))
         return not_supported(n, "temp.param");
     entity_index saved_scope = current_scope;
@@ -1164,9 +1140,7 @@ analysis_result semantic_analysis::variable_template_id(SyntaxRef n,
     if (!vt || x.ambiguous)
         return not_supported(n, "temp.names");
     owned_array<template_argument> arguments;
-    analysis_result r = template_id_arguments(n, vt, arguments);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, template_id_arguments(n, vt, arguments));
     for (const template_argument &a : arguments) {
         if (depends(type_table, a.type) || a.template_entity)
             return not_supported(n, "temp.dep");
@@ -1182,10 +1156,9 @@ analysis_result semantic_analysis::variable_template_id(SyntaxRef n,
         }
     }
     entity_index e = 0;
-    r = instantiate_variable(n, vt, arguments.data(),
-                             static_cast<uint32_t>(arguments.size()), e);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY_SET(r,
+             instantiate_variable(n, vt, arguments.data(),
+                                  static_cast<uint32_t>(arguments.size()), e));
     size_t uses_before = name_uses.size();
     r = named_entity(n[0].token(), e, m);
     /* (clang's lookup of the name finds the template, no claim here) */
@@ -1216,10 +1189,8 @@ semantic_analysis::instantiate_variable(SyntaxRef at, uint32_t vt,
        specialization's declaration, its parameters the deduced arguments */
     uint32_t pattern = 0;
     owned_array<template_argument> deduced;
-    analysis_result matched =
-        matching_specialization(at, vt, arguments, count, pattern, deduced);
-    if (matched != analysis_result::well_formed)
-        return matched;
+    VTRY(matched,
+         matching_specialization(at, vt, arguments, count, pattern, deduced));
     uint32_t index = record_instantiation(ft, arguments, count);
     function_template definition = ft;
     if (pattern) {
@@ -1273,9 +1244,7 @@ analysis_result semantic_analysis::alias_template_type(SyntaxRef id,
                                                        uint32_t *cv)
 {
     owned_array<template_argument> arguments;
-    analysis_result r = template_id_arguments(id, at, arguments);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, template_id_arguments(id, at, arguments));
     return alias_template_specialization(id, at, arguments, type, cv);
 }
 
@@ -1358,9 +1327,7 @@ analysis_result semantic_analysis::alias_template_specialization(
        arguments substituted, itself dependent (clang mangles it so) */
     if (!dependent_arguments(arguments)) {
         bool satisfied = true;
-        r = template_constraints_satisfied(at, arguments, satisfied);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY_SET(r, template_constraints_satisfied(at, arguments, satisfied));
         /* clang reports the unsatisfied constraint at the use; while a
            candidate is substituted, a deduction failure */
         if (!satisfied && substituting)
@@ -1631,10 +1598,8 @@ semantic_analysis::class_template_definition(SyntaxRef n, SyntaxRef specifier)
     SyntaxElement head_name = class_head_name(head);
     bool specialization =
         head_name && head_name.is(syntax_kind::simple_template_id);
-    analysis_result r = template_head_parameters(n, parameters, true, true,
-                                                 specialization, true);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, template_head_parameters(n, parameters, true, true, specialization,
+                                     true));
     /* a partial specialization's requires-clause is checked where it is
        matched (matching_specialization); the primary's where a
        specialization is named (template_type) */
@@ -1647,10 +1612,8 @@ semantic_analysis::class_template_definition(SyntaxRef n, SyntaxRef specifier)
     uint32_t name = tokens.identifier(head_name.token());
     uint32_t index = 0, first = 0;
     entity_index scope = 0;
-    r = template_parameter_scope(n, parameters, outer, name, index, scope,
-                                 first);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY_SET(r, template_parameter_scope(n, parameters, outer, name, index,
+                                         scope, first));
     /* the definition of a class template declared before
        (class_template_declaration): its record, defined now */
     entity_index prior = entity_table.find(outer, name);
@@ -1805,10 +1768,8 @@ analysis_result semantic_analysis::class_specialization_definition(
             return not_supported(n, rule);
     uint32_t index = 0, first = 0;
     entity_index scope = 0;
-    analysis_result r =
-        template_parameter_scope(n, parameters, outer, 0, index, scope, first);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, template_parameter_scope(n, parameters, outer, 0, index, scope,
+                                     first));
     /* the arguments, in the parameters' scope; what they record for
        claims is the template's */
     owned_array<template_argument> arguments;
@@ -2047,19 +2008,15 @@ analysis_result semantic_analysis::matching_specialization(
             if (!set[i])
                 return not_supported(at, "temp.class.spec");
         bool substituted = false;
-        analysis_result again =
-            substitute_specialization(k + 1, d, arguments, count, substituted);
-        if (again != analysis_result::well_formed)
-            return again;
+        VTRY(again, substitute_specialization(k + 1, d, arguments, count,
+                                              substituted));
         if (!substituted)
             continue;
         /* [temp.class.spec.match]/2: "and the deduced template arguments
            satisfy the associated constraints of the partial
            specialization, if any" */
         bool satisfied = true;
-        analysis_result c = template_constraints_satisfied(k + 1, d, satisfied);
-        if (c != analysis_result::well_formed)
-            return c;
+        VTRY(c, template_constraints_satisfied(k + 1, d, satisfied));
         if (!satisfied)
             continue;
         matches++;
@@ -2128,9 +2085,7 @@ analysis_result semantic_analysis::template_type(SyntaxRef id,
     if (!named)
         named = x.unknown_entity;
     if (!named && qualified && !x.unknown) {
-        analysis_result m = missing_member(id[0].token(), scope);
-        if (m != analysis_result::well_formed)
-            return m;
+        VTRY(m, missing_member(id[0].token(), scope));
     }
     if (!named && !qualified && is_builtin_common_type(name))
         return builtin_common_type(id, type);
@@ -2146,9 +2101,7 @@ analysis_result semantic_analysis::template_type(SyntaxRef id,
         return not_supported(id, "temp.names");
     }
     owned_array<template_argument> arguments;
-    analysis_result filled = template_id_arguments(id, ct, arguments);
-    if (filled != analysis_result::well_formed)
-        return filled;
+    VTRY(filled, template_id_arguments(id, ct, arguments));
     /* [temp.dep.type]/9: "the template name is a template parameter" */
     bool dependent = function_templates[ct - 1].is_parameter;
     for (const template_argument &a : arguments) {
@@ -2178,10 +2131,7 @@ analysis_result semantic_analysis::template_type(SyntaxRef id,
        requires-clause) */
     if (head_constraint(function_templates[ct - 1].declaration)) {
         bool satisfied = true;
-        analysis_result s =
-            template_constraints_satisfied(ct, arguments, satisfied);
-        if (s != analysis_result::well_formed)
-            return s;
+        VTRY(s, template_constraints_satisfied(ct, arguments, satisfied));
         if (!satisfied && substituting)
             return analysis_result::ill_formed;
         if (!satisfied)
@@ -2190,10 +2140,8 @@ analysis_result semantic_analysis::template_type(SyntaxRef id,
                               "temp.names");
     }
     entity_index c = 0;
-    analysis_result r = instantiate_class(
-        id, ct, &arguments[0], static_cast<uint32_t>(arguments.size()), c);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, instantiate_class(id, ct, &arguments[0],
+                              static_cast<uint32_t>(arguments.size()), c));
     type = entity_table[c].type.unqualified();
     return analysis_result::well_formed;
 }
@@ -2421,17 +2369,12 @@ semantic_analysis::class_template_declaration(SyntaxRef n, SyntaxRef elaborated)
         return not_supported(n, "temp.class");
     owned_array<SyntaxRef> parameters;
     /* [temp.pre]/9: a requires-clause in its template-head */
-    analysis_result r =
-        template_head_parameters(n, parameters, true, true, false, true);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, template_head_parameters(n, parameters, true, true, false, true));
     uint32_t name = tokens.identifier(elaborated[1].token());
     uint32_t index = 0, first = 0;
     entity_index scope = 0;
-    r = template_parameter_scope(n, parameters, outer, name, index, scope,
-                                 first);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY_SET(r, template_parameter_scope(n, parameters, outer, name, index,
+                                         scope, first));
     entity_index held = entity_table.find(outer, name);
     if (held) {
         /* a redeclaration of the template, with no default
@@ -2515,9 +2458,7 @@ semantic_analysis::member_definition_of_template(SyntaxRef n,
 {
     entity_index outer = current_scope;
     owned_array<SyntaxRef> parameters;
-    analysis_result r = template_head_parameters(n, parameters);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, template_head_parameters(n, parameters));
     auto def = definition.function_definition();
     if (leading_gnu_attributes(definition) || !def.plain() || def.size() != 3)
         return not_supported(n, "temp.mem.func");
@@ -2540,22 +2481,17 @@ semantic_analysis::member_definition_of_template(SyntaxRef n,
         return not_supported(n, "temp.mem.func");
     uint32_t index = 0, first = 0;
     entity_index scope = 0;
-    r = template_parameter_scope(n, parameters, outer, 0, index, scope, first);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY_SET(r, template_parameter_scope(n, parameters, outer, 0, index, scope,
+                                         first));
     /* the template-id's arguments in terms of the parameters; what they
        record for claims is the template's */
     owned_array<template_argument> arguments;
-    r = template_id_arguments_in(id, ct, scope, arguments);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY_SET(r, template_id_arguments_in(id, ct, scope, arguments));
     uint32_t pattern = 0;
     owned_array<template_argument> deduced;
-    r = matching_specialization(id, ct, arguments.data(),
-                                static_cast<uint32_t>(arguments.size()),
-                                pattern, deduced);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY_SET(r, matching_specialization(id, ct, arguments.data(),
+                                        static_cast<uint32_t>(arguments.size()),
+                                        pattern, deduced));
     const template_argument *mine = arguments.data();
     uint32_t mine_count = static_cast<uint32_t>(arguments.size());
     function_template of = function_templates[ct - 1];

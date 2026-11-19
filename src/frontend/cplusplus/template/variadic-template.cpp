@@ -405,16 +405,12 @@ analysis_result semantic_analysis::fold(SyntaxRef n, expression_meaning &m)
     owned_array<expression_meaning> operands;
     for (uint32_t i = 0; i < count; i++) {
         expression_meaning e;
-        analysis_result r = expansion_element_expression(pattern, i, e);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r, expansion_element_expression(pattern, i, e));
         operands.append(e);
     }
     expression_meaning e;
     if (has_init) {
-        analysis_result r = expression(init, e);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r, expression(init, e));
     }
     for (const expression_meaning &x : operands) {
         type_kind k = type_table[x.type.unqualified()].kind;
@@ -478,9 +474,7 @@ analysis_result semantic_analysis::fold(SyntaxRef n, expression_meaning &m)
         }
         while (i-- > 0) {
             expression_meaning next;
-            analysis_result r = combine(operands[i], acc, next);
-            if (r != analysis_result::well_formed)
-                return r;
+            VTRY(r, combine(operands[i], acc, next));
             acc = next;
         }
     } else {
@@ -493,9 +487,7 @@ analysis_result semantic_analysis::fold(SyntaxRef n, expression_meaning &m)
         }
         for (; i < count; i++) {
             expression_meaning next;
-            analysis_result r = combine(acc, operands[i], next);
-            if (r != analysis_result::well_formed)
-                return r;
+            VTRY(r, combine(acc, operands[i], next));
             acc = next;
         }
     }

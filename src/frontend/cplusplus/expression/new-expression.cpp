@@ -194,9 +194,7 @@ analysis_result semantic_analysis::new_type_id(NewTypeId n,
     if (!n.type_specifier_seq() || n.size() > 2)
         return not_supported(n, "expr.new");
     specified s;
-    analysis_result r = decl_specifier_seq(n.type_specifier_seq(), s, false);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, decl_specifier_seq(n.type_specifier_seq(), s, false));
     if (!s.has_type)
         return not_supported(n, "expr.new");
     type = s.type;
@@ -362,9 +360,7 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
             return not_supported(n, "expr.new");
         /* the class's operator delete[], as clang looks it up, ::new or
            not */
-        r = array_cookie(n, c, type, false, cookie);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY_SET(r, array_cookie(n, c, type, false, cookie));
     }
     bool elements =
         array && c &&
@@ -373,12 +369,8 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
         /* [expr.new]/9: "If the expression in a noptr-new-declarator is
            present, it is implicitly converted to std::size_t." */
         expression_meaning b;
-        r = expression(bound, b);
-        if (r != analysis_result::well_formed)
-            return r;
-        r = operand_value(n, b);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY_SET(r, expression(bound, b));
+        VTRY_SET(r, operand_value(n, b));
         const struct type &bt = type_table[b.type.unqualified()];
         bool integral = (bt.kind == type_kind::fundamental &&
                          fundamental_type_is_integral(bt.fundamental)) ||
@@ -393,9 +385,7 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
             fundamental_type_is_signed(tokens.files.behavior, bt.fundamental) &&
             static_cast<int64_t>(b.value) < 0)
             negative = true;
-        r = implicit_conversion(n, b, size_type, false);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY_SET(r, implicit_conversion(n, b, size_type, false));
         if (b.evaluation == constness::constant) {
             /* "The expression is erroneous if: the expression is of
                non-class type and its value before converting to std::size_t
@@ -456,9 +446,7 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
     if (placement) {
         if (placement.size() != 3)
             return not_supported(placement.index(), "expr.new");
-        r = expression_list_meanings(placement[1], arguments);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY_SET(r, expression_list_meanings(placement[1], arguments));
     }
     allocation_function kind = allocation_function::new_;
     if (array)
@@ -468,9 +456,7 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
     entity_index scope = c;
     if (global)
         scope = 0;
-    r = allocation_functions(n, kind, scope, set, in_class);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY_SET(r, allocation_functions(n, kind, scope, set, in_class));
     owned_array<overload_candidate> candidates;
     for (entity_index f : set) {
         overload_candidate k;
@@ -480,10 +466,8 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
     }
     size_t chosen = 0;
     bool none_viable = false;
-    r = best_viable_function(n, candidates, nullptr, arguments, chosen,
-                             &none_viable);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY_SET(r, best_viable_function(n, candidates, nullptr, arguments, chosen,
+                                     &none_viable));
     if (none_viable) {
         if (allocation_names_spelled() != allocation_declarations_analysed ||
             tokens.files.behavior.microsoft_extensions)
@@ -498,9 +482,7 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
     }
     entity_index function = set[chosen];
     expression_meaning call;
-    r = call_function(n, at, function, arguments, call);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY_SET(r, call_function(n, at, function, arguments, call));
     /* the pointer to the object, which its initialization is of */
     m = expression_meaning();
     m.type = qualified_type::make(type_table.pointer_to(type), cv_none);
@@ -585,9 +567,7 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
             if (!entity_table[c].first_constructor)
                 return not_supported(n, "dcl.init");
             owned_array<expression_meaning> list;
-            r = expression_list_meanings(init[1], list);
-            if (r != analysis_result::well_formed)
-                return r;
+            VTRY_SET(r, expression_list_meanings(init[1], list));
             r = construct(n, type, list, object.node, value);
         } else if (init.size() == 3) {
             r = initialize_from(n, init[1], type, true, false, value);

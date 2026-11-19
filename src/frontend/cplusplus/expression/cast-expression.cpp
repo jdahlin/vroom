@@ -179,15 +179,10 @@ analysis_result semantic_analysis::explicit_conversion(SyntaxRef at,
            (possibly cv-qualified) class type, conversion functions are
            considered", then the second standard conversion sequence */
         bool converted = false;
-        analysis_result r =
-            conversion_function_call(at, m, to, true, converted);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r, conversion_function_call(at, m, to, true, converted));
         if (!converted)
             return no_cast(at, kinds);
-        r = operand_value(at, m);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY_SET(r, operand_value(at, m));
         return implicit_conversion(at, m, to, true);
     }
     if (kinds == cast_reinterpret && m.type.unqualified() == to.unqualified() &&
@@ -218,9 +213,7 @@ analysis_result semantic_analysis::explicit_conversion(SyntaxRef at,
         entity_index e = enumeration_of(to);
         if (!e)
             return not_supported(at, "dcl.enum");
-        analysis_result r = operand_value(at, m);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r, operand_value(at, m));
         if (m.type.unqualified() == to.unqualified())
             return analysis_result::well_formed;
         if (type_table[m.type.unqualified()].kind == type_kind::enumeration &&
@@ -261,9 +254,7 @@ analysis_result semantic_analysis::explicit_conversion(SyntaxRef at,
     if (target.kind != type_kind::fundamental &&
         target.kind != type_kind::pointer)
         return not_supported(at, "expr.cast");
-    analysis_result r = operand_value(at, m);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, operand_value(at, m));
     if (is_member_pointer(m.type)) {
         /* [conv.bool]/1: "A prvalue of ... pointer-to-member type can be
            converted to a prvalue of type bool" (a static_cast,
@@ -335,9 +326,7 @@ analysis_result semantic_analysis::explicit_conversion(SyntaxRef at,
             type_table.pointer_to(qualified_type::make(
                 type_table.fundamental(fundamental_type::void_), cv_none)),
             cv_none);
-        r = implicit_conversion(at, m, void_pointer, true);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY_SET(r, implicit_conversion(at, m, void_pointer, true));
     }
     if (is_pointer(m.type)) {
         fundamental_type t = target.fundamental;
@@ -384,9 +373,7 @@ analysis_result semantic_analysis::member_pointer_cast(SyntaxRef at,
                                                        expression_meaning &m,
                                                        uint8_t kinds)
 {
-    analysis_result r = operand_value(at, m);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, operand_value(at, m));
     if (!(kinds & cast_static))
         return not_supported(at, "expr.cast");
     const struct type source = type_table[m.type.unqualified()];
@@ -525,9 +512,7 @@ analysis_result semantic_analysis::pointer_conversion(SyntaxRef at,
             type_table.pointer_to(qualified_type::make(
                 target_pointee.unqualified(), pointee.cv())),
             cv_none);
-        r = implicit_conversion(at, m, via, true);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY_SET(r, implicit_conversion(at, m, via, true));
         m.type = result;
         converted(m, conversion_kind::qualification_cast);
         return analysis_result::well_formed;
@@ -691,9 +676,7 @@ analysis_result semantic_analysis::reference_cast(SyntaxRef at,
     bool temporary = (kinds & cast_static) && scalars && may_bind_temporary &&
                      (m.category == value_category::prvalue || !same);
     if (temporary) {
-        analysis_result r = reference_binding(at, m, to);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r, reference_binding(at, m, to));
     } else {
         if (m.category == value_category::prvalue)
             return not_supported(at, "expr.cast");
@@ -733,9 +716,7 @@ analysis_result semantic_analysis::reference_cast(SyntaxRef at,
         address.type = pointer;
     address.node = expression_node(semantic_kind::address, address, t, m.node);
     if (!temporary) {
-        analysis_result r = pointer_conversion(at, pointer, address, kinds);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r, pointer_conversion(at, pointer, address, kinds));
     }
     m = expression_meaning();
     m.type = referenced;
@@ -759,9 +740,7 @@ analysis_result semantic_analysis::cast(SyntaxRef n, expression_meaning &m)
     analysis_result r = type_id(n[1], to);
     /* [over.over]/1: "an explicit type conversion" */
     if (r == analysis_result::well_formed)
-        r = target_expression(n[3], to, m);
-    if (r != analysis_result::well_formed)
-        return r;
+        VTRY_SET(r, target_expression(n[3], to, m));
     /* C++03 [expr.const]/1: "Floating literals can appear only if they are
        cast to integral or enumeration types." */
     bool floating_literal_to_integral =

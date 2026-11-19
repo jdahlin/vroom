@@ -322,9 +322,7 @@ analysis_result semantic_analysis::namespace_definition(SyntaxRef n)
             /* GNU attributes that change nothing a namespace's members
                get (abi_tag, which changes their symbols, has no rule) */
             gnu_attributes g;
-            analysis_result r = gnu_attribute_specifier(c, g);
-            if (r != analysis_result::well_formed)
-                return r;
+            VTRY(r, gnu_attribute_specifier(c, g));
             if (g.flags || g.aligned || g.section)
                 return not_supported(n, "dcl.attr");
             continue;
@@ -468,9 +466,7 @@ analysis_result semantic_analysis::named_namespace(SyntaxRef at,
     lookup_result found;
     if (qualifier) {
         nominated_scope scope;
-        analysis_result r = nested_name_specifier(qualifier, scope);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r, nested_name_specifier(qualifier, scope));
         if (!is_namespace(scope.entity))
             return not_supported(at, "basic.lookup.udir");
         found = lookup_in_namespace(scope.entity, tokens.identifier(name),
@@ -581,9 +577,7 @@ semantic_analysis::namespace_alias_definition(NamespaceAliasDefinition n)
         return not_supported(n, "namespace.alias");
     }
     entity_index nominated = 0;
-    analysis_result r = named_namespace(n, qualifier, name, nominated);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, named_namespace(n, qualifier, name, nominated));
     entity_index scope = current_scope;
     uint32_t alias_name = tokens.identifier(alias);
     entity_index prior = entity_table.find(scope, alias_name);

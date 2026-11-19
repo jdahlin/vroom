@@ -705,9 +705,7 @@ analysis_result semantic_analysis::condition(SyntaxElement c, bool for_switch,
         m.node = expression_node(semantic_kind::entity, m, first_token(at[1]),
                                  last_declared);
     } else {
-        r = expression(c, m);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY_SET(r, expression(c, m));
     }
     if (!for_switch)
         r = contextual_bool(at, m);
@@ -723,9 +721,7 @@ analysis_result semantic_analysis::condition(SyntaxElement c, bool for_switch,
 analysis_result semantic_analysis::switch_condition(SyntaxRef at,
                                                     expression_meaning &m)
 {
-    analysis_result r = operand_value(at, m);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, operand_value(at, m));
     /* [stmt.switch]/2: "The condition shall be of integral type,
        enumeration type, or class type. ... If the (possibly converted) type
        is subject to integral promotions, the condition is converted to the

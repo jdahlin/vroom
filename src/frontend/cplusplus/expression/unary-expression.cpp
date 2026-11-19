@@ -317,9 +317,7 @@ analysis_result semantic_analysis::size_of(SyntaxRef n, bool alignment,
 {
     qualified_type operand;
     if (n.size() == 4 && n[2].is(syntax_kind::type_id)) {
-        analysis_result r = type_id(n[2], operand);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r, type_id(n[2], operand));
     } else if (n.size() == 2 && !alignment) {
         /* [expr.sizeof]/3: "The lvalue-to-rvalue, array-to-pointer, and
            function-to-pointer standard conversions are not applied to the
@@ -407,9 +405,7 @@ analysis_result semantic_analysis::increment(SyntaxRef n, SyntaxElement operand,
                                              bool decrement, bool postfix,
                                              expression_meaning &m)
 {
-    analysis_result r = expression(operand, m);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, expression(operand, m));
     return increment_of(n, n.first_token(), operand, decrement, postfix, m);
 }
 
@@ -564,9 +560,7 @@ analysis_result semantic_analysis::unary(SyntaxRef n, expression_meaning &m)
     case preprocessing_op_or_punc::PLUS:
     case preprocessing_op_or_punc::MINUS:
     case preprocessing_op_or_punc::TILDE: {
-        r = operand_value(n, m);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY_SET(r, operand_value(n, m));
         /* [expr.unary.op]/7, /8, /10: "arithmetic or unscoped
            enumeration type", "integral or unscoped enumeration type" */
         promote_enumeration(m);
@@ -613,9 +607,7 @@ analysis_result semantic_analysis::unary(SyntaxRef n, expression_meaning &m)
            ! is contextually converted to bool; its value is true if the
            converted operand is false and false otherwise.  The type of the
            result is bool." */
-        r = contextual_bool(n, m);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY_SET(r, contextual_bool(n, m));
         m.value = !m.value;
         break;
     }
@@ -647,9 +639,7 @@ analysis_result semantic_analysis::indirection_of(SyntaxRef n, token_index at,
        and the result is an lvalue referring to the object or function
        to which the expression points.  If the type of the expression
        is "pointer to T", the type of the result is "T"." */
-    analysis_result r = operand_value(n, m);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, operand_value(n, m));
     if (!is_pointer(m.type)) {
         if (fundamental_of(m.type) == fundamental_type::none)
             return not_supported(n, "expr.unary.op");
@@ -776,9 +766,7 @@ analysis_result semantic_analysis::noexcept_operator(SyntaxRef n,
     if (r != analysis_result::well_formed)
         return r;
     bool throwing = false;
-    r = potentially_throwing(n, e.node, throwing);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY_SET(r, potentially_throwing(n, e.node, throwing));
     m = integer_constant(fundamental_type::bool_, !throwing, n.first_token());
     return analysis_result::well_formed;
 }

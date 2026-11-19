@@ -33,9 +33,7 @@ semantic_analysis::concept_definition(SyntaxRef n, ConceptDefinition definition)
 {
     entity_index outer = current_scope;
     owned_array<SyntaxRef> parameters;
-    analysis_result r = template_head_parameters(n, parameters, true);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, template_head_parameters(n, parameters, true));
     if (definition.size() != 5 || !definition[1].is_token())
         return not_supported(n, "temp.concept");
     uint32_t name = tokens.identifier(definition[1].token());
@@ -43,10 +41,8 @@ semantic_analysis::concept_definition(SyntaxRef n, ConceptDefinition definition)
         return not_supported(n, "temp.concept");
     uint32_t index = 0, first = 0;
     entity_index scope = 0;
-    r = template_parameter_scope(n, parameters, outer, name, index, scope,
-                                 first);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY_SET(r, template_parameter_scope(n, parameters, outer, name, index,
+                                         scope, first));
     function_template record = new_template(
         name, outer, n, index, first, static_cast<uint32_t>(parameters.size()));
     entity_table[record.entity].defined = true;
@@ -88,9 +84,7 @@ analysis_result semantic_analysis::concept_id(SyntaxRef n, uint32_t ct,
             depends_on_template_parameter(a.type) || a.template_entity)
             return not_supported(n, "temp.constr");
     bool satisfied = false;
-    r = concept_satisfied(n, ct, arguments, satisfied);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY_SET(r, concept_satisfied(n, ct, arguments, satisfied));
     m = integer_constant(fundamental_type::bool_, satisfied, n.first_token());
     return analysis_result::well_formed;
 }
@@ -484,9 +478,8 @@ analysis_result semantic_analysis::template_constraints_satisfied(
         if (parts != 1)
             r = template_id_arguments_in(x.constraint, ct, scope, arguments);
         if (r == analysis_result::well_formed)
-            r = concept_satisfied(x.constraint, ct, arguments, satisfied);
-        if (r != analysis_result::well_formed)
-            return r;
+            VTRY_SET(r,
+                     concept_satisfied(x.constraint, ct, arguments, satisfied));
     }
     if (!constraint || !satisfied)
         return analysis_result::well_formed;

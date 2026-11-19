@@ -103,9 +103,7 @@ analysis_result semantic_analysis::conversion_type(SyntaxRef id,
     if (t.is(syntax_kind::conversion_type_id))
         seq = t[0].index();
     specified s;
-    analysis_result r = decl_specifier_seq(seq, s, false);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, decl_specifier_seq(seq, s, false));
     if (!s.has_type || s.typedef_ || s.static_ || s.extern_ || s.inline_ ||
         s.constexpr_ || s.virtual_ || s.friend_ || s.gnu_flags || s.aligned)
         return not_supported(seq, "class.conv.fct");
@@ -130,9 +128,7 @@ analysis_result semantic_analysis::conversion_type(SyntaxRef id,
         if (!k.is(syntax_kind::ptr_operator))
             return not_supported(k, "class.conv.fct");
         declarator_meaning m;
-        r = pointer_operator(k, type, m);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY_SET(r, pointer_operator(k, type, m));
     }
     return analysis_result::well_formed;
 }
@@ -161,9 +157,7 @@ semantic_analysis::conversion_function_member(entity_index c, SyntaxRef n,
     /* [ext:gnu_attributes] attributes before the declaration */
     uint32_t lead = leading_gnu_attributes(n);
     while (first < lead) {
-        analysis_result r = gnu_attribute_specifier(n[first], s);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r, gnu_attribute_specifier(n[first], s));
         first++;
     }
     if (first < n.size() && n[first].is(syntax_kind::decl_specifier_seq)) {
@@ -196,9 +190,7 @@ semantic_analysis::conversion_function_member(entity_index c, SyntaxRef n,
             return not_supported(n, "class.conv.fct");
     }
     qualified_type type;
-    analysis_result r = conversion_type(id, type);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, conversion_type(id, type));
     s.type = type;
     s.has_type = true;
     return member_declarators(c, n, s, access, first, bodies);
@@ -413,9 +405,7 @@ semantic_analysis::conversion_function_call(SyntaxRef at, expression_meaning &m,
                           "it is declared",
                           "class.access");
     token_index t = at.first_token();
-    analysis_result r = deleted_use(t, f);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, deleted_use(t, f));
     /* (a captureless lambda's closure object has no members: its
        temporary is the call's object argument, as for its call operator) */
     if ((aggregate_prvalue(m) && !entity_table[c].lambda) ||
@@ -437,10 +427,8 @@ semantic_analysis::conversion_function_call(SyntaxRef at, expression_meaning &m,
     owned_array<SyntaxElement> syntax;
     owned_array<expression_meaning> arguments;
     expression_meaning result;
-    r = call_with(at, callee, x.type, address.node, f, syntax, arguments,
-                  result);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY_SET(r, call_with(at, callee, x.type, address.node, f, syntax,
+                          arguments, result));
     m = result;
     converted = true;
     return analysis_result::well_formed;

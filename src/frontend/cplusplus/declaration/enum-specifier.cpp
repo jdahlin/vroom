@@ -518,9 +518,7 @@ analysis_result semantic_analysis::enum_specifier_rules(SyntaxRef n,
         if (base.size() != 2 || !base[1].is(syntax_kind::type_specifier_seq))
             return not_supported(n, "dcl.enum");
         specified s;
-        analysis_result r = decl_specifier_seq(base[1], s, true);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r, decl_specifier_seq(base[1], s, true));
         /* [dcl.enum]/2: "The type-specifier-seq of an enum-base shall name
            an integral type; any cv-qualification is ignored." */
         if (!s.has_type)
@@ -685,9 +683,7 @@ analysis_result semantic_analysis::enum_specifier_rules(SyntaxRef n,
             expression_meaning m;
             analysis_result r = expression(init, m);
             if (r == analysis_result::well_formed)
-                r = operand_value(node_of(init), m);
-            if (r != analysis_result::well_formed)
-                return r;
+                VTRY_SET(r, operand_value(node_of(init), m));
             /* "If the expression has unscoped enumeration type, the
                enumerator has the underlying type of that enumeration
                type" */
@@ -708,9 +704,7 @@ analysis_result semantic_analysis::enum_specifier_rules(SyntaxRef n,
                     "dcl.enum");
             }
             bool constant = false;
-            r = integral_constant_expression(n, m, constant);
-            if (r != analysis_result::well_formed)
-                return r;
+            VTRY_SET(r, integral_constant_expression(n, m, constant));
             if (!constant)
                 return not_supported(n, "expr.const");
             fundamental_type f = fundamental_of(m.type);

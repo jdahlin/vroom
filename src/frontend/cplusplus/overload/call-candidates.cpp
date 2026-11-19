@@ -94,9 +94,7 @@ semantic_analysis::resolve_call(SyntaxRef n,
         if (!arguments[i].is(syntax_kind::braced_init_list))
             continue;
         owned_array<SyntaxElement> clauses;
-        analysis_result r = list_clauses(arguments[i], clauses);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r, list_clauses(arguments[i], clauses));
         if (clauses.size() != 1 || clauses[0].is(syntax_kind::braced_init_list))
             return not_supported(n, "over.ics.list");
         for (entity_index e : set) {
@@ -122,9 +120,7 @@ semantic_analysis::resolve_call(SyntaxRef n,
     for (size_t i = early.size(); i < arguments.size(); i++) {
         expression_meaning e;
         if (!arguments[i].is(syntax_kind::braced_init_list)) {
-            analysis_result r = expression(arguments[i], e);
-            if (r != analysis_result::well_formed)
-                return r;
+            VTRY(r, expression(arguments[i], e));
         }
         early.append(e);
     }
@@ -132,9 +128,7 @@ semantic_analysis::resolve_call(SyntaxRef n,
     for (size_t i = 0; i < arguments.size(); i++) {
         if (!arguments[i].is(syntax_kind::braced_init_list))
             continue;
-        analysis_result r = expression(lists[list++], early[i]);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r, expression(lists[list++], early[i]));
     }
     expression_meaning implied;
     if (object) {
@@ -159,10 +153,7 @@ semantic_analysis::resolve_call(SyntaxRef n,
     const expression_meaning *implied_object = nullptr;
     if (object)
         implied_object = &implied;
-    analysis_result r =
-        best_viable_function(n, candidates, implied_object, early, chosen);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, best_viable_function(n, candidates, implied_object, early, chosen));
     entity_index c = set[chosen];
     /* a copy: deleted_use may define an implicit member, adding entities
        that may move entity_table's */
@@ -183,9 +174,7 @@ semantic_analysis::resolve_call(SyntaxRef n,
     /* [dcl.fct.def.delete]/2: "If a function is overloaded, it is
        referenced only if the function is selected by overload
        resolution." */
-    r = deleted_use(callee().at, c);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY_SET(r, deleted_use(callee().at, c));
     if (use < name_uses.size() && !name_uses[use].entity)
         name_uses[use].entity = c;
     /* the expression the name is, as analysed: its type and entity are

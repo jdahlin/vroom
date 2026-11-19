@@ -171,9 +171,7 @@ analysis_result semantic_analysis::base_class_name(SyntaxElement name,
 {
     if (name.is(syntax_kind::simple_template_id)) {
         type_index t = 0;
-        analysis_result r = template_type(name, 0, false, t);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r, template_type(name, 0, false, t));
         id = name.first_token();
         if (type_table[t].kind != type_kind::class_type)
             return not_supported(n, "class.derived");
@@ -651,9 +649,7 @@ analysis_result semantic_analysis::to_base(token_index at, entity_index base,
             entity_index v = virtual_route(c, base);
             if (!v)
                 return not_supported(current_declaration, "class.mi");
-            analysis_result r = to_virtual_base(at, c, v, m);
-            if (r != analysis_result::well_formed)
-                return r;
+            VTRY(r, to_virtual_base(at, c, v, m));
             continue;
         }
         step = nonvirtual_step(c, base);
@@ -836,10 +832,7 @@ analysis_result semantic_analysis::pointer_along_path(
     qualified_type type, bool to_derived, bool access, expression_meaning &m)
 {
     owned_array<entity_index> steps;
-    analysis_result r =
-        accessible_path(at, derived, base, access, "conv.ptr", steps);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, accessible_path(at, derived, base, access, "conv.ptr", steps));
     /* the steps at a nonzero offset in the order the pointer passes
        them */
     owned_array<size_t> shifts;
@@ -897,10 +890,8 @@ analysis_result semantic_analysis::accessible_path(
     if (!nonvirtual_path(derived, base, steps))
         return not_supported(current_declaration, label);
     for (size_t i = 0; access && i < steps.size(); i++) {
-        analysis_result r =
-            base_pointer_access(at, entity_table[steps[i]].enclosing, steps[i]);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r, base_pointer_access(at, entity_table[steps[i]].enclosing,
+                                    steps[i]));
     }
     return analysis_result::well_formed;
 }

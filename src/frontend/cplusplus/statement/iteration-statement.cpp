@@ -247,10 +247,7 @@ analysis_result semantic_analysis::exposition_variable(
     entity_table[v].automatic = true;
     initialized_value value;
     scoped_value<qualified_type> deduced(declaration_deduced, qualified_type());
-    analysis_result r =
-        deduced_initialization(n, m, named, false, false, v, type, value);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, deduced_initialization(n, m, named, false, false, v, type, value));
     entity_table[v].definition = value.node;
     declaration =
         statement_node(semantic_kind::declaration_statement, at, v, value.node);
@@ -318,9 +315,7 @@ analysis_result semantic_analysis::range_call(SyntaxRef n, token_index at,
             return r;
     }
     if (set.size() > 1) {
-        r = resolve_call(n, arguments, early, set, object, f);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY_SET(r, resolve_call(n, arguments, early, set, object, f));
         if (member)
             chosen = semantics[f.node].b;
     }
@@ -527,9 +522,7 @@ analysis_result semantic_analysis::for_range_declaration(
     placeholder_allowed = true;
     scoped_value<qualified_type> deduced(declaration_deduced, qualified_type());
     scoped_value<bool> group(placeholder_group, false);
-    analysis_result r = decl_specifier_seq(at[0], s, false);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, decl_specifier_seq(at[0], s, false));
     /* [stmt.ranged]/2: "In the decl-specifier-seq of a for-range-declaration,
        each decl-specifier shall be either a type-specifier or constexpr.
        The decl-specifier-seq shall not define a class or enumeration." */

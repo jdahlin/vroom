@@ -165,9 +165,7 @@ analysis_result semantic_analysis::pointer_operator(SyntaxRef op,
                cv-qualifier-seq pointer to member of class
                nested-name-specifier of type T"." */
             nominated_scope scope;
-            analysis_result r = nested_name_specifier(c, scope);
-            if (r != analysis_result::well_formed)
-                return r;
+            VTRY(r, nested_name_specifier(c, scope));
             if (!scope.global && !scope.dependent &&
                 (is_namespace(scope.entity) ||
                  entity_table[scope.entity].kind == entity_kind::enumeration))
@@ -219,30 +217,22 @@ analysis_result semantic_analysis::pointer_operator(SyntaxRef op,
             type = qualified_type::make(type_table.block_pointer_to(type),
                                         cv_none);
         } else if (c.is(AMPERSAND)) {
-            analysis_result r = reference(op, false, type, m);
-            if (r != analysis_result::well_formed)
-                return r;
+            VTRY(r, reference(op, false, type, m));
         } else if (c.is(AMPERSAND_AMPERSAND)) {
             if (!tokens.files.behavior.has(language_feature::rvalue_references))
                 /* [ext.clang] an rvalue reference before C++11, an
                    extension (an error with -pedantic-errors) */
                 return not_supported(op, "ext.clang");
-            analysis_result r = reference(op, true, type, m);
-            if (r != analysis_result::well_formed)
-                return r;
+            VTRY(r, reference(op, true, type, m));
         } else if (c.cv_qualifier_seq()) {
             /* [dcl.ptr]/1: the cv-qualifiers apply to the pointer */
             for (auto q : c.elements()) {
                 if (!q.is_token())
                     return not_supported(op, "dcl.ptr");
-                analysis_result r = pointer_qualifier(op, q.token(), type);
-                if (r != analysis_result::well_formed)
-                    return r;
+                VTRY(r, pointer_qualifier(op, q.token(), type));
             }
         } else if (c.is_token()) {
-            analysis_result r = pointer_qualifier(op, c.token(), type);
-            if (r != analysis_result::well_formed)
-                return r;
+            VTRY(r, pointer_qualifier(op, c.token(), type));
         } else {
             return not_supported(op, "dcl.ptr");
         }
@@ -321,12 +311,8 @@ analysis_result semantic_analysis::array(SyntaxRef at, SyntaxElement bound,
         return analysis_result::well_formed;
     }
     expression_meaning m;
-    analysis_result r = expression(bound, m);
-    if (r != analysis_result::well_formed)
-        return r;
-    r = operand_value(at, m);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, expression(bound, m));
+    VTRY_SET(r, operand_value(at, m));
     /* [expr.const]/10: an integral promotion of an unscoped
        enumeration */
     promote_enumeration(m);
@@ -343,9 +329,7 @@ analysis_result semantic_analysis::array(SyntaxRef at, SyntaxElement bound,
     /* a bound that is not a constant expression: a variable length array
        (C99's, clang's extension), or one clang folds */
     bool constant = false;
-    r = integral_constant_expression(at, m, constant);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY_SET(r, integral_constant_expression(at, m, constant));
     if (!constant)
         return not_supported(at, "expr.const");
     const implementation_defined_behavior &b = tokens.files.behavior;
@@ -363,10 +347,8 @@ analysis_result semantic_analysis::array(SyntaxRef at, SyntaxElement bound,
         return not_supported(at, "dcl.array");
     /* "N shall be greater than zero": zero is clang's extension */
     if (!value) {
-        r = extension_used(diagnostic_id::sema_zero_length_array,
-                           at.first_token(), nullptr);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY_SET(r, extension_used(diagnostic_id::sema_zero_length_array,
+                                   at.first_token(), nullptr));
     }
     type = qualified_type::make(type_table.array_of(type, uint64_t(value)),
                                 cv_none);
@@ -726,9 +708,7 @@ analysis_result semantic_analysis::declarator_qualifier(SyntaxRef nested,
                                                         declarator_meaning &m)
 {
     nominated_scope scope;
-    analysis_result r = nested_name_specifier(nested, scope);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, nested_name_specifier(nested, scope));
     if (at_block_scope() || defining_class || function_state.active)
         return not_supported(nested, "dcl.meaning");
     if (is_namespace(scope.entity)) {
@@ -792,9 +772,7 @@ analysis_result semantic_analysis::declarator(SyntaxRef declaration,
         auto q = d.qualified_id();
         if (q.size() != 2 || !q.nested_name_specifier() || !q.identifier())
             return not_supported(n, "dcl.meaning");
-        analysis_result r = declarator_qualifier(q.nested_name_specifier(), m);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r, declarator_qualifier(q.nested_name_specifier(), m));
         m.has_id = true;
         m.id = q.identifier().token();
         return analysis_result::well_formed;
@@ -808,9 +786,7 @@ analysis_result semantic_analysis::declarator(SyntaxRef declaration,
            sequences here */
         for (auto c : d.elements(1)) {
             if (c.gnu_attribute_specifier()) {
-                analysis_result r = gnu_attribute_specifier(c, m);
-                if (r != analysis_result::well_formed)
-                    return r;
+                VTRY(r, gnu_attribute_specifier(c, m));
                 continue;
             }
             auto literal = c.gnu_asm_label().string_literal();
@@ -924,9 +900,7 @@ analysis_result semantic_analysis::declarator(SyntaxRef declaration,
         if (q.size() != 2 || !q.nested_name_specifier() ||
             (!operator_name && !name.is_identifier()))
             return not_supported(q, "dcl.meaning");
-        analysis_result r = declarator_qualifier(q.nested_name_specifier(), m);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r, declarator_qualifier(q.nested_name_specifier(), m));
         if (m.destructor && !m.qualifier)
             return not_supported(q, "class.dtor");
         has_head = true;
@@ -972,9 +946,7 @@ analysis_result semantic_analysis::declarator(SyntaxRef declaration,
     while (i < d.size()) {
         auto c = d[i];
         if (c.gnu_attribute_specifier()) {
-            analysis_result r = gnu_attribute_specifier(c, m);
-            if (r != analysis_result::well_formed)
-                return r;
+            VTRY(r, gnu_attribute_specifier(c, m));
             i++;
             continue;
         }
@@ -984,9 +956,7 @@ analysis_result semantic_analysis::declarator(SyntaxRef declaration,
             /* [ext:gnu_attributes] after the parameters */
             for (auto a : c.elements())
                 if (a.is_node() && only_gnu_attributes(tree, a)) {
-                    analysis_result r = gnu_attribute_specifier(a, m);
-                    if (r != analysis_result::well_formed)
-                        return r;
+                    VTRY(r, gnu_attribute_specifier(a, m));
                 }
             suffixes.append({true, i, false});
             i++;
@@ -1008,9 +978,7 @@ analysis_result semantic_analysis::declarator(SyntaxRef declaration,
         else if (x.has_bound)
             r = array(n, d[x.child], type);
         else
-            r = array(n, {}, type);
-        if (r != analysis_result::well_formed)
-            return r;
+            VTRY_SET(r, array(n, {}, type));
         /* a reference the suffix's operand was is no longer the
            declarator's outermost type */
         m.reference_made = false;

@@ -134,9 +134,7 @@ analysis_result semantic_analysis::return_statement(SyntaxRef n,
     if (function_state.deducing && n.size() == 2) {
         /* [dcl.type.auto.deduct]/2: "If the return statement has no
            operand, then E is void()" */
-        analysis_result r = deduce_return(n, nullptr, false);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r, deduce_return(n, nullptr, false));
         returns_void = true;
     }
     if (function_state.deducing && n.size() == 3 &&
@@ -185,9 +183,7 @@ analysis_result semantic_analysis::return_statement(SyntaxRef n,
     if (function_state.deducing) {
         analysis_result r = expression(operand, m);
         if (r == analysis_result::well_formed)
-            r = deduce_return(n, &m, names_entity(operand));
-        if (r != analysis_result::well_formed)
-            return r;
+            VTRY_SET(r, deduce_return(n, &m, names_entity(operand)));
         returns = function_state.returns;
         returns_void = fundamental_of(returns) == fundamental_type::void_;
     }
@@ -199,9 +195,7 @@ analysis_result semantic_analysis::return_statement(SyntaxRef n,
     /* [over.over]/1: "the return value of a function" */
     analysis_result r = analysis_result::well_formed;
     if (!function_state.deducing)
-        r = target_expression(operand, returns, m);
-    if (r != analysis_result::well_formed)
-        return r;
+        VTRY_SET(r, target_expression(operand, returns, m));
     const struct type &object = type_table[m.type.unqualified()];
     if (movable && m.category == value_category::lvalue &&
         object.kind == type_kind::class_type &&

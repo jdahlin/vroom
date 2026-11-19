@@ -164,15 +164,11 @@ analysis_result semantic_analysis::case_label(SyntaxRef n, SyntaxElement value,
                                               size_t innermost)
 {
     expression_meaning m;
-    analysis_result r = expression(value, m);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, expression(value, m));
     fundamental_type adjusted = function_state.switches[innermost].type;
     if (adjusted == fundamental_type::none)
         return not_supported(n, "stmt.switch");
-    r = operand_value(n, m);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY_SET(r, operand_value(n, m));
     const char *rule = "the constant-expression shall be a converted "
                        "constant expression of the adjusted type of the "
                        "switch condition";
@@ -187,14 +183,10 @@ analysis_result semantic_analysis::case_label(SyntaxRef n, SyntaxElement value,
         return ill_formed(n, rule, "stmt.switch");
     }
     bool constant = false;
-    r = integral_constant_expression(n, m, constant);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY_SET(r, integral_constant_expression(n, m, constant));
     if (!constant)
         return ill_formed(n, rule, "stmt.switch");
-    r = converted_constant_expression(n, m, adjusted, constant);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY_SET(r, converted_constant_expression(n, m, adjusted, constant));
     if (!constant)
         return not_supported(n, "expr.const");
     for (size_t i = function_state.switches[innermost].first_value;

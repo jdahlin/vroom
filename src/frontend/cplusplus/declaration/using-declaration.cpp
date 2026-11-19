@@ -182,9 +182,7 @@ analysis_result semantic_analysis::using_declarator(UsingDeclarator n,
            expansion */
         return not_supported(n, "namespace.udecl");
     nominated_scope q;
-    analysis_result r = nested_name_specifier(n.nested_name_specifier(), q);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, nested_name_specifier(n.nested_name_specifier(), q));
     token_index t = n.identifier().token();
     uint32_t name = tokens.identifier(t);
     lookup_result found = lookup_qualified(q.entity, name, lookup_filter::any);

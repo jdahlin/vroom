@@ -767,6 +767,25 @@ enum class analysis_result : uint8_t {
 };
 const char *analysis_result_name(analysis_result result);
 
+/*
+ * The early return of an analysis: a step that is not well formed is the
+ * function's conclusion.
+ *
+ *     VTRY(r, expression(e, m));       analysis_result r = ...; return r unless well_formed
+ *     VTRY_SET(r, operand_value(n, m)); r = ...; the same, for an r already declared
+ *
+ * Statements, not expressions: they are written on a line of their own, as
+ * the two lines of the `if` they stand for.
+ */
+#define VTRY(name, ...)                                                        \
+    analysis_result name = (__VA_ARGS__);                                      \
+    if (name != analysis_result::well_formed)                                  \
+    return name
+#define VTRY_SET(name, ...)                                                    \
+    name = (__VA_ARGS__);                                                      \
+    if (name != analysis_result::well_formed)                                  \
+    return name
+
 /* the conclusion about a construct of two parts: ill-formed if either is,
    else unsupported if either is */
 inline analysis_result worse(analysis_result a, analysis_result b)

@@ -208,16 +208,13 @@ analysis_result semantic_analysis::converted_constant_expression(
     constant = false;
     if (tokens.files.behavior.has(language_feature::list_initialization)) {
         bool narrows = false;
-        analysis_result r = narrowing(
-            at, m, qualified_type::make(type_table.fundamental(to), cv_none),
-            narrows);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r, narrowing(
+                    at, m,
+                    qualified_type::make(type_table.fundamental(to), cv_none),
+                    narrows));
         if (narrows) {
-            r = extension_used(diagnostic_id::sema_narrowing, at.first_token(),
-                               nullptr);
-            if (r != analysis_result::well_formed)
-                return r;
+            VTRY_SET(r, extension_used(diagnostic_id::sema_narrowing,
+                                       at.first_token(), nullptr));
         }
     }
     convert_arithmetic(m, to);
@@ -238,15 +235,9 @@ analysis_result semantic_analysis::bool_constant_expression(SyntaxRef at,
     constant = false;
     value = false;
     expression_meaning m;
-    analysis_result r = expression(e, m);
-    if (r != analysis_result::well_formed)
-        return r;
-    r = contextual_bool(at, m);
-    if (r != analysis_result::well_formed)
-        return r;
-    r = constant_expression(at, m, constant);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, expression(e, m));
+    VTRY_SET(r, contextual_bool(at, m));
+    VTRY_SET(r, constant_expression(at, m, constant));
     value = constant && m.value != 0;
     return analysis_result::well_formed;
 }

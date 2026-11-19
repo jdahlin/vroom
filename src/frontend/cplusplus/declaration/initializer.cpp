@@ -465,11 +465,9 @@ analysis_result semantic_analysis::reference_binding(SyntaxRef at,
                 return not_supported(at, "over.match.ref");
         }
         bool converted = false;
-        analysis_result c = conversion_function_call(
-            at, m, qualified_type::make(t1.unqualified(), cv_none), false,
-            converted);
-        if (c != analysis_result::well_formed)
-            return c;
+        VTRY(c, conversion_function_call(
+                    at, m, qualified_type::make(t1.unqualified(), cv_none),
+                    false, converted));
         if (!converted)
             return not_supported(at, "dcl.init.ref");
         return reference_binding(at, m, reference);
@@ -538,9 +536,7 @@ analysis_result semantic_analysis::reference_binding(SyntaxRef at,
     /* (a temporary of or from an enumeration: not yet) */
     if (x.kind == type_kind::enumeration || y.kind == type_kind::enumeration)
         return not_supported(at, "dcl.init.ref");
-    analysis_result result = operand_value(at, m);
-    if (result != analysis_result::well_formed)
-        return result;
+    VTRY(result, operand_value(at, m));
     return implicit_conversion(at, m, t1, false);
 }
 
@@ -632,9 +628,7 @@ analysis_result semantic_analysis::initialize_from(SyntaxRef at,
            [dcl.init.string]." */
         if (is_string_literal(tokens, clause) &&
             character_type(fundamental_of(target.operand))) {
-            analysis_result r = expression(clause, m);
-            if (r != analysis_result::well_formed)
-                return r;
+            VTRY(r, expression(clause, m));
             result.evaluation = constness::constant;
             result.node = m.node;
             return string_initialization(at, m, type);
@@ -643,9 +637,7 @@ analysis_result semantic_analysis::initialize_from(SyntaxRef at,
             /* C++20's aggregate initialization from a parenthesized
                expression-list ([dcl.init]/17.5) */
             return not_supported(at, "dcl.init");
-        analysis_result r = expression(clause, m);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r, expression(clause, m));
         /* a string-literal in parentheses: GCC's and clang's extension */
         if (m.string_literal)
             return not_supported(at, "dcl.init.string");
@@ -656,9 +648,7 @@ analysis_result semantic_analysis::initialize_from(SyntaxRef at,
                           "dcl.init");
     }
     /* [over.over]/1: "an object or reference being initialized" */
-    analysis_result r = target_expression(clause, type, m);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, target_expression(clause, type, m));
     return initialize_with(at, m, type, direct, list, result);
 }
 
@@ -677,9 +667,7 @@ analysis_result semantic_analysis::initialize_with(SyntaxRef at,
         /* [dcl.init]/17.2: "If the destination type is a reference type,
            see [dcl.init.ref]." */
         result.evaluation = constness::unknown;
-        r = reference_binding(at, m, type);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY_SET(r, reference_binding(at, m, type));
         /* the reference's own type: what lowering makes an address of */
         result.node = expression_node(semantic_kind::bind_reference, m,
                                       at.first_token(), m.node);
@@ -734,16 +722,12 @@ analysis_result semantic_analysis::initialize_with(SyntaxRef at,
                class subobject of the derived object */
             if (!copies_bytes(target.entity))
                 return not_supported(at, "class.copy.ctor");
-            r = to_base(at.first_token(), target.entity, m);
-            if (r != analysis_result::well_formed)
-                return r;
+            VTRY_SET(r, to_base(at.first_token(), target.entity, m));
             same = true;
         }
         if (!same)
             return not_supported(at, "dcl.init");
-        r = operand_value(at, m);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY_SET(r, operand_value(at, m));
         result.evaluation = constness::unknown;
         result.value = 0;
         result.node = m.node;
@@ -760,9 +744,7 @@ analysis_result semantic_analysis::initialize_with(SyntaxRef at,
     if (type_table[m.type.unqualified()].kind == type_kind::class_type) {
         /* [dcl.init]/17.7: by a conversion function */
         bool converted = false;
-        r = conversion_function_call(at, m, type, direct, converted);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY_SET(r, conversion_function_call(at, m, type, direct, converted));
     }
     if (target.kind == type_kind::fundamental &&
         target.fundamental == fundamental_type::void_)
@@ -773,37 +755,27 @@ analysis_result semantic_analysis::initialize_with(SyntaxRef at,
            copy, as va_copy's) */
         if (m.type.unqualified() != type.unqualified())
             return not_supported(at, "dcl.init");
-        r = operand_value(at, m);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY_SET(r, operand_value(at, m));
         result.evaluation = constness::not_constant;
         result.value = 0;
         result.node = m.node;
         return analysis_result::well_formed;
     }
-    r = operand_value(at, m);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY_SET(r, operand_value(at, m));
     if (list &&
         tokens.files.behavior.has(language_feature::list_initialization)) {
         bool narrows = false;
-        r = narrowing(at, m, type, narrows);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY_SET(r, narrowing(at, m, type, narrows));
         /* Microsoft's extensions: clang accepts a narrowing conversion
            by the -fms-compatibility-version it emulates */
         if (narrows && tokens.files.behavior.microsoft_extensions)
             return not_supported(at, "dcl.init.list");
         if (narrows) {
-            r = extension_used(diagnostic_id::sema_narrowing, at.first_token(),
-                               nullptr);
-            if (r != analysis_result::well_formed)
-                return r;
+            VTRY_SET(r, extension_used(diagnostic_id::sema_narrowing,
+                                       at.first_token(), nullptr));
         }
     }
-    r = implicit_conversion(at, m, type, direct);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY_SET(r, implicit_conversion(at, m, type, direct));
     result.evaluation = m.evaluation;
     result.value = m.value;
     result.node = m.node;
@@ -824,9 +796,7 @@ semantic_analysis::list_initialization(SyntaxRef list, qualified_type &type,
                                        bool direct, initialized_value &result)
 {
     owned_array<SyntaxElement> clauses;
-    analysis_result gathered = list_clauses(list, clauses);
-    if (gathered != analysis_result::well_formed)
-        return gathered;
+    VTRY(gathered, list_clauses(list, clauses));
     return list_initialization_of(list, clauses, type, direct, result);
 }
 
@@ -890,20 +860,14 @@ analysis_result semantic_analysis::list_initialization_of(
         if (!target.bound_known) {
             bound = clauses.size();
             if (!bound) {
-                analysis_result r =
-                    extension_used(diagnostic_id::sema_zero_length_array,
-                                   list.first_token(), nullptr);
-                if (r != analysis_result::well_formed)
-                    return r;
+                VTRY(r, extension_used(diagnostic_id::sema_zero_length_array,
+                                       list.first_token(), nullptr));
             }
             type = qualified_type::make(type_table.array_of(element, bound),
                                         type.cv());
         }
         size_t next = 0;
-        analysis_result r =
-            aggregate_elements(list, clauses, next, type, result);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r, aggregate_elements(list, clauses, next, type, result));
         if (!target.bound_known && clauses.size())
             /* the elements the clauses initialized, with brace elision */
             type = qualified_type::make(
@@ -988,10 +952,7 @@ analysis_result semantic_analysis::initializer(SyntaxElement init,
                     !entity_table[target.entity].first_constructor)
                     return not_supported(init, "dcl.init");
                 owned_array<expression_meaning> arguments;
-                analysis_result r =
-                    expression_list_meanings(init[1], arguments);
-                if (r != analysis_result::well_formed)
-                    return r;
+                VTRY(r, expression_list_meanings(init[1], arguments));
                 return construct(init, type, arguments, 0, result);
             }
             return ill_formed(init,
@@ -1102,17 +1063,13 @@ analysis_result semantic_analysis::class_list_initialization(
     if (clauses.size() == 1 && !clauses[0].is(syntax_kind::braced_init_list)) {
         /* (3.2): an element of the class's own type */
         expression_meaning e;
-        analysis_result r = expression(clauses[0], e);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r, expression(clauses[0], e));
         if (e.type.unqualified() == type.unqualified())
             return initialize_with(list, e, type, false, true, result);
         /* an element initialized from it: analysed again below */
     }
     size_t next = 0;
-    analysis_result r = aggregate_elements(list, clauses, next, type, result);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, aggregate_elements(list, clauses, next, type, result));
     return too_many_clauses(list, clauses, next);
 }
 
@@ -1154,9 +1111,7 @@ analysis_result semantic_analysis::constructor_list_initialization(
         if (clause.is(syntax_kind::braced_init_list))
             return not_supported(list, "over.match.list");
         expression_meaning e;
-        analysis_result r = expression(clause, e);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r, expression(clause, e));
         arguments.append(e);
     }
     if (arguments.size() == 1 &&
@@ -1170,9 +1125,7 @@ analysis_result semantic_analysis::constructor_list_initialization(
     owned_array<expression_meaning> before;
     for (const expression_meaning &e : arguments)
         before.append(e);
-    analysis_result r = construct(list, type, arguments, 0, result);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, construct(list, type, arguments, 0, result));
     entity_index chosen = semantics[result.node].b;
     if (!chosen || semantics[result.node].kind != semantic_kind::construct)
         return not_supported(list, "over.match.list");
@@ -1202,23 +1155,17 @@ analysis_result semantic_analysis::constructor_list_initialization(
         if (!clauses[i].is_token())
             at = clauses[i].index();
         expression_meaning value = before[i];
-        r = operand_value(at, value);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY_SET(r, operand_value(at, value));
         bool narrows = false;
-        r = narrowing(at, value, to, narrows);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY_SET(r, narrowing(at, value, to, narrows));
         /* [impl.clang] into a reference's temporary: its own warning
            group (-Wc++11-narrowing-const-reference) */
         if (narrows &&
             (reference || tokens.files.behavior.microsoft_extensions))
             return not_supported(at, "dcl.init.list");
         if (narrows) {
-            r = extension_used(diagnostic_id::sema_narrowing, at.first_token(),
-                               nullptr);
-            if (r != analysis_result::well_formed)
-                return r;
+            VTRY_SET(r, extension_used(diagnostic_id::sema_narrowing,
+                                       at.first_token(), nullptr));
         }
     }
     return analysis_result::well_formed;
@@ -1309,10 +1256,7 @@ analysis_result semantic_analysis::aggregate_elements(
                               "ill-formed",
                               "dcl.init.aggr");
         if (next < clauses.size()) {
-            analysis_result r =
-                aggregate_element(list, clauses, next, element, one);
-            if (r != analysis_result::well_formed)
-                return r;
+            VTRY(r, aggregate_element(list, clauses, next, element, one));
         } else if (target.kind == type_kind::array) {
             /* the rest of an array: zero, as the lowering fills it */
             break;
@@ -1387,9 +1331,7 @@ analysis_result semantic_analysis::aggregate_element(
     }
     if (record.kind == type_kind::class_type) {
         expression_meaning e;
-        analysis_result r = expression(clause, e);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r, expression(clause, e));
         if (e.type.unqualified() == element.unqualified()) {
             next++;
             return initialize_with(at, e, element, false, true, one);

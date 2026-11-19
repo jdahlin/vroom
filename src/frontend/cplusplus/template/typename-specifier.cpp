@@ -104,9 +104,7 @@ analysis_result semantic_analysis::typename_type(SyntaxRef n, type_index &type,
            is written; an instantiation looks the template up in the
            substituted class */
         nominated_scope scope;
-        analysis_result r = nested_name_specifier(n[1], scope, true);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r, nested_name_specifier(n[1], scope, true));
         if (scope.dependent) {
             type = dependent_written_type(n);
             return analysis_result::well_formed;
@@ -122,9 +120,7 @@ analysis_result semantic_analysis::typename_type(SyntaxRef n, type_index &type,
     token_index t = n[2].token();
     uint32_t name = tokens.identifier(t);
     nominated_scope scope;
-    analysis_result r = nested_name_specifier(n[1], scope, true);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, nested_name_specifier(n[1], scope, true));
     if (scope.dependent) {
         type = dependent_member_type(scope.dependent, name);
         return analysis_result::well_formed;
@@ -140,9 +136,7 @@ analysis_result semantic_analysis::typename_type(SyntaxRef n, type_index &type,
                                    "namespace.qual");
     entity_index e = found.entity;
     if (!e && !found.unknown) {
-        analysis_result m = missing_member(t, scope.entity);
-        if (m != analysis_result::well_formed)
-            return m;
+        VTRY(m, missing_member(t, scope.entity));
     }
     return named_member_type(n, t, e, "temp.res", type, cv);
 }

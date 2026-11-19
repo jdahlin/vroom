@@ -64,12 +64,8 @@ analysis_result semantic_analysis::member_bit_field(entity_index c,
                           "type",
                           "class.bit");
     expression_meaning w;
-    analysis_result r = expression(width_expression, w);
-    if (r != analysis_result::well_formed)
-        return r;
-    r = operand_value(declaration, w);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, expression(width_expression, w));
+    VTRY_SET(r, operand_value(declaration, w));
     promote_enumeration(w);
     if (!is_integral(w.type))
         return not_supported(declaration, "class.bit");
@@ -77,9 +73,7 @@ analysis_result semantic_analysis::member_bit_field(entity_index c,
        constant expression with a value greater than or equal to zero and
        is called the width of the bit-field." */
     bool constant_width = false;
-    r = integral_constant_expression(declaration, w, constant_width);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY_SET(r, integral_constant_expression(declaration, w, constant_width));
     if (!constant_width)
         return not_supported(declaration, "class.bit");
     __int128 width_value =

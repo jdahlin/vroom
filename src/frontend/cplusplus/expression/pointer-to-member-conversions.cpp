@@ -136,10 +136,7 @@ analysis_result semantic_analysis::member_pointer_along_path(
 {
     uint64_t offset = 0;
     owned_array<entity_index> steps;
-    analysis_result r =
-        accessible_path(at, derived, base, access, "conv.mem", steps);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, accessible_path(at, derived, base, access, "conv.mem", steps));
     for (entity_index step : steps)
         offset += entity_table[step].offset;
     m.type = qualified_type::make(type.unqualified(), cv_none);

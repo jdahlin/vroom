@@ -1077,9 +1077,7 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
         if (c.is(syntax_kind::gnu_attribute_specifier) &&
             class_specifier_before(seq, i)) {
             gnu_attributes g;
-            analysis_result r = gnu_attribute_specifier(c, g);
-            if (r != analysis_result::well_formed)
-                return r;
+            VTRY(r, gnu_attribute_specifier(c, g));
             if (g.aligned && !(g.flags & ~gnu_aligned) && !g.section &&
                 !g.abi_tag) {
                 if (g.aligned > trailing_class_alignment)
@@ -1214,9 +1212,7 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
                     continue;
                 /* [ext:gnu_attributes] a decl-specifier: it applies to
                    the declaration */
-                r = gnu_attribute_specifier(c, s);
-                if (r != analysis_result::well_formed)
-                    return r;
+                VTRY_SET(r, gnu_attribute_specifier(c, s));
                 continue;
             } else
                 return not_supported(c.index());
@@ -1503,18 +1499,13 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
     if (named) {
         type = named;
     } else if (keywords) {
-        analysis_result r = simple_type(seq, k, type);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r, simple_type(seq, k, type));
     }
     /* [dcl.spec]/2: "Each decl-specifier shall appear at most once in a
        complete decl-specifier-seq, except that long may appear twice." */
     if (duplicate) {
-        analysis_result r =
-            extension_used(diagnostic_id::sema_duplicate_specifier, duplicate,
-                           duplicate_spelling);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r, extension_used(diagnostic_id::sema_duplicate_specifier,
+                               duplicate, duplicate_spelling));
     }
     s.has_type = type != 0;
     s.declares_class = declares_class;
@@ -1556,9 +1547,7 @@ analysis_result semantic_analysis::qualified_type_name(SyntaxRef n,
         if (n.size() == 2 && n[0].is(syntax_kind::nested_name_specifier) &&
             n[1].is(syntax_kind::simple_template_id)) {
             nominated_scope scope;
-            analysis_result r = nested_name_specifier(n[0], scope);
-            if (r != analysis_result::well_formed)
-                return r;
+            VTRY(r, nested_name_specifier(n[0], scope));
             /* a namespace's member template or a class's (a member
                alias template, member_template_declaration) */
             if (!is_namespace(scope.entity) &&
@@ -1569,9 +1558,7 @@ analysis_result semantic_analysis::qualified_type_name(SyntaxRef n,
         return not_supported(n, "dcl.type.simple");
     }
     nominated_scope scope;
-    analysis_result r = nested_name_specifier(n[0], scope, true);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, nested_name_specifier(n[0], scope, true));
     token_index t = n[1].token();
     if (scope.dependent) {
         /* [temp.res]/5: a qualified name in a context the parser assumes
@@ -1657,9 +1644,7 @@ analysis_result semantic_analysis::named_class(SyntaxElement name, SyntaxRef at,
             /* a simple-template-id, a decltype-specifier */
             return not_supported(at, "basic.lookup.qual");
         nominated_scope scope;
-        analysis_result r = nested_name_specifier(name[0], scope);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r, nested_name_specifier(name[0], scope));
         id = name[1].token();
         found = lookup_qualified(scope.entity, tokens.identifier(id),
                                  lookup_filter::types);

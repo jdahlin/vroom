@@ -88,12 +88,8 @@ analysis_result semantic_analysis::clang_bit_cast(SyntaxRef n,
                                                   expression_meaning &m)
 {
     qualified_type to;
-    analysis_result r = type_id(n[2], to);
-    if (r != analysis_result::well_formed)
-        return r;
-    r = expression(n[4], m);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, type_id(n[2], to));
+    VTRY_SET(r, expression(n[4], m));
     if (depends_on_template_parameter(to) ||
         depends_on_template_parameter(m.type))
         return not_supported(n, "temp.dep.constexpr");
@@ -107,9 +103,7 @@ analysis_result semantic_analysis::clang_bit_cast(SyntaxRef n,
                           "__builtin_bit_cast requires sizeof(To) == "
                           "sizeof(From)",
                           "bit.cast");
-    r = operand_value(n, m);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY_SET(r, operand_value(n, m));
     uint64_t value = 0;
     if (pointer)
         m.evaluation = constness::not_constant;

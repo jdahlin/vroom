@@ -733,10 +733,7 @@ analysis_result semantic_analysis::generic_lambda(SyntaxRef n, SyntaxRef list,
         return not_supported(n, "temp.constr");
     uint32_t index = 0, first = 0;
     entity_index scope = 0;
-    analysis_result r =
-        template_parameter_scope(n, parameters, c, 0, index, scope, first);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, template_parameter_scope(n, parameters, c, 0, index, scope, first));
     /* the template's declarator, in the template-parameters' scope; what
        it records for claims is the template's, which clang has none of */
     size_t expressions_before = expressions.size();
@@ -772,9 +769,7 @@ analysis_result semantic_analysis::generic_lambda(SyntaxRef n, SyntaxRef list,
     entity_table[t].implemented = preprocessing_op_or_punc::LEFT_PARENTHESIS;
     hold_template_name(record, call_name, c);
     entity_table[c].call_operator = t;
-    r = closure_class(c, n, false);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY_SET(r, closure_class(c, n, false));
     owned_array<capture_record> none;
     return closure_object(l, none, m);
 }

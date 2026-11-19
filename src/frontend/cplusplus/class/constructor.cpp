@@ -125,9 +125,7 @@ analysis_result semantic_analysis::member_template_declaration(
         return not_supported(n, "temp.constr");
     if (at < inner.size() && inner[at].is(syntax_kind::decl_specifier_seq)) {
         specified s;
-        analysis_result r = constructor_specifiers(inner[at], s);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r, constructor_specifiers(inner[at], s));
         at++;
     }
     /* a constructor's declarator, not a destructor's (which [temp.mem]/3
@@ -153,9 +151,7 @@ analysis_result semantic_analysis::constructor_specifiers(SyntaxRef seq,
 {
     for (SyntaxElement x : seq.elements()) {
         if (x.is(syntax_kind::gnu_attribute_specifier)) {
-            analysis_result r = gnu_attribute_specifier(x, s);
-            if (r != analysis_result::well_formed)
-                return r;
+            VTRY(r, gnu_attribute_specifier(x, s));
             continue;
         }
         if (!x.is_token())
@@ -213,13 +209,9 @@ semantic_analysis::default_member_initializer(token_index at, entity_index e,
          entity_table[record.entity].first_constructor))
         return not_supported(init, "class.base.init");
     expression_meaning object;
-    analysis_result r = subobject(at, e, object);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, subobject(at, e, object));
     initialized_value value;
-    r = initializer(init, type, value);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY_SET(r, initializer(init, type, value));
     statement = subobject_store(object, type, at, value.node);
     return analysis_result::well_formed;
 }
@@ -412,9 +404,7 @@ analysis_result semantic_analysis::special_member_declarator(
     /* [ext:gnu_attributes] before the declaration (libc++'s
        _LIBCPP_HIDE_FROM_ABI) */
     for (uint32_t i = 0; i < leading_gnu_attributes(declaration); i++) {
-        r = gnu_attribute_specifier(declaration[i], m);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY_SET(r, gnu_attribute_specifier(declaration[i], m));
     }
     /* [dcl.fct.default]: a member function's default arguments are a
        complete-class context ([class.mem]/6): analysed with the class
@@ -587,10 +577,9 @@ analysis_result semantic_analysis::defaulted_or_deleted_special_member(
     if (form.deleted()) {
         if (explicit_specified)
             return not_supported(n, "dcl.fct.def.delete");
-        analysis_result r = special_member_declarator(
-            c, n, d, access, false, constexpr_specified, virtual_specified);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r,
+             special_member_declarator(c, n, d, access, false,
+                                       constexpr_specified, virtual_specified));
         const entity &f = entity_table[last_declared];
         /* a deleted destructor (libc++'s __nat): the class's destructor,
            deleted, which a delete-expression checks (deleted_use); an
@@ -772,9 +761,7 @@ analysis_result semantic_analysis::expression_list_meanings(
             a.is(preprocessing_op_or_punc::ELLIPSIS))
             return not_supported(node_of(a), "over.match.list");
         expression_meaning e;
-        analysis_result r = expression(a, e);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r, expression(a, e));
         out.append(e);
     }
     return analysis_result::well_formed;
@@ -845,11 +832,10 @@ semantic_analysis::construct(SyntaxRef at, qualified_type type,
     owned_array<uint32_t> first_arguments;
     owned_array<template_argument> deduced;
     if (x.constructor_templates) {
-        analysis_result r = constructor_template_candidates(
-            at, c, arguments.data(), static_cast<uint32_t>(arguments.size()),
-            copy, candidates, &first_arguments, &deduced);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r, constructor_template_candidates(
+                    at, c, arguments.data(),
+                    static_cast<uint32_t>(arguments.size()), copy, candidates,
+                    &first_arguments, &deduced));
     }
     /* the implicitly-declared copy constructor X(const X&)
        ([class.copy.ctor]/6: "If the class definition does not explicitly
@@ -904,10 +890,8 @@ semantic_analysis::construct(SyntaxRef at, qualified_type type,
         candidates.append(moving);
     }
     size_t best = 0;
-    analysis_result resolved =
-        best_viable_function(at, candidates, nullptr, arguments, best);
-    if (resolved != analysis_result::well_formed)
-        return resolved;
+    VTRY(resolved,
+         best_viable_function(at, candidates, nullptr, arguments, best));
     entity_index chosen = candidates[best].function;
     if (uint32_t g = candidates[best].template_index) {
         /* the chosen specialization's definition ([temp.inst]/4) */
@@ -915,12 +899,10 @@ semantic_analysis::construct(SyntaxRef at, qualified_type type,
         size_t end = deduced.size();
         if (k + 1 < first_arguments.size())
             end = first_arguments[k + 1];
-        analysis_result r = instantiate(
-            at, function_templates[g - 1].entity,
-            deduced.data() + first_arguments[k],
-            static_cast<uint32_t>(end - first_arguments[k]), chosen);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r, instantiate(at, function_templates[g - 1].entity,
+                            deduced.data() + first_arguments[k],
+                            static_cast<uint32_t>(end - first_arguments[k]),
+                            chosen));
     }
     if (!chosen) {
         if (!copies_bytes(c) && !(x.defaulted_move_constructor && best == move))
@@ -931,15 +913,11 @@ semantic_analysis::construct(SyntaxRef at, qualified_type type,
         entity_index from = type_table[arguments[0].type.unqualified()].entity;
         if (from != c && base_step(from, c, ambiguous)) {
             /* its const X& bound to the base class subobject */
-            analysis_result r = to_base(at.first_token(), c, arguments[0]);
-            if (r != analysis_result::well_formed)
-                return r;
+            VTRY(r, to_base(at.first_token(), c, arguments[0]));
         }
         result.evaluation = constness::unknown;
         result.value = 0;
-        analysis_result r = operand_value(at, arguments[0]);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r, operand_value(at, arguments[0]));
         result.node = arguments[0].node;
         return analysis_result::well_formed;
     }
@@ -950,9 +928,7 @@ semantic_analysis::construct(SyntaxRef at, qualified_type type,
                           "it is declared",
                           "class.access");
     /* [dcl.fct.def.delete]/2 */
-    analysis_result deleted = deleted_use(at.first_token(), chosen);
-    if (deleted != analysis_result::well_formed)
-        return deleted;
+    VTRY(deleted, deleted_use(at.first_token(), chosen));
     size_t n = arguments.size();
     const qualified_type *p =
         type_table.parameters(entity_table[chosen].type.unqualified());
@@ -961,10 +937,7 @@ semantic_analysis::construct(SyntaxRef at, qualified_type type,
         /* [over.match.ctor]: each parameter copy-initialized from its
            argument ([expr.call]/7) */
         initialized_value one;
-        analysis_result r =
-            initialize_with(at, arguments[i], p[i], false, false, one);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r, initialize_with(at, arguments[i], p[i], false, false, one));
         nodes.append(one.node);
     }
     /* [dcl.fct.default]/1: the default arguments of the parameters left */
@@ -1062,9 +1035,7 @@ analysis_result semantic_analysis::ctor_initializer(SyntaxElement list,
            names ([basic.lookup.qual]) */
         entity_index qualified_class = 0;
         if (item[0].is(syntax_kind::class_or_decltype)) {
-            analysis_result r = named_class(item[0], item, qualified_class, id);
-            if (r != analysis_result::well_formed)
-                return r;
+            VTRY(r, named_class(item[0], item, qualified_class, id));
             if (qualified_class == c)
                 return not_supported(item, "class.base.init");
             name = tokens.identifier(id);
@@ -1145,9 +1116,7 @@ analysis_result semantic_analysis::ctor_initializer(SyntaxElement list,
         if (record.kind == type_kind::array)
             return not_supported(item, "class.base.init");
         expression_meaning object;
-        analysis_result r = subobject(id, e, object);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r, subobject(id, e, object));
         if (record.kind == type_kind::class_type &&
             entity_table[record.entity].first_constructor) {
             /* [class.base.init]/7: direct-initialization: a constructor */
@@ -1242,10 +1211,8 @@ analysis_result semantic_analysis::ctor_initializer(SyntaxElement list,
                constructor's class is not a union ... the entity is
                initialized from its default member initializer as
                specified in [dcl.init]" */
-            analysis_result r =
-                default_member_initializer(at, subobjects[i], initialized[i]);
-            if (r != analysis_result::well_formed)
-                return r;
+            VTRY(r,
+                 default_member_initializer(at, subobjects[i], initialized[i]));
             continue;
         }
         qualified_type declared = entity_table[subobjects[i]].type;
@@ -1276,9 +1243,7 @@ analysis_result semantic_analysis::ctor_initializer(SyntaxElement list,
             trivial_defaulted_default_constructor(record.entity))
             continue;
         expression_meaning object;
-        analysis_result r = subobject(at, subobjects[i], object);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r, subobject(at, subobjects[i], object));
         owned_array<expression_meaning> none;
         initialized_value value;
         constructing_base = entity_table[subobjects[i]].base_subobject;
@@ -1328,9 +1293,7 @@ analysis_result semantic_analysis::subobject(token_index at, entity_index e,
         }
         return r;
     }
-    analysis_result r = this_object(at, m);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, this_object(at, m));
     return to_base(at, type_table[entity_table[e].type.unqualified()].entity,
                    m);
 }
@@ -1842,13 +1805,9 @@ analysis_result semantic_analysis::implicit_copy(entity_index c, SyntaxRef n,
                         type_table[entity_table[e].type.unqualified()].entity,
                         from);
         else
-            r = member_access(at, e, from);
-        if (r != analysis_result::well_formed)
-            return r;
+            VTRY_SET(r, member_access(at, e, from));
         expression_meaning object;
-        r = subobject(at, e, object);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY_SET(r, subobject(at, e, object));
         qualified_type type = entity_table[e].type;
         const struct type &record = type_table[type.unqualified()];
         if (record.kind == type_kind::class_type &&
@@ -1887,9 +1846,7 @@ analysis_result semantic_analysis::implicit_copy(entity_index c, SyntaxRef n,
              !entity_table[record.entity].member_count))
             /* an empty base: no bytes */
             continue;
-        r = operand_value(n, from);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY_SET(r, operand_value(n, from));
         statements.append(subobject_store(object, type, at, from.node));
         if (entity_table[e].virtual_base)
             statements.back() = complete_object(statements.back());
@@ -2073,9 +2030,7 @@ analysis_result semantic_analysis::class_conversion(SyntaxRef n, entity_index c,
         r = list_initialization(n[1], type, true, value);
     } else {
         if (n.size() == 4) {
-            r = expression_list_meanings(n[2], arguments);
-            if (r != analysis_result::well_formed)
-                return r;
+            VTRY_SET(r, expression_list_meanings(n[2], arguments));
         } else if (n.size() != 3) {
             return not_supported(n, "expr.type.conv");
         }

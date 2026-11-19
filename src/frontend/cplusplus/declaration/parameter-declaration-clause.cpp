@@ -250,9 +250,7 @@ analysis_result semantic_analysis::parameter_declaration(
         auto c = n[lead];
         if (c.gnu_attribute_specifier()) {
             gnu_attributes g;
-            analysis_result r = gnu_attribute_specifier(c, g);
-            if (r != analysis_result::well_formed)
-                return r;
+            VTRY(r, gnu_attribute_specifier(c, g));
             if (g.flags || g.aligned || g.section || g.abi_tag)
                 break;
         } else if (!c.is(syntax_kind::attribute_specifier_seq,
@@ -267,9 +265,7 @@ analysis_result semantic_analysis::parameter_declaration(
     if (!at(0).decl_specifier_seq())
         return not_supported(n, "dcl.attr");
     specified s;
-    analysis_result r = decl_specifier_seq(at(0), s, true);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, decl_specifier_seq(at(0), s, true));
     /* [dcl.type]/3: "at least one defining-type-specifier that is not a
        cv-qualifier shall appear in a complete type-specifier-seq or a
        complete decl-specifier-seq" */
@@ -433,11 +429,9 @@ analysis_result semantic_analysis::function(SyntaxRef parameters,
            element */
         uint32_t elements = 0;
         token_index ellipsis = 0;
-        analysis_result r = parameter_pack_expansion(
-            declarations[k], k + 1 == declarations.size() && !variadic,
-            elements, ellipsis);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r, parameter_pack_expansion(
+                    declarations[k], k + 1 == declarations.size() && !variadic,
+                    elements, ellipsis));
         if (ellipsis) {
             uint32_t pack_name = 0;
             if (tokens[ellipsis + 1].kind == token_kind::identifier)
@@ -477,10 +471,8 @@ analysis_result semantic_analysis::function(SyntaxRef parameters,
                 empty_pack = pack_name;
             continue;
         }
-        r = parameter_declaration(declarations[k], t, unnamed, id,
-                                  default_argument);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY_SET(r, parameter_declaration(declarations[k], t, unnamed, id,
+                                          default_argument));
         if (declared_pack) {
             /* [temp.variadic]/5: a template's own function parameter
                pack, of a type that names a template parameter pack
@@ -543,10 +535,8 @@ analysis_result semantic_analysis::function(SyntaxRef parameters,
     function_cv = cv;
     function_exceptions_specified = specified_exceptions;
     if (exceptions) {
-        analysis_result r =
-            parameter_scope_noexcept(exceptions, may_qualify, non_throwing);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r,
+             parameter_scope_noexcept(exceptions, may_qualify, non_throwing));
     }
     if (abstract_class(type))
         /* a return type of abstract class type: as a parameter's */

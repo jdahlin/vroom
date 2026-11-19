@@ -671,9 +671,7 @@ semantic_analysis::static_assert_declaration(StaticAssertDeclaration n)
     if (n.size() < 5)
         return not_supported(n, "dcl.pre");
     bool constant = false, value = false;
-    analysis_result r = bool_constant_expression(n, n[2], constant, value);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, bool_constant_expression(n, n[2], constant, value));
     if (!constant)
         return not_supported(n, "expr.const");
     if (!value)
@@ -705,9 +703,7 @@ analysis_result semantic_analysis::alias_type(SyntaxRef n, qualified_type &type)
                tokens.files.behavior.has(extension::clang_ext_vector_type)) {
         /* [ext:clang_ext_vector_type] */
         g.ext_vector_allowed = true;
-        analysis_result r = gnu_attribute_specifier(n[2], g);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r, gnu_attribute_specifier(n[2], g));
         if (g.flags || g.aligned || g.section || g.abi_tag ||
             (!g.ext_vector && !g.ext_vector_parameter))
             return not_supported(n, "dcl.attr");
@@ -729,9 +725,7 @@ analysis_result semantic_analysis::alias_type(SyntaxRef n, qualified_type &type)
             return not_supported(n, "dcl.typedef");
     }
     specified s;
-    analysis_result r = decl_specifier_seq(id[0], s, false);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, decl_specifier_seq(id[0], s, false));
     if (!s.has_type || s.declares_enumeration || s.typedef_ || s.static_ ||
         s.extern_ || s.inline_ || s.constexpr_ || s.gnu_flags || s.aligned)
         return not_supported(n, "dcl.typedef");
@@ -754,9 +748,7 @@ analysis_result semantic_analysis::alias_declaration(AliasDeclaration n)
     if (defining_class)
         return not_supported(n, "class.mem");
     qualified_type type;
-    analysis_result r = alias_type(n, type);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, alias_type(n, type));
     specified s;
     s.typedef_ = true;
     s.type = type;
@@ -849,9 +841,7 @@ semantic_analysis::function_definition(FunctionDefinition definition)
         return special_member_definition(n, 1);
     if (!n.size())
         return not_supported(n, "dcl.fct.def.general");
-    analysis_result r = init_declarators(n, tail[0], true);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, init_declarators(n, tail[0], true));
     entity_index f = last_declared;
     if (!f || entity_table[f].kind != entity_kind::function)
         return not_supported(n, "dcl.fct.def.general");
@@ -908,9 +898,7 @@ analysis_result semantic_analysis::init_declarators(SyntaxRef declaration,
            !(declaration[first].is(syntax_kind::decl_specifier_seq) &&
              declaration[first].index() == specifiers)) {
         /* [ext:gnu_attributes] before the decl-specifier-seq */
-        r = gnu_attribute_specifier(declaration[first], s);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY_SET(r, gnu_attribute_specifier(declaration[first], s));
         first++;
     }
     owned_array<SyntaxElement> items;
@@ -1024,9 +1012,7 @@ analysis_result semantic_analysis::declare_with_initializer(
     /* the parameters of this declarator's function declarator, if it has
        one (function sets them) */
     function_parameters.clear();
-    analysis_result r = declarator(declaration, d, type, m);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, declarator(declaration, d, type, m));
     if (!m.has_id)
         return not_supported(declaration, "dcl.meaning");
     bool has_default_arguments = false;
@@ -1123,10 +1109,8 @@ analysis_result semantic_analysis::declare_with_initializer(
         kind = entity_kind::function;
     bool placeholder = contains_placeholder(type);
     if (placeholder || kind == entity_kind::function) {
-        r = placeholder_declaration(declaration, m, type, kind, placeholder,
-                                    initialized);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY_SET(r, placeholder_declaration(declaration, m, type, kind,
+                                            placeholder, initialized));
     }
     /* [ext:gnu_attributes] noreturn on what is no function (a pointer to
        function, a typedef-name): GCC and clang make it part of the
@@ -1321,9 +1305,7 @@ analysis_result semantic_analysis::declare_with_initializer(
                 return not_supported(declaration, "dcl.init");
             owned_array<expression_meaning> none;
             initialized_value value;
-            r = construct(declaration, object, none, 0, value);
-            if (r != analysis_result::well_formed)
-                return r;
+            VTRY_SET(r, construct(declaration, object, none, 0, value));
             entity_table[declared_entity].definition = value.node;
         }
     }
@@ -1438,9 +1420,8 @@ analysis_result semantic_analysis::declare_with_initializer(
         } else {
             constant_value v;
             bool constant = false;
-            r = evaluate_constant(declaration, value.node, v, constant);
-            if (r != analysis_result::well_formed)
-                return r;
+            VTRY_SET(r,
+                     evaluate_constant(declaration, value.node, v, constant));
             if (constant) {
                 expression_meaning folded;
                 folded.type = semantics[value.node].type;

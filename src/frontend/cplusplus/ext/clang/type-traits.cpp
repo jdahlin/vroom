@@ -162,9 +162,7 @@ semantic_analysis::clang_type_transformation(ClangTypeTransformation n,
     if (which == transformation::none)
         return not_supported(n, "ext.clang");
     qualified_type t;
-    analysis_result r = type_id(n[2], t);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, type_id(n[2], t));
     if (depends_on_template_parameter(t)) {
         /* (the keyword's name as an identifier: a keyword token has
            none of its own) */
@@ -444,9 +442,7 @@ analysis_result semantic_analysis::clang_type_trait(SyntaxRef n,
         if (which < 0)
             return not_supported(n, "ext.clang");
         qualified_type t;
-        analysis_result r = type_id(n[2], t);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r, type_id(n[2], t));
         if (depends_on_template_parameter(t))
             return not_supported(n, "temp.dep.constexpr");
         int64_t value = 0;
@@ -463,12 +459,8 @@ analysis_result semantic_analysis::clang_type_trait(SyntaxRef n,
         !n[4].is(syntax_kind::type_id))
         return not_supported(n, "ext.clang");
     qualified_type t, u;
-    analysis_result r = type_id(n[2], t);
-    if (r != analysis_result::well_formed)
-        return r;
-    r = type_id(n[4], u);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, type_id(n[2], t));
+    VTRY_SET(r, type_id(n[4], u));
     if (depends_on_template_parameter(t) || depends_on_template_parameter(u))
         return not_supported(n, "temp.dep.constexpr");
     m = integer_constant(fundamental_type::bool_, t == u, n.first_token());
@@ -591,9 +583,7 @@ analysis_result semantic_analysis::builtin_common_type(SyntaxRef id,
 {
     owned_array<SyntaxElement> written;
     owned_array<bool> expansion;
-    analysis_result r = builtin_template_arguments(id, written, expansion);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, builtin_template_arguments(id, written, expansion));
     if (written.size() < 3 || expansion[0] || expansion[1] || expansion[2])
         return not_supported(id, "ext.clang");
     /* the two templates, by name */
@@ -622,14 +612,11 @@ analysis_result semantic_analysis::builtin_common_type(SyntaxRef id,
     qualified_type empty;
     if (!written[2].is(syntax_kind::type_id))
         return not_supported(id, "ext.clang");
-    r = type_id(written[2], empty);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY_SET(r, type_id(written[2], empty));
     owned_array<qualified_type> types;
     bool dependent = depends_on_template_parameter(empty);
-    r = builtin_template_types(id, written, expansion, 3, types, dependent);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY_SET(
+        r, builtin_template_types(id, written, expansion, 3, types, dependent));
     if (dependent) {
         /* [temp.dep.type]/9: a template-id of dependent arguments */
         type = dependent_written_type(id);
@@ -637,10 +624,8 @@ analysis_result semantic_analysis::builtin_common_type(SyntaxRef id,
     }
     common_found found = common_found::none;
     qualified_type c;
-    r = common_type_of(id, templates[0], types.data(),
-                       static_cast<uint32_t>(types.size()), found, c);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY_SET(r, common_type_of(id, templates[0], types.data(),
+                               static_cast<uint32_t>(types.size()), found, c));
     if (found == common_found::none) {
         if (empty.cv())
             return not_supported(id, "ext.clang");
@@ -667,16 +652,13 @@ analysis_result semantic_analysis::builtin_type_pack_element(SyntaxRef id,
 {
     owned_array<SyntaxElement> written;
     owned_array<bool> expansion;
-    analysis_result r = builtin_template_arguments(id, written, expansion);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, builtin_template_arguments(id, written, expansion));
     if (written.empty() || expansion[0] || written[0].is(syntax_kind::type_id))
         return not_supported(id, "ext.clang");
     owned_array<qualified_type> types;
     bool dependent = false;
-    r = builtin_template_types(id, written, expansion, 1, types, dependent);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY_SET(
+        r, builtin_template_types(id, written, expansion, 1, types, dependent));
     /* N: value-dependent when it names a template's own parameter
        ([temp.dep.constexpr]/2) */
     SyntaxElement n = written[0];
@@ -692,15 +674,11 @@ analysis_result semantic_analysis::builtin_type_pack_element(SyntaxRef id,
     expression_meaning m;
     r = expression(n, m);
     if (r == analysis_result::well_formed)
-        r = operand_value(id, m);
-    if (r != analysis_result::well_formed)
-        return r;
+        VTRY_SET(r, operand_value(id, m));
     bool constant = false;
     if (is_integral(m.type)) {
-        r = converted_constant_expression(
-            id, m, fundamental_type::unsigned_long_int, constant);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY_SET(r, converted_constant_expression(
+                        id, m, fundamental_type::unsigned_long_int, constant));
     }
     if (!constant)
         return ill_formed(id,
@@ -734,9 +712,7 @@ analysis_result semantic_analysis::builtin_make_integer_seq(SyntaxRef id,
 {
     owned_array<SyntaxElement> written;
     owned_array<bool> expansion;
-    analysis_result r = builtin_template_arguments(id, written, expansion);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, builtin_template_arguments(id, written, expansion));
     if (written.size() != 3 || expansion[0] || expansion[1] || expansion[2] ||
         written[2].is(syntax_kind::type_id))
         return not_supported(id, "ext.clang");
@@ -758,9 +734,7 @@ analysis_result semantic_analysis::builtin_make_integer_seq(SyntaxRef id,
     if (!written[1].is(syntax_kind::type_id))
         return not_supported(id, "ext.clang");
     qualified_type element;
-    r = type_id(written[1], element);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY_SET(r, type_id(written[1], element));
     /* N: value-dependent when it names a template's own parameter
        ([temp.dep.constexpr]/2) */
     SyntaxElement n = written[2];
@@ -777,15 +751,11 @@ analysis_result semantic_analysis::builtin_make_integer_seq(SyntaxRef id,
     expression_meaning m;
     r = expression(n, m);
     if (r == analysis_result::well_formed)
-        r = operand_value(id, m);
-    if (r != analysis_result::well_formed)
-        return r;
+        VTRY_SET(r, operand_value(id, m));
     bool constant = false;
     fundamental_type f = fundamental_of(element);
     if (!element.cv() && is_integral(element) && is_integral(m.type)) {
-        r = converted_constant_expression(id, m, f, constant);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY_SET(r, converted_constant_expression(id, m, f, constant));
     }
     if (!constant)
         return ill_formed(id,
@@ -815,10 +785,8 @@ analysis_result semantic_analysis::builtin_make_integer_seq(SyntaxRef id,
     if (ft.is_alias)
         return alias_template_specialization(id, t, arguments, type);
     entity_index c = 0;
-    r = instantiate_class(id, t, arguments.data(),
-                          static_cast<uint32_t>(arguments.size()), c);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY_SET(r, instantiate_class(id, t, arguments.data(),
+                                  static_cast<uint32_t>(arguments.size()), c));
     type = entity_table[c].type.unqualified();
     return analysis_result::well_formed;
 }
@@ -1032,10 +1000,8 @@ semantic_analysis::template_with_types(SyntaxRef id, entity_index named,
     if (alias)
         return alias_template_specialization(id, t, arguments, type);
     entity_index c = 0;
-    analysis_result r = instantiate_class(
-        id, t, arguments.data(), static_cast<uint32_t>(arguments.size()), c);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, instantiate_class(id, t, arguments.data(),
+                              static_cast<uint32_t>(arguments.size()), c));
     type = entity_table[c].type.unqualified();
     return analysis_result::well_formed;
 }

@@ -53,9 +53,7 @@ semantic_analysis::explicit_specialization(ExplicitSpecialization n)
         return not_supported(n, "temp.expl.spec");
     specified s;
     uint32_t index = 0;
-    analysis_result r = named_specialization(n, inner, true, false, s, index);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, named_specialization(n, inner, true, false, s, index));
     /* [temp.expl.spec]/14 (Note): the template's exception specification
        is instantiated for the comparison: not here */
     if (dependent_exception_specification(
@@ -128,9 +126,7 @@ semantic_analysis::explicit_instantiation(ExplicitInstantiation n)
         return member_explicit_instantiation(n, d, extern_);
     specified s;
     uint32_t index = 0;
-    analysis_result r = named_specialization(n, d, false, extern_, s, index);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, named_specialization(n, d, false, extern_, s, index));
     entity_index e = instantiations[index].specialization;
     if (extern_)
         entity_table[e].explicitly_instantiated =

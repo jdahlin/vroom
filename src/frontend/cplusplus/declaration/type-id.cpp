@@ -65,9 +65,7 @@ analysis_result semantic_analysis::type_id(TypeId n, qualified_type &type)
     if (expansion && count == 2 && n[1].is(preprocessing_op_or_punc::ELLIPSIS))
         count = 1;
     specified s;
-    analysis_result r = decl_specifier_seq(n.type_specifier_seq(), s, false);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, decl_specifier_seq(n.type_specifier_seq(), s, false));
     if (!s.has_type)
         return not_supported(n, "dcl.name");
     type = s.type;

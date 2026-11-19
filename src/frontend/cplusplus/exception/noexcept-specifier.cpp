@@ -135,9 +135,7 @@ analysis_result semantic_analysis::noexcept_specifier(NoexceptSpecifier n,
            deferred yet */
         return not_supported(n, "except.spec");
     bool constant = false, value = false;
-    analysis_result r = bool_constant_expression(n, n[2], constant, value);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, bool_constant_expression(n, n[2], constant, value));
     if (!constant)
         return ill_formed(n,
                           "in a noexcept-specifier, the constant-expression "

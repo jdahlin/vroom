@@ -297,10 +297,8 @@ semantic_analysis::instantiate_class(SyntaxRef at, uint32_t class_template,
            named ([temp.class.spec.match]) */
         uint32_t pattern = 0;
         owned_array<template_argument> deduced;
-        analysis_result matched = matching_specialization(
-            at, class_template, arguments, count, pattern, deduced);
-        if (matched != analysis_result::well_formed)
-            return matched;
+        VTRY(matched, matching_specialization(at, class_template, arguments,
+                                              count, pattern, deduced));
         if (pattern != x.pattern) {
             instantiation_record &y = instantiations[k];
             y.pattern = pattern;
@@ -339,10 +337,8 @@ semantic_analysis::instantiate_class(SyntaxRef at, uint32_t class_template,
        primary's or a specialization's */
     uint32_t pattern = 0;
     owned_array<template_argument> deduced;
-    analysis_result matched = matching_specialization(
-        at, class_template, arguments, count, pattern, deduced);
-    if (matched != analysis_result::well_formed)
-        return matched;
+    VTRY(matched, matching_specialization(at, class_template, arguments, count,
+                                          pattern, deduced));
     record.pattern = pattern;
     record.first_argument = static_cast<uint32_t>(template_arguments.size());
     record.argument_count = count;

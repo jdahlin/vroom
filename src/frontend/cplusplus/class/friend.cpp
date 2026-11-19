@@ -118,9 +118,7 @@ analysis_result semantic_analysis::friend_class(entity_index c, SyntaxRef n,
         /* a qualified name: [basic.lookup.elab]/3, a class declared
            before */
         type_index named = 0;
-        analysis_result r = elaborated_type_specifier(type, named);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r, elaborated_type_specifier(type, named));
         const struct type &record = type_table[named];
         if (record.kind != type_kind::class_type ||
             entity_table[record.entity].kind != entity_kind::class_type)
@@ -224,9 +222,7 @@ semantic_analysis::friend_function(entity_index c, SyntaxRef n,
     declarator_meaning m;
     function_cv = 0;
     function_parameters.clear();
-    r = declarator(n, tail[1], type, m);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY_SET(r, declarator(n, tail[1], type, m));
     /* an operator function only as a definition ([over.oper]: its
        declaration's checks are operator_function_declaration's) */
     if (!m.has_id || m.qualifier || m.qualified_namespace ||
@@ -288,9 +284,7 @@ semantic_analysis::friend_function(entity_index c, SyntaxRef n,
         if (s.constexpr_)
             entity_table[befriended].constexpr_ = true;
         if (m.operator_function) {
-            analysis_result o = operator_function_declaration(n, befriended);
-            if (o != analysis_result::well_formed)
-                return o;
+            VTRY(o, operator_function_declaration(n, befriended));
         }
         bodies.append(n);
         friend_definitions.append({n, befriended, c});
@@ -425,15 +419,12 @@ analysis_result semantic_analysis::defaulted_equality(
             analysis_result r =
                 named_entity(at, parameters[k], sides[k], false);
             if (r == analysis_result::well_formed)
-                r = member_access(at, member, sides[k]);
-            if (r != analysis_result::well_formed)
-                return r;
+                VTRY_SET(r, member_access(at, member, sides[k]));
         }
-        analysis_result r = binary_of(
-            current_declaration, at, preprocessing_op_or_punc::EQUAL_EQUAL,
-            SyntaxElement(), sides[0], SyntaxElement(), sides[1], equal);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r,
+             binary_of(current_declaration, at,
+                       preprocessing_op_or_punc::EQUAL_EQUAL, SyntaxElement(),
+                       sides[0], SyntaxElement(), sides[1], equal));
         /* a bool prvalue each ([class.eq]/2), joined by && ([expr.log.and]) */
         if (i) {
             if (all.evaluation == constness::not_constant)

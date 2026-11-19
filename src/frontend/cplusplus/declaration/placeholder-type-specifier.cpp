@@ -344,9 +344,7 @@ analysis_result semantic_analysis::deduced_initializer(SyntaxElement init,
            expression */
         return not_supported(init.index(), "dcl.type.auto.deduct");
     expression_meaning m;
-    analysis_result r = expression(clause, m);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, expression(clause, m));
     return deduced_initialization(init, m, names_entity(clause), direct, list,
                                   e, type, value);
 }
@@ -358,10 +356,7 @@ analysis_result semantic_analysis::deduced_initialization(
     entity_index e, qualified_type &type, initialized_value &value)
 {
     qualified_type replacement;
-    analysis_result r =
-        deduce_placeholder(n, type, m, named, type, replacement);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, deduce_placeholder(n, type, m, named, type, replacement));
     /* [dcl.spec.auto]/7: "if the type that replaces the placeholder type is
        not the same in each deduction, the program is ill-formed" */
     if (declaration_deduced.unqualified() &&
@@ -394,9 +389,7 @@ analysis_result semantic_analysis::deduced_initialization(
         entity_table[e].linkage_of_name = linkage::internal;
         entity_table[e].unnamed_type_linkage = true;
     }
-    r = deduced_type_supported(n, type);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY_SET(r, deduced_type_supported(n, type));
     return initialize_with(n, m, type, direct, list, value);
 }
 
@@ -436,13 +429,9 @@ analysis_result semantic_analysis::deduce_return(SyntaxRef at,
             type_table.fundamental(fundamental_type::void_), cv_none);
     } else {
         qualified_type replacement;
-        analysis_result r =
-            deduce_placeholder(at, declared, *e, named, deduced, replacement);
-        if (r != analysis_result::well_formed)
-            return r;
-        r = deduced_type_supported(at, deduced);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r,
+             deduce_placeholder(at, declared, *e, named, deduced, replacement));
+        VTRY_SET(r, deduced_type_supported(at, deduced));
     }
     if (function_state.deduced) {
         if (!(deduced == function_state.returns))
@@ -513,9 +502,7 @@ analysis_result semantic_analysis::trailing_return(SyntaxRef declaration,
        makes such a declaration, for an expression) */
     if (!(type == auto_type))
         return not_supported(n, "dcl.fct");
-    analysis_result r = declarator(declaration, n[0], type, m);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, declarator(declaration, n[0], type, m));
     const struct type f = type_table[type.unqualified()];
     if (f.kind != type_kind::function || !(f.operand == auto_type))
         return not_supported(n, "dcl.fct");

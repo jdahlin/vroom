@@ -38,9 +38,7 @@ semantic_analysis::lambda_captures_of(SyntaxRef n,
                  preprocessing_op_or_punc::RIGHT_BRACKET))
             continue;
         if (c.is(syntax_kind::lambda_capture, syntax_kind::capture_list)) {
-            analysis_result r = lambda_captures_of(c, out);
-            if (r != analysis_result::well_formed)
-                return r;
+            VTRY(r, lambda_captures_of(c, out));
             continue;
         }
         out.append(c);
@@ -166,9 +164,7 @@ analysis_result semantic_analysis::lambda_introducer(LambdaIntroducer n,
                                                      lambda_context &l)
 {
     owned_array<SyntaxElement> captures;
-    analysis_result r = lambda_captures_of(n, captures);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, lambda_captures_of(n, captures));
     for (size_t i = 0; i < captures.size(); i++) {
         SyntaxElement c = captures[i];
         capture_record record;
@@ -211,9 +207,7 @@ analysis_result semantic_analysis::lambda_introducer(LambdaIntroducer n,
                 return not_supported(n, "expr.prim.lambda.capture");
             }
         } else if (c.is(syntax_kind::init_capture)) {
-            r = init_capture(c, l, record);
-            if (r != analysis_result::well_formed)
-                return r;
+            VTRY_SET(r, init_capture(c, l, record));
             lambda_captures.append(record);
             continue;
         } else if (c.is(syntax_kind::simple_capture)) {
@@ -311,9 +305,7 @@ analysis_result semantic_analysis::lambda_introducer(LambdaIntroducer n,
         if (record.by_reference)
             captured =
                 enclosing_capture_type(e, lambdas.size(), l.first_capture);
-        r = capture_type(n, captured, record.by_reference, type);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY_SET(r, capture_type(n, captured, record.by_reference, type));
         record.member = capture_member_of(l.closure, type);
         lambda_captures.append(record);
     }
@@ -418,12 +410,8 @@ analysis_result semantic_analysis::closure_member(token_index t,
                                                   expression_meaning &m)
 {
     expression_meaning object;
-    analysis_result r = this_object(t, object, true);
-    if (r != analysis_result::well_formed)
-        return r;
-    r = member_access(t, member, object);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, this_object(t, object, true));
+    VTRY_SET(r, member_access(t, member, object));
     m = object;
     m.evaluation = constness::not_constant;
     return analysis_result::well_formed;
@@ -482,10 +470,8 @@ analysis_result semantic_analysis::captured_entity(token_index t,
     if (record.by_reference)
         captured =
             enclosing_capture_type(e, lambdas.size() - 1, l.first_capture);
-    analysis_result r =
-        capture_type(current_declaration, captured, record.by_reference, type);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, capture_type(current_declaration, captured, record.by_reference,
+                         type));
     record.member = capture_member_of(l.closure, type);
     lambda_captures.append(record);
     return closure_member(t, record.member, m);
@@ -534,9 +520,7 @@ analysis_result semantic_analysis::captured_this(token_index t,
         lambda_captures.append(record);
         member = record.member;
     }
-    analysis_result r = closure_member(t, member, m);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, closure_member(t, member, m));
     if (!star)
         return operand_value(current_declaration, m);
     m.type = qualified_type::make(type_table.pointer_to(m.type), cv_none);
@@ -579,10 +563,8 @@ semantic_analysis::closure_object(lambda_context &l,
             r = this_pointer(c.at, e);
         initialized_value value;
         if (r == analysis_result::well_formed)
-            r = initialize_with(l.at, e, entity_table[c.member].type, true,
-                                false, value);
-        if (r != analysis_result::well_formed)
-            return r;
+            VTRY_SET(r, initialize_with(l.at, e, entity_table[c.member].type,
+                                        true, false, value));
         elements.append(value.node);
     }
     m = expression_meaning();

@@ -58,10 +58,8 @@ analysis_result semantic_analysis::member_function_template(
         return not_supported(n, "temp.mem");
     uint32_t index = 0, first = 0;
     entity_index scope = 0;
-    analysis_result declared =
-        template_parameter_scope(n, parameters, c, 0, index, scope, first);
-    if (declared != analysis_result::well_formed)
-        return declared;
+    VTRY(declared,
+         template_parameter_scope(n, parameters, c, 0, index, scope, first));
     for (uint32_t i = 0; i < parameters.size(); i++)
         if (template_parameter_is_pack(first + i))
             return not_supported(n, "temp.variadic");
@@ -70,10 +68,8 @@ analysis_result semantic_analysis::member_function_template(
     specified s;
     declarator_meaning m;
     qualified_type type;
-    analysis_result r =
-        function_template_declarator(definition, lead, c, scope, s, m, type);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r,
+         function_template_declarator(definition, lead, c, scope, s, m, type));
     /* [temp.mem]/3: "A member function template shall not be virtual." */
     if (s.virtual_)
         return ill_formed_at_token(m.id,
@@ -94,10 +90,8 @@ analysis_result semantic_analysis::member_function_template(
                                    "class.static.mfct");
     uint32_t gnu_flags = 0;
     token_index abi_tag = 0;
-    r = function_template_attributes(n, s, m, 0, "temp.mem", gnu_flags,
-                                     abi_tag);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY_SET(r, function_template_attributes(n, s, m, 0, "temp.mem", gnu_flags,
+                                             abi_tag));
     uint32_t name = tokens.identifier(m.id);
     /* [temp.over]/1: other member function templates of the name are
        overloads; a non-template member of the name too ([temp.mem]/2),
@@ -223,19 +217,16 @@ analysis_result semantic_analysis::member_template_call(
                 named_overload_set(a, set_at))
                 return not_supported(n, "temp.deduct.call");
             expression_meaning e;
-            analysis_result r = expression(a, e);
-            if (r != analysis_result::well_formed)
-                return r;
+            VTRY(r, expression(a, e));
             early.append(e);
         }
     for (const expression_meaning &e : early)
         if (e.entity && entity_table[e.entity].kind == entity_kind::function)
             return not_supported(n, "temp.deduct.call");
     owned_array<overload_candidate> candidates;
-    analysis_result r = member_template_candidates(
-        n, held, early.data(), static_cast<uint32_t>(early.size()), candidates);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, member_template_candidates(n, held, early.data(),
+                                       static_cast<uint32_t>(early.size()),
+                                       candidates));
     if (candidates.empty())
         return not_supported(n, "temp.deduct");
     owned_array<expression_meaning> all;
@@ -244,9 +235,8 @@ analysis_result semantic_analysis::member_template_call(
         all.append(e);
     size_t chosen = 0;
     bool none_viable = false;
-    r = best_viable_function(n, candidates, nullptr, all, chosen, &none_viable);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY_SET(r, best_viable_function(n, candidates, nullptr, all, chosen,
+                                     &none_viable));
     if (none_viable)
         return not_supported(n, "over.match.viable");
     const overload_candidate &k = candidates[chosen];
@@ -255,11 +245,10 @@ analysis_result semantic_analysis::member_template_call(
                          static_cast<uint32_t>(early.size()), deduced);
     entity_index f = 0;
     if (r == analysis_result::well_formed)
-        r = instantiate(n, function_templates[k.template_index - 1].entity,
-                        deduced.data(), static_cast<uint32_t>(deduced.size()),
-                        f);
-    if (r != analysis_result::well_formed)
-        return r;
+        VTRY_SET(r,
+                 instantiate(n, function_templates[k.template_index - 1].entity,
+                             deduced.data(),
+                             static_cast<uint32_t>(deduced.size()), f));
     return bound_member_call(n, f, object, arguments, early, m);
 }
 
@@ -283,9 +272,7 @@ analysis_result semantic_analysis::bound_member_call(
                           "it is declared",
                           "class.access");
     if (x.enclosing != object_class) {
-        analysis_result r = to_base(at, x.enclosing, e);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r, to_base(at, x.enclosing, e));
     }
     if (e.category == value_category::prvalue &&
         entity_table[x.enclosing].destructor)
@@ -293,9 +280,7 @@ analysis_result semantic_analysis::bound_member_call(
         return not_supported(n, "class.temporary");
     if (aggregate_prvalue(e))
         return not_supported(n, "class.temporary");
-    analysis_result r = deleted_use(at, f);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, deleted_use(at, f));
     expression_meaning callee;
     callee.type = x.type;
     callee.category = value_category::lvalue;

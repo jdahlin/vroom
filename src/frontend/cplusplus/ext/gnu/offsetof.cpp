@@ -67,9 +67,7 @@ analysis_result semantic_analysis::gnu_offsetof(SyntaxRef n,
                                                 expression_meaning &m)
 {
     qualified_type t;
-    analysis_result r = type_id(n[2], t);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, type_id(n[2], t));
     if (depends_on_template_parameter(t))
         return not_supported(n, "temp.dep.constexpr");
     const implementation_defined_behavior &b = tokens.files.behavior;
@@ -92,9 +90,7 @@ analysis_result semantic_analysis::gnu_offsetof(SyntaxRef n,
                 r = operand_value(n, e);
             bool constant = false;
             if (r == analysis_result::well_formed && is_integral(e.type))
-                r = integral_constant_expression(n, e, constant);
-            if (r != analysis_result::well_formed)
-                return r;
+                VTRY_SET(r, integral_constant_expression(n, e, constant));
             if (!constant)
                 return not_supported(n, "ext.gnu");
             i++; /* ] */

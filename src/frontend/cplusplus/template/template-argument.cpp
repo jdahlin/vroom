@@ -322,10 +322,8 @@ analysis_result semantic_analysis::template_argument_for(
            before it, which may fail to be one ([temp.deduct]/8) */
         if (!before)
             return not_supported(at, "temp.arg.nontype");
-        analysis_result r =
-            substituted_parameter_type(template_index, position, before, to);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r,
+             substituted_parameter_type(template_index, position, before, to));
         /* still dependent (template <class C, typename C::type = 0> with C
            a template parameter): the argument is value-dependent
            ([temp.dep.constexpr]/2), checked against the parameter's type
@@ -432,18 +430,14 @@ analysis_result semantic_analysis::template_argument_for(
     expression_meaning m;
     analysis_result r = expression(written, m);
     if (r == analysis_result::well_formed)
-        r = operand_value(at, m);
-    if (r != analysis_result::well_formed)
-        return r;
+        VTRY_SET(r, operand_value(at, m));
     if (tr.kind == type_kind::enumeration) {
         /* [expr.const]/10's converted constant expression of an
            enumeration type: one of that type (no conversion) */
         if (m.type.unqualified() != to.unqualified())
             return not_supported(at, "temp.arg.nontype");
         bool constant = false;
-        r = constant_expression(at, m, constant);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY_SET(r, constant_expression(at, m, constant));
         if (!constant)
             return not_supported(at, "temp.arg.nontype");
         out.kind = template_argument::kind_t::value;
@@ -456,9 +450,8 @@ analysis_result semantic_analysis::template_argument_for(
     bool constant = false;
     r = integral_constant_expression(at, m, constant);
     if (r == analysis_result::well_formed && constant)
-        r = converted_constant_expression(at, m, fundamental_of(to), constant);
-    if (r != analysis_result::well_formed)
-        return r;
+        VTRY_SET(r, converted_constant_expression(at, m, fundamental_of(to),
+                                                  constant));
     if (!constant)
         return not_supported(at, "temp.arg.nontype");
     out.kind = template_argument::kind_t::value;
@@ -500,9 +493,7 @@ analysis_result semantic_analysis::address_argument(SyntaxRef at,
     if (reference && address_of)
         return not_supported(at, "temp.arg.nontype");
     expression_meaning m;
-    analysis_result result = expression(operand, m);
-    if (result != analysis_result::well_formed)
-        return result;
+    VTRY(result, expression(operand, m));
     entity_index e = m.entity;
     if (!e)
         return not_supported(at, "temp.arg.nontype");
@@ -568,9 +559,7 @@ analysis_result semantic_analysis::template_template_argument(
     lookup_result x;
     if (qualifier) {
         nominated_scope scope;
-        analysis_result r = nested_name_specifier(qualifier, scope);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r, nested_name_specifier(qualifier, scope));
         if (scope.entity && !is_namespace(scope.entity))
             return not_supported(at, "temp.arg.template");
         x = lookup_qualified(scope.entity, tokens.identifier(name.token()),

@@ -19,9 +19,7 @@ analysis_result semantic_analysis::expression(SyntaxElement e,
                                               expression_meaning &m)
 {
     m = expression_meaning();
-    analysis_result r = expression_kind(e, m);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, expression_kind(e, m));
     /* [ext:clang_atomic], [ext:clang_bit_int] the operations on an atomic
        object or a _BitInt are not analysed yet */
     type_kind k = type_table[m.type.unqualified()].kind;

@@ -472,9 +472,7 @@ analysis_result semantic_analysis::builtin_addressof(SyntaxRef n,
                                                      expression_meaning &m)
 {
     SyntaxElement operand = n[2];
-    analysis_result r = expression(operand, m);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, expression(operand, m));
     if (m.category != value_category::lvalue)
         return ill_formed(n,
                           "the operand of __builtin_addressof shall be an "

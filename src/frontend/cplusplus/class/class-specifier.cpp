@@ -157,9 +157,7 @@ analysis_result semantic_analysis::bind_anonymous_members(entity_index c,
             if (!member.bit_field && t.kind == type_kind::class_type)
                 inner = t.entity;
             if (inner && entity_table[inner].anonymous_object == m) {
-                analysis_result r = bind_anonymous_members(c, n, inner);
-                if (r != analysis_result::well_formed)
-                    return r;
+                VTRY(r, bind_anonymous_members(c, n, inner));
             }
             continue;
         }
@@ -218,14 +216,10 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
             /* one attribute-specifier, or a seq of them */
             if (c.is(syntax_kind::attribute_specifier_seq)) {
                 for (auto each : c.elements()) {
-                    analysis_result r = gnu_attribute_specifier(each, gnu);
-                    if (r != analysis_result::well_formed)
-                        return r;
+                    VTRY(r, gnu_attribute_specifier(each, gnu));
                 }
             } else {
-                analysis_result r = gnu_attribute_specifier(c, gnu);
-                if (r != analysis_result::well_formed)
-                    return r;
+                VTRY(r, gnu_attribute_specifier(c, gnu));
             }
         } else {
             head_list.append(c);
@@ -306,9 +300,7 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
         if (outer || at_block_scope() || function_state.active)
             return not_supported(n, "class.pre");
         nominated_scope q;
-        analysis_result qr = nested_name_specifier(head_qualifier, q);
-        if (qr != analysis_result::well_formed)
-            return qr;
+        VTRY(qr, nested_name_specifier(head_qualifier, q));
         if (!is_namespace(q.entity)) {
             /* [class.nest]/3: "If class X is defined in a namespace scope,
                a nested class Y may be declared in class X and later defined
@@ -708,9 +700,7 @@ semantic_analysis::elaborated_type_specifier(ElaboratedTypeSpecifier n,
            previously declared type-name, the elaborated-type-specifier is
            ill-formed." */
         nominated_scope q;
-        analysis_result r = nested_name_specifier(e[at], q);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r, nested_name_specifier(e[at], q));
         token_index t = e[at + 1].token();
         lookup_result found = lookup_qualified(q.entity, tokens.identifier(t),
                                                lookup_filter::types);
@@ -1085,9 +1075,7 @@ semantic_analysis::member_declaration(entity_index c, MemberDeclaration m,
             /* [dcl.typedef]/2: "A typedef-name can also be introduced by
                an alias-declaration", a member-declaration ([class.mem]/1) */
             qualified_type type;
-            analysis_result r = alias_type(a, type);
-            if (r != analysis_result::well_formed)
-                return r;
+            VTRY(r, alias_type(a, type));
             specified s;
             s.typedef_ = true;
             s.type = type;
@@ -1247,9 +1235,7 @@ analysis_result semantic_analysis::member_declaration_with_specifiers(
     sole_elaborated = 0;
     declaration_access = 0;
     for (uint32_t i = 0; i < lead && r == analysis_result::well_formed; i++)
-        r = gnu_attribute_specifier(node[i], s);
-    if (r != analysis_result::well_formed)
-        return r;
+        VTRY_SET(r, gnu_attribute_specifier(node[i], s));
     return member_declarators(c, node, s, access, lead + 1, bodies);
 }
 
@@ -1370,10 +1356,7 @@ semantic_analysis::member_declarator(entity_index c, SyntaxRef declaration,
                                       syntax_kind::braced_init_list))
             return not_supported(d.index(), "class.mem");
         last_declared = 0;
-        analysis_result r =
-            member_declarator(c, declaration, d[0], s, access, definition);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r, member_declarator(c, declaration, d[0], s, access, definition));
         entity_index e = last_declared;
         if (e && entity_table[e].kind == entity_kind::variable &&
             !entity_table[e].nonstatic_member)
@@ -1594,10 +1577,7 @@ semantic_analysis::member_declarator(entity_index c, SyntaxRef declaration,
             entity_table[e].operator_function = true;
             entity_table[e].implemented = m.implemented;
             entity_table[e].allocation = m.allocation;
-            analysis_result checked =
-                operator_function_declaration(declaration, e);
-            if (checked != analysis_result::well_formed)
-                return checked;
+            VTRY(checked, operator_function_declaration(declaration, e));
             /* (one deleted on this, its first, declaration: not counted,
                layout's pod_for_layout reads the count at the class's end,
                before the bodies) */
@@ -1621,10 +1601,7 @@ semantic_analysis::member_declarator(entity_index c, SyntaxRef declaration,
             entity_table[e].explicit_ = s.explicit_;
         }
         if (m.literal_operator) {
-            analysis_result checked =
-                literal_operator_declaration(declaration, e);
-            if (checked != analysis_result::well_formed)
-                return checked;
+            VTRY(checked, literal_operator_declaration(declaration, e));
         }
         if (has_defaults) {
             if (entity_table[e].allocation != allocation_function::none)
@@ -1645,9 +1622,7 @@ semantic_analysis::member_declarator(entity_index c, SyntaxRef declaration,
                                   "over.oper");
             defer_default_arguments(e, declaration, parameters);
         }
-        analysis_result v = virtual_member(c, e, declaration, m.id, s.virtual_);
-        if (v != analysis_result::well_formed)
-            return v;
+        VTRY(v, virtual_member(c, e, declaration, m.id, s.virtual_));
     } else if (has_defaults) {
         /* /3: a default argument of a member that is not a function */
         return not_supported(declaration, "dcl.fct.default");
@@ -2016,9 +1991,7 @@ semantic_analysis::static_member_initializer(SyntaxRef declarator,
     initialized_value value;
     value.evaluation = constness::unknown;
     value.value = 0;
-    analysis_result r = initializer(init, type, value);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, initializer(init, type, value));
     if (value.evaluation == constness::not_constant)
         return ill_formed(declarator,
                           "every initializer-clause of a static data "
@@ -2200,9 +2173,7 @@ analysis_result semantic_analysis::alignment_specifier(AlignmentSpecifier n,
         return not_supported(n, "dcl.align");
     if (n[2].is(syntax_kind::type_id)) {
         qualified_type t;
-        analysis_result r = type_id(n[2], t);
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r, type_id(n[2], t));
         const struct type &record = type_table[t.unqualified()];
         if (record.kind == type_kind::function ||
             (record.kind == type_kind::array && !record.bound_known))
@@ -2214,15 +2185,11 @@ analysis_result semantic_analysis::alignment_specifier(AlignmentSpecifier n,
         return analysis_result::well_formed;
     }
     expression_meaning e;
-    analysis_result r = expression(n[2], e);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY(r, expression(n[2], e));
     if (!is_integral(e.type) || e.category != value_category::prvalue)
         return not_supported(n, "dcl.align");
     bool constant = false;
-    r = constant_expression(n, e, constant);
-    if (r != analysis_result::well_formed)
-        return r;
+    VTRY_SET(r, constant_expression(n, e, constant));
     if (!constant)
         return not_supported(n, "dcl.align");
     alignment = e.value;

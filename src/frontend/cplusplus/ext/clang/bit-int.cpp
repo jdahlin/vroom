@@ -57,9 +57,7 @@ analysis_result semantic_analysis::clang_bit_int_type(SyntaxRef n,
         r = operand_value(n, m);
     bool constant = false;
     if (r == analysis_result::well_formed && is_integral(m.type))
-        r = integral_constant_expression(n, m, constant);
-    if (r != analysis_result::well_formed)
-        return r;
+        VTRY_SET(r, integral_constant_expression(n, m, constant));
     if (!constant)
         return not_supported(n, "ext.clang");
     __int128 bits =
