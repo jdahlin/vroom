@@ -276,7 +276,8 @@ node_index parser::constraint_logical_or_expression()
         if ((binary_operator_follows() &&
              !at(preprocessing_op_or_punc::AMPERSAND_AMPERSAND) &&
              !at(preprocessing_op_or_punc::BAR_BAR)) ||
-            at(preprocessing_op_or_punc::LEFT_BRACKET) ||
+            (at(preprocessing_op_or_punc::LEFT_BRACKET) &&
+             !at_attribute_specifier()) ||
             at(preprocessing_op_or_punc::DOT) ||
             at(preprocessing_op_or_punc::ARROW) ||
             at(preprocessing_op_or_punc::PLUS_PLUS) ||
