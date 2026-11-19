@@ -487,9 +487,11 @@ analysis_result semantic_analysis::declare_specialization(
     }
     /* (a copy: making the entity can move the table) */
     const entity t = entity_table[record.template_entity];
-    /* (a member function template is inline, [class.mfct]/1) */
+    /* (a member function template is inline, [class.mfct]/1; the
+       definition's declarator may leave out the inline of an earlier
+       declaration, [dcl.inline]/5) */
     bool inline_ = s.inline_ || !is_namespace(t.enclosing);
-    if (inline_ != t.inline_ || s.constexpr_ != t.constexpr_)
+    if ((inline_ && !t.inline_) || s.constexpr_ != t.constexpr_)
         return not_supported(declaration, "temp.inst");
     entity_index e =
         entity_table.make(entity_kind::function, t.name, t.enclosing);

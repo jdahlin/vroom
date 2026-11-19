@@ -505,7 +505,7 @@ semantic_analysis::function_template_definition(node_index n,
         if (old.enclosing != outer || f.parameter_count != parameters.size() ||
             !same_template_parameters(first, f.first_parameter,
                                       f.parameter_count) ||
-            old.inline_ != s.inline_ || old.constexpr_ != s.constexpr_ ||
+            old.constexpr_ != s.constexpr_ ||
             (s.static_ && old.linkage_of_name != linkage::internal))
             return not_supported(n, "temp.over.link");
         /* the same names: an instantiation made before the definition
@@ -531,6 +531,12 @@ semantic_analysis::function_template_definition(node_index n,
                            !(values[i].type == entity_table[pe].type)))
                 return not_supported(n, "temp.over.link");
         }
+        /* [dcl.inline]/5: an inline declaration after the definition is
+           ill-formed; one before it makes the template inline */
+        if (s.inline_ && !old.inline_ && f.definition)
+            return not_supported(n, "dcl.inline");
+        if (s.inline_)
+            entity_table[f.entity].inline_ = true;
         entity_table.add_declaration(f.entity, n);
         if (defines) {
             function_template &record = function_templates[earlier - 1];
