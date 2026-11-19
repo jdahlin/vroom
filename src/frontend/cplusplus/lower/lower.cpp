@@ -1189,7 +1189,15 @@ void c_lowering::gnu_attributes(entity_index e, uint32_t s)
         ast_builder_symbol_flags_add(c, s, flags);
     if (x.gnu_flags & gnu_used)
         ast_builder_symbol_keep(c, s);
-    if (x.gnu_flags & gnu_hidden_visibility)
+    /* [ext:gnu_attributes] a class's visibility("hidden") is its
+       members' (and its nested classes') */
+    bool hidden = x.gnu_flags & gnu_hidden_visibility;
+    for (entity_index k = x.enclosing;
+         !hidden && k &&
+         analysis.entity_table[k].kind == entity_kind::class_type;
+         k = analysis.entity_table[k].enclosing)
+        hidden = analysis.entity_table[k].gnu_flags & gnu_hidden_visibility;
+    if (hidden)
         ast_builder_symbol_visibility(c, s, "hidden", 6);
     if (x.section) {
         /* the string-literal's characters between its quotes (sema took
