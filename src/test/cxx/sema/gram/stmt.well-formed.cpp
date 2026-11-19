@@ -24,3 +24,6 @@ int tern(int a) { return a ? add(a, 1) : -a; }
 void ptr(int *p) { int *q = p; *q = 1; q[0] = 2; }
 int (*pick())(int, int) { return add; }
 int call5() { return pick()(1, 2) + (*pick())(3, 4); }
+// [expr.throw]: void prvalues, with and without an operand, also dependent
+void thrower(int a) { if (a) throw a + 1; else throw; }
+template <class T> void throw_dependent(T t) { throw t; }

@@ -305,6 +305,9 @@ struct tree_checker {
             child(n, node.c, tree_sort::expression, false, "deallocation");
             prvalue(n, node.a, "operand");
             break;
+        case semantic_kind::throw_exception:
+            child(n, node.a, tree_sort::expression, true, "operand");
+            break;
         case semantic_kind::block:
         case semantic_kind::declarations:
             list(n, tree_sort::statement, "statement");
