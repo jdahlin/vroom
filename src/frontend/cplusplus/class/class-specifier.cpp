@@ -2006,17 +2006,18 @@ semantic_analysis::static_member_initializer(SyntaxRef declarator,
     qualified_type type = entity_table[e].type;
     uint32_t cv = cv_of(type_table, type);
     const struct type record = type_table[type.unqualified()];
+    /* [class.static.data]/4: integral or enumeration type */
+    const bool integral_or_enumeration =
+        record.kind == type_kind::enumeration ||
+        (record.kind == type_kind::fundamental && is_integral(type));
     /* [expr.const]/3: until the initializer is analysed (and if analysis
        has no rules for it) whether a member that may be usable in constant
        expressions is one, and its value, are unknown: a later member's
        initializer that names it is not thereby not a constant expression */
     if (s.constexpr_ ||
-        ((cv & cv_const) && !(cv & cv_volatile) &&
-         record.kind == type_kind::fundamental && is_integral(type)))
+        ((cv & cv_const) && !(cv & cv_volatile) && integral_or_enumeration))
         entity_table[e].usable = constness::unknown;
-    if (!(cv & cv_const) || (cv & cv_volatile) ||
-        record.kind != type_kind::fundamental || !is_integral(type))
-        /* an enumeration's too, which analysis does not fold yet */
+    if (!(cv & cv_const) || (cv & cv_volatile) || !integral_or_enumeration)
         return not_supported(declarator, "class.static.data");
     initialized_value value;
     value.evaluation = constness::unknown;
