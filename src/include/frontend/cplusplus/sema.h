@@ -3364,6 +3364,9 @@ class semantic_analysis
     /* __type_pack_element<N, T...> */
     bool is_builtin_type_pack_element(uint32_t name) const;
     analysis_result builtin_type_pack_element(node_index id, type_index &type);
+    /* __make_integer_seq<B, T, N> */
+    bool is_builtin_make_integer_seq(uint32_t name) const;
+    analysis_result builtin_make_integer_seq(node_index id, type_index &type);
     analysis_result
     builtin_template_arguments(node_index id,
                                owned_array<syntax_child> &written,

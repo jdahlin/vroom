@@ -214,7 +214,7 @@ analysis_result semantic_analysis::template_head_parameters(
             template_parameter_parts y;
             if (!template_parameter_form(inner[k], y) || y.has_declarator ||
                 y.template_template || y.has_default ||
-                (y.pack && (!y.type || k + 1 != inner.size())))
+                (y.pack && k + 1 != inner.size()))
                 return not_supported(p, "temp.arg.template");
         }
     }
@@ -2071,6 +2071,8 @@ analysis_result semantic_analysis::template_type(node_index id,
         return builtin_common_type(id, type);
     if (!named && !qualified && is_builtin_type_pack_element(name))
         return builtin_type_pack_element(id, type);
+    if (!named && !qualified && is_builtin_make_integer_seq(name))
+        return builtin_make_integer_seq(id, type);
     uint32_t ct = class_template_of(named);
     if (!ct) {
         uint32_t at = alias_template_of(named);
@@ -2297,8 +2299,16 @@ bool semantic_analysis::same_template_parameters(uint32_t first,
         if (a.kind != b.kind || template_parameter_is_pack(first + i) !=
                                     template_parameter_is_pack(other_first + i))
             return false;
-        if (a.kind == entity_kind::none && !(a.type == b.type))
-            return false;
+        /* (a non-type parameter's type: the same, or each list's type
+           parameter at the same position, template<class T, T...>) */
+        if (a.kind == entity_kind::none && !(a.type == b.type)) {
+            uint32_t at =
+                own_type_parameter_position(a.type, a.enclosing, first);
+            if (at == UINT32_MAX || a.type.cv() != b.type.cv() ||
+                at != own_type_parameter_position(b.type, b.enclosing,
+                                                  other_first))
+                return false;
+        }
         if (a.kind == entity_kind::template_entity) {
             /* template template-parameters: their own parameters */
             const function_template x = function_templates[a.instantiation - 1];
