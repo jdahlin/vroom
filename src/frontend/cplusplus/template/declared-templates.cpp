@@ -432,11 +432,29 @@ semantic_analysis::function_template_definition(SyntaxRef n,
                 last = i;
                 packs++;
             }
-        if (packs > 1)
-            return not_supported(n, "temp.variadic");
-        bool pack = packs == 1;
         const struct type ft = type_table[type.unqualified()];
         const qualified_type *list = type_table.parameters(type.unqualified());
+        /* [temp.param]/14: "A template parameter pack of a function
+           template shall not be followed by another template parameter
+           unless that template parameter can be deduced from the
+           parameter-type-list": several packs, each named only in pack
+           expansions inside the parameters' types (tuple<A...>,
+           seq<N...>), no function parameter pack */
+        if (packs > 1) {
+            for (uint32_t i = 0; i < ft.parameter_count; i++)
+                if (type_table[list[i].unqualified()].kind ==
+                    type_kind::pack_expansion)
+                    return not_supported(n, "temp.variadic");
+            for (uint32_t i = 0; i < parameters.size(); i++)
+                if (template_parameter_is_pack(first + i) &&
+                    !pack_only_expanded(
+                        entity_table[template_parameter_entities[first + i]]
+                            .name,
+                        d[lead].first_token(), d[lead + 1].end_token()))
+                    return not_supported(n, "temp.variadic");
+            packs = 0;
+        }
+        bool pack = packs == 1;
         uint32_t pack_name = 0;
         if (pack)
             pack_name =
