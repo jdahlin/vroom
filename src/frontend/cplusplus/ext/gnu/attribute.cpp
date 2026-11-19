@@ -265,6 +265,9 @@ static const gnu_attribute_rule gnu_attribute_rules[] = {
        when the deployment target is older (libc++'s
        _LIBCPP_INTRODUCED_IN_LLVM_N_ATTRIBUTE) */
     {"availability", 0},
+    /* clang's swift_attr("..."): an annotation for Swift's importer (the
+       SDK's __swift_nonisolated_unsafe) */
+    {"swift_attr", 0},
     /* clang's enable_if(condition, message) (below) */
     {"enable_if", gnu_enable_if},
 };
