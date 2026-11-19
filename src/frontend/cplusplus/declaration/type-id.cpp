@@ -65,7 +65,7 @@ analysis_result semantic_analysis::type_id(TypeId n, qualified_type &type)
     if (expansion && count == 2 && n[1].is(preprocessing_op_or_punc::ELLIPSIS))
         count = 1;
     specified s;
-    analysis_result r = decl_specifier_seq(n[0].index(), s, false);
+    analysis_result r = decl_specifier_seq(n[0], s, false);
     if (r != analysis_result::well_formed)
         return r;
     if (!s.has_type)

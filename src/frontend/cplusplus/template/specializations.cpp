@@ -291,7 +291,7 @@ semantic_analysis::named_specialization(SyntaxRef n, SyntaxRef declaration,
         static_cast<owned_array<parameter_meaning> &&>(function_parameters);
     declarator_meaning m;
     qualified_type type;
-    analysis_result r = decl_specifier_seq(declaration[0].index(), s, false);
+    analysis_result r = decl_specifier_seq(declaration[0], s, false);
     uint32_t cv = 0;
     if (r == analysis_result::well_formed) {
         type = s.type;
@@ -539,7 +539,7 @@ analysis_result semantic_analysis::member_explicit_instantiation(
     specified s;
     declarator_meaning m;
     qualified_type type;
-    analysis_result r = decl_specifier_seq(declaration[0].index(), s, false);
+    analysis_result r = decl_specifier_seq(declaration[0], s, false);
     uint32_t cv = 0;
     if (r == analysis_result::well_formed) {
         type = s.type;

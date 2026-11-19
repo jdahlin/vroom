@@ -322,7 +322,7 @@ analysis_result semantic_analysis::namespace_definition(SyntaxRef n)
             /* GNU attributes that change nothing a namespace's members
                get (abi_tag, which changes their symbols, has no rule) */
             gnu_attributes g;
-            analysis_result r = gnu_attribute_specifier(c.index(), g);
+            analysis_result r = gnu_attribute_specifier(c, g);
             if (r != analysis_result::well_formed)
                 return r;
             if (g.flags || g.aligned || g.section)

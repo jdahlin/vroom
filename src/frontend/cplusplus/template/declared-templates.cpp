@@ -290,9 +290,9 @@ analysis_result semantic_analysis::function_template_declarator(
     if (constructor && specifiers)
         r = constructor_specifiers(definition[lead], s);
     else if (specifiers)
-        r = decl_specifier_seq(definition[lead].index(), s, false);
+        r = decl_specifier_seq(definition[lead], s, false);
     for (uint32_t i = 0; i < lead && r == analysis_result::well_formed; i++)
-        r = gnu_attribute_specifier(definition[i].index(), s);
+        r = gnu_attribute_specifier(definition[i], s);
     if (r == analysis_result::well_formed) {
         type = s.type;
         function_cv = 0;
@@ -740,7 +740,7 @@ analysis_result semantic_analysis::declare_template_parameters(
             entity_index saved = current_scope;
             current_scope = scope;
             specified sp;
-            analysis_result r = decl_specifier_seq(node[0].index(), sp, false);
+            analysis_result r = decl_specifier_seq(node[0], sp, false);
             qualified_type type = sp.type;
             if (r == analysis_result::well_formed && form.has_declarator) {
                 declarator_meaning dm;
@@ -1101,7 +1101,7 @@ semantic_analysis::variable_template_definition(SyntaxRef n,
     current_scope = scope;
     specified s;
     declarator_meaning m;
-    r = decl_specifier_seq(declaration[skip].index(), s, false);
+    r = decl_specifier_seq(declaration[skip], s, false);
     qualified_type type = s.type;
     if (r == analysis_result::well_formed) {
         function_cv = 0;

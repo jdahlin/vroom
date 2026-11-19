@@ -519,7 +519,7 @@ analysis_result semantic_analysis::enum_specifier_rules(SyntaxRef n,
         if (base.size() != 2 || !base[1].is(syntax_kind::type_specifier_seq))
             return not_supported(n, "dcl.enum");
         specified s;
-        analysis_result r = decl_specifier_seq(base[1].index(), s, true);
+        analysis_result r = decl_specifier_seq(base[1], s, true);
         if (r != analysis_result::well_formed)
             return r;
         /* [dcl.enum]/2: "The type-specifier-seq of an enum-base shall name

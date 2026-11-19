@@ -83,7 +83,7 @@ semantic_analysis::instantiate(SyntaxRef at, entity_index template_entity,
         else if (constructor && specifiers)
             r = constructor_specifiers(d_syntax[d_skip], s);
         else if (specifiers)
-            r = decl_specifier_seq(d_syntax[d_skip].index(), s, false);
+            r = decl_specifier_seq(d_syntax[d_skip], s, false);
         qualified_type type = s.type;
         if (lambda) {
             type = lambda_type;

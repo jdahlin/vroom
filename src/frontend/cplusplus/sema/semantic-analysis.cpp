@@ -109,7 +109,7 @@ bool semantic_analysis::parsed_completely(SyntaxRef n) const
         for (uint32_t i = 0; i < next.size(); i++) {
             SyntaxElement c = next[i];
             if (!c.is_token())
-                work.append(c.index());
+                work.append(c);
         }
     }
     return true;

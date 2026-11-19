@@ -194,7 +194,7 @@ analysis_result semantic_analysis::new_type_id(NewTypeId n,
     if (!n.size() || n.size() > 2 || !n[0].is(syntax_kind::type_specifier_seq))
         return not_supported(n, "expr.new");
     specified s;
-    analysis_result r = decl_specifier_seq(n[0].index(), s, false);
+    analysis_result r = decl_specifier_seq(n[0], s, false);
     if (r != analysis_result::well_formed)
         return r;
     if (!s.has_type)

@@ -1077,7 +1077,7 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
         if (c.is(syntax_kind::gnu_attribute_specifier) &&
             class_specifier_before(seq, i)) {
             gnu_attributes g;
-            analysis_result r = gnu_attribute_specifier(c.index(), g);
+            analysis_result r = gnu_attribute_specifier(c, g);
             if (r != analysis_result::well_formed)
                 return r;
             if (g.aligned && !(g.flags & ~gnu_aligned) && !g.section &&
@@ -1215,7 +1215,7 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
                     continue;
                 /* [ext:gnu_attributes] a decl-specifier: it applies to
                    the declaration */
-                r = gnu_attribute_specifier(c.index(), s);
+                r = gnu_attribute_specifier(c, s);
                 if (r != analysis_result::well_formed)
                     return r;
                 continue;

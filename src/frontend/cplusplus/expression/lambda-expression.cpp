@@ -533,7 +533,7 @@ semantic_analysis::lambda_call_type(SyntaxRef n, SyntaxRef d, lambda_context &l,
                 /* [ext:gnu_attributes] always_inline and the like: no
                    effect on the closure type */
                 gnu_attributes g;
-                analysis_result a = gnu_attribute_specifier(part.index(), g);
+                analysis_result a = gnu_attribute_specifier(part, g);
                 if (a != analysis_result::well_formed)
                     r = a;
             } else if (part.is_token()) {
@@ -721,10 +721,10 @@ analysis_result semantic_analysis::generic_lambda(SyntaxRef n, SyntaxRef list,
         if (p.is_token())
             continue;
         template_parameter_parts x;
-        if (!template_parameter_form(p.index(), x) || !x.type || x.pack ||
+        if (!template_parameter_form(p, x) || !x.type || x.pack ||
             x.template_template || x.constraint)
             return not_supported(p.index(), "temp.param");
-        parameters.append(p.index());
+        parameters.append(p);
     }
     uint32_t clauses = 0;
     for (uint32_t i = 1; i + 1 < n.size(); i++)

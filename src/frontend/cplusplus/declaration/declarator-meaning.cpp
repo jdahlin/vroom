@@ -504,7 +504,7 @@ void semantic_analysis::hold_names(SyntaxRef declaration)
             for (uint32_t i = 0; i < x.size(); i++) {
                 SyntaxElement c = x[i];
                 if (!c.is_token())
-                    work.append(c.index());
+                    work.append(c);
                 else if (tokens[c.token()].kind == token_kind::identifier &&
                          (x.is(syntax_kind::using_declarator) ||
                           (x == declaration && i == 1)))

@@ -209,22 +209,21 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
                 only_alignment && k.is(syntax_kind::alignment_specifier);
         if (only_alignment) {
             for (auto k : c.elements())
-                alignas_list.append(k.index());
+                alignas_list.append(k);
         } else if (c.is(syntax_kind::alignment_specifier)) {
-            alignas_list.append(c.index());
+            alignas_list.append(c);
         } else if (class_head_attributes_without_effect(c)) {
             /* [dcl.attr.deprecated] and the like: nothing generated */
         } else if (c.is_node() && gnu_or_without_effect(c)) {
             /* one attribute-specifier, or a seq of them */
             if (c.is(syntax_kind::attribute_specifier_seq)) {
                 for (auto each : c.elements()) {
-                    analysis_result r =
-                        gnu_attribute_specifier(each.index(), gnu);
+                    analysis_result r = gnu_attribute_specifier(each, gnu);
                     if (r != analysis_result::well_formed)
                         return r;
                 }
             } else {
-                analysis_result r = gnu_attribute_specifier(c.index(), gnu);
+                analysis_result r = gnu_attribute_specifier(c, gnu);
                 if (r != analysis_result::well_formed)
                     return r;
             }
@@ -581,7 +580,7 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
         if (!declaration) {
             /* a node the grammar does not place here (unparsed, an
                explicit instantiation kept as an error) */
-            result = worse(result, not_supported(member.index()));
+            result = worse(result, not_supported(member));
             continue;
         }
         result =
@@ -1184,7 +1183,7 @@ analysis_result semantic_analysis::member_declaration_with_specifiers(
             owned_array<SyntaxRef> work;
             for (auto x : node.elements())
                 if (x.is_node() && !x.is(syntax_kind::function_body))
-                    work.append(x.index());
+                    work.append(x);
             while (!work.empty()) {
                 auto k = work.back();
                 work.resize(work.size() - 1);
@@ -1192,7 +1191,7 @@ analysis_result semantic_analysis::member_declaration_with_specifiers(
                     return not_supported(k, "class.conv.fct");
                 for (auto x : k.elements())
                     if (x.is_node())
-                        work.append(x.index());
+                        work.append(x);
             }
             return not_supported(node, "class.ctor");
         }
@@ -1243,12 +1242,12 @@ analysis_result semantic_analysis::member_declaration_with_specifiers(
         sole_elaborated = first[0].index();
     bool outer_virtual_allowed = virtual_allowed;
     virtual_allowed = true;
-    analysis_result r = decl_specifier_seq(first.index(), s, false);
+    analysis_result r = decl_specifier_seq(first, s, false);
     virtual_allowed = outer_virtual_allowed;
     sole_elaborated = 0;
     declaration_access = 0;
     for (uint32_t i = 0; i < lead && r == analysis_result::well_formed; i++)
-        r = gnu_attribute_specifier(node[i].index(), s);
+        r = gnu_attribute_specifier(node[i], s);
     if (r != analysis_result::well_formed)
         return r;
     return member_declarators(c, node, s, access, lead + 1, bodies);
@@ -1910,7 +1909,7 @@ semantic_analysis::member_function_definition(entity_index c,
     specified s;
     bool outer_virtual_allowed = virtual_allowed;
     virtual_allowed = true;
-    analysis_result r = decl_specifier_seq(seq.index(), s, false);
+    analysis_result r = decl_specifier_seq(seq, s, false);
     virtual_allowed = outer_virtual_allowed;
     qualified_type type = s.type;
     declarator_meaning m;

@@ -539,7 +539,7 @@ analysis_result semantic_analysis::for_range_declaration(
     placeholder_allowed = true;
     scoped_value<qualified_type> deduced(declaration_deduced, qualified_type());
     scoped_value<bool> group(placeholder_group, false);
-    analysis_result r = decl_specifier_seq(at[0].index(), s, false);
+    analysis_result r = decl_specifier_seq(at[0], s, false);
     if (r != analysis_result::well_formed)
         return r;
     /* [stmt.ranged]/2: "In the decl-specifier-seq of a for-range-declaration,

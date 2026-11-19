@@ -153,7 +153,7 @@ analysis_result semantic_analysis::constructor_specifiers(SyntaxRef seq,
 {
     for (SyntaxElement x : seq.elements()) {
         if (x.is(syntax_kind::gnu_attribute_specifier)) {
-            analysis_result r = gnu_attribute_specifier(x.index(), s);
+            analysis_result r = gnu_attribute_specifier(x, s);
             if (r != analysis_result::well_formed)
                 return r;
             continue;
@@ -412,7 +412,7 @@ analysis_result semantic_analysis::special_member_declarator(
     /* [ext:gnu_attributes] before the declaration (libc++'s
        _LIBCPP_HIDE_FROM_ABI) */
     for (uint32_t i = 0; i < leading_gnu_attributes(declaration); i++) {
-        r = gnu_attribute_specifier(declaration[i].index(), m);
+        r = gnu_attribute_specifier(declaration[i], m);
         if (r != analysis_result::well_formed)
             return r;
     }

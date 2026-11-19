@@ -396,7 +396,7 @@ analysis_result semantic_analysis::gnu_attribute_specifier(SyntaxRef n,
                 attributes.append(c);
             else if (c.is(syntax_kind::gnu_attribute_list,
                           syntax_kind::gnu_attribute_specifier))
-                work.append(c.index());
+                work.append(c);
             else if (c.is(syntax_kind::attribute_specifier) &&
                      attributes_as_gnu(c, standard))
                 g.flags |= standard;

@@ -117,14 +117,14 @@ analysis_result semantic_analysis::conversion_type(SyntaxRef id,
     owned_array<SyntaxRef> work;
     for (uint32_t i = t.size(); i-- > 1;)
         if (!t[i].is_token())
-            work.append(t[i].index());
+            work.append(t[i]);
     while (!work.empty()) {
         SyntaxRef k = work.back();
         work.resize(work.size() - 1);
         if (k.is(syntax_kind::conversion_declarator)) {
             for (uint32_t i = k.size(); i-- > 0;)
                 if (!k[i].is_token())
-                    work.append(k[i].index());
+                    work.append(k[i]);
             continue;
         }
         if (!k.is(syntax_kind::ptr_operator))
@@ -161,7 +161,7 @@ semantic_analysis::conversion_function_member(entity_index c, SyntaxRef n,
     /* [ext:gnu_attributes] attributes before the declaration */
     uint32_t lead = leading_gnu_attributes(n);
     while (first < lead) {
-        analysis_result r = gnu_attribute_specifier(n[first].index(), s);
+        analysis_result r = gnu_attribute_specifier(n[first], s);
         if (r != analysis_result::well_formed)
             return r;
         first++;
@@ -212,7 +212,7 @@ SyntaxRef semantic_analysis::conversion_function_id_of(SyntaxRef n) const
     for (SyntaxElement x : n.elements()) {
         if (!x.is_token() &&
             !x.is(syntax_kind::decl_specifier_seq, syntax_kind::function_body))
-            work.append(x.index());
+            work.append(x);
     }
     while (!work.empty()) {
         SyntaxRef k = work.back();
@@ -226,7 +226,7 @@ SyntaxRef semantic_analysis::conversion_function_id_of(SyntaxRef n) const
             continue;
         for (auto child : k.elements())
             if (!child.is_token())
-                work.append(child.index());
+                work.append(child);
     }
     return 0;
 }

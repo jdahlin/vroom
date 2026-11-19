@@ -210,7 +210,7 @@ semantic_analysis::friend_function(entity_index c, SyntaxRef n,
     specified s;
     bool outer = friend_allowed;
     friend_allowed = true;
-    analysis_result r = decl_specifier_seq(n[leading].index(), s, false);
+    analysis_result r = decl_specifier_seq(n[leading], s, false);
     friend_allowed = outer;
     if (r != analysis_result::well_formed)
         return r;

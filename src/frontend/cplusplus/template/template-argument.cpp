@@ -268,7 +268,7 @@ analysis_result semantic_analysis::substituted_parameter_type(
     current_scope = scope;
     lookup_horizon = ft.declaration.first_token();
     specified sp;
-    analysis_result r = decl_specifier_seq(node[0].index(), sp, false);
+    analysis_result r = decl_specifier_seq(node[0], sp, false);
     qualified_type t = sp.type;
     if (r == analysis_result::well_formed && form.has_declarator) {
         declarator_meaning dm;

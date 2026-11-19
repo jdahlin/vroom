@@ -141,8 +141,7 @@ analysis_result semantic_analysis::using_declaration(UsingDeclaration n)
                  k < items.size() &&
                  items[k].is(syntax_kind::gnu_attribute_specifier);
                  k++) {
-                analysis_result r =
-                    gnu_attribute_specifier(items[k].index(), g);
+                analysis_result r = gnu_attribute_specifier(items[k], g);
                 if (r != analysis_result::well_formed)
                     return worse(result, r);
             }

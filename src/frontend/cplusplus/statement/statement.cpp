@@ -664,7 +664,7 @@ analysis_result semantic_analysis::condition(SyntaxElement c, bool for_switch,
         scoped_value<qualified_type> deduced(declaration_deduced,
                                              qualified_type());
         scoped_value<bool> group(placeholder_group, false);
-        r = decl_specifier_seq(at[0].index(), s, false);
+        r = decl_specifier_seq(at[0], s, false);
         if (r == analysis_result::well_formed &&
             (s.typedef_ || s.static_ || s.extern_ || s.inline_))
             /* [stmt.pre]/8: "In the decl-specifier-seq of a condition, each

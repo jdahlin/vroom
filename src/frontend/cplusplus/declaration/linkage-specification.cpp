@@ -48,11 +48,11 @@ analysis_result semantic_analysis::linkage_specification(LinkageSpecification n)
         if (x.is(syntax_kind::declaration_seq)) {
             for (SyntaxElement y : x.elements()) {
                 if (!y.is_token())
-                    inner.append(y.index());
+                    inner.append(y);
             }
             continue;
         }
-        inner.append(x.index());
+        inner.append(x);
     }
     bool saved = c_language;
     bool saved_braces = linkage_without_braces;

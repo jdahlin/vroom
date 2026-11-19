@@ -112,7 +112,7 @@ bool semantic_analysis::template_head_list(
             continue;
         if (c.is(syntax_kind::type_parameter,
                  syntax_kind::parameter_declaration)) {
-            parameters.append(c.index());
+            parameters.append(c);
             continue;
         }
         /* (its requires-clause: head_constraint) */
@@ -126,7 +126,7 @@ bool semantic_analysis::template_head_list(
             if (!p.is(syntax_kind::type_parameter,
                       syntax_kind::parameter_declaration))
                 return false;
-            parameters.append(p.index());
+            parameters.append(p);
         }
     }
     return true;

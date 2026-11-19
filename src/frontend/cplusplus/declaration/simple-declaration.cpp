@@ -705,7 +705,7 @@ analysis_result semantic_analysis::alias_type(SyntaxRef n, qualified_type &type)
                tokens.files.behavior.has(extension::clang_ext_vector_type)) {
         /* [ext:clang_ext_vector_type] */
         g.ext_vector_allowed = true;
-        analysis_result r = gnu_attribute_specifier(n[2].index(), g);
+        analysis_result r = gnu_attribute_specifier(n[2], g);
         if (r != analysis_result::well_formed)
             return r;
         if (g.flags || g.aligned || g.section || g.abi_tag ||
@@ -729,7 +729,7 @@ analysis_result semantic_analysis::alias_type(SyntaxRef n, qualified_type &type)
             return not_supported(n, "dcl.typedef");
     }
     specified s;
-    analysis_result r = decl_specifier_seq(id[0].index(), s, false);
+    analysis_result r = decl_specifier_seq(id[0], s, false);
     if (r != analysis_result::well_formed)
         return r;
     if (!s.has_type || s.declares_enumeration || s.typedef_ || s.static_ ||
@@ -906,7 +906,7 @@ analysis_result semantic_analysis::init_declarators(SyntaxRef declaration,
            !(declaration[first].is(syntax_kind::decl_specifier_seq) &&
              declaration[first].index() == specifiers)) {
         /* [ext:gnu_attributes] before the decl-specifier-seq */
-        r = gnu_attribute_specifier(declaration[first].index(), s);
+        r = gnu_attribute_specifier(declaration[first], s);
         if (r != analysis_result::well_formed)
             return r;
         first++;
