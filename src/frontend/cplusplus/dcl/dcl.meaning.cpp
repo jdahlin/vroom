@@ -210,6 +210,17 @@ analysis_result semantic_analysis::pointer_operator(node_index op,
             }
             type = qualified_type::make(type_table.pointer_to(type), cv_none);
         } else if (syntax_is_punctuator(tokens, c,
+                                        preprocessing_op_or_punc::CARET)) {
+            /* [ext:clang_blocks] "a block pointer to function type"; clang
+               rejects one to any other type */
+            if (type_table[type.unqualified()].kind != type_kind::function)
+                return ill_formed(op,
+                                  "a block pointer shall point to a function "
+                                  "type",
+                                  "ext.clang");
+            type = qualified_type::make(type_table.block_pointer_to(type),
+                                        cv_none);
+        } else if (syntax_is_punctuator(tokens, c,
                                         preprocessing_op_or_punc::AMPERSAND)) {
             analysis_result r = reference(op, false, type, m);
             if (r != analysis_result::well_formed)

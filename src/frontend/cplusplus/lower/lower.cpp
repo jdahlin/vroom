@@ -649,6 +649,7 @@ ast_qualified_type c_lowering::type(qualified_type t, token_index at)
     case type_kind::pointer:
     case type_kind::lvalue_reference:
     case type_kind::rvalue_reference:
+    case type_kind::block_pointer: /* the block's address, as C's ^ */
         made = ast_builder_type_pointer(c, type(r.operand, at));
         break;
     case type_kind::array:

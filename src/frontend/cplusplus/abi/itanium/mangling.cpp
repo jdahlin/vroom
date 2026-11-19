@@ -1843,6 +1843,11 @@ bool itanium_mangler::type(qualified_type t)
             type(qualified_type::make(
                 analysis.entity_table[r.entity].type.unqualified(), cv_none)) &&
             type(r.operand);
+    } else if (r.kind == type_kind::block_pointer) {
+        /* [abi:mangling-type]'s vendor extended type qualifier, as clang
+           mangles a block pointer ([ext:clang_blocks]) */
+        text("U13block_pointer");
+        done = type(r.operand);
     } else if (r.kind == type_kind::atomic) {
         /* [abi:mangling-type]'s vendor extended type qualifier, as clang
            mangles _Atomic(T) ([ext:clang_atomic]) */

@@ -211,6 +211,7 @@ uint64_t semantic_analysis::size_of_type(qualified_type t) const
             return 0;
         }
     case type_kind::pointer:
+    case type_kind::block_pointer:
         return b.long_width / 8;
     case type_kind::pointer_to_member:
         /* [abi:data-member-pointers]: "The basic ABI properties of data

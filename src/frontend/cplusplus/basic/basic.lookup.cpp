@@ -555,6 +555,7 @@ bool semantic_analysis::associated_with(
     case type_kind::array:
     case type_kind::lvalue_reference:
     case type_kind::rvalue_reference:
+    case type_kind::block_pointer:
         return associated_with(record.operand, classes, namespaces);
     case type_kind::function: {
         const qualified_type *parameters =
