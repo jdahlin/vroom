@@ -150,7 +150,13 @@ analysis_result semantic_analysis::template_head_parameters(
     if (node.child_count != 2 ||
         !syntax_is(tree, tree.children(n)[0], syntax_kind::template_head))
         return not_supported(n, "temp.pre");
-    if (!is_namespace(current_scope) || defining_class)
+    /* a member alias template of a class of namespace scope
+       (member_template_declaration) is the one member template here */
+    bool member_alias =
+        entity_table[current_scope].kind == entity_kind::class_type &&
+        is_namespace(entity_table[current_scope].enclosing) &&
+        syntax_is(tree, tree.children(n)[1], syntax_kind::alias_declaration);
+    if (!member_alias && (!is_namespace(current_scope) || defining_class))
         return not_supported(n, "temp.mem");
     /* template-head: template < template-parameter-list >; a
        requires-clause is [temp.constr] */

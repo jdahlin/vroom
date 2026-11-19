@@ -91,6 +91,16 @@ analysis_result semantic_analysis::member_template_declaration(entity_index c,
         return not_supported(n, "temp.mem");
     node_index inner = tree.children(n)[1].index();
     const syntax_node &d = tree[inner];
+    /* [temp.alias]/1: a member alias template, of a class of namespace
+       scope: an alias template declared in the class's scope */
+    if (d.kind == syntax_kind::alias_declaration &&
+        is_namespace(entity_table[c].enclosing)) {
+        entity_index saved = current_scope;
+        current_scope = c;
+        analysis_result r = alias_template_definition(n, inner);
+        current_scope = saved;
+        return r;
+    }
     if ((d.kind != syntax_kind::function_definition &&
          d.kind != syntax_kind::member_declaration) ||
         !is_namespace(entity_table[c].enclosing))
