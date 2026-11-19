@@ -133,8 +133,10 @@ name_class classify(parser &p, unsigned ahead, unsigned *length,
             } else if (kind == name_kind::type_name ||
                        kind == name_kind::template_name) {
                 class_name = name;
-                class_known = !found_dependent && found &&
-                              p.names.kind_of(found) == scope_kind::class_;
+                class_known =
+                    !found_dependent && found &&
+                    (p.names.kind_of(found) == scope_kind::class_ ||
+                     p.names.kind_of(found) == scope_kind::enumeration);
                 if (class_known)
                     scope = found;
                 dependent = dependent || found_dependent;

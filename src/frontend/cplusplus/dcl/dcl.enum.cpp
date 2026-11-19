@@ -268,10 +268,13 @@ node_index parser::enum_specifier_or_elaborated(decl_specifier_facts &facts)
                         "dcl.enum", position);
     if (pending.size() - mark > 1)
         finish_node(syntax_kind::enum_head, mark, first);
+    /* [basic.scope.enum]/1: the enumerators' region */
+    scope_index region = names.enter(scope_kind::enumeration);
+    names.leave();
     if (name)
-        names.declare(name, name_kind::type_name);
+        names.declare(name, name_kind::type_name, region);
     add_token(); /* { */
-    enumerator_list(scoped);
+    enumerator_list(scoped, region);
     if (failed())
         return 0;
     if (!accept(preprocessing_op_or_punc::RIGHT_BRACE))
@@ -295,7 +298,7 @@ node_index parser::enum_specifier_or_elaborated(decl_specifier_facts &facts)
  * declaration for an enumerator is immediately after its
  * enumerator-definition."
  */
-node_index parser::enumerator_list(bool scoped)
+node_index parser::enumerator_list(bool scoped, scope_index region)
 {
     size_t mark = begin_node();
     token_index first = position;
@@ -321,6 +324,7 @@ node_index parser::enumerator_list(bool scoped)
             finish_node(syntax_kind::enumerator_definition, definition_mark,
                         definition_first);
         }
+        names.declare_in(region, name, name_kind::other);
         if (!scoped)
             names.declare(name, name_kind::other);
         count++;
