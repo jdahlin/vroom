@@ -336,7 +336,18 @@ analysis_result semantic_analysis::template_argument_for(
             substituted_parameter_type(template_index, position, before, to);
         if (r != analysis_result::well_formed)
             return r;
-        if (depends_on_template_parameter(to) || !structural_parameter_type(to))
+        /* still dependent (template <class C, typename C::type = 0> with C
+           a template parameter): the argument is value-dependent
+           ([temp.dep.constexpr]/2), checked against the parameter's type
+           ([temp.arg.nontype]/2) once an instantiation gives C */
+        if (depends_on_template_parameter(to)) {
+            out.kind = template_argument::kind_t::value;
+            out.type = to;
+            out.template_entity = dependent_value_entity(written);
+            out.value = UINT32_MAX;
+            return analysis_result::well_formed;
+        }
+        if (!structural_parameter_type(to))
             return not_supported(at, "temp.arg.nontype");
     }
     /* in a template's own declaration, a non-type template-parameter's
