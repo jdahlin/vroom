@@ -83,6 +83,9 @@ analysis_result semantic_analysis::expression_kind(syntax_child e,
     }
     node_index n = e.index();
     switch (tree[n].kind) {
+    case syntax_kind::gnu_extension_expression:
+        /* [ext:gnu_extension_keyword]: __extension__ changes no meaning */
+        return expression(tree.children(n)[1], m);
     case syntax_kind::primary_expression:
         return parenthesized(n, m);
     case syntax_kind::qualified_id:

@@ -1068,6 +1068,9 @@ semantic_analysis::member_declaration(entity_index c, syntax_child member,
                                       owned_array<node_index> &bodies)
 {
     node_index n = member.index();
+    if (tree[n].kind == syntax_kind::gnu_extension_declaration)
+        /* [ext:gnu_extension_keyword]: __extension__ changes no meaning */
+        return member_declaration(c, tree.children(n)[1], access, bodies);
     const syntax_node &node = tree[n];
     const syntax_child *children = tree.children(n);
     if (node.kind == syntax_kind::empty_declaration)
