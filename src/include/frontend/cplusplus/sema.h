@@ -1128,6 +1128,8 @@ enum class semantic_kind : uint8_t {
        element's destruction (last first), c is given the cookie's address
        as allocated and array_count is the cookie's count */
     delete_object,
+    /* [expr.throw]: a: the operand (0: none, a rethrow); not lowered */
+    throw_exception,
     /* [class.cdtor]/4, [abi:vtable-ctor]: a: the address of the object
        under construction or destruction (this), b: its class, whose
        virtual table pointer is stored in it */
@@ -4408,6 +4410,7 @@ class semantic_analysis
     /* [expr.new] and [expr.delete]: the expressions */
     analysis_result new_expression(node_index n, expression_meaning &m);
     analysis_result delete_expression(node_index n, expression_meaning &m);
+    analysis_result throw_expression(node_index n, expression_meaning &m);
     analysis_result usual_deallocation(node_index n, entity_index c,
                                        bool global, bool array,
                                        entity_index &function, bool &sized,

@@ -11,6 +11,7 @@
  * exception").
  */
 #include "../cplusplus-internal.h"
+#include "frontend/cplusplus/sema.h"
 
 namespace cplusplus
 {
@@ -50,6 +51,34 @@ node_index parser::throw_expression()
             return 0;
     }
     return finish_node(syntax_kind::throw_expression, mark, first);
+}
+
+/*
+ * [expr.throw]/1: "A throw-expression is of type void."  It is a prvalue
+ * ([basic.lval]/1: a void expression is one).  /4: without an operand it
+ * rethrows.  Not analysed: the copy-initialization of the exception object
+ * from the operand (/3) and [except.throw]/5's check of its destructor.
+ */
+analysis_result semantic_analysis::throw_expression(node_index n,
+                                                    expression_meaning &m)
+{
+    const syntax_node &node = tree[n];
+    uint32_t operand_node = 0;
+    if (node.child_count > 1) {
+        expression_meaning operand;
+        analysis_result r = expression(tree.children(n)[1], operand);
+        if (r != analysis_result::well_formed)
+            return r;
+        operand_node = operand.node;
+    }
+    m = expression_meaning();
+    m.type = qualified_type::make(
+        type_table.fundamental(fundamental_type::void_), cv_none);
+    m.category = value_category::prvalue;
+    m.evaluation = constness::not_constant;
+    m.node = expression_node(semantic_kind::throw_exception, m,
+                             node.first_token, operand_node);
+    return analysis_result::well_formed;
 }
 
 } // namespace cplusplus
