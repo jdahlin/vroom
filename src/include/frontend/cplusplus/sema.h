@@ -401,6 +401,9 @@ struct entity {
     /* a class: its default constructor is declared = default
        ([dcl.fct.def.default]), declared as the implicit one is */
     bool defaulted_default_constructor = false;
+    /* a class: its implicit copy constructor is deleted, a subobject's
+       being deleted or not accessible ([class.copy.ctor]/10.1) */
+    bool implicit_copy_deleted = false;
     /* ... and explicit: explicit X() = default ([class.conv.ctor]/2: a
        copy-initialization does not consider it) */
     bool explicit_default_constructor = false;
