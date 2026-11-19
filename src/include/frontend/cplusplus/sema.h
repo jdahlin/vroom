@@ -1902,6 +1902,7 @@ class semantic_analysis
                                             declarator_meaning &m);
     analysis_result gnu_attribute_specifier(node_index n, specified &s);
     uint32_t leading_gnu_attributes(node_index n) const;
+    bool class_specifier_before(node_index seq, uint32_t i) const;
     bool gnu_or_without_effect(node_index n) const;
     /* [dcl.attr.grammar]: every attribute at n (an attribute-specifier,
        -seq or -list) changes nothing vcc generates */
@@ -1968,6 +1969,9 @@ class semantic_analysis
     /* a declarator analysed now may have a cv-qualifier-seq: a member
        declarator, or one whose declarator-id is a qualified-id */
     bool in_member_declarator = false;
+    /* in a member function template's declarator: 1 the template's own
+       (temp.mem.cpp), 2 a specialization's (instantiation.cpp) */
+    uint8_t in_member_template_declarator = 0;
     /* [dcl.fct.spec]/2: virtual is analysed on a member-declaration's
        decl-specifier-seq only; a member-declarator's virt-specifiers and
        pure-specifier ([class.mem]/1) for the declarator it holds */
@@ -2292,6 +2296,7 @@ class semantic_analysis
     /* [expr.cond] */
     analysis_result conditional(node_index n, expression_meaning &m);
     analysis_result noexcept_operator(node_index n, expression_meaning &m);
+    analysis_result clang_type_trait(node_index n, expression_meaning &m);
     analysis_result potentially_throwing(node_index n, uint32_t x,
                                          bool &throwing);
     analysis_result conditional_operands(node_index n,
@@ -2690,7 +2695,25 @@ class semantic_analysis
     /* [class.mem]: one member-declaration of the class being defined */
     /* [temp.mem]/1: the member template n (a template-declaration) of
        class c */
-    analysis_result member_template_declaration(entity_index c, node_index n);
+    analysis_result member_template_declaration(entity_index c, node_index n,
+                                                uint8_t access);
+    analysis_result member_function_template(entity_index c, node_index n,
+                                             node_index definition,
+                                             uint8_t access);
+    /* a call x.f(args) or x->f(args) of a member function template
+       ([temp.mem]/1): member_reference's object (its address) and the
+       held name it found, for call to deduce from the arguments */
+    entity_index member_template_name = 0;
+    expression_meaning member_template_object;
+    analysis_result member_template_call(
+        node_index n, entity_index held, const expression_meaning &object,
+        const owned_array<syntax_child> &arguments,
+        owned_array<expression_meaning> &early, expression_meaning &m);
+    analysis_result bound_member_call(
+        node_index n, entity_index f, const expression_meaning &object,
+        const owned_array<syntax_child> &arguments,
+        owned_array<expression_meaning> &early, expression_meaning &m);
+    uint32_t member_function_template_of(entity_index held) const;
     analysis_result member_declaration(entity_index c, syntax_child n,
                                        uint8_t access,
                                        owned_array<node_index> &bodies);
@@ -2897,6 +2920,11 @@ class semantic_analysis
                              owned_array<expression_meaning> &out);
     /* the class whose member-specification is analysed, 0 if none */
     entity_index defining_class = 0;
+    /* [ext:gnu_attributes] the alignment aligned attributes after a
+       class-specifier's closing brace ask of the class the
+       decl-specifier-seq defines (GCC: they apply to the type), 0 if none;
+       class_specifier takes it before the class is laid out */
+    uint32_t trailing_class_alignment = 0;
     /* the access of the member-declaration analysed (an enumeration's and
        its enumerators' in a class) */
     uint8_t declaration_access = 0;
@@ -3259,7 +3287,8 @@ class semantic_analysis
     analysis_result
     template_head_parameters(node_index n, owned_array<node_index> &parameters,
                              bool packs = false, bool constrained = false,
-                             bool pack_anywhere = false);
+                             bool pack_anywhere = false,
+                             bool type_constraints = false);
     syntax_child head_constraint(node_index n) const;
     /* [temp.constr.atomic]/3: the satisfaction of a concept-id, once per
        concept and arguments (a later different result would be ill-formed,
@@ -3297,6 +3326,8 @@ class semantic_analysis
         bool type = false, template_template = false, pack = false;
         bool named = false, has_default = false, has_declarator = false;
         token_index id = 0;
+        /* a type-parameter's type-constraint ([temp.param]/1), or 0 */
+        node_index constraint = 0;
         node_index head = 0;
         syntax_child default_argument, declarator;
     };
@@ -3785,6 +3816,10 @@ class semantic_analysis
        argument */
     bool dependent_parameter_type(entity_index t, uint32_t i,
                                   qualified_type &type) const;
+    /* the concept-name of the function template t's template-parameter
+       at i, a type-parameter with a type-constraint ([temp.param]/1),
+       or 0 */
+    token_index parameter_type_constraint(entity_index t, uint32_t i) const;
     /* whether the argument is a template ([temp.arg.template]/1): the
        class template, or in a template's own declaration the template
        template-parameter it names (also its position plus one in

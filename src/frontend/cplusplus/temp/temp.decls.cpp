@@ -143,7 +143,7 @@ syntax_child semantic_analysis::head_constraint(node_index n) const
 
 analysis_result semantic_analysis::template_head_parameters(
     node_index n, owned_array<node_index> &parameters, bool packs,
-    bool constrained, bool pack_anywhere)
+    bool constrained, bool pack_anywhere, bool type_constraints)
 {
     const syntax_node &node = tree[n];
     if (node.child_count != 2 ||
@@ -167,6 +167,12 @@ analysis_result semantic_analysis::template_head_parameters(
         node_index p = parameters[i];
         template_parameter_parts x;
         if (!template_parameter_form(p, x))
+            return not_supported(p, "temp.param");
+        /* [temp.param]/4: a type-constraint's immediately-declared
+           constraint is one of the template's associated constraints
+           ([temp.constr.decl]/3), checked with its requires-clause
+           (template_constraints_satisfied): a function template's */
+        if (x.constraint && (!type_constraints || x.pack))
             return not_supported(p, "temp.param");
         /* [temp.param]/18: "If a template-parameter is a type-parameter
            with an ellipsis prior to its optional identifier ... then the
@@ -231,7 +237,7 @@ semantic_analysis::function_template_definition(node_index n,
     /* [temp.param]/14: a function template's pack may be followed by
        parameters that are deduced or have defaults */
     analysis_result head =
-        template_head_parameters(n, parameters, true, true, true);
+        template_head_parameters(n, parameters, true, true, true, true);
     if (head != analysis_result::well_formed)
         return head;
     const syntax_node &d = tree[definition];
@@ -286,11 +292,13 @@ semantic_analysis::function_template_definition(node_index n,
         type_table[type.unqualified()].kind != type_kind::function)
         return not_supported(n, "temp.fct");
     /* [ext:gnu_attributes] its specializations' symbols' (given them at
-       instantiation) */
+       instantiation), and noinline, always_inline and noreturn, which
+       lowering gives each specialization as a non-template function's */
     uint32_t gnu_flags = s.gnu_flags | m.gnu_flags;
     if (s.typedef_ || s.extern_ || c_language ||
-        (gnu_flags & ~gnu_function_symbol_flags) || s.aligned || m.aligned ||
-        s.section || m.section || m.asm_label ||
+        (gnu_flags & ~(gnu_function_symbol_flags | gnu_noinline |
+                       gnu_always_inline | gnu_noreturn)) ||
+        s.aligned || m.aligned || s.section || m.section || m.asm_label ||
         (s.abi_tag && m.abi_tag && s.abi_tag != m.abi_tag))
         return not_supported(n, "temp.fct");
     token_index abi_tag = m.abi_tag;
@@ -662,7 +670,9 @@ uint32_t semantic_analysis::function_template_of(entity_index held) const
             !function_templates[i].unusable &&
             !function_templates[i].is_class &&
             !function_templates[i].is_alias &&
-            !function_templates[i].is_variable)
+            !function_templates[i].is_variable &&
+            /* (a member function template: member_function_template_of) */
+            is_namespace(entity_table[function_templates[i].entity].enclosing))
             return static_cast<uint32_t>(i + 1);
     return 0;
 }

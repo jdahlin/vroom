@@ -163,6 +163,16 @@ analysis_result semantic_analysis::parameter_scope_noexcept(node_index n,
                                                             bool &non_throwing)
 {
     const syntax_node &node = tree[n];
+    /* [class.mem]/6: a member function template's noexcept-specifier,
+       is analysed per specialization (taken as value-dependent), whose class is
+       complete by then ([temp.inst]/4) */
+    if (member && node.child_count == 4 && in_member_template_declarator == 1) {
+        non_throwing = false;
+        dependent_exception_specifications.append(n);
+        return analysis_result::well_formed;
+    }
+    if (member && in_member_template_declarator == 2)
+        member = false;
     if (node.child_count != 4 || member)
         return noexcept_specifier(n, member, non_throwing);
     entity_index outer = current_scope;

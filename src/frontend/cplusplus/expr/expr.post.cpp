@@ -640,6 +640,33 @@ analysis_result semantic_analysis::call(node_index n, expression_meaning &m)
         uint32_t ft = 0;
         bool qualified = false;
         owned_array<template_argument> specified;
+        /* [class.mfct.non-static]/2: a member function template's name
+           in a member function of its class (or a class derived from
+           it), called on (*this) */
+        if (children[0].is_token() &&
+            tokens[children[0].index()].kind == token_kind::identifier) {
+            lookup_result x = lookup_unqualified(
+                tokens.identifier(children[0].index()), lookup_filter::any);
+            if (x.unknown && !x.entity && !x.ambiguous &&
+                member_function_template_of(x.unknown_entity)) {
+                bool ambiguous = false;
+                entity_index of = entity_table[x.unknown_entity].enclosing;
+                if (!function_state.this_entity ||
+                    (of != current_class() &&
+                     !base_step(current_class(), of, ambiguous)) ||
+                    ambiguous)
+                    return not_supported(n, "temp.mem");
+                expression_meaning object;
+                r = this_object(children[0].index(), object);
+                if (r != analysis_result::well_formed)
+                    return r;
+                owned_array<expression_meaning> early;
+                for (const expression_meaning &e : expanded)
+                    early.append(e);
+                return member_template_call(n, x.unknown_entity, object,
+                                            arguments, early, m);
+            }
+        }
         r = template_callee(children[0], name, ft, specified, qualified);
         if (r != analysis_result::well_formed)
             return r;
@@ -748,8 +775,16 @@ analysis_result semantic_analysis::call(node_index n, expression_meaning &m)
             early.append(e);
     if (!looked_up) {
         overloaded_callee = callee_name(children[0]);
+        member_template_name = 0;
         r = expression(children[0], f);
         overloaded_callee = 0;
+    }
+    if (entity_index held = member_template_name) {
+        member_template_name = 0;
+        if (r != analysis_result::well_formed)
+            return r;
+        expression_meaning object = member_template_object;
+        return member_template_call(n, held, object, arguments, early, m);
     }
     if (r != analysis_result::well_formed)
         return r;
