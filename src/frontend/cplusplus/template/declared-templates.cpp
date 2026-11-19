@@ -1790,7 +1790,7 @@ analysis_result semantic_analysis::class_specialization_definition(
        use), never another's.  One named but not defined yet (a
        specialization's head, instantiate_class) is not instantiated */
     /* only an instantiation whose arguments this one matches would have
-       used it: [temp.class.spec]/1, [temp.spec.partial.match]/2 */
+       used it: [temp.class.spec]/1, [temp.class.spec.match]/2 */
     for (const instantiation_record &r : instantiations)
         if (r.template_entity == primary.entity && r.specialization &&
             entity_table[r.specialization].kind == entity_kind::class_type &&

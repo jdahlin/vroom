@@ -423,7 +423,7 @@ bool semantic_analysis::unary_trait(int which, qualified_type t, int64_t &value)
     return true;
 }
 
-/* [dcl.init.general]/17.6.2: the same class initialized from a value of
+/* [dcl.init]/17.6.2: the same class initialized from a value of
    category c: the copy or move constructor chosen, [over.match.ctor];
    a deleted one, or the implicit one deleted ([class.copy.ctor]/10), makes
    it ill-formed.  known is false for what is not analysed (constructor
@@ -515,7 +515,7 @@ bool semantic_analysis::convertible_types(qualified_type from,
         return false;
     if (s.kind == conversion_sequence::form::bad || s.ambiguous)
         return false;
-    /* [over.match.general]/3: a deleted function selected makes the
+    /* [over.match]/4: a deleted function selected makes the
        initialization ill-formed; [class.access.base]/6: so does an
        inaccessible base ([conv.ptr]/3, [conv.mem]/2) */
     if (s.function && entity_table[s.function].deleted)
