@@ -85,6 +85,14 @@ bool semantic_analysis::deduce_type(qualified_type p, qualified_type a,
                 cv_none),
             deduced, set, exact);
     }
+    if (pr.kind == type_kind::dependent &&
+        !entity_table[pr.entity].instantiation) {
+        /* a dependent type known by how it is written (__remove_cv(T),
+           decltype(e)): [temp.deduct.type]/5.3 a non-deduced context;
+           comparing two declarations, the same entity for the same
+           tokens ([temp.over.link]/5) */
+        return !exact || p == a;
+    }
     if (pr.kind == type_kind::dependent) {
         /* [temp.deduct.type]/8's TT<T>: a class template's specialization,
            whose arguments are deduced from those of A's, a
@@ -92,9 +100,8 @@ bool semantic_analysis::deduce_type(qualified_type p, qualified_type a,
         const struct type &ar = type_table[a.unqualified()];
         /* comparing two declarations ([temp.over.link]/7), A a
            specialization in the other's template parameters */
-        bool dependent =
-            exact && ar.kind == type_kind::dependent &&
-            entity_table[ar.entity].kind != entity_kind::dependent_member;
+        bool dependent = exact && ar.kind == type_kind::dependent &&
+                         entity_table[ar.entity].instantiation;
         /* ([temp.deduct.call]/4.1: P may be more cv-qualified) */
         if ((ar.kind != type_kind::class_type && !dependent) ||
             (a.cv() & ~p.cv()) || (exact && p.cv() != a.cv()) ||
