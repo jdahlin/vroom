@@ -987,7 +987,8 @@ class parser
     node_index class_or_decltype(scope_index *region);
     /* { member-specification_opt } of the class name (0: unnamed) whose
        region is region, in two passes ([class.mem]/6) */
-    node_index class_body(uint32_t name, scope_index region);
+    node_index class_body(uint32_t name, scope_index region,
+                          bool specialization);
     node_index member_specification();
     node_index member_declaration();
     node_index member_declaration_alternative();

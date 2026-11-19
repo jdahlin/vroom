@@ -870,7 +870,7 @@ node_index parser::elaborated_or_class_specifier(decl_specifier_facts &facts)
         if (!at(preprocessing_op_or_punc::LEFT_BRACE))
             return expected("'{' to begin the member-specification",
                             "class.pre");
-        class_body(name, region);
+        class_body(name, region, template_id);
         if (failed())
             return 0;
         facts.declares_type = true;
