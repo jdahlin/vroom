@@ -920,6 +920,13 @@ node_index parser::elaborated_or_class_specifier(decl_specifier_facts &facts)
         class_body(name, region, template_id);
         if (failed())
             return 0;
+        /* [class.union.anon]/1: "The names of the members of an anonymous
+           union are bound in the scope inherited from the scope of the
+           anonymous union declaration"; an unnamed struct so is clang's
+           extension: a name in the enclosing class finds them */
+        if (!name && !qualifier && at(preprocessing_op_or_punc::SEMICOLON) &&
+            names.kind_of(names.declaring_scope()) == scope_kind::class_)
+            names.add_base(names.declaring_scope(), region);
         facts.declares_type = true;
         return finish_node(syntax_kind::class_specifier, mark, first);
     }
