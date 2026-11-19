@@ -3247,6 +3247,18 @@ class semantic_analysis
        TypeIdentity, Empty, T...> (type_traits.cpp) */
     bool is_builtin_common_type(uint32_t name) const;
     analysis_result builtin_common_type(node_index id, type_index &type);
+    /* __type_pack_element<N, T...> */
+    bool is_builtin_type_pack_element(uint32_t name) const;
+    analysis_result builtin_type_pack_element(node_index id, type_index &type);
+    analysis_result
+    builtin_template_arguments(node_index id,
+                               owned_array<syntax_child> &written,
+                               owned_array<bool> &expansion);
+    analysis_result
+    builtin_template_types(node_index id,
+                           const owned_array<syntax_child> &written,
+                           const owned_array<bool> &expansion, size_t from,
+                           owned_array<qualified_type> &types, bool &dependent);
     enum class common_found : uint8_t { none, found };
     analysis_result common_type_of(node_index id, entity_index base,
                                    const qualified_type *types, uint32_t count,

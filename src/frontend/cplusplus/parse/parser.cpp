@@ -87,13 +87,15 @@ parser::parser(token_stream &tokens, syntax_tree &tree, declared_names &names,
         names.declare_in(declared_names::global_namespace,
                          tokens.pp.identifier(name, strlen(name)) + 1,
                          name_kind::type_name);
-    /* [ext:clang_builtin_templates] clang's predeclared class template
-       (libc++'s common_type derives from it) */
-    static const char common_type_name[] = "__builtin_common_type";
-    names.declare_in(
-        declared_names::global_namespace,
-        tokens.pp.identifier(common_type_name, sizeof common_type_name - 1) + 1,
-        name_kind::template_name);
+    /* [ext:clang_builtin_templates] clang's predeclared templates
+       (libc++'s common_type derives from the first, tuple_element uses the
+       second) */
+    static const char *const builtin_templates[] = {"__builtin_common_type",
+                                                    "__type_pack_element"};
+    for (const char *name : builtin_templates)
+        names.declare_in(declared_names::global_namespace,
+                         tokens.pp.identifier(name, strlen(name)) + 1,
+                         name_kind::template_name);
 }
 
 extension_keyword parser::extension_keyword_of(const token &t) const

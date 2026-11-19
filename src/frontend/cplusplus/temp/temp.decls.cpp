@@ -1948,6 +1948,8 @@ analysis_result semantic_analysis::template_type(node_index id,
         named = x.unknown_entity;
     if (!named && !qualified && is_builtin_common_type(name))
         return builtin_common_type(id, type);
+    if (!named && !qualified && is_builtin_type_pack_element(name))
+        return builtin_type_pack_element(id, type);
     uint32_t ct = class_template_of(named);
     if (!ct) {
         uint32_t at = alias_template_of(named);
