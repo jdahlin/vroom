@@ -57,6 +57,9 @@ inline bool syntax_kind_in(syntax_kind k, const uint64_t *bits)
 #include "frontend/cplusplus/syntax-views.inc"
 #undef SYNTAX_VIEWS_DECLARE
 
+class SyntaxElement;
+class SyntaxElements;
+
 class SyntaxRef
 {
   public:
@@ -105,13 +108,12 @@ class SyntaxRef
             return 0;
         return node().child_count;
     }
-    /* the i-th child; {} past the end */
-    syntax_child operator[](uint32_t i) const
-    {
-        if (i >= size())
-            return {};
-        return cx->tree.children(n)[i];
-    }
+    /* the i-th child, a node or a token; {} past the end */
+    SyntaxElement operator[](uint32_t i) const;
+    /* the last child ({} without one) */
+    SyntaxElement back() const;
+    /* every child, nodes and tokens, in order */
+    SyntaxElements elements() const;
     bool is(syntax_kind k) const
     {
         return n && node().kind == k;
@@ -169,6 +171,132 @@ class SyntaxRef
     const SyntaxContext *cx = nullptr;
     node_index n = 0;
 };
+
+/*
+ * A child: a node, whose view this is (every accessor of SyntaxRef), or a
+ * token, for which the view is empty and the questions below answer.
+ */
+class SyntaxElement : public SyntaxRef
+{
+  public:
+    SyntaxElement() = default;
+    SyntaxElement(const SyntaxContext &cx, syntax_child c)
+        : SyntaxRef(cx, c), c(c)
+    {
+    }
+    /* false for no child at all (a token is one) */
+    explicit operator bool() const
+    {
+        return c.bits != 0;
+    }
+    operator syntax_child() const
+    {
+        return c;
+    }
+    bool is_token() const
+    {
+        return c.is_token();
+    }
+    bool is_node() const
+    {
+        return c.bits && !c.is_token();
+    }
+    /* the token (0 for a node) */
+    token_index token() const
+    {
+        if (!c.is_token())
+            return 0;
+        return c.index();
+    }
+    using SyntaxRef::is;
+    bool is_identifier() const
+    {
+        return c.is_token() &&
+               cx->tokens[c.index()].kind == token_kind::identifier;
+    }
+    bool is(preprocessing_op_or_punc op) const
+    {
+        return is_punctuator(c, op);
+    }
+    bool is(standard_keyword k) const
+    {
+        return is_keyword(c, k);
+    }
+
+  private:
+    syntax_child c = {};
+};
+
+/* the children of a node, nodes and tokens, as SyntaxElement */
+class SyntaxElements
+{
+  public:
+    class iterator
+    {
+      public:
+        iterator(const SyntaxContext *cx, const syntax_child *at)
+            : cx(cx), at(at)
+        {
+        }
+        SyntaxElement operator*() const
+        {
+            return SyntaxElement(*cx, *at);
+        }
+        iterator &operator++()
+        {
+            at++;
+            return *this;
+        }
+        bool operator!=(const iterator &o) const
+        {
+            return at != o.at;
+        }
+
+      private:
+        const SyntaxContext *cx;
+        const syntax_child *at;
+    };
+    SyntaxElements() = default;
+    SyntaxElements(const SyntaxContext &cx, const syntax_child *first,
+                   uint32_t count)
+        : cx(&cx), first(first), count(count)
+    {
+    }
+    iterator begin() const
+    {
+        return iterator(cx, first);
+    }
+    iterator end() const
+    {
+        return iterator(cx, first + count);
+    }
+
+  private:
+    const SyntaxContext *cx = nullptr;
+    const syntax_child *first = nullptr;
+    uint32_t count = 0;
+};
+
+inline SyntaxElement SyntaxRef::operator[](uint32_t i) const
+{
+    if (i >= size())
+        return {};
+    return SyntaxElement(*cx, cx->tree.children(n)[i]);
+}
+
+inline SyntaxElement SyntaxRef::back() const
+{
+    if (!size())
+        return {};
+    return (*this)[size() - 1];
+}
+
+inline SyntaxElements SyntaxRef::elements() const
+{
+    if (!n)
+        return {};
+    return SyntaxElements(*cx, children(), size());
+}
 
 /* the node children of a node, each as a view of type T (tokens are
    skipped), or one node as the only element: for (auto d : seq.declarations()) */

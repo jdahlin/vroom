@@ -4105,14 +4105,15 @@ class semantic_analysis
                                       entity_index &named, uint32_t &parameter,
                                       uint32_t element = 0) const;
 
-    /* the typed view of a node of the syntax tree (syntax.h) */
+    /* the typed view of a node of the syntax tree, or of a child (a node
+       or a token) (syntax.h) */
     SyntaxRef syntax(node_index n) const
     {
         return SyntaxRef(syntax_cx, n);
     }
-    SyntaxRef syntax(syntax_child c) const
+    SyntaxElement syntax(syntax_child c) const
     {
-        return SyntaxRef(syntax_cx, c);
+        return SyntaxElement(syntax_cx, c);
     }
 
   private:

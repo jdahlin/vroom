@@ -81,7 +81,7 @@ semantic_analysis::template_simple_declaration(TemplateDeclaration t,
         s.is(s[lead + 1], syntax_kind::init_declarator)) {
         /* (a specialization's template-id after attributes: no rules
            yet) */
-        auto item = syntax(s[lead + 1]);
+        auto item = s[lead + 1];
         if (lead && item.is(item[0], syntax_kind::simple_template_id))
             return not_supported(t, "temp.pre");
         if (node_index id = variable_specialization_id(s))

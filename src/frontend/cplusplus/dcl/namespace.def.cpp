@@ -620,8 +620,7 @@ void semantic_analysis::declaration_seq_in(node_index container)
 {
     auto namespace_body = syntax(container);
     for (uint32_t i = 0; i < namespace_body.size(); i++)
-        for (auto d :
-             syntax(namespace_body[i]).declaration_seq().declarations())
+        for (auto d : namespace_body[i].declaration_seq().declarations())
             declaration(d);
 }
 
