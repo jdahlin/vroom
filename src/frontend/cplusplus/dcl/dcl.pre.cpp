@@ -666,14 +666,12 @@ analysis_result semantic_analysis::empty_declaration(node_index)
  */
 analysis_result semantic_analysis::static_assert_declaration(node_index n)
 {
-    const syntax_node &node = tree[n];
-    const syntax_child *children = tree.children(n);
+    auto node = syntax(n);
     /* static_assert ( constant-expression [, string-literal] ) ; */
-    if (node.child_count < 5)
+    if (node.size() < 5)
         return not_supported(n, "dcl.pre");
     bool constant = false, value = false;
-    analysis_result r =
-        bool_constant_expression(n, children[2], constant, value);
+    analysis_result r = bool_constant_expression(n, node[2], constant, value);
     if (r != analysis_result::well_formed)
         return r;
     if (!constant)
@@ -698,19 +696,18 @@ analysis_result semantic_analysis::static_assert_declaration(node_index n)
 analysis_result semantic_analysis::alias_type(node_index n,
                                               qualified_type &type)
 {
-    const syntax_node &node = tree[n];
-    const syntax_child *c = tree.children(n);
+    auto node = syntax(n);
     /* using identifier attribute-specifier-seq_opt = defining-type-id ;
        the attributes only those that change nothing vcc generates */
     uint32_t type_at = 3;
     gnu_attributes g;
-    if (node.child_count == 6 && attributes_without_effect(c[2])) {
+    if (node.size() == 6 && attributes_without_effect(node[2])) {
         type_at = 4;
-    } else if (node.child_count == 6 && !c[2].is_token() &&
+    } else if (node.size() == 6 && !node[2].is_token() &&
                tokens.files.behavior.has(extension::clang_ext_vector_type)) {
         /* [ext:clang_ext_vector_type] */
         g.ext_vector_allowed = true;
-        analysis_result r = gnu_attribute_specifier(c[2].index(), g);
+        analysis_result r = gnu_attribute_specifier(node[2].index(), g);
         if (r != analysis_result::well_formed)
             return r;
         if (g.flags || g.aligned || g.section || g.abi_tag ||
@@ -718,18 +715,16 @@ analysis_result semantic_analysis::alias_type(node_index n,
             return not_supported(n, "dcl.attr");
         type_at = 4;
     }
-    if (node.child_count != type_at + 2 ||
-        !syntax(c[type_at]).is(syntax_kind::defining_type_id))
+    if (node.size() != type_at + 2 ||
+        !node[type_at].is(syntax_kind::defining_type_id))
         return not_supported(n, "dcl.attr");
-    node_index id = c[type_at].index();
-    const syntax_node &d = tree[id];
-    const syntax_child *dc = tree.children(id);
-    if (!d.child_count || d.child_count > 2 || dc[0].is_token())
+    node_index id = node[type_at].index();
+    auto d = syntax(id);
+    if (!d.size() || d.size() > 2 || d[0].is_token())
         return not_supported(n, "dcl.typedef");
     /* (a simple-template-id counts as declares_class too: the
        class-specifiers and elaborated-type-specifiers are looked for) */
-    for (uint32_t i = 0; i < tree[dc[0].index()].child_count; i++) {
-        syntax_child k = tree.children(dc[0].index())[i];
+    for (syntax_child k : d[0].elements()) {
         if (syntax(k).is(syntax_kind::class_specifier) ||
             syntax(k).is(syntax_kind::elaborated_type_specifier) ||
             syntax(k).is(syntax_kind::enum_specifier) ||
@@ -737,16 +732,16 @@ analysis_result semantic_analysis::alias_type(node_index n,
             return not_supported(n, "dcl.typedef");
     }
     specified s;
-    analysis_result r = decl_specifier_seq(dc[0].index(), s, false);
+    analysis_result r = decl_specifier_seq(d[0].index(), s, false);
     if (r != analysis_result::well_formed)
         return r;
     if (!s.has_type || s.declares_enumeration || s.typedef_ || s.static_ ||
         s.extern_ || s.inline_ || s.constexpr_ || s.gnu_flags || s.aligned)
         return not_supported(n, "dcl.typedef");
     type = s.type;
-    if (d.child_count == 2) {
+    if (d.size() == 2) {
         declarator_meaning m;
-        r = declarator(current_declaration, dc[1], type, m);
+        r = declarator(current_declaration, d[1], type, m);
         if (r == analysis_result::well_formed && m.has_id)
             return not_supported(n, "dcl.name");
         if (r != analysis_result::well_formed)
@@ -770,8 +765,8 @@ analysis_result semantic_analysis::alias_declaration(node_index n)
     s.type = type;
     s.has_type = true;
     entity_index declared = 0;
-    r = declare(n, tree[n].first_token + 1, entity_kind::typedef_name, type, s,
-                false, false, declared);
+    r = declare(n, syntax(n).first_token() + 1, entity_kind::typedef_name, type,
+                s, false, false, declared);
     last_declared = declared;
     return r;
 }
@@ -788,10 +783,10 @@ analysis_result semantic_analysis::alias_declaration(node_index n)
 analysis_result semantic_analysis::simple_declaration(node_index n)
 {
     uint32_t k = leading_gnu_attributes(n);
-    if (k >= tree[n].child_count ||
-        !syntax(tree.children(n)[k]).is(syntax_kind::decl_specifier_seq))
+    if (k >= syntax(n).size() ||
+        !syntax(n)[k].is(syntax_kind::decl_specifier_seq))
         return not_supported(n, "dcl.attr");
-    return init_declarators(n, tree.children(n)[k].index(), false);
+    return init_declarators(n, syntax(n)[k].index(), false);
 }
 
 /* [ext:gnu_attributes] the number of gnu-attribute-specifiers (or
@@ -800,8 +795,8 @@ analysis_result semantic_analysis::simple_declaration(node_index n)
 uint32_t semantic_analysis::leading_gnu_attributes(node_index n) const
 {
     uint32_t k = 0;
-    while (k < tree[n].child_count && !tree.children(n)[k].is_token() &&
-           gnu_or_without_effect(tree.children(n)[k].index()))
+    while (k < syntax(n).size() && !syntax(n)[k].is_token() &&
+           gnu_or_without_effect(syntax(n)[k].index()))
         k++;
     return k;
 }
@@ -812,12 +807,11 @@ uint32_t semantic_analysis::leading_gnu_attributes(node_index n) const
 bool semantic_analysis::gnu_or_without_effect(node_index n) const
 {
     uint32_t flags = 0;
-    if (tree[n].kind == syntax_kind::attribute_specifier)
+    if (syntax(n).is(syntax_kind::attribute_specifier))
         return attributes_as_gnu(syntax_child::node(n), flags);
-    if (tree[n].kind != syntax_kind::attribute_specifier_seq)
+    if (!syntax(n).is(syntax_kind::attribute_specifier_seq))
         return only_gnu_attributes(tree, n);
-    for (uint32_t i = 0; i < tree[n].child_count; i++) {
-        syntax_child c = tree.children(n)[i];
+    for (syntax_child c : syntax(n).elements()) {
         if (c.is_token())
             return false;
         if (!syntax(c).is(syntax_kind::gnu_attribute_specifier) &&
@@ -843,26 +837,24 @@ semantic_analysis::function_definition(FunctionDefinition definition)
     if (!definition)
         return not_supported(current_declaration, "dcl.fct.def.general");
     node_index n = definition;
-    const syntax_node &node = tree[n];
+    auto node = syntax(n);
     uint32_t k = leading_gnu_attributes(n);
-    if (k && (k >= node.child_count ||
-              !syntax(tree.children(n)[k]).is(syntax_kind::decl_specifier_seq)))
+    if (k &&
+        (k >= node.size() || !syntax(n)[k].is(syntax_kind::decl_specifier_seq)))
         return not_supported(n, "dcl.fct.def.general");
-    if (node.child_count &&
-        !syntax(tree.children(n)[k]).is(syntax_kind::decl_specifier_seq))
+    if (node.size() && !syntax(n)[k].is(syntax_kind::decl_specifier_seq))
         /* [class.mem]/12: a constructor or destructor (or a conversion
            function) defined outside its class */
         return special_member_definition(n, 0);
     bool constexpr_specified = false;
-    if (!k && node.child_count == 3 &&
-        function_specifiers_only(tree.children(n)[0].index(),
-                                 constexpr_specified))
+    if (!k && node.size() == 3 &&
+        function_specifiers_only(syntax(n)[0].index(), constexpr_specified))
         /* the same, constexpr ([class.ctor]/1): a decl-specifier-seq of
            constexpr alone has no type, so names no other function */
         return special_member_definition(n, 1);
-    if (!node.child_count)
+    if (!node.size())
         return not_supported(n, "dcl.fct.def.general");
-    analysis_result r = init_declarators(n, tree.children(n)[k].index(), true);
+    analysis_result r = init_declarators(n, syntax(n)[k].index(), true);
     if (r != analysis_result::well_formed)
         return r;
     entity_index f = last_declared;
@@ -893,13 +885,11 @@ analysis_result semantic_analysis::init_declarators(node_index declaration,
        attribute-specifier-seq_opt identifier ; "the identifier is declared to
        be a class-name in the scope that contains the declaration" */
     sole_elaborated = 0;
-    if (!definition && tree[specifiers].child_count == 1 &&
-        syntax(tree.children(specifiers)[0])
-            .is(syntax_kind::elaborated_type_specifier)) {
+    if (!definition && syntax(specifiers).size() == 1 &&
+        syntax(specifiers)[0].is(syntax_kind::elaborated_type_specifier)) {
         bool declarators = false;
         bool after = false;
-        for (uint32_t i = 0; i < tree[declaration].child_count; i++) {
-            syntax_child c = tree.children(declaration)[i];
+        for (syntax_child c : syntax(declaration).elements()) {
             if (!c.is_token() && c.index() == specifiers) {
                 after = true;
                 continue;
@@ -908,7 +898,7 @@ analysis_result semantic_analysis::init_declarators(node_index declaration,
                 declarators = true;
         }
         if (!declarators)
-            sole_elaborated = tree.children(specifiers)[0].index();
+            sole_elaborated = syntax(specifiers)[0].index();
     }
     placeholder_allowed = true;
     /* (a declaration nested in an initializer has its own) */
@@ -918,22 +908,20 @@ analysis_result semantic_analysis::init_declarators(node_index declaration,
     sole_elaborated = 0;
     if (r != analysis_result::well_formed)
         return r;
-    const syntax_node &node = tree[declaration];
+    auto node = syntax(declaration);
     uint32_t first = 0;
-    while (first < node.child_count &&
-           !(syntax(tree.children(declaration)[first])
-                 .is(syntax_kind::decl_specifier_seq) &&
-             tree.children(declaration)[first].index() == specifiers)) {
+    while (first < node.size() &&
+           !(node[first].is(syntax_kind::decl_specifier_seq) &&
+             node[first].index() == specifiers)) {
         /* [ext:gnu_attributes] before the decl-specifier-seq */
-        r = gnu_attribute_specifier(tree.children(declaration)[first].index(),
-                                    s);
+        r = gnu_attribute_specifier(node[first].index(), s);
         if (r != analysis_result::well_formed)
             return r;
         first++;
     }
     owned_array<syntax_child> items;
-    for (uint32_t i = first + 1; i < node.child_count; i++) {
-        syntax_child c = tree.children(declaration)[i];
+    for (uint32_t i = first + 1; i < node.size(); i++) {
+        syntax_child c = node[i];
         if (syntax(c).is(syntax_kind::function_body))
             break;
         /* [dcl.decl]/4: a function template's trailing requires-clause,
@@ -953,9 +941,9 @@ analysis_result semantic_analysis::init_declarators(node_index declaration,
             continue;
         }
         if (syntax(c).is(syntax_kind::init_declarator_list)) {
-            const syntax_node &list = tree[c.index()];
-            for (uint32_t k = 0; k < list.child_count; k++) {
-                syntax_child item = tree.children(c.index())[k];
+            auto list = syntax(c);
+            for (uint32_t k = 0; k < list.size(); k++) {
+                syntax_child item = syntax(c)[k];
                 if (!item.is_token() ||
                     tokens[item.index()].kind == token_kind::identifier)
                     items.append(item);
@@ -993,7 +981,7 @@ analysis_result semantic_analysis::init_declarators(node_index declaration,
     }
     if (items.empty())
         return extension_used(diagnostic_id::sema_no_declarator,
-                              tree[declaration].first_token, nullptr);
+                              node.first_token(), nullptr);
     placeholder_group = items.size() > 1 && contains_placeholder(s.type);
     analysis_result result = analysis_result::well_formed;
     for (syntax_child item : items) {
@@ -1022,12 +1010,11 @@ analysis_result semantic_analysis::init_declarator(node_index declaration,
     syntax_child init;
     bool initialized = false;
     if (syntax(item).is(syntax_kind::init_declarator)) {
-        const syntax_node &node = tree[item.index()];
-        if (node.child_count != 2 || syntax(tree.children(item.index())[1])
-                                         .is(syntax_kind::requires_clause))
+        auto node = syntax(item);
+        if (node.size() != 2 || node[1].is(syntax_kind::requires_clause))
             return not_supported(item.index(), "dcl.decl");
-        d = tree.children(item.index())[0];
-        init = tree.children(item.index())[1];
+        d = node[0];
+        init = node[1];
         initialized = true;
     }
     return declare_with_initializer(declaration, d, init, initialized, s,

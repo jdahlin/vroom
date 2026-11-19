@@ -66,11 +66,11 @@ semantic_analysis::template_simple_declaration(TemplateDeclaration t,
        for an unbounded set of related types." (a declaration with no
        declarator: a class's) */
     node_index only = sole_decl_specifier(s);
-    if (only && tree[only].kind == syntax_kind::class_specifier)
+    if (only && syntax(only).is(syntax_kind::class_specifier))
         return class_template_definition(t, only);
     /* [temp.class]/1's declaration without a definition (template<class T>
        struct S;) */
-    if (only && tree[only].kind == syntax_kind::elaborated_type_specifier)
+    if (only && syntax(only).is(syntax_kind::elaborated_type_specifier))
         return class_template_declaration(t, only);
     /* [temp.pre]/1: a variable template, its one init-declarator with an
        initializer, after attributes without effect (libc++'s deprecated
@@ -103,20 +103,20 @@ semantic_analysis::template_simple_declaration(TemplateDeclaration t,
 analysis_result semantic_analysis::deduction_guide(node_index n)
 {
     /* the template-name: the token before the parameters' '(' */
-    const syntax_node &node = tree[n];
+    auto node = syntax(n);
     token_index name = 0;
     node_index id = 0;
-    for (uint32_t i = 1; i < node.child_count; i++) {
-        syntax_child c = tree.children(n)[i];
+    for (uint32_t i = 1; i < node.size(); i++) {
+        syntax_child c = node[i];
         if (!name && syntax(c).is(preprocessing_op_or_punc::LEFT_PARENTHESIS))
-            name = tree.children(n)[i - 1].index();
+            name = node[i - 1].token();
         if (syntax(c).is(syntax_kind::simple_template_id))
             id = c.index();
     }
     /* [temp.deduct.guide]/3: "The template-name shall be the same
        identifier as the template-name of the simple-template-id." */
     if (!id ||
-        tokens.identifier(tree[id].first_token) != tokens.identifier(name))
+        tokens.identifier(syntax(id).first_token()) != tokens.identifier(name))
         return ill_formed_at_token(name,
                                    "the template-name shall be the same "
                                    "identifier as the template-name of the "
@@ -141,15 +141,12 @@ syntax_child semantic_analysis::head_constraint(node_index n) const
 {
     if (syntax(syntax_child::node(n)).is(syntax_kind::lambda_expression))
         return lambda_constraint(n);
-    if (!tree[n].child_count ||
-        !syntax(tree.children(n)[0]).is(syntax_kind::template_head))
+    if (!syntax(n).size() || !syntax(n)[0].is(syntax_kind::template_head))
         return syntax_child();
-    node_index head = tree.children(n)[0].index();
-    for (uint32_t i = 0; i < tree[head].child_count; i++) {
-        syntax_child c = tree.children(head)[i];
-        if (syntax(c).is(syntax_kind::requires_clause) &&
-            tree[c.index()].child_count == 2)
-            return tree.children(c.index())[1];
+    node_index head = syntax(n)[0].index();
+    for (syntax_child c : syntax(head).elements()) {
+        if (syntax(c).is(syntax_kind::requires_clause) && syntax(c).size() == 2)
+            return syntax(c)[1];
     }
     return syntax_child();
 }
@@ -158,16 +155,14 @@ syntax_child semantic_analysis::head_constraint(node_index n) const
    function-definition's child before its function-body, or none */
 syntax_child semantic_analysis::trailing_constraint(node_index n) const
 {
-    if (tree[n].child_count != 2 || tree.children(n)[1].is_token())
+    if (syntax(n).size() != 2 || syntax(n)[1].is_token())
         return syntax_child();
-    node_index d = tree.children(n)[1].index();
-    if (tree[d].kind != syntax_kind::function_definition)
+    node_index d = syntax(n)[1].index();
+    if (!syntax(d).is(syntax_kind::function_definition))
         return syntax_child();
-    for (uint32_t i = 0; i < tree[d].child_count; i++) {
-        syntax_child c = tree.children(d)[i];
-        if (syntax(c).is(syntax_kind::requires_clause) &&
-            tree[c.index()].child_count == 2)
-            return tree.children(c.index())[1];
+    for (syntax_child c : syntax(d).elements()) {
+        if (syntax(c).is(syntax_kind::requires_clause) && syntax(c).size() == 2)
+            return syntax(c)[1];
     }
     return syntax_child();
 }
@@ -176,33 +171,32 @@ analysis_result semantic_analysis::template_head_parameters(
     node_index n, owned_array<node_index> &parameters, bool packs,
     bool constrained, bool pack_anywhere, bool type_constraints)
 {
-    const syntax_node &node = tree[n];
+    auto node = syntax(n);
     /* [dcl.fct]/18: an abbreviated function template without a
        template-head, its parameters all invented */
-    if (node.kind == syntax_kind::function_definition) {
+    if (node.is(syntax_kind::function_definition)) {
         if (!abbreviated_parameters(n, parameters) || parameters.empty())
             return not_supported(n, "temp.variadic");
         return analysis_result::well_formed;
     }
-    if (node.child_count != 2 ||
-        !syntax(tree.children(n)[0]).is(syntax_kind::template_head))
+    if (node.size() != 2 || !node[0].is(syntax_kind::template_head))
         return not_supported(n, "temp.pre");
     /* a member alias template of a class of namespace scope
        (member_template_declaration) is the one member template here */
     bool member_alias =
         entity_table[current_scope].kind == entity_kind::class_type &&
         is_namespace(entity_table[current_scope].enclosing) &&
-        syntax(tree.children(n)[1]).is(syntax_kind::alias_declaration);
+        node[1].is(syntax_kind::alias_declaration);
     /* ... and a member class template (member_template_declaration) */
     bool member_class =
         entity_table[current_scope].kind == entity_kind::class_type &&
-        syntax(tree.children(n)[1]).is(syntax_kind::member_declaration);
+        node[1].is(syntax_kind::member_declaration);
     if (!member_alias && !member_class &&
         (!is_namespace(current_scope) || defining_class))
         return not_supported(n, "temp.mem");
     /* template-head: template < template-parameter-list >; a
        requires-clause is [temp.constr] */
-    node_index head = tree.children(n)[0].index();
+    node_index head = node[0].index();
     if (!template_head_list(head, parameters))
         return not_supported(n, "temp.pre");
     /* [dcl.fct]/22: the invented template-parameters after the declared */
@@ -283,10 +277,10 @@ analysis_result semantic_analysis::function_template_declarator(
     entity_index scope, specified &s, declarator_meaning &m,
     qualified_type &type)
 {
-    const syntax_child *dc = tree.children(definition) + lead;
-    bool specifiers = syntax(dc[0]).is(syntax_kind::decl_specifier_seq);
+    auto d = syntax(definition);
+    bool specifiers = d[lead].is(syntax_kind::decl_specifier_seq);
     bool constructor =
-        member_of && declares_special_member(member_of, dc[specifiers]);
+        member_of && declares_special_member(member_of, d[lead + specifiers]);
     size_t expressions_before = expressions.size();
     size_t uses_before = name_uses.size();
     entity_index outer = current_scope;
@@ -296,11 +290,11 @@ analysis_result semantic_analysis::function_template_declarator(
     placeholder_allowed = true;
     analysis_result r = analysis_result::well_formed;
     if (constructor && specifiers)
-        r = constructor_specifiers(dc[0].index(), s);
+        r = constructor_specifiers(d[lead].index(), s);
     else if (specifiers)
-        r = decl_specifier_seq(dc[0].index(), s, false);
+        r = decl_specifier_seq(d[lead].index(), s, false);
     for (uint32_t i = 0; i < lead && r == analysis_result::well_formed; i++)
-        r = gnu_attribute_specifier(tree.children(definition)[i].index(), s);
+        r = gnu_attribute_specifier(d[i].index(), s);
     if (r == analysis_result::well_formed) {
         type = s.type;
         function_cv = 0;
@@ -308,10 +302,10 @@ analysis_result semantic_analysis::function_template_declarator(
         if (member_of)
             member_template_declarator(1);
         if (constructor)
-            r = constructor_template_declarator(definition, dc[specifiers],
-                                                type, m);
+            r = constructor_template_declarator(definition,
+                                                d[lead + specifiers], type, m);
         else
-            r = declarator(definition, dc[specifiers], type, m);
+            r = declarator(definition, d[lead + specifiers], type, m);
         if (member_of)
             member_template_declarator(0);
     }
@@ -368,25 +362,24 @@ semantic_analysis::function_template_definition(node_index n,
         template_head_parameters(n, parameters, true, true, true, true);
     if (head != analysis_result::well_formed)
         return head;
-    const syntax_node &d = tree[definition];
+    auto d = syntax(definition);
     /* a function-definition, or a simple-declaration of one declarator
        without an initializer: the template declared, defined later;
        [ext:gnu_attributes] before it, its specializations' */
-    bool defines = d.kind == syntax_kind::function_definition;
+    bool defines = d.is(syntax_kind::function_definition);
     uint32_t lead = leading_gnu_attributes(definition);
-    const syntax_child *dc = tree.children(definition) + lead;
     /* [dcl.decl]/4: a trailing requires-clause (trailing_constraint),
        where the template-head has none */
     uint32_t trailing = trailing_constraint(n).bits != 0;
     if (trailing && head_constraint(n).bits)
         return not_supported(n, "temp.constr");
-    if (d.child_count != lead + 3 + trailing ||
-        !syntax(dc[0]).is(syntax_kind::decl_specifier_seq) ||
-        dc[1].is_token() ||
-        (defines && !syntax(dc[2 + trailing]).is(syntax_kind::function_body)) ||
-        (!defines && (!syntax(dc[2]).is(preprocessing_op_or_punc::SEMICOLON) ||
-                      (!syntax(dc[1]).is(syntax_kind::noptr_declarator) &&
-                       !syntax(dc[1]).is(syntax_kind::ptr_declarator)))))
+    if (d.size() != lead + 3 + trailing ||
+        !d[lead].is(syntax_kind::decl_specifier_seq) ||
+        d[lead + 1].is_token() ||
+        (defines && !d[lead + 2 + trailing].is(syntax_kind::function_body)) ||
+        (!defines && (!d[lead + 2].is(preprocessing_op_or_punc::SEMICOLON) ||
+                      (!d[lead + 1].is(syntax_kind::noptr_declarator) &&
+                       !d[lead + 1].is(syntax_kind::ptr_declarator)))))
         return not_supported(n, "temp.fct");
     uint32_t index = 0, first = 0;
     entity_index scope = 0;
@@ -452,16 +445,15 @@ semantic_analysis::function_template_definition(node_index n,
            in pack expansions (res<A...>, tuple<A...>&), each name of it
            followed by ... */
         if (pack && depends(type_table, ft.operand, &entity_table, last) &&
-            !pack_only_expanded(pack_name, tree[dc[0].index()].first_token,
-                                tree[dc[0].index()].end_token))
+            !pack_only_expanded(pack_name, d[lead].first_token(),
+                                d[lead].end_token()))
             return not_supported(n, "temp.variadic");
         for (uint32_t i = 0; i < ft.parameter_count; i++) {
             const struct type pt = type_table[list[i].unqualified()];
             if (pt.kind != type_kind::pack_expansion) {
                 if (pack && depends(type_table, list[i], &entity_table, last) &&
-                    !pack_only_expanded(pack_name,
-                                        tree[dc[1].index()].first_token,
-                                        tree[dc[1].index()].end_token))
+                    !pack_only_expanded(pack_name, d[lead + 1].first_token(),
+                                        d[lead + 1].end_token()))
                     return not_supported(n, "temp.variadic");
                 continue;
             }
@@ -695,7 +687,7 @@ analysis_result semantic_analysis::declare_template_parameters(
         uint32_t name = 0;
         if (form.named)
             name = tokens.identifier(id);
-        else if (tree[node].kind == syntax_kind::decl_specifier_seq)
+        else if (syntax(node).is(syntax_kind::decl_specifier_seq))
             name = invented_parameter_name(node);
         /* [temp.local]/6: "The name of a template-parameter shall not be
            redeclared within its scope (including nested scopes)." */
@@ -721,7 +713,7 @@ analysis_result semantic_analysis::declare_template_parameters(
             current_scope = scope;
             specified sp;
             analysis_result r =
-                decl_specifier_seq(tree.children(node)[0].index(), sp, false);
+                decl_specifier_seq(syntax(node)[0].index(), sp, false);
             qualified_type type = sp.type;
             if (r == analysis_result::well_formed && form.has_declarator) {
                 declarator_meaning dm;
@@ -869,11 +861,10 @@ semantic_analysis::template_of_form(entity_index e,
 bool semantic_analysis::template_id_name(node_index id, lookup_result &x,
                                          entity_index &named) const
 {
-    const syntax_child *parts = tree.children(id);
-    if (tree[id].child_count < 3 || !parts[0].is_token() ||
-        tokens[parts[0].index()].kind != token_kind::identifier)
+    auto parts = syntax(id);
+    if (parts.size() < 3 || !parts[0].is_identifier())
         return false;
-    x = lookup_unqualified(tokens.identifier(parts[0].index()),
+    x = lookup_unqualified(tokens.identifier(parts[0].token()),
                            lookup_filter::any);
     named = x.entity;
     if (!named)
@@ -897,7 +888,7 @@ analysis_result semantic_analysis::alias_template_definition(node_index n,
         template_head_parameters(n, parameters, true, true, false, true);
     if (r != analysis_result::well_formed)
         return r;
-    uint32_t name = tokens.identifier(tree[alias].first_token + 1);
+    uint32_t name = tokens.identifier(syntax(alias).first_token() + 1);
     if (entity_index prior = entity_table.find(outer, name)) {
         /* a redeclaration of the same tokens (libc++'s __swap_result_t in
            two headers), as clang accepts it; [temp.alias] has no rule for
@@ -1066,11 +1057,11 @@ semantic_analysis::variable_template_definition(node_index n,
     analysis_result r = template_head_parameters(n, parameters, true);
     if (r != analysis_result::well_formed)
         return r;
-    const syntax_child *parts = tree.children(declaration) +
-                                attributes_without_effect_before(declaration);
-    node_index item = parts[1].index();
-    if (tree[item].child_count != 2 ||
-        syntax(tree.children(item)[1]).is(syntax_kind::requires_clause))
+    uint32_t skip = attributes_without_effect_before(declaration);
+    auto parts = syntax(declaration);
+    node_index item = parts[skip + 1].index();
+    if (syntax(item).size() != 2 ||
+        syntax(item)[1].is(syntax_kind::requires_clause))
         return not_supported(n, "temp.pre");
     /* (the name is not known before the declarator: the template-parameters
        are checked against it below) */
@@ -1086,11 +1077,11 @@ semantic_analysis::variable_template_definition(node_index n,
     current_scope = scope;
     specified s;
     declarator_meaning m;
-    r = decl_specifier_seq(parts[0].index(), s, false);
+    r = decl_specifier_seq(parts[skip].index(), s, false);
     qualified_type type = s.type;
     if (r == analysis_result::well_formed) {
         function_cv = 0;
-        r = declarator(declaration, tree.children(item)[0], type, m);
+        r = declarator(declaration, syntax(item)[0], type, m);
     }
     current_scope = saved_scope;
     function_cv = saved_cv;
@@ -1102,8 +1093,7 @@ semantic_analysis::variable_template_definition(node_index n,
         type_table[type.unqualified()].kind == type_kind::function ||
         type_table[type.unqualified()].kind == type_kind::none)
         return not_supported(n, "temp.pre");
-    for (uint32_t i = 0; i < tree[parts[0].index()].child_count; i++) {
-        syntax_child k = tree.children(parts[0].index())[i];
+    for (syntax_child k : parts[skip].elements()) {
         if (syntax(k).is(syntax_kind::class_specifier) ||
             syntax(k).is(syntax_kind::elaborated_type_specifier) ||
             syntax(k).is(syntax_kind::enum_specifier))
@@ -1176,7 +1166,7 @@ analysis_result semantic_analysis::variable_template_id(node_index n,
     if (r != analysis_result::well_formed)
         return r;
     size_t uses_before = name_uses.size();
-    r = named_entity(tree.children(n)[0].index(), e, m);
+    r = named_entity(syntax(n)[0].index(), e, m);
     /* (clang's lookup of the name finds the template, no claim here) */
     name_uses.resize(uses_before);
     return r;
@@ -1373,7 +1363,7 @@ analysis_result semantic_analysis::alias_template_specialization(
     token_index saved_horizon = lookup_horizon;
     bool saved_expanding = expanding;
     current_scope = scope;
-    lookup_horizon = tree[ft.declaration].first_token;
+    lookup_horizon = syntax(ft.declaration).first_token();
     expanding = false;
     qualified_type t;
     r = alias_type(ft.definition, t);
@@ -1566,8 +1556,7 @@ bool semantic_analysis::expansion_list(node_index list,
                                        owned_array<syntax_child> &written,
                                        owned_array<bool> &expansion) const
 {
-    for (uint32_t k = 0; k < tree[list].child_count; k++) {
-        syntax_child a = tree.children(list)[k];
+    for (syntax_child a : syntax(list).elements()) {
         if (syntax(a).is(preprocessing_op_or_punc::COMMA))
             continue;
         if (syntax(a).is(preprocessing_op_or_punc::ELLIPSIS)) {
@@ -1587,14 +1576,13 @@ bool semantic_analysis::expansion_list(node_index list,
    else 0 */
 node_index semantic_analysis::sole_decl_specifier(node_index declaration) const
 {
-    if (tree[declaration].child_count != 2 ||
-        !syntax(tree.children(declaration)[0])
-             .is(syntax_kind::decl_specifier_seq))
+    if (syntax(declaration).size() != 2 ||
+        !syntax(declaration)[0].is(syntax_kind::decl_specifier_seq))
         return 0;
-    node_index seq = tree.children(declaration)[0].index();
-    if (tree[seq].child_count != 1 || tree.children(seq)[0].is_token())
+    node_index seq = syntax(declaration)[0].index();
+    if (syntax(seq).size() != 1 || syntax(seq)[0].is_token())
         return 0;
-    return tree.children(seq)[0].index();
+    return syntax(seq)[0].index();
 }
 
 bool semantic_analysis::depends_on_parameter_from(qualified_type t,
@@ -1616,11 +1604,10 @@ semantic_analysis::class_template_definition(node_index n, node_index specifier)
     entity_index outer = current_scope;
     owned_array<node_index> parameters;
     /* class-head: class-key identifier base-clause_opt */
-    const syntax_node &spec = tree[specifier];
-    if (!spec.child_count ||
-        !syntax(tree.children(specifier)[0]).is(syntax_kind::class_head))
+    auto spec = syntax(specifier);
+    if (!spec.size() || !spec[0].is(syntax_kind::class_head))
         return not_supported(n, "temp.class");
-    node_index head = tree.children(specifier)[0].index();
+    node_index head = spec[0].index();
     syntax_child head_name = class_head_name(head);
     bool specialization =
         head_name.bits && syntax(head_name).is(syntax_kind::simple_template_id);
@@ -1758,23 +1745,23 @@ analysis_result semantic_analysis::class_specialization_definition(
     entity_index outer = current_scope;
     if (!is_namespace(outer) || defining_class)
         return not_supported(n, rule);
-    const syntax_node &spec = tree[specifier];
+    auto spec = syntax(specifier);
     /* [temp.expl.spec]/1 also declares a specialization without defining
        it: class-key simple-template-id ; (an elaborated-type-specifier),
        whose definition may follow */
-    bool defines = spec.kind == syntax_kind::class_specifier;
+    bool defines = spec.is(syntax_kind::class_specifier);
     node_index id = 0;
     if (defines) {
-        node_index head = tree.children(specifier)[0].index();
+        node_index head = spec[0].index();
         id = class_head_name(head).index();
     } else {
-        id = tree.children(specifier)[1].index();
+        id = spec[1].index();
     }
     lookup_result x;
     entity_index named = 0;
     if (!template_id_name(id, x, named))
         return not_supported(n, rule);
-    for (token_index i = spec.first_token; i < spec.end_token; i++)
+    for (token_index i = spec.first_token(); i < spec.end_token(); i++)
         if (p.keyword_of(tokens[i]) == standard_keyword::friend_)
             return not_supported(n, "class.friend");
     uint32_t ct = class_template_of(named);
@@ -1897,7 +1884,7 @@ analysis_result semantic_analysis::substitute_specialization(
     if (s.is_variable) {
         id = variable_specialization_id(s.declarator);
     } else {
-        node_index head = tree.children(s.definition)[0].index();
+        node_index head = syntax(s.definition)[0].index();
         id = class_head_name(head).index();
     }
     entity_index scope = entity_table.make(entity_kind::block_scope, 0,
@@ -1909,7 +1896,7 @@ analysis_result semantic_analysis::substitute_specialization(
     substitution_mark mark = mark_substitution();
     owned_array<template_argument> again;
     token_index saved_horizon = lookup_horizon;
-    lookup_horizon = tree[s.declaration].first_token;
+    lookup_horizon = syntax(s.declaration).first_token();
     substituting++;
     partial_arguments++;
     declaring_specializations++;
@@ -2110,12 +2097,10 @@ analysis_result semantic_analysis::template_type(node_index id,
                                                  bool qualified,
                                                  type_index &type, uint32_t *cv)
 {
-    const syntax_node &t = tree[id];
-    const syntax_child *parts = tree.children(id);
-    if (t.child_count < 3 || !parts[0].is_token() ||
-        tokens[parts[0].index()].kind != token_kind::identifier)
+    auto t = syntax(id);
+    if (t.size() < 3 || !t[0].is_identifier())
         return not_supported(id, "temp.names");
-    uint32_t name = tokens.identifier(parts[0].index());
+    uint32_t name = tokens.identifier(t[0].token());
     lookup_result x;
     if (qualified)
         x = lookup_qualified(scope, name, lookup_filter::any);
@@ -2125,7 +2110,7 @@ analysis_result semantic_analysis::template_type(node_index id,
     if (!named)
         named = x.unknown_entity;
     if (!named && qualified && !x.unknown) {
-        analysis_result m = missing_member(parts[0].index(), scope);
+        analysis_result m = missing_member(t[0].token(), scope);
         if (m != analysis_result::well_formed)
             return m;
     }
@@ -2203,7 +2188,7 @@ analysis_result semantic_analysis::template_type(node_index id,
 analysis_result semantic_analysis::template_id_arguments(
     node_index id, uint32_t ct, owned_array<template_argument> &arguments)
 {
-    const syntax_child *parts = tree.children(id);
+    auto parts = syntax(id);
     const function_template ft = function_templates[ct - 1];
     uint32_t count = ft.parameter_count;
     /* [temp.arg]/1: "When the parameter declared by the template is a
@@ -2216,14 +2201,14 @@ analysis_result semantic_analysis::template_id_arguments(
     owned_array<template_argument> elements;
     owned_array<syntax_child> written;
     owned_array<bool> expansion;
-    for (uint32_t i = 2; i + 1 < tree[id].child_count; i++) {
-        if (syntax(parts[i]).is(preprocessing_op_or_punc::ELLIPSIS)) {
+    for (uint32_t i = 2; i + 1 < parts.size(); i++) {
+        if (parts[i].is(preprocessing_op_or_punc::ELLIPSIS)) {
             if (written.empty() || expansion.back())
                 return not_supported(id, "temp.variadic");
             expansion.back() = true;
             continue;
         }
-        if (syntax(parts[i]).is(syntax_kind::template_argument_list)) {
+        if (parts[i].is(syntax_kind::template_argument_list)) {
             if (!expansion_list(parts[i].index(), written, expansion))
                 return not_supported(id, "temp.variadic");
         } else {
@@ -2235,9 +2220,9 @@ analysis_result semantic_analysis::template_id_arguments(
        it */
     for (size_t w = 0; w < written.size(); w++)
         if (syntax(written[w]).is(syntax_kind::type_id) &&
-            tree[written[w].index()].child_count == 2 &&
-            syntax(tree.children(written[w].index())[1])
-                .is(preprocessing_op_or_punc::ELLIPSIS)) {
+            syntax(written[w].index()).size() == 2 &&
+            syntax(written[w].index())[1].is(
+                preprocessing_op_or_punc::ELLIPSIS)) {
             if (expansion[w])
                 return not_supported(id, "temp.variadic");
             expansion[w] = true;
@@ -2253,7 +2238,7 @@ analysis_result semantic_analysis::template_id_arguments(
                 token_index first = first_token(a);
                 token_index end = first + 1;
                 if (!a.is_token())
-                    end = tree[a.index()].end_token;
+                    end = syntax(a).end_token();
                 if (end > first + 1 &&
                     syntax(syntax_child::token(end - 1))
                         .is(preprocessing_op_or_punc::ELLIPSIS))
@@ -2415,12 +2400,10 @@ semantic_analysis::class_template_declaration(node_index n,
                                               node_index elaborated)
 {
     entity_index outer = current_scope;
-    const syntax_node &e = tree[elaborated];
-    const syntax_child *parts = tree.children(elaborated);
-    if (e.child_count != 2 || !parts[0].is_token() || !parts[1].is_token() ||
-        tokens[parts[1].index()].kind != token_kind::identifier)
+    auto e = syntax(elaborated);
+    if (e.size() != 2 || !e[0].is_token() || !e[1].is_identifier())
         return not_supported(n, "temp.class");
-    standard_keyword key = p.keyword_of(tokens[parts[0].index()]);
+    standard_keyword key = p.keyword_of(tokens[e[0].token()]);
     if (key != standard_keyword::class_ && key != standard_keyword::struct_)
         return not_supported(n, "temp.class");
     owned_array<node_index> parameters;
@@ -2428,7 +2411,7 @@ semantic_analysis::class_template_declaration(node_index n,
     analysis_result r = template_head_parameters(n, parameters, true, true);
     if (r != analysis_result::well_formed)
         return r;
-    uint32_t name = tokens.identifier(parts[1].index());
+    uint32_t name = tokens.identifier(e[1].token());
     uint32_t index = 0, first = 0;
     entity_index scope = 0;
     r = template_parameter_scope(n, parameters, outer, name, index, scope,
@@ -2473,32 +2456,31 @@ semantic_analysis::class_template_declaration(node_index n,
 node_index semantic_analysis::out_of_class_member(node_index definition,
                                                   token_index *name) const
 {
-    const syntax_node &d = tree[definition];
-    if (d.child_count != 3 || tree.children(definition)[1].is_token())
+    auto d = syntax(definition);
+    if (d.size() != 3 || d[1].is_token())
         return 0;
-    node_index x = tree.children(definition)[1].index();
-    while (tree[x].kind == syntax_kind::ptr_declarator) {
-        const syntax_node &pd = tree[x];
-        if (pd.child_count != 2 || tree.children(x)[1].is_token())
+    node_index x = d[1].index();
+    while (syntax(x).is(syntax_kind::ptr_declarator)) {
+        auto pd = syntax(x);
+        if (pd.size() != 2 || syntax(x)[1].is_token())
             return 0;
-        x = tree.children(x)[1].index();
+        x = syntax(x)[1].index();
     }
-    if (tree[x].kind != syntax_kind::noptr_declarator || !tree[x].child_count ||
-        !syntax(tree.children(x)[0]).is(syntax_kind::qualified_id))
+    if (!syntax(x).is(syntax_kind::noptr_declarator) || !syntax(x).size() ||
+        !syntax(x)[0].is(syntax_kind::qualified_id))
         return 0;
-    node_index q = tree.children(x)[0].index();
-    if (tree[q].child_count != 2 ||
-        !syntax(tree.children(q)[0]).is(syntax_kind::nested_name_specifier) ||
-        !tree.children(q)[1].is_token() ||
-        tokens[tree.children(q)[1].index()].kind != token_kind::identifier)
+    node_index q = syntax(x)[0].index();
+    if (syntax(q).size() != 2 ||
+        !syntax(q)[0].is(syntax_kind::nested_name_specifier) ||
+        !syntax(q)[1].is_identifier())
         return 0;
-    node_index nested = tree.children(q)[0].index();
+    node_index nested = syntax(q)[0].index();
     if (name)
-        *name = tree.children(q)[1].index();
-    if (tree[nested].child_count != 2 ||
-        !syntax(tree.children(nested)[0]).is(syntax_kind::simple_template_id))
+        *name = syntax(q)[1].token();
+    if (syntax(nested).size() != 2 ||
+        !syntax(nested)[0].is(syntax_kind::simple_template_id))
         return 0;
-    return tree.children(nested)[0].index();
+    return syntax(nested)[0].index();
 }
 
 /*
@@ -2731,8 +2713,8 @@ uint32_t semantic_analysis::attributes_without_effect_before(
     node_index declaration) const
 {
     uint32_t k = 0;
-    while (k < tree[declaration].child_count &&
-           class_head_attributes_without_effect(tree.children(declaration)[k]))
+    while (k < syntax(declaration).size() &&
+           class_head_attributes_without_effect(syntax(declaration)[k]))
         k++;
     return k;
 }
