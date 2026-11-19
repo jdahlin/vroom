@@ -1843,7 +1843,7 @@ class semantic_analysis
         entity_index function = 0, granting = 0;
     };
     owned_array<friend_definition> friend_definitions;
-    entity_index friend_defined_by(node_index n) const;
+    entity_index friend_defined_by(node_index n, entity_index c) const;
     /* the scope unqualified lookup goes to after s: its enclosing one, or
        for a friend function defined in a class, the class
        ([basic.lookup.unqual]/1) */

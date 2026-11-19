@@ -1654,13 +1654,6 @@ semantic_analysis::class_template_definition(node_index n, node_index specifier)
     if (!head_name.is_token() ||
         tokens[head_name.index()].kind != token_kind::identifier)
         return not_supported(n, "temp.class");
-    /* a specialization declares the friend
-       functions its class defines in the template's namespace
-       ([class.friend]/6), which a lookup there would find; friends have
-       no rules yet */
-    for (token_index i = spec.first_token; i < spec.end_token; i++)
-        if (p.keyword_of(tokens[i]) == standard_keyword::friend_)
-            return not_supported(n, "class.friend");
     uint32_t name = tokens.identifier(head_name.index());
     uint32_t index = 0, first = 0;
     entity_index scope = 0;

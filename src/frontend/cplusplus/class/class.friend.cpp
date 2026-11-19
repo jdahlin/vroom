@@ -8,7 +8,9 @@
  * or (C++11, [class.friend]/3) by a type-name; a friend function declared
  * (not defined) by an unqualified identifier, of the innermost enclosing
  * namespace ([namespace.memdef]/3).  Friend definitions, operator
- * functions, members of other classes and templates are not.
+ * functions, members of other classes and templates are not.  A class
+ * template's friends are declared per specialization (instantiate_class),
+ * each granting only that specialization ([temp.friend]).
  */
 #include "../cplusplus-internal.h"
 #include "frontend/cplusplus/sema.h"
@@ -330,11 +332,14 @@ bool semantic_analysis::defined_by_friend(entity_index f) const
     return false;
 }
 
-/* the function a friend definition n defines, 0 if n is not one */
-entity_index semantic_analysis::friend_defined_by(node_index n) const
+/* the function a friend definition n in class c defines (a class
+   template's defines one per specialization, [temp.friend]), 0 if n is
+   not one */
+entity_index semantic_analysis::friend_defined_by(node_index n,
+                                                  entity_index c) const
 {
     for (const friend_definition &d : friend_definitions)
-        if (d.definition == n)
+        if (d.definition == n && d.granting == c)
             return d.function;
     return 0;
 }

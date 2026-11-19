@@ -1876,7 +1876,7 @@ analysis_result semantic_analysis::member_typedef(
 analysis_result semantic_analysis::member_function_body(entity_index c,
                                                         node_index definition)
 {
-    if (entity_index f = friend_defined_by(definition))
+    if (entity_index f = friend_defined_by(definition, c))
         return friend_function_body(c, definition, f);
     const syntax_child *children = tree.children(definition);
     current_declaration = definition;
