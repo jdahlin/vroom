@@ -1474,16 +1474,11 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
         (m.gnu_flags & gnu_used))
         return not_supported(declaration, "ext.gnu");
     /* a member's symbol attributes (a member function's weak and section,
-       a static data member's) are not analysed yet; on a non-static data
-       member they are GCC's error.  A member function's noinline,
-       always_inline and noreturn are a non-member function's (lowering's) */
-    if (m.gnu_flags & (gnu_weak | gnu_used | gnu_section))
-        return not_supported(declaration, "ext.gnu");
-    if (!is_function &&
-        (m.gnu_flags & (gnu_noinline | gnu_always_inline | gnu_noreturn)))
-        return not_supported(declaration, "ext.gnu");
-    if (!is_function && (m.gnu_flags & gnu_function_symbol_flags))
-        /* a data member's */
+       a static data member's, a data member's function attributes) are not
+       analysed yet; on a non-static data member they are GCC's error */
+    if ((m.gnu_flags & (gnu_weak | gnu_used | gnu_section)) ||
+        (!is_function &&
+         (m.gnu_flags & (gnu_inline_flags | gnu_function_symbol_flags))))
         return not_supported(declaration, "ext.gnu");
     /* [class.mem]/20: "If T is the name of a class, then each of the
        following shall have a name different from T: every static data
@@ -1611,8 +1606,7 @@ semantic_analysis::member_declarator(entity_index c, node_index declaration,
         entity_table[e].defined = definition;
         /* [ext:gnu_attributes] its symbol's */
         entity_table[e].gnu_flags |=
-            m.gnu_flags & (gnu_function_symbol_flags | gnu_noinline |
-                           gnu_always_inline | gnu_noreturn);
+            m.gnu_flags & (gnu_function_symbol_flags | gnu_inline_flags);
         entity_table[e].abi_tag = m.abi_tag;
         if (m.operator_function) {
             entity_table[e].operator_function = true;

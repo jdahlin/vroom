@@ -55,31 +55,12 @@ analysis_result semantic_analysis::member_function_template(
         if (template_parameter_is_pack(first + i))
             return not_supported(n, "temp.variadic");
     /* the declarator, in the template-parameters' scope (whose enclosing
-       scope is the class, [basic.scope.class]); a cv-qualifier-seq is the
-       member's ([dcl.fct]/6) */
-    size_t expressions_before = expressions.size();
-    size_t uses_before = name_uses.size();
-    entity_index outer = current_scope;
-    current_scope = scope;
+       scope is the class, [basic.scope.class]) */
     specified s;
     declarator_meaning m;
     qualified_type type;
-    analysis_result r = decl_specifier_seq(dc[0].index(), s, false);
-    for (uint32_t i = 0; i < lead && r == analysis_result::well_formed; i++)
-        r = gnu_attribute_specifier(tree.children(definition)[i].index(), s);
-    if (r == analysis_result::well_formed) {
-        type = s.type;
-        function_cv = 0;
-        function_parameters.clear();
-        in_member_declarator = true;
-        in_member_template_declarator = 1;
-        r = declarator(definition, dc[1], type, m);
-        in_member_template_declarator = 0;
-        in_member_declarator = false;
-    }
-    current_scope = outer;
-    expressions.resize(expressions_before);
-    name_uses.resize(uses_before);
+    analysis_result r =
+        function_template_declarator(definition, lead, scope, true, s, m, type);
     if (r != analysis_result::well_formed)
         return r;
     /* [temp.mem]/3: "A member function template shall not be virtual." */
@@ -89,15 +70,9 @@ analysis_result semantic_analysis::member_function_template(
                                    "virtual",
                                    "temp.mem");
     if (!m.has_id || m.qualifier || m.qualified_namespace || m.destructor ||
-        m.conversion_function || m.literal_operator ||
+        m.conversion_function || m.literal_operator || s.explicit_ ||
         m.allocation != allocation_function::none ||
         type_table[type.unqualified()].kind != type_kind::function)
-        return not_supported(n, "temp.mem");
-    uint32_t gnu_flags = s.gnu_flags | m.gnu_flags;
-    if (s.typedef_ || s.extern_ || s.explicit_ ||
-        (gnu_flags & ~gnu_function_symbol_flags) || s.aligned || m.aligned ||
-        s.section || m.section || m.asm_label ||
-        (s.abi_tag && m.abi_tag && s.abi_tag != m.abi_tag))
         return not_supported(n, "temp.mem");
     if (s.static_ && function_cv)
         return ill_formed_at_token(m.id,
@@ -105,12 +80,12 @@ analysis_result semantic_analysis::member_function_template(
                                    "declared const, volatile, or const "
                                    "volatile",
                                    "class.static.mfct");
-    for (const parameter_meaning &p : function_parameters)
-        if (p.default_argument.index())
-            return not_supported(n, "dcl.fct.default");
-    token_index abi_tag = m.abi_tag;
-    if (!abi_tag)
-        abi_tag = s.abi_tag;
+    uint32_t gnu_flags = 0;
+    token_index abi_tag = 0;
+    r = function_template_attributes(n, s, m, 0, "temp.mem", gnu_flags,
+                                     abi_tag);
+    if (r != analysis_result::well_formed)
+        return r;
     uint32_t name = tokens.identifier(m.id);
     /* [temp.over]/1: other member function templates of the name are
        overloads; a non-template member of the name too ([temp.mem]/2),
@@ -146,18 +121,28 @@ analysis_result semantic_analysis::member_function_template(
     return analysis_result::well_formed;
 }
 
-/* the member function template whose name, held, is held (its record's
-   index plus one), 0 if none */
-uint32_t semantic_analysis::member_function_template_of(entity_index held) const
+/*
+ * [temp.over]/1: the specializations of the member function templates
+ * named held deduced from the arguments (not the object's), appended to
+ * candidates as member candidates ([over.match.funcs]/2).
+ */
+analysis_result semantic_analysis::member_template_candidates(
+    node_index n, entity_index held, const expression_meaning *arguments,
+    uint32_t count, owned_array<overload_candidate> &candidates)
 {
-    for (size_t i = 0; i < function_templates.size(); i++) {
-        const function_template &f = function_templates[i];
-        if (f.name == held && held && !f.unusable && !f.is_class &&
-            !f.is_alias && !f.is_variable && !f.is_concept &&
-            !is_namespace(entity_table[f.entity].enclosing))
-            return static_cast<uint32_t>(i + 1);
-    }
-    return 0;
+    owned_array<uint32_t> group;
+    function_template_overloads(held, group);
+    for (uint32_t g : group)
+        if (!entity_table[function_templates[g - 1].entity].nonstatic_member)
+            /* a static member function template: no implicit object
+               parameter to match ([over.match.funcs]/4) */
+            return not_supported(n, "temp.mem");
+    size_t first = candidates.size();
+    analysis_result r =
+        template_candidates(n, group, arguments, count, candidates);
+    for (size_t i = first; i < candidates.size(); i++)
+        candidates[i].member = true;
+    return r;
 }
 
 /*
@@ -189,23 +174,13 @@ analysis_result semantic_analysis::member_template_call(
     for (const expression_meaning &e : early)
         if (e.entity && entity_table[e.entity].kind == entity_kind::function)
             return not_supported(n, "temp.deduct.call");
-    owned_array<uint32_t> group;
-    function_template_overloads(held, group);
-    for (uint32_t g : group)
-        if (!entity_table[function_templates[g - 1].entity].nonstatic_member)
-            /* a static member function template: no implicit object
-               parameter to match ([over.match.funcs]/4) */
-            return not_supported(n, "temp.mem");
     owned_array<overload_candidate> candidates;
-    analysis_result r =
-        template_candidates(n, group, early.data(),
-                            static_cast<uint32_t>(early.size()), candidates);
+    analysis_result r = member_template_candidates(
+        n, held, early.data(), static_cast<uint32_t>(early.size()), candidates);
     if (r != analysis_result::well_formed)
         return r;
     if (candidates.empty())
         return not_supported(n, "temp.deduct");
-    for (overload_candidate &k : candidates)
-        k.member = true;
     owned_array<expression_meaning> all;
     all.append(object);
     for (const expression_meaning &e : early)

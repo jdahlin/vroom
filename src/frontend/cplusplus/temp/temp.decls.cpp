@@ -217,6 +217,67 @@ static bool depends(const types &table, qualified_type t,
                     const entities *parameters = nullptr, uint64_t from = 0);
 
 /*
+ * A function template's decl-specifier-seq, after the lead GNU attributes
+ * of definition (its specializations'), and declarator, in the
+ * template-parameters' scope; what they record for claims is the
+ * template's, which clang has no claim for.  member: a member function
+ * template's, whose cv-qualifier-seq is the member's ([dcl.fct]/6).
+ */
+analysis_result semantic_analysis::function_template_declarator(
+    node_index definition, uint32_t lead, entity_index scope, bool member,
+    specified &s, declarator_meaning &m, qualified_type &type)
+{
+    const syntax_child *dc = tree.children(definition) + lead;
+    size_t expressions_before = expressions.size();
+    size_t uses_before = name_uses.size();
+    entity_index outer = current_scope;
+    current_scope = scope;
+    analysis_result r = decl_specifier_seq(dc[0].index(), s, false);
+    for (uint32_t i = 0; i < lead && r == analysis_result::well_formed; i++)
+        r = gnu_attribute_specifier(tree.children(definition)[i].index(), s);
+    if (r == analysis_result::well_formed) {
+        type = s.type;
+        function_cv = 0;
+        function_parameters.clear();
+        if (member)
+            member_template_declarator(1);
+        r = declarator(definition, dc[1], type, m);
+        if (member)
+            member_template_declarator(0);
+    }
+    current_scope = outer;
+    expressions.resize(expressions_before);
+    name_uses.resize(uses_before);
+    return r;
+}
+
+/*
+ * [ext:gnu_attributes] a function template's attributes: its
+ * specializations' symbols' (given them at instantiation) and the GNU
+ * attributes of allowed, one abi_tag; any other is not analysed
+ * (subclause), nor a default argument.
+ */
+analysis_result semantic_analysis::function_template_attributes(
+    node_index n, const specified &s, const declarator_meaning &m,
+    uint32_t allowed, const char *subclause, uint32_t &gnu_flags,
+    token_index &abi_tag)
+{
+    gnu_flags = s.gnu_flags | m.gnu_flags;
+    if (s.typedef_ || s.extern_ ||
+        (gnu_flags & ~(gnu_function_symbol_flags | allowed)) || s.aligned ||
+        m.aligned || s.section || m.section || m.asm_label ||
+        (s.abi_tag && m.abi_tag && s.abi_tag != m.abi_tag))
+        return not_supported(n, subclause);
+    for (const parameter_meaning &p : function_parameters)
+        if (p.default_argument.index())
+            return not_supported(n, "dcl.fct.default");
+    abi_tag = m.abi_tag;
+    if (!abi_tag)
+        abi_tag = s.abi_tag;
+    return analysis_result::well_formed;
+}
+
+/*
  * [temp.fct]/1: "A function template defines an unbounded set of related
  * functions."  One defined at namespace scope with type parameters only
  * (template<class T, typename U> R f(P...) { ... }): its declarator is
@@ -262,26 +323,11 @@ semantic_analysis::function_template_definition(node_index n,
         template_parameter_scope(n, parameters, outer, 0, index, scope, first);
     if (declared != analysis_result::well_formed)
         return declared;
-    /* the declarator, in the template-parameters' scope; what it records
-       for claims is the template's, which clang has no claim for */
-    size_t expressions_before = expressions.size();
-    size_t uses_before = name_uses.size();
-    current_scope = scope;
     specified s;
     declarator_meaning m;
     qualified_type type;
-    analysis_result r = decl_specifier_seq(dc[0].index(), s, false);
-    for (uint32_t i = 0; i < lead && r == analysis_result::well_formed; i++)
-        r = gnu_attribute_specifier(tree.children(definition)[i].index(), s);
-    if (r == analysis_result::well_formed) {
-        type = s.type;
-        function_cv = 0;
-        function_parameters.clear();
-        r = declarator(definition, dc[1], type, m);
-    }
-    current_scope = outer;
-    expressions.resize(expressions_before);
-    name_uses.resize(uses_before);
+    analysis_result r = function_template_declarator(definition, lead, scope,
+                                                     false, s, m, type);
     if (r != analysis_result::well_formed)
         return r;
     /* an operator function template (libc++'s byte& operator<<=(byte&,
@@ -291,22 +337,14 @@ semantic_analysis::function_template_definition(node_index n,
         function_cv ||
         type_table[type.unqualified()].kind != type_kind::function)
         return not_supported(n, "temp.fct");
-    /* [ext:gnu_attributes] its specializations' symbols' (given them at
-       instantiation), and noinline, always_inline and noreturn, which
-       lowering gives each specialization as a non-template function's */
-    uint32_t gnu_flags = s.gnu_flags | m.gnu_flags;
-    if (s.typedef_ || s.extern_ || c_language ||
-        (gnu_flags & ~(gnu_function_symbol_flags | gnu_noinline |
-                       gnu_always_inline | gnu_noreturn)) ||
-        s.aligned || m.aligned || s.section || m.section || m.asm_label ||
-        (s.abi_tag && m.abi_tag && s.abi_tag != m.abi_tag))
+    if (c_language)
         return not_supported(n, "temp.fct");
-    token_index abi_tag = m.abi_tag;
-    if (!abi_tag)
-        abi_tag = s.abi_tag;
-    for (const parameter_meaning &p : function_parameters)
-        if (p.default_argument.index())
-            return not_supported(n, "dcl.fct.default");
+    uint32_t gnu_flags = 0;
+    token_index abi_tag = 0;
+    r = function_template_attributes(n, s, m, gnu_inline_flags, "temp.fct",
+                                     gnu_flags, abi_tag);
+    if (r != analysis_result::well_formed)
+        return r;
     /* [temp.variadic]/7: "A pack whose name appears within the pattern of
        a pack expansion is expanded by that pack expansion"; a pack named
        outside one is ill-formed (/7), which the template's own declarator
@@ -662,18 +700,18 @@ analysis_result semantic_analysis::declare_template_parameters(
     return analysis_result::well_formed;
 }
 
-/* the usable function template whose name the held entity is, plus one */
-uint32_t semantic_analysis::function_template_of(entity_index held) const
+/* the usable function template (member: member function template) whose
+   name the held entity is, plus one */
+uint32_t semantic_analysis::function_template_of(entity_index held,
+                                                 bool member) const
 {
-    for (size_t i = 0; i < function_templates.size(); i++)
-        if (function_templates[i].name == held && held &&
-            !function_templates[i].unusable &&
-            !function_templates[i].is_class &&
-            !function_templates[i].is_alias &&
-            !function_templates[i].is_variable &&
-            /* (a member function template: member_function_template_of) */
-            is_namespace(entity_table[function_templates[i].entity].enclosing))
+    for (size_t i = 0; i < function_templates.size(); i++) {
+        const function_template &f = function_templates[i];
+        if (f.name == held && held && !f.unusable && !f.is_class &&
+            !f.is_alias && !f.is_variable &&
+            is_namespace(entity_table[f.entity].enclosing) != member)
             return static_cast<uint32_t>(i + 1);
+    }
     return 0;
 }
 
