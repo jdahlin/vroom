@@ -317,8 +317,9 @@ analysis_result semantic_analysis::analyse_function_body(
            to cv X"."  An unnamed variable lowering makes the first
            parameter */
         entity_index c = entity_table[f].enclosing;
-        qualified_type object = qualified_type::make(
-            entity_table[c].type.unqualified(), entity_table[f].member_cv);
+        qualified_type object =
+            qualified_type::make(entity_table[c].type.unqualified(),
+                                 object_cv(entity_table[f].member_cv));
         entity_index t =
             entity_table.make(entity_kind::variable, 0, parameters);
         entity_table[t].type =

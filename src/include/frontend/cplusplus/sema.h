@@ -36,7 +36,19 @@ enum cv_qualifier : uint32_t {
     cv_const = 1,
     cv_volatile = 2,
     cv_restrict = 4,
+    /* [dcl.fct]/1: the ref-qualifier of a non-static member function,
+       kept with its cv-qualifier-seq (entity::member_cv and the
+       declarator's function_cv alone; never a type's qualifiers) */
+    cv_ref_lvalue = 8,
+    cv_ref_rvalue = 16,
 };
+
+/* the cv-qualifiers of a member function's cv-qualifier-seq and
+   ref-qualifier: those that qualify `this` */
+inline uint32_t object_cv(uint32_t member_cv)
+{
+    return member_cv & (cv_const | cv_volatile);
+}
 
 /*
  * A possibly cv-qualified type: the cv-unqualified type's index and the

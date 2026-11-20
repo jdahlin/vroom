@@ -1017,7 +1017,8 @@ ast_qualified_type c_lowering::entity_type(entity_index e, token_index at)
     if (x.kind != entity_kind::function || !x.nonstatic_member)
         return type(x.type, at);
     qualified_type object = qualified_type::make(
-        analysis.entity_table[x.enclosing].type.unqualified(), x.member_cv);
+        analysis.entity_table[x.enclosing].type.unqualified(),
+        object_cv(x.member_cv));
     return member_function_type(object, x.type, at);
 }
 
@@ -5456,7 +5457,7 @@ bool c_lowering::thunk_body(const thunk_record &r, token_index at)
     parameter_types.append(ast_builder_type_pointer(
         c, type(qualified_type::make(
                     analysis.entity_table[x.enclosing].type.unqualified(),
-                    x.member_cv),
+                    object_cv(x.member_cv)),
                 at)));
     for (uint32_t k = 0; k < ft.parameter_count; k++)
         parameter_types.append(parameter_type(types[k], at));

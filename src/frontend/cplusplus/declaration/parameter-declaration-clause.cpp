@@ -439,15 +439,26 @@ analysis_result semantic_analysis::function(SyntaxRef parameters,
                 *qualified |= cv_volatile;
                 continue;
             }
-            /* [dcl.fct]/1 ref-qualifier: of a member function's own
-               declarator it is not analysed */
-            if (!may_qualify && !type_ref && c.is(AMPERSAND)) {
-                type_ref = 1;
-                continue;
-            }
-            if (!may_qualify && !type_ref && c.is(AMPERSAND_AMPERSAND)) {
-                type_ref = 2;
-                continue;
+            /* [dcl.fct]/1 ref-qualifier: a member function's own is kept
+               with the cv-qualifier-seq (cv_ref_lvalue, cv_ref_rvalue) */
+            if (c.is(AMPERSAND) || c.is(AMPERSAND_AMPERSAND)) {
+                bool lvalue = c.is(AMPERSAND);
+                if (may_qualify) {
+                    if (cv & (cv_ref_lvalue | cv_ref_rvalue))
+                        return not_supported(parameters, "dcl.fct");
+                    if (lvalue)
+                        cv |= cv_ref_lvalue;
+                    else
+                        cv |= cv_ref_rvalue;
+                    continue;
+                }
+                if (!type_ref) {
+                    if (lvalue)
+                        type_ref = 1;
+                    else
+                        type_ref = 2;
+                    continue;
+                }
             }
             if (c.noexcept_specifier() && !specified_exceptions) {
                 /* analysed once the parameters are known */

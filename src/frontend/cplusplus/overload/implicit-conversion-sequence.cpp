@@ -580,7 +580,25 @@ semantic_analysis::object_sequence(const expression_meaning &object,
     s.reference = true;
     s.implicit_object = true;
     s.binds_rvalue = object.category != value_category::lvalue;
-    s.target = qualified_type::make(object.type.unqualified(), x.member_cv);
+    /* [over.match.funcs]/4: the type of the implicit object parameter of a
+       function with a ref-qualifier is "lvalue reference to cv X" for &
+       and "rvalue reference to cv X" for &&; /5: only a function declared
+       without a ref-qualifier binds an rvalue to a non-const parameter */
+    if (x.member_cv & cv_ref_lvalue) {
+        if (s.binds_rvalue &&
+            (!(x.member_cv & cv_const) || (x.member_cv & cv_volatile)))
+            return of_form(sequence::form::bad);
+        /* [over.ics.rank]/3.2.3 applies to it */
+        s.implicit_object = false;
+    }
+    if (x.member_cv & cv_ref_rvalue) {
+        if (!s.binds_rvalue)
+            return of_form(sequence::form::bad);
+        s.rvalue_reference = true;
+        s.implicit_object = false;
+    }
+    s.target =
+        qualified_type::make(object.type.unqualified(), object_cv(x.member_cv));
     entity_index c = type_table[object.type.unqualified()].entity;
     if (c != x.enclosing) {
         s.identity = false;

@@ -738,12 +738,17 @@ semantic_analysis::member_pointer_constant(token_index t, entity_index e,
     /* [dcl.fct]/1: the function type of a member function with a
        cv-qualifier-seq has it (the entity keeps it as member_cv) */
     qualified_type pointee = x.type;
-    if (x.kind == entity_kind::function && x.member_cv)
-        pointee =
-            qualified_type::make(type_table.function_qualified(
-                                     x.type.unqualified(),
-                                     x.member_cv & (cv_const | cv_volatile), 0),
-                                 cv_none);
+    if (x.kind == entity_kind::function && x.member_cv) {
+        uint8_t ref = 0;
+        if (x.member_cv & cv_ref_lvalue)
+            ref = 1;
+        if (x.member_cv & cv_ref_rvalue)
+            ref = 2;
+        pointee = qualified_type::make(
+            type_table.function_qualified(x.type.unqualified(),
+                                          object_cv(x.member_cv), ref),
+            cv_none);
+    }
     m = expression_meaning();
     m.type =
         qualified_type::make(type_table.pointer_to_member(c, pointee), cv_none);

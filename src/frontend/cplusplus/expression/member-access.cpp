@@ -315,6 +315,8 @@ analysis_result semantic_analysis::member_reference(SyntaxRef n,
        calls changes) */
     token_index callee = overloaded_callee;
     VTRY(r, expression(n[0], m));
+    /* (a call in the object expression left it unset) */
+    overloaded_callee = callee;
     /* [over.ref]/1: "An expression x->m is interpreted as
        (x.operator->())->m for a class object x of type T if T::operator->()
        exists and if the operator is selected as the best match function by

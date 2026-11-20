@@ -132,9 +132,13 @@ semantic_analysis::resolve_call(SyntaxRef n,
     }
     expression_meaning implied;
     if (object) {
-        /* the implied object argument, the lvalue the address is of */
+        /* the implied object argument, the object expression the address
+           is of: its category selects among ref-qualified overloads
+           ([over.match.funcs]/4-5) */
         implied.type = type_table[semantics[object].type.unqualified()].operand;
         implied.category = value_category::lvalue;
+        if (semantics[object].kind == semantic_kind::address)
+            implied.category = semantics[semantics[object].a].category;
     }
     owned_array<overload_candidate> candidates;
     for (entity_index e : set) {
