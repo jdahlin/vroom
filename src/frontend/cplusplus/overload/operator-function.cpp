@@ -311,10 +311,13 @@ analysis_result semantic_analysis::operator_function_declaration(SyntaxRef n,
                   entity_table[x.enclosing].kind == entity_kind::class_type;
     bool call = op == preprocessing_op_or_punc::LEFT_PARENTHESIS;
     bool subscript = op == preprocessing_op_or_punc::LEFT_BRACKET;
-    if ((call || subscript) && member && !x.nonstatic_member)
-        /* C++23's static operator() and operator[] (P1169, P2589), an
-           extension of clang's before */
-        return not_supported(n, "over.call");
+    if (call && member && !x.nonstatic_member)
+        /* C++23's static operator() (P1169), an extension of clang's
+           before: any number of parameters, as a non-static one */
+        return analysis_result::well_formed;
+    if (subscript && member && !x.nonstatic_member)
+        /* C++23's static operator[] (P2589) */
+        return not_supported(n, "over.sub");
     /* [over.oper]/7: "An operator function shall either be a non-static
        member function or be a non-member function that has at least one
        parameter whose type is a class, a reference to a class, an
