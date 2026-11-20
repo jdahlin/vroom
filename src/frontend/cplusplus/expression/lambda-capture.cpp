@@ -328,10 +328,7 @@ analysis_result semantic_analysis::variable_capture(SyntaxRef n,
     /* a local entity of a function the lambda is not in: of a local
        class's member function's enclosing function */
     entity_index owner = enclosing_function(entity_table, e);
-    bool reachable = owner == function_state.function;
-    for (size_t k = lambdas.size(); k-- > 0 && !reachable;)
-        if (lambdas[k].enclosing_function == owner)
-            reachable = true;
+    bool reachable = local_reachable(owner);
     if (!reachable || (owner != function_state.function && !current_lambda()))
         return not_supported(n, "basic.def.odr");
     record.variable = e;
@@ -559,10 +556,7 @@ analysis_result semantic_analysis::captured_entity(token_index t,
         return analysis_result::well_formed;
     }
     entity_index owner = enclosing_function(entity_table, e);
-    bool reachable = false;
-    for (size_t k = lambdas.size(); k-- > 0 && !reachable;)
-        if (lambdas[k].enclosing_function == owner)
-            reachable = true;
+    bool reachable = local_reachable(owner);
     if (!reachable)
         /* of a function enclosing a local class whose member function
            the lambda is in */
@@ -581,6 +575,34 @@ analysis_result semantic_analysis::captured_entity(token_index t,
         return analysis_result::well_formed;
     }
     return capture_variable(l, t, e, m);
+}
+
+/*
+ * Whether a local entity of function owner is reachable from the function
+ * analysed now: it is that function, or one a lambda on the stack is in, or
+ * the function a generic lambda's closure was made in, which a
+ * specialization's body (analysed from wherever it is called) has no
+ * lambda on the stack for.
+ */
+bool semantic_analysis::local_reachable(entity_index owner) const
+{
+    entity_index f = function_state.function;
+    for (unsigned guard = 0; f && guard < 64; guard++) {
+        if (f == owner)
+            return true;
+        for (size_t k = lambdas.size(); k-- > 0;)
+            if (lambdas[k].enclosing_function == owner)
+                return true;
+        entity_index c = entity_table[f].enclosing;
+        while (c && entity_table[c].kind != entity_kind::class_type)
+            c = entity_table[c].enclosing;
+        entity_index outer = 0;
+        for (const generic_closure &g : generic_closures)
+            if (g.closure == c)
+                outer = g.enclosing_function;
+        f = outer;
+    }
+    return false;
 }
 
 /*
@@ -669,6 +691,49 @@ analysis_result semantic_analysis::resolve_pending_uses(lambda_context &l)
     }
     pending_uses.resize(keep);
     return result;
+}
+
+/*
+ * Whether the name of a variable usable in constant expressions at token
+ * t of a generic lambda's body (in [first, end)) is an odr-use, as far as
+ * its statement shows: [expr.prim.lambda.capture]/7 captures it when the
+ * full-expression depends on a generic lambda parameter, and otherwise it
+ * is an odr-use unless it is only read ([basic.def.odr]/4), which a
+ * reference bound to it or its address is not.
+ */
+bool semantic_analysis::odr_use_in_statement(
+    token_index t, token_index first, token_index end,
+    const owned_array<parameter_meaning> &parameters) const
+{
+    auto boundary = [&](token_index k) {
+        return is_operator(tokens[k], preprocessing_op_or_punc::SEMICOLON) ||
+               is_operator(tokens[k], preprocessing_op_or_punc::LEFT_BRACE) ||
+               is_operator(tokens[k], preprocessing_op_or_punc::RIGHT_BRACE);
+    };
+    token_index from = t, to = t;
+    while (from > first && !boundary(from - 1))
+        from--;
+    while (to + 1 < end && !boundary(to + 1))
+        to++;
+    bool before_equal = true;
+    for (token_index k = from; k <= to; k++) {
+        if (is_operator(tokens[k], preprocessing_op_or_punc::EQUAL))
+            before_equal = false;
+        /* a reference declared before the =, its address taken */
+        if (k < t && before_equal &&
+            is_operator(tokens[k], preprocessing_op_or_punc::AMPERSAND) &&
+            k + 1 < t)
+            return true;
+        if (k + 1 == t &&
+            is_operator(tokens[k], preprocessing_op_or_punc::AMPERSAND))
+            return true;
+        if (tokens[k].kind != token_kind::identifier)
+            continue;
+        for (const parameter_meaning &p : parameters)
+            if (p.id && tokens.identifier(p.id) == tokens.identifier(k))
+                return true;
+    }
+    return false;
 }
 
 /*
@@ -769,17 +834,15 @@ analysis_result semantic_analysis::implicit_captures(
                 if (captured)
                     continue;
                 entity_index owner = enclosing_function(entity_table, e);
-                bool reachable = owner == function_state.function;
-                for (size_t k = lambdas.size(); k-- > 0 && !reachable;)
-                    if (lambdas[k].enclosing_function == owner)
-                        reachable = true;
+                bool reachable = local_reachable(owner);
                 if (!reachable)
                     continue;
                 const struct type kind = type_table[x.type.unqualified()];
                 if (x.usable == constness::constant &&
                     (kind.kind == type_kind::fundamental ||
                      kind.kind == type_kind::enumeration ||
-                     kind.kind == type_kind::pointer))
+                     kind.kind == type_kind::pointer) &&
+                    !odr_use_in_statement(t, first, end, parameters))
                     continue;
                 record.variable = e;
                 record.at = t;

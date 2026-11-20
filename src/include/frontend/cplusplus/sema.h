@@ -2668,6 +2668,9 @@ class semantic_analysis
     };
     owned_array<lambda_context> lambdas;
     owned_array<capture_record> lambda_captures;
+    /* the lambda whose lambda-declarator is analysed (names in it have the
+       types of the members that would capture them) */
+    lambda_context *declaring_lambda = nullptr;
     /* the closure type of a lambda-expression in a default member
        initializer, which each constructor's analysis of the initializer
        uses (one type, [class.mem]/10) and the captures it made (this) */
@@ -2694,6 +2697,9 @@ class semantic_analysis
     analysis_result
     implicit_captures(SyntaxRef n, lambda_context &l,
                       const owned_array<parameter_meaning> &parameters);
+    bool odr_use_in_statement(
+        token_index t, token_index first, token_index end,
+        const owned_array<parameter_meaning> &parameters) const;
     /* [basic.def.odr]/4: a name in a lambda's body of a local variable
        usable in constant expressions is an odr-use, so a capture, unless
        its value is read (lvalue-to-rvalue conversion); named by an entity
@@ -2714,6 +2720,7 @@ class semantic_analysis
        ([expr.prim.lambda.capture]/15): an odr-use */
     bool forced_odr_use = false;
     analysis_result resolve_pending_uses(lambda_context &l);
+    bool local_reachable(entity_index owner) const;
     analysis_result variable_capture(SyntaxRef n, lambda_context &l,
                                      entity_index e, token_index name,
                                      bool by_reference);

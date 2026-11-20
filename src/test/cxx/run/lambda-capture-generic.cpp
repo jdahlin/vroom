@@ -15,5 +15,22 @@ int main()
     check(init(1) == 13);
     auto nested = [=](auto x) { return [=](auto y) { return x + y + base; }(1); };
     check(nested(2) == 14);
+    /* a constant odr-used in the innermost of nested generic lambdas, and
+       a parameter of the outermost: both captured down the chain */
+    const int k = 10;
+    auto outer = [=](auto a) {
+        return [=](auto b) {
+            return [=](auto c) {
+                const int &r = k;
+                decltype(a) a2 = a;
+                return r + a2 + b + c;
+            };
+        };
+    };
+    auto m1 = outer(1);
+    auto m2 = m1(2);
+    check(sizeof(outer) == sizeof(int) && sizeof(m1) == 2 * sizeof(int) &&
+          sizeof(m2) == 3 * sizeof(int));
+    check(m2(3) == 16);
     return 0;
 }

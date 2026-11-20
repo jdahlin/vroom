@@ -981,9 +981,8 @@ bool itanium_mangler::template_args(entity_index c, entity_index function)
                declaration): [abi:mangle.function-type]'s pack expansion of the
                parameter, <type> ::= Dp <type> */
             if (entity_index own = analysis.specialization_own_pack(c, i, k)) {
-                /* a non-type pack: the expression's expansion,
-                   <expression> ::= sp <expression>, of the parameter
-                   (<template-arg> ::= X <expression> E) */
+                /* a non-type pack: the expansion of the parameter as an expression
+                   (sp), in a template argument (X ... E) */
                 if (analysis.entity_table[own].kind == entity_kind::none) {
                     text("Xsp");
                     template_param(analysis.entity_table[own].value);
@@ -1725,7 +1724,7 @@ bool itanium_mangler::closure_type_name(entity_index c)
         uint32_t explicit_count =
             analysis.template_parameter_count(call) -
             analysis.invented_parameter_count(table[c].lambda);
-        /* <template-param-decl> ::= Ty | Tn <type> | Tp <template-param-decl> */
+        /* the template-param-decls: Ty, Tn and the type, Tp before a pack's */
         for (uint32_t i = 0; i < explicit_count; i++) {
             bool pack = false;
             qualified_type value_type;
