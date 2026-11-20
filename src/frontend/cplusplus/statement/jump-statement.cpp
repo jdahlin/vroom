@@ -212,6 +212,16 @@ analysis_result semantic_analysis::return_statement(SyntaxRef n,
     } else if (movable && m.category == value_category::lvalue &&
                object.kind == type_kind::class_type &&
                tokens.files.behavior.has(language_feature::rvalue_references) &&
+               has_implicit_conversion_functions(object.entity)) {
+        /* the first overload resolution, as an rvalue, may find a
+           converting constructor of the returned class viable by a
+           conversion function of the operand's (and its parameter is
+           not an rvalue reference to the object's type, which C++11 to
+           C++17 want): not analysed */
+        return not_supported(n, "class.copy.elision");
+    } else if (movable && m.category == value_category::lvalue &&
+               object.kind == type_kind::class_type &&
+               tokens.files.behavior.has(language_feature::rvalue_references) &&
                !copies_bytes(object.entity) &&
                !declares_copy_constructor(object.entity)) {
         /* the move constructor the class may declare implicitly

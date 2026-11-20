@@ -1553,10 +1553,24 @@ semantic_analysis::member_declarator(entity_index c, SyntaxRef declaration,
         hides = prior;
         prior = 0;
     }
-    if (prior && entity_table[prior].enclosing != c)
-        /* a name a using-declaration or a member enumeration's enumerator
-           brought into the class */
-        return not_supported(declaration, "class.mem");
+    /* [namespace.udecl]/15 (C++20 /14): the functions of a base class a
+       using-declaration brought into the class, which a member function of
+       the name declared here joins as an overload, or hides one of them
+       (overload_set) */
+    entity_index introduced = 0;
+    if (prior && entity_table[prior].enclosing != c) {
+        if (is_function && entity_table[prior].kind == entity_kind::function &&
+            entity_table[prior].special == special_member::none &&
+            entity_table.bound_by_using(c, name) && !m.conversion_function &&
+            !m.destructor) {
+            introduced = prior;
+            prior = 0;
+        } else {
+            /* a name a using-declaration or a member enumeration's
+               enumerator brought into the class */
+            return not_supported(declaration, "class.mem");
+        }
+    }
     entity_index overloads = 0;
     /* [temp.mem]/2: member function templates of the name declared before
        are overloaded with this function: it heads the name's chain, and
@@ -1582,6 +1596,9 @@ semantic_analysis::member_declarator(entity_index c, SyntaxRef declaration,
            in it is another function */
         for (entity_index o = prior; o; o = entity_table[o].next_overload) {
             const entity &x = entity_table[o];
+            /* the base's functions after the class's own are no conflict */
+            if (x.enclosing != c)
+                break;
             if (!same_parameters(type_table, x.type.unqualified(),
                                  type.unqualified()))
                 continue;
@@ -1862,13 +1879,21 @@ semantic_analysis::member_declarator(entity_index c, SyntaxRef declaration,
     if (overloads) {
         /* another member function of the set, last in its chain */
         entity_index last = overloads;
-        while (entity_table[last].next_overload)
+        while (entity_table[last].next_overload &&
+               entity_table[entity_table[last].next_overload].enclosing == c)
             last = entity_table[last].next_overload;
+        /* before the base's functions, if any */
+        entity_table[e].next_overload = entity_table[last].next_overload;
         entity_table[last].next_overload = e;
         entity_table[e].hidden_type = entity_table[overloads].hidden_type;
     } else {
+        entity_table[e].next_overload = introduced;
         entity_table[e].member_templates = templates;
         entity_table.bind(c, name, e);
+        /* the member function templates of the base's name */
+        if (introduced && entity_table[introduced].member_templates)
+            introduce_member_templates(
+                c, e, entity_table[introduced].member_templates);
     }
     last_declared = e;
     return analysis_result::well_formed;

@@ -803,7 +803,8 @@ analysis_result semantic_analysis::initialize_with(SyntaxRef at,
             related = base_step(source.entity, target.entity, ambiguous) != 0;
         }
         if (source.kind == type_kind::class_type && !same && !related &&
-            has_conversion_functions(source.entity))
+            conversion_functions_yield_class(source.entity, target.entity,
+                                             true))
             /* [dcl.init]/17.6.3, [over.match.copy]/1.2: the conversion
                functions of the source class are candidates too, and in a
                direct-initialization ([over.match.ctor]) a constructor's

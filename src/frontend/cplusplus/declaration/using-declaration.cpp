@@ -306,9 +306,45 @@ analysis_result semantic_analysis::using_declarator(UsingDeclarator n,
            is the entity's here, so only a declaration that leaves it as
            it is has rules; a name the derived class declares too would be
            an overload or hide the base's */
-        if (kind == entity_kind::none || entity_table.find(c, name) ||
+        if (kind == entity_kind::none ||
             entity_table[e].access != declaration_access)
             return not_supported(n, "namespace.udecl");
+        /* (the access of every function of the set the head begins) */
+        for (entity_index o = e; o; o = entity_table[o].next_overload)
+            if (entity_table[o].access != declaration_access)
+                return not_supported(n, "namespace.udecl");
+        entity_index own = entity_table.find(c, name);
+        if (own) {
+            /* [namespace.udecl]/15 (C++20 /14): the base's member
+               functions join the class's own of the name, which hide the
+               ones with their signature (overload_set): they follow the
+               own in the chain.  A member function template, a name of
+               two using-declarations, or any other kind has no rules */
+            if (kind != entity_kind::function ||
+                entity_table[e].special != special_member::none ||
+                entity_table[own].kind != entity_kind::function ||
+                entity_table[own].enclosing != c ||
+                entity_table[own].special != special_member::none)
+                return not_supported(n, "namespace.udecl");
+            entity_index last = own;
+            while (entity_table[last].next_overload &&
+                   entity_table[entity_table[last].next_overload].enclosing ==
+                       c)
+                last = entity_table[last].next_overload;
+            if (entity_table[last].next_overload == e) {
+                /* [namespace.udecl]/9: again */
+                used(t, e);
+                return analysis_result::well_formed;
+            }
+            if (entity_table[last].next_overload)
+                return not_supported(n, "namespace.udecl");
+            entity_table[last].next_overload = e;
+            if (entity_table[e].member_templates)
+                introduce_member_templates(c, own,
+                                           entity_table[e].member_templates);
+            used(t, e);
+            return analysis_result::well_formed;
+        }
         entity_table.bind(c, name, e, true);
         used(t, e);
         return analysis_result::well_formed;
