@@ -26,8 +26,20 @@ uint32_t c_lowering::construct_at(const semantic_node &n, uint32_t object,
             return 0;
         arguments.append(a);
     }
-    return special_call(n.b, address_of(object, pointer_to(type_of(object))),
-                        arguments.data(), n.count, at, vtt);
+    uint32_t call =
+        special_call(n.b, address_of(object, pointer_to(type_of(object))),
+                     arguments.data(), n.count, at, vtt);
+    if (!call || !n.op)
+        return call;
+    /* [dcl.init]/8.2: the object is zero-initialized, then the
+       implicit default constructor runs on it */
+    if (holds_data_member_pointer(n.type))
+        return fail("a zero-initialized object with a pointer to data member "
+                    "in it",
+                    n.at);
+    ast_qualified_type t = AST_QUALIFIED_TYPE_UNQUALIFIED(type_of(object));
+    uint32_t zero = make(AST_NODE_ZERO, t, 0, 0, 0, 0, 0);
+    return comma(type_of(call), assign(t, object, zero), call);
 }
 
 /* [dcl.init]/17.6.1: the prvalue n initializes the object in symbol s

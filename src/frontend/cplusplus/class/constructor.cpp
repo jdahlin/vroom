@@ -2693,18 +2693,22 @@ analysis_result semantic_analysis::class_direct_initialization(
         /* T() of an aggregate with default member initializers:
            [dcl.init]/9 value-initialization zero-initializes the object
            and then default-initializes it with the implicit, non-trivial
-           default constructor.  When every member has an initializer the
-           zeros are overwritten, so the constructor alone gives the
-           value; a member without one stays zero, which is not analysed
-           (zero-initialization then a constructor) */
+           default constructor.  When every member has an initializer and
+           no base class holds data the zeros are overwritten, so the
+           constructor alone gives the value; otherwise the construct node
+           is marked (op 1) to zero the object first */
         const entity &x = entity_table[c];
-        if (x.base_count)
-            return not_supported(n, "dcl.init");
+        bool overwritten = !x.base_count;
         for (uint32_t i = 0; i < x.member_count; i++)
             if (!entity_table[class_members[x.first_member + i]]
                      .default_initializer)
-                return not_supported(n, "dcl.init");
+                overwritten = false;
         r = construct(n, type, arguments, 0, value);
+        if (r == analysis_result::well_formed && !overwritten) {
+            if (semantics[value.node].kind != semantic_kind::construct)
+                return not_supported(n, "dcl.init");
+            semantics[value.node].op = 1;
+        }
     } else if (is_aggregate(c) &&
                (arguments.size() != 1 ||
                 arguments[0].type.unqualified() != type.unqualified())) {
