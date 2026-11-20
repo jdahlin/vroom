@@ -275,8 +275,75 @@ analysis_result semantic_analysis::named_cast(SyntaxRef n,
     return explicit_conversion(n, to, m, kinds);
 }
 
+/*
+ * [expr.typeid]/1: "The result of a typeid expression is an lvalue of
+ * static type const std::type_info".  /6: "If the header <typeinfo> is not
+ * imported or included prior to a use of typeid, the program is
+ * ill-formed."  A type-id operand (/4) and an unevaluated expression
+ * operand that is not a glvalue of polymorphic class type (/3) name the
+ * static type; /2's dynamic type, and the std::type_info objects, have no
+ * lowering: the node is not lowered.
+ */
+analysis_result semantic_analysis::type_identification(SyntaxRef n,
+                                                       expression_meaning &m)
+{
+    if (n.size() != 4)
+        return not_supported(n, "expr.typeid");
+    qualified_type operand;
+    if (n[2].is(syntax_kind::type_id)) {
+        VTRY(r, type_id(n[2], operand));
+    } else {
+        expression_meaning e;
+        unevaluated++;
+        analysis_result r = expression(n[2], e);
+        unevaluated--;
+        if (r != analysis_result::well_formed)
+            return r;
+        operand = e.type;
+        if (e.category != value_category::prvalue &&
+            type_table[operand.unqualified()].kind == type_kind::class_type &&
+            entity_table[type_table[operand.unqualified()].entity].dynamic)
+            return not_supported(n, "expr.typeid");
+    }
+    if (depends_on_template_parameter(operand))
+        return not_supported(n, "expr.typeid");
+    const struct type record = type_table[operand.unqualified()];
+    if (record.kind == type_kind::lvalue_reference ||
+        record.kind == type_kind::rvalue_reference)
+        operand = record.operand;
+    const struct type shape = type_table[operand.unqualified()];
+    if (shape.kind == type_kind::class_type && !entity_table[shape.entity].size)
+        return not_supported(n, "expr.typeid");
+    entity_index std_ =
+        entity_table.find(0, tokens.pp.identifier("std", 3) + 1);
+    entity_index info = 0;
+    if (std_ && is_namespace(std_) && std_namespace(std_)) {
+        lookup_result found = lookup_in_namespace(
+            std_, tokens.pp.identifier("type_info", 9) + 1, lookup_filter::any);
+        if (found.ambiguous)
+            return not_supported(n, "namespace.qual");
+        info = found.entity;
+    }
+    if (!info || entity_table[info].kind != entity_kind::class_type ||
+        !entity_table[info].size)
+        return ill_formed(n,
+                          "the header <typeinfo> shall be included before a "
+                          "use of typeid",
+                          "expr.typeid");
+    m = expression_meaning();
+    m.type =
+        qualified_type::make(entity_table[info].type.unqualified(), cv_const);
+    m.category = value_category::lvalue;
+    m.evaluation = constness::not_constant;
+    m.node =
+        expression_node(semantic_kind::type_identification, m, n.first_token());
+    return analysis_result::well_formed;
+}
+
 analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
 {
+    if (n[0].is_token() && n[0].keyword() == standard_keyword::typeid_)
+        return type_identification(n, m);
     if (n.size() == 2 && n[1].is_token()) {
         preprocessing_op_or_punc op =
             preprocessing_op_or_punc_primary(tokens[n[1].token()].op_or_punc);
@@ -433,7 +500,8 @@ analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
             /* a typedef-name of a class */
             return class_conversion(n, record.entity, m);
         if (record.kind != type_kind::fundamental &&
-            record.kind != type_kind::pointer)
+            record.kind != type_kind::pointer &&
+            record.kind != type_kind::enumeration)
             return not_supported(n, "expr.type.conv");
         bool is_void = record.kind == type_kind::fundamental &&
                        record.fundamental == fundamental_type::void_;

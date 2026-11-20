@@ -1180,6 +1180,8 @@ enum class semantic_kind : uint8_t {
     delete_object,
     /* [expr.throw]: a: the operand (0: none, a rethrow); not lowered */
     throw_exception,
+    /* [expr.typeid]: an lvalue of type const std::type_info; not lowered */
+    type_identification,
     /* [class.cdtor]/4, [abi:vtable-ctor]: a: the address of the object
        under construction or destruction (this), b: its class, whose
        virtual table pointer is stored in it */
@@ -2677,6 +2679,8 @@ class semantic_analysis
                                      expression_meaning &right,
                                      expression_meaning &m);
     /* [expr.static.cast], [expr.const.cast], [expr.reinterpret.cast] */
+    /* [expr.typeid] */
+    analysis_result type_identification(SyntaxRef n, expression_meaning &m);
     analysis_result named_cast(SyntaxRef n, standard_keyword keyword,
                                expression_meaning &m);
     /* [expr.comma] */

@@ -1,0 +1,1 @@
+typeid-static-type.cpp:15:39: error: C++ code generation does not handle a typeid expression (no run-time type information) yet

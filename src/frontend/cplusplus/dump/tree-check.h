@@ -308,6 +308,8 @@ struct tree_checker {
         case semantic_kind::throw_exception:
             child(n, node.a, tree_sort::expression, true, "operand");
             break;
+        case semantic_kind::type_identification:
+            break;
         case semantic_kind::block:
         case semantic_kind::declarations:
             list(n, tree_sort::statement, "statement");
