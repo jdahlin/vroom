@@ -17,7 +17,7 @@ template <class T> constexpr unsigned long of_expr(T t) { return sizeof(t) + siz
 template <class T> struct alignas(sizeof(T)) Al { char c; };
 template <class... P> constexpr unsigned long count() { return sizeof...(P); }
 template <class... P> constexpr unsigned long total() { return (sizeof(P) + ... + 0); }
-template <class... P> struct Sizes { static constexpr unsigned long v[sizeof...(P) + 1] = { sizeof(P)..., 0 }; };
+template <class... P> constexpr unsigned long nth(unsigned long i) { constexpr unsigned long v[sizeof...(P) + 1] = { sizeof(P)..., 0 }; return v[i]; }
 template <int N> constexpr unsigned long of_value() { return sizeof(N) + sizeof(char[N]); }
 template <class T> concept Small = sizeof(T) <= 4;
 template <class T> concept Sized = requires { sizeof(T); };
@@ -41,7 +41,7 @@ static_assert(of_expr(1) == 12 && of_expr('c') == 1 + 1 + 4);
 static_assert(alignof(Al<int>) == 4 && sizeof(Al<int>) == 4 && alignof(Al<double>) == 8);
 static_assert(count<>() == 0 && count<int, char, long>() == 3);
 static_assert(total<>() == 0 && total<int, char, long>() == 13);
-static_assert(Sizes<int, char, long>::v[2] == 8 && Sizes<>::v[0] == 0);
+static_assert(nth<int, char, long>(2) == 8 && nth<>(0) == 0);
 static_assert(of_value<5>() == 9);
 static_assert(Small<char> && !Small<long> && Sized<int> && !Sized<Inc<int>>);
 static_assert(pick<char>() == 2 && pick<long>() == 1);
