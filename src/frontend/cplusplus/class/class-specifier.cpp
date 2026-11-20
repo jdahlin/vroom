@@ -969,7 +969,8 @@ entity_index semantic_analysis::declare_class(entity_index scope, uint32_t name,
  * has have no virtual function or virtual base.  [dcl.init.aggr]/2: "The
  * elements of an aggregate are: ... for a class, the direct base classes
  * in declaration order, followed by the direct non-static data members";
- * an empty base, which is no field, is not analysed as one.
+ * an empty base, which is no field, is an element all the same
+ * (aggregate_elements).
  */
 bool semantic_analysis::is_aggregate(entity_index c) const
 {
@@ -1004,11 +1005,15 @@ bool semantic_analysis::is_aggregate(entity_index c) const
        classes" (C++17); "no base classes" before */
     if (x.base_count && !b.has(language_feature::aggregates_with_bases))
         return false;
-    for (uint32_t i = 0; i < x.base_count; i++)
-        if (entity_table[class_bases[x.first_base + i]].field == UINT32_MAX)
+    for (uint32_t i = 0; i < x.base_count; i++) {
+        const entity &b = entity_table[class_bases[x.first_base + i]];
+        if (b.virtual_base || b.access)
             return false;
+    }
     for (uint32_t i = 0; i < x.member_count; i++) {
         const entity &m = entity_table[class_members[x.first_member + i]];
+        if (m.base_subobject)
+            continue; /* its access is the base-specifier's, checked above */
         if (m.access)
             return false;
         /* C++11's [dcl.init.aggr]/1: "no brace-or-equal-initializers for

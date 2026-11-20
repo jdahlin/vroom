@@ -119,7 +119,32 @@ bool semantic_analysis::type_without_external_linkage(qualified_type t,
         if (visible && x.linkage_of_name == linkage::none &&
             visible_local_class(entity_table, record.entity))
             return false;
-        return x.linkage_of_name != linkage::external;
+        if (x.linkage_of_name != linkage::external)
+            return true;
+        /* [basic.link]/4 (clang's template argument list linkage): a class
+           template specialization has the weakest linkage of its template
+           arguments (overloaded<closure type of main>) */
+        if (x.kind == entity_kind::class_type && x.instantiation) {
+            const instantiation_record &made =
+                instantiations[x.instantiation - 1];
+            for (uint32_t i = 0; i < made.argument_count; i++) {
+                const template_argument &a =
+                    template_arguments[made.first_argument + i];
+                if (a.kind == template_argument::kind_t::type &&
+                    type_without_external_linkage(a.type, visible))
+                    return true;
+                if (a.kind != template_argument::kind_t::pack)
+                    continue;
+                for (uint32_t k = 0; k < a.count; k++) {
+                    const template_argument &element =
+                        pack_arguments[a.value + k];
+                    if (element.kind == template_argument::kind_t::type &&
+                        type_without_external_linkage(element.type, visible))
+                        return true;
+                }
+            }
+        }
+        return false;
     }
     case type_kind::pointer:
     case type_kind::array:

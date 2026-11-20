@@ -1578,6 +1578,9 @@ analysis_result semantic_analysis::aggregate_elements(
         target.kind == type_kind::array || target.kind == type_kind::vector;
     owned_array<qualified_type> types;
     owned_array<SyntaxRef> defaults;
+    /* a base class that is no field (an empty one): an element that has
+       no place in the object's fields */
+    owned_array<bool> empty_bases;
     uint64_t count = 0;
     bool unknown_bound = false;
     if (arraylike) {
@@ -1585,11 +1588,29 @@ analysis_result semantic_analysis::aggregate_elements(
         unknown_bound = target.kind == type_kind::array && !target.bound_known;
     } else {
         const entity &x = entity_table[target.entity];
+        /* the direct base classes in declaration order (a non-empty one is
+           the field it is), then the other members */
+        for (uint32_t i = 0; i < x.base_count; i++) {
+            const entity &b = entity_table[class_bases[x.first_base + i]];
+            if (b.field == UINT32_MAX) {
+                types.append(b.type);
+                defaults.append(0);
+                empty_bases.append(true);
+            } else {
+                types.append(
+                    entity_table[class_members[x.first_member + b.field]].type);
+                defaults.append(0);
+                empty_bases.append(false);
+            }
+        }
         for (uint32_t i = 0; i < x.member_count; i++) {
             const entity &m = entity_table[class_members[x.first_member + i]];
+            if (m.base_subobject)
+                continue;
             if (!m.bit_field || m.name) {
                 types.append(m.type);
                 defaults.append(m.default_initializer);
+                empty_bases.append(false);
             }
         }
         count = types.size();
@@ -1606,6 +1627,10 @@ analysis_result semantic_analysis::aggregate_elements(
             element = types[i];
         initialized_value one;
         bool has_default = !arraylike && defaults[i];
+        if (!arraylike && empty_bases[i]) {
+            VTRY(r, empty_base_element(list, clauses, next, element));
+            continue;
+        }
         if (next >= clauses.size()) {
             VTRY(r, omitted_element_checks(list, element, has_default));
         }
@@ -1626,6 +1651,57 @@ analysis_result semantic_analysis::aggregate_elements(
     }
     aggregate_value(list, type, all, elements, result);
     return analysis_result::well_formed;
+}
+
+/*
+ * [dcl.init.aggr]/2: the direct base classes are elements of an aggregate;
+ * [class.derived]/4 an empty one has no storage, so no field holds its
+ * value: the element is initialized as any ([dcl.init.aggr]/4.2, /5), and
+ * the object it makes is nothing the program can tell from any other of the
+ * class, as long as making it does nothing: a closure without captures, a
+ * class with no constructor of its own and no destructor, from a braced
+ * list, a conversion or an object (a clause that calls a function to make
+ * it is not analysed).
+ */
+analysis_result
+semantic_analysis::empty_base_element(SyntaxRef list,
+                                      const owned_array<SyntaxElement> &clauses,
+                                      size_t &next, qualified_type element)
+{
+    entity_index base = type_table[element.unqualified()].entity;
+    if (!trivial_special_members(base))
+        return not_supported(list, "dcl.init.aggr");
+    if (next >= clauses.size()) {
+        /* /5.2: from an empty initializer list */
+        return omitted_element_checks(list, element, false);
+    }
+    initialized_value one;
+    VTRY(r, aggregate_element(list, clauses, next, element, one));
+    if (!makes_no_effect(one.node))
+        return not_supported(list, "dcl.init.aggr");
+    return analysis_result::well_formed;
+}
+
+/* whether evaluating the expression of an empty class does nothing: the
+   shapes empty_base_element accepts */
+bool semantic_analysis::makes_no_effect(uint32_t n) const
+{
+    const semantic_node &x = semantics[n];
+    switch (x.kind) {
+    case semantic_kind::constant:
+    case semantic_kind::zero:
+    case semantic_kind::entity:
+        return true;
+    case semantic_kind::initializer_list:
+        for (uint32_t i = 0; i < x.count; i++)
+            if (!makes_no_effect(semantics.items(x.first)[i]))
+                return false;
+        return true;
+    case semantic_kind::conversion:
+        return makes_no_effect(x.a);
+    default:
+        return false;
+    }
 }
 
 /* [dcl.init.aggr]/5.2 and 5.3: an element no clause initializes, which is
@@ -1876,6 +1952,16 @@ analysis_result semantic_analysis::designated_elements(
                               "dcl.init.aggr");
         const entity &x = entity_table[target.entity];
         is_union = x.union_;
+        /* [dcl.init.aggr]/5.2: an empty base class is an element too,
+           which no designator initializes: value-initialized (nothing to
+           do when its special members are trivial) */
+        for (uint32_t i = 0; i < x.base_count; i++) {
+            const entity &b = entity_table[class_bases[x.first_base + i]];
+            if (b.field == UINT32_MAX &&
+                !trivial_special_members(
+                    type_table[b.type.unqualified()].entity))
+                return not_supported(list, "dcl.init.aggr");
+        }
         for (uint32_t i = 0; i < x.member_count; i++) {
             entity_index e = class_members[x.first_member + i];
             const entity &m = entity_table[e];

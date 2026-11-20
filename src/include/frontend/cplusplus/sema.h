@@ -583,6 +583,12 @@ struct entity {
        last.  The name is bound to the first; the others are reached
        through it (overload_set) */
     entity_index next_overload = 0;
+    /* a member function: a copy of the base class's function that a
+       using-declaration brought into a class whose name already denotes the
+       functions of another base ([namespace.udecl]/1, /15), which the
+       class's chain of the name links without changing the bases' own; the
+       function it stands for (overload_set lists that, never the copy) */
+    entity_index using_shadow_of = 0;
     /* a member function that is the first of its name's chain: the held
        name (held_by_template) of the member function templates of the same
        name in the class, which [temp.mem]/2 overloads with the chain; 0
@@ -2269,6 +2275,17 @@ class semantic_analysis
     analysis_result namespace_alias_definition(NamespaceAliasDefinition n);
     analysis_result using_declaration(UsingDeclaration n);
     analysis_result using_declarator(UsingDeclarator n, bool if_exists = false);
+    /* [temp.variadic]/5: in a using-declaration the pattern is a
+       using-declarator: one followed by an ellipsis, once for each element
+       of the packs it names */
+    analysis_result using_declarator_pack(UsingDeclarator n, bool if_exists);
+    /* [namespace.udecl]/1, /15: the functions of e (a base class's) join
+       the chain of name in class c, which `head` (the name's binding in c)
+       begins and which already has functions of another base: the class's
+       chain links copies of them (entity::using_shadow_of) */
+    analysis_result using_join_chains(UsingDeclarator n, token_index t,
+                                      entity_index c, uint32_t name,
+                                      entity_index head, entity_index e);
     /* [basic.lookup.udir]: the namespace a namespace-name, after a
        nested-name-specifier (0: none), names */
     analysis_result named_namespace(SyntaxRef at, SyntaxRef qualifier,
@@ -2763,6 +2780,14 @@ class semantic_analysis
     };
     owned_array<member_closure> member_closures;
     owned_array<capture_record> member_closure_captures;
+    /* [over.match.class.deduct]: the arguments of a class template
+       argument deduction are analysed to deduce the class and again to
+       initialize it: a lambda-expression among them is one closure type,
+       the one the deduction found (its closure is kept in member_closures,
+       under this key (a node's index with the top bit set: no
+       entity's), while the expression is
+       analysed); 0 when none */
+    uint32_t closure_reuse = 0;
     /* a generic lambda's closure: what its specializations' bodies need of
        the lambda-expression, and the captures it made */
     struct generic_closure {
@@ -3620,6 +3645,12 @@ class semantic_analysis
     aggregate_elements(SyntaxRef list,
                        const owned_array<SyntaxElement> &clauses, size_t &next,
                        qualified_type type, initialized_value &result);
+    /* [dcl.init.aggr]/2: an empty base class, an element with no field */
+    analysis_result
+    empty_base_element(SyntaxRef list,
+                       const owned_array<SyntaxElement> &clauses, size_t &next,
+                       qualified_type element);
+    bool makes_no_effect(uint32_t n) const;
     analysis_result aggregate_element(SyntaxRef list,
                                       const owned_array<SyntaxElement> &clauses,
                                       size_t &next, qualified_type element,
@@ -5328,6 +5359,10 @@ class semantic_analysis
     /* whether class c may bind to a non-const lvalue reference to a non-class
        type: a conversion function returning an lvalue reference
        ([over.match.ref]) */
+    /* [over.call.object]/2: no surrogate call function of c's conversion
+       functions is a better candidate than the call operators calls */
+    bool call_surrogates_lose(entity_index c,
+                              const owned_array<entity_index> &calls) const;
     bool converts_to_lvalue_reference(entity_index c) const;
     /* the first conversion function class c itself declares (the others
        follow by next_overload), 0 if none */

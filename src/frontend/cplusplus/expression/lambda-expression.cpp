@@ -458,9 +458,13 @@ semantic_analysis::lambda_expression_analysed(LambdaExpression n,
         member = initialized_member;
         scope = entity_table[member].enclosing;
     }
-    if (member)
+    /* the key of the closures kept: the member's, or a deduction's */
+    uint32_t kept_key = member;
+    if (!kept_key)
+        kept_key = closure_reuse;
+    if (kept_key)
         for (const member_closure &k : member_closures)
-            if (k.lambda == n.index() && k.member == member) {
+            if (k.lambda == n.index() && k.member == kept_key) {
                 l.closure = k.closure;
                 owned_array<capture_record> again;
                 for (uint32_t i = 0; i < k.capture_count; i++)
@@ -542,11 +546,11 @@ semantic_analysis::lambda_expression_analysed(LambdaExpression n,
         entity_table[c].size = 0;
         return r;
     }
-    if (member) {
+    if (kept_key) {
         member_closure k;
         k.lambda = n.index();
         k.closure = c;
-        k.member = member;
+        k.member = kept_key;
         k.first_capture = static_cast<uint32_t>(member_closure_captures.size());
         k.capture_count = static_cast<uint32_t>(captures.size());
         for (const capture_record &x : captures)

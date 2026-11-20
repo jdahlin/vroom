@@ -467,8 +467,20 @@ analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
         uint32_t ct = class_template_of(x.unknown_entity);
         if (ct && n.size() <= 4) {
             entity_index deduced = 0;
-            VTRY(r, deduced_class(n, ct, deduced));
-            return class_conversion(n, deduced, m);
+            /* a lambda-expression among the arguments is one closure for
+               the deduction and the initialization */
+            uint32_t saved_reuse = closure_reuse;
+            closure_reuse = n.index().index() | 0x80000000u;
+            analysis_result r = deduced_class(n, ct, deduced);
+            if (r == analysis_result::well_formed)
+                r = class_conversion(n, deduced, m);
+            size_t kept = 0;
+            for (size_t i = 0; i < member_closures.size(); i++)
+                if (member_closures[i].member != closure_reuse)
+                    member_closures[kept++] = member_closures[i];
+            member_closures.resize(kept);
+            closure_reuse = saved_reuse;
+            return r;
         }
     }
     if (named_cv)
