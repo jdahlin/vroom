@@ -239,11 +239,26 @@ semantic_analysis::standard_conversion_sequence(const expression_meaning &a,
         s.base_to = tp.entity;
         return s;
     }
-    /* [diff.lex]/3: a string literal to char*, clang's extension since
-       C++11; [conv.fctptr]: a function pointer conversion */
-    if ((a.string_literal &&
-         pointee.unqualified() == target_pointee.unqualified()) ||
-        fp.kind == type_kind::function || tp.kind == type_kind::function)
+    /* [diff.lex]/3: a string literal to char*, wchar_t* and so on (the
+       target's pointee the element type, not const): C++03's deprecated
+       conversion, clang's extension since C++11 (-Wwritable-strings).
+       [impl.clang] since C++11 a function that needs it is worse than any
+       viable function that does not (even one called through an ellipsis
+       or by a user-defined conversion), whatever the other arguments
+       (better in overload-resolution.cpp); it is of Conversion rank
+       between functions that all need it.  C++03 ranks it by other rules
+       (clang's Writing Conversion): not analysed.  The conversion itself
+       is standard_conversion's (standard-conversions.cpp). */
+    if (a.string_literal &&
+        pointee.unqualified() == target_pointee.unqualified() &&
+        !target_pointee.cv()) {
+        if (!tokens.files.behavior.has(language_feature::list_initialization))
+            return of_form(sequence::form::unknown);
+        s.string_literal_to_char_pointer = true;
+        return s;
+    }
+    /* [conv.fctptr]: a function pointer conversion */
+    if (fp.kind == type_kind::function || tp.kind == type_kind::function)
         return of_form(sequence::form::unknown);
     if (fp.kind == type_kind::none || tp.kind == type_kind::none)
         return of_form(sequence::form::unknown);
