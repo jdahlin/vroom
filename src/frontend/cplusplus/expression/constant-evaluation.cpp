@@ -28,6 +28,7 @@
  * not_constant is taken as it is.
  */
 #include "../cplusplus-internal.h"
+#include "frontend/cplusplus/builtin-registry.h"
 #include "frontend/cplusplus/sema.h"
 
 namespace cplusplus
@@ -1532,12 +1533,24 @@ constness semantic_analysis::evaluate_call(constant_evaluation &state,
         return constness::constant;
     }
     /* [ext:gnu_library_builtins] clang evaluates the bit counts */
-    if (int which = bit_count_builtin(semantics[callee].a))
-        return evaluate_bit_count(state, which, x, v);
-    if (int which = query_builtin(semantics[callee].a))
-        return evaluate_query_builtin(state, which, x, v);
-    if (entity_table[semantics[callee].a].gnu_flags & gnu_floating_constant)
-        return evaluate_floating_builtin(state, semantics[callee].a, x, v);
+    if (uint16_t row = entity_table[semantics[callee].a].gnu_builtin_row) {
+        const gnu_builtin &b = gnu_builtin_at(row);
+        switch (b.fold) {
+        case builtin_fold::bit_count:
+            return evaluate_bit_count(state, b.which, x, v);
+        case builtin_fold::constant_p:
+        case builtin_fold::lock_free:
+            return evaluate_query_builtin(state, b.which, x, v);
+        case builtin_fold::floating_constant:
+            return evaluate_floating_builtin(state, semantics[callee].a, x, v);
+        case builtin_fold::identity:
+            return evaluate_node(state, semantics.items(x.first)[0], v);
+        case builtin_fold::bswap:
+            return evaluate_bswap(state, x, v);
+        default:
+            return evaluate_builtin_fold(state, b, x, v);
+        }
+    }
     /* [class.this]/1: a non-static member function's this, the address
        of the object expression */
     constant_value self;

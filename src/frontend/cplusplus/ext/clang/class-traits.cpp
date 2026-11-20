@@ -158,6 +158,7 @@ bool semantic_analysis::derives_from(entity_index d, entity_index b) const
    Derived that is an incomplete class other than Base is ill-formed
    ([meta.rel]/5: "complete type"), left unsupported. */
 analysis_result semantic_analysis::clang_base_of_trait(SyntaxRef n,
+                                                       bool virtual_base,
                                                        expression_meaning &m)
 {
     qualified_type b, d;
@@ -172,7 +173,20 @@ analysis_result semantic_analysis::clang_base_of_trait(SyntaxRef n,
         if (entity_table[bk.entity].kind != entity_kind::class_type ||
             entity_table[dk.entity].kind != entity_kind::class_type)
             return not_supported(n, "meta.rel");
-        if (bk.entity == dk.entity) {
+        if (virtual_base) {
+            /* __builtin_is_virtual_base_of(B, D): B is one of D's virtual
+               bases, direct or indirect ([class.mi]/4); a class is none of
+               its own */
+            if (!entity_table[dk.entity].size)
+                return not_supported(n, "meta.rel");
+            const entity &x = entity_table[dk.entity];
+            for (uint32_t i = 0; i < x.virtual_base_count; i++)
+                if (type_table[entity_table[class_virtual_bases
+                                                [x.first_virtual_base + i]]
+                                   .type.unqualified()]
+                        .entity == bk.entity)
+                    value = true;
+        } else if (bk.entity == dk.entity) {
             value = !entity_table[bk.entity].union_;
         } else {
             if (!entity_table[dk.entity].size)
@@ -275,6 +289,29 @@ bool semantic_analysis::class_property_trait(int which, qualified_type t,
         {
             bool throws = false;
             answer = class_destructible(c, throws) && !destroys(c);
+        }
+        return true;
+    /* [meta.unary.prop] is_destructible: "the expression declval<U&>().~U()
+       is well-formed when treated as an unevaluated operand" for U the
+       type without its array extents or reference ("T is a reference
+       type: true; void, a function, an array of unknown bound: false");
+       is_nothrow_destructible: and the destructor does not throw */
+    case unary_trait_kind::is_destructible:
+    case unary_trait_kind::is_nothrow_destructible:
+        if (kind == type_kind::function ||
+            fundamental_of(t) == fundamental_type::void_ || unbounded)
+            return true;
+        if (!is_class) {
+            answer = true;
+            return true;
+        }
+        {
+            bool throws = false;
+            answer = class_destructible(c, throws);
+            if (static_cast<unary_trait_kind>(which) ==
+                    unary_trait_kind::is_nothrow_destructible &&
+                throws)
+                answer = false;
         }
         return true;
     default:

@@ -16,278 +16,155 @@
 #include "../../cplusplus-internal.h"
 #include "common/softfloat.h"
 #include "frontend/c/ast-builder.h"
+#include "frontend/cplusplus/builtin-registry.h"
 #include "frontend/cplusplus/sema.h"
 
 namespace cplusplus
 {
 
-/* a type of a library builtin's prototype, as clang's Builtins.td writes
-   them */
-enum class builtin_type : uint8_t {
-    end,
-    void_,
-    bool_,
-    int_,
-    float_,
-    double_,
-    long_double,
-    size_t_,
-    char_pointer,
-    const_char_pointer,
-    void_pointer,
-    const_void_pointer,
-    ellipsis,
-    long_,
-    long_long,
-    int_pointer,
-    /* <math.h>'s floating type: double, float with the suffix f, long
-       double with l (C17 7.12/1's "f" and "l" suffixed functions) */
-    real,
-    real_pointer,
-    wchar_,
-    wchar_pointer,
-    const_wchar_pointer,
-};
-
-struct library_builtin_rule {
-    const char *name;
-    bool noreturn;
-    /* the result, then the parameters, ending with end (an ellipsis last
-       if it is variadic) */
-    builtin_type types[6];
-};
-
-using bt = builtin_type;
-
-/* clang's Builtins.td, the LibBuiltin entries' prototypes (<stdlib.h>,
-   <string.h>, <stdio.h>, <strings.h>, <math.h>) */
-static const library_builtin_rule library_builtins[] = {
-    {"abort", true, {bt::void_, bt::end}},
-    {"abs", false, {bt::int_, bt::int_, bt::end}},
-    {"ffs", false, {bt::int_, bt::int_, bt::end}},
-    {"memchr",
-     false,
-     {bt::void_pointer, bt::const_void_pointer, bt::int_, bt::size_t_,
-      bt::end}},
-    {"memcmp",
-     false,
-     {bt::int_, bt::const_void_pointer, bt::const_void_pointer, bt::size_t_,
-      bt::end}},
-    {"memcpy",
-     false,
-     {bt::void_pointer, bt::void_pointer, bt::const_void_pointer, bt::size_t_,
-      bt::end}},
-    {"memmove",
-     false,
-     {bt::void_pointer, bt::void_pointer, bt::const_void_pointer, bt::size_t_,
-      bt::end}},
-    {"memset",
-     false,
-     {bt::void_pointer, bt::void_pointer, bt::int_, bt::size_t_, bt::end}},
-    {"printf",
-     false,
-     {bt::int_, bt::const_char_pointer, bt::ellipsis, bt::end}},
-    {"puts", false, {bt::int_, bt::const_char_pointer, bt::end}},
-    {"snprintf",
-     false,
-     {bt::int_, bt::char_pointer, bt::size_t_, bt::const_char_pointer,
-      bt::ellipsis, bt::end}},
-    {"sprintf",
-     false,
-     {bt::int_, bt::char_pointer, bt::const_char_pointer, bt::ellipsis,
-      bt::end}},
-    {"strchr",
-     false,
-     {bt::char_pointer, bt::const_char_pointer, bt::int_, bt::end}},
-    {"strcmp",
-     false,
-     {bt::int_, bt::const_char_pointer, bt::const_char_pointer, bt::end}},
-    {"strcpy",
-     false,
-     {bt::char_pointer, bt::char_pointer, bt::const_char_pointer, bt::end}},
-    {"strlen", false, {bt::size_t_, bt::const_char_pointer, bt::end}},
-    {"strncmp",
-     false,
-     {bt::int_, bt::const_char_pointer, bt::const_char_pointer, bt::size_t_,
-      bt::end}},
-    {"strncpy",
-     false,
-     {bt::char_pointer, bt::char_pointer, bt::const_char_pointer, bt::size_t_,
-      bt::end}},
-    {"strpbrk",
-     false,
-     {bt::char_pointer, bt::const_char_pointer, bt::const_char_pointer,
-      bt::end}},
-    {"strrchr",
-     false,
-     {bt::char_pointer, bt::const_char_pointer, bt::int_, bt::end}},
-    {"strstr",
-     false,
-     {bt::char_pointer, bt::const_char_pointer, bt::const_char_pointer,
-      bt::end}},
-    {"wcslen", false, {bt::size_t_, bt::const_wchar_pointer, bt::end}},
-    {"wmemchr",
-     false,
-     {bt::wchar_pointer, bt::const_wchar_pointer, bt::wchar_, bt::size_t_,
-      bt::end}},
-    {"wmemcmp",
-     false,
-     {bt::int_, bt::const_wchar_pointer, bt::const_wchar_pointer, bt::size_t_,
-      bt::end}},
-};
-
-#define MATH1(n)                                                               \
-    {                                                                          \
-        n, false,                                                              \
-        {                                                                      \
-            bt::real, bt::real, bt::end                                        \
-        }                                                                      \
-    }
-#define MATH2(n)                                                               \
-    {                                                                          \
-        n, false,                                                              \
-        {                                                                      \
-            bt::real, bt::real, bt::real, bt::end                              \
-        }                                                                      \
-    }
-
-/* <math.h>'s functions, each also with the suffixes f and l */
-static const library_builtin_rule math_builtins[] = {
-    MATH1("acos"),
-    MATH1("acosh"),
-    MATH1("asin"),
-    MATH1("asinh"),
-    MATH1("atan"),
-    MATH2("atan2"),
-    MATH1("atanh"),
-    MATH1("cbrt"),
-    MATH1("ceil"),
-    MATH2("copysign"),
-    MATH1("cos"),
-    MATH1("cosh"),
-    MATH1("erf"),
-    MATH1("erfc"),
-    MATH1("exp"),
-    MATH1("exp2"),
-    MATH1("expm1"),
-    MATH1("fabs"),
-    MATH2("fdim"),
-    MATH1("floor"),
-    {"fma", false, {bt::real, bt::real, bt::real, bt::real, bt::end}},
-    MATH2("fmax"),
-    MATH2("fmin"),
-    MATH2("fmod"),
-    {"frexp", false, {bt::real, bt::real, bt::int_pointer, bt::end}},
-    MATH2("hypot"),
-    {"ilogb", false, {bt::int_, bt::real, bt::end}},
-    {"ldexp", false, {bt::real, bt::real, bt::int_, bt::end}},
-    MATH1("lgamma"),
-    {"llrint", false, {bt::long_long, bt::real, bt::end}},
-    {"llround", false, {bt::long_long, bt::real, bt::end}},
-    MATH1("log"),
-    MATH1("log10"),
-    MATH1("log1p"),
-    MATH1("log2"),
-    MATH1("logb"),
-    {"lrint", false, {bt::long_, bt::real, bt::end}},
-    {"lround", false, {bt::long_, bt::real, bt::end}},
-    {"modf", false, {bt::real, bt::real, bt::real_pointer, bt::end}},
-    MATH1("nearbyint"),
-    MATH2("nextafter"),
-    {"nexttoward", false, {bt::real, bt::real, bt::long_double, bt::end}},
-    MATH2("pow"),
-    MATH2("remainder"),
-    {"remquo", false, {bt::real, bt::real, bt::real, bt::int_pointer, bt::end}},
-    MATH1("rint"),
-    MATH1("round"),
-    {"scalbln", false, {bt::real, bt::real, bt::long_, bt::end}},
-    {"scalbn", false, {bt::real, bt::real, bt::int_, bt::end}},
-    MATH1("sin"),
-    MATH1("sinh"),
-    MATH1("sqrt"),
-    MATH1("tan"),
-    MATH1("tanh"),
-    MATH1("tgamma"),
-    MATH1("trunc"),
-};
-
-#undef MATH1
-#undef MATH2
-
-/* t: a builtin_type */
-qualified_type semantic_analysis::builtin_parameter_type(uint8_t t,
-                                                         uint8_t real)
+/* a pointer to a fundamental type with the cv-qualifiers on the pointee */
+qualified_type semantic_analysis::builtin_pointer(fundamental_type f,
+                                                  uint32_t pointee_cv)
 {
-    fundamental_type f = fundamental_type::void_;
-    uint32_t pointee_cv = cv_none;
-    bool pointer = false;
-    switch (static_cast<builtin_type>(t)) {
-    case builtin_type::bool_:
+    qualified_type q =
+        qualified_type::make(type_table.fundamental(f), pointee_cv);
+    return qualified_type::make(type_table.pointer_to(q), cv_none);
+}
+
+qualified_type semantic_analysis::builtin_scalar(fundamental_type f)
+{
+    return qualified_type::make(type_table.fundamental(f), cv_none);
+}
+
+/* the unsigned integer type of the signed one f */
+static fundamental_type unsigned_integer(fundamental_type f)
+{
+    switch (f) {
+    case fundamental_type::int_:
+        return fundamental_type::unsigned_int;
+    case fundamental_type::long_int:
+        return fundamental_type::unsigned_long_int;
+    case fundamental_type::long_long_int:
+        return fundamental_type::unsigned_long_long_int;
+    default:
+        return fundamental_type::unsigned_int128;
+    }
+}
+
+/*
+ * One type of a library builtin's prototype at *p, in Builtins.def's
+ * encoding (clang's Builtins.td; frontend/c/libbuiltins.inc, which
+ * gen-libbuiltins.py makes from it): the prefixes L (long), S (signed),
+ * U (unsigned), I (a required constant), X (complex); the type letters v b
+ * c s i f d, z (size_t), Y (ptrdiff_t), w (wchar_t), P (FILE, as void), W
+ * (int64_t), Z (int32_t); the suffixes * (pointer), C, D (const, volatile)
+ * and R (restrict, no meaning here).  False for a type this front end has
+ * no type for (__float128, __int128 pointers are read).
+ */
+bool semantic_analysis::library_type(const char *&p, qualified_type &t)
+{
+    int longs = 0;
+    bool is_signed = false, is_unsigned = false, complex = false;
+    for (;; p++) {
+        if (*p == 'L')
+            longs++;
+        else if (*p == 'S')
+            is_signed = true;
+        else if (*p == 'U')
+            is_unsigned = true;
+        else if (*p == 'X')
+            complex = true;
+        else if (*p != 'I')
+            break;
+    }
+    fundamental_type f = fundamental_type::none;
+    switch (*p++) {
+    case 'v':
+        f = fundamental_type::void_;
+        break;
+    case 'b':
         f = fundamental_type::bool_;
         break;
-    case builtin_type::int_:
-        f = fundamental_type::int_;
+    case 'c':
+        f = fundamental_type::char_;
+        if (is_unsigned)
+            f = fundamental_type::unsigned_char;
+        else if (is_signed)
+            f = fundamental_type::signed_char;
         break;
-    case builtin_type::float_:
+    case 's':
+        f = fundamental_type::short_int;
+        if (is_unsigned)
+            f = fundamental_type::unsigned_short_int;
+        break;
+    case 'i':
+        if (longs == 0)
+            f = fundamental_type::int_;
+        else if (longs == 1)
+            f = fundamental_type::long_int;
+        else if (longs == 2)
+            f = fundamental_type::long_long_int;
+        else
+            f = fundamental_type::int128;
+        if (is_unsigned)
+            f = unsigned_integer(f);
+        longs = 0;
+        break;
+    case 'f':
         f = fundamental_type::float_;
         break;
-    case builtin_type::double_:
+    case 'd':
+        if (longs > 1)
+            return false;
         f = fundamental_type::double_;
+        if (longs)
+            f = fundamental_type::long_double;
+        longs = 0;
         break;
-    case builtin_type::long_double:
-        f = fundamental_type::long_double;
-        break;
-    case builtin_type::long_:
-        f = fundamental_type::long_int;
-        break;
-    case builtin_type::long_long:
-        f = fundamental_type::long_long_int;
-        break;
-    case builtin_type::int_pointer:
-        f = fundamental_type::int_;
-        pointer = true;
-        break;
-    case builtin_type::const_wchar_pointer:
-        pointee_cv = cv_const;
-        [[fallthrough]];
-    case builtin_type::wchar_pointer:
-        pointer = true;
-        [[fallthrough]];
-    case builtin_type::wchar_:
-        f = fundamental_type::wchar_t_;
-        break;
-    case builtin_type::real_pointer:
-        pointer = true;
-        [[fallthrough]];
-    case builtin_type::real:
-        f = static_cast<fundamental_type>(real);
-        break;
-    case builtin_type::size_t_:
+    case 'z':
         /* [support.types.layout]/3: "The type size_t is an
            implementation-defined unsigned integer type", sizeof's */
         f = fundamental_type::unsigned_long_int;
         break;
-    case builtin_type::const_char_pointer:
-        pointee_cv = cv_const;
-        [[fallthrough]];
-    case builtin_type::char_pointer:
-        f = fundamental_type::char_;
-        pointer = true;
+    case 'Y':
+        f = fundamental_type::long_int;
         break;
-    case builtin_type::const_void_pointer:
-        pointee_cv = cv_const;
-        [[fallthrough]];
-    case builtin_type::void_pointer:
-        pointer = true;
+    case 'w':
+        f = fundamental_type::wchar_t_;
+        break;
+    case 'P':
+        f = fundamental_type::void_;
+        break;
+    case 'W':
+        f = fundamental_type::long_int;
+        break;
+    case 'Z':
+        f = fundamental_type::int_;
         break;
     default:
-        break;
+        return false;
     }
-    qualified_type q = qualified_type::make(type_table.fundamental(f), cv_none);
-    if (!pointer)
-        return q;
-    q = qualified_type::make(type_table.fundamental(f), pointee_cv);
-    return qualified_type::make(type_table.pointer_to(q), cv_none);
+    if (longs)
+        return false;
+    t = builtin_scalar(f);
+    if (complex)
+        t = qualified_type::make(type_table.complex_of(t), cv_none);
+    for (;; p++) {
+        if (*p == '*') {
+            t = qualified_type::make(type_table.pointer_to(t), cv_none);
+            /* (an address space) */
+            while (p[1] >= '0' && p[1] <= '9')
+                p++;
+        } else if (*p == 'C' || *p == 'D') {
+            uint32_t cv = cv_volatile;
+            if (*p == 'C')
+                cv = cv_const;
+            t = qualified_type::make(t.unqualified(), t.cv() | cv);
+        } else if (*p != 'R') {
+            break;
+        }
+    }
+    return true;
 }
 
 /* [ext:clang_builtin_functions] clang's builtin functions that are not C
@@ -332,68 +209,6 @@ entity_index semantic_analysis::declare_builtin(
     entity_table[e].gnu_flags = flags;
     entity_table.bind(0, name, e);
     return e;
-}
-
-/* the type-generic classifications and comparisons of <math.h> (C17
-   7.12.3, 7.12.14) among the C front end's builtins: their arguments
-   are passed as they are, unpromoted (postfix-expression.cpp), as clang's
-   custom type checking does */
-static const char *const generic_builtins[] = {
-    "fpclassify",
-    "isfinite",
-    "isgreater",
-    "isgreaterequal",
-    "isinf",
-    "isless",
-    "islessequal",
-    "islessgreater",
-    "isnan",
-    "isnormal",
-    "isunordered",
-    "signbit",
-    /* clang's type-generic bit counts (Builtins.td, custom type
-       checking): the one argument of any unsigned integer type */
-    "popcountg",
-    "clzg",
-    "ctzg",
-};
-
-/* __builtin_popcountg, __builtin_clzg, __builtin_ctzg: 1, 2, 3 */
-static int bit_count_kind(const char *spelling, size_t length)
-{
-    static const char *const names[] = {"popcountg", "clzg", "ctzg"};
-    for (int i = 0; i < 3; i++)
-        if (length == 10 + strlen(names[i]) &&
-            !memcmp(spelling + 10, names[i], length - 10))
-            return i + 1;
-    return 0;
-}
-
-static bool is_bit_count_builtin(const char *spelling, size_t length)
-{
-    return length > 10 && !memcmp(spelling, "__builtin_", 10) &&
-           bit_count_kind(spelling, length) != 0;
-}
-
-static bool is_generic_builtin(const char *spelling, size_t length)
-{
-    for (const char *g : generic_builtins)
-        if (length == 10 + strlen(g) && !memcmp(spelling + 10, g, length - 10))
-            return true;
-    return false;
-}
-
-/* __builtin_constant_p, __atomic_always_lock_free, __atomic_is_lock_free,
-   __c11_atomic_is_lock_free: 1, 2, 3, 4 */
-static int query_kind(const char *spelling, size_t length)
-{
-    static const char *const names[] = {
-        "__builtin_constant_p", "__atomic_always_lock_free",
-        "__atomic_is_lock_free", "__c11_atomic_is_lock_free"};
-    for (int i = 0; i < 4; i++)
-        if (length == strlen(names[i]) && !memcmp(spelling, names[i], length))
-            return i + 1;
-    return 0;
 }
 
 /* the scalar letters of the C front end's builtin signatures and their
@@ -464,88 +279,146 @@ static floating_builtin floating_builtin_kind(const char *spelling,
     return floating_builtin::none;
 }
 
-/* a builtin of vcc's C front end (frontend/c/builtin-table.cpp) whose
-   signature has scalar types only, in the table's letters, or one of the
-   generic_builtins: lowered to the C front end's builtin node
-   (gnu_compiler_builtin) */
+/* the type of a letter of the C front end's builtin signatures (frontend/c/
+   builtin-table.cpp, cc_builtin_signature_type): a scalar, a vector of 16
+   bytes, or a pointer to void or char (p, P, s, S); not a va_list (V, M) */
+bool semantic_analysis::builtin_letter_type(char letter, qualified_type &t)
+{
+    switch (letter) {
+    case 'p':
+        t = builtin_pointer(fundamental_type::void_, cv_none);
+        return true;
+    case 'P':
+        t = builtin_pointer(fundamental_type::void_, cv_const);
+        return true;
+    case 's':
+        t = builtin_pointer(fundamental_type::char_, cv_none);
+        return true;
+    case 'S':
+        t = builtin_pointer(fundamental_type::char_, cv_const);
+        return true;
+    default:
+        break;
+    }
+    const char *at = strchr(signature_letters, letter);
+    if (!letter || !at)
+        return false;
+    t = builtin_scalar(signature_types[at - signature_letters]);
+    /* [ext:gnu_vector_size] F, B, H, I, Q and E: the x86 builtins' vectors of
+       16 bytes (v4sf, v16qi, v8hi, v4si, v2di, v2df) of that element */
+    if (strchr("FBHIQE", letter))
+        t = qualified_type::make(type_table.vector_of(t, 16 / size_of_type(t)),
+                                 cv_none);
+    return true;
+}
+
+/* a builtin of vcc's C front end (frontend/c/builtin-table.cpp): its
+   function type is the table's signature when the registry has no row of
+   another form, and the call lowers to the C front end's builtin node
+   (gnu_compiler_builtin); the form of the registry's row says how a call
+   with arguments of any type is checked.  A signature with a parameter
+   this front end has no type for (a vector, a va_list) is declared as a
+   function of the form `unsupported`: a call is refused naming it. */
 entity_index semantic_analysis::compiler_builtin(uint32_t name,
                                                  const char *spelling,
                                                  size_t length)
 {
     const char *signature = ast_builder_builtin_signature(spelling, length);
-    if (!signature)
+    uint16_t row = 0;
+    const gnu_builtin *registered = gnu_builtin_find(spelling, length, &row);
+    if (!signature && !registered)
         return 0;
-    floating_builtin floating = floating_builtin_kind(spelling, length);
-    if (floating == floating_builtin::infinity_sign ||
-        floating == floating_builtin::is_signaling)
-        return declare_builtin(
-            name, name,
-            qualified_type::make(type_table.fundamental(fundamental_type::int_),
-                                 cv_none),
-            nullptr, 0, true,
-            gnu_compiler_builtin | gnu_untyped_builtin | gnu_floating_constant);
-    if (floating != floating_builtin::none) {
-        fundamental_type type = fundamental_type::double_;
-        if (signature[0] == 'f')
-            type = fundamental_type::float_;
-        if (signature[0] == 'D')
-            type = fundamental_type::long_double;
-        uint32_t flags = gnu_compiler_builtin;
-        if (type != fundamental_type::long_double)
-            flags |= gnu_floating_constant;
-        qualified_type result =
-            qualified_type::make(type_table.fundamental(type), cv_none);
-        qualified_type parameter = builtin_parameter_type(
-            static_cast<uint8_t>(builtin_type::const_char_pointer));
-        return declare_builtin(name, name, result, &parameter,
-                               signature[1] == 'S', false, flags);
-    }
-    owned_array<qualified_type> types_of;
-    /* a signature of other than scalar letters (a pointer to any type, a
-       va_list): one function taking anything whose calls are refused */
-    int query = query_kind(spelling, length);
-    /* an atomic builtin's signature is C's builtin layer's ("vc": the weak
-       argument a __c11_atomic_compare_exchange_* call leaves out, inserted
-       there): it takes anything, atomic_builtin_result has the rules */
-    int written = 0, shape = 0;
-    bool atomic = ast_builder_atomic_shape(spelling, length, &written, &shape);
-    for (const char *s = signature; *s; s++)
-        if (query || atomic || !strchr(signature_letters, *s) ||
-            (s != signature && *s == 'v')) {
-            if (is_generic_builtin(spelling, length))
-                break;
-            uint32_t flags = gnu_compiler_builtin | gnu_untyped_builtin;
-            if (query)
-                flags |= gnu_query_builtin;
-            return declare_builtin(
-                name, name,
-                qualified_type::make(
-                    type_table.fundamental(fundamental_type::void_), cv_none),
-                nullptr, 0, true, flags);
-        }
-    /* int f(...) */
-    bool generic = is_generic_builtin(spelling, length);
-    for (const char *s = signature; *s && !(generic && s != signature); s++) {
-        const char *at = strchr(signature_letters, *s);
-        /* a parameter of type void is no scalar */
-        if (!at || (s != signature && *s == 'v'))
-            return 0;
-        qualified_type made = qualified_type::make(
-            type_table.fundamental(signature_types[at - signature_letters]),
-            cv_none);
-        if (*s == 'F' || *s == 'B' || *s == 'H' || *s == 'I' || *s == 'Q' ||
-            *s == 'E')
-            /* [ext:gnu_vector_size] a vector of 16 bytes */
-            made = qualified_type::make(
-                type_table.vector_of(made, 16 / size_of_type(made)), cv_none);
-        types_of.append(made);
-    }
-    /* the result, then the parameters */
+    /* (a builtin of this front end alone has its own prototype) */
+    if (registered && registered->proto)
+        signature = registered->proto;
+    if (registered && registered->form == builtin_form::library)
+        return 0;
+    qualified_type void_type = qualified_type::make(
+        type_table.fundamental(fundamental_type::void_), cv_none);
     uint32_t flags = gnu_compiler_builtin;
-    if (is_bit_count_builtin(spelling, length))
-        flags |= gnu_bit_count;
-    return declare_builtin(name, name, types_of[0], types_of.data() + 1,
-                           types_of.size() - 1, generic, flags);
+    entity_index e = 0;
+    builtin_form form = builtin_form::signature;
+    if (registered)
+        form = registered->form;
+    /* a function taking anything: the form checks each call */
+    if (form == builtin_form::query || form == builtin_form::va_list ||
+        form == builtin_form::overflow || form == builtin_form::atomic ||
+        form == builtin_form::bit_count || form == builtin_form::generic ||
+        form == builtin_form::launder || form == builtin_form::bswapg ||
+        form == builtin_form::invoke || form == builtin_form::complex) {
+        qualified_type result = void_type;
+        /* (the type-generic ones have the signature's result type) */
+        if (form == builtin_form::generic || form == builtin_form::bit_count)
+            builtin_letter_type(signature[0], result);
+        e = declare_builtin(name, name, result, nullptr, 0, true, flags);
+    } else if (form == builtin_form::floating_constant) {
+        qualified_type result;
+        builtin_letter_type(signature[0], result);
+        qualified_type parameter =
+            builtin_pointer(fundamental_type::char_, cv_const);
+        e = declare_builtin(name, name, result, &parameter, signature[1] == 'S',
+                            false, flags);
+    } else {
+        owned_array<qualified_type> types_of;
+        bool known = signature != nullptr;
+        bool variadic = false;
+        for (const char *s = signature; known && *s; s++) {
+            qualified_type t;
+            if (*s == '.') {
+                variadic = s != signature;
+                known = variadic && !s[1];
+                break;
+            }
+            /* a parameter of type void is no scalar */
+            if (!builtin_letter_type(*s, t) || (s != signature && *s == 'v'))
+                known = false;
+            else
+                types_of.append(t);
+        }
+        if (known && (form == builtin_form::complex_part ||
+                      form == builtin_form::complex_conjugate)) {
+            /* the C table's d. f. D.: the real type of the complex argument */
+            qualified_type complex_type = qualified_type::make(
+                type_table.complex_of(types_of[0]), cv_none);
+            if (form == builtin_form::complex_part) {
+                types_of.append(complex_type);
+            } else {
+                types_of[0] = complex_type;
+                types_of.append(complex_type);
+            }
+            variadic = false;
+        }
+        if (known && form == builtin_form::carry && types_of.size() == 4) {
+            /* the C table writes the carry out as the variadic rest: a
+               pointer to the type */
+            types_of.append(qualified_type::make(
+                type_table.pointer_to(types_of[0]), cv_none));
+            variadic = false;
+        }
+        if (known && types_of.size() && form == builtin_form::library_alias) {
+            /* the library function's own symbol, noexcept as clang's
+               declaration of a library function */
+            uint32_t symbol = tokens.pp.identifier(registered->symbol,
+                                                   strlen(registered->symbol)) +
+                              1;
+            e = declare_builtin(name, symbol, types_of[0], types_of.data() + 1,
+                                types_of.size() - 1, variadic,
+                                gnu_library_function, true);
+            entity_table[e].gnu_builtin_row = row;
+            return e;
+        }
+        if (known && types_of.size()) {
+            e = declare_builtin(name, name, types_of[0], types_of.data() + 1,
+                                types_of.size() - 1, variadic, flags);
+        } else {
+            form = builtin_form::unsupported;
+            e = declare_builtin(name, name, void_type, nullptr, 0, true, flags);
+        }
+    }
+    if (form == builtin_form::unsupported)
+        row = gnu_builtin_unsupported_row;
+    entity_table[e].gnu_builtin_row = row;
+    return e;
 }
 
 bool semantic_analysis::builtin_spelled(uint32_t name) const
@@ -553,6 +426,73 @@ bool semantic_analysis::builtin_spelled(uint32_t name) const
     size_t length = 0;
     const char *spelling = tokens.pp.identifier_spelling(name - 1, &length);
     return length > 10 && !memcmp(spelling, "__builtin_", 10);
+}
+
+/*
+ * The C library function __builtin_NAME declares at its first use, as clang
+ * does (GCC manual 6.63): the prototype is the C front end's table's, or
+ * clang's Builtins.td (frontend/c/libbuiltins.inc), its symbol the
+ * library's name, and it is noexcept in C++ (the declaration <math.h> and
+ * <string.h> write with __THROW is of the same type).  A prototype this
+ * front end has no types for is declared as a function of the form
+ * `unsupported`.
+ */
+entity_index semantic_analysis::library_function_builtin(uint32_t name,
+                                                         const char *spelling,
+                                                         size_t length)
+{
+    const char *signature = nullptr, *symbol = nullptr;
+    bool clang_encoding = false;
+    if (!ast_builder_library_builtin(spelling + 10, length - 10, &signature,
+                                     &clang_encoding, &symbol))
+        return 0;
+    owned_array<qualified_type> types_of;
+    bool variadic = false, known = true;
+    const char *p = signature;
+    while (known && *p) {
+        qualified_type t;
+        if (*p == '.') {
+            variadic = true;
+            break;
+        }
+        if (clang_encoding) {
+            known = library_type(p, t);
+        } else {
+            known = builtin_letter_type(*p, t);
+            p++;
+        }
+        if (known)
+            types_of.append(t);
+    }
+    if (!known || !types_of.size()) {
+        entity_index e =
+            declare_builtin(name, name, builtin_scalar(fundamental_type::void_),
+                            nullptr, 0, true, gnu_compiler_builtin);
+        entity_table[e].gnu_builtin_row = gnu_builtin_unsupported_row;
+        return e;
+    }
+    uint32_t library = 0;
+    if (symbol)
+        library = tokens.pp.identifier(symbol, strlen(symbol)) + 1;
+    else
+        library = tokens.pp.identifier(spelling + 10, length - 10) + 1;
+    uint32_t flags = gnu_library_function;
+    /* (C17 7.22.4.1, 7.22.4.4, 7.22.4.5, 7.22.4.7) */
+    static const char *const noreturn_functions[] = {"abort", "exit", "_Exit",
+                                                     "quick_exit"};
+    for (const char *f : noreturn_functions)
+        if (strlen(f) == length - 10 && !memcmp(f, spelling + 10, length - 10))
+            flags |= gnu_noreturn;
+    /* bound under its __builtin_ name: the program's own declaration of the
+       library function is another */
+    entity_index e =
+        declare_builtin(name, library, types_of[0], types_of.data() + 1,
+                        types_of.size() - 1, variadic, flags, true);
+    /* (a row of the registry says how a constant expression folds it) */
+    uint16_t row = 0;
+    if (gnu_builtin_find(spelling, length, &row))
+        entity_table[e].gnu_builtin_row = row;
+    return e;
 }
 
 entity_index semantic_analysis::library_builtin(uint32_t name)
@@ -564,102 +504,25 @@ entity_index semantic_analysis::library_builtin(uint32_t name)
     const char *spelling = tokens.pp.identifier_spelling(name - 1, &length);
     if (length <= 10 || memcmp(spelling, "__builtin_", 10))
         return compiler_builtin(name, spelling, length);
-    spelling += 10;
-    length -= 10;
     /* clang's bool __builtin_is_constant_evaluated(void) (Builtins.td):
        [meta.const.eval]/1's std::is_constant_evaluated, true "if and only
        if evaluation of the call occurs within the evaluation of an
        expression or conversion that is manifestly constant-evaluated"; no
        library function: the evaluator answers true, lowering false */
-    if (length == 21 && !memcmp(spelling, "is_constant_evaluated", 21)) {
-        return declare_builtin(
-            name, name,
-            builtin_parameter_type(static_cast<uint8_t>(builtin_type::bool_)),
-            nullptr, 0, false, gnu_is_constant_evaluated);
-    }
-    const library_builtin_rule *found = nullptr;
-    for (const library_builtin_rule &b : library_builtins)
-        if (strlen(b.name) == length && !memcmp(b.name, spelling, length))
-            found = &b;
-    fundamental_type real = fundamental_type::double_;
-    for (const library_builtin_rule &b : math_builtins) {
-        size_t n = strlen(b.name);
-        if (n > length || memcmp(b.name, spelling, n))
-            continue;
-        /* NAME, or NAMEf, NAMEl; a name of the table wins (modf, modff) */
-        if (n == length) {
-            found = &b;
-            real = fundamental_type::double_;
-        } else if (n + 1 == length && !found && spelling[n] == 'f') {
-            found = &b;
-            real = fundamental_type::float_;
-        } else if (n + 1 == length && !found && spelling[n] == 'l') {
-            found = &b;
-            real = fundamental_type::long_double;
-        }
-    }
-    if (!found)
-        return compiler_builtin(name, spelling - 10, length + 10);
-    qualified_type result = builtin_parameter_type(
-        static_cast<uint8_t>(found->types[0]), static_cast<uint8_t>(real));
-    owned_array<qualified_type> parameters;
-    bool variadic = false;
-    for (uint32_t i = 1; found->types[i] != builtin_type::end; i++) {
-        if (found->types[i] == builtin_type::ellipsis)
-            variadic = true;
-        else
-            parameters.append(
-                builtin_parameter_type(static_cast<uint8_t>(found->types[i]),
-                                       static_cast<uint8_t>(real)));
-    }
-    uint32_t library = tokens.pp.identifier(spelling, length) + 1;
-    uint32_t flags = gnu_library_function;
-    if (found->noreturn)
-        flags |= gnu_noreturn;
-    /* bound under its __builtin_ name: the program's own declaration of
-       the library function is another */
-    /* clang declares a library function noexcept in C++ (the declaration
-       <math.h> and <string.h> write with __THROW is of the same type) */
-    return declare_builtin(name, library, result, parameters.data(),
-                           parameters.size(), variadic, flags, true);
+    static const char evaluated[] = "__builtin_is_constant_evaluated";
+    if (length == sizeof evaluated - 1 && !memcmp(spelling, evaluated, length))
+        return declare_builtin(name, name,
+                               builtin_scalar(fundamental_type::bool_), nullptr,
+                               0, false, gnu_is_constant_evaluated);
+    if (entity_index e = compiler_builtin(name, spelling, length))
+        return e;
+    return library_function_builtin(name, spelling, length);
 }
 
 /* whether the spelling has the text in it */
 static bool spelled_with(const char *spelling, size_t length, const char *text)
 {
     return memmem(spelling, length, text, strlen(text)) != nullptr;
-}
-
-/* __builtin_va_start, __builtin_c23_va_start, __builtin_va_end,
-   __builtin_va_copy: 1, 2, 3, 4; the Microsoft forms (__builtin_ms_va_*):
-   5 */
-static int va_list_kind(const char *spelling, size_t length)
-{
-    static const char *const names[] = {
-        "__builtin_va_start", "__builtin_c23_va_start", "__builtin_va_end",
-        "__builtin_va_copy"};
-    for (int i = 0; i < 4; i++)
-        if (length == strlen(names[i]) && !memcmp(spelling, names[i], length))
-            return i + 1;
-    if (spelled_with(spelling, length, "__builtin_ms_va_"))
-        return 5;
-    return 0;
-}
-
-/* __builtin_add_overflow, __builtin_sub_overflow, __builtin_mul_overflow
-   and their typed forms (__builtin_sadd_overflow, __builtin_umulll_overflow,
-   ...) */
-static bool overflow_builtin(const char *spelling, size_t length)
-{
-    static const char suffix[] = "_overflow";
-    if (length < sizeof suffix - 1 ||
-        memcmp(spelling + length - (sizeof suffix - 1), suffix,
-               sizeof suffix - 1) ||
-        memcmp(spelling, "__builtin_", 10))
-        return false;
-    return spelled_with(spelling, length, "add") ||
-           spelled_with(spelling, length, "sub") ||
-           spelled_with(spelling, length, "mul");
 }
 
 /*
@@ -672,7 +535,8 @@ static bool overflow_builtin(const char *spelling, size_t length)
  * variadic is ill-formed, as in clang.
  */
 analysis_result
-semantic_analysis::va_list_builtin_result(SyntaxRef n, int which,
+semantic_analysis::va_list_builtin_result(SyntaxRef n, entity_index called,
+                                          int which,
                                           const owned_array<uint32_t> &nodes)
 {
     size_t expected = 1;
@@ -684,7 +548,9 @@ semantic_analysis::va_list_builtin_result(SyntaxRef n, int which,
     if (which == 2)
         right = nodes.size() == 1 || nodes.size() == 2;
     if (which == 5)
-        return not_supported(n, "ext.gnu");
+        return not_supported_builtin(n, "ext.gnu", called,
+                                     "is the Microsoft va_list builtin, which "
+                                     "has no lowering for this target");
     if (!right)
         return ill_formed(n,
                           "a va_list builtin takes the arguments its form does",
@@ -748,7 +614,7 @@ semantic_analysis::va_list_builtin_result(SyntaxRef n, int which,
  * their unsigned ones; the operands are converted to it when lowered.
  */
 analysis_result semantic_analysis::overflow_builtin_result(
-    SyntaxRef n, const char *spelling, size_t length,
+    SyntaxRef n, entity_index called, const char *spelling, size_t length,
     const owned_array<uint32_t> &nodes, qualified_type &result)
 {
     if (nodes.size() != 3)
@@ -765,7 +631,10 @@ analysis_result semantic_analysis::overflow_builtin_result(
         qualified_type t = semantics[nodes[i]].type;
         fundamental_type f = fundamental_of(t);
         if (f == fundamental_type::none && !enumeration_of(t))
-            return not_supported(n, "ext.gnu");
+            return not_supported_builtin(
+                n, "ext.gnu", called,
+                "with an operand of a type that is neither an integer nor an "
+                "enumeration");
         if (!enumeration_of(t) && !fundamental_type_is_integral(f)) {
             /* the typed forms convert any arithmetic operand */
             if (typed == fundamental_type::none)
@@ -773,7 +642,9 @@ analysis_result semantic_analysis::overflow_builtin_result(
                                   "operand argument to overflow builtin must "
                                   "be an integer",
                                   "ext.gnu");
-            return not_supported(n, "ext.gnu");
+            return not_supported_builtin(
+                n, "ext.gnu", called,
+                "typed form with an operand that is not an integer");
         }
     }
     qualified_type third = semantics[nodes[2]].type;
@@ -785,7 +656,9 @@ analysis_result semantic_analysis::overflow_builtin_result(
     qualified_type pointee = type_table[third.unqualified()].operand;
     fundamental_type f = fundamental_of(pointee);
     if (f == fundamental_type::none && !enumeration_of(pointee))
-        return not_supported(n, "ext.gnu");
+        return not_supported_builtin(n, "ext.gnu", called,
+                                     "with a result of a type that is neither "
+                                     "an integer nor an enumeration");
     if ((pointee.cv() & cv_const) ||
         (!enumeration_of(pointee) && !fundamental_type_is_integral(f)))
         return ill_formed(n,
@@ -795,7 +668,8 @@ analysis_result semantic_analysis::overflow_builtin_result(
     /* (a bool result: the code generator compares the stored byte with the
        exact value, clang the one bit: not supported) */
     if (f == fundamental_type::bool_)
-        return not_supported(n, "ext.gnu");
+        return not_supported_builtin(n, "ext.gnu", called,
+                                     "with a bool result");
     if (typed != fundamental_type::none && f != typed)
         return ill_formed(n,
                           "the result argument of a typed overflow builtin "
@@ -824,26 +698,38 @@ semantic_analysis::atomic_builtin_result(SyntaxRef n, entity_index called,
     size_t length = 0;
     const char *spelling =
         tokens.pp.identifier_spelling(entity_table[called].name - 1, &length);
-    if (entity_table[called].gnu_flags & gnu_floating_constant) {
-        if (nodes.size() != 1 || !fundamental_type_is_floating(
-                                     fundamental_of(semantics[nodes[0]].type)))
-            return ill_formed(n, "expected one floating-point argument",
-                              "ext.gnu");
-        return analysis_result::well_formed;
-    }
-    if (int which = query_kind(spelling, length))
-        return query_builtin_result(n, which, nodes, result);
-    if (int which = va_list_kind(spelling, length)) {
-        VTRY(r, va_list_builtin_result(n, which, nodes));
+    const gnu_builtin &row =
+        gnu_builtin_at(entity_table[called].gnu_builtin_row);
+    switch (row.form) {
+    case builtin_form::query:
+        return query_builtin_result(n, called, row.which, nodes, result);
+    case builtin_form::va_list: {
+        VTRY(r, va_list_builtin_result(n, called, row.which, nodes));
         result = qualified_type::make(
             type_table.fundamental(fundamental_type::void_), cv_none);
         return analysis_result::well_formed;
     }
-    if (overflow_builtin(spelling, length))
-        return overflow_builtin_result(n, spelling, length, nodes, result);
+    case builtin_form::overflow:
+        return overflow_builtin_result(n, called, spelling, length, nodes,
+                                       result);
+    case builtin_form::complex:
+        return complex_result(n, called, nodes, result);
+    case builtin_form::launder:
+        return launder_result(n, called, nodes, result);
+    case builtin_form::bswapg:
+        return bswapg_result(n, called, nodes, result);
+    case builtin_form::atomic:
+        break;
+    default:
+        return not_supported_builtin(
+            n, "ext.gnu", called,
+            "has a signature whose parameter types are not supported");
+    }
     int written = 0, kind = 0;
     if (!ast_builder_atomic_shape(spelling, length, &written, &kind))
-        return not_supported(n, "ext.gnu");
+        return not_supported_builtin(n, "ext.gnu", called,
+                                     "is not an atomic builtin of the C "
+                                     "front end");
     if (nodes.size() != static_cast<size_t>(written))
         return ill_formed(n,
                           "an atomic builtin takes the arguments its form "
@@ -885,11 +771,50 @@ semantic_analysis::atomic_builtin_result(SyntaxRef n, entity_index called,
         }
         fundamental_type f = fundamental_of(pointee);
         bool pointer = is_pointer(pointee);
+        /* an unscoped enumeration is its underlying integer ([dcl.enum]/5:
+           clang rejects a scoped one) */
+        entity_index enumeration = enumeration_of(pointee);
+        if (enumeration) {
+            if (entity_table[enumeration].scoped)
+                return ill_formed(n,
+                                  "address argument to atomic operation must "
+                                  "be a pointer to integer, pointer or "
+                                  "supported floating point type",
+                                  "ext.clang");
+            f = entity_table[enumeration].underlying;
+        }
+        /* the generic forms take an object of any trivially copyable class
+           type that is as large as an atomic one ([intro.object]) */
+        bool generic_form = !spelled_with(spelling, length, "_n") &&
+                            !spelled_with(spelling, length, "__c11_") &&
+                            !spelled_with(spelling, length, "__sync_");
+        bool class_object =
+            type_table[pointee.unqualified()].kind == type_kind::class_type;
+        if (class_object && generic_form) {
+            bool known = false;
+            entity_index c = type_table[pointee.unqualified()].entity;
+            if (!class_trivially_copyable(c, known) || !known)
+                return not_supported_builtin(
+                    n, "ext.gnu", called,
+                    "on an object of a class that is not known to be "
+                    "trivially copyable");
+            uint64_t bytes = entity_table[c].size;
+            if (bytes != 1 && bytes != 2 && bytes != 4 && bytes != 8 &&
+                bytes != 16)
+                return not_supported_builtin(
+                    n, "ext.gnu", called,
+                    "on an object of a class whose size is not 1, 2, 4, 8 or "
+                    "16 bytes");
+            f = fundamental_type::unsigned_long_int;
+        }
         if (!pointer &&
             (f == fundamental_type::none || f == fundamental_type::void_ ||
              f == fundamental_type::std_nullptr_t ||
              fundamental_type_width(tokens.files.behavior, f) > 64))
-            return not_supported(n, "ext.gnu");
+            return not_supported_builtin(
+                n, "ext.gnu", called,
+                "on an object that is not an integer, a pointer or a floating "
+                "type of at most 64 bits");
         /* the operations that compute: an integer (a pointer for the
            additive ones) */
         bool computes = spelled_with(spelling, length, "fetch");
@@ -899,7 +824,9 @@ semantic_analysis::atomic_builtin_result(SyntaxRef n, entity_index called,
         if (computes && ((pointer && selecting) ||
                          (!pointer && (!fundamental_type_is_integral(f) ||
                                        f == fundamental_type::bool_))))
-            return not_supported(n, "ext.gnu");
+            return not_supported_builtin(
+                n, "ext.gnu", called,
+                "with an operation its operand type does not take");
         /* the arguments that are pointers to the object's type: the
            generic __atomic_load, __atomic_store, __atomic_exchange and
            __atomic_compare_exchange take them in place of values */
@@ -927,7 +854,10 @@ semantic_analysis::atomic_builtin_result(SyntaxRef n, entity_index called,
                memory_order of <stdatomic.h>) */
             if (fundamental_of(t) == fundamental_type::none && !is_pointer(t) &&
                 !enumeration_of(t))
-                return not_supported(n, "ext.gnu");
+                return not_supported_builtin(
+                    n, "ext.gnu", called,
+                    "with an argument that is not an arithmetic, enumeration "
+                    "or pointer value");
         }
     }
     switch (kind) {
@@ -954,14 +884,119 @@ semantic_analysis::atomic_builtin_result(SyntaxRef n, entity_index called,
     return analysis_result::well_formed;
 }
 
+/*
+ * [ext:gnu_library_builtins] _Complex T __builtin_complex (T real, T imag)
+ * (GCC manual 6.14, "Complex Numbers": "The two operands must have the same
+ * real floating-point type, and the result has the corresponding complex
+ * type"): not a constant expression's operands' conversion; each operand
+ * keeps its type.
+ */
+analysis_result
+semantic_analysis::complex_result(SyntaxRef n, entity_index called,
+                                  const owned_array<uint32_t> &nodes,
+                                  qualified_type &result)
+{
+    if (nodes.size() != 2)
+        return ill_formed(n, "__builtin_complex takes two arguments",
+                          "ext.gnu");
+    qualified_type a = semantics[nodes[0]].type;
+    qualified_type b = semantics[nodes[1]].type;
+    if (depends_on_template_parameter(a) || depends_on_template_parameter(b))
+        return not_supported(n, "temp.dep.constexpr");
+    fundamental_type f = fundamental_of(a);
+    if (a.unqualified() != b.unqualified())
+        return ill_formed(n,
+                          "the operands of __builtin_complex shall have the "
+                          "same type",
+                          "ext.gnu");
+    if (f != fundamental_type::float_ && f != fundamental_type::double_ &&
+        f != fundamental_type::long_double)
+        return ill_formed(n,
+                          "the operands of __builtin_complex shall have real "
+                          "floating-point type",
+                          "ext.gnu");
+    result = qualified_type::make(
+        type_table.complex_of(qualified_type::make(a.unqualified(), cv_none)),
+        cv_none);
+    return analysis_result::well_formed;
+}
+
+/*
+ * [ext:clang_builtin_functions] T *__builtin_launder(T *) (clang's
+ * Builtins.td, custom type checking): "std::launder" of [ptr.launder], the
+ * pointer to the object that is in the storage the argument points to;
+ * clang rejects an argument that is not a pointer to an object type (a
+ * function pointer, a void pointer).  The call has the argument's type.
+ */
+analysis_result
+semantic_analysis::launder_result(SyntaxRef n, entity_index called,
+                                  const owned_array<uint32_t> &nodes,
+                                  qualified_type &result)
+{
+    if (nodes.size() != 1)
+        return ill_formed(n, "__builtin_launder takes one argument",
+                          "ext.clang");
+    qualified_type t = semantics[nodes[0]].type;
+    if (depends_on_template_parameter(t))
+        return not_supported(n, "temp.dep.constexpr");
+    if (!is_pointer(t))
+        return ill_formed(n,
+                          "the argument of __builtin_launder shall be a "
+                          "pointer to an object type",
+                          "ext.clang");
+    qualified_type pointee = type_table[t.unqualified()].operand;
+    if (type_table[pointee.unqualified()].kind == type_kind::function ||
+        fundamental_of(pointee) == fundamental_type::void_)
+        return ill_formed(n,
+                          "the argument of __builtin_launder shall be a "
+                          "pointer to an object type",
+                          "ext.clang");
+    result = qualified_type::make(t.unqualified(), cv_none);
+    return analysis_result::well_formed;
+}
+
+/*
+ * [ext:clang_builtin_functions] T __builtin_bswapg(T) (clang's
+ * Builtins.td, custom type checking): the bytes of an integer of a multiple
+ * of 8 bits in the opposite order; the call has the argument's type.
+ */
+analysis_result
+semantic_analysis::bswapg_result(SyntaxRef n, entity_index called,
+                                 const owned_array<uint32_t> &nodes,
+                                 qualified_type &result)
+{
+    if (nodes.size() != 1)
+        return ill_formed(n, "__builtin_bswapg takes one argument",
+                          "ext.clang");
+    qualified_type t = semantics[nodes[0]].type;
+    fundamental_type f = fundamental_of(t);
+    if (depends_on_template_parameter(t))
+        return not_supported(n, "temp.dep.constexpr");
+    if (f == fundamental_type::none || !fundamental_type_is_integral(f))
+        return ill_formed(n,
+                          "the argument of __builtin_bswapg shall be an "
+                          "integer",
+                          "ext.clang");
+    unsigned width = fundamental_type_width(tokens.files.behavior, f);
+    /* (a bool has one byte of storage, and swapping it changes nothing) */
+    if (f == fundamental_type::bool_)
+        width = 8;
+    if (width % 8 || width > 64)
+        return not_supported_builtin(n, "ext.clang", called,
+                                     "of an integer wider than 64 bits or of a "
+                                     "width that is not a multiple of 8");
+    result = qualified_type::make(t.unqualified(), cv_none);
+    return analysis_result::well_formed;
+}
+
 int semantic_analysis::query_builtin(entity_index e) const
 {
-    if (!(entity_table[e].gnu_flags & gnu_query_builtin))
+    if (!entity_table[e].gnu_builtin_row)
         return 0;
-    size_t length = 0;
-    const char *spelling =
-        tokens.pp.identifier_spelling(entity_table[e].name - 1, &length);
-    return query_kind(spelling, length);
+    const gnu_builtin &row = gnu_builtin_at(entity_table[e].gnu_builtin_row);
+    if (row.form != builtin_form::query)
+        return 0;
+    return row.which;
 }
 
 /* the size in bytes of a lock-free query where clang's answer is the
@@ -985,10 +1020,9 @@ static bool lock_free_decided(unsigned __int128 size, bool &free)
  * std::nullptr_t; the size of a lock-free query that is a constant 0 or 16
  * is not supported (lock_free_decided).
  */
-analysis_result
-semantic_analysis::query_builtin_result(SyntaxRef n, int which,
-                                        const owned_array<uint32_t> &nodes,
-                                        qualified_type &result)
+analysis_result semantic_analysis::query_builtin_result(
+    SyntaxRef n, entity_index called, int which,
+    const owned_array<uint32_t> &nodes, qualified_type &result)
 {
     size_t expected = 2;
     if (which == 1 || which == 4)
@@ -1001,7 +1035,10 @@ semantic_analysis::query_builtin_result(SyntaxRef n, int which,
         fundamental_type f = fundamental_of(t);
         if (!is_pointer(t) &&
             (f == fundamental_type::none || f == fundamental_type::void_))
-            return not_supported(n, "ext.gnu");
+            return not_supported_builtin(
+                n, "ext.gnu", called,
+                "of an operand that is not an arithmetic, enumeration or "
+                "pointer value");
     }
     if (which == 1) {
         result = qualified_type::make(
@@ -1010,19 +1047,25 @@ semantic_analysis::query_builtin_result(SyntaxRef n, int which,
     }
     fundamental_type f = fundamental_of(semantics[nodes[0]].type);
     if (!fundamental_type_is_integral(f) && f != fundamental_type::none)
-        return not_supported(n, "ext.gnu");
+        return not_supported_builtin(n, "ext.gnu", called,
+                                     "with a size that is not an integer");
     if (nodes.size() == 2 && !is_pointer(semantics[nodes[1]].type) &&
         fundamental_of(semantics[nodes[1]].type) !=
             fundamental_type::std_nullptr_t &&
         !fundamental_type_is_integral(fundamental_of(semantics[nodes[1]].type)))
-        return not_supported(n, "ext.gnu");
+        return not_supported_builtin(
+            n, "ext.gnu", called,
+            "with a pointer argument that is not a pointer or null");
     constant_value v;
     bool constant = false;
     VTRY(r, evaluate_constant(n, nodes[0], v, constant));
     if (constant && v.kind == constant_value_kind::integer) {
         bool free = false;
         if (!lock_free_decided(v.integer, free))
-            return not_supported(n, "ext.gnu");
+            return not_supported_builtin(
+                n, "ext.gnu", called,
+                "with a constant size of 0 or 16, which clang and vcc answer "
+                "differently");
     } else if (which == 2) {
         return ill_formed(n, "the argument must be a constant integer",
                           "ext.gnu");
@@ -1149,12 +1192,12 @@ constness semantic_analysis::evaluate_query_builtin(constant_evaluation &state,
 
 int semantic_analysis::bit_count_builtin(entity_index e) const
 {
-    if (!(entity_table[e].gnu_flags & gnu_bit_count))
+    if (!entity_table[e].gnu_builtin_row)
         return 0;
-    size_t length = 0;
-    const char *spelling =
-        tokens.pp.identifier_spelling(entity_table[e].name - 1, &length);
-    return bit_count_kind(spelling, length);
+    const gnu_builtin &row = gnu_builtin_at(entity_table[e].gnu_builtin_row);
+    if (row.form != builtin_form::bit_count)
+        return 0;
+    return row.which;
 }
 
 /* clang's __builtin_popcountg(x), __builtin_clzg(x[, fallback]) and
@@ -1177,7 +1220,8 @@ semantic_analysis::bit_count_arguments(SyntaxRef n, entity_index called,
     qualified_type first = semantics[nodes[0]].type;
     fundamental_type f = fundamental_of(first);
     if (f == fundamental_type::none)
-        return not_supported(n, "ext.gnu");
+        return not_supported_builtin(n, "ext.gnu", called,
+                                     "of an operand that is not an integer");
     if (!fundamental_type_is_integral(f) ||
         fundamental_type_is_signed(tokens.files.behavior, f))
         return ill_formed(n,
@@ -1187,7 +1231,8 @@ semantic_analysis::bit_count_arguments(SyntaxRef n, entity_index called,
     if (nodes.size() == 2) {
         fundamental_type g = fundamental_of(semantics[nodes[1]].type);
         if (g == fundamental_type::none)
-            return not_supported(n, "ext.gnu");
+            return not_supported_builtin(
+                n, "ext.gnu", called, "with a fallback that is not an integer");
         if (!fundamental_type_is_integral(g) ||
             fundamental_type_width(tokens.files.behavior, g) >
                 fundamental_type_width(tokens.files.behavior,
@@ -1246,6 +1291,33 @@ constness semantic_analysis::evaluate_bit_count(constant_evaluation &state,
     v = constant_value();
     v.kind = constant_value_kind::integer;
     v.integer = count;
+    return constness::constant;
+}
+
+/* the value of __builtin_bswapg's argument with its bytes reversed, as the
+   argument's type */
+constness semantic_analysis::evaluate_bswap(constant_evaluation &state,
+                                            const semantic_node &call,
+                                            constant_value &v)
+{
+    constant_value x;
+    constness c = evaluate_node(state, semantics.items(call.first)[0], x);
+    if (c != constness::constant)
+        return c;
+    if (x.kind != constant_value_kind::integer)
+        return constness::unknown;
+    fundamental_type f = fundamental_of(call.type);
+    unsigned width = fundamental_type_width(tokens.files.behavior, f);
+    if (f == fundamental_type::bool_)
+        width = 8;
+    unsigned __int128 bits = x.integer, swapped = 0;
+    for (unsigned i = 0; i < width / 8; i++) {
+        swapped = (swapped << 8) | (bits & 0xff);
+        bits >>= 8;
+    }
+    v = constant_value();
+    v.kind = constant_value_kind::integer;
+    v.integer = integer_wrap(tokens.files.behavior, f, swapped);
     return constness::constant;
 }
 

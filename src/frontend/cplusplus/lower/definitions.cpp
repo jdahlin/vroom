@@ -388,6 +388,7 @@ bool analysis_complete(const semantic_analysis &analysis, lowering_failure &why)
                 why.file = u.file;
                 why.line = u.line;
                 why.function = u.function;
+                why.detail = u.detail;
                 why.at = u.node.first_token();
             }
             why.what = "a declaration that is not well-formed";

@@ -387,11 +387,100 @@ analysis_result semantic_analysis::constructible_types(
     return analysis_result::well_formed;
 }
 
+/*
+ * __is_trivially_constructible(T, Args...) ([meta.unary.prop]
+ * is_trivially_constructible: "is_constructible_v<T, Args...> is true and
+ * the variable definition for is_constructible, as defined below, is known
+ * to call no operation that is not trivial ([basic.types],
+ * [special])"), given that the definition is well-formed: a class is
+ * trivially constructed by a trivial default constructor from nothing, by a
+ * trivial copy or move constructor from one object of its own class, and
+ * from nothing else; a scalar or a reference from arguments that are no
+ * class objects (a conversion function is a call).
+ */
+/* [class.default.ctor]/2: the default constructor of class c is trivial:
+   not user-provided, no virtual functions, no default member initializer,
+   and trivial for every subobject's class */
+bool semantic_analysis::trivial_default_constructor(entity_index c) const
+{
+    const entity &x = entity_table[c];
+    if (x.dynamic)
+        return false;
+    if (x.first_constructor && !trivial_defaulted_default_constructor(c))
+        return false;
+    for (uint32_t i = 0; i < x.member_count; i++) {
+        const entity &m = entity_table[class_members[x.first_member + i]];
+        if (m.kind == entity_kind::variable && m.nonstatic_member &&
+            m.default_initializer)
+            return false;
+    }
+    owned_array<entity_index> classes;
+    subobject_classes(c, classes);
+    for (entity_index k : classes)
+        if (!trivial_default_constructor(k))
+            return false;
+    return true;
+}
+
+/* [class.copy.ctor]/11: the copy (or move) constructor of class c is
+   trivial: no virtual functions, none provided by the user (an implicit one
+   has an entity, a defaulted one when trivial none) and trivial for every
+   subobject's class */
+bool semantic_analysis::trivial_copy_constructor(entity_index c) const
+{
+    const entity &x = entity_table[c];
+    if (x.dynamic)
+        return false;
+    for (entity_index k = x.first_constructor; k;
+         k = entity_table[k].next_constructor)
+        if (is_copy_constructor(c, k) && !entity_table[k].implicit)
+            return false;
+    owned_array<entity_index> classes;
+    subobject_classes(c, classes);
+    for (entity_index k : classes)
+        if (!trivial_copy_constructor(k))
+            return false;
+    return true;
+}
+
+bool semantic_analysis::trivially_constructed(qualified_type t,
+                                              const qualified_type *types,
+                                              uint32_t count) const
+{
+    const struct type k = type_table[t.unqualified()];
+    if (k.kind == type_kind::array)
+        return trivially_constructed(k.operand, types, count);
+    if (k.kind == type_kind::class_type) {
+        if (count == 0)
+            return trivial_default_constructor(k.entity);
+        /* (the argument's type: a reference to the object) */
+        qualified_type object = types[0];
+        type_kind object_kind = type_table[object.unqualified()].kind;
+        if (object_kind == type_kind::lvalue_reference ||
+            object_kind == type_kind::rvalue_reference)
+            object = type_table[object.unqualified()].operand;
+        const struct type a = type_table[object.unqualified()];
+        if (count == 1 && a.kind == type_kind::class_type &&
+            a.entity == k.entity)
+            return trivial_copy_constructor(k.entity);
+        return false;
+    }
+    for (uint32_t i = 0; i < count; i++) {
+        qualified_type argument = types[i];
+        type_kind argument_kind = type_table[argument.unqualified()].kind;
+        if (argument_kind == type_kind::lvalue_reference ||
+            argument_kind == type_kind::rvalue_reference)
+            argument = type_table[argument.unqualified()].operand;
+        if (type_table[argument.unqualified()].kind == type_kind::class_type)
+            return false;
+    }
+    return true;
+}
+
 /* ( type-id ..._opt , ... ): __is_constructible(T, Args...) and
    __is_nothrow_constructible(T, Args...) */
-analysis_result
-semantic_analysis::clang_constructible_trait(SyntaxRef n, bool nothrow,
-                                             expression_meaning &m)
+analysis_result semantic_analysis::clang_constructible_trait(
+    SyntaxRef n, bool nothrow, bool trivial, expression_meaning &m)
 {
     owned_array<SyntaxElement> written;
     owned_array<bool> expansion;
@@ -420,6 +509,9 @@ semantic_analysis::clang_constructible_trait(SyntaxRef n, bool nothrow,
     VTRY_SET(r, constructible_types(n, types[0], types.data() + 1,
                                     static_cast<uint32_t>(types.size() - 1),
                                     nothrow, value));
+    if (value && trivial)
+        value = trivially_constructed(types[0], types.data() + 1,
+                                      static_cast<uint32_t>(types.size() - 1));
     m = integer_constant(fundamental_type::bool_, value, n.first_token());
     return analysis_result::well_formed;
 }

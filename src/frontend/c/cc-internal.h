@@ -833,6 +833,7 @@ CC_PRIVATE uint32_t cc_library_builtin_declare(cc *c, uint32_t id,
                                                uint32_t loc);
 CC_PRIVATE bool cc_library_builtin_is_known(const char *n);
 CC_PRIVATE const char *cc_library_builtin_signature(const char *n);
+CC_PRIVATE const char *cc_library_builtin_symbol(const char *n, size_t length);
 CC_PRIVATE bool cc_library_builtin_info(cc *c, const char *name, size_t len,
                                         ast_qualified_type *fty,
                                         const char **lib);

@@ -225,6 +225,23 @@ CC_PRIVATE const char *cc_library_builtin_signature(const char *n)
     return b ? b->sig : NULL;
 }
 
+/* the symbol of the library builtin n (with its __builtin_ prefix), NULL if the
+   generated table has none of that name */
+CC_PRIVATE const char *cc_library_builtin_symbol(const char *n, size_t length)
+{
+    const struct cc_library_builtin_entry *b =
+        cc_library_builtin_find(n, length);
+
+    if (!b)
+        return NULL;
+    /* the integer-power builtins name compiler-runtime helpers */
+    if (!strcmp(b->name, "__builtin_powi"))
+        return "__powidf2";
+    if (!strcmp(b->name, "__builtin_powif"))
+        return "__powisf2";
+    return b->lib;
+}
+
 /* a library builtin by name (__builtin_expl): its function type and the library function it calls (expl);
    false: not one, or a signature not readable (C++ calls it so: cxx_gen_builtin) */
 CC_PRIVATE bool cc_library_builtin_info(cc *c, const char *name, size_t len,

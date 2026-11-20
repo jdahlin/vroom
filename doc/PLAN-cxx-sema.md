@@ -1048,6 +1048,34 @@ libstdc++ and json), since sema cannot analyse a declaration kept as tokens.
   gcc/pr79286 is skipped: its uninitialized argument is undefined in C++
   and clang++ -O2 deletes main.  `src/test/cxx/run/library-builtins.cpp`.
   C5.1 1563 -> 2033, 0 wrong.
+  Then the compiler builtins, from one registry (`ext/gnu/builtin-registry.cpp`,
+  `include/frontend/cplusplus/builtin-registry.h`): a row for each builtin
+  whose call is not one function type with the standard conversions: its
+  form (how a call is checked and typed), its fold (how a constant
+  expression evaluates it: `ext/gnu/builtin-fold.cpp`, the integer, floating
+  and string builtins and the overflow ones) and its lowering.  A builtin
+  of the C front end's table with a signature of scalars and void or char
+  pointers is the function of that prototype (`compiler_builtin`); the
+  C library functions' `__builtin_` forms come from that table or clang's
+  generated one (`frontend/c/libbuiltins.inc`: the 80 hand-written
+  prototypes are gone); `__builtin_launder`, `_bswapg`, `_invoke` (the
+  INVOKE expression, `ext/clang/builtin-invoke.cpp`), `_verbose_trap`,
+  `_assume_dereferenceable`, `_memcpy_inline`, `_char_memchr`, the carry
+  builtins, `__is_trivially_constructible`, `__is_destructible` and
+  `__is_nothrow_destructible`, `__builtin_is_virtual_base_of`, atomics on
+  enumerations and trivially copyable classes.  A refusal of an extension
+  names its construct (`unsupported_construct::detail`: the source text, or
+  the builtin and what about its call).  Not yet: `_Complex` and
+  `__float128` expressions (so `__builtin_complex` answers 0 to
+  `__has_builtin`), vector builtins and GCC `vector_size` types,
+  `__builtin_clear_padding`, `__builtin_coro_*`, `__is_final`,
+  `__is_standard_layout`, `__is_pod`, `__is_literal_type` and the other
+  traits `bench/cxx-libcxx-builtins.py` lists; `src/test/cxx/run/gnu-builtin-*.cpp`
+  (the ones in xfail.txt are what is missing), `src/test/cxx/sema/gram/ext.gnu-builtins.cpp`.
+  libc++'s first refusal at [ext.gnu] (19 headers: `__builtin_assume_aligned`,
+  then `__builtin_invoke`) is gone; the sweep of its 109 headers stops
+  elsewhere (`__algorithm/simd_utils.h`: an alias template of an
+  ext_vector_type and a lambda in a variable template).
   Then unions ([class.union]): a class with the class-key union has
   every non-static data member at offset 0, the largest's size and the
   strictest alignment; aggregate initialization initializes the first

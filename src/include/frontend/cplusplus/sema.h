@@ -19,6 +19,7 @@
 
 #include "frontend/cplusplus/parse.h"
 #include "frontend/cplusplus/syntax.h"
+#include "frontend/cplusplus/builtin-registry.h"
 
 namespace cplusplus
 {
@@ -354,25 +355,11 @@ enum gnu_attribute_flag : uint32_t {
     gnu_mode = 131072,
     /* vector_size(N): the type of the typedef-name or variable */
     gnu_vector_size = 1u << 30,
-    /* [ext:gnu_library_builtins] __builtin_popcountg, __builtin_clzg and
-       __builtin_ctzg (with gnu_compiler_builtin): a constant expression
-       when its arguments are (bit_count_builtin) */
-    gnu_bit_count = 262144,
-    /* [ext:gnu_library_builtins] a builtin of vcc's C front end whose
-       arguments or result are not those of one function type
-       (__atomic_*, __sync_*, __c11_atomic_*, __builtin_va_start): declared
-       as a function taking anything, so that lookup finds it; a call is not
-       supported yet (call_with) */
-    gnu_untyped_builtin = 524288,
     /* [ext:gnu_library_builtins] the C library function a __builtin_NAME
        declares implicitly (library_builtin): a declaration of the library's
        own name, with or without noexcept, is of this function, as clang's
        are */
     gnu_library_function = 1048576,
-    /* [ext:gnu_library_builtins] __builtin_constant_p and the lock-free
-       queries (with gnu_untyped_builtin): a constant expression when their
-       arguments are (query_builtin) */
-    gnu_query_builtin = 2097152,
     /* [dcl.attr.nouniqueaddr] [[no_unique_address]] (the standard's, not a
        GCC attribute): a non-static data member that may share its bytes
        with another subobject (entity::no_unique_address) */
@@ -391,8 +378,6 @@ enum gnu_attribute_flag : uint32_t {
     /* "cleanup (cleanup_function)": a local variable's function, called
        with its address when it goes out of scope (gnu_cleanup) */
     gnu_cleanup = 67108864,
-    /* Floating-point format builtins supported in constant evaluation. */
-    gnu_floating_constant = 134217728,
 };
 /* the GNU attributes of a function's own symbol that analysis carries to
    member functions and function templates */
@@ -670,6 +655,10 @@ struct entity {
        and gnu_cleanup's function */
     uint32_t gnu_priority = 0;
     entity_index gnu_cleanup = 0;
+    /* [ext:gnu_library_builtins] a function that is a compiler builtin
+       (gnu_compiler_builtin): its row of the builtin registry
+       (ext/gnu/builtin-registry.cpp), 0 if it has none */
+    uint16_t gnu_builtin_row = 0;
     /* [ext:gnu_asm_labels] a function's or variable's asm label: the
        string-literal that is its symbol, 0 if none */
     token_index asm_label = 0;
@@ -957,6 +946,9 @@ struct unsupported_construct {
     const char *file = "";
     uint32_t line = 0;
     const char *function = "";
+    /* the form of the construct that has no rules yet (a builtin's name
+       and what about its call), "" if the subclause says enough */
+    const char *detail = "";
 };
 
 struct analysed_declaration {
@@ -1763,6 +1755,14 @@ class semantic_analysis
        and the call site (the check that refused it, for the diagnostic's
        note) */
     analysis_result not_supported(SyntaxRef n, call_site where = call_site());
+    /* ... naming the builtin function called and what about the call has
+       no rules yet ("__builtin_x: a pointer to a class"): the error says
+       so */
+    analysis_result not_supported_builtin(SyntaxRef n, const char *subclause,
+                                          entity_index called, const char *what,
+                                          call_site where = call_site());
+    owned_objects<owned_string> detail_texts;
+    void name_unsupported_detail(token_index t, const char *what);
     analysis_result not_supported(SyntaxRef n, const char *subclause,
                                   call_site where = call_site());
     /* whether the parser gave up on a part of the declaration */
@@ -2370,6 +2370,7 @@ class semantic_analysis
        [lex.name]/3 reserves it to the implementation, so a scope with
        names analysis did not follow does not hide the builtin */
     bool builtin_spelled(uint32_t name) const;
+    bool builtin_letter_type(char letter, qualified_type &t);
     entity_index compiler_builtin(uint32_t name, const char *spelling,
                                   size_t length);
     entity_index declare_builtin(uint32_t name, uint32_t symbol,
@@ -2377,8 +2378,11 @@ class semantic_analysis
                                  const qualified_type *parameters, size_t count,
                                  bool variadic, uint32_t flags,
                                  bool non_throwing = false);
-    /* real: the fundamental_type of builtin_type::real */
-    qualified_type builtin_parameter_type(uint8_t t, uint8_t real = 0);
+    qualified_type builtin_pointer(fundamental_type f, uint32_t pointee_cv);
+    qualified_type builtin_scalar(fundamental_type f);
+    bool library_type(const char *&p, qualified_type &t);
+    entity_index library_function_builtin(uint32_t name, const char *spelling,
+                                          size_t length);
     /* the parameters of the function declarator analysed last: a function
        definition's, with the types they have in its body ([dcl.fct]/5's
        adjustment, top-level cv-qualifiers kept) */
@@ -2961,7 +2965,12 @@ class semantic_analysis
     /* [meta.unary.prop] is_constructible and is_nothrow_constructible
        (ext/clang/constructible-traits.cpp): the analysis of T t(declval<
        Args>()...); */
+    bool trivial_default_constructor(entity_index c) const;
+    bool trivial_copy_constructor(entity_index c) const;
+    bool trivially_constructed(qualified_type t, const qualified_type *types,
+                               uint32_t count) const;
     analysis_result clang_constructible_trait(SyntaxRef n, bool nothrow,
+                                              bool trivial,
                                               expression_meaning &m);
     analysis_result constructible_types(SyntaxRef n, qualified_type t,
                                         const qualified_type *types,
@@ -2990,7 +2999,8 @@ class semantic_analysis
     /* ext/clang/class-traits.cpp: the traits that ask about a class */
     bool class_property_trait(int which, qualified_type t, bool &answer);
     bool derives_from(entity_index d, entity_index b) const;
-    analysis_result clang_base_of_trait(SyntaxRef n, expression_meaning &m);
+    analysis_result clang_base_of_trait(SyntaxRef n, bool virtual_base,
+                                        expression_meaning &m);
     bool polymorphic_class(entity_index c) const;
     bool virtual_destructor(entity_index c) const;
     bool triviality_unknown(entity_index c) const;
@@ -3015,17 +3025,32 @@ class semantic_analysis
        and its value in a constant evaluation */
     int bit_count_builtin(entity_index e) const;
     int query_builtin(entity_index e) const;
-    analysis_result query_builtin_result(SyntaxRef n, int which,
+    analysis_result query_builtin_result(SyntaxRef n, entity_index called,
+                                         int which,
                                          const owned_array<uint32_t> &nodes,
                                          qualified_type &result);
     analysis_result bit_count_arguments(SyntaxRef n, entity_index called,
                                         const owned_array<uint32_t> &nodes);
-    analysis_result va_list_builtin_result(SyntaxRef n, int which,
+    analysis_result va_list_builtin_result(SyntaxRef n, entity_index called,
+                                           int which,
                                            const owned_array<uint32_t> &nodes);
-    analysis_result overflow_builtin_result(SyntaxRef n, const char *spelling,
-                                            size_t length,
+    analysis_result overflow_builtin_result(SyntaxRef n, entity_index called,
+                                            const char *spelling, size_t length,
                                             const owned_array<uint32_t> &nodes,
                                             qualified_type &result);
+    analysis_result builtin_invoke(SyntaxRef n, entity_index called,
+                                   const owned_array<SyntaxElement> &written,
+                                   const owned_array<expression_meaning> &ops,
+                                   expression_meaning &m);
+    analysis_result complex_result(SyntaxRef n, entity_index called,
+                                   const owned_array<uint32_t> &nodes,
+                                   qualified_type &result);
+    analysis_result launder_result(SyntaxRef n, entity_index called,
+                                   const owned_array<uint32_t> &nodes,
+                                   qualified_type &result);
+    analysis_result bswapg_result(SyntaxRef n, entity_index called,
+                                  const owned_array<uint32_t> &nodes,
+                                  qualified_type &result);
     analysis_result atomic_builtin_result(SyntaxRef n, entity_index called,
                                           const owned_array<uint32_t> &nodes,
                                           qualified_type &result);
@@ -3296,6 +3321,28 @@ class semantic_analysis
                                      constant_value &v);
     constness evaluate_bit_count(constant_evaluation &state, int which,
                                  const semantic_node &call, constant_value &v);
+    constness evaluate_builtin_fold(constant_evaluation &state,
+                                    const gnu_builtin &b,
+                                    const semantic_node &call,
+                                    constant_value &v);
+    constness evaluate_integer_builtin(constant_evaluation &state,
+                                       const gnu_builtin &b,
+                                       const semantic_node &call,
+                                       constant_value &v);
+    constness evaluate_floating_classification(constant_evaluation &state,
+                                               const gnu_builtin &b,
+                                               const semantic_node &call,
+                                               constant_value &v);
+    constness evaluate_string_builtin(constant_evaluation &state,
+                                      const gnu_builtin &b,
+                                      const semantic_node &call,
+                                      constant_value &v);
+    constness evaluate_overflow_builtin(constant_evaluation &state,
+                                        const gnu_builtin &b,
+                                        const semantic_node &call,
+                                        constant_value &v);
+    constness evaluate_bswap(constant_evaluation &state,
+                             const semantic_node &call, constant_value &v);
     constness evaluate_call(constant_evaluation &state, uint32_t node,
                             constant_value &v);
     constness evaluate_object(constant_evaluation &state, uint32_t node,

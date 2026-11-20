@@ -411,6 +411,8 @@ bool semantic_analysis::unary_trait(int which, qualified_type t, int64_t &value)
     case unary_trait_kind::is_trivially_destructible:
     case unary_trait_kind::has_trivial_destructor:
     case unary_trait_kind::has_virtual_destructor:
+    case unary_trait_kind::is_destructible:
+    case unary_trait_kind::is_nothrow_destructible:
         if (!class_property_trait(which, t, answer))
             return false;
         break;
@@ -559,13 +561,17 @@ analysis_result semantic_analysis::clang_type_trait(SyntaxRef n,
     bool convertible = spelled(name, written.size(), "__is_convertible") ||
                        spelled(name, written.size(), "__is_convertible_to");
     if (spelled(name, written.size(), "__is_constructible"))
-        return clang_constructible_trait(n, false, m);
+        return clang_constructible_trait(n, false, false, m);
     if (spelled(name, written.size(), "__is_nothrow_constructible"))
-        return clang_constructible_trait(n, true, m);
+        return clang_constructible_trait(n, true, false, m);
+    if (spelled(name, written.size(), "__is_trivially_constructible"))
+        return clang_constructible_trait(n, false, true, m);
     if (n.size() == 6 && n[2].is(syntax_kind::type_id) &&
         n[4].is(syntax_kind::type_id)) {
         if (spelled(name, written.size(), "__is_base_of"))
-            return clang_base_of_trait(n, m);
+            return clang_base_of_trait(n, false, m);
+        if (spelled(name, written.size(), "__builtin_is_virtual_base_of"))
+            return clang_base_of_trait(n, true, m);
         if (spelled(name, written.size(), "__is_assignable"))
             return clang_assignable_trait(n, 0, m);
         if (spelled(name, written.size(), "__is_nothrow_assignable"))

@@ -54,8 +54,57 @@ analysis_result semantic_analysis::not_supported(SyntaxRef n,
     u.file = where.file;
     u.line = where.line;
     u.function = where.function;
+    /* an extension's construct is named by its source text (the first
+       tokens), so the error says what it is */
+    if (!strncmp(subclause, "ext.", 4) && n.index()) {
+        const syntax_node &s = tree[n];
+        owned_buffer text;
+        size_t tokens_named = 0;
+        for (token_index t = s.first_token;
+             t < s.end_token && tokens_named < 16 && text.size() < 100; t++) {
+            if (text.size())
+                vbuffer_string_append(text.get(), " ");
+            tokens.spelling(t, text.get());
+            tokens_named++;
+        }
+        if (text.size() && tokens_named == 16)
+            vbuffer_string_append(text.get(), " ...");
+        if (text.size()) {
+            owned_string &named = detail_texts.make(text.data(), text.size());
+            u.detail = named.c_str();
+        }
+    }
     unsupported.append(u);
     return analysis_result::unsupported;
+}
+
+/* the last refusal recorded names the identifier at t: "NAME what" */
+void semantic_analysis::name_unsupported_detail(token_index t, const char *what)
+{
+    owned_buffer text;
+    tokens.spelling(t, text.get());
+    vbuffer_string_append(text.get(), " ");
+    vbuffer_string_append(text.get(), what);
+    owned_string &detail = detail_texts.make(text.data(), text.size());
+    unsupported[unsupported.size() - 1].detail = detail.c_str();
+}
+
+analysis_result semantic_analysis::not_supported_builtin(SyntaxRef n,
+                                                         const char *subclause,
+                                                         entity_index called,
+                                                         const char *what,
+                                                         call_site where)
+{
+    size_t length = 0;
+    const char *spelling =
+        tokens.pp.identifier_spelling(entity_table[called].name - 1, &length);
+    char text[256];
+    snprintf(text, sizeof text, "%.*s %s", static_cast<int>(length), spelling,
+             what);
+    owned_string &detail = detail_texts.make(text, strlen(text));
+    analysis_result r = not_supported(n, subclause, where);
+    unsupported[unsupported.size() - 1].detail = detail.c_str();
+    return r;
 }
 
 analysis_result semantic_analysis::ill_formed(SyntaxRef at, const char *rule,

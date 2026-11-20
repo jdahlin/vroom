@@ -339,6 +339,27 @@ const char *ast_builder_builtin_signature(const char *name, size_t length)
     return b ? b->sig : NULL;
 }
 
+bool ast_builder_library_builtin(const char *name, size_t length,
+                                 const char **signature, bool *clang_encoding,
+                                 const char **symbol)
+{
+    char full[128];
+    int enc = 0;
+
+    if (length + 11 > sizeof full)
+        return false;
+    memcpy(full, name, length);
+    full[length] = 0;
+    *signature = cc_builtin_library_signature(full, &enc);
+    if (!*signature)
+        return false;
+    *clang_encoding = enc != 0;
+    memcpy(full, "__builtin_", 10);
+    memcpy(full + 10, name, length);
+    *symbol = cc_library_builtin_symbol(full, length + 10);
+    return true;
+}
+
 bool ast_builder_atomic_shape(const char *name, size_t length, int *written,
                               int *result)
 {
