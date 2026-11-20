@@ -225,9 +225,11 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
             head_list.append(c);
         }
     }
-    if (gnu.aligned || gnu.section ||
+    /* (packed packs each member: the class's own, before the name or after
+       the closing brace; aligned in the class-head is not analysed) */
+    if (gnu.aligned || gnu.section || gnu.priority || gnu.cleanup ||
         (gnu.flags & ~(gnu_hidden_visibility | gnu_abi_tag |
-                       gnu_exclude_from_explicit_instantiation)))
+                       gnu_exclude_from_explicit_instantiation | gnu_packed)))
         return not_supported(n, "ext.gnu");
     const SyntaxElement *head_children = head_list.data();
     uint32_t head_count = static_cast<uint32_t>(head_list.size());
@@ -530,7 +532,9 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
     if (has_bases)
         result = base_clause(c, head_children[2], key);
     entity_table[c].requested_alignment = trailing_class_alignment;
+    entity_table[c].gnu_flags |= trailing_class_flags;
     trailing_class_alignment = 0;
+    trailing_class_flags = 0;
     for (SyntaxRef a : alignas_list) {
         uint64_t alignment = 0;
         if (result == analysis_result::well_formed)
@@ -1526,7 +1530,8 @@ semantic_analysis::member_declarator(entity_index c, SyntaxRef declaration,
     /* a member's symbol attributes (a member function's weak and section,
        a static data member's, a data member's function attributes) are not
        analysed yet; on a non-static data member they are GCC's error */
-    if ((m.gnu_flags & (gnu_weak | gnu_used | gnu_section | gnu_mode)) ||
+    if ((m.gnu_flags & (gnu_weak | gnu_used | gnu_section | gnu_mode |
+                        gnu_constructor | gnu_destructor | gnu_cleanup)) ||
         (!is_function &&
          (m.gnu_flags & (gnu_inline_flags | gnu_function_symbol_flags))))
         return not_supported(declaration, "ext.gnu");
@@ -1863,9 +1868,11 @@ semantic_analysis::member_declarator(entity_index c, SyntaxRef declaration,
            with aligned */
         uint32_t named =
             typedef_alignment_of(s.type.unqualified(), type, s.typedef_aligned);
+        VTRY(checked, array_element_alignment(declaration, type, named));
         if (named > entity_table[e].alignment)
             entity_table[e].alignment = named;
-        entity_table[e].gnu_flags = m.gnu_flags & gnu_packed;
+        entity_table[e].gnu_flags =
+            (m.gnu_flags | entity_table[c].gnu_flags) & gnu_packed;
         /* [dcl.attr.nouniqueaddr]/2: the declaration's or the
            declarator's */
         entity_table[e].no_unique_address =

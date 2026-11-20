@@ -44,15 +44,16 @@ SyntaxRef with_attributes(parser &p, Alternative parse)
     if (p.failed())
         return 0;
     /* [ext.gnu] clang takes GCC's attributes before a declaration, a label,
-       an expression statement or a null statement; before a statement
-       with substatements it says "an attribute list cannot appear here" */
+       an expression statement, a null statement or a loop (code_align);
+       before another statement with substatements the attribute does not
+       apply to it ("'code_align' attribute only applies to ..."), an
+       error whichever the attribute */
     if (attributes && has_gnu_attribute(p.tree, attributes) &&
         (p.at(preprocessing_op_or_punc::LEFT_BRACE) ||
          p.at(standard_keyword::if_) || p.at(standard_keyword::switch_) ||
-         p.at(standard_keyword::while_) || p.at(standard_keyword::do_) ||
-         p.at(standard_keyword::for_) || p.at(standard_keyword::try_)))
+         p.at(standard_keyword::try_)))
         return p.violates("GCC's attributes only before a declaration, a "
-                          "label, or an expression or null statement",
+                          "label, a loop, or an expression or null statement",
                           "ext.gnu", first);
     SyntaxRef n = parse();
     if (p.failed())
@@ -538,6 +539,61 @@ analysis_result semantic_analysis::statement(SyntaxElement s, uint32_t &built)
         }});
 }
 
+/* a statement that is a fallthrough statement: an attributed null
+   statement with a fallthrough attribute ([dcl.attr.fallthrough]/1) */
+bool semantic_analysis::fallthrough_statement(SyntaxElement s) const
+{
+    if (!s.is(syntax_kind::statement) || s.size() < 2)
+        return false;
+    SyntaxElement inner = s[s.size() - 1];
+    if (!inner.is(syntax_kind::expression_statement) || inner.size() != 1)
+        return false;
+    for (token_index t = s.first_token(); t < inner.first_token(); t++) {
+        if (tokens[t].kind == token_kind::operator_or_punctuator)
+            continue;
+        owned_buffer spelling;
+        tokens.spelling(t, spelling.get());
+        if ((spelling.size() == 11 &&
+             !memcmp(spelling.data(), "fallthrough", 11)) ||
+            (spelling.size() == 15 &&
+             !memcmp(spelling.data(), "__fallthrough__", 15)))
+            return true;
+    }
+    return false;
+}
+
+/* a labeled-statement whose label is a case label or default label */
+bool semantic_analysis::case_or_default_label(SyntaxElement s) const
+{
+    if (!s.is(syntax_kind::labeled_statement) || !s.size() || !s[0].is_token())
+        return false;
+    standard_keyword k = s[0].keyword();
+    return k == standard_keyword::case_ || k == standard_keyword::default_;
+}
+
+/* code_align's argument at the tokens from `at`: ( integer ), a power of
+   two from 1 to 4096 ("'code_align' attribute requires an integer
+   argument which is a power of two between 1 and 4096") */
+bool semantic_analysis::code_align_argument(token_index at) const
+{
+    if (!is_operator(tokens[at], preprocessing_op_or_punc::LEFT_PARENTHESIS) ||
+        !is_operator(tokens[at + 2],
+                     preprocessing_op_or_punc::RIGHT_PARENTHESIS))
+        return false;
+    owned_buffer digits;
+    tokens.spelling(at + 1, digits.get());
+    uint64_t value = 0;
+    for (size_t i = 0; i < digits.size(); i++) {
+        unsigned char ch = digits.data()[i];
+        if (ch < '0' || ch > '9')
+            return false;
+        value = value * 10 + (ch - '0');
+        if (value > 4096)
+            return false;
+    }
+    return digits.size() && value && !(value & (value - 1));
+}
+
 /*
  * [stmt.pre]/1: "The optional attribute-specifier-seq appertains to the
  * respective statement."  [dcl.attr.likelihood]/1: "The attribute-token
@@ -557,7 +613,8 @@ analysis_result semantic_analysis::attributed_statement(Statement n,
     for (uint32_t i = 0; i + 1 < n.size(); i++) {
         SyntaxElement c = n[i];
         if (!c.is(syntax_kind::attribute_specifier,
-                  syntax_kind::attribute_specifier_seq))
+                  syntax_kind::attribute_specifier_seq,
+                  syntax_kind::gnu_attribute_specifier))
             return not_supported(n, "dcl.attr");
         for (token_index t = c.first_token(); t < c.end_token(); t++) {
             if (tokens[t].kind == token_kind::operator_or_punctuator)
@@ -568,8 +625,55 @@ analysis_result semantic_analysis::attributed_statement(Statement n,
                 spelling.size() == 6 && !memcmp(spelling.data(), "likely", 6);
             bool unlikely =
                 spelling.size() == 8 && !memcmp(spelling.data(), "unlikely", 8);
-            if (!likely && !unlikely)
+            /* [dcl.attr.fallthrough]/1: "The attribute-token fallthrough
+               may be applied to a null statement; such a statement is a
+               fallthrough statement.  ... A fallthrough statement may only
+               appear within an enclosing switch statement.  The next
+               statement that would be executed after a fallthrough
+               statement shall be a labeled statement whose label is a case
+               label or default label for the same switch statement": the
+               label is not checked (clang's warning, GCC's), which
+               changes no code.  [ext:gnu_attributes]
+               __attribute__((fallthrough)) and clang's and GCC's
+               [[clang::fallthrough]] and [[gnu::fallthrough]] are the same
+               statement */
+            bool fallthrough =
+                (spelling.size() == 11 &&
+                 !memcmp(spelling.data(), "fallthrough", 11)) ||
+                (spelling.size() == 15 &&
+                 !memcmp(spelling.data(), "__fallthrough__", 15));
+            /* (the attribute's own scope and the keyword spelling) */
+            bool scope = ((spelling.size() == 5 &&
+                           !memcmp(spelling.data(), "clang", 5)) ||
+                          (spelling.size() == 3 &&
+                           !memcmp(spelling.data(), "gnu", 3))) &&
+                         is_operator(tokens[t + 1],
+                                     preprocessing_op_or_punc::COLON_COLON);
+            bool wrapper =
+                scope || (spelling.size() == 13 &&
+                          !memcmp(spelling.data(), "__attribute__", 13));
+            /* clang's code_align(N) on a loop: "The code_align attribute
+               ... specifies the alignment of the loop's first instruction,
+               an integer power of two between 1 and 4096": a hint for the
+               position of code, which vcc does not give (the tokens after
+               it are its argument) */
+            bool code_align = (spelling.size() == 10 &&
+                               !memcmp(spelling.data(), "code_align", 10)) ||
+                              (spelling.size() == 14 &&
+                               !memcmp(spelling.data(), "__code_align__", 14));
+            if (code_align) {
+                if (!inner.is(syntax_kind::iteration_statement) ||
+                    !code_align_argument(t + 1))
+                    return not_supported(n, "dcl.attr");
+                /* (past the argument's three tokens) */
+                t += 3;
+            } else if (fallthrough) {
+                if (!inner.is(syntax_kind::expression_statement) ||
+                    inner.size() != 1 || function_state.switches.empty())
+                    return not_supported(n, "dcl.attr.fallthrough");
+            } else if (!likely && !unlikely && !wrapper) {
                 return not_supported(n, "dcl.attr");
+            }
         }
     }
     return statement(inner, built);

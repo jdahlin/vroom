@@ -210,6 +210,26 @@ void c_lowering::gnu_attributes(entity_index e, uint32_t s)
         ast_builder_symbol_flags_add(c, s, flags);
     if (x.gnu_flags & gnu_used)
         ast_builder_symbol_keep(c, s);
+    /* [ext:gnu_attributes] constructor and destructor: an entry of the
+       program's .init_array or .fini_array, ordered by the priority, where
+       the function is defined; it is emitted though nothing refers to it */
+    if ((x.gnu_flags & (gnu_constructor | gnu_destructor)) && x.defined) {
+        if (x.gnu_flags & gnu_constructor)
+            ast_builder_symbol_constructor(c, s);
+        else
+            ast_builder_symbol_destructor(c, s);
+        if (x.gnu_priority)
+            ast_builder_symbol_priority(c, s, x.gnu_priority);
+        ast_builder_symbol_keep(c, s);
+    }
+    /* cleanup: the function of a local variable, called with its address
+       when it goes out of scope (C's code generator does it at each way
+       out of the scope) */
+    if (x.gnu_flags & gnu_cleanup) {
+        uint32_t function = symbol(x.gnu_cleanup, 0);
+        if (function)
+            ast_builder_symbol_cleanup(c, s, function);
+    }
     /* [ext:gnu_attributes] a class's visibility("hidden") is its
        members' (and its nested classes') */
     bool hidden = x.gnu_flags & gnu_hidden_visibility;

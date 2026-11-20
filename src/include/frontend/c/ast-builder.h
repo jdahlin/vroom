@@ -102,6 +102,14 @@ void ast_builder_symbol_keep(cc *c, uint32_t s);
 /* a function the program's start runs (.init_array; the default
    priority): GNU C's __attribute__((constructor)) */
 void ast_builder_symbol_constructor(cc *c, uint32_t s);
+/* ... or after main returns (.fini_array): __attribute__((destructor)) */
+void ast_builder_symbol_destructor(cc *c, uint32_t s);
+/* the priority of a constructor or destructor (0: the default; a smaller
+   number runs first, a destructor's last) */
+void ast_builder_symbol_priority(cc *c, uint32_t s, uint32_t priority);
+/* GNU C's __attribute__((cleanup(function))) on a local variable: the
+   function is called with the variable's address when its scope ends */
+void ast_builder_symbol_cleanup(cc *c, uint32_t s, uint32_t function);
 void ast_builder_symbol_flags_add(cc *c, uint32_t s, uint32_t flags);
 /* GNU C's __attribute__((section(name))): the section the symbol is
    placed in */

@@ -1154,6 +1154,7 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
     /* a specifier with no rules yet (an attribute after a class-specifier
        may change the class's layout) before any class is defined */
     trailing_class_alignment = 0;
+    trailing_class_flags = 0;
     for (uint32_t i = 0; i < seq.size(); i++) {
         SyntaxElement c = seq[i];
         if (c.is_token() || c.is(syntax_kind::class_specifier,
@@ -1184,10 +1185,11 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
             class_specifier_before(seq, i)) {
             gnu_attributes g;
             VTRY(r, gnu_attribute_specifier(c, g));
-            if (g.aligned && !(g.flags & ~gnu_aligned) && !g.section &&
-                !g.abi_tag) {
+            if (!(g.flags & ~gnu_packed) && !g.section && !g.abi_tag &&
+                !g.mode) {
                 if (g.aligned > trailing_class_alignment)
                     trailing_class_alignment = static_cast<uint32_t>(g.aligned);
+                trailing_class_flags |= g.flags;
                 continue;
             }
         }
