@@ -1792,7 +1792,10 @@ semantic_analysis::member_declarator(entity_index c, SyntaxRef declaration,
             /* incomplete too; an array of unknown bound last is clang's
                flexible array member extension */
             return not_supported(declaration, "class.mem");
-        if (!size)
+        /* (an array of zero elements, clang's and GCC's extension
+           (declarator_meaning warns of it), takes no bytes: glibc's struct
+           file_handle) */
+        if (!size && !(record.kind == type_kind::array && record.bound_known))
             return not_supported(declaration, "class.mem");
         uint32_t alignment = static_cast<uint32_t>(alignment_of_type(type));
         if (!alignment)

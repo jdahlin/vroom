@@ -166,6 +166,7 @@ class class_layout
     const char *allocation_of_members();
     const char *virtual_base_allocation();
     const char *finalization();
+    bool zero_size_members_only(const entity &x) const;
 
   private:
     semantic_analysis &analysis;
@@ -611,12 +612,35 @@ const char *class_layout::virtual_base_allocation()
  * size for a POD for the purpose of layout ([abi:pod]), whose tail
  * padding is not reused.
  */
+bool class_layout::zero_size_members_only(const entity &x) const
+{
+    if (x.dynamic || x.base_count || x.virtual_base_count)
+        return false;
+    bool any = false;
+    for (uint32_t i = 0; i < x.member_count; i++) {
+        const entity &m = table[analysis.class_members[x.first_member + i]];
+        const struct type &t = analysis.type_table[m.type.unqualified()];
+        if (m.bit_field && !m.bit_width)
+            continue;
+        if (t.kind != type_kind::array || !t.bound_known ||
+            analysis.size_of_type(m.type))
+            return false;
+        any = true;
+    }
+    return any;
+}
+
 const char *class_layout::finalization()
 {
     entity &x = table[c];
     x.alignment = alignment;
     raise_size(data_size());
     x.size = align_up(size, alignment);
+    /* (a class whose data members are all arrays of zero elements, with
+       no base class or virtual table pointer, takes no bytes: clang's and
+       GCC's size is zero, which analysis takes for an incomplete class's) */
+    if (!x.size && zero_size_members_only(x))
+        return "class.mem";
     if (!x.size)
         x.size = alignment;
     x.data_size = data_size();
