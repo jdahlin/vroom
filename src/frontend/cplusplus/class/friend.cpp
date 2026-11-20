@@ -223,11 +223,10 @@ semantic_analysis::friend_function(entity_index c, SyntaxRef n,
     function_cv = 0;
     function_parameters.clear();
     VTRY_SET(r, declarator(n, tail[1], type, m));
-    /* an operator function only as a definition ([over.oper]: its
-       declaration's checks are operator_function_declaration's) */
+    /* an operator function ([over.oper]: its declaration's checks are
+       operator_function_declaration's), not an allocation function */
     if (!m.has_id || m.qualifier || m.qualified_namespace ||
-        (m.operator_function &&
-         (!defines || m.allocation != allocation_function::none)) ||
+        (m.operator_function && m.allocation != allocation_function::none) ||
         m.literal_operator || m.destructor || m.aligned || m.gnu_flags ||
         function_cv || c_language ||
         type_table[type.unqualified()].kind != type_kind::function)
@@ -245,9 +244,23 @@ semantic_analysis::friend_function(entity_index c, SyntaxRef n,
         return not_supported(n, "class.friend");
     entity_index befriended = 0;
     if (entity_index prior = entity_table.find(space, name)) {
-        if (entity_table[prior].kind != entity_kind::function)
+        if (entity_table[prior].kind == entity_kind::none &&
+            entity_table[prior].held_by_template &&
+            entity_table[prior].enclosing == space) {
+            /* [temp.over]/1: the name is held by a function template of
+               the namespace; the non-template functions of the name are
+               in template_name_functions (as a declaration finds them) */
+            for (const template_name_function &x : template_name_functions)
+                if (x.name == prior && !befriended &&
+                    same_parameters(type_table,
+                                    entity_table[x.function].type.unqualified(),
+                                    type.unqualified()))
+                    befriended = x.function;
+        } else if (entity_table[prior].kind != entity_kind::function) {
             return not_supported(n, "class.friend");
-        for (entity_index o = prior; o && !befriended;
+        }
+        for (entity_index o = prior;
+             o && !befriended && entity_table[o].kind == entity_kind::function;
              o = entity_table[o].next_overload)
             if (same_parameters(type_table, entity_table[o].type.unqualified(),
                                 type.unqualified()))
@@ -283,11 +296,11 @@ semantic_analysis::friend_function(entity_index c, SyntaxRef n,
         entity_table[befriended].inline_ = true;
         if (s.constexpr_)
             entity_table[befriended].constexpr_ = true;
-        if (m.operator_function) {
-            VTRY(o, operator_function_declaration(n, befriended));
-        }
         bodies.append(n);
         friend_definitions.append({n, befriended, c});
+    }
+    if (m.operator_function) {
+        VTRY(o, operator_function_declaration(n, befriended));
     }
     entity_table.add_declaration(befriended, n);
     friend_record f;

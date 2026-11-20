@@ -539,6 +539,18 @@ analysis_result semantic_analysis::declare(SyntaxRef declaration,
                                 entity_table[x.function].type.unqualified(),
                                 type.unqualified()))
                 prior = x.function;
+        if (!prior && !qualified) {
+            /* [namespace.memdef]/3: a function a friend declaration
+               declared first, its name not bound: it is now one of the
+               non-template functions of the name */
+            prior = declared_unbound(scope, name, type);
+            if (prior) {
+                template_name_function x;
+                x.name = held_name;
+                x.function = prior;
+                template_name_functions.append(x);
+            }
+        }
     }
     if (prior && kind == entity_kind::function &&
         entity_table[prior].kind == entity_kind::function) {
