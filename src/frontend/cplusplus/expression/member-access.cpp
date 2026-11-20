@@ -171,10 +171,8 @@ analysis_result semantic_analysis::member_access(token_index at, entity_index e,
            operator that expects a glvalue for that operand, the temporary
            materialization conversion is applied to convert the expression
            to an xvalue."  One with a destructor is destroyed at the end of
-           the full-expression ([class.temporary]/4), not analysed yet */
-        if (m.category == value_category::prvalue &&
-            entity_table[x.enclosing].destructor)
-            return not_supported(current_declaration, "class.temporary");
+           the full-expression ([class.temporary]/4): lowering holds it in
+           a temporary of the full-expression. */
         /* [class.this]/3: "A member function whose type has a
            cv-qualifier-seq cv1 can be called on an object expression of
            type cv2 T only if cv1 is the same as or more cv-qualified than

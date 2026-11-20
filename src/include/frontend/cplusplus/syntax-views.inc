@@ -17397,7 +17397,7 @@ static const uint64_t syntax_allowed_children[][4] = {
     {0x7ffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x18ec70u}, /* concept_definition */
     {0x208007cu, 0x2040000000u, 0x30e00100275c0u, 0x180008u}, /* explicit_instantiation */
     {0x208007cu, 0x2040000000u, 0x30e00100275c0u, 0x180008u}, /* explicit_specialization */
-    {0x0u, 0x20000000e0000u, 0x40000010001c0000u, 0x180000u}, /* deduction_guide */
+    {0x0u, 0x20000000e0400u, 0x40000010001c0000u, 0x180000u}, /* deduction_guide */
     {0x0u, 0x0u, 0x40006000001c0000u, 0x180000u}, /* module_declaration */
     {0x0u, 0x0u, 0x800000000000u, 0x180000u}, /* module_name */
     {0x0u, 0x0u, 0x800000000000u, 0x180000u}, /* module_partition */

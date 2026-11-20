@@ -1111,6 +1111,26 @@ libstdc++ and json), since sema cannot analyse a declaration kept as tokens.
   listed runs need [cpp.pragma] or lost `_ZL1m`, 15 new ones are not
   listed), vcc-abi 35 pass, 2 xfail.
 
+- Status (2026-11-20, object lifetimes in lowering): the refusals that
+  named a context ("outside a statement", "in a conditional operand", "in
+  a condition or init-statement", "a goto where an object with a
+  destructor is live") are replaced by the rules they were special cases
+  of: a full-expression is lowered as one C expression wherever it is
+  ([intro.execution]/5); a temporary constructed under ?:, && or || has a
+  flag tested before its destruction ([class.temporary]/4, clang's); a
+  prvalue initializes its result object itself, through ?: too
+  ([dcl.init]/17.6.1, `initialize_into`), and `temporary_object` is the
+  one materialization ([basic.lval]/7) the call, construct and argument
+  paths share; a goto destroys what is live at it and not at its label
+  ([stmt.dcl]/2); a condition's and init-statement's variables go
+  through the block's declaration path ([stmt.pre]/4, [stmt.while]/2,
+  [stmt.for]/1: the condition's variable outlives the step).  A labeled
+  declaration-statement is in its block (it was destroyed at once).
+  cxx-run -O0123 1672 passed (4 xfails fixed), cxx-sema lowering 565 ->
+  571 files as clang ([class.temporary] 33 -> 27), symbols 2956 -> 2964,
+  cxx-c-suites unchanged; lower.cpp 6490 -> about 6600 lines with the
+  new rules, C node helpers taking most of the growth back.
+
 #### S4: what remains
 
 In an order where each item's tests can pass when it lands.  "Needs"
@@ -1145,9 +1165,14 @@ lines:
   bases).  They go into a record of their own per class, in a table
   beside `class_members` and `class_bases`, added by R6; the fields
   `entity` has today stay where they are until S3 and S6 have merged.
-- `lower/lower.cpp` (2573 lines) is edited by every track.  New lowering
-  for S4 goes into files of its own in `lower/` (classes, virtual tables,
-  initialization at start-up).
+- Lowering is `lower/`, files by topic (2026-11-20, split from the
+  6500-line `lower.cpp`): `lower-internal.h` (the `c_lowering` class and
+  the C node helpers), `types.cpp`, `symbols.cpp`, `scopes.cpp`,
+  `initialization.cpp`, `values.cpp`, `operators-and-calls.cpp`,
+  `expression.cpp`, `statements.cpp`, `member-pointers.cpp`,
+  `new-delete.cpp`, `vtables.cpp`, `virtual-bases.cpp`,
+  `static-storage.cpp`, `definitions.cpp`; each compiles alone.  New
+  lowering goes into the file of its topic.
 - [dcl.init.ref] and the copy constructor's selection are S3's; R4 and R5
   call them and do not re-implement them.
 - A class template's instantiation (S6b) completes a class from entities,

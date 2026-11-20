@@ -84,6 +84,7 @@ relative to it); `TODO.md` stays at the top.
   (`PLAN-cxx-spec.md`, `PLAN-cxx-parse.md`, then `PLAN-cxx-sema.md`: semantics and
   lowering to codegen, steps S0-S9, a plan under review).  The driver compiles
   C++ through it (`lower/compile.cpp`, `include/frontend/cplusplus/compile.h`;
+  the lowering to C's AST is `lower/`, files by topic sharing `lower-internal.h`;
   a C-hosted vcc has none): what the analysis or lowering does not handle yet
   is an error with the reason.  There are no separate C++ tools: the front
   end's developer outputs (tokens, syntax tree, analysis, the claims the

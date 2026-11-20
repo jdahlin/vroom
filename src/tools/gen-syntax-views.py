@@ -168,6 +168,10 @@ KNOWN_CHILDREN = {
     # a member-specification's explicit instantiation (an error kept in
     # the tree) and __extension__ before a member-declaration
     'member-specification': ['explicit-instantiation', 'gnu-extension-declaration'],
+    # a deduction-guide's ( parameter-declaration-clause ) parsed as a
+    # function declarator's parameters-and-qualifiers, whose function type
+    # sema reads ([temp.deduct.guide]/1)
+    'deduction-guide': ['parameters-and-qualifiers'],
 }
 
 # list nonterminals whose node nests (expression , assignment-expression:
