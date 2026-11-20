@@ -398,8 +398,10 @@ bool parser::at_decl_specifier(bool unknown_names)
     case standard_keyword::typename_:
         return true;
     case standard_keyword::extension:
-        /* a keyword that is a literal (__null) is an operand */
-        return peek().literal == literal_kind::none;
+        /* a keyword that is a literal (__null) is an operand, and so is
+           one that only an expression begins (__builtin_offsetof) */
+        return peek().literal == literal_kind::none &&
+               !at_expression_extension_keyword();
     default:
         break;
     }
@@ -623,7 +625,8 @@ node_index parser::decl_specifier_seq(decl_specifier_facts &facts,
                is of int; what it combines with is analysis's */
             add_token();
         } else if (k == standard_keyword::extension &&
-                   peek().literal == literal_kind::none) {
+                   peek().literal == literal_kind::none &&
+                   !at_expression_extension_keyword()) {
             /* an extension's keyword (P9); one that is a literal, __null,
                is an operand, no decl-specifier */
             return beyond_this_step();

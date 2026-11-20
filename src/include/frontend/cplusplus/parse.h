@@ -757,6 +757,7 @@ class parser
     standard_keyword keyword_of(const token &t) const;
     extension_keyword extension_keyword_of(const token &t) const;
     bool at(extension_keyword k, unsigned ahead = 0);
+    bool at_expression_extension_keyword();
     bool has(extension e) const
     {
         return tokens.files.behavior.has(e);
