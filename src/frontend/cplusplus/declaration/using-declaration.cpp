@@ -344,6 +344,26 @@ analysis_result semantic_analysis::using_declarator(UsingDeclarator n,
     if (n.identifier()) {
         t = n.identifier().token();
     } else if (auto function = n[1].operator_function_id()) {
+        /* [over.match.oper]/3.4: a function a using-declaration brings in
+           is a candidate for the reversed or rewritten form of a
+           comparison, unless one declared with it ("corresponds") says
+           otherwise: not analysed */
+        if (function.size() >= 2 && function.symbol().is_token() &&
+            tokens[function.symbol().token()].kind ==
+                token_kind::operator_or_punctuator)
+            switch (preprocessing_op_or_punc_primary(
+                tokens[function.symbol().token()].op_or_punc)) {
+            case preprocessing_op_or_punc::EQUAL_EQUAL:
+            case preprocessing_op_or_punc::EXCLAMATION_EQUAL:
+            case preprocessing_op_or_punc::LESS:
+            case preprocessing_op_or_punc::GREATER:
+            case preprocessing_op_or_punc::LESS_EQUAL:
+            case preprocessing_op_or_punc::GREATER_EQUAL:
+            case preprocessing_op_or_punc::SPACESHIP:
+                return not_supported(n, "over.match.oper");
+            default:
+                break;
+            }
         /* [over.oper]/1: operator() names the operator function: the
            keyword's token takes the operator's name */
         declarator_meaning function_name;

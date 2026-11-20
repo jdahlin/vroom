@@ -573,7 +573,7 @@ analysis_result semantic_analysis::declare_specialization(
         entity_table.make(entity_kind::function, t.name, t.enclosing);
     entity_table[e].type = type;
     entity_table[e].linkage_of_name = t.linkage_of_name;
-    if (type_without_external_linkage(type))
+    if (type_without_external_linkage(type, false, true))
         entity_table[e].linkage_of_name = linkage::internal;
     entity_table[e].inline_ = true;
     entity_table[e].constexpr_ = t.constexpr_;

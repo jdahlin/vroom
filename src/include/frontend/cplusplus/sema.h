@@ -2250,9 +2250,11 @@ class semantic_analysis
     bool qualified_declarator = false;
     entity_index qualified_scope = 0;
     /* whether the type is, or is made of, a class or enumeration whose
-       name has no external linkage */
-    bool type_without_external_linkage(qualified_type t,
-                                       bool visible = false) const;
+       name has no external linkage; with arguments, a class template
+       specialization of the weakest linkage of its template arguments
+       (clang's, of a function specialization's) */
+    bool type_without_external_linkage(qualified_type t, bool visible = false,
+                                       bool arguments = false) const;
     /* [basic.link]/4.3: whether t is (an array of) an unnamed class
        without a typedef name for linkage purposes */
     bool unnamed_class_object(qualified_type t) const;
