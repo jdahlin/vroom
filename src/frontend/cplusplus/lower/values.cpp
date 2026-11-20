@@ -223,6 +223,63 @@ uint32_t c_lowering::string_literal(const semantic_node &n)
                               kind);
 }
 
+/* [ext:clang_source_location] the place is the call's inside a default
+   argument (default_argument), else where the builtin is written */
+uint32_t c_lowering::source_location(const semantic_node &n)
+{
+    token_index at = n.at;
+    entity_index function = n.b;
+    if (call_site_at) {
+        at = call_site_at;
+        function = call_site_function;
+    }
+    source_position p = tokens.position(at);
+    source_location_builtin which = static_cast<source_location_builtin>(n.op);
+    ast_qualified_type t = AST_QUALIFIED_TYPE_UNQUALIFIED(type(n.type, n.at));
+    if (which == source_location_builtin::line)
+        return ast_builder_integer(c, t, p.line);
+    if (which == source_location_builtin::column)
+        return ast_builder_integer(c, t, p.column);
+    owned_buffer text;
+    if (which == source_location_builtin::function) {
+        if (function)
+            spelling(function, text);
+    } else {
+        const char *name = p.file_name;
+        if (which == source_location_builtin::file_name) {
+            const char *slash = strrchr(name, '/');
+            if (slash)
+                name = slash + 1;
+        }
+        vbuffer_string_append(text.get(), name);
+    }
+    /* the characters and a NUL: a string-literal's array of const char,
+       which decays */
+    owned_array<uint8_t> bytes;
+    bytes.resize(text.size() + 1);
+    for (size_t i = 0; i < text.size(); i++)
+        bytes[i] = static_cast<uint8_t>(text.data()[i]);
+    bytes[text.size()] = 0;
+    qualified_type element = record(n.type).operand;
+    uint32_t array = ast_builder_string(c, type(element, n.at), bytes.data(),
+                                        static_cast<uint32_t>(bytes.size()), 1,
+                                        LEX_TOKEN_STRING);
+    return cast(array, t, AST_CAST_ARRAY_DECAY);
+}
+
+/* [dcl.fct.default]/5: the argument's builtins are those of the call */
+uint32_t c_lowering::default_argument(const semantic_node &n)
+{
+    token_index outer_at = call_site_at;
+    entity_index outer_function = call_site_function;
+    call_site_at = n.at;
+    call_site_function = n.b;
+    uint32_t made = expression(n.a);
+    call_site_at = outer_at;
+    call_site_function = outer_function;
+    return made;
+}
+
 uint32_t c_lowering::conversion(const semantic_node &n)
 {
     ast_qualified_type t = AST_QUALIFIED_TYPE_UNQUALIFIED(type(n.type, n.at));

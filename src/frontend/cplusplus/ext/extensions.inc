@@ -138,7 +138,9 @@ EXTENSION(clang_blocks, clang,
           "function type (Darwin's SDK declares functions taking one under __BLOCKS__)")
 EXTENSION(clang_source_location, clang,
           "clang Language Extensions, Source location builtins: __builtin_source_location(), "
-          "std::source_location::current's primitive")
+          "std::source_location::current's primitive, and __builtin_FILE(), __builtin_FILE_NAME(), "
+          "__builtin_FUNCTION(), __builtin_LINE() and __builtin_COLUMN(), which in a default "
+          "argument are the call's")
 EXTENSION(clang_bit_cast, clang,
           "clang Language Extensions: __builtin_bit_cast (type, expression), "
           "std::bit_cast ([bit.cast]) as a primitive")

@@ -284,6 +284,11 @@ struct tree_checker {
                 analysis.semantics[node.a].category != value_category::lvalue)
                 problem(n, "an asm output is not an lvalue");
             break;
+        case semantic_kind::source_location:
+            break;
+        case semantic_kind::default_argument:
+            child(n, node.a, tree_sort::initializer, false, "argument");
+            break;
         case semantic_kind::vtable_pointer_store:
             child(n, node.a, tree_sort::expression, false, "object address");
             prvalue(n, node.a, "object address");

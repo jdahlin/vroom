@@ -637,6 +637,13 @@ class c_lowering
                                   uint32_t b);
     uint32_t constant(const semantic_node &n);
     uint32_t string_literal(const semantic_node &n);
+    /* [ext:clang_source_location] __builtin_FILE() and the others, and the
+       default argument whose are those of the call that uses it (the call,
+       and the function it is in, while the argument is lowered) */
+    uint32_t source_location(const semantic_node &n);
+    uint32_t default_argument(const semantic_node &n);
+    token_index call_site_at = 0;
+    entity_index call_site_function = 0;
     uint32_t conversion(const semantic_node &n);
     /* pointers to members ([dcl.mptr], [abi:member-pointers]) */
     ast_qualified_type member_function_pair = 0;
