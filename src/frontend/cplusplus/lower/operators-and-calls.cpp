@@ -97,6 +97,10 @@ uint32_t c_lowering::binary(const semantic_node &n)
     uint32_t a = expression(n.a), b = expression(n.b);
     if (!a || !b)
         return 0;
+    if (is_comparison(op) && record(n.type).kind == type_kind::vector)
+        /* [ext:gnu_vector_size] lane by lane: a signed integer vector */
+        return make(AST_NODE_BINARY, type(n.type, n.at), a, b, 0,
+                    static_cast<uint16_t>(op), 0);
     if (is_comparison(op))
         return to_bool(make(AST_NODE_BINARY,
                             ast_builder_type_basic(AST_TYPE_INT), a, b, 0,

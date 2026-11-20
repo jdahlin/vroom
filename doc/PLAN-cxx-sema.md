@@ -2376,9 +2376,16 @@ Shared with C, not copied: the layout and validity rule
   -O0..3, arm64 calling convention against clang's).  Not yet: a conversion
   between two vector types, `+=` and the other operators (V3), `v[i]` (V4),
   list-initialization and constant evaluation of a vector.
-- V3 operators: arithmetic, bitwise, shifts, comparisons (result a signed
-  integer vector), unary, `?:`, compound assignment, scalar splat; clang's
-  rules for mixing a vector and a scalar.
+- V3 **Done** (2026-11-20): the operators (`ext/gnu/vector-operators.cpp`):
+  `+ - * / % & | ^ << >>` and the comparisons lane by lane on two vectors of
+  one type, or a vector and a scalar (converted to the element type; an
+  integer constant must fit, clang's truncation rule); comparisons give a
+  signed integer vector of the same lanes (-1 / 0); unary `+ - ~`; the
+  compound assignments `op=`.  The nodes are as C's front end builds them,
+  so code generation is shared.  Test: `src/test/cxx/run/gnu-vector-operators.cpp`
+  (lanes against clang, cxx-run -O0..3).  Not yet: two different vector types
+  (clang's lax conversions), `&&`, `||`, `!`, `?:` on vectors, `++`/`--`,
+  constant evaluation, templates on vector types.
 - V4 element access `v[i]` (an lvalue), vector initializer lists, C-style
   casts between vectors of the same size (the bits), `__builtin_shufflevector`,
   `__builtin_convertvector` (shares `ext/clang/convertvector.cpp`),

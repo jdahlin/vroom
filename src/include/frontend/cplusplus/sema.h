@@ -192,6 +192,8 @@ class types
     type_index block_pointer_to(qualified_type function);
     type_index bit_int(uint64_t width, uint32_t parameter);
     type_index vector_of(qualified_type element, uint64_t count);
+    type_index vector_mask_of(const type &vector, uint64_t element,
+                              bool long_is_64);
     type_index ext_vector_of(qualified_type element, uint64_t count,
                              uint32_t parameter);
 
@@ -2754,6 +2756,13 @@ class semantic_analysis
                                  const expression_meaning &left,
                                  const expression_meaning &right,
                                  expression_meaning &m);
+    bool vector_scalar_fits(const expression_meaning &scalar,
+                            qualified_type element) const;
+    analysis_result vector_binary(SyntaxRef n, token_index at,
+                                  preprocessing_op_or_punc op,
+                                  expression_meaning &left,
+                                  expression_meaning &right,
+                                  expression_meaning &m);
     analysis_result arithmetic(SyntaxRef n, preprocessing_op_or_punc op,
                                expression_meaning &left,
                                expression_meaning &right,

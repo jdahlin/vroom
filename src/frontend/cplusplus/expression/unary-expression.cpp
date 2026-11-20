@@ -597,6 +597,20 @@ analysis_result semantic_analysis::unary(SyntaxRef n, expression_meaning &m)
         /* [expr.unary.op]/7, /8, /10: "arithmetic or unscoped
            enumeration type", "integral or unscoped enumeration type" */
         promote_enumeration(m);
+        if (type_table[m.type.unqualified()].kind == type_kind::vector) {
+            /* [ext:gnu_vector_size] +, - and ~ lane by lane: ~ of integer
+               elements, a vector of the operand's type */
+            if (o == preprocessing_op_or_punc::TILDE &&
+                !is_integral(type_table[m.type.unqualified()].operand))
+                return ill_formed(n,
+                                  "the operand of ~ shall be a vector of "
+                                  "integer elements",
+                                  "ext.gnu");
+            m.type = qualified_type::make(m.type.unqualified(), cv_none);
+            m.evaluation = constness::not_constant;
+            m.beyond_integral_constant = true;
+            break;
+        }
         if (o == preprocessing_op_or_punc::PLUS && is_pointer(m.type)) {
             /* [expr.unary.op]/7: "or pointer type" */
             break;
