@@ -237,6 +237,7 @@ SYNTAX_NODE(clang_type_transformation, "clang-type-transformation", "ext.clang")
 SYNTAX_NODE(clang_bit_cast_expression, "clang-bit-cast-expression", "ext.clang")
 SYNTAX_NODE(clang_convertvector_expression, "clang-convertvector-expression", "ext.clang")
 SYNTAX_NODE(clang_source_location_expression, "clang-source-location-expression", "ext.clang")
+SYNTAX_NODE(gnu_typeof_specifier, "gnu-typeof-specifier", "ext.gnu")
 SYNTAX_NODE(clang_atomic_type_specifier, "clang-atomic-type-specifier", "ext.clang")
 SYNTAX_NODE(clang_bit_int_type_specifier, "clang-bit-int-type-specifier", "ext.clang")
 

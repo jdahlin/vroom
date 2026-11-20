@@ -549,6 +549,7 @@ enum class extension_keyword : uint8_t {
     atomic,
     bit_int,
     source_location,
+    typeof_,
 };
 
 /*
@@ -981,6 +982,8 @@ class parser
     node_index clang_convertvector_expression();
     /* ---- ext/clang/source-location.cpp: __builtin_source_location() */
     node_index clang_source_location_expression();
+    /* ---- ext/gnu/typeof.cpp: typeof(e), typeof(T) */
+    node_index gnu_typeof_specifier();
     /* ---- ext/clang/atomic.cpp: _Atomic(T) */
     node_index clang_atomic_type_specifier();
     /* ---- ext/clang/bit-int.cpp: _BitInt(N) */

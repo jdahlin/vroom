@@ -736,7 +736,7 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
                     for (entity_index f : members)
                         types.append(entity_table[f].type);
                 } else if (!a.is(syntax_kind::braced_init_list)) {
-                    VTRY_SET(r, expression(a, e));
+                    VTRY_SET(r, passed_expression(a, e));
                     types.append(e.type);
                 }
                 early.append(e);
@@ -1151,7 +1151,7 @@ analysis_result semantic_analysis::template_call(
         if (named_overload_set(a, set_at))
             return not_supported(n, "temp.deduct.call");
         size_t uses_before = name_uses.size();
-        VTRY(r, expression(a, e));
+        VTRY(r, passed_expression(a, e));
         /* (a function's name whose other declarations analysis did not
            follow may be such a set too) */
         if (e.entity && entity_table[e.entity].kind == entity_kind::function) {
@@ -1317,7 +1317,7 @@ analysis_result semantic_analysis::call_with(
                     e = early[i];
                 else
                     /* [over.over]/1: "a parameter of a function" */
-                    r = target_expression(a, parameter, e);
+                    r = passed_target_expression(a, parameter, e);
                 /* an argument that is one token is reported at the call */
                 SyntaxRef at = n;
                 if (a.is_node())
@@ -1341,7 +1341,7 @@ analysis_result semantic_analysis::call_with(
         if (i < early.size() && early[i].node)
             e = early[i];
         else
-            r = expression(a, e);
+            r = passed_expression(a, e);
         if (r == analysis_result::well_formed)
             VTRY_SET(r, operand_value(node_of(a), e));
         /* [ext:gnu_library_builtins] a type-generic builtin of the C

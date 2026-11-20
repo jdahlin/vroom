@@ -120,7 +120,7 @@ semantic_analysis::resolve_call(SyntaxRef n,
     for (size_t i = early.size(); i < arguments.size(); i++) {
         expression_meaning e;
         if (!arguments[i].is(syntax_kind::braced_init_list)) {
-            VTRY(r, expression(arguments[i], e));
+            VTRY(r, passed_expression(arguments[i], e));
         }
         early.append(e);
     }

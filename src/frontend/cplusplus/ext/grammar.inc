@@ -121,6 +121,12 @@ PRODUCTION(gnu_int128, "simple-type-specifier", "__int128")
 
 PRODUCTION(gnu_float128, "simple-type-specifier", "__float128")
 
+/* ---- GCC manual 6.7, Referring to a Type with typeof ---- */
+
+PRODUCTION(gnu_typeof, "simple-type-specifier", "gnu-typeof-specifier")
+PRODUCTION(gnu_typeof, "gnu-typeof-specifier", "typeof ( expression )")
+PRODUCTION(gnu_typeof, "gnu-typeof-specifier", "typeof ( type-id )")
+
 /* ---- GCC manual 6.12, Complex Numbers ---- */
 
 PRODUCTION(gnu_complex, "simple-type-specifier", "_Complex")

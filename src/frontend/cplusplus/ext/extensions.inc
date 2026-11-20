@@ -54,6 +54,9 @@ EXTENSION(gnu_float128, gnu,
 EXTENSION(gnu_complex, gnu,
           "GCC manual 6.12, Complex Numbers: _Complex, __complex__ and __complex with float, "
           "double and long double")
+EXTENSION(gnu_typeof, gnu,
+          "GCC manual 6.7, Referring to a Type with typeof: typeof, __typeof and __typeof__ "
+          "(expression) or (type-id), a type-specifier (glibc's <math.h> casts through it)")
 EXTENSION(gnu_labels_as_values, gnu,
           "GCC manual 6.3, Labels as Values: &&label and goto *expression;")
 EXTENSION(gnu_designated_initializers, gnu,

@@ -580,6 +580,14 @@ node_index parser::decl_specifier_seq(decl_specifier_facts &facts,
             if (failed())
                 return 0;
             facts.has_defining_type_specifier = true;
+        } else if (at(extension_keyword::typeof_)) {
+            /* [ext:gnu_typeof] a simple-type-specifier */
+            if (facts.has_defining_type_specifier)
+                break;
+            gnu_typeof_specifier();
+            if (failed())
+                return 0;
+            facts.has_defining_type_specifier = true;
         } else if (at(extension_keyword::int128)) {
             /* [ext:gnu_int128] a simple-type-specifier */
             add_token();
@@ -1135,6 +1143,7 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
                                  syntax_kind::typename_specifier,
                                  syntax_kind::simple_template_id,
                                  syntax_kind::decltype_specifier,
+                                 syntax_kind::gnu_typeof_specifier,
                                  syntax_kind::clang_type_transformation,
                                  syntax_kind::clang_atomic_type_specifier,
                                  syntax_kind::clang_bit_int_type_specifier,
@@ -1229,6 +1238,12 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
                 r = decltype_type(c, denoted);
                 class_type = denoted.unqualified();
                 cv |= denoted.cv();
+            } else if (c.is(syntax_kind::gnu_typeof_specifier)) {
+                /* [ext:gnu_typeof] */
+                qualified_type denoted;
+                r = gnu_typeof_type(c, denoted);
+                class_type = denoted.unqualified();
+                cv |= denoted.cv();
             } else if (c.is(syntax_kind::clang_type_transformation)) {
                 /* [ext:clang_type_traits] */
                 qualified_type denoted;
@@ -1303,6 +1318,7 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
             if (!c.is(syntax_kind::simple_type_specifier,
                       syntax_kind::typename_specifier,
                       syntax_kind::decltype_specifier,
+                      syntax_kind::gnu_typeof_specifier,
                       syntax_kind::clang_type_transformation,
                       syntax_kind::clang_atomic_type_specifier,
                       syntax_kind::clang_bit_int_type_specifier,

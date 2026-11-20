@@ -309,7 +309,12 @@ analysis_result semantic_analysis::declare(SyntaxRef declaration,
                 if (!x.c_language_linkage || x.kind != kind || x.name != name ||
                     !is_namespace(x.enclosing))
                     continue;
-                if (!(x.type == type))
+                /* [impl.clang] the library function a builtin declares
+                   implicitly is noexcept, and a declaration of the
+                   library's name without noexcept is of it */
+                bool library = x.gnu_flags & gnu_library_function;
+                if (!(x.type == type) &&
+                    !(library && differ_in_exceptions(x.type, type)))
                     return not_supported(declaration, "dcl.link");
                 prior = e;
                 entity_table.bind(scope, name, e);

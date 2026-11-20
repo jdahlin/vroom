@@ -345,6 +345,11 @@ enum gnu_attribute_flag : uint32_t {
        as a function taking anything, so that lookup finds it; a call is not
        supported yet (call_with) */
     gnu_untyped_builtin = 524288,
+    /* [ext:gnu_library_builtins] the C library function a __builtin_NAME
+       declares implicitly (library_builtin): a declaration of the library's
+       own name, with or without noexcept, is of this function, as clang's
+       are */
+    gnu_library_function = 1048576,
 };
 /* the GNU attributes of a function's own symbol that analysis carries to
    member functions and function templates */
@@ -2122,7 +2127,8 @@ class semantic_analysis
     entity_index declare_builtin(uint32_t name, uint32_t symbol,
                                  qualified_type result,
                                  const qualified_type *parameters, size_t count,
-                                 bool variadic, uint32_t flags);
+                                 bool variadic, uint32_t flags,
+                                 bool non_throwing = false);
     /* real: the fundamental_type of builtin_type::real */
     qualified_type builtin_parameter_type(uint8_t t, uint8_t real = 0);
     /* the parameters of the function declarator analysed last: a function
@@ -2194,6 +2200,23 @@ class semantic_analysis
     /* [class.friend]: friend is analysed on a friend declaration's
        decl-specifier-seq only */
     bool friend_allowed = false;
+    /* [ext:gnu_float128] the expression analysed next may name an object of
+       type __float128 (or a copy of one through an identity cast): set by
+       the contexts that only pass the value on (a function's argument, a
+       cast's operand), cleared by expression(); every other use of a
+       binary128 value is not analysed */
+    bool binary128_value_passes = false;
+    /* whether e (analysed as m, of type __float128) is an object's name or
+       an identity cast of one: a value that is only passed on */
+    analysis_result passed_expression(SyntaxElement e, expression_meaning &m);
+    analysis_result passed_target_expression(SyntaxElement e,
+                                             qualified_type target,
+                                             expression_meaning &m);
+    bool passes_binary128(SyntaxElement e, const expression_meaning &m) const;
+    /* whether a conversion of a __float128 or complex value to another
+       type, or from one, is the one analysis does not handle yet */
+    bool binary128_or_complex(qualified_type t) const;
+    bool binary128_conversion(qualified_type from, qualified_type to) const;
     /* ---- placeholder types and decltype (placeholder-type-specifier.cpp,
        decltype-specifier.cpp) ---- */
     /* [dcl.spec.auto]/4: the decl-specifier-seq analysed next may have a
@@ -2606,6 +2629,8 @@ class semantic_analysis
     analysis_result clang_atomic_type(SyntaxRef n, qualified_type &type);
     uint64_t atomic_layout(qualified_type value, bool alignment) const;
     analysis_result clang_bit_int_type(SyntaxRef n, qualified_type &type);
+    /* [ext:gnu_typeof] the type typeof ( expression or type-id ) denotes */
+    analysis_result gnu_typeof_type(SyntaxRef n, qualified_type &type);
     analysis_result clang_ext_vector_count(SyntaxRef at, SyntaxElement count,
                                            gnu_attributes &g);
     analysis_result clang_ext_vector_type(SyntaxRef at, const gnu_attributes &g,

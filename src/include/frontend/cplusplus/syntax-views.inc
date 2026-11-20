@@ -152,6 +152,7 @@ struct GnuInitializerList;
 struct GnuLabelAddress;
 struct GnuOffsetofExpression;
 struct GnuOldDesignation;
+struct GnuTypeofSpecifier;
 struct Handler;
 struct HandlerSeq;
 struct Handlers;
@@ -1029,6 +1030,7 @@ template <> inline constexpr bool syntax_converts<ElaboratedEnumSpecifier, DeclS
 template <> inline constexpr bool syntax_converts<EnumSpecifier, DeclSpecifier> = true;
 template <> inline constexpr bool syntax_converts<ExplicitSpecifier, DeclSpecifier> = true;
 template <> inline constexpr bool syntax_converts<GnuAttributeSpecifier, DeclSpecifier> = true;
+template <> inline constexpr bool syntax_converts<GnuTypeofSpecifier, DeclSpecifier> = true;
 template <> inline constexpr bool syntax_converts<PlaceholderTypeSpecifier, DeclSpecifier> = true;
 template <> inline constexpr bool syntax_converts<SimpleTemplateId, DeclSpecifier> = true;
 template <> inline constexpr bool syntax_converts<SimpleTypeName, DeclSpecifier> = true;
@@ -1137,6 +1139,7 @@ template <> inline constexpr bool syntax_converts<DecltypeSpecifier, DefiningTyp
 template <> inline constexpr bool syntax_converts<ElaboratedClassSpecifier, DefiningTypeSpecifier> = true;
 template <> inline constexpr bool syntax_converts<ElaboratedEnumSpecifier, DefiningTypeSpecifier> = true;
 template <> inline constexpr bool syntax_converts<EnumSpecifier, DefiningTypeSpecifier> = true;
+template <> inline constexpr bool syntax_converts<GnuTypeofSpecifier, DefiningTypeSpecifier> = true;
 template <> inline constexpr bool syntax_converts<PlaceholderTypeSpecifier, DefiningTypeSpecifier> = true;
 template <> inline constexpr bool syntax_converts<SimpleTemplateId, DefiningTypeSpecifier> = true;
 template <> inline constexpr bool syntax_converts<SimpleTypeName, DefiningTypeSpecifier> = true;
@@ -2365,6 +2368,7 @@ template <> inline constexpr bool syntax_converts<ClangAtomicTypeSpecifier, Simp
 template <> inline constexpr bool syntax_converts<ClangBitIntTypeSpecifier, SimpleTypeSpecifier> = true;
 template <> inline constexpr bool syntax_converts<ClangTypeTransformation, SimpleTypeSpecifier> = true;
 template <> inline constexpr bool syntax_converts<DecltypeSpecifier, SimpleTypeSpecifier> = true;
+template <> inline constexpr bool syntax_converts<GnuTypeofSpecifier, SimpleTypeSpecifier> = true;
 template <> inline constexpr bool syntax_converts<PlaceholderTypeSpecifier, SimpleTypeSpecifier> = true;
 template <> inline constexpr bool syntax_converts<SimpleTemplateId, SimpleTypeSpecifier> = true;
 template <> inline constexpr bool syntax_converts<SimpleTypeName, SimpleTypeSpecifier> = true;
@@ -2558,6 +2562,7 @@ template <> inline constexpr bool syntax_converts<ClangTypeTransformation, TypeS
 template <> inline constexpr bool syntax_converts<DecltypeSpecifier, TypeSpecifier> = true;
 template <> inline constexpr bool syntax_converts<ElaboratedClassSpecifier, TypeSpecifier> = true;
 template <> inline constexpr bool syntax_converts<ElaboratedEnumSpecifier, TypeSpecifier> = true;
+template <> inline constexpr bool syntax_converts<GnuTypeofSpecifier, TypeSpecifier> = true;
 template <> inline constexpr bool syntax_converts<PlaceholderTypeSpecifier, TypeSpecifier> = true;
 template <> inline constexpr bool syntax_converts<SimpleTemplateId, TypeSpecifier> = true;
 template <> inline constexpr bool syntax_converts<SimpleTypeName, TypeSpecifier> = true;
@@ -2730,6 +2735,7 @@ GnuExtensionExpression gnu_extension_expression() const;
 GnuInitializerList gnu_initializer_list() const;
 GnuLabelAddress gnu_label_address() const;
 GnuOffsetofExpression gnu_offsetof_expression() const;
+GnuTypeofSpecifier gnu_typeof_specifier() const;
 Handler handler() const;
 HandlerSeq handler_seq() const;
 IdExpression id_expression() const;
@@ -4799,7 +4805,7 @@ struct CvQualifierSeq : SyntaxExtra<CvQualifierSeq> {
     CvQualifierSeq cv_qualifier_seq() const;
 };
 
-/* decl-specifier: one of clang_atomic_type_specifier, clang_bit_int_type_specifier, clang_type_transformation, class_specifier, decltype_specifier, elaborated_enum_specifier, elaborated_type_specifier, enum_specifier, explicit_specifier, gnu_attribute_specifier, placeholder_type_specifier, simple_template_id, simple_type_specifier, typename_specifier */
+/* decl-specifier: one of clang_atomic_type_specifier, clang_bit_int_type_specifier, clang_type_transformation, class_specifier, decltype_specifier, elaborated_enum_specifier, elaborated_type_specifier, enum_specifier, explicit_specifier, gnu_attribute_specifier, gnu_typeof_specifier, placeholder_type_specifier, simple_template_id, simple_type_specifier, typename_specifier */
 struct DeclSpecifier : SyntaxExtra<DeclSpecifier> {
     using SyntaxExtra<DeclSpecifier>::SyntaxExtra;
     /* a node of one of its kinds, as this view: the kind is checked */
@@ -5143,7 +5149,7 @@ struct DefiningTypeId : SyntaxExtra<DefiningTypeId> {
     DefiningTypeSpecifierSeq defining_type_specifier_seq() const;
 };
 
-/* defining-type-specifier: one of clang_atomic_type_specifier, clang_bit_int_type_specifier, clang_type_transformation, class_specifier, decltype_specifier, elaborated_enum_specifier, elaborated_type_specifier, enum_specifier, placeholder_type_specifier, simple_template_id, simple_type_specifier, typename_specifier */
+/* defining-type-specifier: one of clang_atomic_type_specifier, clang_bit_int_type_specifier, clang_type_transformation, class_specifier, decltype_specifier, elaborated_enum_specifier, elaborated_type_specifier, enum_specifier, gnu_typeof_specifier, placeholder_type_specifier, simple_template_id, simple_type_specifier, typename_specifier */
 struct DefiningTypeSpecifier : SyntaxExtra<DefiningTypeSpecifier> {
     using SyntaxExtra<DefiningTypeSpecifier>::SyntaxExtra;
     /* a node of one of its kinds, as this view: the kind is checked */
@@ -6654,6 +6660,29 @@ struct GnuOldDesignation : SyntaxExtra<GnuOldDesignation> {
     }
     static bool accepts(syntax_kind k);
     Designator gnu_designator_list() const;
+    SyntaxElement identifier() const;
+};
+
+/* the gnu-typeof-specifier node */
+struct GnuTypeofSpecifier : SyntaxExtra<GnuTypeofSpecifier> {
+    using SyntaxExtra<GnuTypeofSpecifier>::SyntaxExtra;
+    GnuTypeofSpecifier() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    GnuTypeofSpecifier(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<GnuTypeofSpecifier>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    GnuTypeofSpecifier(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<GnuTypeofSpecifier>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
+    static bool accepts(syntax_kind k);
+    Expression expression() const;
+    TypeId type_id() const;
     SyntaxElement identifier() const;
 };
 
@@ -9517,7 +9546,7 @@ struct SimpleTypeName : SyntaxExtra<SimpleTypeName> {
     SyntaxElement identifier() const;
 };
 
-/* simple-type-specifier: one of clang_atomic_type_specifier, clang_bit_int_type_specifier, clang_type_transformation, decltype_specifier, placeholder_type_specifier, simple_template_id, simple_type_specifier */
+/* simple-type-specifier: one of clang_atomic_type_specifier, clang_bit_int_type_specifier, clang_type_transformation, decltype_specifier, gnu_typeof_specifier, placeholder_type_specifier, simple_template_id, simple_type_specifier */
 struct SimpleTypeSpecifier : SyntaxExtra<SimpleTypeSpecifier> {
     using SyntaxExtra<SimpleTypeSpecifier>::SyntaxExtra;
     /* a node of one of its kinds, as this view: the kind is checked */
@@ -10208,7 +10237,7 @@ struct TypeRequirement : SyntaxExtra<TypeRequirement> {
     SyntaxElement identifier() const;
 };
 
-/* type-specifier: one of clang_atomic_type_specifier, clang_bit_int_type_specifier, clang_type_transformation, decltype_specifier, elaborated_enum_specifier, elaborated_type_specifier, placeholder_type_specifier, simple_template_id, simple_type_specifier, typename_specifier */
+/* type-specifier: one of clang_atomic_type_specifier, clang_bit_int_type_specifier, clang_type_transformation, decltype_specifier, elaborated_enum_specifier, elaborated_type_specifier, gnu_typeof_specifier, placeholder_type_specifier, simple_template_id, simple_type_specifier, typename_specifier */
 struct TypeSpecifier : SyntaxExtra<TypeSpecifier> {
     using SyntaxExtra<TypeSpecifier>::SyntaxExtra;
     /* a node of one of its kinds, as this view: the kind is checked */
@@ -11509,7 +11538,7 @@ inline CvQualifierSeq CvQualifierSeq::cv_qualifier_seq() const
 
 inline bool DeclSpecifier::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0x1fc00u, 0x2000000000000u, 0x4000009000000000u, 0x31000u};
+    static const uint64_t kinds[] = {0x1fc00u, 0x2000000000000u, 0x4000009000000000u, 0x71000u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -11704,7 +11733,7 @@ inline DefiningTypeSpecifierSeq DefiningTypeId::defining_type_specifier_seq() co
 
 inline bool DefiningTypeSpecifier::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0x1fc00u, 0x0u, 0x9000000000u, 0x31000u};
+    static const uint64_t kinds[] = {0x1fc00u, 0x0u, 0x9000000000u, 0x71000u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -12507,6 +12536,26 @@ inline Designator GnuOldDesignation::gnu_designator_list() const
 }
 
 inline SyntaxElement GnuOldDesignation::identifier() const
+{
+    return token_of_kind(token_kind::identifier);
+}
+
+inline bool GnuTypeofSpecifier::accepts(syntax_kind k)
+{
+    return k == syntax_kind::gnu_typeof_specifier;
+}
+
+inline Expression GnuTypeofSpecifier::expression() const
+{
+    return first<Expression>();
+}
+
+inline TypeId GnuTypeofSpecifier::type_id() const
+{
+    return first<TypeId>();
+}
+
+inline SyntaxElement GnuTypeofSpecifier::identifier() const
 {
     return token_of_kind(token_kind::identifier);
 }
@@ -14094,7 +14143,7 @@ inline SyntaxElement SimpleTypeName::identifier() const
 
 inline bool SimpleTypeSpecifier::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0x6400u, 0x0u, 0x1000000000u, 0x31000u};
+    static const uint64_t kinds[] = {0x6400u, 0x0u, 0x1000000000u, 0x71000u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -14505,7 +14554,7 @@ inline SyntaxElement TypeRequirement::identifier() const
 
 inline bool TypeSpecifier::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0x7c00u, 0x0u, 0x9000000000u, 0x31000u};
+    static const uint64_t kinds[] = {0x7c00u, 0x0u, 0x9000000000u, 0x71000u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -15381,7 +15430,7 @@ template <class S, class F> decltype(auto) syntax_visit(const S &s, F &f)
         break;
     case syntax_kind::simple_template_id:
         if constexpr (syntax_converts<SimpleTemplateId, S>)
-            return syntax_call<ClassHeadName, TemplateId, ClassOrDecltype, MemInitializerId, BaseSpecifier, BaseSpecifierList, UnqualifiedId, IdExpression, SimpleTypeSpecifier, DeclaratorId, NoptrDeclarator, PtrDeclarator, TypeSpecifier, Declarator, DefiningTypeSpecifier, InitDeclarator, MemberDeclarator, InitDeclaratorList, MemberDeclaratorList, DeclSpecifier, PrimaryExpression, ConstraintLogicalAndExpression, ConstraintLogicalOrExpression, PostfixExpression, UnaryExpression, CastExpression, PmExpression, MultiplicativeExpression, AdditiveExpression, ShiftExpression, CompareExpression, RelationalExpression, EqualityExpression, AndExpression, ExclusiveOrExpression, InclusiveOrExpression, LogicalAndExpression, ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, SimpleTemplateId(s.index()));
+            return syntax_call<ClassHeadName, TemplateId, ClassOrDecltype, MemInitializerId, BaseSpecifier, BaseSpecifierList, UnqualifiedId, IdExpression, DeclaratorId, SimpleTypeSpecifier, NoptrDeclarator, PtrDeclarator, Declarator, TypeSpecifier, InitDeclarator, MemberDeclarator, DefiningTypeSpecifier, InitDeclaratorList, MemberDeclaratorList, DeclSpecifier, PrimaryExpression, ConstraintLogicalAndExpression, ConstraintLogicalOrExpression, PostfixExpression, UnaryExpression, CastExpression, PmExpression, MultiplicativeExpression, AdditiveExpression, ShiftExpression, CompareExpression, RelationalExpression, EqualityExpression, AndExpression, ExclusiveOrExpression, InclusiveOrExpression, LogicalAndExpression, ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, SimpleTemplateId(s.index()));
         break;
     case syntax_kind::template_id:
         if constexpr (syntax_converts<OperatorTemplateId, S>)
@@ -15554,6 +15603,10 @@ template <class S, class F> decltype(auto) syntax_visit(const S &s, F &f)
     case syntax_kind::clang_source_location_expression:
         if constexpr (syntax_converts<ClangSourceLocationExpression, S>)
             return syntax_call<PrimaryExpression, ConstraintLogicalAndExpression, ConstraintLogicalOrExpression, PostfixExpression, UnaryExpression, CastExpression, PmExpression, MultiplicativeExpression, AdditiveExpression, ShiftExpression, CompareExpression, RelationalExpression, EqualityExpression, AndExpression, ExclusiveOrExpression, InclusiveOrExpression, LogicalAndExpression, ConstraintExpression, LogicalOrExpression, ConditionalExpression, ConstantExpression, TemplateArgument, TemplateArgumentList, AssignmentExpression, ClangTypeTraitArgument, ClangTypeTraitArgumentList, Expression, InitializerClause, Condition, ExprOrBracedInitList, ExpressionList, ForRangeInitializer, GnuAttributeArguments, GnuInitializerList, InitializerList>(f, ClangSourceLocationExpression(s.index()));
+        break;
+    case syntax_kind::gnu_typeof_specifier:
+        if constexpr (syntax_converts<GnuTypeofSpecifier, S>)
+            return syntax_call<SimpleTypeSpecifier, TypeSpecifier, DefiningTypeSpecifier, DeclSpecifier>(f, GnuTypeofSpecifier(s.index()));
         break;
     case syntax_kind::clang_atomic_type_specifier:
         if constexpr (syntax_converts<ClangAtomicTypeSpecifier, S>)
@@ -16191,6 +16244,11 @@ inline GnuLabelAddress SyntaxRef::gnu_label_address() const
 inline GnuOffsetofExpression SyntaxRef::gnu_offsetof_expression() const
 {
     return as<GnuOffsetofExpression>();
+}
+
+inline GnuTypeofSpecifier SyntaxRef::gnu_typeof_specifier() const
+{
+    return as<GnuTypeofSpecifier>();
 }
 
 inline Handler SyntaxRef::handler() const
@@ -17168,218 +17226,219 @@ inline UsingDeclarators SyntaxRef::using_declarators() const
 /* per node kind, the kinds its productions allow as a child node
    ((unparsed) and (erroneous) anywhere) */
 static const uint64_t syntax_allowed_children[][4] = {
-    {0x208007eu, 0x40000000u, 0xf1e00100275c0u, 0xc0008u}, /* translation_unit */
-    {0x208007eu, 0x40000000u, 0x30e00100275c0u, 0xc0008u}, /* declaration_seq */
-    {0x18000080u, 0x1c0002038000fcu, 0x40000030801c0000u, 0xc0004u}, /* simple_declaration */
-    {0x0u, 0x0u, 0x0u, 0xc0000u}, /* empty_declaration */
-    {0xfffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xcec70u}, /* static_assert_declaration */
-    {0x0u, 0x2000u, 0x40000000001c0000u, 0xc0000u}, /* alias_declaration */
-    {0x0u, 0x0u, 0x40000000001c0000u, 0xc0000u}, /* attribute_declaration */
-    {0x1fc80u, 0x2000000000000u, 0x40000090001c0000u, 0xf1000u}, /* decl_specifier_seq */
-    {0x7d00u, 0x0u, 0x40000090001c0000u, 0xf1000u}, /* type_specifier_seq */
-    {0x1fe00u, 0x0u, 0x40000090001c0000u, 0xf1000u}, /* defining_type_specifier_seq */
-    {0x4000000u, 0x0u, 0x1000000000u, 0xc0000u}, /* simple_type_specifier */
-    {0x4000000u, 0x0u, 0x40000010001c0000u, 0xc0000u}, /* elaborated_type_specifier */
-    {0x4040000u, 0x0u, 0x0u, 0xc0000u}, /* elaborated_enum_specifier */
-    {0xfffe081ff8000000u, 0x1c000000000003u, 0x30003000000000u, 0xcec70u}, /* decltype_specifier */
-    {0x4000u, 0x0u, 0x800000000u, 0xc0000u}, /* placeholder_type_specifier */
-    {0x0u, 0x1400000000u, 0x0u, 0xc0000u}, /* class_specifier */
-    {0x1c20000u, 0x0u, 0x0u, 0xc0000u}, /* enum_specifier */
-    {0x340000u, 0x0u, 0x40000000001c0000u, 0xc0000u}, /* enum_head */
-    {0x4000000u, 0x0u, 0x0u, 0xc0000u}, /* enum_head_name */
-    {0x340000u, 0x0u, 0x40000000001c0000u, 0xc0000u}, /* opaque_enum_declaration */
-    {0x0u, 0x0u, 0x0u, 0xc0000u}, /* enum_key */
-    {0x100u, 0x0u, 0x0u, 0xc0000u}, /* enum_base */
-    {0x1c00000u, 0x0u, 0x0u, 0xc0000u}, /* enumerator_list */
-    {0xfffe0813f9000000u, 0x1c000000000000u, 0x30003000000000u, 0xcec70u}, /* enumerator_definition */
-    {0x0u, 0x0u, 0x40000000001c0000u, 0xc0000u}, /* enumerator */
-    {0x1000u, 0x0u, 0x0u, 0xc0000u}, /* using_enum_declaration */
-    {0x4002000u, 0x0u, 0x1000000000u, 0xc0000u}, /* nested_name_specifier */
-    {0x14000000u, 0x1c000000000000u, 0x3000000000u, 0xc0000u}, /* qualified_id */
-    {0x6000u, 0x0u, 0x1000000000u, 0xc0000u}, /* unqualified_id */
-    {0xfffe081ff8000000u, 0x1c000000000003u, 0x30003000000000u, 0xcec70u}, /* primary_expression */
-    {0xfffe081ff8006400u, 0x1c000006001003u, 0x3000b000000000u, 0xffc70u}, /* postfix_expression */
-    {0x60813f8000000u, 0x1c000000001000u, 0x30003000000000u, 0xcec70u}, /* unary_expression */
-    {0xfffe081ff8000000u, 0x1c000000000003u, 0x30003000000000u, 0xcec70u}, /* noexcept_expression */
-    {0x60813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xcec70u}, /* await_expression */
-    {0xfffe081ff8000000u, 0x1c000002000001u, 0x30003000000000u, 0xcec70u}, /* yield_expression */
-    {0xfffe081ff8000000u, 0x1c000000000001u, 0x30003000000000u, 0xcec70u}, /* throw_expression */
-    {0x6000000000u, 0x800000000080000u, 0x4c0000000u, 0xc0000u}, /* lambda_expression */
-    {0x78000000000u, 0x0u, 0x0u, 0xc0000u}, /* lambda_introducer */
-    {0x80u, 0x1e0800u, 0x40000000801c0000u, 0xc0000u}, /* lambda_declarator */
-    {0x70000000000u, 0x0u, 0x0u, 0xc0000u}, /* lambda_capture */
-    {0x70000000000u, 0x0u, 0x0u, 0xc0000u}, /* capture_list */
-    {0x0u, 0x0u, 0x0u, 0xc0000u}, /* simple_capture */
-    {0x0u, 0x3800000u, 0x0u, 0xc0000u}, /* init_capture */
-    {0x1300000000000u, 0x2001000u, 0x0u, 0xc0000u}, /* new_expression */
-    {0xfffe081ff8000000u, 0x1c000006000001u, 0x30003000000000u, 0xcec70u}, /* new_placement */
-    {0xc00000000100u, 0x100u, 0x0u, 0xc0000u}, /* new_type_id */
-    {0xc00000000000u, 0x100u, 0x0u, 0xc0000u}, /* new_declarator */
-    {0xfffe881ff8000000u, 0x1c000000000003u, 0x40300030001c0000u, 0xcec70u}, /* noptr_new_declarator */
-    {0xfffe081ff8000000u, 0x1c000006000001u, 0x30003000000000u, 0xcec70u}, /* new_initializer */
-    {0x60813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xcec70u}, /* delete_expression */
-    {0x60813f8000000u, 0x1c000000001000u, 0x30003000000000u, 0xcec70u}, /* cast_expression */
-    {0xe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xcec70u}, /* pm_expression */
-    {0x1e0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xcec70u}, /* multiplicative_expression */
-    {0x3e0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xcec70u}, /* additive_expression */
-    {0x7e0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xcec70u}, /* shift_expression */
-    {0xfe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xcec70u}, /* compare_expression */
-    {0x1fe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xcec70u}, /* relational_expression */
-    {0x3fe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xcec70u}, /* equality_expression */
-    {0x7fe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xcec70u}, /* and_expression */
-    {0xffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xcec70u}, /* exclusive_or_expression */
-    {0x1ffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xcec70u}, /* inclusive_or_expression */
-    {0x3ffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xcec70u}, /* logical_and_expression */
-    {0x7ffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xcec70u}, /* logical_or_expression */
-    {0xfffe081ff8000000u, 0x1c000000000003u, 0x30003000000000u, 0xcec70u}, /* conditional_expression */
-    {0xfffe081ff8000000u, 0x1c000002000001u, 0x30003000000000u, 0xcec70u}, /* assignment_expression */
-    {0xfffe081ff8000000u, 0x1c000000000003u, 0x30003000000000u, 0xcec70u}, /* expression */
-    {0x18000000u, 0x1c0000000000fcu, 0x3000000000u, 0xc0000u}, /* init_declarator_list */
-    {0x18000000u, 0x1c0000038000f0u, 0x3080000000u, 0xc0004u}, /* init_declarator */
-    {0x18000000u, 0x1c000000000ce0u, 0x4000003000000000u, 0xc0002u}, /* declarator */
-    {0x18000000u, 0x1c0000000001e0u, 0x3000000000u, 0xc0000u}, /* ptr_declarator */
-    {0xfffe0813f8000000u, 0x1c0000000004e0u, 0x40300030001c0000u, 0xcec70u}, /* noptr_declarator */
-    {0x18000000u, 0x1c000000000000u, 0x3000000000u, 0xc0000u}, /* declarator_id */
-    {0x4000000u, 0x200u, 0x40000000001c0000u, 0xc0000u}, /* ptr_operator */
-    {0x0u, 0x200u, 0x0u, 0xc0000u}, /* cv_qualifier_seq */
-    {0x0u, 0x1e0200u, 0x40000000001c0000u, 0xc0000u}, /* parameters_and_qualifiers */
-    {0x0u, 0x1000u, 0x0u, 0xc0000u}, /* trailing_return_type */
-    {0x100u, 0x1c100u, 0x0u, 0xc0000u}, /* type_id */
-    {0x200u, 0x1c100u, 0x0u, 0xc0000u}, /* defining_type_id */
-    {0x0u, 0x10c00u, 0x0u, 0xc0000u}, /* abstract_declarator */
-    {0x0u, 0x18100u, 0x0u, 0xc0000u}, /* ptr_abstract_declarator */
-    {0xfffe0813f8000000u, 0x1c000000018500u, 0x40300030001c0000u, 0xcec70u}, /* noptr_abstract_declarator */
-    {0x0u, 0xc0000u, 0x0u, 0xc0000u}, /* parameter_declaration_clause */
-    {0x0u, 0xc0000u, 0x0u, 0xc0000u}, /* parameter_declaration_list */
-    {0xfffe081ff8000080u, 0x1c00000201c1f1u, 0x40300030001c0000u, 0xcec70u}, /* parameter_declaration */
-    {0xfffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xcec70u}, /* noexcept_specifier */
-    {0xffffffffffffffffu, 0xffffffffffffffffu, 0xffffffffffffffffu, 0xfffffu}, /* dynamic_exception_specification */
-    {0xffffffffffffffffu, 0xffffffffffffffffu, 0xffffffffffffffffu, 0xfffffu}, /* type_id_list */
-    {0xfffe081ff8000000u, 0x1c000006000001u, 0x30003000000000u, 0xcec70u}, /* initializer */
-    {0xfffe081ff8000000u, 0x1c000002000001u, 0x30003000000000u, 0xcec70u}, /* brace_or_equal_initializer */
-    {0xfffe081ff8000000u, 0x1c00001e000001u, 0x30003000000000u, 0xced70u}, /* braced_init_list */
-    {0xfffe081ff8000000u, 0x1c000006000001u, 0x30003000000000u, 0xcec70u}, /* initializer_list */
-    {0x0u, 0x18000000u, 0x0u, 0xc0000u}, /* designated_initializer_list */
-    {0x0u, 0x23000000u, 0x0u, 0xc0000u}, /* designated_initializer_clause */
-    {0xfffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xcec70u}, /* designator */
-    {0x18000080u, 0x1c0101800000f0u, 0x40000030801c0000u, 0xc0000u}, /* function_definition */
-    {0x0u, 0x800400000000000u, 0x0u, 0xc0000u}, /* function_body */
-    {0x0u, 0x800400000000000u, 0x18u, 0xc0000u}, /* function_try_block */
-    {0x0u, 0x200000000u, 0x0u, 0xc0000u}, /* identifier_list */
-    {0x0u, 0x40800000000u, 0x40000010001c0000u, 0xc0000u}, /* class_head */
-    {0x4000000u, 0x0u, 0x1000000000u, 0xc0000u}, /* class_head_name */
-    {0x2080038u, 0x3040000000u, 0xe0010004000u, 0xc0008u}, /* member_specification */
-    {0x1a0800b8u, 0x1c00e0400000f0u, 0x40000c30901c4000u, 0xc0008u}, /* member_declaration */
-    {0x18000000u, 0x1c00c0000000f0u, 0x3080000000u, 0xc0000u}, /* member_declarator_list */
-    {0xfffe0813f8000000u, 0x1c0300030000f0u, 0x40300030801c0000u, 0xcec70u}, /* member_declarator */
-    {0x0u, 0x10000000000u, 0x0u, 0xc0000u}, /* virt_specifier_seq */
-    {0x0u, 0x0u, 0x0u, 0xc0000u}, /* pure_specifier */
-    {0x6000u, 0x380000000000u, 0x1000000000u, 0xc0000u}, /* base_clause */
-    {0x2000u, 0x380000000000u, 0x1000000000u, 0xc0000u}, /* base_specifier_list */
-    {0x2000u, 0x200000000000u, 0x40000010001c0000u, 0xc0000u}, /* base_specifier */
-    {0x4000000u, 0x0u, 0x1000000000u, 0xc0000u}, /* class_or_decltype */
-    {0x0u, 0x1800000000000u, 0x0u, 0xc0000u}, /* ctor_initializer */
-    {0x0u, 0x1800000000000u, 0x0u, 0xc0000u}, /* mem_initializer_list */
-    {0xfffe081ff8006000u, 0x1c200006000001u, 0x30003000000000u, 0xcec70u}, /* mem_initializer */
-    {0xfffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xcec70u}, /* explicit_specifier */
-    {0x0u, 0x0u, 0x0u, 0xc0000u}, /* operator_function_id */
-    {0x0u, 0x0u, 0x0u, 0xc0000u}, /* literal_operator_id */
-    {0x100u, 0x20000000000000u, 0x0u, 0xc0000u}, /* conversion_function_id */
-    {0x100u, 0x40000000000100u, 0x0u, 0xc0000u}, /* conversion_type_id */
-    {0x0u, 0x40000000000100u, 0x0u, 0xc0000u}, /* conversion_declarator */
-    {0x0u, 0x6c00000000000000u, 0x40000000001c0007u, 0xc0080u}, /* statement */
-    {0x18000080u, 0x1c0000030000f0u, 0x40000030001c0000u, 0xc0000u}, /* condition */
-    {0xfffe0813fa080034u, 0x6e9c000000000000u, 0x40300030001e5407u, 0xcecf8u}, /* labeled_statement */
-    {0xfffe081ff8000000u, 0x1c000000000003u, 0x30003000000000u, 0xcec70u}, /* expression_statement */
-    {0x2080034u, 0x7e80000000000000u, 0x25407u, 0xc0088u}, /* compound_statement */
-    {0x2080034u, 0x7e80000000000000u, 0x25407u, 0xc0088u}, /* statement_seq */
-    {0xfffe081ffa080034u, 0x6f9c000000000003u, 0x30003000025407u, 0xcecf8u}, /* selection_statement */
-    {0xfffe081ffa080034u, 0xef9c000002000003u, 0x30003000025407u, 0xcecf8u}, /* iteration_statement */
-    {0x18000080u, 0x1c0002000000f0u, 0x40000030001c0000u, 0xc0000u}, /* for_range_declaration */
-    {0xfffe081ff8000000u, 0x1c000002000003u, 0x30003000000000u, 0xcec70u}, /* jump_statement */
-    {0xfffe081ff8000000u, 0x1c000002000003u, 0x30003000000000u, 0xcec70u}, /* coroutine_return_statement */
-    {0x0u, 0x800000000000000u, 0x18u, 0xc0000u}, /* try_block */
-    {0x0u, 0x0u, 0x18u, 0xc0000u}, /* handler_seq */
-    {0x0u, 0x800000000000000u, 0x20u, 0xc0000u}, /* handler */
-    {0x18000100u, 0x1c00000001c1f0u, 0x40000030001c0000u, 0xc0000u}, /* exception_declaration */
-    {0x208007eu, 0x40000000u, 0x40030e00101e75c0u, 0xc0008u}, /* named_namespace_definition */
-    {0x208007eu, 0x40000000u, 0x40030e00101e75c0u, 0xc0008u}, /* unnamed_namespace_definition */
-    {0x208007eu, 0x40000000u, 0x30e00100277c0u, 0xc0008u}, /* nested_namespace_definition */
-    {0x0u, 0x0u, 0x200u, 0xc0000u}, /* enclosing_namespace_specifier */
-    {0x0u, 0x0u, 0x800u, 0xc0000u}, /* namespace_alias_definition */
-    {0x4000000u, 0x0u, 0x0u, 0xc0000u}, /* qualified_namespace_specifier */
-    {0x4000000u, 0x0u, 0x40000000001c0000u, 0xc0000u}, /* using_directive */
-    {0x208007eu, 0x40000000u, 0x30e00100275c0u, 0xc0008u}, /* linkage_specification */
-    {0x0u, 0x0u, 0x4000000000018000u, 0xc0000u}, /* using_declaration */
-    {0x0u, 0x0u, 0x4000000000018000u, 0xc0000u}, /* using_declarator_list */
-    {0x14000000u, 0x1c000000000000u, 0x3000000000u, 0xc0000u}, /* using_declarator */
-    {0x0u, 0x0u, 0x40000000001c0000u, 0xc0000u}, /* asm_declaration */
-    {0x0u, 0x0u, 0x40000000001c0000u, 0xc0000u}, /* attribute_specifier_seq */
-    {0x0u, 0x0u, 0x1e00000u, 0xc0000u}, /* attribute_specifier */
-    {0xfffe0813f8000000u, 0x1c000000001000u, 0x30003000000000u, 0xcec70u}, /* alignment_specifier */
-    {0x0u, 0x0u, 0x0u, 0xc0000u}, /* attribute_using_prefix */
-    {0x0u, 0x0u, 0x1c00000u, 0xc0000u}, /* attribute_list */
-    {0x0u, 0x0u, 0x3000000u, 0xc0000u}, /* attribute */
-    {0x0u, 0x0u, 0x0u, 0xc0000u}, /* attribute_scoped_token */
-    {0x0u, 0x0u, 0xc000000u, 0xc0000u}, /* attribute_argument_clause */
-    {0x0u, 0x0u, 0xc000000u, 0xc0000u}, /* balanced_token_seq */
-    {0x0u, 0x0u, 0xc000000u, 0xc0000u}, /* balanced_token */
-    {0x208007cu, 0x2040000000u, 0x30f00300275c0u, 0xc0008u}, /* template_declaration */
-    {0x0u, 0x80000u, 0x4c0000000u, 0xc0000u}, /* template_head */
-    {0x0u, 0x80000u, 0x440000000u, 0xc0000u}, /* template_parameter_list */
-    {0x1038000000u, 0x1c000000000000u, 0x30003300000000u, 0xcec00u}, /* requires_clause */
-    {0x1038000000u, 0x1c000000000000u, 0x30003300000000u, 0xcec00u}, /* constraint_logical_or_expression */
-    {0x1038000000u, 0x1c000000000000u, 0x30003200000000u, 0xcec00u}, /* constraint_logical_and_expression */
-    {0x18000000u, 0x1c000000001000u, 0x3820000000u, 0xc0000u}, /* type_parameter */
-    {0xfffe0813fc000000u, 0x1c000000001000u, 0x30007000000000u, 0xcec70u}, /* type_constraint */
-    {0xfffe0813f8000000u, 0x1c000000001000u, 0x30007000000000u, 0xcec70u}, /* simple_template_id */
-    {0xfffe0813f8000000u, 0x1c000000001000u, 0x30007000000000u, 0xcec70u}, /* template_id */
-    {0xfffe0813f8000000u, 0x1c000000001000u, 0x30007000000000u, 0xcec70u}, /* template_argument_list */
-    {0x4000000u, 0x0u, 0x1000000000u, 0xc0000u}, /* typename_specifier */
-    {0x7ffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xcec70u}, /* concept_definition */
-    {0x208007cu, 0x2040000000u, 0x30e00100275c0u, 0xc0008u}, /* explicit_instantiation */
-    {0x208007cu, 0x2040000000u, 0x30e00100275c0u, 0xc0008u}, /* explicit_specialization */
-    {0x0u, 0x20000000e0000u, 0x40000010001c0000u, 0xc0000u}, /* deduction_guide */
-    {0x0u, 0x0u, 0x40006000001c0000u, 0xc0000u}, /* module_declaration */
-    {0x0u, 0x0u, 0x800000000000u, 0xc0000u}, /* module_name */
-    {0x0u, 0x0u, 0x800000000000u, 0xc0000u}, /* module_partition */
-    {0x0u, 0x0u, 0x800000000000u, 0xc0000u}, /* module_name_qualifier */
-    {0x208007eu, 0x40000000u, 0x30e00100275c0u, 0xc0008u}, /* export_declaration */
-    {0x0u, 0x0u, 0x40006000001c0000u, 0xc0000u}, /* module_import_declaration */
-    {0x208007eu, 0x40000000u, 0x30e00100275c0u, 0xc0008u}, /* global_module_fragment */
-    {0x208007eu, 0x40000000u, 0x30e00100275c0u, 0xc0008u}, /* private_module_fragment */
-    {0x60813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xcec70u}, /* fold_expression */
-    {0x0u, 0x0u, 0xc0000000000000u, 0xc0000u}, /* requires_expression */
-    {0x0u, 0xe0000u, 0x0u, 0xc0000u}, /* requirement_parameter_list */
-    {0x0u, 0x0u, 0x2f00000000000000u, 0xc0000u}, /* requirement_body */
-    {0x0u, 0x0u, 0x2f00000000000000u, 0xc0000u}, /* requirement_seq */
-    {0xfffe081ff8000000u, 0x1c000000000003u, 0x30003000000000u, 0xcec70u}, /* simple_requirement */
-    {0x4000000u, 0x0u, 0x1000000000u, 0xc0000u}, /* type_requirement */
-    {0xfffe081ff8000000u, 0x1c000000000003u, 0x1030003000000000u, 0xcec70u}, /* compound_requirement */
-    {0x0u, 0x0u, 0x800000000u, 0xc0000u}, /* return_type_requirement */
-    {0x7ffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xcec70u}, /* nested_requirement */
-    {0x0u, 0x0u, 0x8000000000000000u, 0xc0001u}, /* gnu_attribute_specifier */
-    {0x0u, 0x0u, 0x8000000000000000u, 0xc0001u}, /* gnu_attribute_list */
-    {0xfffe081ff8000000u, 0x1c000006000001u, 0x30003000000000u, 0xcec70u}, /* gnu_attribute */
-    {0x0u, 0x0u, 0x0u, 0xc0000u}, /* gnu_asm_label */
-    {0xffffffffffffffffu, 0xffffffffffffffffu, 0xffffffffffffffffu, 0xfffffu}, /* gnu_declarator */
-    {0xffffffffffffffffu, 0xffffffffffffffffu, 0xffffffffffffffffu, 0xfffffu}, /* gnu_extension_declaration */
-    {0xffffffffffffffffu, 0xffffffffffffffffu, 0xffffffffffffffffu, 0xfffffu}, /* gnu_extension_expression */
-    {0x0u, 0x2001000u, 0x0u, 0xc0000u}, /* gnu_compound_literal */
-    {0x0u, 0x0u, 0x0u, 0xc0000u}, /* gnu_label_address */
-    {0xfffe081ff8000000u, 0x1c000000000003u, 0x30003000000000u, 0xcec70u}, /* gnu_computed_goto */
-    {0xfffe081ff8000000u, 0x1c000022000001u, 0x30003000000000u, 0xcef70u}, /* gnu_initializer_list */
-    {0x0u, 0x20000000u, 0x0u, 0xc0000u}, /* gnu_designation */
-    {0xfffe081ff8000000u, 0x1c000000001003u, 0x30003000000000u, 0xcec70u}, /* gnu_offsetof_expression */
-    {0xfffe081ff8000000u, 0x1c000000001001u, 0x30003000000000u, 0xcec70u}, /* clang_type_trait_expression */
-    {0x0u, 0x1000u, 0x0u, 0xc0000u}, /* clang_type_transformation */
-    {0xfffe081ff8000000u, 0x1c000000001001u, 0x30003000000000u, 0xcec70u}, /* clang_bit_cast_expression */
-    {0xfffe081ff8000000u, 0x1c000000001001u, 0x30003000000000u, 0xcec70u}, /* clang_convertvector_expression */
-    {0x0u, 0x0u, 0x0u, 0xc0000u}, /* clang_source_location_expression */
-    {0x0u, 0x1000u, 0x0u, 0xc0000u}, /* clang_atomic_type_specifier */
-    {0xfffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xcec70u}, /* clang_bit_int_type_specifier */
-    {0xffffffffffffffffu, 0xffffffffffffffffu, 0xffffffffffffffffu, 0xfffffu}, /* unparsed */
-    {0xffffffffffffffffu, 0xffffffffffffffffu, 0xffffffffffffffffu, 0xfffffu}, /* erroneous */
+    {0x208007eu, 0x40000000u, 0xf1e00100275c0u, 0x180008u}, /* translation_unit */
+    {0x208007eu, 0x40000000u, 0x30e00100275c0u, 0x180008u}, /* declaration_seq */
+    {0x18000080u, 0x1c0002038000fcu, 0x40000030801c0000u, 0x180004u}, /* simple_declaration */
+    {0x0u, 0x0u, 0x0u, 0x180000u}, /* empty_declaration */
+    {0xfffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x18ec70u}, /* static_assert_declaration */
+    {0x0u, 0x2000u, 0x40000000001c0000u, 0x180000u}, /* alias_declaration */
+    {0x0u, 0x0u, 0x40000000001c0000u, 0x180000u}, /* attribute_declaration */
+    {0x1fc80u, 0x2000000000000u, 0x40000090001c0000u, 0x1f1000u}, /* decl_specifier_seq */
+    {0x7d00u, 0x0u, 0x40000090001c0000u, 0x1f1000u}, /* type_specifier_seq */
+    {0x1fe00u, 0x0u, 0x40000090001c0000u, 0x1f1000u}, /* defining_type_specifier_seq */
+    {0x4000000u, 0x0u, 0x1000000000u, 0x180000u}, /* simple_type_specifier */
+    {0x4000000u, 0x0u, 0x40000010001c0000u, 0x180000u}, /* elaborated_type_specifier */
+    {0x4040000u, 0x0u, 0x0u, 0x180000u}, /* elaborated_enum_specifier */
+    {0xfffe081ff8000000u, 0x1c000000000003u, 0x30003000000000u, 0x18ec70u}, /* decltype_specifier */
+    {0x4000u, 0x0u, 0x800000000u, 0x180000u}, /* placeholder_type_specifier */
+    {0x0u, 0x1400000000u, 0x0u, 0x180000u}, /* class_specifier */
+    {0x1c20000u, 0x0u, 0x0u, 0x180000u}, /* enum_specifier */
+    {0x340000u, 0x0u, 0x40000000001c0000u, 0x180000u}, /* enum_head */
+    {0x4000000u, 0x0u, 0x0u, 0x180000u}, /* enum_head_name */
+    {0x340000u, 0x0u, 0x40000000001c0000u, 0x180000u}, /* opaque_enum_declaration */
+    {0x0u, 0x0u, 0x0u, 0x180000u}, /* enum_key */
+    {0x100u, 0x0u, 0x0u, 0x180000u}, /* enum_base */
+    {0x1c00000u, 0x0u, 0x0u, 0x180000u}, /* enumerator_list */
+    {0xfffe0813f9000000u, 0x1c000000000000u, 0x30003000000000u, 0x18ec70u}, /* enumerator_definition */
+    {0x0u, 0x0u, 0x40000000001c0000u, 0x180000u}, /* enumerator */
+    {0x1000u, 0x0u, 0x0u, 0x180000u}, /* using_enum_declaration */
+    {0x4002000u, 0x0u, 0x1000000000u, 0x180000u}, /* nested_name_specifier */
+    {0x14000000u, 0x1c000000000000u, 0x3000000000u, 0x180000u}, /* qualified_id */
+    {0x6000u, 0x0u, 0x1000000000u, 0x180000u}, /* unqualified_id */
+    {0xfffe081ff8000000u, 0x1c000000000003u, 0x30003000000000u, 0x18ec70u}, /* primary_expression */
+    {0xfffe081ff8006400u, 0x1c000006001003u, 0x3000b000000000u, 0x1ffc70u}, /* postfix_expression */
+    {0x60813f8000000u, 0x1c000000001000u, 0x30003000000000u, 0x18ec70u}, /* unary_expression */
+    {0xfffe081ff8000000u, 0x1c000000000003u, 0x30003000000000u, 0x18ec70u}, /* noexcept_expression */
+    {0x60813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x18ec70u}, /* await_expression */
+    {0xfffe081ff8000000u, 0x1c000002000001u, 0x30003000000000u, 0x18ec70u}, /* yield_expression */
+    {0xfffe081ff8000000u, 0x1c000000000001u, 0x30003000000000u, 0x18ec70u}, /* throw_expression */
+    {0x6000000000u, 0x800000000080000u, 0x4c0000000u, 0x180000u}, /* lambda_expression */
+    {0x78000000000u, 0x0u, 0x0u, 0x180000u}, /* lambda_introducer */
+    {0x80u, 0x1e0800u, 0x40000000801c0000u, 0x180000u}, /* lambda_declarator */
+    {0x70000000000u, 0x0u, 0x0u, 0x180000u}, /* lambda_capture */
+    {0x70000000000u, 0x0u, 0x0u, 0x180000u}, /* capture_list */
+    {0x0u, 0x0u, 0x0u, 0x180000u}, /* simple_capture */
+    {0x0u, 0x3800000u, 0x0u, 0x180000u}, /* init_capture */
+    {0x1300000000000u, 0x2001000u, 0x0u, 0x180000u}, /* new_expression */
+    {0xfffe081ff8000000u, 0x1c000006000001u, 0x30003000000000u, 0x18ec70u}, /* new_placement */
+    {0xc00000000100u, 0x100u, 0x0u, 0x180000u}, /* new_type_id */
+    {0xc00000000000u, 0x100u, 0x0u, 0x180000u}, /* new_declarator */
+    {0xfffe881ff8000000u, 0x1c000000000003u, 0x40300030001c0000u, 0x18ec70u}, /* noptr_new_declarator */
+    {0xfffe081ff8000000u, 0x1c000006000001u, 0x30003000000000u, 0x18ec70u}, /* new_initializer */
+    {0x60813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x18ec70u}, /* delete_expression */
+    {0x60813f8000000u, 0x1c000000001000u, 0x30003000000000u, 0x18ec70u}, /* cast_expression */
+    {0xe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x18ec70u}, /* pm_expression */
+    {0x1e0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x18ec70u}, /* multiplicative_expression */
+    {0x3e0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x18ec70u}, /* additive_expression */
+    {0x7e0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x18ec70u}, /* shift_expression */
+    {0xfe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x18ec70u}, /* compare_expression */
+    {0x1fe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x18ec70u}, /* relational_expression */
+    {0x3fe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x18ec70u}, /* equality_expression */
+    {0x7fe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x18ec70u}, /* and_expression */
+    {0xffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x18ec70u}, /* exclusive_or_expression */
+    {0x1ffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x18ec70u}, /* inclusive_or_expression */
+    {0x3ffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x18ec70u}, /* logical_and_expression */
+    {0x7ffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x18ec70u}, /* logical_or_expression */
+    {0xfffe081ff8000000u, 0x1c000000000003u, 0x30003000000000u, 0x18ec70u}, /* conditional_expression */
+    {0xfffe081ff8000000u, 0x1c000002000001u, 0x30003000000000u, 0x18ec70u}, /* assignment_expression */
+    {0xfffe081ff8000000u, 0x1c000000000003u, 0x30003000000000u, 0x18ec70u}, /* expression */
+    {0x18000000u, 0x1c0000000000fcu, 0x3000000000u, 0x180000u}, /* init_declarator_list */
+    {0x18000000u, 0x1c0000038000f0u, 0x3080000000u, 0x180004u}, /* init_declarator */
+    {0x18000000u, 0x1c000000000ce0u, 0x4000003000000000u, 0x180002u}, /* declarator */
+    {0x18000000u, 0x1c0000000001e0u, 0x3000000000u, 0x180000u}, /* ptr_declarator */
+    {0xfffe0813f8000000u, 0x1c0000000004e0u, 0x40300030001c0000u, 0x18ec70u}, /* noptr_declarator */
+    {0x18000000u, 0x1c000000000000u, 0x3000000000u, 0x180000u}, /* declarator_id */
+    {0x4000000u, 0x200u, 0x40000000001c0000u, 0x180000u}, /* ptr_operator */
+    {0x0u, 0x200u, 0x0u, 0x180000u}, /* cv_qualifier_seq */
+    {0x0u, 0x1e0200u, 0x40000000001c0000u, 0x180000u}, /* parameters_and_qualifiers */
+    {0x0u, 0x1000u, 0x0u, 0x180000u}, /* trailing_return_type */
+    {0x100u, 0x1c100u, 0x0u, 0x180000u}, /* type_id */
+    {0x200u, 0x1c100u, 0x0u, 0x180000u}, /* defining_type_id */
+    {0x0u, 0x10c00u, 0x0u, 0x180000u}, /* abstract_declarator */
+    {0x0u, 0x18100u, 0x0u, 0x180000u}, /* ptr_abstract_declarator */
+    {0xfffe0813f8000000u, 0x1c000000018500u, 0x40300030001c0000u, 0x18ec70u}, /* noptr_abstract_declarator */
+    {0x0u, 0xc0000u, 0x0u, 0x180000u}, /* parameter_declaration_clause */
+    {0x0u, 0xc0000u, 0x0u, 0x180000u}, /* parameter_declaration_list */
+    {0xfffe081ff8000080u, 0x1c00000201c1f1u, 0x40300030001c0000u, 0x18ec70u}, /* parameter_declaration */
+    {0xfffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x18ec70u}, /* noexcept_specifier */
+    {0xffffffffffffffffu, 0xffffffffffffffffu, 0xffffffffffffffffu, 0x1fffffu}, /* dynamic_exception_specification */
+    {0xffffffffffffffffu, 0xffffffffffffffffu, 0xffffffffffffffffu, 0x1fffffu}, /* type_id_list */
+    {0xfffe081ff8000000u, 0x1c000006000001u, 0x30003000000000u, 0x18ec70u}, /* initializer */
+    {0xfffe081ff8000000u, 0x1c000002000001u, 0x30003000000000u, 0x18ec70u}, /* brace_or_equal_initializer */
+    {0xfffe081ff8000000u, 0x1c00001e000001u, 0x30003000000000u, 0x18ed70u}, /* braced_init_list */
+    {0xfffe081ff8000000u, 0x1c000006000001u, 0x30003000000000u, 0x18ec70u}, /* initializer_list */
+    {0x0u, 0x18000000u, 0x0u, 0x180000u}, /* designated_initializer_list */
+    {0x0u, 0x23000000u, 0x0u, 0x180000u}, /* designated_initializer_clause */
+    {0xfffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x18ec70u}, /* designator */
+    {0x18000080u, 0x1c0101800000f0u, 0x40000030801c0000u, 0x180000u}, /* function_definition */
+    {0x0u, 0x800400000000000u, 0x0u, 0x180000u}, /* function_body */
+    {0x0u, 0x800400000000000u, 0x18u, 0x180000u}, /* function_try_block */
+    {0x0u, 0x200000000u, 0x0u, 0x180000u}, /* identifier_list */
+    {0x0u, 0x40800000000u, 0x40000010001c0000u, 0x180000u}, /* class_head */
+    {0x4000000u, 0x0u, 0x1000000000u, 0x180000u}, /* class_head_name */
+    {0x2080038u, 0x3040000000u, 0xe0010004000u, 0x180008u}, /* member_specification */
+    {0x1a0800b8u, 0x1c00e0400000f0u, 0x40000c30901c4000u, 0x180008u}, /* member_declaration */
+    {0x18000000u, 0x1c00c0000000f0u, 0x3080000000u, 0x180000u}, /* member_declarator_list */
+    {0xfffe0813f8000000u, 0x1c0300030000f0u, 0x40300030801c0000u, 0x18ec70u}, /* member_declarator */
+    {0x0u, 0x10000000000u, 0x0u, 0x180000u}, /* virt_specifier_seq */
+    {0x0u, 0x0u, 0x0u, 0x180000u}, /* pure_specifier */
+    {0x6000u, 0x380000000000u, 0x1000000000u, 0x180000u}, /* base_clause */
+    {0x2000u, 0x380000000000u, 0x1000000000u, 0x180000u}, /* base_specifier_list */
+    {0x2000u, 0x200000000000u, 0x40000010001c0000u, 0x180000u}, /* base_specifier */
+    {0x4000000u, 0x0u, 0x1000000000u, 0x180000u}, /* class_or_decltype */
+    {0x0u, 0x1800000000000u, 0x0u, 0x180000u}, /* ctor_initializer */
+    {0x0u, 0x1800000000000u, 0x0u, 0x180000u}, /* mem_initializer_list */
+    {0xfffe081ff8006000u, 0x1c200006000001u, 0x30003000000000u, 0x18ec70u}, /* mem_initializer */
+    {0xfffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x18ec70u}, /* explicit_specifier */
+    {0x0u, 0x0u, 0x0u, 0x180000u}, /* operator_function_id */
+    {0x0u, 0x0u, 0x0u, 0x180000u}, /* literal_operator_id */
+    {0x100u, 0x20000000000000u, 0x0u, 0x180000u}, /* conversion_function_id */
+    {0x100u, 0x40000000000100u, 0x0u, 0x180000u}, /* conversion_type_id */
+    {0x0u, 0x40000000000100u, 0x0u, 0x180000u}, /* conversion_declarator */
+    {0x0u, 0x6c00000000000000u, 0x40000000001c0007u, 0x180080u}, /* statement */
+    {0x18000080u, 0x1c0000030000f0u, 0x40000030001c0000u, 0x180000u}, /* condition */
+    {0xfffe0813fa080034u, 0x6e9c000000000000u, 0x40300030001e5407u, 0x18ecf8u}, /* labeled_statement */
+    {0xfffe081ff8000000u, 0x1c000000000003u, 0x30003000000000u, 0x18ec70u}, /* expression_statement */
+    {0x2080034u, 0x7e80000000000000u, 0x25407u, 0x180088u}, /* compound_statement */
+    {0x2080034u, 0x7e80000000000000u, 0x25407u, 0x180088u}, /* statement_seq */
+    {0xfffe081ffa080034u, 0x6f9c000000000003u, 0x30003000025407u, 0x18ecf8u}, /* selection_statement */
+    {0xfffe081ffa080034u, 0xef9c000002000003u, 0x30003000025407u, 0x18ecf8u}, /* iteration_statement */
+    {0x18000080u, 0x1c0002000000f0u, 0x40000030001c0000u, 0x180000u}, /* for_range_declaration */
+    {0xfffe081ff8000000u, 0x1c000002000003u, 0x30003000000000u, 0x18ec70u}, /* jump_statement */
+    {0xfffe081ff8000000u, 0x1c000002000003u, 0x30003000000000u, 0x18ec70u}, /* coroutine_return_statement */
+    {0x0u, 0x800000000000000u, 0x18u, 0x180000u}, /* try_block */
+    {0x0u, 0x0u, 0x18u, 0x180000u}, /* handler_seq */
+    {0x0u, 0x800000000000000u, 0x20u, 0x180000u}, /* handler */
+    {0x18000100u, 0x1c00000001c1f0u, 0x40000030001c0000u, 0x180000u}, /* exception_declaration */
+    {0x208007eu, 0x40000000u, 0x40030e00101e75c0u, 0x180008u}, /* named_namespace_definition */
+    {0x208007eu, 0x40000000u, 0x40030e00101e75c0u, 0x180008u}, /* unnamed_namespace_definition */
+    {0x208007eu, 0x40000000u, 0x30e00100277c0u, 0x180008u}, /* nested_namespace_definition */
+    {0x0u, 0x0u, 0x200u, 0x180000u}, /* enclosing_namespace_specifier */
+    {0x0u, 0x0u, 0x800u, 0x180000u}, /* namespace_alias_definition */
+    {0x4000000u, 0x0u, 0x0u, 0x180000u}, /* qualified_namespace_specifier */
+    {0x4000000u, 0x0u, 0x40000000001c0000u, 0x180000u}, /* using_directive */
+    {0x208007eu, 0x40000000u, 0x30e00100275c0u, 0x180008u}, /* linkage_specification */
+    {0x0u, 0x0u, 0x4000000000018000u, 0x180000u}, /* using_declaration */
+    {0x0u, 0x0u, 0x4000000000018000u, 0x180000u}, /* using_declarator_list */
+    {0x14000000u, 0x1c000000000000u, 0x3000000000u, 0x180000u}, /* using_declarator */
+    {0x0u, 0x0u, 0x40000000001c0000u, 0x180000u}, /* asm_declaration */
+    {0x0u, 0x0u, 0x40000000001c0000u, 0x180000u}, /* attribute_specifier_seq */
+    {0x0u, 0x0u, 0x1e00000u, 0x180000u}, /* attribute_specifier */
+    {0xfffe0813f8000000u, 0x1c000000001000u, 0x30003000000000u, 0x18ec70u}, /* alignment_specifier */
+    {0x0u, 0x0u, 0x0u, 0x180000u}, /* attribute_using_prefix */
+    {0x0u, 0x0u, 0x1c00000u, 0x180000u}, /* attribute_list */
+    {0x0u, 0x0u, 0x3000000u, 0x180000u}, /* attribute */
+    {0x0u, 0x0u, 0x0u, 0x180000u}, /* attribute_scoped_token */
+    {0x0u, 0x0u, 0xc000000u, 0x180000u}, /* attribute_argument_clause */
+    {0x0u, 0x0u, 0xc000000u, 0x180000u}, /* balanced_token_seq */
+    {0x0u, 0x0u, 0xc000000u, 0x180000u}, /* balanced_token */
+    {0x208007cu, 0x2040000000u, 0x30f00300275c0u, 0x180008u}, /* template_declaration */
+    {0x0u, 0x80000u, 0x4c0000000u, 0x180000u}, /* template_head */
+    {0x0u, 0x80000u, 0x440000000u, 0x180000u}, /* template_parameter_list */
+    {0x1038000000u, 0x1c000000000000u, 0x30003300000000u, 0x18ec00u}, /* requires_clause */
+    {0x1038000000u, 0x1c000000000000u, 0x30003300000000u, 0x18ec00u}, /* constraint_logical_or_expression */
+    {0x1038000000u, 0x1c000000000000u, 0x30003200000000u, 0x18ec00u}, /* constraint_logical_and_expression */
+    {0x18000000u, 0x1c000000001000u, 0x3820000000u, 0x180000u}, /* type_parameter */
+    {0xfffe0813fc000000u, 0x1c000000001000u, 0x30007000000000u, 0x18ec70u}, /* type_constraint */
+    {0xfffe0813f8000000u, 0x1c000000001000u, 0x30007000000000u, 0x18ec70u}, /* simple_template_id */
+    {0xfffe0813f8000000u, 0x1c000000001000u, 0x30007000000000u, 0x18ec70u}, /* template_id */
+    {0xfffe0813f8000000u, 0x1c000000001000u, 0x30007000000000u, 0x18ec70u}, /* template_argument_list */
+    {0x4000000u, 0x0u, 0x1000000000u, 0x180000u}, /* typename_specifier */
+    {0x7ffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x18ec70u}, /* concept_definition */
+    {0x208007cu, 0x2040000000u, 0x30e00100275c0u, 0x180008u}, /* explicit_instantiation */
+    {0x208007cu, 0x2040000000u, 0x30e00100275c0u, 0x180008u}, /* explicit_specialization */
+    {0x0u, 0x20000000e0000u, 0x40000010001c0000u, 0x180000u}, /* deduction_guide */
+    {0x0u, 0x0u, 0x40006000001c0000u, 0x180000u}, /* module_declaration */
+    {0x0u, 0x0u, 0x800000000000u, 0x180000u}, /* module_name */
+    {0x0u, 0x0u, 0x800000000000u, 0x180000u}, /* module_partition */
+    {0x0u, 0x0u, 0x800000000000u, 0x180000u}, /* module_name_qualifier */
+    {0x208007eu, 0x40000000u, 0x30e00100275c0u, 0x180008u}, /* export_declaration */
+    {0x0u, 0x0u, 0x40006000001c0000u, 0x180000u}, /* module_import_declaration */
+    {0x208007eu, 0x40000000u, 0x30e00100275c0u, 0x180008u}, /* global_module_fragment */
+    {0x208007eu, 0x40000000u, 0x30e00100275c0u, 0x180008u}, /* private_module_fragment */
+    {0x60813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x18ec70u}, /* fold_expression */
+    {0x0u, 0x0u, 0xc0000000000000u, 0x180000u}, /* requires_expression */
+    {0x0u, 0xe0000u, 0x0u, 0x180000u}, /* requirement_parameter_list */
+    {0x0u, 0x0u, 0x2f00000000000000u, 0x180000u}, /* requirement_body */
+    {0x0u, 0x0u, 0x2f00000000000000u, 0x180000u}, /* requirement_seq */
+    {0xfffe081ff8000000u, 0x1c000000000003u, 0x30003000000000u, 0x18ec70u}, /* simple_requirement */
+    {0x4000000u, 0x0u, 0x1000000000u, 0x180000u}, /* type_requirement */
+    {0xfffe081ff8000000u, 0x1c000000000003u, 0x1030003000000000u, 0x18ec70u}, /* compound_requirement */
+    {0x0u, 0x0u, 0x800000000u, 0x180000u}, /* return_type_requirement */
+    {0x7ffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x18ec70u}, /* nested_requirement */
+    {0x0u, 0x0u, 0x8000000000000000u, 0x180001u}, /* gnu_attribute_specifier */
+    {0x0u, 0x0u, 0x8000000000000000u, 0x180001u}, /* gnu_attribute_list */
+    {0xfffe081ff8000000u, 0x1c000006000001u, 0x30003000000000u, 0x18ec70u}, /* gnu_attribute */
+    {0x0u, 0x0u, 0x0u, 0x180000u}, /* gnu_asm_label */
+    {0xffffffffffffffffu, 0xffffffffffffffffu, 0xffffffffffffffffu, 0x1fffffu}, /* gnu_declarator */
+    {0xffffffffffffffffu, 0xffffffffffffffffu, 0xffffffffffffffffu, 0x1fffffu}, /* gnu_extension_declaration */
+    {0xffffffffffffffffu, 0xffffffffffffffffu, 0xffffffffffffffffu, 0x1fffffu}, /* gnu_extension_expression */
+    {0x0u, 0x2001000u, 0x0u, 0x180000u}, /* gnu_compound_literal */
+    {0x0u, 0x0u, 0x0u, 0x180000u}, /* gnu_label_address */
+    {0xfffe081ff8000000u, 0x1c000000000003u, 0x30003000000000u, 0x18ec70u}, /* gnu_computed_goto */
+    {0xfffe081ff8000000u, 0x1c000022000001u, 0x30003000000000u, 0x18ef70u}, /* gnu_initializer_list */
+    {0x0u, 0x20000000u, 0x0u, 0x180000u}, /* gnu_designation */
+    {0xfffe081ff8000000u, 0x1c000000001003u, 0x30003000000000u, 0x18ec70u}, /* gnu_offsetof_expression */
+    {0xfffe081ff8000000u, 0x1c000000001001u, 0x30003000000000u, 0x18ec70u}, /* clang_type_trait_expression */
+    {0x0u, 0x1000u, 0x0u, 0x180000u}, /* clang_type_transformation */
+    {0xfffe081ff8000000u, 0x1c000000001001u, 0x30003000000000u, 0x18ec70u}, /* clang_bit_cast_expression */
+    {0xfffe081ff8000000u, 0x1c000000001001u, 0x30003000000000u, 0x18ec70u}, /* clang_convertvector_expression */
+    {0x0u, 0x0u, 0x0u, 0x180000u}, /* clang_source_location_expression */
+    {0xfffe081ff8000000u, 0x1c000000001003u, 0x30003000000000u, 0x18ec70u}, /* gnu_typeof_specifier */
+    {0x0u, 0x1000u, 0x0u, 0x180000u}, /* clang_atomic_type_specifier */
+    {0xfffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x18ec70u}, /* clang_bit_int_type_specifier */
+    {0xffffffffffffffffu, 0xffffffffffffffffu, 0xffffffffffffffffu, 0x1fffffu}, /* unparsed */
+    {0xffffffffffffffffu, 0xffffffffffffffffu, 0xffffffffffffffffu, 0x1fffffu}, /* erroneous */
 };
 /* the list kinds: a child of the same kind is a list not flattened */
 static const uint64_t syntax_list_kinds[4] = {0x10000400002u, 0x1000004008040004u, 0x100000044000000u, 0x0u};

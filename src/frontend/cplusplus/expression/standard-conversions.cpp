@@ -686,6 +686,13 @@ analysis_result semantic_analysis::implicit_conversion(SyntaxRef at,
                        "ill-formed";
     to = qualified_type::make(to.unqualified(), cv_none);
     const struct type target = type_table[to.unqualified()];
+    if (binary128_conversion(m.type, to))
+        return not_supported(at, "ext.gnu");
+    if (m.type.unqualified() == to.unqualified() && binary128_or_complex(to)) {
+        /* the identity: the value is passed on as it is */
+        m.type = to;
+        return analysis_result::well_formed;
+    }
     if (type_table[m.type.unqualified()].kind == type_kind::enumeration ||
         target.kind == type_kind::enumeration) {
         if (m.type.unqualified() == to.unqualified()) {

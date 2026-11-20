@@ -317,15 +317,15 @@ bool parser::names_compiler_builtin(uint32_t name)
 
 /* the function name names, declared at its first use with C language
    linkage and the GNU flags given */
-entity_index
-semantic_analysis::declare_builtin(uint32_t name, uint32_t symbol,
-                                   qualified_type result,
-                                   const qualified_type *parameters,
-                                   size_t count, bool variadic, uint32_t flags)
+entity_index semantic_analysis::declare_builtin(
+    uint32_t name, uint32_t symbol, qualified_type result,
+    const qualified_type *parameters, size_t count, bool variadic,
+    uint32_t flags, bool non_throwing)
 {
     entity_index e = entity_table.make(entity_kind::function, symbol, 0);
     entity_table[e].type = qualified_type::make(
-        type_table.function(result, parameters, count, variadic), cv_none);
+        type_table.function(result, parameters, count, variadic, non_throwing),
+        cv_none);
     entity_table[e].linkage_of_name = linkage::external;
     entity_table[e].c_language_linkage = true;
     entity_table[e].gnu_flags = flags;
@@ -507,13 +507,15 @@ entity_index semantic_analysis::library_builtin(uint32_t name)
                                        static_cast<uint8_t>(real)));
     }
     uint32_t library = tokens.pp.identifier(spelling, length) + 1;
-    uint32_t flags = 0;
+    uint32_t flags = gnu_library_function;
     if (found->noreturn)
-        flags = gnu_noreturn;
+        flags |= gnu_noreturn;
     /* bound under its __builtin_ name: the program's own declaration of
        the library function is another */
+    /* clang declares a library function noexcept in C++ (the declaration
+       <math.h> and <string.h> write with __THROW is of the same type) */
     return declare_builtin(name, library, result, parameters.data(),
-                           parameters.size(), variadic, flags);
+                           parameters.size(), variadic, flags, true);
 }
 
 /* whether the spelling has the text in it */
