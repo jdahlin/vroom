@@ -3856,6 +3856,26 @@ class semantic_analysis
     void declare_implicit(entity_index c, special_member kind, bool copy,
                           bool move = false);
     analysis_result implicit_definitions(entity_index c, SyntaxRef n);
+    /* [class.copy.assign]: the implicitly-declared copy and move assignment
+       operators that are not trivial (class/implicit-assignment.cpp) */
+    enum class assignment_use : uint8_t { usable, deleted, unknown };
+    bool move_assignment_operator(entity_index f, entity_index c) const;
+    bool bytewise_const_member(entity_index c) const;
+    bool declared_deleted(entity_index f) const;
+    assignment_use subobject_assignment(entity_index k, entity_index c,
+                                        bool move, bool &non_throwing);
+    bool assignment_not_trivial(entity_index c);
+    void declare_implicit_assignment(entity_index c, bool move, bool deleted,
+                                     bool non_throwing);
+    analysis_result implicit_assignments(entity_index c);
+    analysis_result implicit_assignment_definitions(entity_index c,
+                                                    SyntaxRef n);
+    analysis_result implicit_assignment_body(entity_index c, SyntaxRef n,
+                                             entity_index f,
+                                             qualified_type returns);
+    analysis_result implicit_assignment(entity_index c, SyntaxRef n,
+                                        entity_index source, bool move,
+                                        owned_array<uint32_t> &statements);
     /* [namespace.udecl]/3: the using-declarations of constructors of class
        c's direct bases, kept until its closing } (inherit_constructors) */
     struct inheriting_declaration {

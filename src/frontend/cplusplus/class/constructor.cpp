@@ -1910,6 +1910,7 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
     }
     if (destruction && !entity_table[c].destructor)
         declare_implicit(c, special_member::destructor, false);
+    VTRY(assignments, implicit_assignments(c));
     return inherit_constructors(c, n);
 }
 
@@ -2371,7 +2372,7 @@ analysis_result semantic_analysis::implicit_definitions(entity_index c,
         if (r != analysis_result::well_formed)
             return r;
     }
-    return analysis_result::well_formed;
+    return implicit_assignment_definitions(c, n);
 }
 
 /* [class.copy.ctor]/14: each base and member of *this direct-initialized
