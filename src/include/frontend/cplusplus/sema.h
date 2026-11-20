@@ -2584,10 +2584,16 @@ class semantic_analysis
                                expression_meaning &left,
                                expression_meaning &right,
                                expression_meaning &m);
+    bool class_operand(const expression_meaning &m) const;
     analysis_result comparison(SyntaxRef n, preprocessing_op_or_punc op,
                                expression_meaning &left,
                                expression_meaning &right,
                                expression_meaning &m);
+    /* [expr.spaceship]: the built-in three-way comparison of operands
+       that are prvalues */
+    analysis_result three_way_comparison(SyntaxRef n, expression_meaning &left,
+                                         expression_meaning &right,
+                                         expression_meaning &m);
     /* [expr.type]/3: the composite pointer type of two operands, one a
        pointer and the other a pointer or a null pointer constant, both
        converted to it; unsupported where analysis has no rule */
@@ -3725,6 +3731,9 @@ class semantic_analysis
     uint32_t concept_of(entity_index e) const;
     analysis_result requires_expression(RequiresExpression n,
                                         expression_meaning &m);
+    analysis_result requirement_satisfied(SyntaxElement r, bool &satisfied);
+    analysis_result type_constraint_satisfied(SyntaxElement q, qualified_type u,
+                                              bool &satisfied);
     analysis_result concept_id(SyntaxRef n, uint32_t ct, expression_meaning &m);
     /* [temp.constr.constr]: whether constraint-expression e is satisfied,
        the template parameters bound in scope */
@@ -3791,8 +3800,6 @@ class semantic_analysis
     struct satisfaction {
         uint32_t concept_template = 0, first = 0, count = 0;
         bool satisfied = false;
-        /* not known: its check was unsupported */
-        bool unknown = false;
     };
     owned_array<satisfaction> satisfactions;
     owned_array<template_argument> satisfaction_arguments;

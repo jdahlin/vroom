@@ -34,7 +34,6 @@ old-empty-base-assign	vcc: the C++ front end does not handle a declaration the p
 old-empty-member-copy	vcc: the rules of [class.ctor] are not implemented yet
 old-empty-pack-constexpr	vcc: the rules of [dcl.decl] are not implemented yet
 old-enable-if-overloads	vcc: the rules of [temp.variadic] are not implemented yet
-old-enum-class-no-conversion	vcc: the rules of [expr.prim.req] are not implemented yet
 old-enumerator-prvalue	vcc: the rules of [ext.clang] are not implemented yet
 old-enums-switch	vcc: the C++ front end does not handle a declaration the parser kept as tokens yet
 old-explicit-destructor-instance	vcc: the C++ front end does not handle a declaration the parser kept as tokens yet
@@ -70,7 +69,6 @@ old-pseudo-destructor-side-effects	vcc: the rules of [expr.ref] are not implemen
 old-range-for-arrays	vcc: the rules of [stmt.ranged] are not implemented yet
 old-ref-param-converting-ctor	vcc: the rules of [class.copy.ctor] are not implemented yet
 old-ref-qualified-members	vcc: the rules of [dcl.fct] are not implemented yet
-old-requires-invalid-deref	vcc: the rules of [expr.prim.req] are not implemented yet
 old-requires-params	vcc: the rules of [expr.prim.req] are not implemented yet
 old-reversed-packs	vcc: the rules of [expr.sizeof] are not implemented yet
 old-spaceship	vcc: the rules of [over.match.oper] are not implemented yet

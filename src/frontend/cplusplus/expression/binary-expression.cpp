@@ -266,7 +266,7 @@ analysis_result semantic_analysis::arithmetic(SyntaxRef n,
     if (!allowed) {
         auto known = [&](const expression_meaning &x) {
             return fundamental_of(x.type) != fundamental_type::none ||
-                   is_pointer(x.type);
+                   is_pointer(x.type) || class_operand(x);
         };
         if (!known(left) || !known(right))
             return not_supported(n, "expr.compound");
@@ -438,6 +438,12 @@ analysis_result semantic_analysis::composite_pointer_type(SyntaxRef at,
     return r;
 }
 
+/* whether operand m has class type */
+bool semantic_analysis::class_operand(const expression_meaning &m) const
+{
+    return type_table[m.type.unqualified()].kind == type_kind::class_type;
+}
+
 /*
  * [expr.rel] and [expr.eq]: the operands are prvalues; the result is a
  * bool.
@@ -476,8 +482,11 @@ analysis_result semantic_analysis::comparison(SyntaxRef n,
         fundamental_of(left.type) == fundamental_type::std_nullptr_t ||
         fundamental_of(right.type) == fundamental_type::std_nullptr_t;
     if (!pointers && !nullptrs) {
-        if (fundamental_of(left.type) == fundamental_type::none ||
-            fundamental_of(right.type) == fundamental_type::none)
+        /* (an operand of class type: no operator function was viable, and
+           no conversion function makes a built-in one so) */
+        if (!class_operand(left) && !class_operand(right) &&
+            (fundamental_of(left.type) == fundamental_type::none ||
+             fundamental_of(right.type) == fundamental_type::none))
             return not_supported(n, "expr.compound");
         if (equality)
             return ill_formed(n,
@@ -506,6 +515,77 @@ analysis_result semantic_analysis::comparison(SyntaxRef n,
     /* addresses are not modelled */
     if (m.evaluation == constness::constant)
         m.evaluation = constness::unknown;
+    return analysis_result::well_formed;
+}
+
+/*
+ * [expr.spaceship]/3-7: p <=> q of arithmetic, enumeration or object
+ * pointer operands, a prvalue of std::strong_ordering or
+ * std::partial_ordering (/9: <compare> shall have been included).  Its
+ * value is not modelled; operand types the rules judge by a narrowing
+ * conversion or by a composite type that is not an object pointer type
+ * are refused.
+ */
+analysis_result
+semantic_analysis::three_way_comparison(SyntaxRef n, expression_meaning &left,
+                                        expression_meaning &right,
+                                        expression_meaning &m)
+{
+    const char *name = "strong_ordering";
+    if (is_arithmetic(left.type) && is_arithmetic(right.type)) {
+        bool left_bool = fundamental_of(left.type) == fundamental_type::bool_;
+        bool right_bool = fundamental_of(right.type) == fundamental_type::bool_;
+        if (left_bool != right_bool)
+            return ill_formed(n,
+                              "if one of the operands is of type bool and "
+                              "the other is not, the program is ill-formed",
+                              "expr.spaceship");
+        fundamental_type t = usual_arithmetic_conversions(left, right);
+        bool floating = is_floating(left.type) || is_floating(right.type);
+        if (floating)
+            name = "partial_ordering";
+        /* (a conversion between integral types may be narrowing) */
+        else if (fundamental_of(left.type) != fundamental_of(right.type) ||
+                 fundamental_of(left.type) != t)
+            return not_supported(n, "expr.spaceship");
+    } else if (is_pointer(left.type) && is_pointer(right.type)) {
+        VTRY(r, composite_pointer_type(n, left, right));
+        if (!is_object_pointer(left.type) || !is_object_pointer(right.type))
+            return not_supported(n, "expr.spaceship");
+    } else if ((!class_operand(left) && !class_operand(right)) &&
+               (fundamental_of(left.type) == fundamental_type::none ||
+                fundamental_of(right.type) == fundamental_type::none ||
+                is_pointer(left.type) || is_pointer(right.type))) {
+        return not_supported(n, "expr.spaceship");
+    } else {
+        return ill_formed(n,
+                          "the operands shall have arithmetic, enumeration "
+                          "or pointer type",
+                          "expr.spaceship");
+    }
+    entity_index std_ =
+        entity_table.find(0, tokens.pp.identifier("std", 3) + 1);
+    entity_index category = 0;
+    if (std_ && is_namespace(std_) && std_namespace(std_)) {
+        lookup_result found = lookup_in_namespace(
+            std_,
+            tokens.pp.identifier(name, static_cast<uint32_t>(strlen(name))) + 1,
+            lookup_filter::any);
+        if (found.ambiguous)
+            return not_supported(n, "namespace.qual");
+        category = found.entity;
+    }
+    if (!category || entity_table[category].kind != entity_kind::class_type ||
+        !entity_table[category].size)
+        return ill_formed(n,
+                          "the header <compare> shall be included before a "
+                          "use of the built-in three-way comparison",
+                          "expr.spaceship");
+    m = expression_meaning();
+    m.type = qualified_type::make(entity_table[category].type.unqualified(),
+                                  cv_none);
+    m.category = value_category::prvalue;
+    m.evaluation = constness::unknown;
     return analysis_result::well_formed;
 }
 
@@ -572,10 +652,6 @@ analysis_result semantic_analysis::builtin_binary(SyntaxRef n, token_index at,
                                                   expression_meaning &m)
 {
     analysis_result r = analysis_result::well_formed;
-    if (op == preprocessing_op_or_punc::SPACESHIP)
-        /* [expr.spaceship]: the built-in three-way comparison, whose
-           result is of a type of <compare> */
-        return not_supported(n, "expr.spaceship");
     if (op == preprocessing_op_or_punc::DOT_STAR ||
         op == preprocessing_op_or_punc::ARROW_STAR)
         /* the built-in pointer-to-member operators
@@ -624,8 +700,13 @@ analysis_result semantic_analysis::builtin_binary(SyntaxRef n, token_index at,
                              op == preprocessing_op_or_punc::LESS_EQUAL ||
                              op == preprocessing_op_or_punc::GREATER_EQUAL ||
                              op == preprocessing_op_or_punc::EQUAL_EQUAL ||
-                             op == preprocessing_op_or_punc::EXCLAMATION_EQUAL);
+                             op ==
+                                 preprocessing_op_or_punc::EXCLAMATION_EQUAL ||
+                             op == preprocessing_op_or_punc::SPACESHIP);
     switch (op) {
+    case preprocessing_op_or_punc::SPACESHIP:
+        r = three_way_comparison(n, left, right, m);
+        return binary_built(r, at, op, left, right, m);
     case preprocessing_op_or_punc::LESS:
     case preprocessing_op_or_punc::GREATER:
     case preprocessing_op_or_punc::LESS_EQUAL:
