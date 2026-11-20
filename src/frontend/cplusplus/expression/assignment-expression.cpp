@@ -154,6 +154,8 @@ analysis_result semantic_analysis::assignment_of(
         record.kind != type_kind::pointer &&
         !(record.kind == type_kind::pointer_to_member &&
           op == preprocessing_op_or_punc::EQUAL) &&
+        !(record.kind == type_kind::vector &&
+          op == preprocessing_op_or_punc::EQUAL) &&
         !(record.kind == type_kind::enumeration &&
           enumeration_of(assigned_type)))
         return not_supported(n, "expr.ass");

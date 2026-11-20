@@ -853,6 +853,17 @@ analysis_result semantic_analysis::initialize_with(SyntaxRef at,
         result.node = m.node;
         return analysis_result::well_formed;
     }
+    if (target.kind == type_kind::vector) {
+        /* [ext:gnu_vector_size] a vector is initialized from a vector of its
+           type, a copy of its bytes (other conversions not analysed) */
+        if (m.type.unqualified() != type.unqualified())
+            return not_supported(at, "dcl.init");
+        VTRY_SET(r, operand_value(at, m));
+        result.evaluation = constness::not_constant;
+        result.value = 0;
+        result.node = m.node;
+        return analysis_result::well_formed;
+    }
     if (target.kind != type_kind::fundamental &&
         target.kind != type_kind::pointer &&
         target.kind != type_kind::pointer_to_member && !enumeration_of(type))

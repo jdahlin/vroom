@@ -2368,8 +2368,14 @@ Shared with C, not copied: the layout and validity rule
   vector element type" and size errors.  Test: `src/test/cxx/run/gnu-vector-size.cpp`
   (cxx-run, -O0 symbols = clang's).  An expression of vector type is still
   refused (`expression/expression.cpp`).
-- V2 values: the same-type copy (initialization, assignment, arguments,
-  returns), `sizeof`, vector members in classes.
+- V2 **Done** (2026-11-20): vector values of one type: initialization from
+  a vector of the type (`initialize_with`), `=` (`assignment_of`), the identity
+  conversion (`implicit_conversion`), so arguments, results, `sizeof` and
+  vector members copied with their class.  Test:
+  `src/test/cxx/run/gnu-vector-values.cpp` (bytes read back by memcpy; cxx-run
+  -O0..3, arm64 calling convention against clang's).  Not yet: a conversion
+  between two vector types, `+=` and the other operators (V3), `v[i]` (V4),
+  list-initialization and constant evaluation of a vector.
 - V3 operators: arithmetic, bitwise, shifts, comparisons (result a signed
   integer vector), unary, `?:`, compound assignment, scalar splat; clang's
   rules for mixing a vector and a scalar.
