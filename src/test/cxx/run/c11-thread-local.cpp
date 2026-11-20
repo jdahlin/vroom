@@ -20,5 +20,9 @@ int main()
     bump();
     *address() += 100;
     p.a = 40;
+    /* [ext:gnu_thread_local] Direct TLS access at block scope. */
+    static __thread pair g = {-2, -1};
+    if (++g.a != -1 || ++g.b != 0)
+        return 1;
     return counter + bump() + p.a + p.b + name[0] - 'm' - 149;
 }

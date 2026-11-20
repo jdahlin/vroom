@@ -859,6 +859,7 @@ The first grammar, about 55 nonterminals.
     extension gives grammar (GNU's alternate spellings `__inline__`,
     `__const__`, `__signed__`, `__volatile__`, `__asm__`, `__alignof__`;
     `__attribute__`, `__restrict__`, `__extension__`; clang's type traits).
+    GNU `__thread` uses the same static TLS lowering as `_Thread_local`.
     `ext/gnu/attribute.cpp` (where `[[ ]]` can be, among decl-specifiers,
     after a declarator and a namespace name; clang's placement rules),
     `ext/gnu/asm-label.cpp`, `ext/gnu/extension-keyword.cpp`,

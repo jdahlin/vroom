@@ -35,6 +35,8 @@ EXTENSION(gnu_common_predefined_macros, gnu,
 EXTENSION(gnu_alternate_keywords, gnu,
           "GCC manual 6.48, Alternate Keywords: __inline__, __const__, __signed__, "
           "__volatile__, __asm__, __alignof__ for inline, const, signed, volatile, asm, alignof")
+EXTENSION(gnu_thread_local, gnu,
+          "GCC manual, Thread-Local Storage: __thread as a storage-class specifier")
 EXTENSION(gnu_attributes, gnu,
           "GCC manual 6.39, Attribute Syntax: __attribute__ ((attribute-list))")
 EXTENSION(gnu_library_builtins, gnu,

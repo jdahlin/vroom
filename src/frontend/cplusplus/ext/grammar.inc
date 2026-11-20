@@ -231,6 +231,7 @@ PRODUCTION(clang_atomic, "cv-qualifier", "_Atomic")
 /* ---- clang Language Extensions, C11 _Thread_local in C++ ---- */
 
 PRODUCTION(clang_c11_thread_local, "storage-class-specifier", "_Thread_local")
+PRODUCTION(gnu_thread_local, "storage-class-specifier", "__thread")
 
 /* ---- clang Language Extensions, _BitInt in C++ ---- */
 
