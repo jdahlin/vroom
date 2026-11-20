@@ -650,7 +650,8 @@ class c_lowering
        pointer) through conversions: the member (0: the null value) and
        the offset the conversions add */
     bool member_pointer_value(uint32_t n, entity_index &member,
-                              int64_t &adjustment) const;
+                              int64_t &adjustment,
+                              bool *variable = nullptr) const;
     uint32_t member_pointer(uint32_t n);
     uint32_t member_pointer_constant(qualified_type t, entity_index member,
                                      int64_t adjustment, token_index at);
@@ -2311,7 +2312,7 @@ bool c_lowering::holds_data_member_pointer(qualified_type t) const
 }
 
 bool c_lowering::member_pointer_value(uint32_t n, entity_index &member,
-                                      int64_t &adjustment) const
+                                      int64_t &adjustment, bool *variable) const
 {
     adjustment = 0;
     for (;;) {
@@ -2326,6 +2327,11 @@ bool c_lowering::member_pointer_value(uint32_t n, entity_index &member,
         case conversion_kind::null_member_pointer:
             member = 0;
             return true;
+        case conversion_kind::lvalue_to_rvalue:
+            /* a variable's value, for rereadable_member_pointer */
+            if (variable && node(x.a).kind == semantic_kind::entity)
+                return *variable = true;
+            return false;
         case conversion_kind::member_pointer_to_derived:
             adjustment += static_cast<int64_t>(x.value);
             break;
@@ -2444,26 +2450,10 @@ uint32_t c_lowering::read_first(uint32_t n, reread &r, const char *what)
    no effect */
 bool c_lowering::rereadable_member_pointer(uint32_t n) const
 {
-    for (;;) {
-        const semantic_node &x = node(n);
-        if (x.kind == semantic_kind::member_pointer)
-            return true;
-        if (x.kind != semantic_kind::conversion)
-            return false;
-        switch (static_cast<conversion_kind>(x.op)) {
-        case conversion_kind::null_member_pointer:
-            return true;
-        case conversion_kind::lvalue_to_rvalue:
-            return node(x.a).kind == semantic_kind::entity;
-        case conversion_kind::member_pointer_to_derived:
-        case conversion_kind::member_pointer_to_base:
-        case conversion_kind::member_pointer_qualification:
-            n = x.a;
-            break;
-        default:
-            return false;
-        }
-    }
+    entity_index member = 0;
+    int64_t adjustment = 0;
+    bool variable = false;
+    return member_pointer_value(n, member, adjustment, &variable);
 }
 
 uint32_t c_lowering::read_again(const reread &r)
@@ -2935,6 +2925,7 @@ uint32_t c_lowering::call(const semantic_node &n)
     /* a call through a pointer to member function: its statements
        first ([expr.mptr.oper]/6) */
     owned_array<uint32_t> through;
+    uint32_t before_call = 0;
     bool member_pointer_call =
         node(n.a).kind == semantic_kind::member_pointer_access;
     if (member_pointer_call) {
@@ -2952,14 +2943,19 @@ uint32_t c_lowering::call(const semantic_node &n)
            the object's virtual table at the function's slot
            ([abi:vtable-components]); the object's address is read twice,
            so it is lowered twice when that has no effect, else held */
-        uint32_t object = expression(n.b);
-        if (!object)
+        reread r;
+        uint32_t first = read_first(n.b, r,
+                                    "a virtual call on an object whose "
+                                    "address has side effects outside a "
+                                    "statement");
+        if (!first)
             return 0;
-        if (!side_effect_free(object))
-            return fail("a virtual call on an object whose address has "
-                        "side effects",
-                        n.at);
-        uint32_t again = expression(n.b);
+        /* held: stored before the call, read for the callee and the
+           argument */
+        if (r.symbol)
+            before_call = first;
+        uint32_t object = read_again(r);
+        uint32_t again = read_again(r);
         callee = virtual_function(node(n.a).a, again, n.at);
         if (!callee)
             return 0;
@@ -3048,6 +3044,8 @@ uint32_t c_lowering::call(const semantic_node &n)
             ast_builder_node(c, AST_NODE_EXPRESSION, t, made, 0, 0, 0, 0));
         made = statement_expression(t, block(through));
     }
+    if (before_call)
+        made = comma(t, before_call, made);
     if (!is_reference(result))
         return made;
     return dereference(made, type(n.type, n.at));
