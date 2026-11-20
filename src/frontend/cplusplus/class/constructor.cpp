@@ -1774,10 +1774,11 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
         for (entity_index k : classes)
             if (!copies_bytes(k))
                 return not_supported(n, "class.copy.ctor");
-        /* [class.default.ctor]/1: a user-declared constructor and no
-           default one: no default constructor (not analysed) */
+        /* [class.default.ctor]/1: a user-declared constructor (a
+           constructor template is one, [temp.mem]/1) and no default one:
+           no default constructor (not analysed) */
         if (y.defaulted_move_constructor && !y.defaulted_default_constructor &&
-            !y.first_constructor)
+            !user_constructors)
             return not_supported(n, "class.default.ctor");
         if (!user_copy && !y.defaulted_copy_constructor)
             copy_deleted = true;
