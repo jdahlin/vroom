@@ -166,6 +166,11 @@ PRODUCTION(gnu_offsetof, "gnu-offsetof-member-designator", "identifier")
 PRODUCTION(gnu_offsetof, "gnu-offsetof-member-designator", "gnu-offsetof-member-designator . identifier")
 PRODUCTION(gnu_offsetof, "gnu-offsetof-member-designator", "gnu-offsetof-member-designator [ expression ]")
 
+/* ---- GCC manual, Variable Arguments: __builtin_va_arg ---- */
+
+PRODUCTION(gnu_va_arg, "primary-expression", "gnu-va-arg-expression")
+PRODUCTION(gnu_va_arg, "gnu-va-arg-expression", "__builtin_va_arg ( assignment-expression , type-id )")
+
 /* ---- clang Language Extensions, __builtin_bit_cast ---- */
 
 PRODUCTION(clang_bit_cast, "primary-expression", "clang-bit-cast-expression")
@@ -180,6 +185,11 @@ PRODUCTION(clang_convertvector, "clang-convertvector-expression", "__builtin_con
 
 PRODUCTION(clang_atomic, "simple-type-specifier", "clang-atomic-type-specifier")
 PRODUCTION(clang_atomic, "clang-atomic-type-specifier", "_Atomic ( type-id )")
+PRODUCTION(clang_atomic, "decl-specifier", "_Atomic")
+
+/* ---- clang Language Extensions, C11 _Thread_local in C++ ---- */
+
+PRODUCTION(clang_c11_thread_local, "storage-class-specifier", "_Thread_local")
 
 /* ---- clang Language Extensions, _BitInt in C++ ---- */
 

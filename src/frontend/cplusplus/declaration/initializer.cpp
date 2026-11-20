@@ -761,6 +761,12 @@ analysis_result semantic_analysis::initialize_with(SyntaxRef at,
                                                    bool direct, bool list,
                                                    initialized_value &result)
 {
+    /* [ext:clang_atomic] an atomic object is initialized as an object of
+       its value type (C23 6.7.11/11: "the initial value of the object
+       ... is that of the expression (after conversion)"; not atomically) */
+    if (type_index value = atomic_value_type(type))
+        return initialize_with(at, m, qualified_type::make(value, type.cv()),
+                               direct, list, result);
     const struct type target = type_table[type.unqualified()];
     analysis_result r = analysis_result::well_formed;
     if (target.kind == type_kind::lvalue_reference ||

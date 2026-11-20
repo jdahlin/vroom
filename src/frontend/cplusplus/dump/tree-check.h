@@ -274,6 +274,9 @@ struct tree_checker {
                 problem(n, "no constructor");
             list(n, tree_sort::initializer, "argument");
             break;
+        case semantic_kind::va_arg_:
+            child(n, node.a, tree_sort::expression, false, "va_list");
+            break;
         case semantic_kind::vtable_pointer_store:
             child(n, node.a, tree_sort::expression, false, "object address");
             prvalue(n, node.a, "object address");

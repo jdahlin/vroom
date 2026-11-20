@@ -67,6 +67,9 @@ EXTENSION(gnu_compound_literals, gnu,
 EXTENSION(gnu_offsetof, gnu,
           "GCC manual 6.53, Support for offsetof: __builtin_offsetof (type, member), "
           "<cstddef>'s offsetof ([support.types.layout]/1)")
+EXTENSION(gnu_va_arg, gnu,
+          "GCC manual 6.55 (Variable Arguments): __builtin_va_arg (va_list, type), "
+          "<cstdarg>'s va_arg ([cstdarg.syn])")
 
 /* clang */
 EXTENSION(clang_feature_checks, clang,
@@ -107,6 +110,10 @@ EXTENSION(clang_no_operator_names, clang,
 EXTENSION(clang_atomic, clang,
           "clang Language Extensions, C11 _Atomic in C++: _Atomic(T) a type with C11's "
           "atomic type's layout (C23 6.2.5)")
+EXTENSION(clang_c11_thread_local, clang,
+          "clang Language Extensions, C11 _Thread_local in C++: a storage-class-specifier with "
+          "C11's rules (constant initialization, trivial destruction, static or namespace "
+          "scope), accessed directly, without thread_local's wrapper functions")
 EXTENSION(clang_availability, clang,
           "clang Attributes, availability: availability(platform, introduced=version, ...), "
           "a version a pp-number such as 10.12.1")

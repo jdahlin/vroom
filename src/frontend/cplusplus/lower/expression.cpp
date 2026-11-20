@@ -209,6 +209,15 @@ uint32_t c_lowering::expression(uint32_t index)
         if (!allocated_symbol)
             return fail("an allocated pointer outside new or delete", n.at);
         return c_variable(c, allocated_symbol, allocated_type);
+    case semantic_kind::va_arg_: {
+        uint32_t list = expression(n.a);
+        if (!list)
+            return 0;
+        return ast_builder_node(
+            c, AST_NODE_VA_ARG,
+            AST_QUALIFIED_TYPE_UNQUALIFIED(type(n.type, n.at)), list, 0, 0, 0,
+            0);
+    }
     case semantic_kind::vtable_pointer_store:
         return vtable_pointer_stores(n);
     case semantic_kind::destroy: {

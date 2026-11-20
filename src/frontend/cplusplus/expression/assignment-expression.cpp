@@ -112,6 +112,9 @@ analysis_result semantic_analysis::assignment(SyntaxRef n,
     preprocessing_op_or_punc op =
         preprocessing_op_or_punc_primary(tokens[n[1].token()].op_or_punc);
     expression_meaning left, right;
+    /* [ext:clang_atomic] an atomic object is assigned (written with one
+       atomic store or read-modify-write, C's code generator) */
+    atomic_object_operand = true;
     analysis_result r = expression(n[0], left);
     /* [over.over]/1: "the left side of an assignment" */
     if (r == analysis_result::well_formed &&
@@ -139,14 +142,20 @@ analysis_result semantic_analysis::assignment_of(
                                  right, handled, m);
     if (r != analysis_result::well_formed || handled)
         return r;
-    const struct type record = type_table[left.type.unqualified()];
+    /* [ext:clang_atomic] an atomic object is assigned a value of its value
+       type */
+    qualified_type assigned_type = left.type;
+    if (type_index value = atomic_value_type(left.type))
+        assigned_type = qualified_type::make(value, left.type.cv());
+    const struct type record = type_table[assigned_type.unqualified()];
     if (record.kind == type_kind::class_type)
         return class_assignment(n, op, left, right, m);
     if (record.kind != type_kind::fundamental &&
         record.kind != type_kind::pointer &&
         !(record.kind == type_kind::pointer_to_member &&
           op == preprocessing_op_or_punc::EQUAL) &&
-        !(record.kind == type_kind::enumeration && enumeration_of(left.type)))
+        !(record.kind == type_kind::enumeration &&
+          enumeration_of(assigned_type)))
         return not_supported(n, "expr.ass");
     /* [basic.lval]/10: "An lvalue is modifiable unless its type is
        const-qualified or is a function type." */
@@ -157,7 +166,7 @@ analysis_result semantic_analysis::assignment_of(
                           "expr.ass");
     VTRY_SET(r, operand_value(n, right));
     qualified_type target =
-        qualified_type::make(left.type.unqualified(), cv_none);
+        qualified_type::make(assigned_type.unqualified(), cv_none);
     /* E1 op= E2: the type E1 op E2 is computed in */
     qualified_type computation = target;
     if (op == preprocessing_op_or_punc::EQUAL) {
@@ -185,14 +194,14 @@ analysis_result semantic_analysis::assignment_of(
                               "have arithmetic type",
                               "expr.ass");
         promote_enumeration(right);
-        if (is_pointer(left.type)) {
+        if (is_pointer(assigned_type)) {
             if (!additive)
                 return ill_formed(n,
                                   "in all cases other than += and -=, E1 "
                                   "shall have arithmetic type",
                                   "expr.ass");
-            if (!is_object_pointer(left.type) ||
-                !size_of_type(type_table[left.type.unqualified()].operand))
+            if (!is_object_pointer(assigned_type) ||
+                !size_of_type(type_table[assigned_type.unqualified()].operand))
                 return not_supported(n, "expr.ass");
             if (!is_integral(right.type)) {
                 if (fundamental_of(right.type) == fundamental_type::none &&

@@ -44,7 +44,10 @@ void c_lowering::symbol_linkage(entity_index e, int &storage,
         /* [temp.explicit]/10's explicit instantiation definition: emitted
            whether used or not, weak (clang's weak_odr) */
         flags |= AST_SYMBOL_FLAG_WEAK;
-    else if (x.inline_ && explicit_ != instantiation_kind::declaration)
+    else if (x.inline_ && explicit_ != instantiation_kind::declaration &&
+             !(x.gnu_flags & gnu_inline_definition))
+        /* (an inline gnu_inline function is not emitted at all: a plain
+           global symbol, C's GNU extern inline, gnu_attributes) */
         flags |= AST_SYMBOL_FLAG_LINKONCE | AST_SYMBOL_FLAG_WEAK;
     /* [class.local]: a member of a local class has no linkage
        ([basic.link]/8); [impl.clang] its symbol is local unless the
@@ -157,6 +160,10 @@ uint32_t c_lowering::symbol(entity_index e, token_index at, int variant)
     }
     if (!function)
         symbol_linkage(e, storage, flags);
+    /* [ext:clang_c11_thread_local] thread storage duration, C's
+       _Thread_local (accessed directly: no wrapper function) */
+    if (x.kind == entity_kind::variable && x.c11_thread_local)
+        flags |= AST_SYMBOL_FLAG_THREAD;
     s = ast_builder_symbol(c, kind, name.data(), name.size(), t, storage, flags,
                            0);
     *slot = s;
@@ -195,6 +202,10 @@ void c_lowering::gnu_attributes(entity_index e, uint32_t s)
         flags |= AST_SYMBOL_FLAG_NORETURN;
     if (x.gnu_flags & gnu_weak)
         flags |= AST_SYMBOL_FLAG_WEAK;
+    /* an inline gnu_inline function: C's GNU extern inline, which the
+       code generator inlines and never emits */
+    if ((x.gnu_flags & gnu_inline_definition) && x.inline_)
+        flags |= AST_SYMBOL_FLAG_GNU_INLINE;
     if (flags)
         ast_builder_symbol_flags_add(c, s, flags);
     if (x.gnu_flags & gnu_used)

@@ -127,6 +127,12 @@ analysis_result semantic_analysis::operand_value(SyntaxRef at,
         }
         m.type = qualified_type::make(m.type.unqualified(), cv_none);
         m.evaluation = read;
+        /* [ext:clang_atomic] an atomic object's value is of its value
+           type (lowered as C's atomic load; a constant's is folded, as
+           clang folds a constexpr atomic's) */
+        if (record.kind == type_kind::atomic)
+            m.type =
+                qualified_type::make(record.operand.unqualified(), cv_none);
     }
     m.category = value_category::prvalue;
     converted(m, kind);

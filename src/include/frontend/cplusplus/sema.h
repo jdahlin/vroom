@@ -370,6 +370,12 @@ enum gnu_attribute_flag : uint32_t {
        GCC attribute): a non-static data member that may share its bytes
        with another subobject (entity::no_unique_address) */
     gnu_no_unique_address = 4194304,
+    /* "gnu_inline: This attribute should be used with a function that is
+       also declared with the inline keyword ... In C++, this attribute does
+       not depend on extern in any way, but it still requires the inline
+       keyword to enable its special behavior": the definition is used only
+       for inlining, never emitted (glibc's __extern_inline) */
+    gnu_inline_definition = 8388608,
 };
 /* the GNU attributes of a function's own symbol that analysis carries to
    member functions and function templates */
@@ -433,6 +439,9 @@ struct entity {
     /* a variable: [basic.stc.auto]/1, a local variable not declared static
        (or a parameter) */
     bool automatic = false;
+    /* a variable: [ext:clang_c11_thread_local] declared _Thread_local, of
+       thread storage duration ([basic.stc.thread]) with C11's rules */
+    bool c11_thread_local = false;
     /* a block_scope: the scope whose names it shall not redeclare (the
        function parameter scope for the outermost block of a function
        definition, the scope of a statement's condition for its
@@ -1215,6 +1224,9 @@ enum class semantic_kind : uint8_t {
     throw_exception,
     /* [expr.typeid]: an lvalue of type const std::type_info; not lowered */
     type_identification,
+    /* [ext:gnu_va_arg] __builtin_va_arg (a, T): a: the va_list (an
+       lvalue); a prvalue of the node's type */
+    va_arg_,
     /* [class.cdtor]/4, [abi:vtable-ctor]: a: the address of the object
        under construction or destruction (this), b: its class, whose
        virtual table pointer is stored in it */
@@ -1707,6 +1719,8 @@ class semantic_analysis
         bool friend_ = false;
         /* [dcl.stc]/8: mutable (only where mutable_allowed) */
         bool mutable_ = false;
+        /* [ext:clang_c11_thread_local] _Thread_local */
+        bool c11_thread_local = false;
         /* [class.conv.fct]/2: explicit (only where explicit_allowed) */
         bool explicit_ = false;
         /* explicit ( value-dependent condition ): see entity */
@@ -2281,6 +2295,16 @@ class semantic_analysis
        cast's operand), cleared by expression(); every other use of a
        binary128 value is not analysed */
     bool binary128_value_passes = false;
+    /* [ext:clang_atomic] the expression analysed next is the operand of &,
+       sizeof or an assignment's left operand: an atomic object stays one
+       (anywhere else it is read, expression) */
+    bool atomic_object_operand = false;
+    /* [ext:clang_atomic] the value type of an atomic type the operations
+       are analysed for (an integer, enumeration or pointer of 1, 2, 4 or 8
+       bytes, which the code generator reads and writes with one
+       instruction); 0 for any other */
+    type_index atomic_value_type(qualified_type t) const;
+    analysis_result atomic_value_check(SyntaxRef n, qualified_type value);
     /* whether e (analysed as m, of type __float128) is an object's name or
        an identity cast of one: a value that is only passed on */
     analysis_result passed_expression(SyntaxElement e, expression_meaning &m);
@@ -2696,6 +2720,7 @@ class semantic_analysis
     bool class_trivially_copyable(entity_index c, bool &known);
     analysis_result gnu_offsetof(SyntaxRef n, expression_meaning &m);
     analysis_result clang_bit_cast(SyntaxRef n, expression_meaning &m);
+    analysis_result gnu_va_arg(SyntaxRef n, expression_meaning &m);
     analysis_result clang_convertvector(SyntaxRef n, expression_meaning &m);
     bool builtin_addressof_call(SyntaxRef n);
     /* clang's type-generic bit counts: which one the function e is (1
@@ -2708,6 +2733,12 @@ class semantic_analysis
                                          qualified_type &result);
     analysis_result bit_count_arguments(SyntaxRef n, entity_index called,
                                         const owned_array<uint32_t> &nodes);
+    analysis_result va_list_builtin_result(SyntaxRef n, int which,
+                                           const owned_array<uint32_t> &nodes);
+    analysis_result overflow_builtin_result(SyntaxRef n, const char *spelling,
+                                            size_t length,
+                                            const owned_array<uint32_t> &nodes,
+                                            qualified_type &result);
     analysis_result atomic_builtin_result(SyntaxRef n, entity_index called,
                                           const owned_array<uint32_t> &nodes,
                                           qualified_type &result);

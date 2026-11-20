@@ -395,6 +395,27 @@ static int query_kind(const char *spelling, size_t length)
     return 0;
 }
 
+/* the scalar letters of the C front end's builtin signatures and their
+   types */
+static const char signature_letters[] = "vbcChiulLwWzfdD";
+static const fundamental_type signature_types[] = {
+    fundamental_type::void_,
+    fundamental_type::bool_,
+    fundamental_type::char_,
+    fundamental_type::unsigned_char,
+    fundamental_type::unsigned_short_int,
+    fundamental_type::int_,
+    fundamental_type::unsigned_int,
+    fundamental_type::long_int,
+    fundamental_type::unsigned_long_int,
+    fundamental_type::long_long_int,
+    fundamental_type::unsigned_long_long_int,
+    fundamental_type::unsigned_long_int,
+    fundamental_type::float_,
+    fundamental_type::double_,
+    fundamental_type::long_double,
+};
+
 /* a builtin of vcc's C front end (frontend/c/builtin-table.cpp) whose
    signature has scalar types only, in the table's letters, or one of the
    generic_builtins: lowered to the C front end's builtin node
@@ -403,24 +424,6 @@ entity_index semantic_analysis::compiler_builtin(uint32_t name,
                                                  const char *spelling,
                                                  size_t length)
 {
-    static const char letters[] = "vbcChiulLwWzfdD";
-    static const fundamental_type types[] = {
-        fundamental_type::void_,
-        fundamental_type::bool_,
-        fundamental_type::char_,
-        fundamental_type::unsigned_char,
-        fundamental_type::unsigned_short_int,
-        fundamental_type::int_,
-        fundamental_type::unsigned_int,
-        fundamental_type::long_int,
-        fundamental_type::unsigned_long_int,
-        fundamental_type::long_long_int,
-        fundamental_type::unsigned_long_long_int,
-        fundamental_type::unsigned_long_int,
-        fundamental_type::float_,
-        fundamental_type::double_,
-        fundamental_type::long_double,
-    };
     const char *signature = ast_builder_builtin_signature(spelling, length);
     if (!signature)
         return 0;
@@ -428,8 +431,14 @@ entity_index semantic_analysis::compiler_builtin(uint32_t name,
     /* a signature of other than scalar letters (a pointer to any type, a
        va_list): one function taking anything whose calls are refused */
     int query = query_kind(spelling, length);
+    /* an atomic builtin's signature is C's builtin layer's ("vc": the weak
+       argument a __c11_atomic_compare_exchange_* call leaves out, inserted
+       there): it takes anything, atomic_builtin_result has the rules */
+    int written = 0, shape = 0;
+    bool atomic = ast_builder_atomic_shape(spelling, length, &written, &shape);
     for (const char *s = signature; *s; s++)
-        if (query || !strchr(letters, *s) || (s != signature && *s == 'v')) {
+        if (query || atomic || !strchr(signature_letters, *s) ||
+            (s != signature && *s == 'v')) {
             if (is_generic_builtin(spelling, length))
                 break;
             uint32_t flags = gnu_compiler_builtin | gnu_untyped_builtin;
@@ -444,12 +453,13 @@ entity_index semantic_analysis::compiler_builtin(uint32_t name,
     /* int f(...) */
     bool generic = is_generic_builtin(spelling, length);
     for (const char *s = signature; *s && !(generic && s != signature); s++) {
-        const char *at = strchr(letters, *s);
+        const char *at = strchr(signature_letters, *s);
         /* a parameter of type void is no scalar */
         if (!at || (s != signature && *s == 'v'))
             return 0;
         types_of.append(qualified_type::make(
-            type_table.fundamental(types[at - letters]), cv_none));
+            type_table.fundamental(signature_types[at - signature_letters]),
+            cv_none));
     }
     /* the result, then the parameters */
     uint32_t flags = gnu_compiler_builtin;
@@ -541,6 +551,182 @@ static bool spelled_with(const char *spelling, size_t length, const char *text)
     return memmem(spelling, length, text, strlen(text)) != nullptr;
 }
 
+/* __builtin_va_start, __builtin_c23_va_start, __builtin_va_end,
+   __builtin_va_copy: 1, 2, 3, 4; the Microsoft forms (__builtin_ms_va_*):
+   5 */
+static int va_list_kind(const char *spelling, size_t length)
+{
+    static const char *const names[] = {
+        "__builtin_va_start", "__builtin_c23_va_start", "__builtin_va_end",
+        "__builtin_va_copy"};
+    for (int i = 0; i < 4; i++)
+        if (length == strlen(names[i]) && !memcmp(spelling, names[i], length))
+            return i + 1;
+    if (spelled_with(spelling, length, "__builtin_ms_va_"))
+        return 5;
+    return 0;
+}
+
+/* __builtin_add_overflow, __builtin_sub_overflow, __builtin_mul_overflow
+   and their typed forms (__builtin_sadd_overflow, __builtin_umulll_overflow,
+   ...) */
+static bool overflow_builtin(const char *spelling, size_t length)
+{
+    static const char suffix[] = "_overflow";
+    if (length < sizeof suffix - 1 ||
+        memcmp(spelling + length - (sizeof suffix - 1), suffix,
+               sizeof suffix - 1) ||
+        memcmp(spelling, "__builtin_", 10))
+        return false;
+    return spelled_with(spelling, length, "add") ||
+           spelled_with(spelling, length, "sub") ||
+           spelled_with(spelling, length, "mul");
+}
+
+/*
+ * [ext:gnu_library_builtins] __builtin_va_start (ap, last), __builtin_va_end
+ * (ap) and __builtin_va_copy (dest, src) (GCC manual 6.55; clang's Sema's
+ * SemaBuiltinVAStart, SemaBuiltinVACopy): "void" calls whose va_list
+ * arguments are lvalues of type __builtin_va_list (the type the AAPCS64
+ * record is).  __builtin_c23_va_start takes the last parameter's name
+ * too, or alone.  A call in a function that is not
+ * variadic is ill-formed, as in clang.
+ */
+analysis_result
+semantic_analysis::va_list_builtin_result(SyntaxRef n, int which,
+                                          const owned_array<uint32_t> &nodes)
+{
+    size_t expected = 1;
+    if (which == 4)
+        expected = 2;
+    bool right = nodes.size() == expected;
+    if (which == 1)
+        right = nodes.size() == 2;
+    if (which == 2)
+        right = nodes.size() == 1 || nodes.size() == 2;
+    if (which == 5)
+        return not_supported(n, "ext.gnu");
+    if (!right)
+        return ill_formed(n,
+                          "a va_list builtin takes the arguments its form does",
+                          "ext.gnu");
+    /* clang: "'va_start' used in function with fixed args" */
+    if ((which == 1 || which == 2) && function_state.active &&
+        function_state.function &&
+        type_table[entity_table[function_state.function].type.unqualified()]
+                .kind == type_kind::function &&
+        !type_table[entity_table[function_state.function].type.unqualified()]
+             .variadic)
+        return ill_formed(n, "'va_start' used in function with fixed args",
+                          "ext.gnu");
+    size_t lists = 1;
+    if (which == 4)
+        lists = 2;
+    for (size_t i = 0; i < lists; i++) {
+        /* (the object the lvalue-to-rvalue conversion of the argument
+           reads: its cv-qualification is the argument's) */
+        uint32_t object = nodes[i];
+        while (semantics[object].kind == semantic_kind::conversion &&
+               static_cast<conversion_kind>(semantics[object].op) ==
+                   conversion_kind::lvalue_to_rvalue)
+            object = semantics[object].a;
+        qualified_type t = semantics[object].type;
+        /* (a template's own va_list is dependent: analysed when it is
+           instantiated) */
+        if (depends_on_template_parameter(t))
+            return not_supported(n, "temp.dep.constexpr");
+        /* (the lvalue-to-rvalue conversion argument passing applied is
+           the lowering's no-op: the node under it is the object) */
+        if (fundamental_of(t) != fundamental_type::builtin_va_list)
+            return ill_formed(n,
+                              "argument is of type that "
+                              "is not 'va_list'",
+                              "ext.gnu");
+        /* "binding reference of type '__builtin_va_list' to value of type
+           'const __builtin_va_list' drops 'const' qualifier" */
+        bool written = which != 4 || i == 0;
+        if (written && (t.cv() & cv_const))
+            return ill_formed(n,
+                              "a va_list argument that is written shall not "
+                              "be const",
+                              "ext.gnu");
+    }
+    return analysis_result::well_formed;
+}
+
+/*
+ * [ext:gnu_library_builtins] __builtin_add_overflow (a, b, &r) and the
+ * subtraction and multiplication ones (GCC manual 6.56, Integer Overflow
+ * Builtins; clang's SemaBuiltinOverflow): "These built-in functions promote
+ * the first two operands into infinite precision signed type and perform
+ * addition on those promoted operands.  The result is then cast to the type
+ * the pointer argument points to and stored there.  If the stored result is
+ * equal to the infinite precision result, the built-in functions return
+ * false, otherwise they return true."  The operands are of integer type
+ * (bool and enumerations too, as clang accepts), the result a pointer to a
+ * non-const integer type, other than bool.  The typed forms (__builtin_saddl_overflow, ...)
+ * take one type for the operands and the result, int, long, long long or
+ * their unsigned ones; the operands are converted to it when lowered.
+ */
+analysis_result semantic_analysis::overflow_builtin_result(
+    SyntaxRef n, const char *spelling, size_t length,
+    const owned_array<uint32_t> &nodes, qualified_type &result)
+{
+    if (nodes.size() != 3)
+        return ill_formed(n,
+                          "an overflow builtin takes two operands and a "
+                          "pointer to the result",
+                          "ext.gnu");
+    const char *signature = ast_builder_builtin_signature(spelling, length);
+    fundamental_type typed = fundamental_type::none;
+    if (signature && signature[1] != '.')
+        typed = signature_types[strchr(signature_letters, signature[1]) -
+                                signature_letters];
+    for (size_t i = 0; i < 2; i++) {
+        qualified_type t = semantics[nodes[i]].type;
+        fundamental_type f = fundamental_of(t);
+        if (f == fundamental_type::none && !enumeration_of(t))
+            return not_supported(n, "ext.gnu");
+        if (!enumeration_of(t) && !fundamental_type_is_integral(f)) {
+            /* the typed forms convert any arithmetic operand */
+            if (typed == fundamental_type::none)
+                return ill_formed(n,
+                                  "operand argument to overflow builtin must "
+                                  "be an integer",
+                                  "ext.gnu");
+            return not_supported(n, "ext.gnu");
+        }
+    }
+    qualified_type third = semantics[nodes[2]].type;
+    if (!is_pointer(third))
+        return ill_formed(n,
+                          "result argument to overflow builtin must be a "
+                          "pointer to a non-const integer type",
+                          "ext.gnu");
+    qualified_type pointee = type_table[third.unqualified()].operand;
+    fundamental_type f = fundamental_of(pointee);
+    if (f == fundamental_type::none && !enumeration_of(pointee))
+        return not_supported(n, "ext.gnu");
+    if ((pointee.cv() & cv_const) ||
+        (!enumeration_of(pointee) && !fundamental_type_is_integral(f)))
+        return ill_formed(n,
+                          "result argument to overflow builtin must be a "
+                          "pointer to a non-const integer type",
+                          "ext.gnu");
+    /* (a bool result: the code generator compares the stored byte with the
+       exact value, clang the one bit: not supported) */
+    if (f == fundamental_type::bool_)
+        return not_supported(n, "ext.gnu");
+    if (typed != fundamental_type::none && f != typed)
+        return ill_formed(n,
+                          "the result argument of a typed overflow builtin "
+                          "points to its type",
+                          "ext.gnu");
+    result = qualified_type::make(
+        type_table.fundamental(fundamental_type::bool_), cv_none);
+    return analysis_result::well_formed;
+}
+
 /*
  * [ext:gnu_library_builtins] a call of an __atomic_*, __sync_* or
  * __c11_atomic_* builtin (GCC manual 6.55, 6.56; clang's Builtins.td, Sema's
@@ -561,6 +747,14 @@ semantic_analysis::atomic_builtin_result(SyntaxRef n, entity_index called,
         tokens.pp.identifier_spelling(entity_table[called].name - 1, &length);
     if (int which = query_kind(spelling, length))
         return query_builtin_result(n, which, nodes, result);
+    if (int which = va_list_kind(spelling, length)) {
+        VTRY(r, va_list_builtin_result(n, which, nodes));
+        result = qualified_type::make(
+            type_table.fundamental(fundamental_type::void_), cv_none);
+        return analysis_result::well_formed;
+    }
+    if (overflow_builtin(spelling, length))
+        return overflow_builtin_result(n, spelling, length, nodes, result);
     int written = 0, kind = 0;
     if (!ast_builder_atomic_shape(spelling, length, &written, &kind))
         return not_supported(n, "ext.gnu");
@@ -579,6 +773,30 @@ semantic_analysis::atomic_builtin_result(SyntaxRef n, entity_index called,
                               "ext.gnu");
         pointee = qualified_type::make(
             type_table[first.unqualified()].operand.unqualified(), cv_none);
+        /* [ext:clang_atomic] clang's SemaAtomicOpsOverloaded: a
+           __c11_atomic builtin takes a pointer to an atomic object (the
+           macros of clang's and vcc's <stdatomic.h> pass &a) and operates
+           on its value type; the GNU forms take no atomic object */
+        bool atomic_object =
+            type_table[pointee.unqualified()].kind == type_kind::atomic;
+        bool c11 = spelled_with(spelling, length, "__c11_");
+        if (c11 && !atomic_object)
+            return ill_formed(n,
+                              "address argument to atomic operation must be "
+                              "a pointer to _Atomic type",
+                              "ext.clang");
+        if (!c11 && atomic_object)
+            return ill_formed(n,
+                              "address argument to atomic operation must be "
+                              "a pointer to integer, pointer or supported "
+                              "floating point type",
+                              "ext.clang");
+        if (atomic_object) {
+            type_index value = atomic_value_type(pointee);
+            if (!value)
+                return not_supported(n, "ext.clang");
+            pointee = qualified_type::make(value, cv_none);
+        }
         fundamental_type f = fundamental_of(pointee);
         bool pointer = is_pointer(pointee);
         if (!pointer &&
@@ -619,7 +837,10 @@ semantic_analysis::atomic_builtin_result(SyntaxRef n, entity_index called,
                                   "an argument of an atomic builtin must be "
                                   "a pointer",
                                   "ext.gnu");
-            if (fundamental_of(t) == fundamental_type::none && !is_pointer(t))
+            /* (an unscoped enumeration converts to an integer: the
+               memory_order of <stdatomic.h>) */
+            if (fundamental_of(t) == fundamental_type::none && !is_pointer(t) &&
+                !enumeration_of(t))
                 return not_supported(n, "ext.gnu");
         }
     }

@@ -336,6 +336,7 @@ analysis_result semantic_analysis::size_of(SyntaxRef n, bool alignment,
         /* [expr.sizeof]/1: "The operand is either an expression, which is
            an unevaluated operand ([expr.prop])" */
         unevaluated++;
+        atomic_object_operand = true;
         analysis_result r = expression(n[1], e);
         unevaluated--;
         if (r != analysis_result::well_formed)
@@ -418,6 +419,9 @@ analysis_result semantic_analysis::increment(SyntaxRef n, SyntaxElement operand,
                                              bool decrement, bool postfix,
                                              expression_meaning &m)
 {
+    /* [ext:clang_atomic] ++ and -- of an atomic object: one atomic
+       read-modify-write (C's code generator) */
+    atomic_object_operand = true;
     VTRY(r, expression(operand, m));
     return increment_of(n, n.first_token(), operand, decrement, postfix, m);
 }
@@ -444,6 +448,14 @@ analysis_result semantic_analysis::increment_of(SyntaxRef n, token_index at,
     const char *subclause = "expr.pre.incr";
     if (postfix)
         subclause = "expr.post.incr";
+    /* [ext:clang_atomic] an atomic object's value type has the rules; the
+       prefix forms' result is the atomic object, the postfix forms' a
+       value of the value type (clang's) */
+    qualified_type atomic_type;
+    if (type_index value = atomic_value_type(m.type)) {
+        atomic_type = m.type;
+        m.type = qualified_type::make(value, m.type.cv());
+    }
     /* [basic.lval]/10: "An lvalue is modifiable unless its type is
        const-qualified or is a function type." */
     if (m.category != value_category::lvalue || (m.type.cv() & cv_const))
@@ -495,6 +507,8 @@ analysis_result semantic_analysis::increment_of(SyntaxRef n, token_index at,
         if (decrement)
             kind = increment_kind::post_decrement;
     }
+    if (atomic_type.unqualified() && !postfix)
+        m.type = atomic_type;
     m.node = expression_node(semantic_kind::increment, m, at, m.node, 0,
                              static_cast<uint8_t>(kind));
     return analysis_result::well_formed;
@@ -533,6 +547,8 @@ analysis_result semantic_analysis::unary(SyntaxRef n, expression_meaning &m)
     if (o == preprocessing_op_or_punc::AMPERSAND &&
         n[1].is(syntax_kind::qualified_id))
         member_pointer_operand = n[1].index();
+    /* [ext:clang_atomic] &a of an atomic object a: its address */
+    atomic_object_operand = o == preprocessing_op_or_punc::AMPERSAND;
     analysis_result r = expression(n[1], m);
     member_pointer_operand = outer_operand;
     if (r != analysis_result::well_formed)

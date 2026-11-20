@@ -461,6 +461,16 @@ node_index parser::decl_specifier_seq(decl_specifier_facts &facts,
         if (accept(extension_keyword::restrict) ||
             accept(extension_keyword::nullability))
             continue;
+        /* [ext:clang_c11_thread_local]
+         *     storage-class-specifier:
+         *         _Thread_local
+         */
+        if (!type_specifiers_only && at(extension_keyword::c11_thread_local)) {
+            other_specifier = position;
+            has_other_specifier = true;
+            add_token();
+            continue;
+        }
         standard_keyword k = keyword_of(peek());
         token_index specifier = position;
         /* before C++11 auto is a storage-class-specifier
@@ -567,6 +577,13 @@ node_index parser::decl_specifier_seq(decl_specifier_facts &facts,
             if (failed())
                 return 0;
             facts.has_defining_type_specifier = true;
+        } else if (at(extension_keyword::atomic) &&
+                   !at(preprocessing_op_or_punc::LEFT_PARENTHESIS, 1)) {
+            /* [ext:clang_atomic] C's atomic type qualifier, not a
+               defining-type-specifier */
+            add_token();
+            facts.count++;
+            continue;
         } else if (at(extension_keyword::atomic) ||
                    at(extension_keyword::bit_int)) {
             /* [ext:clang_atomic], [ext:clang_bit_int] a
@@ -1122,7 +1139,8 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
     uint32_t cv = cv_none;
     unsigned const_ = 0, volatile_ = 0, typedef_ = 0, static_ = 0, extern_ = 0,
              mutable_ = 0, inline_ = 0, constexpr_ = 0, virtual_ = 0,
-             friend_ = 0, explicit_ = 0, consteval_ = 0;
+             friend_ = 0, explicit_ = 0, consteval_ = 0, c11_thread_local = 0,
+             atomic_qualifier = 0;
     type_index named = 0;
     bool declares_class = false, declares_enumeration = false;
     token_index named_at = 0, duplicate = 0;
@@ -1380,6 +1398,17 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
         /* [ext:clang_nullability]: no effect on the type */
         if (p.extension_keyword_of(tok) == extension_keyword::nullability)
             continue;
+        /* [ext:clang_atomic] _Atomic without (: the qualifier */
+        if (p.extension_keyword_of(tok) == extension_keyword::atomic) {
+            count(atomic_qualifier, t, "_Atomic");
+            continue;
+        }
+        /* [ext:clang_c11_thread_local] */
+        if (p.extension_keyword_of(tok) ==
+            extension_keyword::c11_thread_local) {
+            count(c11_thread_local, t, "_Thread_local");
+            continue;
+        }
         if (p.extension_keyword_of(tok) == extension_keyword::complex) {
             /* [ext:gnu_complex] */
             if (!k.first)
@@ -1559,12 +1588,14 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
                           "decl-specifier-seq",
                           "dcl.spec");
     constexpr_ += consteval_;
-    if (parameter && (typedef_ || static_ || extern_ || inline_ || constexpr_))
+    if (parameter && (typedef_ || static_ || extern_ || inline_ || constexpr_ ||
+                      c11_thread_local))
         return not_supported(seq, "dcl.fct");
     /* [dcl.stc]/1: "At most one storage-class-specifier shall appear in a
        given decl-specifier-seq, except that thread_local may appear with
        static or extern." */
-    if ((static_ && extern_) || (mutable_ && (static_ || extern_)))
+    if ((static_ && extern_) ||
+        (mutable_ && (static_ || extern_ || c11_thread_local)))
         return ill_formed(seq,
                           "at most one storage-class-specifier shall appear "
                           "in a given decl-specifier-seq",
@@ -1572,7 +1603,7 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
     /* [dcl.stc]/1: "If a storage-class-specifier appears in a
        decl-specifier-seq, there can be no typedef specifier in the same
        decl-specifier-seq" */
-    if (typedef_ && (static_ || extern_ || mutable_))
+    if (typedef_ && (static_ || extern_ || mutable_ || c11_thread_local))
         return ill_formed(seq,
                           "if a storage-class-specifier appears in a "
                           "decl-specifier-seq, there can be no typedef "
@@ -1632,6 +1663,7 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
     s.typedef_ = typedef_;
     s.static_ = static_;
     s.extern_ = extern_;
+    s.c11_thread_local = c11_thread_local != 0;
     s.mutable_ = mutable_ != 0;
     s.inline_ = inline_;
     s.virtual_ = virtual_ != 0;
@@ -1639,6 +1671,29 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
     s.explicit_ = explicit_ != 0;
     s.constexpr_ = constexpr_;
     s.consteval_ = consteval_;
+    /* [ext:clang_atomic] C's _Atomic qualifier: the type the specifiers
+       name made atomic, as _Atomic(T) (C23 6.7.4.1/3 "The type modified by
+       the _Atomic qualifier shall not be an array type or a function
+       type"); other cv-qualifiers stay on the atomic type */
+    if (atomic_qualifier && type) {
+        type_kind k = type_table[type].kind;
+        if (k == type_kind::array || k == type_kind::function ||
+            k == type_kind::atomic)
+            return ill_formed(seq,
+                              "_Atomic cannot be applied to an array, "
+                              "function or atomic type",
+                              "ext.clang");
+        /* clang: "'_Atomic' qualifier on reference type ... has no
+           effect" */
+        if (k != type_kind::lvalue_reference &&
+            k != type_kind::rvalue_reference) {
+            VTRY(r,
+                 atomic_value_check(seq, qualified_type::make(type, cv_none)));
+            type = type_table.atomic_of(qualified_type::make(type, cv_none));
+        }
+    } else if (atomic_qualifier) {
+        return not_supported(seq, "ext.clang");
+    }
     if (type)
         s.type = add_cv(qualified_type::make(type, cv_none), cv);
     return analysis_result::well_formed;

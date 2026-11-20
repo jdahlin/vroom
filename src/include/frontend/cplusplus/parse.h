@@ -544,12 +544,14 @@ enum class extension_keyword : uint8_t {
     complex,
     nullability,
     offsetof_,
+    va_arg_,
     bit_cast,
     convertvector,
     atomic,
     bit_int,
     source_location,
     typeof_,
+    c11_thread_local,
 };
 
 /*
@@ -977,6 +979,7 @@ class parser
     /* ---- ext/gnu/offsetof.cpp: __builtin_offsetof(T, a.b[1]) */
     node_index gnu_offsetof_expression();
     /* ---- ext/clang/bit-cast.cpp: __builtin_bit_cast(T, e) */
+    node_index gnu_va_arg_expression();
     node_index clang_bit_cast_expression();
     /* ---- ext/clang/convertvector.cpp: __builtin_convertvector(e, T) */
     node_index clang_convertvector_expression();
