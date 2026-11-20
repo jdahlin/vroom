@@ -967,7 +967,16 @@ bool itanium_mangler::template_args(entity_index c, entity_index function)
                declaration): [abi:mangle.function-type]'s pack expansion of the
                parameter, <type> ::= Dp <type> */
             if (entity_index own = analysis.specialization_own_pack(c, i, k)) {
-                /* (a non-type or template pack: not mangled yet) */
+                /* a non-type pack: the expression's expansion,
+                   <expression> ::= sp <expression>, of the parameter
+                   (<template-arg> ::= X <expression> E) */
+                if (analysis.entity_table[own].kind == entity_kind::none) {
+                    text("Xsp");
+                    template_param(analysis.entity_table[own].value);
+                    text("E");
+                    continue;
+                }
+                /* (a template pack: not mangled yet) */
                 if (analysis.entity_table[own].kind !=
                     entity_kind::typedef_name)
                     return false;
@@ -1702,8 +1711,25 @@ bool itanium_mangler::closure_type_name(entity_index c)
         uint32_t explicit_count =
             analysis.template_parameter_count(call) -
             analysis.invented_parameter_count(table[c].lambda);
-        for (uint32_t i = 0; i < explicit_count; i++)
-            text("Ty");
+        /* <template-param-decl> ::= Ty | Tn <type> | Tp <template-param-decl> */
+        for (uint32_t i = 0; i < explicit_count; i++) {
+            bool pack = false;
+            qualified_type value_type;
+            semantic_analysis::template_parameter_form_kind kind =
+                analysis.template_parameter_kind(call, i, pack, value_type);
+            if (kind ==
+                semantic_analysis::template_parameter_form_kind::template_)
+                return false;
+            if (pack)
+                text("Tp");
+            if (kind == semantic_analysis::template_parameter_form_kind::type) {
+                text("Ty");
+            } else {
+                text("Tn");
+                if (!type(value_type))
+                    return false;
+            }
+        }
         /* [impl.clang] the template-head's requires-clause: Q and its
            expression */
         bool trailing = false;

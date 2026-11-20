@@ -25,7 +25,7 @@ template <class... Ts> int sum_ref_init(Ts... xs)
 }
 template <class T> T load(const T *p)
 {
-    return [=]<int... Is>(seq<Is...>) { return T{p[Is]...}; }(seq<0>{});
+    return [=]<int... Is>(seq<Is...>) { return (p[Is] + ... + T(0)); }(seq<0>{});
 }
 template <class It> int load4(It it)
 {

@@ -210,7 +210,6 @@ analysis_result semantic_analysis::lambda_introducer(LambdaIntroducer n,
             }
         } else if (c.is(syntax_kind::init_capture)) {
             VTRY_SET(r, init_capture(c, l, record));
-            lambda_captures.append(record);
             continue;
         } else if (c.is(syntax_kind::simple_capture)) {
             if (c.size() == 2 && c[0].is(preprocessing_op_or_punc::STAR)) {
@@ -230,8 +229,16 @@ analysis_result semantic_analysis::lambda_introducer(LambdaIntroducer n,
                                                "preceded by &",
                                                "expr.prim.lambda.capture");
             } else {
-                /* a pack expansion (/17) */
-                return not_supported(c.index(), "temp.variadic");
+                /* a pack expansion (/17): the capture of each element */
+                bool reference = c.size() == 3 &&
+                                 c[0].is(preprocessing_op_or_punc::AMPERSAND);
+                size_t at = reference;
+                if (c.size() != at + 2 || !c[at].is_token() ||
+                    !c[at].is_identifier() ||
+                    !c[at + 1].is(preprocessing_op_or_punc::ELLIPSIS))
+                    return not_supported(c.index(), "temp.variadic");
+                VTRY(packed, pack_capture(n, l, c[at].token(), reference));
+                continue;
             }
         } else {
             return not_supported(n, "expr.prim.lambda.capture");
@@ -272,45 +279,82 @@ analysis_result semantic_analysis::lambda_introducer(LambdaIntroducer n,
         if (found.ambiguous || found.unknown || !e ||
             entity_table[e].kind == entity_kind::none)
             return not_supported(n, "basic.lookup.unqual");
-        const entity &x = entity_table[e];
-        /* a structured binding is a local entity too (C++20,
-           [basic.pre]/7) */
-        bool binding = x.kind == entity_kind::structured_binding &&
-                       x.binding_object &&
-                       entity_table[x.binding_object].automatic;
-        if (!binding && (x.kind != entity_kind::variable || !x.automatic))
+        VTRY_SET(r, variable_capture(n, l, e, name, record.by_reference));
+    }
+    return analysis_result::well_formed;
+}
+
+/*
+ * The explicit capture of local entity e, named at name, by reference or
+ * by copy: the member of the closure type ([expr.prim.lambda.capture]/10,
+ * /12).
+ */
+analysis_result semantic_analysis::variable_capture(SyntaxRef n,
+                                                    lambda_context &l,
+                                                    entity_index e,
+                                                    token_index name,
+                                                    bool by_reference)
+{
+    capture_record record;
+    record.by_reference = by_reference;
+    const entity x = entity_table[e];
+    /* a structured binding is a local entity too (C++20,
+       [basic.pre]/7) */
+    bool binding = x.kind == entity_kind::structured_binding &&
+                   x.binding_object && entity_table[x.binding_object].automatic;
+    if (!binding && (x.kind != entity_kind::variable || !x.automatic))
+        return ill_formed_at_token(name,
+                                   "the identifier in a simple-capture "
+                                   "shall find a local entity",
+                                   "expr.prim.lambda.capture");
+    for (size_t k = l.first_capture; k < lambda_captures.size(); k++)
+        if (lambda_captures[k].variable == e &&
+            !lambda_captures[k].init_capture)
             return ill_formed_at_token(name,
-                                       "the identifier in a simple-capture "
-                                       "shall find a local entity",
+                                       "an identifier shall not appear "
+                                       "more than once in a "
+                                       "lambda-capture",
                                        "expr.prim.lambda.capture");
-        for (size_t k = l.first_capture; k < lambda_captures.size(); k++)
-            if (lambda_captures[k].variable == e &&
-                !lambda_captures[k].init_capture)
-                return ill_formed_at_token(name,
-                                           "an identifier shall not appear "
-                                           "more than once in a "
-                                           "lambda-capture",
-                                           "expr.prim.lambda.capture");
-        /* a local entity of a function the lambda is not in: of a local
-           class's member function's enclosing function */
-        entity_index owner = enclosing_function(entity_table, e);
-        bool reachable = owner == function_state.function;
-        for (size_t k = lambdas.size(); k-- > 0 && !reachable;)
-            if (lambdas[k].enclosing_function == owner)
-                reachable = true;
-        if (!reachable ||
-            (owner != function_state.function && !current_lambda()))
-            return not_supported(n, "basic.def.odr");
-        record.variable = e;
-        record.at = name;
-        qualified_type type;
-        qualified_type captured = x.type;
-        if (record.by_reference)
-            captured =
-                enclosing_capture_type(e, lambdas.size(), l.first_capture);
-        VTRY_SET(r, capture_type(n, captured, record.by_reference, type));
-        record.member = capture_member_of(l.closure, type);
-        lambda_captures.append(record);
+    /* a local entity of a function the lambda is not in: of a local
+       class's member function's enclosing function */
+    entity_index owner = enclosing_function(entity_table, e);
+    bool reachable = owner == function_state.function;
+    for (size_t k = lambdas.size(); k-- > 0 && !reachable;)
+        if (lambdas[k].enclosing_function == owner)
+            reachable = true;
+    if (!reachable || (owner != function_state.function && !current_lambda()))
+        return not_supported(n, "basic.def.odr");
+    record.variable = e;
+    record.at = name;
+    qualified_type type;
+    qualified_type captured = x.type;
+    if (record.by_reference)
+        captured = enclosing_capture_type(e, lambdas.size(), l.first_capture);
+    VTRY(r, capture_type(n, captured, record.by_reference, type));
+    record.member = capture_member_of(l.closure, type);
+    lambda_captures.append(record);
+    return analysis_result::well_formed;
+}
+
+/*
+ * [expr.prim.lambda.capture]/17 and [temp.variadic]: a simple-capture
+ * with an ellipsis captures each element of the pack its identifier
+ * names, as if each were listed.  The pack is the function parameter
+ * pack of the instantiation being analysed; a body that expands it names
+ * the elements, which are captured.
+ */
+analysis_result semantic_analysis::pack_capture(SyntaxRef n, lambda_context &l,
+                                                token_index name,
+                                                bool by_reference)
+{
+    entity_index pack = find_pack(tokens.identifier(name));
+    if (!pack)
+        return not_supported(n, "temp.variadic");
+    uint32_t first = static_cast<uint32_t>(entity_table[pack].value);
+    uint32_t count = entity_table[pack].member_count;
+    for (uint32_t i = 0; i < count; i++) {
+        entity_index e = pack_elements[first + i];
+        VTRY(r, variable_capture(n, l, e, name, by_reference));
     }
     return analysis_result::well_formed;
 }
@@ -332,6 +376,11 @@ analysis_result semantic_analysis::init_capture(InitCapture n,
     bool by_reference = n[0].is(preprocessing_op_or_punc::AMPERSAND);
     if (by_reference)
         i = 1;
+    /* [expr.prim.lambda.capture]/17: an init-capture pack, ... identifier
+       initializer */
+    bool pack = n.size() > i && n[i].is(preprocessing_op_or_punc::ELLIPSIS);
+    if (pack)
+        i++;
     if (n.size() != i + 2 || !n[i].is_identifier())
         return not_supported(n, "temp.variadic");
     token_index name = n[i].token();
@@ -343,38 +392,73 @@ analysis_result semantic_analysis::init_capture(InitCapture n,
                                        "an identifier shall not appear more "
                                        "than once in a lambda-capture",
                                        "expr.prim.lambda.capture");
-    entity_index v =
-        entity_table.make(entity_kind::variable, tokens.identifier(name), 0);
-    entity_table[v].automatic = true;
-    entity_table[v].defined = true;
-    entity_table.add_declaration(v, n);
-    qualified_type type = placeholder_type(false);
-    if (by_reference)
-        type = reference_to(type, false);
-    entity_table[v].type = type;
-    qualified_type outer_deduced = declaration_deduced;
-    entity_index outer_variable = deducing_variable;
-    declaration_deduced = qualified_type();
-    deducing_variable = v;
-    initialized_value value;
-    analysis_result r = deduced_initializer(n[i + 1], v, type, value);
-    declaration_deduced = outer_deduced;
-    deducing_variable = outer_variable;
-    if (r != analysis_result::well_formed)
-        return r;
-    qualified_type member = type;
-    const struct type t = type_table[type.unqualified()];
-    if (t.kind == type_kind::function ||
-        (t.kind == type_kind::array && !by_reference) ||
-        (!by_reference && !size_of_type(type)))
-        return not_supported(n, "expr.prim.lambda.capture");
-    record.variable = v;
-    record.init_capture = true;
-    record.by_reference = by_reference;
-    record.at = name;
-    record.initialization = value.node;
-    record.member = capture_member_of(l.closure, member);
-    entity_table[v].capture_member = record.member;
+    /* /17: "the initializer shall contain an unexpanded pack": the
+       elements of the packs it names, one capture each */
+    uint32_t count = 1;
+    if (pack) {
+        SyntaxElement init = n[i + 1];
+        if (!expansion_count(init.first_token(), init.end_token(), count))
+            return ill_formed_at_token(name,
+                                       "the initializer of an init-capture "
+                                       "pack shall name a parameter pack "
+                                       "and no pack expansion",
+                                       "expr.prim.lambda.capture");
+    }
+    for (uint32_t k = 0; k < count; k++) {
+        entity_index v = entity_table.make(entity_kind::variable,
+                                           tokens.identifier(name), 0);
+        entity_table[v].automatic = true;
+        entity_table[v].defined = true;
+        entity_table.add_declaration(v, n);
+        qualified_type type = placeholder_type(false);
+        if (by_reference)
+            type = reference_to(type, false);
+        entity_table[v].type = type;
+        qualified_type outer_deduced = declaration_deduced;
+        entity_index outer_variable = deducing_variable;
+        bool outer_expanding = expanding;
+        uint32_t outer_element = expansion_element;
+        declaration_deduced = qualified_type();
+        deducing_variable = v;
+        if (pack) {
+            expanding = true;
+            expansion_element = k;
+        }
+        initialized_value value;
+        analysis_result r = deduced_initializer(n[i + 1], v, type, value);
+        declaration_deduced = outer_deduced;
+        deducing_variable = outer_variable;
+        expanding = outer_expanding;
+        expansion_element = outer_element;
+        if (r != analysis_result::well_formed)
+            return r;
+        qualified_type member = type;
+        const struct type t = type_table[type.unqualified()];
+        if (t.kind == type_kind::function ||
+            (t.kind == type_kind::array && !by_reference) ||
+            (!by_reference && !size_of_type(type)))
+            return not_supported(n, "expr.prim.lambda.capture");
+        capture_record each;
+        each.variable = v;
+        each.init_capture = true;
+        each.by_reference = by_reference;
+        each.at = name;
+        each.initialization = value.node;
+        each.member = capture_member_of(l.closure, member);
+        if (pack)
+            each.pack_name = tokens.identifier(name);
+        entity_table[v].capture_member = each.member;
+        lambda_captures.append(each);
+    }
+    /* (an empty pack has no member: its name is bound all the same) */
+    if (pack && count == 0) {
+        capture_record none;
+        none.init_capture = true;
+        none.pack_name = tokens.identifier(name);
+        none.at = name;
+        lambda_captures.append(none);
+    }
+    record.at = 0;
     return analysis_result::well_formed;
 }
 
@@ -382,10 +466,12 @@ analysis_result semantic_analysis::bind_init_captures(entity_index scope)
 {
     lambda_context *l = current_lambda();
     for (size_t i = l->first_capture; i < lambda_captures.size(); i++) {
-        const capture_record &c = lambda_captures[i];
+        const capture_record c = lambda_captures[i];
         if (!c.init_capture)
             continue;
-        uint32_t name = entity_table[c.variable].name;
+        uint32_t name = c.pack_name;
+        if (c.variable)
+            name = entity_table[c.variable].name;
         if (entity_table.find(scope, name))
             /* (the example of /6: "parameter and local variable have the
                same name") */
@@ -394,6 +480,22 @@ analysis_result semantic_analysis::bind_init_captures(entity_index scope)
                                        "parameter of the lambda-declarator "
                                        "shall not have the same name",
                                        "expr.prim.lambda.capture");
+        if (c.pack_name) {
+            /* an init-capture pack's name is the pack of its variables */
+            owned_array<entity_index> elements;
+            size_t k = i;
+            for (; k < lambda_captures.size() &&
+                   lambda_captures[k].pack_name == c.pack_name;
+                 k++)
+                if (lambda_captures[k].variable) {
+                    entity_table[lambda_captures[k].variable].enclosing = scope;
+                    elements.append(lambda_captures[k].variable);
+                }
+            make_bound_pack(scope, name, elements.data(),
+                            static_cast<uint32_t>(elements.size()));
+            i = k - 1;
+            continue;
+        }
         entity_table[c.variable].enclosing = scope;
         entity_table.bind(scope, name, c.variable);
     }
@@ -582,8 +684,10 @@ analysis_result semantic_analysis::implicit_captures(
         if (p.id)
             own.append(tokens.identifier(p.id));
     for (size_t i = l.first_capture; i < lambda_captures.size(); i++)
-        if (lambda_captures[i].init_capture)
+        if (lambda_captures[i].init_capture && lambda_captures[i].variable)
             own.append(entity_table[lambda_captures[i].variable].name);
+        else if (lambda_captures[i].pack_name)
+            own.append(lambda_captures[i].pack_name);
     int depth = 0, unevaluated_depth = -1;
     for (token_index t = first; t < end; t++) {
         if (is_operator(tokens[t],
@@ -803,7 +907,8 @@ semantic_analysis::closure_object(lambda_context &l,
     owned_array<uint32_t> elements;
     for (const capture_record &c : captures) {
         if (c.init_capture) {
-            elements.append(c.initialization);
+            if (c.member)
+                elements.append(c.initialization);
             continue;
         }
         expression_meaning e;

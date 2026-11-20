@@ -2640,6 +2640,8 @@ class semantic_analysis
         bool by_reference = false, star_this = false, init_capture = false;
         token_index at = 0;
         uint32_t initialization = 0;
+        /* an init-capture pack's name (its variables, or none, follow) */
+        uint32_t pack_name = 0;
     };
     /* a lambda-expression whose compound-statement is analysed: its closure
        type, function call operator, the function of the context it is in,
@@ -2705,6 +2707,11 @@ class semantic_analysis
        ([expr.prim.lambda.capture]/15): an odr-use */
     bool forced_odr_use = false;
     analysis_result resolve_pending_uses(lambda_context &l);
+    analysis_result variable_capture(SyntaxRef n, lambda_context &l,
+                                     entity_index e, token_index name,
+                                     bool by_reference);
+    analysis_result pack_capture(SyntaxRef n, lambda_context &l,
+                                 token_index name, bool by_reference);
     /* the elements of the array lvalue a (of array type type) each
        initialized from the corresponding element, an initializer_list
        node: an array captured by copy ([expr.prim.lambda.capture]/15) */
@@ -4788,6 +4795,13 @@ class semantic_analysis
         return function_templates[entity_table[t].instantiation - 1]
             .parameter_count;
     }
+    /* the form of template-parameter i of template entity t: a type
+       parameter, a non-type one (of type value_type) or a template
+       template one, and whether it is a pack */
+    enum class template_parameter_form_kind { type, value, template_ };
+    template_parameter_form_kind
+    template_parameter_kind(entity_index t, uint32_t i, bool &pack,
+                            qualified_type &value_type) const;
     entity_index constraint_parameter(entity_index t, token_index i) const;
     /* what token i names, looked up from scope outward (0: none) */
     entity_index constraint_name(entity_index scope, token_index i) const;
