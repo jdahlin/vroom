@@ -74,6 +74,8 @@ ast_builder_type_function(cc *c, ast_qualified_type result,
 ast_qualified_type ast_builder_type_ptrdiff(cc *c);
 /* the target's __builtin_va_list */
 ast_qualified_type ast_builder_type_va_list(cc *c);
+/* x86-64 System V: the element of the array that is __builtin_va_list */
+ast_qualified_type ast_builder_type_va_list_tag(cc *c);
 /* the target's size of t in bytes */
 uint64_t ast_builder_type_size(cc *c, ast_qualified_type t);
 /* a struct (a union if is_union) named name, incomplete until

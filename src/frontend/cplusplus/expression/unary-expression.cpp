@@ -239,6 +239,8 @@ uint64_t semantic_analysis::size_of_type(qualified_type t) const
             return b.long_width / 8;
         case fundamental_type::builtin_va_list:
             return 32;
+        case fundamental_type::builtin_va_list_tag:
+            return 24;
         default:
             if (fundamental_type_is_integral(record.fundamental))
                 return fundamental_type_width(b, record.fundamental) / 8;
@@ -377,7 +379,8 @@ uint64_t semantic_analysis::alignment_of_type(qualified_type t) const
         /* (ptrdiff_t's, and the pair's: its members') */
         return tokens.files.behavior.long_width / 8;
     case type_kind::fundamental:
-        if (record.fundamental == fundamental_type::builtin_va_list)
+        if (record.fundamental == fundamental_type::builtin_va_list ||
+            record.fundamental == fundamental_type::builtin_va_list_tag)
             return 8;
         return size_of_type(t);
     default:

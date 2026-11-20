@@ -69,6 +69,8 @@ ast_qualified_type c_lowering::fundamental(fundamental_type f, token_index at)
         return pointer_to(v);
     case fundamental_type::builtin_va_list:
         return ast_builder_type_va_list(c);
+    case fundamental_type::builtin_va_list_tag:
+        return ast_builder_type_va_list_tag(c);
     default:
         fail("a bit-precise integer type", at);
         return ast_builder_type_basic(AST_TYPE_INT);

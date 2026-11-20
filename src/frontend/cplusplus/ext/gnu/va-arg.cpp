@@ -37,6 +37,20 @@ node_index parser::gnu_va_arg_expression()
     return finish_node(syntax_kind::gnu_va_arg_expression, mark, first);
 }
 
+bool semantic_analysis::is_va_list(qualified_type t, uint32_t &cv) const
+{
+    cv = t.cv();
+    if (fundamental_of(t) == fundamental_type::builtin_va_list)
+        return true;
+    const struct type &r = type_table[t.unqualified()];
+    if (r.kind != type_kind::array && r.kind != type_kind::pointer)
+        return false;
+    if (fundamental_of(r.operand) != fundamental_type::builtin_va_list_tag)
+        return false;
+    cv = r.operand.cv();
+    return true;
+}
+
 /* [ext:gnu_va_arg] a prvalue of the type-id's type read from the va_list,
    an lvalue.  The type is one the caller's default argument promotions
    ([expr.call]/12) leave as it is: an integer of at least int's width, a
@@ -55,7 +69,8 @@ analysis_result semantic_analysis::gnu_va_arg(SyntaxRef n,
     if (depends_on_template_parameter(t) ||
         depends_on_template_parameter(list.type))
         return not_supported(n, "temp.dep.constexpr");
-    if (fundamental_of(list.type) != fundamental_type::builtin_va_list)
+    uint32_t list_cv = 0;
+    if (!is_va_list(list.type, list_cv))
         return ill_formed(n,
                           "first argument to 'va_arg' is of type that is not "
                           "'va_list'",
@@ -65,7 +80,7 @@ analysis_result semantic_analysis::gnu_va_arg(SyntaxRef n,
     /* the va_list is read and advanced: clang's "binding reference of type
        '__builtin_va_list' to value of type 'const __builtin_va_list' drops
        'const' qualifier" */
-    if (list.type.cv() & cv_const)
+    if (list_cv & cv_const)
         return ill_formed(n, "the va_list of va_arg shall not be const",
                           "ext.gnu");
     t = qualified_type::make(t.unqualified(), cv_none);

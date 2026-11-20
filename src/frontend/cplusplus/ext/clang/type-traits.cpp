@@ -290,7 +290,8 @@ bool semantic_analysis::unary_trait(int which, qualified_type t, int64_t &value)
         kind == type_kind::pack_expansion ||
         kind == type_kind::template_parameter || kind == type_kind::dependent ||
         f == fundamental_type::float128 ||
-        f == fundamental_type::builtin_va_list)
+        f == fundamental_type::builtin_va_list ||
+        f == fundamental_type::builtin_va_list_tag)
         return false;
     bool is_void =
         kind == type_kind::fundamental && f == fundamental_type::void_;
