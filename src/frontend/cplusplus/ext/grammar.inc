@@ -121,6 +121,9 @@ PRODUCTION(gnu_int128, "simple-type-specifier", "__int128")
 
 PRODUCTION(gnu_float128, "simple-type-specifier", "__float128")
 
+PRODUCTION(clang_float16, "simple-type-specifier", "_Float16")
+PRODUCTION(clang_float16, "simple-type-specifier", "__bf16")
+
 /* ---- GCC manual 6.7, Referring to a Type with typeof ---- */
 
 PRODUCTION(gnu_typeof, "simple-type-specifier", "gnu-typeof-specifier")

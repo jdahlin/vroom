@@ -2065,6 +2065,11 @@ bool itanium_mangler::builtin_type(fundamental_type t)
         number(16);
         text("_");
         return true;
+    case fundamental_type::bfloat16:
+        /* [impl.clang] DF16b: clang's, as the Itanium ABI's extended
+           floating-point types have it */
+        text("DF16b");
+        return true;
     default:
         return false;
     }

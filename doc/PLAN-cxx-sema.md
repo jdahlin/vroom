@@ -2398,8 +2398,30 @@ Shared with C, not copied: the layout and validity rule
   `__builtin_elementwise_*` (C has `abs` only), `__builtin_nontemporal_*`.
   Not yet: a vector in a constant expression, `v.xyzw` (ext_vector), vector
   parameters of templates.
-- V5 the `__builtin_ia32_*` builtins `<immintrin.h>` calls (a table beside
-  C's builtins), `__target__("sse2")` functions, then `simd-search.h`
-  compiled by vcc on x86-64 as the check.
+- V5 **Done for SSE2** (2026-11-20): clang's `<emmintrin.h>` (with `mmintrin.h`,
+  `xmmintrin.h`) compiles in C++ for x86-64, and the lexer's `simd-search.h`
+  (`lexer-simd` branch) compiled by vcc's C++ front end finds the same bytes
+  as clang's.  What it took: `nodebug`, `min_vector_width`, `target`
+  attributes (no effect yet: the -m options decide); GNU attributes after a
+  `*` (`void *__attribute__((malloc)) f`, `<mm_malloc.h>`); a vector typedef of
+  a lesser `aligned`; `_Float16` and `__bf16` as types (`clang_float16`:
+  sizes, mangling, vector elements; no arithmetic); compound literals of
+  vector type (`semantic_kind::compound_literal`); `__builtin_elementwise_min`
+  and `_max` of integer vectors (shared with C: `cc_vector_minmax`, as
+  `b ^ ((a ^ b) & (a < b))`); `__builtin_ia32_pmovmskb128` (C's builtin table,
+  lane by lane as `movmskps` is; codegen could match it to `pmovmskb`) and
+  vector letters (`F`, `B`, `H`) in the C++ view of the table's signatures, so
+  `ast_builder_builtin_call` expands the x86 builtins as C does.  The
+  headers define hundreds of `static inline` functions over builtins vcc has
+  no rules for: such a function of a system header whose analysis is
+  unsupported is left undefined (`defer_unsupported_body`), one whose
+  lowering fails is dropped (`function_definition_or_drop`), and a use of
+  either is a refusal with the reason.  Tests: `src/test/cxx/run/x86-sse2-intrinsics.cpp`
+  (`bench/cxx-x86.py`: native, vcc -O0..3 against clang; not in CI yet:
+  needs the x86-64 job).  Not yet: the other `__builtin_ia32_*` (the table
+  has ~30; each needs lanes or an instruction), `__builtin_nontemporal_*`,
+  the other `__builtin_elementwise_*`, the AVX2 and AVX-512 paths of
+  `simd-search.h` (256- and 512-bit vectors, `__target__` features to the
+  assembler's VEX encoding, mask registers), `_Float16` arithmetic.
 - `ext_vector_type` (clang_ext_vector_type) shares V2-V4 (element
   swizzles `.xyzw` are its own).

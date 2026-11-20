@@ -170,6 +170,13 @@ analysis_result semantic_analysis::pointer_operator(SyntaxRef op,
     entity_index member_class = 0;
     type_index member_dependent = 0;
     for (auto c : op.elements()) {
+        if (c.gnu_attribute_specifier()) {
+            /* [ext:gnu_attributes] void *__attribute__((malloc)) f(): the
+               attributes after the * appertain to the declaration, as GCC
+               takes them (<mm_malloc.h>) */
+            VTRY(r, gnu_attribute_specifier(c, m));
+            continue;
+        }
         if (c.is_attribute())
             return not_supported(op, "dcl.attr");
         if (c.nested_name_specifier()) {

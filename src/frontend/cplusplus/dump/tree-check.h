@@ -262,6 +262,9 @@ struct tree_checker {
             /* only a call's function, which the call replaces */
             problem(n, "a bound member function outside a call");
             break;
+        case semantic_kind::compound_literal:
+            child(n, node.a, tree_sort::initializer, false, "initializer");
+            break;
         case semantic_kind::vector_shuffle:
             child(n, node.a, tree_sort::expression, false, "first vector");
             child(n, node.b, tree_sort::expression, false, "second vector");

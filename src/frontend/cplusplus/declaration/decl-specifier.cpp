@@ -609,8 +609,10 @@ node_index parser::decl_specifier_seq(decl_specifier_facts &facts,
             /* [ext:gnu_int128] a simple-type-specifier */
             add_token();
             facts.has_defining_type_specifier = true;
-        } else if (at(extension_keyword::float128)) {
-            /* [ext:gnu_float128] a simple-type-specifier */
+        } else if (at(extension_keyword::float128) ||
+                   at(extension_keyword::float16) ||
+                   at(extension_keyword::bfloat16)) {
+            /* [ext:gnu_float128], [ext:clang_float16] a simple-type-specifier */
             add_token();
             facts.has_defining_type_specifier = true;
         } else if (at(extension_keyword::complex)) {
@@ -1425,6 +1427,17 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
             k.float128++;
             continue;
         }
+        if (p.extension_keyword_of(tok) == extension_keyword::float16 ||
+            p.extension_keyword_of(tok) == extension_keyword::bfloat16) {
+            /* [ext:clang_float16] */
+            if (!k.first)
+                k.first = t;
+            if (p.extension_keyword_of(tok) == extension_keyword::float16)
+                k.float16++;
+            else
+                k.bfloat16++;
+            continue;
+        }
         if (p.extension_keyword_of(tok) == extension_keyword::int128) {
             /* [ext:gnu_int128] */
             if (!k.first)
@@ -1652,7 +1665,8 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
     type_index type = 0;
     bool keywords = k.signed_ || k.unsigned_ || k.short_ || k.long_ ||
                     k.char_ || k.int_ || k.double_ || k.int128 || k.float128 ||
-                    k.complex || k.alone_type != fundamental_type::none;
+                    k.float16 || k.bfloat16 || k.complex ||
+                    k.alone_type != fundamental_type::none;
     if (named && keywords)
         /* [dcl.type]/2: "As a general rule, at most one
            defining-type-specifier is allowed in the complete

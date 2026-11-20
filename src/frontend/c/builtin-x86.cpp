@@ -104,6 +104,40 @@ CC_PRIVATE uint32_t cc_builtin_x86_simd_build(cc *c, const cc_builtin *b,
                                                          args->v[0]),
                                     result);
     }
+    if (!strcmp(name, "pmovmskb128")) {
+        /* the sign bit of each byte, lane i in bit i: the bytes as
+           unsigned, ((lane >> 7) & 1) << i, ored */
+        if (args->n != 1)
+            return cc_node_error_new(c, loc);
+        ast_qualified_type vt = AST_QUALIFIED_TYPE_UNQUALIFIED(
+                               AST_NODE(args->v[0])->ty),
+                           byte = cc_type_basic(AST_TYPE_UNSIGNED_CHAR);
+        uint32_t sym = cc_symbol_new(c, AST_SYMBOL_VARIABLE, 0, vt, loc);
+        c->syms[sym].sc = AST_STORAGE_AUTO;
+        uint32_t saved = cc_node_new(c, AST_NODE_VARIABLE, vt, loc);
+        AST_NODE(saved)->a = sym;
+        AST_NODE(saved)->flags = AST_NODE_FLAG_LVALUE;
+        ast_qualified_type it = cc_type_basic(AST_TYPE_INT);
+        uint32_t result = cc_node_integer_new(c, 0, it, loc);
+        for (unsigned i = 0; i < 16; i++) {
+            uint32_t lane = cc_conversion_apply(
+                c,
+                cc_node_rvalue(c,
+                               cc_builtin_vector_lane(c, saved, byte, i, loc)),
+                it);
+            lane = cc_node_binary_new(c, LEX_TOKEN_GREATER_GREATER, it, lane,
+                                      cc_node_integer_new(c, 7, it, loc), loc);
+            lane = cc_node_binary_new(c, LEX_TOKEN_LESS_LESS, it, lane,
+                                      cc_node_integer_new(c, i, it, loc), loc);
+            result =
+                cc_node_binary_new(c, LEX_TOKEN_PIPE, it, result, lane, loc);
+        }
+        return cc_lowering_sequence(c,
+                                    cc_node_new_operands(c, AST_NODE_ASSIGN, vt,
+                                                         loc, saved,
+                                                         args->v[0]),
+                                    result);
+    }
     if (args->n != 2)
         return cc_node_error_new(c, loc);
     bool shift = name[0] == 'p', cmp = name[0] == 'c';

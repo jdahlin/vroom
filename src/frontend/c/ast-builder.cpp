@@ -407,6 +407,20 @@ uint32_t ast_builder_builtin_call(cc *c, const char *name, size_t length,
         return cc_builtin_bit_count_lower(
             c, b->id, false, cc_conversion_decay(c, args[0]), fallback, 0);
     }
+    /* the x86 vector builtins expanded into lanes, as the parsed call does:
+       the arguments converted to the signature's types first */
+    if (b->id == CC_BUILTIN_X86_SIMD) {
+        const ctype *f = AST_TYPE(c, cc_builtin_type(c, b));
+        cc_id_list typed;
+        cc_id_list_init(&typed);
+        for (uint32_t i = 0; i < count; i++) {
+            uint32_t a = args[i];
+            if (i < f->n)
+                a = cc_conversion_apply(c, a, c->params[f->aux + i]);
+            cc_id_list_append(c, &typed, a);
+        }
+        return cc_builtin_x86_simd_build(c, b, &typed, t, 0);
+    }
     cc_id_list list;
     cc_id_list_init(&list);
     for (uint32_t i = 0; i < count; i++)
@@ -428,6 +442,11 @@ uint32_t ast_builder_shuffle_vector(cc *c, ast_qualified_type t, uint32_t a,
     return ast_builder_node(c, AST_NODE_BUILTIN, t, 0,
                             ast_builder_list(c, items, n), n,
                             CC_BUILTIN_SHUFFLEVECTOR, 0);
+}
+
+uint32_t ast_builder_vector_minmax(cc *c, bool max, uint32_t a, uint32_t b)
+{
+    return cc_vector_minmax(c, max, a, b, 0);
 }
 
 uint32_t ast_builder_convert_vector(cc *c, ast_qualified_type t,

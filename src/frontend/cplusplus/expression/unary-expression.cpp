@@ -205,6 +205,9 @@ uint64_t semantic_analysis::size_of_type(qualified_type t) const
             return 16;
         case fundamental_type::float128:
             return 16;
+        case fundamental_type::float16:
+        case fundamental_type::bfloat16:
+            return 2;
         case fundamental_type::std_nullptr_t:
             return b.long_width / 8;
         case fundamental_type::builtin_va_list:

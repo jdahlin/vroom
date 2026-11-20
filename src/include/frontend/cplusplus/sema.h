@@ -1166,6 +1166,9 @@ enum class semantic_kind : uint8_t {
     /* [ext:gnu_vector_size] __builtin_shufflevector: a, b: the two vectors;
        the list: the constant lane indices (-1 any) */
     vector_shuffle,
+    /* [ext:gnu_compound_literals] (T){...}: a: the initializer list; an object
+       of the type that lives to the end of the enclosing block */
+    compound_literal,
     /* op: the operator (+ - ~ !); a */
     unary,
     /* &a, *a */
@@ -1528,6 +1531,11 @@ class semantic_analysis
     /* the names held (note_held) by the declarations being analysed */
     owned_array<entity_index> held_pending;
     owned_array<unsupported_construct> body_failures;
+    /* whether the token is in a system header (clang's; lowering) */
+    bool token_in_system_header(token_index at) const
+    {
+        return in_system_header(at);
+    }
     owned_array<declared_name> declared;
     owned_array<analysed_expression> expressions;
     /* the semantic tree of every definition analysed */
@@ -1842,7 +1850,7 @@ class semantic_analysis
     struct simple_type_keywords {
         unsigned signed_ = 0, unsigned_ = 0, short_ = 0, long_ = 0, char_ = 0,
                  int_ = 0, double_ = 0, alone = 0, int128 = 0, float128 = 0,
-                 complex = 0;
+                 complex = 0, float16 = 0, bfloat16 = 0;
         fundamental_type alone_type = fundamental_type::none;
         token_index first = 0;
     };
@@ -2279,6 +2287,9 @@ class semantic_analysis
     bool case_or_default_label(SyntaxElement s) const;
     analysis_result gnu_attribute_specifier(SyntaxRef n, declarator_meaning &m);
     analysis_result gnu_attribute_specifier(SyntaxRef n, specified &s);
+    analysis_result defer_unsupported_body(SyntaxRef n, entity_index f,
+                                           size_t before, analysis_result r);
+    analysis_result gnu_compound_literal(SyntaxRef n, expression_meaning &m);
     analysis_result gnu_vector_type(SyntaxRef at, uint64_t bytes,
                                     qualified_type &type);
     analysis_result gnu_mode_type(SyntaxRef at, token_index mode,
@@ -2843,6 +2854,7 @@ class semantic_analysis
     analysis_result clang_convertvector(SyntaxRef n, expression_meaning &m);
     bool builtin_addressof_call(SyntaxRef n);
     bool builtin_shufflevector_call(SyntaxRef n);
+    int vector_builtin_kind(uint32_t name);
     analysis_result builtin_shufflevector(SyntaxRef n, expression_meaning &m);
     /* clang's type-generic bit counts: which one the function e is (1
        popcount, 2 clz, 3 ctz; 0 none), the check of a call's arguments,

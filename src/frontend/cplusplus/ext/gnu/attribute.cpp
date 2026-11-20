@@ -272,6 +272,14 @@ static const gnu_attribute_rule gnu_attribute_rules[] = {
        or pointer to such a type is intended to store character arrays that
        do not necessarily contain a terminating NUL" (a diagnostic's
        hint) */
+    /* clang's nodebug (no debug information for a function: vcc's -g
+       tables are by line), min_vector_width(N) (the widest vector the
+       function uses: an optimization hint) and GCC's target("features")
+       (<immintrin.h>'s intrinsics: the features the function's
+       instructions need, which -m options of the compilation give) */
+    {"nodebug", 0},
+    {"min_vector_width", 0},
+    {"target", 0},
     {"may_alias", 0},
     {"nonstring", 0},
     {"unused", 0},

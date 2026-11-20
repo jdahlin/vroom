@@ -397,7 +397,7 @@ static int query_kind(const char *spelling, size_t length)
 
 /* the scalar letters of the C front end's builtin signatures and their
    types */
-static const char signature_letters[] = "vbcChiulLwWzfdD";
+static const char signature_letters[] = "vbcChiulLwWzfdDFBH";
 static const fundamental_type signature_types[] = {
     fundamental_type::void_,
     fundamental_type::bool_,
@@ -414,6 +414,11 @@ static const fundamental_type signature_types[] = {
     fundamental_type::float_,
     fundamental_type::double_,
     fundamental_type::long_double,
+    /* F, B and H: the x86 builtins' vectors of 16 bytes (v4sf, v16qi, v8hi),
+       made from these elements */
+    fundamental_type::float_,
+    fundamental_type::char_,
+    fundamental_type::short_int,
 };
 
 /* a builtin of vcc's C front end (frontend/c/builtin-table.cpp) whose
@@ -457,9 +462,14 @@ entity_index semantic_analysis::compiler_builtin(uint32_t name,
         /* a parameter of type void is no scalar */
         if (!at || (s != signature && *s == 'v'))
             return 0;
-        types_of.append(qualified_type::make(
+        qualified_type made = qualified_type::make(
             type_table.fundamental(signature_types[at - signature_letters]),
-            cv_none));
+            cv_none);
+        if (*s == 'F' || *s == 'B' || *s == 'H')
+            /* [ext:gnu_vector_size] a vector of 16 bytes */
+            made = qualified_type::make(
+                type_table.vector_of(made, 16 / size_of_type(made)), cv_none);
+        types_of.append(made);
     }
     /* the result, then the parameters */
     uint32_t flags = gnu_compiler_builtin;
@@ -1141,6 +1151,22 @@ analysis_result semantic_analysis::builtin_addressof(SyntaxRef n,
     return analysis_result::well_formed;
 }
 
+/* which of clang's vector builtins that nothing declares a name is: 1
+   __builtin_shufflevector, 2 and 3 __builtin_elementwise_min and _max */
+int semantic_analysis::vector_builtin_kind(uint32_t name)
+{
+    static const char shuffle[] = "__builtin_shufflevector";
+    static const char minimum[] = "__builtin_elementwise_min";
+    static const char maximum[] = "__builtin_elementwise_max";
+    if (name == tokens.pp.identifier(shuffle, sizeof shuffle - 1) + 1)
+        return 1;
+    if (name == tokens.pp.identifier(minimum, sizeof minimum - 1) + 1)
+        return 2;
+    if (name == tokens.pp.identifier(maximum, sizeof maximum - 1) + 1)
+        return 3;
+    return 0;
+}
+
 /* [ext:gnu_vector_size] clang's __builtin_shufflevector(a, b, i...): a call
    of that name with nothing declared by it (the C front end's builtin) */
 bool semantic_analysis::builtin_shufflevector_call(SyntaxRef n)
@@ -1149,9 +1175,8 @@ bool semantic_analysis::builtin_shufflevector_call(SyntaxRef n)
         !n[2].is(syntax_kind::initializer_list) ||
         !tokens.files.behavior.has(extension::gnu_library_builtins))
         return false;
-    static const char spelled[] = "__builtin_shufflevector";
     uint32_t name = tokens.identifier(n[0].token());
-    if (name != tokens.pp.identifier(spelled, sizeof spelled - 1) + 1)
+    if (vector_builtin_kind(name) == 0)
         return false;
     lookup_result x = lookup_unqualified(name, lookup_filter::any);
     return !x.entity && !x.unknown && !x.ambiguous;
@@ -1166,7 +1191,10 @@ analysis_result semantic_analysis::builtin_shufflevector(SyntaxRef n,
 {
     owned_array<SyntaxElement> clauses;
     VTRY(r, list_clauses(n[2].index(), clauses));
-    if (clauses.size() < 3)
+    int kind = vector_builtin_kind(tokens.identifier(n[0].token()));
+    if (kind != 1 && clauses.size() != 2)
+        return ill_formed(n, "this builtin takes two vectors", "ext.gnu");
+    if (clauses.size() < 3 && kind == 1)
         return ill_formed(n,
                           "__builtin_shufflevector takes two vectors and the "
                           "lane indices",
@@ -1184,6 +1212,20 @@ analysis_result semantic_analysis::builtin_shufflevector(SyntaxRef n,
                           "shall be vectors of the same type",
                           "ext.gnu");
     owned_array<uint32_t> indices;
+    if (kind != 1) {
+        /* __builtin_elementwise_min and _max of integer vectors */
+        if (!is_integral(vector.operand))
+            return not_supported(n, "ext.gnu");
+        m = expression_meaning();
+        m.type = qualified_type::make(a.type.unqualified(), cv_none);
+        m.category = value_category::prvalue;
+        m.evaluation = constness::not_constant;
+        m.beyond_integral_constant = true;
+        m.node =
+            expression_node(semantic_kind::vector_shuffle, m, n.first_token(),
+                            a.node, b.node, static_cast<uint8_t>(kind));
+        return analysis_result::well_formed;
+    }
     for (size_t i = 2; i < clauses.size(); i++) {
         expression_meaning e;
         VTRY_SET(r, expression(clauses[i], e));

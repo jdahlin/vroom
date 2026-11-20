@@ -104,8 +104,12 @@ analysis_result semantic_analysis::gnu_vector_type(SyntaxRef at, uint64_t bytes,
                                                    qualified_type &type)
 {
     const struct type &element = type_table[type.unqualified()];
-    if (element.kind != type_kind::fundamental ||
-        element.fundamental == fundamental_type::bool_ || !is_arithmetic(type))
+    bool half = element.kind == type_kind::fundamental &&
+                (element.fundamental == fundamental_type::float16 ||
+                 element.fundamental == fundamental_type::bfloat16);
+    if (!half && (element.kind != type_kind::fundamental ||
+                  element.fundamental == fundamental_type::bool_ ||
+                  !is_arithmetic(type)))
         return ill_formed(at, "invalid vector element type", "ext.gnu");
     uint64_t each = size_of_type(type);
     if (bytes > UINT32_MAX || !vector_size_fits(bytes, each))

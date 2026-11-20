@@ -56,6 +56,8 @@ ast_qualified_type c_lowering::fundamental(fundamental_type f, token_index at)
         return ast_builder_type_basic(AST_TYPE_LONG_DOUBLE);
     case fundamental_type::float16:
         return ast_builder_type_basic(AST_TYPE_FLOAT16);
+    case fundamental_type::bfloat16:
+        return ast_builder_type_basic(AST_TYPE_BFLOAT16);
     case fundamental_type::float128:
         /* as C: a type of its own on x86-64, long double elsewhere */
         if (target == PP_LINUX_X86_64)

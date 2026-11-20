@@ -541,6 +541,8 @@ enum class extension_keyword : uint8_t {
     type_transformation,
     int128,
     float128,
+    float16,
+    bfloat16,
     complex,
     nullability,
     offsetof_,

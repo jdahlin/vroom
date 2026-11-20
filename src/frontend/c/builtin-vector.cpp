@@ -328,3 +328,61 @@ CC_PRIVATE uint32_t cc_builtin_elementwise_abs_build(cc *c, const cc_builtin *b,
     }
     return cc_lowering_sequence(c, pre, result);
 }
+
+/* __builtin_elementwise_min and _max of two vectors of one integer type:
+ * each lane the smaller (larger) of the two, as the vector operations
+ * b ^ ((a ^ b) & (a < b)) with the comparison's -1 / 0 lanes as the mask;
+ * both operands are evaluated once (floating-point lanes, whose NaN rules
+ * minnum has, and scalars are not done). */
+CC_PRIVATE uint32_t cc_vector_minmax(cc *c, bool max, uint32_t a, uint32_t b,
+                                     uint32_t loc)
+{
+    a = cc_node_rvalue(c, a), b = cc_node_rvalue(c, b);
+    ast_qualified_type vt = AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE(a)->ty);
+    if (!cc_type_is_vector(c, vt) ||
+        !cc_type_is_compatible(
+            c, vt, AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE(b)->ty)) ||
+        !cc_type_is_integer(c, AST_TYPE(c, vt)->base)) {
+        cc_report_error(c, loc,
+                        "arguments to '__builtin_elementwise_%s' must be "
+                        "vectors of one integer type",
+                        max ? "max" : "min");
+        return cc_node_error_new(c, loc);
+    }
+    uint32_t pre[2], saved[2], values[2] = {a, b};
+    for (int i = 0; i < 2; i++) {
+        uint32_t sym = cc_symbol_new(c, AST_SYMBOL_VARIABLE, 0, vt, loc);
+        c->syms[sym].sc = AST_STORAGE_AUTO;
+        saved[i] = cc_node_new(c, AST_NODE_VARIABLE, vt, loc);
+        AST_NODE(saved[i])->a = sym;
+        AST_NODE(saved[i])->flags = AST_NODE_FLAG_LVALUE;
+        pre[i] = cc_node_new_operands(c, AST_NODE_ASSIGN, vt, loc, saved[i],
+                                      values[i]);
+    }
+    uint32_t x = cc_node_rvalue(c, saved[0]), y = cc_node_rvalue(c, saved[1]);
+    uint32_t mask =
+        cc_node_binary_new(c, max ? LEX_TOKEN_GREATER : LEX_TOKEN_LESS,
+                           cc_type_vector_mask(c, vt), x, y, loc);
+    mask = cc_cast_insert(c, mask, vt, AST_CAST_NOP);
+    uint32_t diff = cc_node_binary_new(c, LEX_TOKEN_CARET, vt, x, y, loc);
+    diff = cc_node_binary_new(c, LEX_TOKEN_AMPERSAND, vt, diff, mask, loc);
+    uint32_t result = cc_node_binary_new(
+        c, LEX_TOKEN_CARET, vt, cc_node_rvalue(c, saved[1]), diff, loc);
+    return cc_lowering_sequence(c, pre[0],
+                                cc_lowering_sequence(c, pre[1], result));
+}
+
+CC_PRIVATE uint32_t cc_builtin_elementwise_minmax_build(cc *c,
+                                                        const cc_builtin *b,
+                                                        uint32_t loc)
+{
+    cc_id_list args;
+    cc_builtin_arguments_parse(c, &args);
+    if (args.n != 2) {
+        cc_builtin_arity_check(c, loc, 2, &args);
+        return cc_node_error_new(c, loc);
+    }
+    return cc_vector_minmax(c, b->id == CC_BUILTIN_ELEMENTWISE_MAX,
+                            cc_conversion_decay(c, args.v[0]),
+                            cc_conversion_decay(c, args.v[1]), loc);
+}

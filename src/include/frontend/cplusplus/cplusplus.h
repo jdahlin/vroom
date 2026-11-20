@@ -390,6 +390,9 @@ enum class fundamental_type : uint8_t {
     std_nullptr_t,
     /* an extended floating-point type ([basic.fundamental]/12): _Float16 */
     float16,
+    /* [ext:clang_float16] clang's __bf16, brain floating point: a type that
+       no arithmetic is analysed for */
+    bfloat16,
     /* an extended integer type ([basic.fundamental]/5): C23's _BitInt(N),
        clang's extension in C++; N is in the token */
     bit_precise_int,

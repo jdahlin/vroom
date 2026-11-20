@@ -153,6 +153,8 @@ bool ast_builder_atomic_shape(const char *name, size_t length, int *written,
 uint32_t ast_builder_shuffle_vector(cc *c, ast_qualified_type t, uint32_t a,
                                     uint32_t b, const int32_t *indices,
                                     uint32_t count);
+/* __builtin_elementwise_min / _max of two vectors of one integer type */
+uint32_t ast_builder_vector_minmax(cc *c, bool max, uint32_t a, uint32_t b);
 uint32_t ast_builder_convert_vector(cc *c, ast_qualified_type t,
                                     uint32_t vector);
 /* __atomic_load_n(pointer, order): a load of type t, pointer a node of
