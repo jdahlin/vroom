@@ -1910,8 +1910,17 @@ class semantic_analysis
         entity_index befriended = 0;
         entity_index scope = 0;
         uint32_t name = 0;
+        /* [temp.friend]/1: a function template (its entity) all of whose
+           specializations are friends */
+        entity_index template_entity = 0;
     };
     owned_array<friend_record> friends;
+    /* function_template_definition: the function_templates index plus one
+       of the template its last declaration declared or redeclared */
+    uint32_t last_function_template = 0;
+    analysis_result friend_function_template(entity_index c,
+                                             TemplateDeclaration n,
+                                             SyntaxRef inner);
     analysis_result friend_member_declaration(entity_index c,
                                               MemberSimpleDeclaration d,
                                               owned_array<SyntaxRef> &bodies);

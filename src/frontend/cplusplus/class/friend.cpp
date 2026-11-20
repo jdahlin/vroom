@@ -22,6 +22,14 @@ namespace cplusplus
 bool semantic_analysis::friend_names(const friend_record &f,
                                      entity_index e) const
 {
+    if (f.template_entity) {
+        /* [temp.friend]/1: "all specializations of the function template
+           are friends" */
+        if (e == f.template_entity)
+            return true;
+        uint32_t i = entity_table[e].instantiation;
+        return i && instantiations[i - 1].template_entity == f.template_entity;
+    }
     if (f.befriended)
         return f.befriended == e;
     const entity &x = entity_table[e];
@@ -307,6 +315,45 @@ semantic_analysis::friend_function(entity_index c, SyntaxRef n,
     friend_record f;
     f.granting = c;
     f.befriended = befriended;
+    friends.append(f);
+    return analysis_result::well_formed;
+}
+
+/*
+ * [temp.friend]/1: "A friend of a class or class template can be a function
+ * template or class template, a specialization of a function template or
+ * class template, or a non-template function or class": template<...>
+ * friend R f(P); in class c.  The template is declared (or redeclared) in
+ * the innermost enclosing namespace of c ([namespace.memdef]/3) as by a
+ * template-declaration there, and all its specializations are friends.  (The
+ * name is then visible to ordinary lookup there, which [namespace.memdef]/3
+ * hides until a declaration in the namespace: code that names it before is
+ * accepted where it is ill-formed.)  A friend template defined in the class
+ * ([temp.friend]/2), a friend class template and a qualified name are not
+ * analysed.
+ */
+analysis_result semantic_analysis::friend_function_template(
+    entity_index c, TemplateDeclaration n, SyntaxRef inner)
+{
+    uint32_t lead = leading_gnu_attributes(inner);
+    if (inner.is(syntax_kind::function_definition) ||
+        !inner.is(syntax_kind::member_declaration) || inner.size() != lead + 3)
+        return not_supported(n, "temp.friend");
+    entity_index saved_scope = current_scope, saved_class = defining_class;
+    bool saved_friend = friend_allowed;
+    current_scope = enclosing_namespace(c);
+    defining_class = 0;
+    friend_allowed = true;
+    last_function_template = 0;
+    analysis_result r = function_template_definition(n, inner);
+    current_scope = saved_scope;
+    defining_class = saved_class;
+    friend_allowed = saved_friend;
+    if (r != analysis_result::well_formed)
+        return r;
+    friend_record f;
+    f.granting = c;
+    f.template_entity = function_templates[last_function_template - 1].entity;
     friends.append(f);
     return analysis_result::well_formed;
 }

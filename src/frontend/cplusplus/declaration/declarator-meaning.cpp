@@ -413,7 +413,8 @@ static bool declares_by_declarator(SyntaxRef d)
         d = d.back();
     if (d.function_definition())
         return true;
-    if (!d.simple_declaration())
+    /* (a friend function template's: a member-declaration, [temp.friend]) */
+    if (!d.simple_declaration() && !d.is(syntax_kind::member_declaration))
         return false;
     for (auto c : d.elements())
         if (c.is(syntax_kind::init_declarator_list,
@@ -645,6 +646,7 @@ void semantic_analysis::hold_names(SyntaxRef declaration)
             break;
         inner = inner[t.size() - 1].index();
         if ((inner.is(syntax_kind::simple_declaration,
+                      syntax_kind::member_declaration,
                       syntax_kind::function_definition)) &&
             parsed_completely(inner))
             declarator_ids(inner);

@@ -575,6 +575,7 @@ semantic_analysis::function_template_definition(SyntaxRef n,
         if (s.inline_)
             entity_table[f.entity].inline_ = true;
         entity_table.add_declaration(f.entity, n);
+        last_function_template = earlier;
         if (defines) {
             function_template &record = function_templates[earlier - 1];
             record.declaration = n;
@@ -676,6 +677,7 @@ semantic_analysis::function_template_definition(SyntaxRef n,
                 other.unusable = true;
     }
     function_templates.append(record);
+    last_function_template = static_cast<uint32_t>(function_templates.size());
     return analysis_result::well_formed;
 }
 

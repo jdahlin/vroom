@@ -81,6 +81,16 @@ analysis_result semantic_analysis::member_template_declaration(
         parameters.empty())
         return not_supported(n, "temp.mem");
     auto inner = n[1];
+    /* [temp.friend]/1: a friend template */
+    if (inner.is(syntax_kind::member_declaration,
+                 syntax_kind::function_definition)) {
+        uint32_t lead = leading_gnu_attributes(inner);
+        if (lead < inner.size() &&
+            inner[lead].is(syntax_kind::decl_specifier_seq))
+            for (auto x : inner[lead].elements())
+                if (x.is(standard_keyword::friend_))
+                    return friend_function_template(c, n, inner);
+    }
     /* [temp.alias]/1: a member alias template, of a class of namespace
        scope: an alias template declared in the class's scope */
     if (inner.is(syntax_kind::alias_declaration) &&
