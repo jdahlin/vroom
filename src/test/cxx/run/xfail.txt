@@ -29,7 +29,6 @@ old-enable-if-overloads	vcc: the rules of [temp.variadic] are not implemented ye
 old-enumerator-prvalue	vcc: the rules of [ext.clang] are not implemented yet
 old-enums-switch	vcc: the C++ front end does not handle a declaration the parser kept as tokens yet
 old-friend-templates	vcc: the rules of [expr.prim.req] are not implemented yet
-old-gnu-conditional-omitted	vcc: the C++ front end does not handle a declaration the parser kept as tokens yet
 old-ilist-ctor-not-viable	vcc: the rules of [class.mem] are not implemented yet
 old-implicit-assignment-parts	vcc: the rules of [over.match.oper] are not implemented yet
 old-implicit-assignment-requires	vcc: the rules of [expr.prim.req] are not implemented yet

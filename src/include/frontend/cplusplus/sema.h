@@ -1187,7 +1187,10 @@ enum class semantic_kind : uint8_t {
        right operand; a compound assignment's computation type is
        computation */
     assignment,
-    /* a ? b : c; a glvalue when b and c are */
+    /* a ? b : c; a glvalue when b and c are.  [ext:gnu_conditional_omitted]
+       a ? : c has no b: a is the condition converted to bool, d the value
+       of the first operand converted as the second operand would be (the
+       same operand node a converts, evaluated once: lowering uses d alone) */
     conditional,
     /* a, b */
     comma,
@@ -2963,6 +2966,8 @@ class semantic_analysis
                                            expression_meaning &b);
     /* [expr.cond] */
     analysis_result conditional(SyntaxRef n, expression_meaning &m);
+    /* [ext:gnu_conditional_omitted] a ? : c */
+    analysis_result gnu_conditional_omitted(SyntaxRef n, expression_meaning &m);
     analysis_result noexcept_operator(SyntaxRef n, expression_meaning &m);
     analysis_result clang_type_trait(SyntaxRef n, expression_meaning &m);
     /* [meta.rel] is_convertible; known false when analysis cannot tell */

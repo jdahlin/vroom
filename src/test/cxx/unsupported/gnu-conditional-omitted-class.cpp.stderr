@@ -1,0 +1,2 @@
+gnu-conditional-omitted-class.cpp:6:12: error: the rules of [ext.gnu] are not implemented yet: ? with a first operand that is not arithmetic, an enumeration or a pointer is not analysed
+gnu-conditional-omitted-class.cpp:6:12: note: refused by vcc's frontend/cplusplus/ext/gnu/conditional-omitted.cpp:N (gnu_conditional_omitted)

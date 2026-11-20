@@ -228,7 +228,9 @@ struct tree_checker {
             break;
         case semantic_kind::conditional:
             child(n, node.a, tree_sort::expression, false, "condition");
-            child(n, node.b, tree_sort::expression, false, "second operand");
+            child(n, node.b, tree_sort::expression, !!node.d, "second operand");
+            /* [ext:gnu_conditional_omitted] its value */
+            child(n, node.d, tree_sort::expression, !!node.b, "first operand");
             child(n, node.c, tree_sort::expression, false, "third operand");
             condition(n, node.a);
             break;

@@ -578,6 +578,7 @@ class c_lowering
     unsigned conditional_depth = 0;
     owned_array<uint32_t> temporaries, destructions;
     uint32_t conditional(const semantic_node &n);
+    uint32_t conditional_omitted(const semantic_node &n, ast_qualified_type t);
     uint32_t indirect_argument(uint32_t argument, qualified_type parameter,
                                token_index at);
     /* the full-expression e: its temporaries' declarations in before,

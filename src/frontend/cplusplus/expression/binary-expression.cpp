@@ -819,8 +819,9 @@ analysis_result semantic_analysis::builtin_binary(SyntaxRef n, token_index at,
 analysis_result semantic_analysis::conditional(SyntaxRef n,
                                                expression_meaning &m)
 {
+    if (n.size() == 4)
+        return gnu_conditional_omitted(n, m);
     if (n.size() != 5)
-        /* GCC's a ?: b */
         return not_supported(n, "expr.cond");
     expression_meaning c, e2, e3;
     analysis_result r = expression(n[0], c);

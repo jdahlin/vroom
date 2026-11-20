@@ -41,9 +41,12 @@ node_index parser::conditional_expression(bool *conditional)
     if (!at(preprocessing_op_or_punc::QUESTION))
         return n;
     add_token();
-    if (at(preprocessing_op_or_punc::COLON))
-        /* [ext.gnu] a conditional with its second operand omitted: P9 */
+    if (at(preprocessing_op_or_punc::COLON)) {
+        /* [ext:gnu_conditional_omitted] a ? : c */
+        if (tokens.files.behavior.has(extension::gnu_conditional_omitted))
+            return gnu_conditional_omitted(mark, first, conditional);
         return beyond_this_step();
+    }
     expression();
     if (failed())
         return 0;

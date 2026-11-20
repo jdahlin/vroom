@@ -671,6 +671,21 @@ constness semantic_analysis::evaluate_object(constant_evaluation &state,
             return constness::unknown;
         return pointed_place(state, p, object);
     }
+    /* [expr.cond]/5: a glvalue conditional designates the object of the
+       operand it selects ([ext:gnu_conditional_omitted]: d, the first
+       operand, when b is none) */
+    case semantic_kind::conditional: {
+        constant_value condition;
+        c = evaluate_node(state, x.a, condition);
+        if (c != constness::constant)
+            return c;
+        uint32_t second = x.b;
+        if (!second)
+            second = x.d;
+        if (condition.integer != 0)
+            return evaluate_object(state, second, object);
+        return evaluate_object(state, x.c, object);
+    }
     /* [expr.ref]/6.2: "If E2 is a non-static data member ... E1.E2
        designates the corresponding member subobject" */
     case semantic_kind::member: {
@@ -1343,10 +1358,15 @@ constness semantic_analysis::evaluate_node(constant_evaluation &state,
     /* [expr.cond]/1: "only one of the second and third expressions is
        evaluated" */
     case semantic_kind::conditional: {
+        /* [ext:gnu_conditional_omitted] a ? : c has no b: the first
+           operand's value (d) is the result when a is true */
+        uint32_t second = x.b;
+        if (!second)
+            second = x.d;
         c = evaluate_node(state, x.a, v);
         if (c == constness::unknown && state.potential) {
             constant_value arm;
-            if (evaluate_node(state, x.b, arm) == constness::not_constant &&
+            if (evaluate_node(state, second, arm) == constness::not_constant &&
                 evaluate_node(state, x.c, arm) == constness::not_constant)
                 return constness::not_constant;
             return c;
@@ -1354,7 +1374,7 @@ constness semantic_analysis::evaluate_node(constant_evaluation &state,
         if (c != constness::constant)
             return c;
         if (v.integer != 0)
-            return evaluate_node(state, x.b, v);
+            return evaluate_node(state, second, v);
         return evaluate_node(state, x.c, v);
     }
     case semantic_kind::comma: {

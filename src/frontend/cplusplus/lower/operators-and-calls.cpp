@@ -455,10 +455,49 @@ uint32_t c_lowering::call(const semantic_node &n)
     return dereference(made, type(n.type, n.at));
 }
 
+/* [ext:gnu_conditional_omitted] a ? : c: the first operand, evaluated once
+   (n.d), is the result when it is nonzero.  C's conditional has the same
+   form (no second operand); a glvalue's address is held while its value is
+   tested */
+uint32_t c_lowering::conditional_omitted(const semantic_node &n,
+                                         ast_qualified_type t)
+{
+    if (!is_glvalue(n)) {
+        uint32_t value = expression(n.d), otherwise = expression(n.c);
+        if (!value || !otherwise)
+            return 0;
+        return make(AST_NODE_CONDITIONAL, AST_QUALIFIED_TYPE_UNQUALIFIED(t),
+                    value, 0, otherwise, 0, 0);
+    }
+    if (!in_function)
+        return fail("a conditional with an omitted operand and an lvalue "
+                    "result outside a function",
+                    n.at);
+    ast_qualified_type pointer = pointer_to(t);
+    uint32_t first = object(n.d), second = object(n.c);
+    if (!first || !second)
+        return 0;
+    uint32_t symbol = c_local(c, pointer);
+    auto held = [&] { return c_variable(c, symbol, pointer); };
+    uint32_t items[3];
+    items[0] = c_declare(c, symbol);
+    items[1] =
+        c_statement(c, assign(pointer, held(), address_of(first, pointer)));
+    /* the first operand where it is nonzero, else the other's address */
+    uint32_t selected =
+        make(AST_NODE_CONDITIONAL, pointer, dereference(held(), t), held(),
+             address_of(second, pointer), 0, 0);
+    items[2] =
+        ast_builder_node(c, AST_NODE_EXPRESSION, pointer, selected, 0, 0, 0, 0);
+    return dereference(statement_expression(pointer, block(items, 3)), t);
+}
+
 /* [expr.cond] */
 uint32_t c_lowering::conditional(const semantic_node &n)
 {
     ast_qualified_type t = type(n.type, n.at);
+    if (!n.b)
+        return conditional_omitted(n, t);
     if (!is_glvalue(n))
         return make(AST_NODE_CONDITIONAL, AST_QUALIFIED_TYPE_UNQUALIFIED(t),
                     truth(expression(n.a)), expression(n.b), expression(n.c), 0,

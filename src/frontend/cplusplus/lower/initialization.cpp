@@ -59,7 +59,7 @@ uint32_t c_lowering::initialize_into(uint32_t s, qualified_type object_type,
             return 0;
         return statement_expression(v, block(&loop, 1));
     }
-    if (x.kind == semantic_kind::conditional && !is_glvalue(x)) {
+    if (x.kind == semantic_kind::conditional && x.b && !is_glvalue(x)) {
         uint32_t cond = truth(expression(x.a));
         conditional_depth++;
         uint32_t b = initialize_into(s, object_type, t, x.b, through);

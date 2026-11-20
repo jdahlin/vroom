@@ -178,6 +178,11 @@ PRODUCTION(gnu_labels_as_values, "gnu-label-address", "&& identifier")
 PRODUCTION(gnu_labels_as_values, "jump-statement", "gnu-computed-goto")
 PRODUCTION(gnu_labels_as_values, "gnu-computed-goto", "goto * expression ;")
 
+/* ---- GCC manual 6.8, Conditionals with Omitted Operands ---- */
+
+PRODUCTION(gnu_conditional_omitted, "conditional-expression",
+           "logical-or-expression ? : assignment-expression")
+
 /* ---- GCC manual 6.29, Designated Initializers ---- */
 
 PRODUCTION(gnu_designated_initializers, "braced-init-list", "{ gnu-initializer-list ,_opt }")

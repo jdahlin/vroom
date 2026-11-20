@@ -136,7 +136,7 @@ uint32_t c_lowering::read(uint32_t n)
     if (x.kind == semantic_kind::comma)
         return comma(AST_QUALIFIED_TYPE_UNQUALIFIED(t), discard(x.a),
                      read(x.b));
-    if (x.kind == semantic_kind::conditional)
+    if (x.kind == semantic_kind::conditional && x.b)
         return make(AST_NODE_CONDITIONAL, AST_QUALIFIED_TYPE_UNQUALIFIED(t),
                     expression(x.a), read(x.b), read(x.c), 0, 0);
     /* [basic.def.odr]/4: a variable usable in constant expressions whose
@@ -160,7 +160,7 @@ uint32_t c_lowering::discard(uint32_t n)
         uint32_t b = discard(x.b);
         return comma(type_of(b), discard(x.a), b);
     }
-    if (x.kind == semantic_kind::conditional && is_glvalue(x))
+    if (x.kind == semantic_kind::conditional && x.b && is_glvalue(x))
         return make(AST_NODE_CONDITIONAL, v, expression(x.a),
                     cast(discard(x.b), v, AST_CAST_VOID),
                     cast(discard(x.c), v, AST_CAST_VOID), 0, 0);
