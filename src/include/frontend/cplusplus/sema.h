@@ -2506,6 +2506,9 @@ class semantic_analysis
     analysis_result id_expression(token_index t, expression_meaning &m);
     /* [expr.prim.id.qual] */
     analysis_result qualified_id(QualifiedId n, expression_meaning &m);
+    analysis_result qualified_template_id(SyntaxRef n, expression_meaning &m);
+    analysis_result class_member_value(SyntaxRef n, token_index t,
+                                       entity_index e, expression_meaning &m);
     /* [expr.prim.id]: the expression that names the entity e, found by
        lookup of the identifier t */
     analysis_result named_entity(token_index t, entity_index e,

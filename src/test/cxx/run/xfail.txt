@@ -78,9 +78,6 @@ temp-names-literal-operator-template	vcc: the rules of [temp.fct] are not implem
 temp-names-operator-template-id	vcc: the rules of [expr.ref] are not implemented yet
 # [temp.mem] forms not done yet (the temp-mem- tests; PLAN: one PR per group)
 temp-mem-address-deduced-target	vcc: the rules of [over] are not implemented yet
-temp-mem-address-keyword-template	vcc: the rules of [expr.prim.id.qual] are not implemented yet
-temp-mem-address-nonstatic	vcc: the rules of [expr.prim.id.qual] are not implemented yet
-temp-mem-address-static	vcc: the rules of [expr.prim.id.qual] are not implemented yet
 temp-mem-concept-equivalent-head	vcc: the rules of [temp.concept] are not implemented yet
 temp-mem-constructor-declared	vcc: the rules of [temp.inst] are not implemented yet
 temp-mem-constructor-defined-in-class	vcc: symbols differ from clang's (see cxx-run)
