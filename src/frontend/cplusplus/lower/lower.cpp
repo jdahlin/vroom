@@ -183,8 +183,15 @@ class c_lowering
                        owned_array<int64_t> &out) const;
     /* the number of pointers of the table, and the index of group's
        address point in it (UINT32_MAX if left out) */
+    struct shape {
+        uint32_t length = 0;
+        owned_array<uint32_t> points, first_offset;
+        owned_array<int64_t> offsets;
+    };
+    void table_shape(const table_spec &t, shape &out) const;
     uint32_t table_length(const table_spec &t) const;
-    uint32_t table_point(const table_spec &t, uint32_t group) const;
+    void define_array(uint32_t s, ast_qualified_type array,
+                      const owned_array<uint32_t> &runs);
     /* the table's initializer, its symbol s defined with it */
     bool table_definition(const table_spec &t, uint32_t s, token_index at);
     /* &table[index], a void ** */
@@ -211,11 +218,19 @@ class c_lowering
     void vtt_of(entity_index k, vtt_layout &out) const;
     void vtt_tables(vtt_layout &out, entity_index b, uint64_t at,
                     bool is_virtual) const;
-    void vtt_pointer(vtt_layout &out, entity_index b, uint64_t at,
-                     uint32_t table) const;
+    void vtt_pointer(vtt_layout &out, uint64_t at, uint32_t table) const;
     void vtt_secondary_pointers(vtt_layout &out, entity_index b, uint64_t at,
                                 bool morally_virtual, uint32_t table,
                                 owned_array<entity_index> &seen) const;
+    /* whether e is not in seen yet, which it then is */
+    static bool first_time(owned_array<entity_index> &seen, entity_index e)
+    {
+        for (entity_index s : seen)
+            if (s == e)
+                return false;
+        seen.append(e);
+        return true;
+    }
     void vtt_virtual(vtt_layout &out, entity_index b,
                      owned_array<entity_index> &seen) const;
     /* class k's VTT symbol, defined with its construction virtual tables
@@ -4544,7 +4559,9 @@ uint32_t c_lowering::address_point(entity_index k, uint32_t group,
     uint32_t s = vtable(k, at);
     if (!s)
         return 0;
-    return element_address(s, vtable_type(k), table_point(t, group));
+    shape sh;
+    table_shape(t, sh);
+    return element_address(s, vtable_type(k), sh.points[group]);
 }
 
 /* ---- virtual bases ([class.mi]/4) ---------------------------------- */
@@ -4741,41 +4758,49 @@ bool c_lowering::subobject_location(const table_spec &t, entity_index f,
     return found == 1;
 }
 
-uint32_t c_lowering::table_length(const table_spec &t) const
+/* the table's groups in order: each included group's vbase and vcall
+   offsets and its address point (UINT32_MAX for a group left out), and
+   the table's length in pointers */
+void c_lowering::table_shape(const table_spec &t, shape &out) const
 {
     const dynamic_class *d = analysis.dynamic_of(t.k);
-    uint32_t length = 0;
-    owned_array<int64_t> offsets;
+    out.length = 0;
+    out.points.clear();
+    out.offsets.clear();
+    out.first_offset.clear();
     for (uint32_t g = 0; g < d->group_count; g++) {
-        if (!group_included(t, g))
-            continue;
-        offsets.clear();
-        group_offsets(t, g, offsets);
-        length += static_cast<uint32_t>(offsets.size()) + 2 +
-                  analysis.vtable_groups[d->first_group + g].slot_count;
-    }
-    return length;
-}
-
-uint32_t c_lowering::table_point(const table_spec &t, uint32_t group) const
-{
-    const dynamic_class *d = analysis.dynamic_of(t.k);
-    uint32_t point = 0;
-    owned_array<int64_t> offsets;
-    for (uint32_t g = 0; g < d->group_count; g++) {
+        out.first_offset.append(static_cast<uint32_t>(out.offsets.size()));
         if (!group_included(t, g)) {
-            if (g == group)
-                return UINT32_MAX;
+            out.points.append(UINT32_MAX);
             continue;
         }
-        offsets.clear();
-        group_offsets(t, g, offsets);
-        point += static_cast<uint32_t>(offsets.size()) + 2;
-        if (g == group)
-            return point;
-        point += analysis.vtable_groups[d->first_group + g].slot_count;
+        size_t before = out.offsets.size();
+        group_offsets(t, g, out.offsets);
+        out.length += static_cast<uint32_t>(out.offsets.size() - before) + 2;
+        out.points.append(out.length);
+        out.length += analysis.vtable_groups[d->first_group + g].slot_count;
     }
-    return UINT32_MAX;
+    out.first_offset.append(static_cast<uint32_t>(out.offsets.size()));
+}
+
+uint32_t c_lowering::table_length(const table_spec &t) const
+{
+    shape sh;
+    table_shape(t, sh);
+    return sh.length;
+}
+
+/* an array variable s of type array defined by its (index, index, value)
+   runs */
+void c_lowering::define_array(uint32_t s, ast_qualified_type array,
+                              const owned_array<uint32_t> &runs)
+{
+    uint32_t count = static_cast<uint32_t>(runs.size());
+    ast_builder_symbol_body(c, s,
+                            make(AST_NODE_INITIALIZER, array, 0,
+                                 ast_builder_list(c, runs.data(), count),
+                                 count / 3, 1, 0));
+    ast_builder_symbol_flags_add(c, s, AST_SYMBOL_FLAG_DEFINED);
 }
 
 uint32_t c_lowering::element_address(uint32_t s, ast_qualified_type array,
@@ -4836,7 +4861,7 @@ void c_lowering::vtt_tables(vtt_layout &out, entity_index b, uint64_t at,
     spec.construction = b != out.k;
     spec.is_virtual = is_virtual;
     out.tables.append(spec);
-    vtt_pointer(out, b, at, table);
+    vtt_pointer(out, at, table);
     for (uint32_t i = 0; i < x.base_count; i++) {
         const entity &base =
             analysis.entity_table[analysis.class_bases[x.first_base + i]];
@@ -4853,12 +4878,10 @@ void c_lowering::vtt_tables(vtt_layout &out, entity_index b, uint64_t at,
 
 /* the entry for the subobject of class b at offset at: the address point
    of the group of the table whose subobject that is */
-void c_lowering::vtt_pointer(vtt_layout &out, entity_index b, uint64_t at,
-                             uint32_t table) const
+void c_lowering::vtt_pointer(vtt_layout &out, uint64_t at, uint32_t table) const
 {
     const table_spec &t = out.tables[table];
     const dynamic_class *d = analysis.dynamic_of(t.k);
-    (void)b;
     for (uint32_t g = 0; g < d->group_count; g++)
         if (group_included(t, g) &&
             static_cast<int64_t>(t.base_offset) + group_location(t, g) ==
@@ -4889,12 +4912,8 @@ void c_lowering::vtt_secondary_pointers(vtt_layout &out, entity_index b,
         bool base_morally_virtual = morally_virtual, nonvirtual_primary = false;
         uint64_t base_at = 0;
         if (base.virtual_base) {
-            bool repeated = false;
-            for (entity_index s : seen)
-                repeated = repeated || s == of;
-            if (repeated)
+            if (!first_time(seen, of))
                 continue;
-            seen.append(of);
             base_at = virtual_base_offset(out.k, of);
             base_morally_virtual = true;
         } else {
@@ -4904,7 +4923,7 @@ void c_lowering::vtt_secondary_pointers(vtt_layout &out, entity_index b,
         if (!nonvirtual_primary &&
             (analysis.entity_table[of].virtual_base_count ||
              base_morally_virtual))
-            vtt_pointer(out, of, base_at, table);
+            vtt_pointer(out, base_at, table);
         vtt_secondary_pointers(out, of, base_at, base_morally_virtual, table,
                                seen);
     }
@@ -4919,12 +4938,8 @@ void c_lowering::vtt_virtual(vtt_layout &out, entity_index b,
             analysis.entity_table[analysis.class_bases[x.first_base + i]];
         entity_index of = record(base.type).entity;
         if (base.virtual_base) {
-            bool repeated = false;
-            for (entity_index s : seen)
-                repeated = repeated || s == of;
-            if (repeated)
+            if (!first_time(seen, of))
                 continue;
-            seen.append(of);
             vtt_tables(out, of, virtual_base_offset(out.k, of), true);
         }
         if (analysis.entity_table[of].virtual_base_count)
@@ -4955,67 +4970,53 @@ bool c_lowering::table_definition(const table_spec &t, uint32_t s,
                                   token_index at)
 {
     const dynamic_class *d = analysis.dynamic_of(t.k);
+    shape sh;
+    table_shape(t, sh);
     owned_array<uint32_t> runs;
     ast_qualified_type vp = pointer_to(v);
-    uint32_t start = 0;
-    owned_array<int64_t> offsets;
+    auto entry = [&](uint32_t index, uint32_t value) {
+        runs.append(index);
+        runs.append(index);
+        runs.append(value);
+    };
     auto integer = [&](uint32_t index, int64_t value) {
-        if (!value)
-            return;
-        uint32_t n = ast_builder_integer(c, ast_builder_type_ptrdiff(c),
-                                         static_cast<uint64_t>(value));
-        runs.append(index);
-        runs.append(index);
-        runs.append(cast(n, vp, AST_CAST_INTEGER_TO_POINTER));
+        if (value)
+            entry(index,
+                  cast(ast_builder_integer(c, ast_builder_type_ptrdiff(c),
+                                           static_cast<uint64_t>(value)),
+                       vp, AST_CAST_INTEGER_TO_POINTER));
     };
     for (uint32_t g = 0; g < d->group_count; g++) {
-        if (!group_included(t, g))
+        uint32_t point = sh.points[g];
+        if (point == UINT32_MAX)
             continue;
         const vtable_group &group = analysis.vtable_groups[d->first_group + g];
-        offsets.clear();
-        group_offsets(t, g, offsets);
-        uint32_t count = static_cast<uint32_t>(offsets.size());
-        for (uint32_t i = 0; i < count; i++)
-            integer(start + count - 1 - i, offsets[i]);
-        start += count;
-        /* [abi:vtable-components]: the offset to top, "the displacement
-           to the top of the object from the location within the object
-           of the virtual table pointer that addresses this virtual
-           table" */
-        integer(start, -group_location(t, g));
+        /* the offsets, nearest the address point first; then the offset
+           to top, "the displacement to the top of the object from the
+           location within the object of the virtual table pointer that
+           addresses this virtual table" */
+        for (uint32_t i = sh.first_offset[g], k = 3; i < sh.first_offset[g + 1];
+             i++, k++)
+            integer(point - k, sh.offsets[i]);
+        integer(point - 2, -group_location(t, g));
         for (uint32_t i = 0; i < group.slot_count; i++) {
             uint32_t slot = group.first_slot + i;
             entity_index f = analysis.vtable_slots[slot];
             int64_t adjustment = analysis.vtable_adjustments[slot];
-            uint32_t target = 0;
-            ast_qualified_type ft = 0;
-            /* [abi:vtable-components]: a virtual destructor's pair of
-               entries, the complete object destructor (the variant its
-               calls use: D2 for an inline one, as clang) and the deleting
-               one */
-            bool destructor =
-                analysis.entity_table[f].special == special_member::destructor;
             /* [abi:mangling-special-thunks]: an overrider outside the
                virtual base whose table this is: its virtual thunk */
             int64_t vcall = vcall_offset_offset(group, i);
-            if (destructor && i && analysis.vtable_slots[slot - 1] == f) {
-                ft = entity_type(f, at);
-                if (!deleting_destructor(f, at, false))
-                    return false;
-                target = deleting_symbols[f];
-                if (vcall || adjustment)
-                    target = thunk(f, adjustment, at, vcall, 0);
-            } else if (destructor && (vcall || adjustment)) {
-                ft = entity_type(f, at);
-                target = thunk(f, adjustment, at, vcall, 1);
-            } else if (destructor) {
-                ft = entity_type(f, at);
-                target = special_callee(f, at);
-            } else if (vcall && !analysis.entity_table[f].pure) {
-                target = thunk(f, adjustment, at, vcall);
-                ft = entity_type(f, at);
-            } else if (analysis.entity_table[f].pure) {
-                /* [abi:pure-virtual]: a pure virtual function's slot */
+            /* [abi:vtable-components]: a virtual destructor's pair of
+               entries, the complete object destructor (the variant its
+               calls use: D2 for an inline one, as clang) and the deleting
+               one; [abi:pure-virtual]: a pure virtual function's slot */
+            bool destructor =
+                analysis.entity_table[f].special == special_member::destructor;
+            bool deleting =
+                destructor && i && analysis.vtable_slots[slot - 1] == f;
+            ast_qualified_type ft = entity_type(f, at);
+            uint32_t target = 0;
+            if (analysis.entity_table[f].pure && !destructor) {
                 ft = ast_builder_type_function(c, v, nullptr, 0, 0);
                 if (!pure_virtual) {
                     pure_virtual = ast_builder_symbol(
@@ -5024,12 +5025,19 @@ bool c_lowering::table_definition(const table_spec &t, uint32_t s,
                     ast_builder_toplevel(c, pure_virtual);
                 }
                 target = pure_virtual;
-            } else if (adjustment) {
-                target = thunk(f, adjustment, at);
-                ft = entity_type(f, at);
+            } else if (deleting && !deleting_destructor(f, at, false)) {
+                return false;
+            } else if (vcall || adjustment) {
+                int variant = 2;
+                if (destructor)
+                    variant = !deleting;
+                target = thunk(f, adjustment, at, vcall, variant);
+            } else if (deleting) {
+                target = deleting_symbols[f];
+            } else if (destructor) {
+                target = special_callee(f, at);
             } else {
                 target = symbol(f, at);
-                ft = entity_type(f, at);
             }
             if (!target)
                 return false;
@@ -5039,24 +5047,14 @@ bool c_lowering::table_definition(const table_spec &t, uint32_t s,
             uint32_t function =
                 cast(make(AST_NODE_VARIABLE, ft, target, 0, 0, 0, 0),
                      pointer_to(ft), AST_CAST_FUNCTION_DECAY);
-            runs.append(start + 2 + i);
-            runs.append(start + 2 + i);
-            runs.append(cast(function, vp, AST_CAST_POINTER_TO_POINTER));
+            entry(point + i, cast(function, vp, AST_CAST_POINTER_TO_POINTER));
         }
-        start += 2 + group.slot_count;
     }
     if (vcall_unknown)
         return fail("a vcall offset whose final overrider's subobject is not "
                     "found once",
                     at);
-    ast_qualified_type array =
-        ast_builder_type_array(c, vp, table_length(t), true);
-    uint32_t init = make(
-        AST_NODE_INITIALIZER, array, 0,
-        ast_builder_list(c, runs.data(), static_cast<uint32_t>(runs.size())),
-        static_cast<uint32_t>(runs.size() / 3), 1, 0);
-    ast_builder_symbol_body(c, s, init);
-    ast_builder_symbol_flags_add(c, s, AST_SYMBOL_FLAG_DEFINED);
+    define_array(s, ast_builder_type_array(c, vp, sh.length, true), runs);
     return true;
 }
 
@@ -5121,21 +5119,18 @@ uint32_t c_lowering::vtt_define(entity_index k, uint32_t table, int storage,
         types_of.append(ta);
     }
     owned_array<uint32_t> runs;
+    shape sh;
     for (uint32_t i = 0; i < layout.entries.size(); i++) {
         const vtt_entry &e = layout.entries[i];
-        uint32_t point = table_point(layout.tables[e.table], e.group);
+        table_shape(layout.tables[e.table], sh);
+        uint32_t point = sh.points[e.group];
         runs.append(i);
         runs.append(i);
         runs.append(
             cast(element_address(symbols_of[e.table], types_of[e.table], point),
                  vp, AST_CAST_POINTER_TO_POINTER));
     }
-    uint32_t init = make(
-        AST_NODE_INITIALIZER, array, 0,
-        ast_builder_list(c, runs.data(), static_cast<uint32_t>(runs.size())),
-        static_cast<uint32_t>(runs.size() / 3), 1, 0);
-    ast_builder_symbol_body(c, s, init);
-    ast_builder_symbol_flags_add(c, s, AST_SYMBOL_FLAG_DEFINED);
+    define_array(s, array, runs);
     return s;
 }
 
