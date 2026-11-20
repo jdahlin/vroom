@@ -228,6 +228,35 @@ analysis_result semantic_analysis::best_viable_function(
             (entity_table[x.function].gnu_flags & gnu_enable_if) >
                 (entity_table[y.function].gnu_flags & gnu_enable_if))
             return true;
+        /* (2.6) "F1 is a constructor for a class D, F2 is a constructor
+           for a base class B of D, and for all arguments the corresponding
+           parameters of F1 and F2 have the same type": F2 is one D
+           inherits ([namespace.udecl]/16) */
+        if (x.function && y.function && !x.template_index &&
+            !y.template_index &&
+            entity_table[x.function].special == special_member::constructor &&
+            !entity_table[x.function].inherited_constructor &&
+            entity_table[y.function].inherited_constructor &&
+            entity_table[x.function].enclosing ==
+                entity_table[y.function].enclosing) {
+            const qualified_type *p1 = type_table.parameters(
+                entity_table[x.function].type.unqualified());
+            const qualified_type *p2 = type_table.parameters(
+                entity_table[y.function].type.unqualified());
+            size_t count1 =
+                type_table[entity_table[x.function].type.unqualified()]
+                    .parameter_count;
+            size_t count2 =
+                type_table[entity_table[y.function].type.unqualified()]
+                    .parameter_count;
+            bool same = true;
+            for (size_t i = 0; i < n && same; i++)
+                if (i >= count1 || i >= count2 ||
+                    p1[i].unqualified() != p2[i].unqualified())
+                    same = false;
+            if (same)
+                return true;
+        }
         /* (2.8) "F2 is a rewritten candidate ([over.match.oper]) and F1 is
            not"; (2.9) "F1 and F2 are rewritten candidates, and F2 is a
            synthesized candidate with reversed order of parameters and F1

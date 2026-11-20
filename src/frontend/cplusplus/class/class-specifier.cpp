@@ -938,7 +938,8 @@ bool semantic_analysis::is_aggregate(entity_index c) const
        constructors" */
     if (x.explicit_default_constructor)
         return false;
-    if (x.constructor_template || x.constructor_templates)
+    if (x.constructor_template || x.constructor_templates ||
+        x.inherits_constructors)
         return false;
     for (entity_index k = x.first_constructor; k;
          k = entity_table[k].next_constructor)
