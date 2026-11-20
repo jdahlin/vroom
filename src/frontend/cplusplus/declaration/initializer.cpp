@@ -596,10 +596,6 @@ semantic_analysis::class_reference_binding(SyntaxRef at, expression_meaning &m,
                           "if the reference is an rvalue reference, the "
                           "initializer expression shall not be an lvalue",
                           "dcl.init.ref");
-    if (!lvalue && destroys(c2))
-        /* [class.temporary]/6: the temporary bound lives as long as the
-           reference */
-        return not_supported(at, "class.temporary");
     if (c1 == c2)
         return analysis_result::well_formed;
     return to_base(at.first_token(), c1, m);
