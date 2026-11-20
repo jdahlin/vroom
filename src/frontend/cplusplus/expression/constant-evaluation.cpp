@@ -79,6 +79,14 @@ void restore(state_type &state, size_t objects, size_t elements)
     state.element_read_only.resize(elements);
 }
 
+/* an integer type of 128 bits: expression_meaning keeps 64 bits, the
+   evaluator's value all of them */
+bool wide_integer(fundamental_type t)
+{
+    return t == fundamental_type::int128 ||
+           t == fundamental_type::unsigned_int128;
+}
+
 } // namespace
 
 fundamental_type semantic_analysis::evaluated_type(qualified_type t) const
@@ -92,8 +100,7 @@ fundamental_type semantic_analysis::evaluated_type(qualified_type t) const
     }
     if (f == fundamental_type::float_ || f == fundamental_type::double_)
         return f;
-    if (!fundamental_type_is_integral(f) || f == fundamental_type::int128 ||
-        f == fundamental_type::unsigned_int128 ||
+    if (!fundamental_type_is_integral(f) ||
         f == fundamental_type::bit_precise_int ||
         f == fundamental_type::unsigned_bit_precise_int)
         return fundamental_type::none;
@@ -130,6 +137,16 @@ void semantic_analysis::evaluated_meaning(expression_meaning &m,
     m.value = kept_of(evaluated_type(m.type), v);
 }
 
+bool semantic_analysis::value_kept_exactly(qualified_type t,
+                                           const constant_value &v) const
+{
+    fundamental_type f = evaluated_type(t);
+    if (!wide_integer(f))
+        return true;
+    return v.kind == constant_value_kind::integer &&
+           integer_kept_exactly(tokens.files.behavior, f, v.integer);
+}
+
 /* [conv.integral], [conv.double], [conv.fpint], [conv.bool]: the rules
    analysis folds with, on a value */
 constness semantic_analysis::evaluate_conversion(constant_value &v,
@@ -138,6 +155,18 @@ constness semantic_analysis::evaluate_conversion(constant_value &v,
 {
     if (from == fundamental_type::none || to == fundamental_type::none)
         return constness::unknown;
+    if (wide_integer(from) || wide_integer(to)) {
+        /* [conv.integral]/2, /3: the value modulo 2^N; /1 for bool (a
+           floating operand is not evaluated) */
+        if (fundamental_type_is_floating(from) ||
+            fundamental_type_is_floating(to) ||
+            v.kind != constant_value_kind::integer)
+            return constness::unknown;
+        if (!wide_integer(to))
+            v = value_of(to,
+                         integer_wrap(tokens.files.behavior, to, v.integer));
+        return constness::constant;
+    }
     expression_meaning m;
     m.type = qualified_type::make(type_table.fundamental(from), cv_none);
     m.evaluation = constness::constant;
@@ -160,6 +189,8 @@ constness semantic_analysis::evaluate_binary(uint8_t op, fundamental_type t,
                                              const constant_value &y,
                                              constant_value &out)
 {
+    if (wide_integer(t))
+        return evaluate_wide_binary(op, t, right, result, x, y, out);
     uint64_t value = 0;
     constness c =
         fold_binary(tokens.files.behavior, tokens.files.floating_point_pragma,
@@ -168,6 +199,136 @@ constness semantic_analysis::evaluate_binary(uint8_t op, fundamental_type t,
     if (c == constness::constant)
         out = value_of(result, value);
     return c;
+}
+
+/*
+ * [expr.mul], [expr.add], [expr.shift], [expr.rel], [expr.eq], [expr.bit.and],
+ * [expr.xor] and [expr.or] on operands of a 128-bit integer type (folding.cpp's
+ * rules at 128 bits, on the evaluator's values).
+ */
+constness semantic_analysis::evaluate_wide_binary(
+    uint8_t op, fundamental_type t, fundamental_type right,
+    fundamental_type result, const constant_value &x, const constant_value &y,
+    constant_value &out)
+{
+    if (x.kind != constant_value_kind::integer ||
+        y.kind != constant_value_kind::integer)
+        return constness::unknown;
+    preprocessing_op_or_punc o = static_cast<preprocessing_op_or_punc>(op);
+    bool is_signed = t == fundamental_type::int128;
+    unsigned __int128 a = x.integer, b = y.integer;
+    __int128 sa = static_cast<__int128>(a), sb = static_cast<__int128>(b);
+    unsigned __int128 r = 0;
+    bool less = a < b;
+    if (is_signed)
+        less = sa < sb;
+    switch (o) {
+    case preprocessing_op_or_punc::LESS:
+    case preprocessing_op_or_punc::GREATER:
+    case preprocessing_op_or_punc::LESS_EQUAL:
+    case preprocessing_op_or_punc::GREATER_EQUAL:
+    case preprocessing_op_or_punc::EQUAL_EQUAL:
+    case preprocessing_op_or_punc::EXCLAMATION_EQUAL: {
+        /* [expr.rel]/6, [expr.eq] */
+        bool equal = a == b;
+        bool value = !equal;
+        if (o == preprocessing_op_or_punc::LESS)
+            value = less;
+        else if (o == preprocessing_op_or_punc::GREATER)
+            value = !less && !equal;
+        else if (o == preprocessing_op_or_punc::LESS_EQUAL)
+            value = less || equal;
+        else if (o == preprocessing_op_or_punc::GREATER_EQUAL)
+            value = !less;
+        else if (o == preprocessing_op_or_punc::EQUAL_EQUAL)
+            value = equal;
+        out = value_of(result, value);
+        return constness::constant;
+    }
+    case preprocessing_op_or_punc::PLUS:
+    case preprocessing_op_or_punc::MINUS:
+    case preprocessing_op_or_punc::STAR: {
+        /* [expr.pre]/4: a signed result not in range is undefined;
+           [basic.fundamental]/4: an unsigned one wraps */
+        __int128 ignored = 0;
+        bool overflow = false;
+        if (o == preprocessing_op_or_punc::PLUS) {
+            overflow = __builtin_add_overflow(sa, sb, &ignored);
+            r = a + b;
+        } else if (o == preprocessing_op_or_punc::MINUS) {
+            overflow = __builtin_sub_overflow(sa, sb, &ignored);
+            r = a - b;
+        } else {
+            overflow = __builtin_mul_overflow(sa, sb, &ignored);
+            r = a * b;
+        }
+        if (is_signed && overflow)
+            return constness::not_constant;
+        break;
+    }
+    case preprocessing_op_or_punc::SLASH:
+    case preprocessing_op_or_punc::PERCENT: {
+        /* [expr.mul]/4: a zero divisor, or a quotient not representable,
+           is undefined */
+        if (b == 0)
+            return constness::not_constant;
+        if (is_signed) {
+            __int128 least =
+                static_cast<__int128>(static_cast<unsigned __int128>(1) << 127);
+            if (sa == least && sb == -1)
+                return constness::not_constant;
+            if (o == preprocessing_op_or_punc::SLASH)
+                r = static_cast<unsigned __int128>(sa / sb);
+            else
+                r = static_cast<unsigned __int128>(sa % sb);
+        } else if (o == preprocessing_op_or_punc::SLASH) {
+            r = a / b;
+        } else {
+            r = a % b;
+        }
+        break;
+    }
+    case preprocessing_op_or_punc::AMPERSAND:
+        r = a & b;
+        break;
+    case preprocessing_op_or_punc::CARET:
+        r = a ^ b;
+        break;
+    case preprocessing_op_or_punc::BAR:
+        r = a | b;
+        break;
+    case preprocessing_op_or_punc::LESS_LESS:
+    case preprocessing_op_or_punc::GREATER_GREATER: {
+        /* [expr.shift]/1: undefined if the right operand is negative or
+           not less than the width of the promoted left operand */
+        if (wide_integer(right) || fundamental_type_is_floating(right))
+            return constness::unknown;
+        __int128 n =
+            integer_value(tokens.files.behavior, right, kept_of(right, y));
+        if (n < 0 || n >= 128)
+            return constness::not_constant;
+        if (o == preprocessing_op_or_punc::GREATER_GREATER) {
+            /* [expr.shift]/3: E1/2^E2, rounded down */
+            if (is_signed)
+                r = static_cast<unsigned __int128>(sa >> static_cast<int>(n));
+            else
+                r = a >> static_cast<int>(n);
+            break;
+        }
+        /* [expr.shift]/2: congruent to E1 x 2^E2 modulo 2^N (C++20) */
+        if (is_signed &&
+            !tokens.files.behavior.has(language_feature::modular_left_shift))
+            return constness::unknown;
+        r = a << static_cast<int>(n);
+        break;
+    }
+    default:
+        return constness::unknown;
+    }
+    out = constant_value();
+    out.kind = constant_value_kind::integer;
+    out.integer = r;
+    return constness::constant;
 }
 
 void semantic_analysis::evaluate_analysed_expressions()
@@ -199,7 +360,7 @@ void semantic_analysis::evaluate_analysed_expressions()
             state.defined_before = x.at.first_token();
         constant_value v;
         if (evaluate_node(state, m.node, v) == constness::constant &&
-            is_value(v))
+            is_value(v) && value_kept_exactly(m.type, v))
             evaluated_meaning(m, v);
     }
 }
@@ -215,6 +376,10 @@ analysis_result semantic_analysis::evaluate_constant(SyntaxRef at,
     constant_evaluation state;
     constness c = evaluate_node(state, node, v);
     if (c == constness::constant && !is_value(v))
+        c = constness::unknown;
+    /* a 128-bit value that expression_meaning's 64 bits do not hold */
+    if (c == constness::constant &&
+        !value_kept_exactly(semantics[node].type, v))
         c = constness::unknown;
     if (c == constness::unknown)
         return not_supported(at, "expr.const");
@@ -1037,6 +1202,8 @@ constness semantic_analysis::evaluate_node(constant_evaluation &state,
             fundamental_type from = evaluated_type(semantics[x.a].type);
             fundamental_type to = evaluated_type(x.type);
             uint64_t value = 0;
+            if (wide_integer(from) || wide_integer(to))
+                return constness::unknown;
             if (!bit_cast_kept(tokens.files.behavior, from, to,
                                kept_of(from, v), value))
                 return constness::unknown;
@@ -1069,6 +1236,19 @@ constness semantic_analysis::evaluate_node(constant_evaluation &state,
             return c;
         /* the operand is promoted to t, or a bool for ! */
         fundamental_type operand = evaluated_type(semantics[x.a].type);
+        if (wide_integer(operand)) {
+            /* unary + and !; - and ~ at 128 bits are not evaluated */
+            auto op = static_cast<preprocessing_op_or_punc>(x.op);
+            if (v.kind != constant_value_kind::integer)
+                return constness::unknown;
+            if (op == preprocessing_op_or_punc::EXCLAMATION) {
+                v = value_of(t, v.integer == 0);
+                return constness::constant;
+            }
+            if (op == preprocessing_op_or_punc::PLUS)
+                return constness::constant;
+            return constness::unknown;
+        }
         uint64_t value = 0;
         c = fold_unary(tokens.files.behavior,
                        static_cast<preprocessing_op_or_punc>(x.op), operand,
@@ -1542,6 +1722,10 @@ uint32_t semantic_analysis::value_tree(const constant_evaluation &state,
         fundamental_type f = evaluated_type(t);
         if (f == fundamental_type::none)
             return 0;
+        /* a 128-bit value that 64 bits do not hold: the initializer as
+           written is lowered */
+        if (!value_kept_exactly(t, v))
+            return 0;
         m.value = kept_of(f, v);
         return expression_node(semantic_kind::constant, m, at);
     }
@@ -1826,7 +2010,8 @@ constness semantic_analysis::evaluate_statement(constant_evaluation &state,
         if (semantics[condition].kind == semantic_kind::condition_declaration)
             condition = semantics[condition].b;
         fundamental_type t = evaluated_type(semantics[condition].type);
-        if (c == constness::constant && t == fundamental_type::none)
+        if (c == constness::constant &&
+            (t == fundamental_type::none || wide_integer(t)))
             c = constness::unknown;
         if (c == constness::constant) {
             /* [stmt.switch]/5: "If one of the case constants has the same

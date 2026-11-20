@@ -3005,12 +3005,18 @@ class semantic_analysis
                               fundamental_type right, fundamental_type result,
                               const constant_value &x, const constant_value &y,
                               constant_value &out);
+    constness
+    evaluate_wide_binary(uint8_t op, fundamental_type t, fundamental_type right,
+                         fundamental_type result, const constant_value &x,
+                         const constant_value &y, constant_value &out);
     /* a value of the arithmetic type t as expression_meaning keeps it, and
        back */
     uint64_t kept_of(fundamental_type t, const constant_value &v) const;
     constant_value value_of(fundamental_type t, uint64_t kept) const;
     /* m's value as expression_meaning keeps it, from the evaluator's */
     void evaluated_meaning(expression_meaning &m, const constant_value &v);
+    /* whether m's 64 bits hold v of type t (a 128-bit integer may not) */
+    bool value_kept_exactly(qualified_type t, const constant_value &v) const;
 
     /* ---- initialization ([dcl.init]) ---- */
     struct initialized_value {
