@@ -644,6 +644,7 @@ class c_lowering
     uint32_t read(uint32_t n);
     uint32_t discard(uint32_t n);
     uint32_t object(uint32_t n);
+    uint32_t member_access(const semantic_node &n, uint32_t object);
     uint32_t address_of(uint32_t lvalue, ast_qualified_type pointer);
     /* a read of a variable usable in constant expressions, lowered to its
        value */
