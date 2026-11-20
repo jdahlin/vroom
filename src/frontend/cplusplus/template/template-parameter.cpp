@@ -163,6 +163,11 @@ node_index parser::template_parameter()
     /* [temp.res]/5: a parameter-declaration of a (non-type)
        template-parameter assumes a qualified-id names a type */
     flag_set implicit(parameters_implicit_typename, true);
+    /* [class.mem]/6: only a function's default argument is a
+       complete-class context, not a template-argument's: it ends at '>',
+       which the first pass over a member-specification would not stop at */
+    flag_set not_collecting(collecting_members, false);
+    flag_set not_member_default(member_declarator_context, false);
     return parameter_declaration();
 }
 
