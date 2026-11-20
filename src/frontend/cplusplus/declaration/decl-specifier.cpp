@@ -1140,7 +1140,7 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
     unsigned const_ = 0, volatile_ = 0, typedef_ = 0, static_ = 0, extern_ = 0,
              mutable_ = 0, inline_ = 0, constexpr_ = 0, virtual_ = 0,
              friend_ = 0, explicit_ = 0, consteval_ = 0, c11_thread_local = 0,
-             atomic_qualifier = 0;
+             atomic_qualifier = 0, constinit_ = 0, thread_local_ = 0;
     type_index named = 0;
     bool declares_class = false, declares_enumeration = false;
     token_index named_at = 0, duplicate = 0;
@@ -1530,6 +1530,16 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
                an immediate function is a constexpr function */
             count(consteval_, t, "consteval");
             break;
+        case standard_keyword::constinit_:
+            /* [dcl.constinit]/1: applied only to a variable with static or
+               thread storage duration (simple_declaration) */
+            count(constinit_, t, "constinit");
+            break;
+        case standard_keyword::thread_local_:
+            /* [dcl.stc]/3: only on a variable, a structured binding or a
+               static data member (simple_declaration, member_declarator) */
+            count(thread_local_, t, "thread_local");
+            break;
         case standard_keyword::virtual_:
             /* [dcl.fct.spec]/2: "The virtual specifier shall be used only
                in the initial declaration of a non-static member
@@ -1581,7 +1591,8 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
     }
     /* [dcl.spec]/2: "At most one of the constexpr, consteval, and
        constinit keywords shall appear in a decl-specifier-seq." */
-    if (constexpr_ && consteval_)
+    if ((constexpr_ && consteval_) ||
+        (constinit_ && (constexpr_ || consteval_)))
         return ill_formed(seq,
                           "at most one of the constexpr, consteval, and "
                           "constinit keywords shall appear in a "
@@ -1589,21 +1600,30 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
                           "dcl.spec");
     constexpr_ += consteval_;
     if (parameter && (typedef_ || static_ || extern_ || inline_ || constexpr_ ||
-                      c11_thread_local))
+                      c11_thread_local || constinit_ || thread_local_))
         return not_supported(seq, "dcl.fct");
     /* [dcl.stc]/1: "At most one storage-class-specifier shall appear in a
        given decl-specifier-seq, except that thread_local may appear with
        static or extern." */
     if ((static_ && extern_) ||
-        (mutable_ && (static_ || extern_ || c11_thread_local)))
+        (mutable_ &&
+         (static_ || extern_ || c11_thread_local || thread_local_)) ||
+        (c11_thread_local && thread_local_))
         return ill_formed(seq,
                           "at most one storage-class-specifier shall appear "
                           "in a given decl-specifier-seq",
                           "dcl.stc");
+    /* [dcl.stc]/3: "When thread_local is applied to a variable of block
+       scope the storage-class-specifier static is implied if no other
+       storage-class-specifier appears in the decl-specifier-seq." */
+    if (thread_local_ && !static_ && !extern_ && at_block_scope() &&
+        entity_table[current_scope].kind != entity_kind::class_type)
+        static_ = 1;
     /* [dcl.stc]/1: "If a storage-class-specifier appears in a
        decl-specifier-seq, there can be no typedef specifier in the same
        decl-specifier-seq" */
-    if (typedef_ && (static_ || extern_ || mutable_ || c11_thread_local))
+    if (typedef_ &&
+        (static_ || extern_ || mutable_ || c11_thread_local || thread_local_))
         return ill_formed(seq,
                           "if a storage-class-specifier appears in a "
                           "decl-specifier-seq, there can be no typedef "
@@ -1663,7 +1683,11 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
     s.typedef_ = typedef_;
     s.static_ = static_;
     s.extern_ = extern_;
-    s.c11_thread_local = c11_thread_local != 0;
+    /* [basic.stc.thread]: thread_local's thread storage duration is
+       _Thread_local's (the entity's c11_thread_local) */
+    s.c11_thread_local = c11_thread_local != 0 || thread_local_ != 0;
+    s.cxx_thread_local = thread_local_ != 0;
+    s.constinit_ = constinit_ != 0;
     s.mutable_ = mutable_ != 0;
     s.inline_ = inline_;
     s.virtual_ = virtual_ != 0;

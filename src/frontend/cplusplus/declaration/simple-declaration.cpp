@@ -1181,6 +1181,17 @@ analysis_result semantic_analysis::declare_with_initializer(
        function type pointed to */
     if ((gnu_flags & gnu_noreturn) && kind != entity_kind::function)
         return not_supported(declaration, "ext.gnu");
+    /* [dcl.constinit]/1: "The constinit specifier shall be applied only
+       to a declaration of a variable with static or thread storage
+       duration." */
+    if (s.constinit_ &&
+        (kind != entity_kind::variable ||
+         (at_block_scope() && !s.static_ && !s.extern_ && !s.c11_thread_local)))
+        return ill_formed(declaration,
+                          "the constinit specifier shall be applied only to "
+                          "a declaration of a variable with static or "
+                          "thread storage duration",
+                          "dcl.constinit");
     /* [dcl.constexpr]/2: consteval only on a function */
     if (s.consteval_ && kind != entity_kind::function)
         return ill_formed(declaration,
@@ -1273,6 +1284,18 @@ analysis_result semantic_analysis::declare_with_initializer(
             r = literal_operator_declaration(declaration, declared_entity);
     }
     last_declared = declared_entity;
+    if (r == analysis_result::well_formed && kind == entity_kind::variable &&
+        s.constinit_) {
+        /* [dcl.constinit]/1: "If the specifier is applied to any
+           declaration of a variable, it shall be applied to the
+           initializing declaration": one added to a later declaration is
+           clang's "added after initialization" when the variable was
+           defined before, not analysed */
+        entity &x = entity_table[declared_entity];
+        if (x.first_declaration != x.last_declaration && !x.constinit_)
+            return not_supported(declaration, "dcl.constinit");
+        x.constinit_ = true;
+    }
     if (r == analysis_result::well_formed && placeholder &&
         kind == entity_kind::function)
         entity_table[declared_entity].placeholder_return = true;
@@ -1314,11 +1337,32 @@ analysis_result semantic_analysis::declare_with_initializer(
             return ill_formed(declaration,
                               "_Thread_local applies only to a variable",
                               "ext.clang");
-        if (!s.static_ && !s.extern_ && at_block_scope())
+        if (!s.cxx_thread_local && !s.static_ && !s.extern_ && at_block_scope())
             return ill_formed(declaration,
                               "a _Thread_local variable at block scope is "
                               "declared static",
                               "ext.clang");
+        /* [dcl.constexpr]/3.5.3: no definition of a variable of static or
+           thread storage duration in a constexpr function's body (before
+           C++23): clang's "never produces a constant expression" is not
+           analysed */
+        if (s.cxx_thread_local && function_state.active &&
+            function_state.function &&
+            entity_table[function_state.function].constexpr_)
+            return not_supported(declaration, "dcl.constexpr");
+        if (s.cxx_thread_local) {
+            /* [basic.stc.thread]/2: the object is destroyed when its
+               thread exits, by a destructor whose access and deletion
+               analysis does not check for static storage: not analysed */
+            qualified_type element = type;
+            while (type_table[element.unqualified()].kind == type_kind::array)
+                element = type_table[element.unqualified()].operand;
+            const struct type &k = type_table[element.unqualified()];
+            if (k.kind == type_kind::class_type &&
+                entity_table[k.entity].destructor &&
+                !entity_table[entity_table[k.entity].destructor].implicit)
+                return not_supported(declaration, "basic.stc.thread");
+        }
         x.c11_thread_local = true;
     }
     /* [ext:gnu_asm_labels] the symbol of a function or variable with
@@ -1548,6 +1592,19 @@ analysis_result semantic_analysis::declare_with_initializer(
            initializer */
         e.type = type;
         declared.back().type = type;
+    }
+    /* [dcl.constinit]/2: "If a variable declared with the constinit
+       specifier has dynamic initialization, the program is ill-formed."
+       (what is not known to be constant initialization is not claimed) */
+    if (s.constinit_ || entity_table[declared_entity].constinit_) {
+        if (value.evaluation == constness::not_constant)
+            return ill_formed_at_token(m.id,
+                                       "a variable declared with the "
+                                       "constinit specifier shall have "
+                                       "constant initialization",
+                                       "dcl.constinit");
+        if (value.evaluation != constness::constant)
+            return not_supported(declaration, "dcl.constinit");
     }
     /* [dcl.constexpr]/10: "In any constexpr variable declaration, the
        full-expression of the initialization shall be a constant

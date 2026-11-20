@@ -1426,6 +1426,22 @@ semantic_analysis::member_declarator(entity_index c, SyntaxRef declaration,
     if (!s.has_type && declares_special_member(c, d))
         /* a cv-qualifier or another specifier with a constructor */
         return not_supported(declaration, "class.ctor");
+    if (s.cxx_thread_local && !s.static_)
+        /* [dcl.stc]/3: "It shall be applied only to the declaration of a
+           variable of namespace or block scope, to a structured binding
+           declaration, or to the declaration of a static data member." */
+        return ill_formed(declaration,
+                          "thread_local is only allowed on variable "
+                          "declarations and static data members",
+                          "dcl.stc");
+    if (s.cxx_thread_local)
+        /* a static data member of thread storage duration: its definition
+           outside the class is not analysed */
+        return not_supported(declaration, "dcl.stc");
+    if (s.constinit_)
+        /* [dcl.constinit]/1: on the initializing declaration of a static
+           data member, an inline one in the class */
+        return not_supported(declaration, "dcl.constinit");
     qualified_type type = s.type;
     declarator_meaning m;
     function_cv = 0;
@@ -1772,6 +1788,14 @@ semantic_analysis::member_declarator(entity_index c, SyntaxRef declaration,
                                        "data member of reference type",
                                        "class.union");
         uint64_t size = size_of_type(type);
+        bool is_reference = record.kind == type_kind::lvalue_reference ||
+                            record.kind == type_kind::rvalue_reference;
+        if (is_reference)
+            /* [expr.sizeof]/2 gives sizeof(T&) as sizeof(T), but the member
+               is laid out as a pointer ([abi:class-types]); the referenced
+               type may be incomplete ([dcl.ref]/1: "a reference to
+               incomplete type") */
+            size = pointer_size();
         bool is_void = record.kind == type_kind::fundamental &&
                        record.fundamental == fundamental_type::void_;
         if (record.kind == type_kind::class_type && !size)
@@ -1798,6 +1822,8 @@ semantic_analysis::member_declarator(entity_index c, SyntaxRef declaration,
         if (!size && !(record.kind == type_kind::array && record.bound_known))
             return not_supported(declaration, "class.mem");
         uint32_t alignment = static_cast<uint32_t>(alignment_of_type(type));
+        if (is_reference)
+            alignment = static_cast<uint32_t>(pointer_size());
         if (!alignment)
             return not_supported(declaration, "class.mem");
         if (entity_table[c].union_ && element_class(type) &&

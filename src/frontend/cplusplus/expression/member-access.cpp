@@ -160,7 +160,18 @@ analysis_result semantic_analysis::member_access(token_index at, entity_index e,
         m = result;
         return analysis_result::well_formed;
     }
-    if (x.kind == entity_kind::function && x.nonstatic_member) {
+    /* [over.match.funcs]/2, /4: a set that begins with a static member
+       function and has a non-static one is resolved with the object as the
+       implied object argument (a static one is considered to match any
+       object) */
+    bool mixed_set = false;
+    if (x.kind == entity_kind::function && !x.nonstatic_member &&
+        at == overloaded_callee)
+        for (entity_index o = x.next_overload; o;
+             o = entity_table[o].next_overload)
+            if (entity_table[o].nonstatic_member)
+                mixed_set = true;
+    if (x.kind == entity_kind::function && (x.nonstatic_member || mixed_set)) {
         /* [expr.ref]/6.3.2: "Otherwise, if E1.E2 refers to a non-static
            member function and the type of E2 is "function of
            parameter-type-list cv ref-qualifier_opt returning T", then

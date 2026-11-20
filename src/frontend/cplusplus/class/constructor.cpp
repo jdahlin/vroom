@@ -1286,9 +1286,18 @@ analysis_result semantic_analysis::ctor_initializer(SyntaxElement list,
             constructing_base = false;
             if (r != analysis_result::well_formed)
                 return r;
-            if (semantics[value.node].kind != semantic_kind::construct)
-                /* the implicit copy constructor */
-                return not_supported(item, "class.copy.ctor");
+            if (semantics[value.node].kind != semantic_kind::construct) {
+                /* [class.copy.ctor]/14: the implicit copy constructor of a
+                   class that copies its bytes (construct gave the
+                   argument's value): stored as for a member with no
+                   constructors; a base class subobject's bytes are
+                   not, its padding may hold a derived member */
+                if (entity_table[e].base_subobject)
+                    return not_supported(item, "class.copy.ctor");
+                initialized[slot] =
+                    subobject_store(object, type, id, value.node);
+                continue;
+            }
             initialized[slot] = statement_node(
                 semantic_kind::expression_statement, id, value.node);
             if (entity_table[e].virtual_base)

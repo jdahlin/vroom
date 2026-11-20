@@ -56,7 +56,6 @@ old-packs	vcc: the rules of [expr.sizeof] are not implemented yet
 old-partial-later	vcc: the rules of [temp.class.spec] are not implemented yet
 old-pseudo-destructor-side-effects	vcc: the rules of [expr.ref] are not implemented yet
 old-range-for-arrays	vcc: the rules of [stmt.ranged] are not implemented yet
-old-ref-param-converting-ctor	vcc: the rules of [class.copy.ctor] are not implemented yet
 old-ref-qualified-members	vcc: the rules of [dcl.fct] are not implemented yet
 old-requires-params	vcc: the rules of [expr.prim.req] are not implemented yet
 old-reversed-packs	vcc: the rules of [expr.sizeof] are not implemented yet
@@ -66,7 +65,6 @@ old-spec-after-use	vcc: in the definition of an object, the type of that object 
 old-statement-expression	vcc: the C++ front end does not handle a declaration the parser kept as tokens yet
 old-static-local-object	symbols: missing [] extra ['_ZGVZL1gvE1u', '_ZN1UC2Ev'] binding []
 old-std-forward-fold	vcc: C++ code generation does not handle an entity whose symbol is not mangled yet
-old-template-members	vcc: the rules of [class.mem] are not implemented yet
 old-this-const-out-of-class	vcc: the rules of [class.temporary] are not implemented yet
 old-tn-dependent-values	vcc: the rules of [expr.prim.id.qual] are not implemented yet
 old-tn-member-templates	vcc: C++ code generation does not handle an entity whose symbol is not mangled yet

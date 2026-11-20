@@ -645,7 +645,9 @@ analysis_result semantic_analysis::named_entity(token_index t, entity_index e,
     /* a variable with automatic storage duration has no constant address;
        reading one usable in constant expressions is still a constant
        ([expr.const]/3) */
-    if (x.automatic)
+    /* [basic.stc.thread]: nor has an object of thread storage duration:
+       each thread has its own */
+    if (x.automatic || x.c11_thread_local)
         m.evaluation = constness::unknown;
     if (x.automatic && function_state.active) {
         /* [basic.def.odr]/10: a local entity of an enclosing function
