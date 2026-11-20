@@ -3240,19 +3240,48 @@ class semantic_analysis
     analysis_result member_function_template(entity_index c, SyntaxRef n,
                                              SyntaxRef definition,
                                              uint8_t access);
-    /* a call x.f(args) or x->f(args) of a member function template
-       ([temp.mem]/1): member_reference's object (its address) and the
-       held name it found, for call to deduce from the arguments */
+    /* a call x.f(args), x->f<T>(args) or x.template f<T>(args) of a
+       member function template ([temp.mem]/1): member_reference's object
+       and the held name it found, with the template arguments as written,
+       for member_template_call to deduce from the arguments */
     entity_index member_template_name = 0;
     expression_meaning member_template_object;
-    analysis_result member_template_call(
-        SyntaxRef n, entity_index held, const expression_meaning &object,
-        const owned_array<SyntaxElement> &arguments,
-        owned_array<expression_meaning> &early, expression_meaning &m);
+    owned_array<SyntaxElement> member_template_written;
+    SyntaxRef member_template_written_at = 0;
+    /* the call of the functions and function templates held names
+       ([over.call.func]/2, /3): object is the implied object argument
+       (none: a static member's context), written the explicit template
+       arguments of f<T>(...) */
+    analysis_result
+    member_template_call(SyntaxRef n, entity_index held,
+                         const expression_meaning *object,
+                         const owned_array<SyntaxElement> &arguments,
+                         owned_array<expression_meaning> &early,
+                         const owned_array<SyntaxElement> *written,
+                         SyntaxRef written_at, expression_meaning &m);
     analysis_result bound_member_call(
         SyntaxRef n, entity_index f, const expression_meaning &object,
         const owned_array<SyntaxElement> &arguments,
         owned_array<expression_meaning> &early, expression_meaning &m);
+    /* [over.match.funcs]/4: a static member function f called, the object
+       expression (if any) evaluated and discarded */
+    analysis_result static_member_call(
+        SyntaxRef n, entity_index f, const expression_meaning *object,
+        const owned_array<SyntaxElement> &arguments,
+        owned_array<expression_meaning> &early, expression_meaning &m);
+    /* [temp.arg.explicit]: the template-arguments of a simple-template-id
+       (pack expansions marked in expansion) */
+    SyntaxElement member_template_id(SyntaxRef n) const;
+    analysis_result member_callee(SyntaxElement callee, entity_index &held,
+                                  entity_index &named_in,
+                                  owned_array<SyntaxElement> &written,
+                                  SyntaxRef &written_at);
+    analysis_result written_arguments_of(SyntaxElement id,
+                                         owned_array<SyntaxElement> &written,
+                                         owned_array<bool> &expansion);
+    /* whether this names an object here: the function's own, or the
+       enclosing function's of a lambda */
+    bool has_this_object();
     uint32_t member_function_template_of(entity_index held) const
     {
         return function_template_of(held, true);
@@ -4687,8 +4716,13 @@ class semantic_analysis
         owned_array<uint32_t> *first_arguments = nullptr,
         owned_array<template_argument> *all = nullptr);
     analysis_result member_template_candidates(
-        SyntaxRef n, entity_index held, const expression_meaning *arguments,
-        uint32_t count, owned_array<overload_candidate> &candidates);
+        SyntaxRef n, entity_index held, bool with_object,
+        const expression_meaning *arguments, uint32_t count,
+        owned_array<overload_candidate> &candidates,
+        owned_array<uint32_t> *first_arguments = nullptr,
+        owned_array<template_argument> *all = nullptr,
+        const owned_array<SyntaxElement> *written = nullptr,
+        SyntaxRef written_at = 0);
     analysis_result template_candidates(
         SyntaxRef n, const owned_array<uint32_t> &group,
         const expression_meaning *meanings, uint32_t count,

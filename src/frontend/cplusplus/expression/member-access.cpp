@@ -301,6 +301,20 @@ analysis_result semantic_analysis::implicit_member_access(token_index at,
     return analysis_result::well_formed;
 }
 
+/* the simple-template-id of E1.f<T> and E1.template f<T>, else nothing */
+SyntaxElement semantic_analysis::member_template_id(SyntaxRef n) const
+{
+    SyntaxElement id;
+    if (n.size() == 3)
+        id = n[2];
+    else if (n.size() == 4 && n[2].is(standard_keyword::template_))
+        id = n[3];
+    if (id.is(syntax_kind::simple_template_id) && id.size() >= 3 &&
+        id[0].is_identifier())
+        return id;
+    return SyntaxElement{};
+}
+
 /*
  * [expr.ref]/1-/4: E1.E2 and E1->E2.  /2: "For the first option (dot) the
  * first expression shall be a glvalue.  For the second option (arrow) the
@@ -318,6 +332,10 @@ analysis_result semantic_analysis::member_reference(SyntaxRef n,
     token_index name = 0;
     if (n[2].is_identifier()) {
         name = n[2].token();
+    } else if (SyntaxElement id = member_template_id(n);
+               id.is(syntax_kind::simple_template_id)) {
+        /* [temp.names]/4: x.f<T> and x.template f<T> */
+        name = id[0].token();
     } else if (auto function = n[2].operator_function_id()) {
         /* [over.oper]/1: x.operator->() names the member operator
            function: the keyword's token takes the operator's name */
@@ -405,10 +423,25 @@ analysis_result semantic_analysis::member_reference(SyntaxRef n,
         if (name == callee && member_templates_of(e)) {
             member_template_name = e;
             member_template_object = m;
+            member_template_written.clear();
+            member_template_written_at = 0;
+            SyntaxElement id = member_template_id(n);
+            if (id.is(syntax_kind::simple_template_id)) {
+                owned_array<bool> expansion;
+                VTRY(w, written_arguments_of(id, member_template_written,
+                                             expansion));
+                for (bool x : expansion)
+                    if (x)
+                        return not_supported(id.index(), "temp.variadic");
+                member_template_written_at = id.index();
+            }
             return analysis_result::well_formed;
         }
         return not_supported(n, "over");
     }
+    if (member_template_id(n).is(syntax_kind::simple_template_id))
+        /* a template-id of no member function template analysis knows */
+        return not_supported(n, "temp.names");
     if (!e)
         return ill_formed_at_token(name,
                                    "the id-expression shall name a member "

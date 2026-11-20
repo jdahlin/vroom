@@ -239,7 +239,7 @@ analysis_result semantic_analysis::overloaded_operator(
                     rest.append(operand(i));
                 size_t first = candidates.size();
                 VTRY(r, member_template_candidates(
-                            n, templates, rest.data(),
+                            n, templates, true, rest.data(),
                             static_cast<uint32_t>(rest.size()), candidates));
                 for (size_t i = first; i < candidates.size(); i++) {
                     candidates[i].rewritten = rewritten;
@@ -559,6 +559,15 @@ analysis_result semantic_analysis::overloaded_operator(
             expression_node(semantic_kind::address, address, at, e.node);
         object = address.node;
         member = f;
+        if (!x.nonstatic_member) {
+            /* [over.match.funcs]/4: a static member function: the object
+               expression is evaluated and discarded */
+            callee.node = expression_node(semantic_kind::entity, callee, at, f);
+            callee.node = expression_node(semantic_kind::comma, callee, at,
+                                          e.node, callee.node);
+            object = 0;
+            member = 0;
+        }
     } else {
         /* "Otherwise, if a non-member function is selected, the expression
            is interpreted as operator @ ( x , y )" */
