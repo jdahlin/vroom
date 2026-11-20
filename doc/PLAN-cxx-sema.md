@@ -1684,6 +1684,15 @@ lines:
   changed in C++20).  Inside an evaluation analysis's `not_constant` does
   not decide ([expr.const]/5.8, /5.16), only at the outermost node.  A body
   analysed in part is marked on its `function_body` node and not run.
+  References and pointers into one array (libc++'s `__compute_comp_type`):
+  a reference is the pointer to the object it is bound to (`bind_reference`
+  of a glvalue, a reference parameter or local), `[conv.array]`, `P + J`,
+  `P - J`, `P - Q`, the comparisons, `++`/`--`, `[]` and `*` on a pointer
+  to an element of an array (the range-based for statement's `range`,
+  `range + N`, `begin != end`, `++begin`); out-of-range moves, the null
+  pointer and one past the end are not constant; a pointer to a single
+  object moved, a reference to a temporary and `p += n` stay unsupported.
+  Test `constexpr-array-references`.
   The value goes back: `constant_expression` sets the meaning's value
   (array bounds, enumerators, case labels, static_assert), and a constexpr
   variable or a variable of static storage duration whose initializer

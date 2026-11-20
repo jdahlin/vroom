@@ -949,6 +949,11 @@ struct constant_value {
        member the active member */
     uint32_t first = 0, count = 0;
     entity_index member = 0;
+    /* pointer to an element of an array ([basic.compound]/3, [expr.add]/4):
+       the array's elements are elements[base .. base + extent), offset the
+       index of the element pointed to (extent: one past the last), first
+       its place; extent 0: a pointer to one object */
+    uint32_t base = 0, extent = 0;
 };
 
 /* [implimits]/2's quantities for constant evaluation, the bracketed
@@ -2913,6 +2918,23 @@ class semantic_analysis
                               uint32_t &object);
     constness evaluate_read(constant_evaluation &state, uint32_t node,
                             constant_value &v);
+    /* [dcl.init.ref]: a reference bound to the glvalue node: the pointer
+       to its object */
+    constness evaluate_binding(constant_evaluation &state, uint32_t node,
+                               constant_value &v);
+    /* [conv.array]: the pointer to the first element of the array glvalue */
+    constness evaluate_array_pointer(constant_evaluation &state, uint32_t node,
+                                     constant_value &v);
+    /* [expr.add]/4: p moved by n elements */
+    constness offset_pointer(const constant_value &p, __int128 n,
+                             constant_value &moved) const;
+    /* [expr.unary.op]/1: the place of the object p points to */
+    constness pointed_place(const constant_evaluation &state,
+                            const constant_value &p, uint32_t &place) const;
+    /* [expr.add], [expr.rel], [expr.eq]: a binary operator with a pointer
+       operand */
+    constness evaluate_pointer_binary(constant_evaluation &state, uint32_t node,
+                                      constant_value &v);
     constness evaluate_condition(constant_evaluation &state, uint32_t node,
                                  constant_value &v);
     /* the object of type t at place initialized by init (0: none, its
