@@ -332,7 +332,11 @@ analysis_result semantic_analysis::template_argument_for(
             before[typed_by].kind != template_argument::kind_t::type)
             return not_supported(at, "temp.arg.nontype");
         to = qualified_type::make(before[typed_by].type.unqualified(), cv_none);
-        if (!structural_parameter_type(to))
+        /* (a type that is itself a template parameter, in a partial
+           specialization's arguments: a name of the same type or a
+           value-dependent expression below, else refused there) */
+        if (!depends_on_template_parameter(to) &&
+            !structural_parameter_type(to))
             return not_supported(at, "temp.arg.nontype");
     } else if (depends_on_template_parameter(to)) {
         /* another dependent type: the parameter's type with the arguments
