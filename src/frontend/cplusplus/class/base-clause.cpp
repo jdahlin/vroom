@@ -364,9 +364,10 @@ analysis_result semantic_analysis::base_clause(entity_index c, BaseClause n,
             /* [class.mi]/4: no member of the class; its offset is in the
                complete object's layout */
             entity_table[e].field = UINT32_MAX;
-        } else if (!entity_table[base].member_count) {
+        } else if (empty_class(base)) {
             /* [class.derived]/4 (Note): "A base class subobject may be of
-               zero size" */
+               zero size": an empty class's ([abi:empty]; a dynamic class
+               has its virtual table pointer) */
             entity_table[e].field = UINT32_MAX;
         } else {
             entity_table[e].field = entity_table[c].member_count;

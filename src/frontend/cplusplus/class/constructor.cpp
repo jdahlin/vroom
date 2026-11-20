@@ -1992,8 +1992,7 @@ analysis_result semantic_analysis::implicit_copy(entity_index c, SyntaxRef n,
             return not_supported(n, "class.copy.ctor");
         if (record.kind == type_kind::class_type &&
             entity_table[e].field == UINT32_MAX &&
-            (!entity_table[e].virtual_base ||
-             !entity_table[record.entity].member_count))
+            (!entity_table[e].virtual_base || empty_class(record.entity)))
             /* an empty base: no bytes */
             continue;
         VTRY_SET(r, operand_value(n, from));

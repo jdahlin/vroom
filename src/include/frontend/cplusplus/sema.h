@@ -1544,6 +1544,10 @@ class semantic_analysis
     /* whether a class is trivially copyable and has a trivial destructor:
        its objects are copied as their bytes, passed in registers */
     bool trivial_class(entity_index c) const;
+    /* [abi:empty], [class.prop]/5 (std::is_empty): no non-static data
+       member but zero-width bit-fields, no virtual function or base, every
+       base empty (ext/clang/class-traits.cpp) */
+    bool empty_class(entity_index c) const;
     /* the explicit instantiation a function is the subject of, its own or
        its class's ([temp.explicit]/10) */
     instantiation_kind explicitly_instantiated(entity_index f) const;
@@ -2684,7 +2688,6 @@ class semantic_analysis
     bool unary_trait(int which, qualified_type t, int64_t &value);
     /* ext/clang/class-traits.cpp: the traits that ask about a class */
     bool class_property_trait(int which, qualified_type t, bool &answer);
-    bool empty_class(entity_index c) const;
     bool derives_from(entity_index d, entity_index b) const;
     analysis_result clang_base_of_trait(SyntaxRef n, expression_meaning &m);
     bool polymorphic_class(entity_index c) const;

@@ -171,6 +171,33 @@ void *realloc(void *o, size_t n)
 }
 char *strdup(const char *s) { size_t n = strlen(s) + 1; return memcpy(malloc(n), s, n); }
 
+/* ---- C++'s replaceable allocation functions ([new.delete]), by their
+   Itanium names: operator new(size_t), new[], and delete/delete[] unsized,
+   sized and with std::align_val_t; weak like the rest, so a program's own
+   replacement ([replacement.functions]) wins.  new never returns null:
+   out of memory is abort() (no exceptions here). ---- */
+void abort(void);
+static void *rt_new(size_t n, size_t align)
+{
+	char *p;
+	if (align < 16) align = 16;
+	p = malloc(n + align);
+	if (!p) abort();
+	return (void *)(((uintptr_t)p + align - 1) & ~(uintptr_t)(align - 1));
+}
+void *_Znwm(size_t n) { return rt_new(n, 16); }
+void *_Znam(size_t n) { return rt_new(n, 16); }
+void *_ZnwmSt11align_val_t(size_t n, size_t a) { return rt_new(n, a); }
+void *_ZnamSt11align_val_t(size_t n, size_t a) { return rt_new(n, a); }
+void _ZdlPv(void *p) { free(p); }
+void _ZdaPv(void *p) { free(p); }
+void _ZdlPvm(void *p, size_t n) { (void)n; free(p); }
+void _ZdaPvm(void *p, size_t n) { (void)n; free(p); }
+void _ZdlPvSt11align_val_t(void *p, size_t a) { (void)a; free(p); }
+void _ZdaPvSt11align_val_t(void *p, size_t a) { (void)a; free(p); }
+void _ZdlPvmSt11align_val_t(void *p, size_t n, size_t a) { (void)n; (void)a; free(p); }
+void _ZdaPvmSt11align_val_t(void *p, size_t n, size_t a) { (void)n; (void)a; free(p); }
+
 /* ---- exit ---- */
 extern void _exit(int) __attribute__((noreturn));
 static void (*atx[32])(void);

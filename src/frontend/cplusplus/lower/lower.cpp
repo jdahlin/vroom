@@ -997,7 +997,7 @@ ast_qualified_type c_lowering::class_type(entity_index e, token_index at)
             analysis.entity_table
                 [analysis.class_virtual_bases[x.first_virtual_base + i]];
         const entity &of = analysis.entity_table[record(v.type).entity];
-        if (!of.member_count && !of.dynamic)
+        if (analysis.empty_class(record(v.type).entity))
             continue;
         if (v.offset > end)
             padding(v.offset - end);

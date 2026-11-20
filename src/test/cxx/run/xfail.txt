@@ -12,7 +12,6 @@ old-bitfield-const-ref	vcc: the rules of [class.bit] are not implemented yet
 old-braced-args	vcc: the rules of [class.mem] are not implemented yet
 old-braced-template-arguments	vcc: the rules of [over.match.list] are not implemented yet
 old-builtin-common-type	vcc: the rules of [temp.arg] are not implemented yet
-old-builtins	vcc: the C++ front end does not handle a declaration the parser kept as tokens yet
 old-builtins-table	vcc: the rules of [basic.types] are not implemented yet
 old-builtins2	vcc: the C++ front end does not handle a declaration the parser kept as tokens yet
 old-class-pack-params	vcc: the rules of [temp.spec] are not implemented yet
@@ -40,7 +39,6 @@ old-gnu-conditional-omitted	vcc: the C++ front end does not handle a declaration
 old-ilist-ctor-not-viable	vcc: the rules of [class.mem] are not implemented yet
 old-implicit-assignment-parts	vcc: the rules of [over.match.oper] are not implemented yet
 old-implicit-assignment-requires	vcc: the rules of [expr.prim.req] are not implemented yet
-old-implicit-virtual-dtor	link: undefined symbol: operator new(unsigned long)
 old-inherited-defaults	vcc: the rules of [temp.arg] are not implemented yet
 old-initializer-list-local	vcc: the rules of [dcl.init.list] are not implemented yet
 old-initializer-lists	vcc: the rules of [class.mem] are not implemented yet
@@ -50,7 +48,6 @@ old-local-unnamed-template-arg	vcc: C++ code generation does not handle an entit
 old-long-double	vcc: C++ code generation does not handle a constant whose value analysis does not know yet
 old-member-pointers	vcc: the rules of [temp.res] are not implemented yet
 old-member-templates	vcc: the rules of [temp.mem] are not implemented yet
-old-multiple-polymorphic-bases	link: undefined symbol: operator new(unsigned long)
 old-nested-lists	vcc: the rules of [class.mem] are not implemented yet
 old-nullptr-args	vcc: the rules of [temp.deduct] are not implemented yet
 old-ooc-member-class	vcc: the rules of [temp.class] are not implemented yet
@@ -69,7 +66,6 @@ old-spaceship	vcc: the rules of [over.match.oper] are not implemented yet
 old-spaceship-pack-candidate	vcc: the rules of [basic.lookup.argdep] are not implemented yet
 old-spec-after-use	vcc: in the definition of an object, the type of that object shall not be an incomplete type ([basic.def])
 old-statement-expression	vcc: the C++ front end does not handle a declaration the parser kept as tokens yet
-old-static-cast-hierarchy	link: undefined symbol: operator delete(void*, unsigned long)
 old-static-local-object	symbols: missing [] extra ['_ZGVZL1gvE1u', '_ZN1UC2Ev'] binding []
 old-std-forward-fold	vcc: C++ code generation does not handle an entity whose symbol is not mangled yet
 old-template-id-as-value	vcc: the rules of [temp.names] are not implemented yet
