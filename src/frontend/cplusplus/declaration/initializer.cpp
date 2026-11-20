@@ -917,37 +917,69 @@ semantic_analysis::list_initialization(SyntaxRef list, qualified_type &type,
 {
     owned_array<SyntaxElement> clauses;
     owned_array<uint32_t> packs;
-    VTRY(gathered, list_clauses(list, clauses, &packs));
+    designation_set designations;
+    VTRY(gathered, list_clauses(list, clauses, &packs, &designations));
     /* the expansions are known to the array path only: another type's
        clauses are analysed without them */
     bool expanded = false;
     for (size_t i = 0; i < packs.size(); i++)
         if (packs[i] != no_expansion)
             expanded = true;
-    if (expanded && type_table[type.unqualified()].kind != type_kind::array)
+    if (expanded && (designations.any ||
+                     type_table[type.unqualified()].kind != type_kind::array))
         return not_supported(list, "temp.variadic");
     const owned_array<uint32_t> *saved = clause_packs;
     clause_packs = nullptr;
     if (expanded)
         clause_packs = &packs;
-    analysis_result r =
-        list_initialization_of(list, clauses, type, direct, result);
+    analysis_result r;
+    if (designations.any)
+        r = designated_list_initialization(list, clauses, designations, type,
+                                           result);
+    else
+        r = list_initialization_of(list, clauses, type, direct, result);
     clause_packs = saved;
     return r;
+}
+
+void semantic_analysis::append_clause(
+    SyntaxElement clause, const SyntaxElement *chain, uint32_t count,
+    owned_array<SyntaxElement> &clauses, owned_array<uint32_t> *packs,
+    uint32_t pack, designation_set *designated)
+{
+    clauses.append(clause);
+    if (packs)
+        packs->append(pack);
+    if (!designated)
+        return;
+    clause_designation d;
+    d.first = static_cast<uint32_t>(designated->pool.size());
+    d.count = count;
+    for (uint32_t i = 0; i < count; i++)
+        designated->pool.append(chain[i]);
+    designated->of.append(d);
+    if (count)
+        designated->any = true;
 }
 
 /*
  * The initializer-clauses among the children of node, in order.  A clause
  * followed by an ellipsis is [temp.variadic]/7 a pack expansion: its
  * pattern once for each element of the pack(s) it expands ([dcl.init.aggr]/
- * 4.2: the clauses of the list are those after expansion).
+ * 4.2: the clauses of the list are those after expansion).  A designated
+ * clause ([dcl.init.aggr]/3.1: ". identifier" and its initializer, or
+ * [ext:gnu_designated_initializers]'s designation and clause) is the
+ * clause of its initializer with its designators kept in designated; a
+ * caller that gives none does not analyse designators.
  */
-analysis_result
-semantic_analysis::gather_clauses(SyntaxRef list, SyntaxRef node,
-                                  owned_array<SyntaxElement> &clauses,
-                                  owned_array<uint32_t> *packs)
+analysis_result semantic_analysis::gather_clauses(
+    SyntaxRef list, SyntaxRef node, owned_array<SyntaxElement> &clauses,
+    owned_array<uint32_t> *packs, designation_set *designated)
 {
     size_t n = node.size();
+    /* [ext:gnu_designated_initializers]: the designation before the clause
+       that follows it */
+    owned_array<SyntaxElement> pending;
     for (size_t k = 0; k < n; k++) {
         SyntaxElement c = node[k];
         if (c.is(preprocessing_op_or_punc::LEFT_BRACE,
@@ -955,41 +987,66 @@ semantic_analysis::gather_clauses(SyntaxRef list, SyntaxRef node,
                  preprocessing_op_or_punc::COMMA,
                  preprocessing_op_or_punc::ELLIPSIS))
             continue;
-        if (c.is(syntax_kind::initializer_list)) {
-            VTRY(r, gather_clauses(list, c.index(), clauses, packs));
+        if (c.is(syntax_kind::initializer_list,
+                 syntax_kind::designated_initializer_list,
+                 syntax_kind::gnu_initializer_list)) {
+            VTRY(r,
+                 gather_clauses(list, c.index(), clauses, packs, designated));
+            continue;
+        }
+        if (c.is(syntax_kind::designated_initializer_clause)) {
+            /* designator brace-or-equal-initializer: ". identifier" and
+               "= initializer-clause", or a braced-init-list */
+            if (!designated)
+                return not_supported(list, "dcl.init.aggr");
+            SyntaxElement initializer = c[1];
+            if (initializer.is(syntax_kind::brace_or_equal_initializer))
+                initializer = initializer[1];
+            SyntaxElement chain = c[0];
+            append_clause(initializer, &chain, 1, clauses, packs, no_expansion,
+                          designated);
+            continue;
+        }
+        if (c.is(syntax_kind::gnu_designation)) {
+            if (!designated)
+                return not_supported(list, "dcl.init.aggr");
+            pending.clear();
+            for (uint32_t i = 0; i < c.size(); i++) {
+                SyntaxElement d = c[i];
+                if (d.is(syntax_kind::designator) || d.is_identifier())
+                    pending.append(d);
+            }
             continue;
         }
         if (c.is_node() && !syntax_kind_is_expression(c.kind()) &&
             !c.is(syntax_kind::braced_init_list))
-            /* a designated-initializer-list */
             return not_supported(list, "dcl.init.aggr");
         uint32_t count = 1;
         bool expansion =
             k + 1 < n && node[k + 1].is(preprocessing_op_or_punc::ELLIPSIS);
         if (expansion) {
-            if (!packs || c.is_token() ||
+            if (!packs || !pending.empty() || c.is_token() ||
                 !expansion_count(c.first_token(), c.end_token(), count))
                 return not_supported(list, "temp.variadic");
         }
         for (uint32_t i = 0; i < count; i++) {
-            clauses.append(c);
-            if (!packs)
-                continue;
+            uint32_t pack = no_expansion;
             if (expansion)
-                packs->append(i);
-            else
-                packs->append(no_expansion);
+                pack = i;
+            append_clause(c, pending.data(),
+                          static_cast<uint32_t>(pending.size()), clauses, packs,
+                          pack, designated);
         }
+        pending.clear();
     }
     return analysis_result::well_formed;
 }
 
-analysis_result
-semantic_analysis::list_clauses(SyntaxRef list,
-                                owned_array<SyntaxElement> &clauses,
-                                owned_array<uint32_t> *packs)
+analysis_result semantic_analysis::list_clauses(
+    SyntaxRef list, owned_array<SyntaxElement> &clauses,
+    owned_array<uint32_t> *packs, designation_set *designated)
 {
-    return gather_clauses(list, list, clauses, packs);
+    return gather_clauses(list, list, clauses, packs, designated);
 }
 
 analysis_result semantic_analysis::list_initialization_of(
@@ -1425,78 +1482,113 @@ analysis_result semantic_analysis::aggregate_elements(
         if (target.kind != type_kind::array)
             element = types[i];
         initialized_value one;
-        const struct type &of_element = type_table[element.unqualified()];
         bool has_default = target.kind != type_kind::array && defaults[i];
-        if (next >= clauses.size() && !has_default &&
-            of_element.kind == type_kind::class_type &&
-            entity_table[of_element.entity].kind == entity_kind::class_type &&
-            (entity_table[of_element.entity].first_constructor ||
-             destroys(of_element.entity)))
-            /* (5.2): an element left out is copy-initialized from an empty
-               initializer list: a constructor call, not analysed */
-            return not_supported(list, "dcl.init.aggr");
-        if (next >= clauses.size() &&
-            (of_element.kind == type_kind::lvalue_reference ||
-             of_element.kind == type_kind::rvalue_reference) &&
-            !(target.kind != type_kind::array && defaults[i]))
-            /* (5.2): "If the element is not a reference, the element is
-               copy-initialized from an empty initializer list"; (5.3):
-               "Otherwise, the program is ill-formed" */
-            return ill_formed(list,
-                              "an element of reference type that is not "
-                              "explicitly initialized and has no default "
-                              "member initializer makes the program "
-                              "ill-formed",
-                              "dcl.init.aggr");
+        if (next >= clauses.size()) {
+            VTRY(r, omitted_element_checks(list, element, has_default));
+        }
         if (next < clauses.size()) {
             VTRY(r, aggregate_element(list, clauses, next, element, one));
         } else if (target.kind == type_kind::array) {
             /* the rest of an array: zero, as the lowering fills it */
             break;
-        } else if (defaults[i]) {
-            /* (5.1): "If the element has a default member initializer
-               ([class.mem]), the element is initialized from that
-               initializer", whose this is the aggregate being initialized
-               and whose names are looked up in the class: analysed here
-               only when it names nothing (literals and operators) */
-            if (!initializer_names_nothing(defaults[i]))
-                return not_supported(list, "dcl.init.aggr");
-            qualified_type member_type = element;
-            const struct type member = type_table[element.unqualified()];
-            VTRY(r, initializer(defaults[i], member_type, one));
-            if (member.kind == type_kind::class_type &&
-                entity_table[member.entity].kind == entity_kind::class_type &&
-                (entity_table[member.entity].first_constructor ||
-                 destroys(member.entity)) &&
-                !aggregate_value_stored(member.entity, one.node))
-                /* a class with constructors initialized in place by a
-                   constructor call: not analysed */
-                return not_supported(list, "dcl.init.aggr");
         } else {
-            /* (5.2): from an empty initializer list: value-initialization
-               ([dcl.init.list]/3.11 for a scalar, an aggregate's own
-               elements for an aggregate), all zero for these members */
-            expression_meaning zero;
-            zero.type = qualified_type::make(element.unqualified(), cv_none);
-            zero.evaluation = constness::constant;
-            one.evaluation = constness::constant;
-            one.node =
-                expression_node(semantic_kind::zero, zero, list.first_token());
+            SyntaxRef default_initializer;
+            if (target.kind != type_kind::array)
+                default_initializer = defaults[i];
+            VTRY(r, omitted_element_value(list, element, default_initializer,
+                                          one));
         }
         all = combined_constness(all, one.evaluation);
         elements.append(one.node);
     }
+    aggregate_value(list, type, all, elements, result);
+    return analysis_result::well_formed;
+}
+
+/* [dcl.init.aggr]/5.2 and 5.3: an element no clause initializes, which is
+   left out of the list: of a class with constructors, or of reference type
+   without a default member initializer, analysis has no rules (or the
+   program is ill-formed) */
+analysis_result semantic_analysis::omitted_element_checks(
+    SyntaxRef list, qualified_type element, bool has_default)
+{
+    const struct type of_element = type_table[element.unqualified()];
+    if (!has_default && of_element.kind == type_kind::class_type &&
+        entity_table[of_element.entity].kind == entity_kind::class_type &&
+        (entity_table[of_element.entity].first_constructor ||
+         destroys(of_element.entity)))
+        /* (5.2): an element left out is copy-initialized from an empty
+           initializer list: a constructor call, not analysed */
+        return not_supported(list, "dcl.init.aggr");
+    if ((of_element.kind == type_kind::lvalue_reference ||
+         of_element.kind == type_kind::rvalue_reference) &&
+        !has_default)
+        /* (5.2): "If the element is not a reference, the element is
+           copy-initialized from an empty initializer list"; (5.3):
+           "Otherwise, the program is ill-formed" */
+        return ill_formed(list,
+                          "an element of reference type that is not "
+                          "explicitly initialized and has no default "
+                          "member initializer makes the program "
+                          "ill-formed",
+                          "dcl.init.aggr");
+    return analysis_result::well_formed;
+}
+
+/* the value of an element no clause initializes ([dcl.init.aggr]/5) */
+analysis_result
+semantic_analysis::omitted_element_value(SyntaxRef list, qualified_type element,
+                                         SyntaxRef default_initializer,
+                                         initialized_value &one)
+{
+    if (default_initializer) {
+        /* (5.1): "If the element has a default member initializer
+           ([class.mem]), the element is initialized from that
+           initializer", whose this is the aggregate being initialized
+           and whose names are looked up in the class: analysed here
+           only when it names nothing (literals and operators) */
+        if (!initializer_names_nothing(default_initializer))
+            return not_supported(list, "dcl.init.aggr");
+        qualified_type member_type = element;
+        const struct type member = type_table[element.unqualified()];
+        VTRY(r, initializer(default_initializer, member_type, one));
+        if (member.kind == type_kind::class_type &&
+            entity_table[member.entity].kind == entity_kind::class_type &&
+            (entity_table[member.entity].first_constructor ||
+             destroys(member.entity)) &&
+            !aggregate_value_stored(member.entity, one.node))
+            /* a class with constructors initialized in place by a
+               constructor call: not analysed */
+            return not_supported(list, "dcl.init.aggr");
+        return analysis_result::well_formed;
+    }
+    /* (5.2): from an empty initializer list: value-initialization
+       ([dcl.init.list]/3.11 for a scalar, an aggregate's own
+       elements for an aggregate), all zero for these members */
+    expression_meaning zero;
+    zero.type = qualified_type::make(element.unqualified(), cv_none);
+    zero.evaluation = constness::constant;
+    one.evaluation = constness::constant;
+    one.node = expression_node(semantic_kind::zero, zero, list.first_token());
+    return analysis_result::well_formed;
+}
+
+/* the value of the aggregate of type: its elements in order */
+void semantic_analysis::aggregate_value(SyntaxRef list, qualified_type type,
+                                        constness all,
+                                        const owned_array<uint32_t> &elements,
+                                        initialized_value &result)
+{
     result.evaluation = all;
     result.value = 0;
     expression_meaning list_meaning;
     list_meaning.type = qualified_type::make(type.unqualified(), cv_none);
-    if (target.kind == type_kind::array)
+    if (type_table[type.unqualified()].kind == type_kind::array)
         list_meaning.type = type;
     list_meaning.evaluation = all;
     result.node = expression_node(semantic_kind::initializer_list, list_meaning,
                                   list.first_token());
     semantics.set_list(result.node, elements.data(), elements.size());
-    return analysis_result::well_formed;
 }
 
 /*
@@ -1585,6 +1677,329 @@ analysis_result semantic_analysis::aggregate_element_clause(
         return not_supported(list, "dcl.init.aggr");
     /* the braces elided: the subaggregate's elements from the clauses */
     return aggregate_elements(list, clauses, next, element, one);
+}
+
+/*
+ * [dcl.init.aggr]/3.1: "If the initializer list is a designated-
+ * initializer-list, the aggregate shall be of class type, the identifier
+ * in each designator shall name a direct non-static data member of the
+ * class, and the explicitly initialized elements of the aggregate are the
+ * elements that are, or contain, those members."  [ext:gnu_designated_
+ * initializers] (GCC manual 6.29, as clang takes it in C++): "[ index ] ="
+ * and "[ first ... last ] =" for an array, designators in any order (clang
+ * warns: -Wreorder-init-list), nested ".a.b =" and ".a[i] =", clauses with
+ * and without designators in one list.
+ */
+analysis_result semantic_analysis::designated_list_initialization(
+    SyntaxRef list, const owned_array<SyntaxElement> &clauses,
+    const designation_set &designations, qualified_type &type,
+    initialized_value &result)
+{
+    owned_array<designated_item> items;
+    for (size_t i = 0; i < clauses.size(); i++) {
+        designated_item item;
+        item.clause = static_cast<uint32_t>(i);
+        item.chain_first = designations.of[i].first;
+        item.chain_count = designations.of[i].count;
+        items.append(item);
+    }
+    return designated_elements(list, clauses, designations, items, type,
+                               result);
+}
+
+/*
+ * The elements of one aggregate (an array or an aggregate class) from the
+ * clauses in items, some with designators.  A designator selects the
+ * element(s) the clause initializes, and the clauses after it (without
+ * designators) continue from the element after ([dcl.init.aggr]/4.1:
+ * "the explicitly initialized elements ... are the first n"; C99 6.7.9/17).
+ * A clause with more designators initializes a subobject of the element: the
+ * clauses designating the element so are its own list (the recursion).
+ * Left to refuse: a clause without designator after a nested one (C's
+ * current object is then inside the element), the same element designated
+ * in part and as a whole, a union member but its first.
+ */
+analysis_result semantic_analysis::designated_elements(
+    SyntaxRef list, const owned_array<SyntaxElement> &clauses,
+    const designation_set &designations,
+    const owned_array<designated_item> &items, qualified_type &type,
+    initialized_value &result)
+{
+    const struct type target = type_table[type.unqualified()];
+    bool is_array = target.kind == type_kind::array;
+    owned_array<qualified_type> types;
+    owned_array<SyntaxRef> defaults;
+    owned_array<entity_index> members;
+    uint64_t bound = 0;
+    bool bound_known = true, is_union = false;
+    if (is_array) {
+        bound = target.bound;
+        bound_known = target.bound_known;
+    } else if (target.kind == type_kind::class_type &&
+               entity_table[target.entity].kind == entity_kind::class_type) {
+        if (!entity_table[target.entity].size)
+            return not_supported(list, "dcl.init.list");
+        if (!is_aggregate(target.entity))
+            return ill_formed(list,
+                              "a designator selects an element of an "
+                              "aggregate",
+                              "dcl.init.aggr");
+        const entity &x = entity_table[target.entity];
+        is_union = x.union_;
+        for (uint32_t i = 0; i < x.member_count; i++) {
+            entity_index e = class_members[x.first_member + i];
+            const entity &m = entity_table[e];
+            if (!m.bit_field || m.name) {
+                types.append(m.type);
+                defaults.append(m.default_initializer);
+                members.append(e);
+            }
+        }
+        bound = members.size();
+    } else if (target.kind == type_kind::lvalue_reference ||
+               target.kind == type_kind::rvalue_reference) {
+        return not_supported(list, "dcl.init.list");
+    } else {
+        return ill_formed(list,
+                          "a designator selects an element of an aggregate",
+                          "dcl.init.aggr");
+    }
+    /* the elements that can be initialized: a union's first */
+    uint64_t room = bound;
+    if (is_union && room > 1)
+        room = 1;
+    if (is_array && !bound_known)
+        room = UINT64_MAX;
+    /* the largest array a designated list is expanded for (its gaps are
+       zero nodes) */
+    const uint64_t limit = 1u << 20;
+
+    owned_array<uint32_t> slots;
+    owned_array<uint8_t> consumed;
+    if (!items.empty())
+        memset(consumed.extend(items.size()), 0, items.size());
+    constness all = constness::constant;
+    uint64_t pos = 0, extent = 0;
+    bool after_nested = false;
+    for (size_t i = 0; i < items.size(); i++) {
+        if (consumed[i])
+            continue;
+        const designated_item item = items[i];
+        uint64_t first = pos, last = pos;
+        if (item.chain_count) {
+            VTRY(r, designator_elements(
+                        list, designations.pool[item.chain_first], target,
+                        members, bound, bound_known, first, last));
+            if (is_union && first != 0)
+                /* a union member but the first: its active member is not
+                   in the list's value */
+                return not_supported(list, "dcl.init.aggr");
+        } else {
+            if (after_nested)
+                return not_supported(list, "dcl.init.aggr");
+            if (pos >= room)
+                return ill_formed(list,
+                                  "an initializer-list is ill-formed if the "
+                                  "number of initializer-clauses exceeds the "
+                                  "number of elements of the aggregate",
+                                  "dcl.init.aggr");
+        }
+        if (last >= limit)
+            return not_supported(list, "dcl.init.aggr");
+        qualified_type element = target.operand;
+        if (!is_array)
+            element = types[first];
+        initialized_value one;
+        if (item.chain_count > 1) {
+            /* a subobject of the element: the clauses designating the
+               element so, as a list of its own */
+            if (first != last || (first < slots.size() && slots[first]))
+                return not_supported(list, "dcl.init.aggr");
+            owned_array<designated_item> inner;
+            for (size_t j = i; j < items.size(); j++) {
+                if (consumed[j] || !items[j].chain_count)
+                    continue;
+                uint64_t a = 0, b = 0;
+                if (j != i) {
+                    VTRY(r, designator_elements(
+                                list, designations.pool[items[j].chain_first],
+                                target, members, bound, bound_known, a, b));
+                    if (a != first || b != last)
+                        continue;
+                    if (items[j].chain_count == 1)
+                        /* the element designated in part and as a whole */
+                        return not_supported(list, "dcl.init.aggr");
+                }
+                designated_item d = items[j];
+                d.chain_first++;
+                d.chain_count--;
+                inner.append(d);
+                consumed[j] = 1;
+            }
+            VTRY(r, designated_elements(list, clauses, designations, inner,
+                                        element, one));
+            after_nested = true;
+        } else {
+            /* the clause, and the clauses after it without designators it
+               may take with its braces elided */
+            owned_array<SyntaxElement> run;
+            for (size_t j = i; j < items.size(); j++) {
+                if (j != i && (consumed[j] || items[j].chain_count))
+                    break;
+                run.append(clauses[items[j].clause]);
+            }
+            size_t next = 0;
+            VTRY(r, aggregate_element(list, run, next, element, one));
+            if (!next)
+                return not_supported(list, "dcl.init.aggr");
+            i += next - 1;
+            after_nested = false;
+        }
+        if (slots.size() <= last) {
+            size_t was = slots.size();
+            uint32_t *grown = slots.extend(last + 1 - was);
+            memset(grown, 0, (last + 1 - was) * sizeof(uint32_t));
+        }
+        for (uint64_t k = first; k <= last; k++)
+            slots[k] = one.node;
+        all = combined_constness(all, one.evaluation);
+        pos = last + 1;
+        if (pos > extent)
+            extent = pos;
+    }
+    /* the elements: those no clause initializes by [dcl.init.aggr]/5 */
+    uint64_t count = extent;
+    if (!is_array)
+        count = bound;
+    if (is_union && count > 1)
+        count = 1;
+    if (is_array && bound_known && count > target.bound)
+        count = target.bound;
+    owned_array<uint32_t> elements;
+    for (uint64_t i = 0; i < count; i++) {
+        if (i < slots.size() && slots[i]) {
+            elements.append(slots[i]);
+            continue;
+        }
+        qualified_type element = target.operand;
+        SyntaxRef default_initializer;
+        if (!is_array) {
+            element = types[i];
+            default_initializer = defaults[i];
+        }
+        initialized_value one;
+        VTRY(r, omitted_element_checks(list, element,
+                                       static_cast<bool>(default_initializer)));
+        VTRY_SET(
+            r, omitted_element_value(list, element, default_initializer, one));
+        all = combined_constness(all, one.evaluation);
+        elements.append(one.node);
+    }
+    if (is_array && !bound_known)
+        /* [dcl.init.aggr]/4.2 (unknown bound): the greatest index and one */
+        type = qualified_type::make(type_table.array_of(target.operand, extent),
+                                    type.cv());
+    aggregate_value(list, type, all, elements, result);
+    return analysis_result::well_formed;
+}
+
+/*
+ * The elements a designator selects of the aggregate target, first to last
+ * (more than one for GNU's "[ first ... last ]").  [dcl.init.aggr]/3.1:
+ * ". identifier" names a direct non-static data member of a class; C99's
+ * "[ constant-expression ]" ([ext:gnu_designated_initializers]) an element
+ * of an array, "the constant-expression shall be an integer constant
+ * expression ... within the array bounds" (C17 6.7.9/6); the obsolete
+ * "identifier :" is a field designator.
+ */
+analysis_result semantic_analysis::designator_elements(
+    SyntaxRef list, SyntaxElement designator, const struct type &target,
+    const owned_array<entity_index> &members, uint64_t bound, bool bound_known,
+    uint64_t &first, uint64_t &last)
+{
+    bool is_array = target.kind == type_kind::array;
+    SyntaxRef at = list;
+    if (designator.is_node())
+        at = designator;
+    token_index name_token = 0;
+    if (designator.is_token())
+        name_token = designator.token();
+    else if (designator[0].is(preprocessing_op_or_punc::DOT))
+        name_token = designator[1].token();
+    if (name_token) {
+        if (is_array)
+            return ill_formed(at,
+                              "a field designator cannot initialize an "
+                              "array",
+                              "dcl.init.aggr");
+        uint32_t name = tokens.identifier(name_token);
+        for (size_t i = 0; i < members.size(); i++) {
+            if (entity_table[members[i]].name == name) {
+                first = last = i;
+                return analysis_result::well_formed;
+            }
+        }
+        /* a member of an anonymous union or structure is bound through it */
+        for (size_t i = 0; i < members.size(); i++)
+            if (!entity_table[members[i]].name)
+                return not_supported(at, "dcl.init.aggr");
+        return ill_formed(at,
+                          "the identifier in each designator shall name a "
+                          "direct non-static data member of the class",
+                          "dcl.init.aggr");
+    }
+    if (!is_array)
+        return ill_formed(at,
+                          "an array designator cannot initialize an "
+                          "object of class type",
+                          "dcl.init.aggr");
+    const implementation_defined_behavior &behavior = tokens.files.behavior;
+    uint64_t bounds[2] = {0, 0};
+    uint32_t operands = 1;
+    uint32_t index = 1;
+    if (designator.size() > 4)
+        operands = 2;
+    for (uint32_t k = 0; k < operands; k++) {
+        expression_meaning e;
+        VTRY(r, expression(designator[index], e));
+        VTRY_SET(r, operand_value(at, e));
+        /* an enumerator: its value as an integer */
+        if (!promote_enumeration(e))
+            enumeration_as_underlying(e);
+        if (!is_integral(e.type))
+            return ill_formed(at,
+                              "an array designator's index shall be an "
+                              "integer constant expression",
+                              "dcl.init.aggr");
+        bool constant = false;
+        VTRY_SET(r, integral_constant_expression(at, e, constant));
+        if (!constant)
+            return not_supported(at, "expr.const");
+        __int128 value =
+            integer_value(behavior, fundamental_of(e.type), e.value);
+        if (value < 0)
+            return ill_formed(at,
+                              "an array designator's index shall not be "
+                              "negative",
+                              "dcl.init.aggr");
+        if (value > static_cast<__int128>(UINT32_MAX))
+            return not_supported(at, "dcl.init.aggr");
+        bounds[k] = static_cast<uint64_t>(value);
+        index = 3;
+    }
+    first = bounds[0];
+    last = bounds[0];
+    if (operands == 2)
+        last = bounds[1];
+    if (last < first)
+        return ill_formed(at, "an array designator's range is empty",
+                          "dcl.init.aggr");
+    if (bound_known && last >= bound)
+        return ill_formed(at,
+                          "an array designator's index shall be within the "
+                          "array bounds",
+                          "dcl.init.aggr");
+    return analysis_result::well_formed;
 }
 
 } // namespace cplusplus
