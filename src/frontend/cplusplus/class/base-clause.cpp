@@ -144,7 +144,13 @@ node_index parser::class_or_decltype(scope_index *region)
        mem-initializer-id a class or member, [class.base.init]/2): a name
        lookup does not find may be declared where the parser kept the
        tokens, so the declaration is a later step's */
-    if (kind == name_kind::not_declared && (!qualifier || known)) {
+    /* a member of a base the parser does not know (a class template whose
+       base is a built-in, a dependent base): it is in the class's scope
+       for the semantic analysis, as after the nested-name-specifiers of an
+       expression (nested_name_specifier) */
+    bool in_class =
+        qualifier && known && names.kind_of(scope) == scope_kind::class_;
+    if (kind == name_kind::not_declared && (!qualifier || known) && !in_class) {
         unknown_name = true;
         return expected("a class-name", "class.derived");
     }

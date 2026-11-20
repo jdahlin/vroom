@@ -84,8 +84,6 @@ LANGUAGE_FEATURE(star_this_capture, cplusplus_17, never, "P0018R3: the simple-ca
 /* [except.spec] */
 LANGUAGE_FEATURE(dynamic_exception_specifications, cplusplus_98, cplusplus_17,
                  "[diff.cpp14.except]/1: Remove dynamic exception specifications")
-LANGUAGE_FEATURE(empty_throw_exception_specification, cplusplus_98, cplusplus_20,
-                 "[diff.cpp17.except]/1: Remove throw() exception specification")
 LANGUAGE_FEATURE(exception_specification_in_type, cplusplus_17, never,
                  "P0012R1: exception specifications part of the type system")
 /* [temp.names] */

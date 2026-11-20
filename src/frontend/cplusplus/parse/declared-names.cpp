@@ -197,9 +197,19 @@ scope_index declared_names::snapshot(scope_index region)
     copy.enclosing = s.enclosing;
     for (const declaration &d : s.declarations)
         copy.declarations.append(d);
-    for (scope_index other : s.searched_with)
-        copy.searched_with.append(other);
-    return static_cast<scope_index>(scopes.size() - 1);
+    scope_index result = static_cast<scope_index>(scopes.size() - 1);
+    /* the recursion grows scopes: no reference is kept across it */
+    for (size_t i = 0; i < scopes[region].searched_with.size(); i++) {
+        scope_index other = scopes[region].searched_with[i];
+        /* the members of an anonymous union or struct of the region
+           (add_base, decl-specifier.cpp): the first pass's rollback
+           empties that region, so the copy has a copy of it too */
+        if (scopes[other].kind == scope_kind::class_ &&
+            scopes[other].enclosing == region)
+            other = snapshot(other);
+        scopes[result].searched_with.append(other);
+    }
+    return result;
 }
 
 void declared_names::define_class(scope_index in, uint32_t name,

@@ -94,13 +94,17 @@ node_index parser::using_declarator()
                         "namespace.udecl", position);
     if (name) {
         name_kind kind = name_kind::not_declared;
-        if (typename_)
+        bool dependent = false;
+        if (typename_) {
             kind = name_kind::type_name;
-        else if (known)
+            /* [temp.dep.type]/9: a type named through a dependent
+               nested-name-specifier is dependent */
+            dependent = qualifier_dependent;
+        } else if (known)
             kind = names.lookup_qualified(scope, name);
         if (kind != name_kind::not_declared &&
             kind != name_kind::namespace_name)
-            names.declare(name, kind);
+            names.declare(name, kind, 0, dependent);
     }
     return finish_node(syntax_kind::using_declarator, mark, first);
 }

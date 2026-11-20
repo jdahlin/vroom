@@ -351,7 +351,12 @@ node_index parser::noptr_declarator(declarator_form form,
                     }
                 }
                 if (!parsed) {
-                    if (failed_with.beyond_step)
+                    /* C++23's explicit object parameter (this ...) is a
+                       member function's: in a block, T x(this, ...) is
+                       an initializer */
+                    bool this_argument =
+                        block_scope && at(standard_keyword::this_, 1);
+                    if (failed_with.beyond_step && !this_argument)
                         return beyond_this_step();
                     /* ... but only when the parenthesis could hold an
                        expression-list: one that starts with a
