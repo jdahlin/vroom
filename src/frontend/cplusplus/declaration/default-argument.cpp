@@ -132,9 +132,19 @@ analysis_result semantic_analysis::default_arguments(SyntaxRef n,
                     return not_supported(p.declaration, "dcl.fct.default");
         qualified_type type = types[i];
         initialized_value value;
+        /* [ext:clang_source_location] the call's place is the value of a
+           builtin that names it */
+        uint32_t site_nodes = call_site_nodes;
+        struct call_site_scope {
+            unsigned &depth;
+            ~call_site_scope()
+            {
+                depth--;
+            }
+        } at_call = {++call_site_depth};
         VTRY(r, initialize_from(p.declaration, p.default_argument, type, false,
                                 false, value));
-        nodes[i] = value.node;
+        nodes[i] = wrap_call_site(value.node, first, site_nodes);
     }
     /* /4: "In a given function declaration, each parameter subsequent to a
        parameter with a default argument shall have a default argument

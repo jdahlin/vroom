@@ -17,6 +17,10 @@ uint32_t c_lowering::expression(uint32_t index)
         return constant(n);
     case semantic_kind::string_literal:
         return string_literal(n);
+    case semantic_kind::source_location:
+        return source_location(n);
+    case semantic_kind::default_argument:
+        return default_argument(n);
     case semantic_kind::entity: {
         entity_index e = n.a;
         const entity &x = analysis.entity_table[e];

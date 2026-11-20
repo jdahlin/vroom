@@ -1717,8 +1717,9 @@ analysis_result semantic_analysis::call_with(
        argument for the parameter is used." ([dcl.fct.default]/9: evaluated
        at each call) */
     for (size_t i = arguments.size(); i < count; i++)
-        argument_nodes.append(
-            default_argument_nodes[entity_table[called].first_default + i]);
+        argument_nodes.append(bind_call_site(
+            default_argument_nodes[entity_table[called].first_default + i],
+            n.first_token()));
     if (called && (entity_table[called].gnu_flags & gnu_bit_count)) {
         VTRY_SET(r, bit_count_arguments(n, called, argument_nodes));
     }

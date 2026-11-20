@@ -13,7 +13,6 @@ old-braced-args	vcc: the rules of [class.mem] are not implemented yet
 old-braced-template-arguments	vcc: the rules of [over.match.list] are not implemented yet
 old-builtin-common-type	vcc: the rules of [temp.arg] are not implemented yet
 old-builtins-table	vcc: the rules of [basic.types] are not implemented yet
-old-builtins2	vcc: the C++ front end does not handle a declaration the parser kept as tokens yet
 old-class-pack-params	vcc: the rules of [temp.spec] are not implemented yet
 old-class-scalar-operand	vcc: the rules of [dcl.fct] are not implemented yet
 old-conditional-class-convert	vcc: the rules of [expr.cond] are not implemented yet

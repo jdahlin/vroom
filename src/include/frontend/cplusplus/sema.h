@@ -1254,6 +1254,16 @@ enum class semantic_kind : uint8_t {
        take in memory), at: the constraint's string-literal token, b: the
        symbolic name's identifier token (0: none), value: 1 for an output */
     gnu_asm_operand,
+    /* [ext:clang_source_location] __builtin_FILE() and the like: op: a
+       source_location_builtin; at: where it is written; b: the function it
+       is written in (0: none); a prvalue of type unsigned int or const
+       char*.  Inside a default_argument it is the call's */
+    source_location,
+    /* [dcl.fct.default]/5: a default argument whose value depends on the
+       call that uses it (source_location nodes inside): a: the argument's
+       initialization; at: the call (the constructor of a default member
+       initializer), b: the function the call is in (0: none) */
+    default_argument,
     /* [class.cdtor]/4, [abi:vtable-ctor]: a: the address of the object
        under construction or destruction (this), b: its class, whose
        virtual table pointer is stored in it */
@@ -1315,6 +1325,15 @@ enum class semantic_kind : uint8_t {
        (0: none); evaluation not_constant when the body's analysis was not
        well-formed (a tree in part, which the evaluator does not run) */
     function_body,
+};
+
+/* [ext:clang_source_location]: the value a source_location node has */
+enum class source_location_builtin : uint8_t {
+    file,      /* __builtin_FILE: the presumed file name */
+    file_name, /* __builtin_FILE_NAME: its last component */
+    function,  /* __builtin_FUNCTION: the function's name, "" outside one */
+    line,      /* __builtin_LINE */
+    column,    /* __builtin_COLUMN */
 };
 
 const char *semantic_kind_name(semantic_kind kind);
@@ -2808,6 +2827,19 @@ class semantic_analysis
                                           qualified_type &result);
     analysis_result builtin_addressof(SyntaxRef n, expression_meaning &m);
     analysis_result clang_source_location(SyntaxRef n, expression_meaning &m);
+    analysis_result clang_source_location_object(SyntaxRef n,
+                                                 expression_meaning &m);
+    /* a default argument's value is the call's: its source_location nodes
+       are made while call_site_depth is up, and counted; a default
+       argument that made some is wrapped (bind_call_site makes each call's
+       copy).  source_location_at: the place they are bound to at once (a
+       default member initializer: the constructor) */
+    unsigned call_site_depth = 0;
+    uint32_t call_site_nodes = 0;
+    token_index source_location_at = 0;
+    uint32_t wrap_call_site(uint32_t node, token_index at,
+                            uint32_t nodes_before);
+    uint32_t bind_call_site(uint32_t node, token_index call);
     analysis_result clang_atomic_type(SyntaxRef n, qualified_type &type);
     uint64_t atomic_layout(qualified_type value, bool alignment) const;
     analysis_result clang_bit_int_type(SyntaxRef n, qualified_type &type);

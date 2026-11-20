@@ -78,7 +78,8 @@ node_index parser::primary_expression()
         return clang_bit_cast_expression();
     if (at(extension_keyword::convertvector)) /* [ext.clang] */
         return clang_convertvector_expression();
-    if (at(extension_keyword::source_location)) /* [ext.clang] */
+    if (at(extension_keyword::source_location) || /* [ext.clang] */
+        at(extension_keyword::source_location_value))
         return clang_source_location_expression();
     switch (keyword_of(peek())) {
     /* an extension's keyword (__builtin_va_arg, __is_same, ...): P9 */

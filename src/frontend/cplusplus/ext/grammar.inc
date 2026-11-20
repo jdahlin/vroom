@@ -231,6 +231,11 @@ PRODUCTION(clang_bit_int, "clang-bit-int-type-specifier", "_BitInt ( constant-ex
 
 PRODUCTION(clang_source_location, "primary-expression", "clang-source-location-expression")
 PRODUCTION(clang_source_location, "clang-source-location-expression", "__builtin_source_location ( )")
+PRODUCTION(clang_source_location, "clang-source-location-expression", "__builtin_FILE ( )")
+PRODUCTION(clang_source_location, "clang-source-location-expression", "__builtin_FILE_NAME ( )")
+PRODUCTION(clang_source_location, "clang-source-location-expression", "__builtin_FUNCTION ( )")
+PRODUCTION(clang_source_location, "clang-source-location-expression", "__builtin_LINE ( )")
+PRODUCTION(clang_source_location, "clang-source-location-expression", "__builtin_COLUMN ( )")
 
 /* ---- clang Language Extensions, Type Trait Primitives ---- */
 
