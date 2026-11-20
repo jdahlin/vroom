@@ -589,6 +589,20 @@ bool itanium_mangler::name(entity_index e)
            <nested-name> */
         if (!function_scope(local))
             return false;
+        /* [abi:mangling-scope] a default argument's scope:
+           d [<number>] _ */
+        entity_index top = e;
+        if (table[top].kind != entity_kind::class_type)
+            top = table[top].enclosing;
+        while (table[top].kind == entity_kind::class_type &&
+               table[table[top].enclosing].kind == entity_kind::class_type)
+            top = table[top].enclosing;
+        if (uint32_t parameter = table[top].default_argument_parameter) {
+            text("d");
+            if (parameter > 1)
+                number(parameter - 2);
+            text("_");
+        }
         return nested_name(e);
     }
     if (table[scope].kind == entity_kind::class_type ||
@@ -1751,7 +1765,8 @@ bool itanium_mangler::closure_type_name(entity_index c)
         const entity &k = table[other];
         if (k.kind != entity_kind::class_type || !k.lambda ||
             !k.call_operator || enclosing_function(table, other) != context ||
-            k.closure_variable != variable)
+            k.closure_variable != variable ||
+            k.default_argument_parameter != table[c].default_argument_parameter)
             continue;
         /* (a default member initializer analysed in each constructor: the
            one closure type of its lambda-expression) */

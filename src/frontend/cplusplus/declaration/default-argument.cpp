@@ -176,8 +176,13 @@ analysis_result semantic_analysis::default_arguments(SyntaxRef n,
                 depth--;
             }
         } at_call = {++call_site_depth};
-        VTRY(r, initialize_from(p.declaration, p.default_argument, type, false,
-                                false, value));
+        entity_index outer_function = default_argument_function;
+        default_argument_function = f;
+        analysis_result r = initialize_from(p.declaration, p.default_argument,
+                                            type, false, false, value);
+        default_argument_function = outer_function;
+        if (r != analysis_result::well_formed)
+            return r;
         nodes[i] = wrap_call_site(value.node, first, site_nodes);
     }
     /* /4: "In a given function declaration, each parameter subsequent to a

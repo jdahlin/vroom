@@ -740,6 +740,10 @@ struct entity {
     /* a closure type of an inline variable's initializer: the variable,
        the closure's context ([abi:closure-types]) */
     entity_index closure_variable = 0;
+    /* a closure type in a default argument of a member function: its
+       number plus one among that function's ([abi:closure-types]
+       d <number> _) */
+    uint32_t default_argument_parameter = 0;
     /* an init-capture's name ([expr.prim.lambda.capture]/6): the variable
        is the closure's non-static data member this names */
     entity_index capture_member = 0;
@@ -2373,6 +2377,9 @@ class semantic_analysis
     owned_array<parameter_meaning> member_default_parameters;
     /* ... analysed now, of the complete class c */
     bool analysing_member_defaults = false;
+    /* the function whose default argument is analysed: a lambda in it
+       belongs to the function ([abi:closure-types]) */
+    entity_index default_argument_function = 0;
     analysis_result member_default_arguments(entity_index c);
     /* ... of the member function f declared by declaration: kept for then */
     void defer_default_arguments(entity_index f, SyntaxRef declaration,

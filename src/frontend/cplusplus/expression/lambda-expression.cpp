@@ -365,7 +365,16 @@ semantic_analysis::lambda_expression_analysed(LambdaExpression n,
        namespace scope */
     /* ([temp.deduct]/8: a function body analysed to deduce a return type is
        no immediate context: its lambdas are made) */
-    if ((!function_state.active && !is_namespace(current_scope)) ||
+    /* a default argument of an inline function (a member defined in its
+       class): the closure type is named in the function's scope, which
+       the other kinds are not analysed for */
+    bool in_default =
+        !function_state.active && default_argument_function &&
+        entity_table[default_argument_function].inline_ &&
+        entity_table[entity_table[default_argument_function].enclosing].kind ==
+            entity_kind::class_type;
+    if ((!function_state.active && !is_namespace(current_scope) &&
+         !in_default) ||
         (substituting && !function_state.active) || n.size() < 2)
         return not_supported(n, "expr.prim.lambda");
     /* [expr.prim.lambda]/5: a template-parameter-list makes a generic
@@ -433,7 +442,19 @@ semantic_analysis::lambda_expression_analysed(LambdaExpression n,
     entity_index member = 0;
     /* [abi:closure-types] a closure type in a default member initializer
        belongs to the data member, whose class is its scope */
-    if (initialized_member && !current_lambda()) {
+    uint32_t default_parameter = 0;
+    if (in_default && !current_lambda()) {
+        scope = default_argument_function;
+        /* the number of the closure among those of the function's default
+           arguments ([abi:closure-types]: d [<number>] _, number - 2 for
+           the second) */
+        default_parameter = 1;
+        for (entity_index k = 1; k < entity_table.size(); k++)
+            if (entity_table[k].kind == entity_kind::class_type &&
+                entity_table[k].enclosing == scope &&
+                entity_table[k].default_argument_parameter)
+                default_parameter++;
+    } else if (initialized_member && !current_lambda()) {
         member = initialized_member;
         scope = entity_table[member].enclosing;
     }
@@ -448,6 +469,7 @@ semantic_analysis::lambda_expression_analysed(LambdaExpression n,
             }
     entity_index c = entity_table.make(entity_kind::class_type, 0, scope);
     entity_table[c].closure_variable = member;
+    entity_table[c].default_argument_parameter = default_parameter;
     entity_table[c].type = qualified_type::make(
         type_table.of_entity(type_kind::class_type, c), cv_none);
     entity_table[c].lambda = n;
@@ -646,8 +668,8 @@ semantic_analysis::lambda_call_type(SyntaxRef n, SyntaxRef d, lambda_context &l,
     for (const parameter_meaning &parameter : parameters) {
         if (r != analysis_result::well_formed)
             break;
-        /* a default argument ([dcl.fct.default]) or a parameter pack */
-        if (parameter.default_argument || parameter.pack_name)
+        /* a default argument ([dcl.fct.default]) */
+        if (parameter.default_argument)
             r = not_supported(n, "dcl.fct.default");
         /* [expr.prim.lambda.capture]/5: "If an identifier in a
            simple-capture appears as the declarator-id of a parameter of the
