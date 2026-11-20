@@ -90,9 +90,18 @@ name_class classify(parser &p, unsigned ahead, unsigned *length,
         name_kind kind = name_kind::not_declared;
         bool found_dependent = false;
         if (!opaque) {
-            if (qualified)
+            /* [basic.lookup.qual]/1: before a :: only namespaces, types
+               and templates count */
+            bool nested = p.at(preprocessing_op_or_punc::COLON_COLON, i + 1);
+            if (qualified && nested)
+                kind = p.names.lookup_qualified_nested(scope, name, &found,
+                                                       &found_dependent);
+            else if (qualified)
                 kind = p.names.lookup_qualified(scope, name, &found,
                                                 &found_dependent);
+            else if (nested)
+                kind = p.names.lookup_unqualified_nested(name, &found,
+                                                         &found_dependent);
             else
                 kind =
                     p.names.lookup_unqualified(name, &found, &found_dependent);

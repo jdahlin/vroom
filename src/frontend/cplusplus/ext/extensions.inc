@@ -71,6 +71,9 @@ EXTENSION(clang_feature_checks, clang,
 EXTENSION(clang_has_include_next, clang, "clang Language Extensions: __has_include_next")
 EXTENSION(clang_builtin_templates, clang,
           "clang's BuiltinTemplates.td: __builtin_common_type, ...")
+EXTENSION(clang_builtin_functions, clang,
+          "clang Language Extensions, Builtin Functions: __builtin_NAME functions that are not "
+          "C library functions, such as __builtin_coro_resume")
 EXTENSION(clang_file_name_macro, clang, "clang Language Extensions: __FILE_NAME__")
 EXTENSION(clang_flt_eval_method, clang,
           "__FLT_EVAL_METHOD__, as #pragma clang fp eval_method sets it (0 on this target)")

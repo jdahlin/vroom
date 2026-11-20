@@ -289,14 +289,30 @@ qualified_type semantic_analysis::builtin_parameter_type(uint8_t t,
     return qualified_type::make(type_table.pointer_to(q), cv_none);
 }
 
+/* [ext:clang_builtin_functions] clang's builtin functions that are not C
+   library functions (__builtin_coro_resume, __builtin_launder, ...) all
+   have names starting with __builtin_, which [lex.name]/3 reserves: no
+   program declares a type with one, so an unqualified one is a function's
+   name, and `__builtin_coro_resume(h);` is an expression statement
+   ([stmt.ambig]/1) and not a declaration of h */
+static bool names_clang_builtin_function(const char *spelling, size_t length)
+{
+    static const char prefix[] = "__builtin_";
+    return length > sizeof prefix - 1 &&
+           !memcmp(spelling, prefix, sizeof prefix - 1);
+}
+
 /* name is a builtin of vcc's C front end, which clang declares at its
-   first use (a function's name to the parser) */
+   first use (a function's name to the parser), or any other clang builtin
+   function */
 bool parser::names_compiler_builtin(uint32_t name)
 {
     size_t length = 0;
     /* the identifier's number is the preprocessor's plus one */
     const char *spelling = tokens.pp.identifier_spelling(name - 1, &length);
-    return ast_builder_builtin_signature(spelling, length) != nullptr;
+    if (ast_builder_builtin_signature(spelling, length) != nullptr)
+        return true;
+    return names_clang_builtin_function(spelling, length);
 }
 
 /* the function name names, declared at its first use with C language

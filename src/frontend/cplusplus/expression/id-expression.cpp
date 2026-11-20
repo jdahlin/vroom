@@ -156,10 +156,11 @@ node_index parser::nested_name_specifier(scope_index *scope, bool *known,
         bool found_dependent = false;
         if (*known) {
             if (qualified)
-                kind = names.lookup_qualified(*scope, name, &found,
-                                              &found_dependent);
+                kind = names.lookup_qualified_nested(*scope, name, &found,
+                                                     &found_dependent);
             else
-                kind = names.lookup_unqualified(name, &found, &found_dependent);
+                kind = names.lookup_unqualified_nested(name, &found,
+                                                       &found_dependent);
         }
         bool in_class =
             qualified && *known && names.kind_of(*scope) == scope_kind::class_;

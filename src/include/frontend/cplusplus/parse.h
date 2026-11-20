@@ -430,6 +430,17 @@ class declared_names
        looked up according to [basic.lookup.unqual] but ignoring any
        non-type names that have been declared" */
     name_kind lookup_elaborated(uint32_t name);
+    /* [basic.lookup.qual]/1: "lookup of the name preceding that :: considers
+       only namespaces, types, and templates whose specializations are
+       types": a variable, function or enumerator of that name, found first,
+       is ignored; the same of a name after one :: in a nested-name-specifier
+       (the _nested forms, for a name a :: follows) */
+    name_kind lookup_unqualified_nested(uint32_t name,
+                                        scope_index *scope = nullptr,
+                                        bool *dependent = nullptr);
+    name_kind lookup_qualified_nested(scope_index in, uint32_t name,
+                                      scope_index *scope = nullptr,
+                                      bool *dependent = nullptr);
     /* [basic.lookup.qual]: the name in the namespace a
        nested-name-specifier named */
     name_kind lookup_qualified(scope_index in, uint32_t name,
@@ -486,6 +497,8 @@ class declared_names
                             unsigned depth = 0) const;
     /* find skips the names of no type (lookup_elaborated) */
     bool ignoring_non_types = false;
+    /* lookup_unqualified_nested: also keeps namespace-names */
+    bool ignoring_non_scopes = false;
 };
 
 /* ---- the parser ---------------------------------------------------------- */

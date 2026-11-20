@@ -42,6 +42,10 @@ declared_names::find(scope_index in, uint32_t name, unsigned depth) const
         if (ignoring_non_types && d.kind != name_kind::type_name &&
             d.kind != name_kind::template_name)
             continue;
+        if (ignoring_non_scopes && d.kind != name_kind::type_name &&
+            d.kind != name_kind::template_name &&
+            d.kind != name_kind::namespace_name)
+            continue;
         return &d;
     }
     /* a using-directive can nominate a namespace that encloses this one:
@@ -300,6 +304,26 @@ name_kind declared_names::lookup_elaborated(uint32_t name)
     ignoring_non_types = true;
     name_kind found = lookup_unqualified(name);
     ignoring_non_types = false;
+    return found;
+}
+
+name_kind declared_names::lookup_unqualified_nested(uint32_t name,
+                                                    scope_index *scope,
+                                                    bool *dependent)
+{
+    ignoring_non_scopes = true;
+    name_kind found = lookup_unqualified(name, scope, dependent);
+    ignoring_non_scopes = false;
+    return found;
+}
+
+name_kind declared_names::lookup_qualified_nested(scope_index in, uint32_t name,
+                                                  scope_index *scope,
+                                                  bool *dependent)
+{
+    ignoring_non_scopes = true;
+    name_kind found = lookup_qualified(in, name, scope, dependent);
+    ignoring_non_scopes = false;
     return found;
 }
 
