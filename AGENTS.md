@@ -568,6 +568,10 @@ input in `regress/lex` or `regress/pp`.
   in Swedish).
 - Commit after each completed step (small, self-contained commits with a
   message saying what changed and how it was verified).
+- Every pull request's base is main.  A PR stacked on another PR's branch
+  still targets main (its diff shows the lower PR's commits until that one
+  merges; say "on top of #N" in the description).  Do not open, retarget or
+  merge a PR into another branch unless the user asks for that PR.
 - Clang is the reference: when behaviour is unclear, test it against clang
   on a small file before implementing.
 - Measure before and after performance work; report numbers in the plan.
