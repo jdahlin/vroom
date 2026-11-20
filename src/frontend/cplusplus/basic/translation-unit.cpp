@@ -210,6 +210,9 @@ analysis_result semantic_analysis::declare(SyntaxRef declaration,
                                            entity_index &declared_entity)
 {
     declared_entity = 0;
+    if (kind != entity_kind::typedef_name) {
+        VTRY(r, misplaced_function_qualifiers(declaration, type, false));
+    }
     if (variable_instantiating && kind == entity_kind::variable)
         return declare_variable_specialization(declaration, type, s,
                                                declared_entity);

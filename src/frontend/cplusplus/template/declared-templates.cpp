@@ -317,6 +317,8 @@ analysis_result semantic_analysis::function_template_declarator(
             r = declarator(definition, definition[lead + specifiers], type, m);
         if (member_of)
             member_template_declarator(0);
+        if (r == analysis_result::well_formed)
+            r = misplaced_function_qualifiers(definition, type, member_of != 0);
     }
     current_scope = outer;
     expressions.resize(expressions_before);
@@ -1109,6 +1111,8 @@ semantic_analysis::variable_template_definition(SyntaxRef n,
     if (r == analysis_result::well_formed) {
         function_cv = 0;
         r = declarator(declaration, item[0], type, m);
+        if (r == analysis_result::well_formed)
+            r = misplaced_function_qualifiers(declaration, type, false);
     }
     current_scope = saved_scope;
     function_cv = saved_cv;

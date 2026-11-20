@@ -223,6 +223,7 @@ semantic_analysis::friend_function(entity_index c, SyntaxRef n,
     function_cv = 0;
     function_parameters.clear();
     VTRY_SET(r, declarator(n, tail[1], type, m));
+    VTRY_SET(r, misplaced_function_qualifiers(n, type, false));
     /* an operator function ([over.oper]: its declaration's checks are
        operator_function_declaration's), not an allocation function */
     if (!m.has_id || m.qualifier || m.qualified_namespace ||
@@ -360,6 +361,8 @@ analysis_result semantic_analysis::friend_function_body(
         function_cv = 0;
         function_parameters.clear();
         r = declarator(definition, definition.declarator(), type, m);
+        if (r == analysis_result::well_formed)
+            r = misplaced_function_qualifiers(definition, type, false);
     }
     if (r == analysis_result::well_formed) {
         last_declared = f;

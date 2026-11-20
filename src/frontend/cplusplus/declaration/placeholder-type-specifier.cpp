@@ -94,10 +94,11 @@ qualified_type semantic_analysis::function_returning(qualified_type f,
     const qualified_type *list = type_table.parameters(f.unqualified());
     for (uint32_t i = 0; i < r.parameter_count; i++)
         parameters.append(list[i]);
-    return qualified_type::make(type_table.function(returns, parameters.data(),
-                                                    parameters.size(),
-                                                    r.variadic, r.non_throwing),
-                                f.cv());
+    return qualified_type::make(
+        type_table.function(returns, parameters.data(), parameters.size(),
+                            r.variadic, r.non_throwing, r.function_cv,
+                            r.function_ref),
+        f.cv());
 }
 
 /* a type deduced as an array, a function or void: what the declaration

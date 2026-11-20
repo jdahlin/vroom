@@ -103,6 +103,14 @@ static bool write_type_claim_unqualified(const types &table, type_index t,
         else if (record.variadic)
             vbuffer_string_append(out, "...");
         vbuffer_string_append(out, ")");
+        if (record.function_cv & cv_const)
+            vbuffer_string_append(out, " const");
+        if (record.function_cv & cv_volatile)
+            vbuffer_string_append(out, " volatile");
+        if (record.function_ref == 1)
+            vbuffer_string_append(out, " &");
+        if (record.function_ref == 2)
+            vbuffer_string_append(out, " &&");
         if (record.non_throwing)
             vbuffer_string_append(out, " noexcept");
     }

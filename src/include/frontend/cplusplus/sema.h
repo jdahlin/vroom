@@ -114,6 +114,12 @@ struct type {
        exception specification is part of the type since C++17
        ([except.spec]/2, [diff.cpp14.except]/1) */
     bool non_throwing = false;
+    /* function: [dcl.fct]/6 the cv-qualifier-seq (cv_const, cv_volatile)
+       and the ref-qualifier (0 none, 1 &, 2 &&) of a function type that
+       is not a member function declaration's own (whose cv-qualifier-seq
+       is the entity's member_cv): the function type a pointer to member
+       refers to, a typedef-name's */
+    uint8_t function_cv = 0, function_ref = 0;
     /* array: [dcl.array]/1 whether the constant-expression is present (if
        not, an "array of unknown bound of T") */
     bool bound_known = false;
@@ -157,7 +163,11 @@ class types
                                         uint32_t parameter);
     type_index function(qualified_type result, const qualified_type *parameters,
                         size_t parameter_count, bool variadic,
-                        bool non_throwing = false);
+                        bool non_throwing = false, uint32_t function_cv = 0,
+                        uint32_t function_ref = 0);
+    /* the function type f with the qualifiers of [dcl.fct]/6 */
+    type_index function_qualified(type_index f, uint32_t function_cv,
+                                  uint32_t function_ref);
     type_index of_entity(type_kind kind, uint32_t entity);
     type_index pointer_to_member(uint32_t class_entity, qualified_type member);
     type_index dependent_pointer_to_member(type_index class_type,
@@ -2043,6 +2053,9 @@ class semantic_analysis
                                   qualified_type element);
     /* [dcl.fct] */
     analysis_result function(SyntaxRef parameters, qualified_type &type);
+    analysis_result misplaced_function_qualifiers(SyntaxRef n,
+                                                  qualified_type type,
+                                                  bool member);
     /* [ext:gnu_attributes] the attributes of a gnu-attribute-specifier
        (or a gnu-attribute-specifier-seq) analysis has rules for */
     struct gnu_attributes {
@@ -3967,6 +3980,7 @@ class semantic_analysis
                               owned_array<bool> &set);
     /* a template parameter pack: template_parameter_entities[i]'s */
     bool template_parameter_is_pack(uint32_t i) const;
+    bool names_template_parameter_pack(qualified_type t) const;
     /* [temp.variadic]/1: an instantiation's packs (entity_kind::pack, the
        elements pack_elements[value .. + member_count)), and the element
        their names denote while a pack expansion's pattern is analysed

@@ -257,15 +257,63 @@ bool semantic_analysis::deduce_type(qualified_type p, qualified_type a,
         return deduce_type(pr.operand, ar.operand, deduced, set, exact);
     case type_kind::function: {
         if (pr.variadic != ar.variadic || pr.non_throwing != ar.non_throwing ||
-            pr.parameter_count != ar.parameter_count)
-            return false;
-        if (!deduce_type(pr.operand, ar.operand, deduced, set, exact))
+            pr.function_cv != ar.function_cv ||
+            pr.function_ref != ar.function_ref)
             return false;
         const qualified_type *pp = type_table.parameters(p.unqualified());
         const qualified_type *ap = type_table.parameters(a.unqualified());
+        /* [temp.deduct.type]/10: "if the parameter-declaration
+           corresponding to P_i is a function parameter pack, then the type
+           of its declarator-id is compared with each remaining parameter
+           type in the parameter-type-list of A"; a pack not at the end is
+           a non-deduced context ([temp.deduct.type]/5.7), and a pattern
+           other than the pack's own name is not analysed */
+        uint32_t fixed = pr.parameter_count;
         for (uint32_t i = 0; i < pr.parameter_count; i++)
+            if (type_table[pp[i].unqualified()].kind ==
+                type_kind::pack_expansion) {
+                const struct type &name =
+                    type_table[type_table[pp[i].unqualified()]
+                                   .operand.unqualified()];
+                if (i + 1 != pr.parameter_count ||
+                    name.kind != type_kind::template_parameter ||
+                    type_table[pp[i].unqualified()].operand.cv() ||
+                    entity_table[name.entity].value >= deduced.size()) {
+                    deduction_unknowns++;
+                    return false;
+                }
+                fixed = i;
+            }
+        if (fixed == pr.parameter_count) {
+            if (pr.parameter_count != ar.parameter_count)
+                return false;
+        } else if (ar.parameter_count < fixed) {
+            return false;
+        }
+        if (!deduce_type(pr.operand, ar.operand, deduced, set, exact))
+            return false;
+        for (uint32_t i = 0; i < fixed; i++)
             if (!deduce_type(pp[i], ap[i], deduced, set, exact))
                 return false;
+        if (fixed != pr.parameter_count) {
+            owned_array<template_argument> rest;
+            for (uint32_t i = fixed; i < ar.parameter_count; i++) {
+                template_argument element;
+                element.type = ap[i];
+                rest.append(element);
+            }
+            template_argument pack =
+                make_pack(rest.data(), static_cast<uint32_t>(rest.size()));
+            uint64_t at =
+                entity_table[type_table[type_table[pp[fixed].unqualified()]
+                                            .operand.unqualified()]
+                                 .entity]
+                    .value;
+            if (set[at])
+                return deduced[at] == pack;
+            deduced[at] = pack;
+            set[at] = true;
+        }
         return true;
     }
     default:

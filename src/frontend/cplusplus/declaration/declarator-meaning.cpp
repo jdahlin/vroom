@@ -219,6 +219,7 @@ analysis_result semantic_analysis::pointer_operator(SyntaxRef op,
                         cv_none);
                 continue;
             }
+            VTRY(r, misplaced_function_qualifiers(op, type, false));
             type = qualified_type::make(type_table.pointer_to(type), cv_none);
         } else if (c.is(CARET)) {
             /* [ext:clang_blocks] "a block pointer to function type"; clang
@@ -231,13 +232,15 @@ analysis_result semantic_analysis::pointer_operator(SyntaxRef op,
             type = qualified_type::make(type_table.block_pointer_to(type),
                                         cv_none);
         } else if (c.is(AMPERSAND)) {
-            VTRY(r, reference(op, false, type, m));
+            VTRY(r, misplaced_function_qualifiers(op, type, false));
+            VTRY_SET(r, reference(op, false, type, m));
         } else if (c.is(AMPERSAND_AMPERSAND)) {
             if (!tokens.files.behavior.has(language_feature::rvalue_references))
                 /* [ext.clang] an rvalue reference before C++11, an
                    extension (an error with -pedantic-errors) */
                 return not_supported(op, "ext.clang");
-            VTRY(r, reference(op, true, type, m));
+            VTRY(r, misplaced_function_qualifiers(op, type, false));
+            VTRY_SET(r, reference(op, true, type, m));
         } else if (c.cv_qualifier_seq()) {
             /* [dcl.ptr]/1: the cv-qualifiers apply to the pointer */
             for (auto q : c.elements()) {
@@ -1034,7 +1037,8 @@ void semantic_analysis::implicitly_non_throwing(const declarator_meaning &m,
             parameters.append(list[i]);
         type = qualified_type::make(
             type_table.function(f.operand, parameters.data(), parameters.size(),
-                                f.variadic, true),
+                                f.variadic, true, f.function_cv,
+                                f.function_ref),
             type.cv());
     }
 }

@@ -297,6 +297,10 @@ semantic_analysis::named_specialization(SyntaxRef n, SyntaxRef declaration,
         r = declarator(declaration, declaration[1], type, m);
         declarator_template_id = false;
         cv = function_cv;
+        if (r == analysis_result::well_formed)
+            r = misplaced_function_qualifiers(
+                declaration, type,
+                entity_table[current_scope].kind == entity_kind::class_type);
     }
     bool defaults = false;
     for (const parameter_meaning &p : function_parameters)
@@ -543,6 +547,10 @@ analysis_result semantic_analysis::member_explicit_instantiation(
         function_parameters.clear();
         r = declarator(declaration, declaration[1], type, m);
         cv = function_cv;
+        if (r == analysis_result::well_formed)
+            r = misplaced_function_qualifiers(
+                declaration, type,
+                entity_table[current_scope].kind == entity_kind::class_type);
     }
     bool defaults = false;
     for (const parameter_meaning &p : function_parameters)

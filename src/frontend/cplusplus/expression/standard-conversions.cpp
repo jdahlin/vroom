@@ -591,6 +591,7 @@ bool semantic_analysis::differ_in_exceptions(qualified_type a,
     const struct type y = type_table[b.unqualified()];
     if (x.kind != type_kind::function || y.kind != type_kind::function ||
         x.non_throwing == y.non_throwing || !(x.operand == y.operand) ||
+        x.function_cv != y.function_cv || x.function_ref != y.function_ref ||
         x.variadic != y.variadic || x.parameter_count != y.parameter_count ||
         a.cv() != b.cv())
         return false;

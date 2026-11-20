@@ -1389,6 +1389,8 @@ semantic_analysis::member_declarator(entity_index c, SyntaxRef declaration,
     function_parameters.clear();
     analysis_result r = declarator(declaration, d, type, m);
     in_member_declarator = false;
+    if (r == analysis_result::well_formed)
+        r = misplaced_function_qualifiers(declaration, type, true);
     if (r != analysis_result::well_formed)
         return r;
     /* [dcl.fct.default]: a member function's default arguments are a
@@ -1942,6 +1944,8 @@ semantic_analysis::member_function_definition(entity_index c,
         in_member_declarator = true;
         r = declarator(definition, definition.declarator(), type, m);
         in_member_declarator = false;
+        if (r == analysis_result::well_formed)
+            r = misplaced_function_qualifiers(definition, type, true);
     }
     defining_class = saved_class;
     if (r != analysis_result::well_formed)

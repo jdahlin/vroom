@@ -146,6 +146,18 @@ bool semantic_analysis::template_parameter_is_pack(uint32_t i) const
     return template_parameter_form(template_parameter_nodes[i], x) && x.pack;
 }
 
+/* whether t is the name of a template parameter pack */
+bool semantic_analysis::names_template_parameter_pack(qualified_type t) const
+{
+    const struct type &r = type_table[t.unqualified()];
+    if (r.kind != type_kind::template_parameter || t.cv())
+        return false;
+    for (size_t i = 0; i < template_parameter_entities.size(); i++)
+        if (template_parameter_entities[i] == r.entity)
+            return template_parameter_is_pack(static_cast<uint32_t>(i));
+    return false;
+}
+
 /* a pack's argument: its elements stored once, so that two packs of the
    same elements are the same argument (an instantiation's key) */
 semantic_analysis::template_argument

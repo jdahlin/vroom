@@ -2073,6 +2073,12 @@ bool itanium_mangler::qualified(qualified_type t)
  */
 bool itanium_mangler::function_type(qualified_type t)
 {
+    /* "<CV-qualifiers> ::= [r] [V] [K]": those of the function type
+       ([dcl.fct]/6) */
+    if (record(t).function_cv & cv_volatile)
+        text("V");
+    if (record(t).function_cv & cv_const)
+        text("K");
     /* "<exception-spec> ::= Do # non-throwing exception specification" */
     if (record(t).non_throwing)
         text("Do");
@@ -2081,6 +2087,11 @@ bool itanium_mangler::function_type(qualified_type t)
         return false;
     if (!bare_function_type(t))
         return false;
+    /* "<ref-qualifier> ::= R # & ref-qualifier, O # && ref-qualifier" */
+    if (record(t).function_ref == 1)
+        text("R");
+    if (record(t).function_ref == 2)
+        text("O");
     text("E");
     return true;
 }

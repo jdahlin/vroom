@@ -112,14 +112,26 @@ analysis_result semantic_analysis::member_pointer_operator(
     }
     m = expression_meaning();
     if (function) {
-        /* /5: "The restrictions on cv-qualification ... are the same as
-           the rules for E1.E2 given in [expr.ref]": the member functions
-           here have no cv-qualifier-seq (pointer-to-member-conversions.cpp),
-           which an object with one may not call; /6: "The result of a .*
-           expression whose second operand is a pointer to a member
-           function is a prvalue." */
-        if (pointee.cv())
-            return not_supported(n, "expr.mptr.oper");
+        /* /5: "The restrictions on cv-qualification, and on the value
+           category of E1, are the same as the rules for E1.E2 given in
+           [expr.ref]" ([expr.ref]/6.3.2.2: a function with a cv-qualifier-seq
+           or ref-qualifier [class.mfct.non-static]/4, [over.match.funcs]/5:
+           an object with more cv-qualifiers, an lvalue for &&, a non-lvalue
+           for &, has no such call); /6: "The result of a .* expression
+           whose second operand is a pointer to a member function is a
+           prvalue." */
+        const struct type &f = type_table[member.unqualified()];
+        if (pointee.cv() & ~f.function_cv & (cv_const | cv_volatile))
+            return ill_formed(n,
+                              "a member function with fewer cv-qualifiers "
+                              "than the object has cannot be called",
+                              "expr.mptr.oper");
+        if ((f.function_ref == 1 && category != value_category::lvalue) ||
+            (f.function_ref == 2 && category == value_category::lvalue))
+            return ill_formed(n,
+                              "the ref-qualifier of the member function does "
+                              "not match the value category of the object",
+                              "expr.mptr.oper");
         m.type = member;
         m.category = value_category::prvalue;
     } else {

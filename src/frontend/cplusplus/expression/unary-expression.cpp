@@ -735,13 +735,18 @@ semantic_analysis::member_pointer_constant(token_index t, entity_index e,
                                    "a pointer to member shall not point to a "
                                    "member with reference type",
                                    "dcl.mptr");
+    /* [dcl.fct]/1: the function type of a member function with a
+       cv-qualifier-seq has it (the entity keeps it as member_cv) */
+    qualified_type pointee = x.type;
     if (x.kind == entity_kind::function && x.member_cv)
-        /* the function types analysis makes have no cv-qualifier-seq
-           ([dcl.fct]/1) */
-        return not_supported(current_declaration, "dcl.fct");
+        pointee =
+            qualified_type::make(type_table.function_qualified(
+                                     x.type.unqualified(),
+                                     x.member_cv & (cv_const | cv_volatile), 0),
+                                 cv_none);
     m = expression_meaning();
     m.type =
-        qualified_type::make(type_table.pointer_to_member(c, x.type), cv_none);
+        qualified_type::make(type_table.pointer_to_member(c, pointee), cv_none);
     m.category = value_category::prvalue;
     m.evaluation = constness::unknown;
     m.node = expression_node(semantic_kind::member_pointer, m, t, e);
