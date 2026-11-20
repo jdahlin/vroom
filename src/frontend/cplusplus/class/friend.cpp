@@ -5,7 +5,8 @@
  * given permission to name the private and protected members of the
  * class."  What is analysed: in a class that is not local, a friend class
  * named by class-key identifier, by a qualified elaborated-type-specifier
- * or (C++11, [class.friend]/3) by a type-name; a friend function declared
+ * or by class-key and simple-template-id ([temp.friend]/1: a
+ * specialization) or (C++11, [class.friend]/3) by a type-name; a friend function declared
  * (not defined) by an unqualified identifier, of the innermost enclosing
  * namespace ([namespace.memdef]/3).  Friend definitions, operator
  * functions, members of other classes and templates are not.  A class
@@ -130,6 +131,25 @@ analysis_result semantic_analysis::friend_class(entity_index c, SyntaxRef n,
         const struct type &record = type_table[named];
         if (record.kind != type_kind::class_type ||
             entity_table[record.entity].kind != entity_kind::class_type)
+            return not_supported(n, "class.friend");
+        friend_record f;
+        f.granting = c;
+        f.befriended = record.entity;
+        friends.append(f);
+        return analysis_result::well_formed;
+    }
+    if (type.size() == 2 && type[1].is(syntax_kind::simple_template_id)) {
+        /* [temp.friend]/1: "A friend of a class or class template can be
+           ... a specialization of a function template or class template":
+           the specialization named */
+        type_index named = 0;
+        uint32_t cv = 0;
+        VTRY(r, template_type(type[1], 0, false, named, &cv));
+        const struct type &record = type_table[named];
+        if (record.kind != type_kind::class_type ||
+            entity_table[record.entity].kind != entity_kind::class_type ||
+            entity_table[record.entity].union_ !=
+                (key == standard_keyword::union_))
             return not_supported(n, "class.friend");
         friend_record f;
         f.granting = c;
