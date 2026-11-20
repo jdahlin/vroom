@@ -547,6 +547,11 @@ node_index parser::ptr_operator(derivation *kind)
  *         _Nullable
  *         _Nullable_result
  *         _Null_unspecified
+ *
+ * [ext:clang_atomic] (C11's _Atomic as a qualifier after the *):
+ *
+ *     cv-qualifier:
+ *         _Atomic
  */
 node_index parser::cv_qualifier_seq()
 {
@@ -555,7 +560,9 @@ node_index parser::cv_qualifier_seq()
     while (accept(standard_keyword::const_) ||
            accept(standard_keyword::volatile_) ||
            accept(extension_keyword::restrict) ||
-           accept(extension_keyword::nullability))
+           accept(extension_keyword::nullability) ||
+           (!at(preprocessing_op_or_punc::LEFT_PARENTHESIS, 1) &&
+            accept(extension_keyword::atomic)))
         ;
     if (position == first)
         return 0;

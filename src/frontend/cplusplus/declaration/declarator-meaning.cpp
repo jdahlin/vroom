@@ -61,6 +61,21 @@ analysis_result semantic_analysis::pointer_qualifier(SyntaxRef op,
             return not_supported(op, "ext.gnu");
         type = add_cv(type, cv_restrict);
         return analysis_result::well_formed;
+    case extension_keyword::atomic: {
+        /* [ext:clang_atomic] T *_Atomic: the pointer made atomic, as
+           _Atomic(T *) (C23 6.7.4.1/3); other cv-qualifiers stay on the
+           atomic type.  A repeated qualifier is C's 6.7.3/5 (no effect). */
+        type_kind k = type_table[type.unqualified()].kind;
+        if (k == type_kind::atomic)
+            return analysis_result::well_formed;
+        if (k != type_kind::pointer)
+            return not_supported(op, "ext.clang");
+        qualified_type value =
+            qualified_type::make(type.unqualified(), cv_none);
+        VTRY(r, atomic_value_check(op, value));
+        type = qualified_type::make(type_table.atomic_of(value), type.cv());
+        return analysis_result::well_formed;
+    }
     default:
         break;
     }
