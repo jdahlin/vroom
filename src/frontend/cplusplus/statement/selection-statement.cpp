@@ -168,6 +168,15 @@ analysis_result semantic_analysis::selection_statement(SelectionStatement n,
                                 "contextually converted constant expression "
                                 "of type bool",
                                 "stmt.if");
+        /* [dcl.type.auto.deduct]/2: only a non-discarded return statement
+           deduces; which substatement is discarded is not known when the
+           condition is not analysed (or not constant yet): neither is */
+        if (result == analysis_result::unsupported && function_state.deducing) {
+            current_scope = outer;
+            built = statement_node(semantic_kind::if_statement, at, m.node, 0,
+                                   0, init);
+            return worse(result, analysis_result::unsupported);
+        }
         bool taken = constant && m.value != 0;
         /* "During the instantiation of an enclosing templated entity, if
            the condition is not value-dependent after its instantiation, the
