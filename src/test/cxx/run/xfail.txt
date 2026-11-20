@@ -61,7 +61,6 @@ old-ooc-member-class	vcc: the rules of [temp.class] are not implemented yet
 old-ooc-partial-overloads	vcc: the rules of [temp.res] are not implemented yet
 old-operators	vcc: the rules of [over.built] are not implemented yet
 old-overload-set-argument	vcc: the rules of [temp.names] are not implemented yet
-old-overloaded-comma	vcc: the rules of [expr.ref] are not implemented yet
 old-packs	vcc: the rules of [expr.sizeof] are not implemented yet
 old-partial-later	vcc: the rules of [temp.class.spec] are not implemented yet
 old-pseudo-destructor-side-effects	vcc: the rules of [expr.ref] are not implemented yet

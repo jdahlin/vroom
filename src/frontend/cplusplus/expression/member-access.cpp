@@ -306,11 +306,20 @@ analysis_result semantic_analysis::member_reference(SyntaxRef n,
                                                     expression_meaning &m)
 {
     bool arrow = n[1].is(preprocessing_op_or_punc::ARROW);
-    if (!n[2].is_identifier())
-        /* template, a qualified-id, a destructor's name, an operator
-           function's */
+    token_index name = 0;
+    if (n[2].is_identifier()) {
+        name = n[2].token();
+    } else if (auto function = n[2].operator_function_id()) {
+        /* [over.oper]/1: x.operator->() names the member operator
+           function: the keyword's token takes the operator's name */
+        declarator_meaning function_name;
+        VTRY(r, operator_function_id(function, function_name));
+        name = function_name.id;
+    } else {
+        /* template, a qualified-id, a destructor's name, a conversion
+           function's or a literal operator's */
         return not_supported(n, "expr.ref");
-    token_index name = n[2].token();
+    }
     /* (the call's callee name, which analysing the object expression's
        calls changes) */
     token_index callee = overloaded_callee;

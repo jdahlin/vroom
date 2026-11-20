@@ -43,6 +43,11 @@ token_index semantic_analysis::callee_name(SyntaxElement c) const
                  preprocessing_op_or_punc::ARROW)) &&
         c[2].is_identifier())
         return c[2].token();
+    if (c.is(syntax_kind::postfix_expression) && c.size() == 3 &&
+        (c[1].is(preprocessing_op_or_punc::DOT,
+                 preprocessing_op_or_punc::ARROW)) &&
+        c[2].operator_function_id())
+        return c[2].operator_function_id().operator_keyword().token();
     return 0;
 }
 
