@@ -1068,9 +1068,14 @@ analysis_result semantic_analysis::list_initialization_of(
     if (target.kind == type_kind::lvalue_reference ||
         target.kind == type_kind::rvalue_reference)
         return not_supported(list, "dcl.init.list");
+    /* [dcl.init.list]/3.10: no element: value-initialization
+       ([dcl.init]/8: zero-initialization of a scalar, an enumeration's
+       too); one element of an enumeration is not analysed */
+    bool empty_enumeration =
+        target.kind == type_kind::enumeration && clauses.empty();
     if (target.kind != type_kind::fundamental &&
         target.kind != type_kind::pointer &&
-        target.kind != type_kind::pointer_to_member)
+        target.kind != type_kind::pointer_to_member && !empty_enumeration)
         return not_supported(list, "dcl.init.list");
     if (clauses.empty()) {
         /* [dcl.init]/8: to value-initialize a scalar is to zero-initialize
