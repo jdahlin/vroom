@@ -46,3 +46,5 @@ unsigned long no_operand = sizeof();
 unsigned long type_with_declarator_name = sizeof(int x);
 unsigned long unevaluated_call_of_incomplete = sizeof(*(Incomplete *)0);
 unsigned long void_expression = sizeof((void)0);
+struct This_in_default_argument { int m; void f(unsigned long = sizeof(this->m)); };
+struct Member_in_unevaluated_default_argument { int m; void f(unsigned long = sizeof(m) + alignof(decltype(m))); };
