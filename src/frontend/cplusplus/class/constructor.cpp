@@ -428,7 +428,7 @@ bool semantic_analysis::function_specifiers_only(SyntaxRef seq,
 analysis_result semantic_analysis::special_member_declarator(
     entity_index c, SyntaxRef declaration, SyntaxElement d, uint8_t access,
     bool definition, bool constexpr_specified, bool virtual_specified,
-    bool explicit_specified)
+    bool explicit_specified, bool inline_specified)
 {
     qualified_type type = qualified_type::make(
         type_table.fundamental(fundamental_type::void_), cv_none);
@@ -561,7 +561,7 @@ analysis_result semantic_analysis::special_member_declarator(
        [dcl.constexpr]/1: "A function or static data member declared with
        the constexpr or consteval specifier is implicitly an inline
        function or variable" */
-    x.inline_ = definition || constexpr_specified;
+    x.inline_ = definition || constexpr_specified || inline_specified;
     x.constexpr_ = constexpr_specified;
     x.defined = definition;
     x.access = access;

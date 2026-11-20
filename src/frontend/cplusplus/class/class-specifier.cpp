@@ -1143,7 +1143,7 @@ analysis_result semantic_analysis::member_declaration_with_specifiers(
     uint32_t lead = leading_gnu_attributes(node);
     uint32_t at = lead;
     bool constexpr_specified = false, virtual_specified = false,
-         explicit_specified = false;
+         explicit_specified = false, inline_specified = false;
     /* [class.mem]/1: member-declarator: declarator virt-specifier-seq_opt;
        a destructor's ([class.virtual]/4, /5): the declarator, its
        virt-specifiers in override_ and final_ */
@@ -1165,7 +1165,8 @@ analysis_result semantic_analysis::member_declaration_with_specifiers(
     if (node.size() > lead + 1 &&
         node[lead].is(syntax_kind::decl_specifier_seq) &&
         function_specifiers_only(node[lead], constexpr_specified,
-                                 &virtual_specified, &explicit_specified) &&
+                                 &virtual_specified, &explicit_specified,
+                                 &inline_specified) &&
         declares_special_member(c, special(node[lead + 1])))
         at = lead + 1;
     if (lead == node.size() || at > lead ||
@@ -1200,7 +1201,7 @@ analysis_result semantic_analysis::member_declaration_with_specifiers(
             virt_final = final_;
             analysis_result r = special_member_declarator(
                 c, node, special(node[at]), access, false, constexpr_specified,
-                virtual_specified, explicit_specified);
+                virtual_specified, explicit_specified, inline_specified);
             virt_override = virt_final = false;
             return r;
         }
@@ -1217,7 +1218,7 @@ analysis_result semantic_analysis::member_declaration_with_specifiers(
         }
         analysis_result r = special_member_declarator(
             c, node, node[at], access, true, constexpr_specified,
-            virtual_specified, explicit_specified);
+            virtual_specified, explicit_specified, inline_specified);
         if (r == analysis_result::well_formed)
             bodies.append(node);
         return r;
@@ -1892,12 +1893,12 @@ semantic_analysis::member_function_definition(entity_index c,
         return r;
     }
     bool constexpr_specified = false, body_virtual = false,
-         body_explicit = false;
+         body_explicit = false, body_inline = false;
     uint32_t at = 0;
     auto seq = definition.decl_specifier_seq();
     if (seq && definition.size() > leading_gnu_attributes(definition) + 2 &&
         function_specifiers_only(seq, constexpr_specified, &body_virtual,
-                                 &body_explicit) &&
+                                 &body_explicit, &body_inline) &&
         declares_special_member(c, definition.declarator()))
         at = 1;
     if (at || !seq) {

@@ -3267,7 +3267,8 @@ class semantic_analysis
     analysis_result special_member_declarator(
         entity_index c, SyntaxRef declaration, SyntaxElement d, uint8_t access,
         bool definition, bool constexpr_specified = false,
-        bool virtual_specified = false, bool explicit_specified = false);
+        bool virtual_specified = false, bool explicit_specified = false,
+        bool inline_specified = false);
     /* virtual_specified: in a class, where virtual is one of them */
     bool function_specifiers_only(SyntaxRef seq, bool &constexpr_specified,
                                   bool *virtual_specified = nullptr,
