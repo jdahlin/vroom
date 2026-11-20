@@ -451,11 +451,14 @@ analysis_result semantic_analysis::template_argument_for(
         out.type = to;
         return analysis_result::well_formed;
     }
+    /* the kind read before the expression's analysis, which may add types
+       (and move the table tr is in) */
+    type_kind to_kind = tr.kind;
     expression_meaning m;
     analysis_result r = expression(written, m);
     if (r == analysis_result::well_formed)
         VTRY_SET(r, operand_value(at, m));
-    if (tr.kind == type_kind::enumeration) {
+    if (to_kind == type_kind::enumeration) {
         /* [expr.const]/10's converted constant expression of an
            enumeration type: one of that type (no conversion) */
         if (m.type.unqualified() != to.unqualified())
