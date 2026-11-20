@@ -48,7 +48,7 @@ analysis_result semantic_analysis::template_declaration(TemplateDeclaration t)
                defined outside it */
             SyntaxRef d = inner.declaration();
             if (d.is(syntax_kind::function_definition) &&
-                out_of_class_member(d, nullptr, true))
+                out_of_class_member(d))
                 return member_definition_of_template(t, d, inner);
             return not_supported(t, "temp.mem");
         },
@@ -2469,8 +2469,7 @@ semantic_analysis::class_template_declaration(SyntaxRef n, SyntaxRef elaborated)
 /* a function-definition's declarator-id S<A...>::f (behind ptr-operators):
    the simple-template-id, else 0 */
 SyntaxRef semantic_analysis::out_of_class_member(SyntaxRef definition,
-                                                 token_index *name,
-                                                 bool operators) const
+                                                 token_index *name) const
 {
     /* ([ext:gnu_attributes] before the declaration are not among its
        parts) */
@@ -2495,7 +2494,7 @@ SyntaxRef semantic_analysis::out_of_class_member(SyntaxRef definition,
         return 0;
     /* (an operator function's name is made when the declarator is
        analysed: [over.oper]) */
-    bool operator_name = operators && q[1].operator_function_id();
+    bool operator_name = static_cast<bool>(q[1].operator_function_id());
     /* ([class.dtor]/1: ~ and the class's name) */
     bool destructor = q[1].is(syntax_kind::unqualified_id) &&
                       q[1].size() == 2 && q[1][1].is_identifier();
@@ -2504,7 +2503,9 @@ SyntaxRef semantic_analysis::out_of_class_member(SyntaxRef definition,
     auto nested = q[0];
     if (name && destructor)
         *name = q[1][1].token();
-    else if (name && !operator_name)
+    else if (name && operator_name)
+        *name = q[1].operator_function_id().operator_keyword().token();
+    else if (name)
         *name = q[1].token();
     if (nested.size() != 2 || !nested[0].is(syntax_kind::simple_template_id))
         return 0;
@@ -2543,8 +2544,7 @@ analysis_result semantic_analysis::member_definition_of_template(
     for (SyntaxRef x : parameters)
         if (template_parameter_has_default(x))
             return not_supported(x, "temp.param");
-    SyntaxRef id =
-        out_of_class_member(definition, nullptr, static_cast<bool>(inner));
+    SyntaxRef id = out_of_class_member(definition);
     lookup_result x;
     entity_index named = 0;
     if (!template_id_name(id, x, named))

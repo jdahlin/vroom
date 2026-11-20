@@ -3817,10 +3817,10 @@ class semantic_analysis
     };
     owned_array<template_member_definition> template_member_definitions;
     /* the simple-template-id before the declarator-id's :: of a
-       function-definition (box<T>::f), or 0; and the member's name */
+       function-definition (box<T>::f), or 0; and the member's name (for an
+       operator function, its operator keyword's token) */
     SyntaxRef out_of_class_member(SyntaxRef definition,
-                                  token_index *name = nullptr,
-                                  bool operators = false) const;
+                                  token_index *name = nullptr) const;
     analysis_result member_definition_of_template(SyntaxRef n,
                                                   SyntaxRef definition,
                                                   SyntaxRef inner = 0);
