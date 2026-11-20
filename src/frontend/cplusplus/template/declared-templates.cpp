@@ -794,6 +794,7 @@ analysis_result semantic_analysis::declare_template_parameters(
             entity_table.bind(scope, name, e);
         template_parameter_entities.append(e);
         template_parameter_nodes.append(node);
+        template_parameter_default_names.append(first);
     }
     if (template_templates.empty())
         return analysis_result::well_formed;
@@ -1683,19 +1684,18 @@ semantic_analysis::class_template_definition(SyntaxRef n, SyntaxRef specifier)
            scope"; /10: "The set of default template-arguments available
            for use is obtained by merging the default arguments from all
            prior declarations": the definition's parameters take the
-           declaration's defaults, if their names are the same (the
-           default's names are the definition's when analysed) */
+           declaration's defaults, which keep the declaration's parameter
+           names ([temp.over.link]: names do not matter;
+           template_parameter_default_names) */
         for (uint32_t i = 0; i < d.parameter_count; i++) {
             SyntaxRef before = template_parameter_nodes[d.first_parameter + i];
             if (!template_parameter_has_default(before))
                 continue;
-            if (template_parameter_has_default(parameters[i]) ||
-                entity_table[template_parameter_entities[first + i]].name !=
-                    entity_table[template_parameter_entities[d.first_parameter +
-                                                             i]]
-                        .name)
+            if (template_parameter_has_default(parameters[i]))
                 return not_supported(n, "temp.param");
             template_parameter_nodes[first + i] = before;
+            template_parameter_default_names[first + i] =
+                template_parameter_default_names[d.first_parameter + i];
         }
         /* [temp.param]/14 on the merged defaults (clang's error is the
            definition's) */

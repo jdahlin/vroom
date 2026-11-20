@@ -640,10 +640,14 @@ analysis_result semantic_analysis::default_template_arguments(
             return not_supported(at, "temp.arg");
         entity_index scope = entity_table.make(entity_kind::block_scope, 0,
                                                entity_table[t].enclosing);
+        /* the names of the declaration that gave the default
+           ([temp.param]/12, merged: they may differ from the
+           definition's) */
+        uint32_t names =
+            template_parameter_default_names[ft.first_parameter + i];
         for (uint32_t k = 0; k < i; k++)
             bind_template_argument(
-                scope, template_parameter_entities[ft.first_parameter + k],
-                arguments[k]);
+                scope, template_parameter_entities[names + k], arguments[k]);
         current_scope = scope;
         lookup_horizon = ft.declaration.first_token();
         template_argument a;

@@ -3550,6 +3550,10 @@ class semantic_analysis
        parameter-declaration, for its default template-argument */
     owned_array<entity_index> template_parameter_entities;
     owned_array<SyntaxRef> template_parameter_nodes;
+    /* per template-parameter: the first_parameter of the declaration whose
+       parameter names its default template-argument uses (its own
+       template's, or an earlier declaration's after a merge) */
+    owned_array<uint32_t> template_parameter_default_names;
     /* the instantiation whose specialization the declaration analysed
        now declares (its record's index plus one), and how deep
        instantiations nest ([temp.inst]/16) */
