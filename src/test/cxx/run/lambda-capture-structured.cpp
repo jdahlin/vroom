@@ -16,5 +16,9 @@ int main()
     auto [c, d] = arr;
     auto k = [&c, d] { c += d; return c; };
     check(k() == 11);
+    auto nested = [&] { return [=] { return a + b; }(); };
+    check(nested() == 8);
+    auto mut = [a]() mutable { a += 1; return a; };
+    check(mut() == 5 && mut() == 6 && a == 4);
     return 0;
 }
