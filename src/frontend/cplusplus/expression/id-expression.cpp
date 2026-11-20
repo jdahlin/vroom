@@ -721,6 +721,11 @@ analysis_result semantic_analysis::named_entity(token_index t, entity_index e,
 analysis_result semantic_analysis::qualified_id(QualifiedId n,
                                                 expression_meaning &m)
 {
+    if (n.size() >= 2 && n[0].is(syntax_kind::nested_name_specifier) &&
+        n[n.size() - 1].is(syntax_kind::simple_template_id) &&
+        (n.size() == 2 ||
+         (n.size() == 3 && n[1].is(standard_keyword::template_))))
+        return qualified_template_id(n, m);
     if (n.size() != 2 || !n.nested_name_specifier() || !n.identifier())
         return not_supported(n, "expr.prim.id.qual");
     nominated_scope scope;
@@ -805,6 +810,82 @@ analysis_result semantic_analysis::qualified_id(QualifiedId n,
     if (x.kind == entity_kind::function && x.next_overload &&
         t != overloaded_callee)
         return not_supported(n, "over.over");
+    return class_member_value(n, t, e, m);
+}
+
+/*
+ * [expr.prim.id.qual]/2 with [temp.names]/1: C::f<A> or C::template f<A>,
+ * a template-id naming the one member function template of the class's
+ * name, every template argument explicit and none dependent
+ * ([temp.arg.explicit]/4): the specialization is the member named, used
+ * as C::f is (&C::f<A>: a pointer to member, [expr.unary.op]/4, of a
+ * non-static one).  Several templates of the name, or arguments left to
+ * deduce from a target type ([temp.deduct.funcaddr]), are [over.over]'s.
+ */
+analysis_result semantic_analysis::qualified_template_id(SyntaxRef n,
+                                                         expression_meaning &m)
+{
+    SyntaxElement id = n[n.size() - 1];
+    if (id.size() < 3 || !id[0].is_identifier())
+        return not_supported(n, "temp.names");
+    nominated_scope scope;
+    VTRY(r, nested_name_specifier(n[0], scope));
+    if (is_namespace(scope.entity) ||
+        entity_table[scope.entity].kind != entity_kind::class_type)
+        return not_supported(n, "expr.prim.id.qual");
+    token_index t = id[0].token();
+    lookup_result x = lookup_qualified(scope.entity, tokens.identifier(t),
+                                       lookup_filter::any);
+    entity_index held = 0;
+    if (x.unknown && !x.entity && !x.ambiguous &&
+        member_function_template_of(x.unknown_entity))
+        held = x.unknown_entity;
+    else if (x.entity && !x.ambiguous &&
+             entity_table[x.entity].member_templates)
+        held = member_templates_of(x.entity);
+    owned_array<uint32_t> group;
+    if (held)
+        function_template_overloads(held, group);
+    if (group.size() != 1)
+        return not_supported(n, "over.over");
+    uint32_t ft = group[0];
+    owned_array<SyntaxElement> written;
+    owned_array<bool> expansion;
+    VTRY_SET(r, written_arguments_of(id, written, expansion));
+    if (written.size() != function_templates[ft - 1].parameter_count)
+        return not_supported(n, "over.over");
+    owned_array<template_argument> specified;
+    for (size_t i = 0; i < written.size(); i++) {
+        if (expansion[i])
+            return not_supported(n, "temp.variadic");
+        uint32_t position =
+            explicit_argument_position(ft, static_cast<uint32_t>(i));
+        if (position == UINT32_MAX)
+            return not_supported(n, "temp.arg.explicit");
+        template_argument a;
+        VTRY_SET(r, template_argument_for(id.index(), ft, position, written[i],
+                                          specified.data(), a));
+        if (depends_on_template_parameter(a.type) || a.template_entity ||
+            a.kind == template_argument::kind_t::pack)
+            return not_supported(n, "temp.dep");
+        specified.append(a);
+    }
+    entity_index e = 0;
+    VTRY_SET(r,
+             instantiate(n, function_templates[ft - 1].entity, specified.data(),
+                         static_cast<uint32_t>(specified.size()), e));
+    used(t, e);
+    return class_member_value(n, t, e, m);
+}
+
+/* the member e of a class a qualified-id names (at its token t): a pointer
+   to member's operand, (*this)'s member, or the static member itself */
+analysis_result semantic_analysis::class_member_value(SyntaxRef n,
+                                                      token_index t,
+                                                      entity_index e,
+                                                      expression_meaning &m)
+{
+    const entity &x = entity_table[e];
     if (x.kind == entity_kind::function && !x.next_overload) {
         VTRY(r, deleted_use(t, e));
     }

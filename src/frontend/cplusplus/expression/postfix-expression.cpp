@@ -803,17 +803,17 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
         if (held) {
             bool ambiguous = false;
             entity_index from = current_class();
-            bool qualified_name = named_in != 0;
             if (!named_in)
                 named_in = entity_table[held].enclosing;
             /* (*this) is the object where this class is, or is derived
-               from, the class the name is of */
+               from, the class the name is of; elsewhere (a static member
+               function, a nested class's member, a default argument) there
+               is no object, and only a static member function can be
+               called ([class.static.mfct]/2) */
             bool related = from && (named_in == from ||
                                     base_step(from, named_in, ambiguous));
-            if (ambiguous || (!related && !qualified_name))
+            if (ambiguous)
                 return not_supported(n, "temp.mem");
-            /* a static member's (or no member function's) context has no
-               object: only a static member function can be called */
             expression_meaning object;
             bool has_object = related && has_this_object();
             if (has_object)

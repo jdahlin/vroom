@@ -140,8 +140,41 @@ analysis_result semantic_analysis::member_function_template(
            not weighed */
         return not_supported(n, "temp.mem");
     }
+    if (prior) {
+        /* [over.load]/2: "member function template declarations with the
+           same name, the same parameter-type-list, the same trailing
+           requires-clause (if any), and the same template-head cannot be
+           overloaded if any of them is a static member function template
+           declaration" (judged when the return types are the same too) */
+        owned_array<uint32_t> group;
+        function_template_overloads(prior, group);
+        for (uint32_t g : group) {
+            const function_template f = function_templates[g - 1];
+            if (entity_table[f.entity].nonstatic_member != s.static_ ||
+                entity_table[f.entity].enclosing != c)
+                continue;
+            if (equivalent_template(f, n, first,
+                                    static_cast<uint32_t>(parameters.size()),
+                                    type))
+                return ill_formed_at_token(
+                    m.id,
+                    "member function template declarations with the same "
+                    "name, parameter-type-list and template-head cannot be "
+                    "overloaded if any of them is static",
+                    "over.load");
+        }
+    }
     function_template record = new_template(
         name, c, n, index, first, static_cast<uint32_t>(parameters.size()));
+    /* [dcl.fct.default]/4: the trailing parameters with a default
+       argument, which a call may leave out (deduce_from_call) and its
+       specializations take (instantiate) */
+    for (const parameter_meaning &p : function_parameters) {
+        if (!p.default_argument)
+            record.default_arguments = 0;
+        else
+            record.default_arguments++;
+    }
     record.gnu_flags = gnu_flags;
     record.abi_tag = abi_tag;
     if (defines)
@@ -341,9 +374,20 @@ analysis_result semantic_analysis::member_template_call(
     }
     if (!entity_table[f].nonstatic_member)
         return static_member_call(n, f, object, arguments, early, m);
+    if (!object && !current_class() && !defining_class)
+        /* [expr.prim.id]/2: "An id-expression that denotes a non-static
+           data member or non-static member function of a class can only
+           be used: as part of a class member access [...], or to form a
+           pointer to member [...]" (X::f(a) outside any class) */
+        return ill_formed(n,
+                          "an id-expression that denotes a non-static member "
+                          "function can only be used as part of a class "
+                          "member access or to form a pointer to member",
+                          "expr.prim.id");
     if (!object)
         /* [class.mfct.non-static]/3: a non-static member function named
-           where no object is: ill-formed, not analysed */
+           where no object is (a static member's context, a default
+           argument): ill-formed, not analysed */
         return not_supported(n, "class.mfct.non-static");
     return bound_member_call(n, f, *object, arguments, early, m);
 }

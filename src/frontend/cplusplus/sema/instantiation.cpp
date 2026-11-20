@@ -261,6 +261,19 @@ analysis_result semantic_analysis::instantiate_definition(SyntaxRef at,
     entity_table[instantiations[index].specialization].defined = true;
     if (r == analysis_result::well_formed)
         return r;
+    if (r == analysis_result::unsupported &&
+        unsupported.size() > unsupported_before) {
+        /* a use of the specialization is refused when lowered (as an
+           instantiated member function's, instantiated_member_body),
+           never a definition without what its body did: the template's
+           declaration below is not the translation unit's when it is a
+           member of a class.  (It stays defined for the analysis: a use
+           in an unevaluated operand is as well-formed as before.) */
+        entity_index f = instantiations[index].specialization;
+        body_failures.append(unsupported[unsupported_before]);
+        entity_table[f].unsupported_body =
+            static_cast<uint32_t>(body_failures.size());
+    }
     for (analysed_declaration &d : declarations) {
         if (d.node != ft.declaration || d.result == analysis_result::ill_formed)
             continue;

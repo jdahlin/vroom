@@ -621,25 +621,8 @@ semantic_analysis::function_template_definition(SyntaxRef n,
            expressions involving template parameters"; one that is not is
            another template of the name, an overload ([temp.over]) */
         const function_template f = function_templates[g - 1];
-        if (f.parameter_count != parameters.size() ||
-            !same_template_parameters(first, f.first_parameter,
-                                      f.parameter_count) ||
-            !same_constraints(f.declaration, n))
-            continue;
-        owned_array<template_argument> values;
-        owned_array<bool> set;
-        for (uint32_t i = 0; i < f.parameter_count; i++) {
-            values.append(template_argument());
-            set.append(false);
-        }
-        bool same =
-            deduce_type(entity_table[f.entity].type, type, values, set, true);
-        for (uint32_t i = 0; i < f.parameter_count && same; i++) {
-            entity_index pe = template_parameter_entities[first + i];
-            if (set[i] && (entity_table[pe].kind != entity_kind::typedef_name ||
-                           !(values[i].type == entity_table[pe].type)))
-                same = false;
-        }
+        bool same = equivalent_template(
+            f, n, first, static_cast<uint32_t>(parameters.size()), type);
         /* [namespace.udecl]/13: one a using-declaration introduced joins
            the overload set with this one unless they are equivalent */
         if (same && entity_table[f.entity].enclosing != outer)
@@ -657,10 +640,9 @@ semantic_analysis::function_template_definition(SyntaxRef n,
            declarator the specializations are made from has not) */
         if (defaults || f.default_arguments)
             return not_supported(n, "dcl.fct.default");
-        if (old.enclosing != outer || f.parameter_count != parameters.size() ||
-            !same_template_parameters(first, f.first_parameter,
-                                      f.parameter_count) ||
-            old.constexpr_ != s.constexpr_ ||
+        /* (equivalent_template: the same template-head and function
+           type) */
+        if (old.enclosing != outer || old.constexpr_ != s.constexpr_ ||
             (s.static_ && old.linkage_of_name != linkage::internal))
             return not_supported(n, "temp.over.link");
         /* different names: the definition's are the ones its body uses
@@ -673,22 +655,6 @@ semantic_analysis::function_template_definition(SyntaxRef n,
                 entity_table[template_parameter_entities[f.first_parameter + i]]
                     .name)
                 renamed = true;
-        /* the function types the same once each parameter is the other's
-           (the old in terms of the new, exactly) */
-        owned_array<template_argument> values;
-        owned_array<bool> set;
-        for (uint32_t i = 0; i < f.parameter_count; i++) {
-            values.append(template_argument());
-            set.append(false);
-        }
-        if (!deduce_type(old.type, type, values, set, true))
-            return not_supported(n, "temp.over.link");
-        for (uint32_t i = 0; i < f.parameter_count; i++) {
-            entity_index pe = template_parameter_entities[first + i];
-            if (set[i] && (entity_table[pe].kind != entity_kind::typedef_name ||
-                           !(values[i].type == entity_table[pe].type)))
-                return not_supported(n, "temp.over.link");
-        }
         /* [dcl.inline]/5: an inline declaration after the definition is
            ill-formed; one before it makes the template inline */
         if (s.inline_ && !old.inline_ && f.definition)
@@ -1847,6 +1813,29 @@ semantic_analysis::class_template_definition(SyntaxRef n, SyntaxRef specifier)
         tokens[head_name.token()].kind != token_kind::identifier)
         return not_supported(n, "temp.class");
     uint32_t name = tokens.identifier(head_name.token());
+    /* [temp.mem]/3: "A member function template shall not be virtual.":
+       diagnosed in the definition, which is analysed only per
+       specialization (member_function_template's check) */
+    if (specifier.is(syntax_kind::class_specifier))
+        for (auto member :
+             specifier.class_specifier().member_specification().elements()) {
+            if (!member.is(syntax_kind::template_declaration) ||
+                member.size() != 2 ||
+                !member[1].is(syntax_kind::member_declaration,
+                              syntax_kind::function_definition))
+                continue;
+            SyntaxRef inner = member[1];
+            uint32_t lead = leading_gnu_attributes(inner);
+            if (lead >= inner.size() ||
+                !inner[lead].is(syntax_kind::decl_specifier_seq))
+                continue;
+            for (auto x : inner[lead].elements())
+                if (x.is(standard_keyword::virtual_))
+                    return ill_formed_at_token(
+                        x.token(),
+                        "a member function template shall not be virtual",
+                        "temp.mem");
+        }
     uint32_t index = 0, first = 0;
     entity_index scope = 0;
     VTRY_SET(r, template_parameter_scope(n, parameters, outer, name, index,
@@ -2620,6 +2609,38 @@ bool semantic_analysis::same_dependent_parameter_type(SyntaxRef a, SyntaxRef b)
     return ea > a.first_token();
 }
 
+/*
+ * [temp.over.link]/7: whether f is equivalent to the template declared by
+ * n, whose template-parameters are template_parameter_entities[first ..
+ * + count) and whose function type is type: the same template-head and
+ * requires-clauses, and the function types the same once each of f's
+ * parameters is the other's.
+ */
+bool semantic_analysis::equivalent_template(const function_template &f,
+                                            SyntaxRef n, uint32_t first,
+                                            uint32_t count, qualified_type type)
+{
+    if (f.parameter_count != count ||
+        !same_template_parameters(first, f.first_parameter, count) ||
+        !same_constraints(f.declaration, n))
+        return false;
+    owned_array<template_argument> values;
+    owned_array<bool> set;
+    for (uint32_t i = 0; i < count; i++) {
+        values.append(template_argument());
+        set.append(false);
+    }
+    if (!deduce_type(entity_table[f.entity].type, type, values, set, true))
+        return false;
+    for (uint32_t i = 0; i < count; i++) {
+        entity_index pe = template_parameter_entities[first + i];
+        if (set[i] && (entity_table[pe].kind != entity_kind::typedef_name ||
+                       !(values[i].type == entity_table[pe].type)))
+            return false;
+    }
+    return true;
+}
+
 bool semantic_analysis::same_template_parameters(uint32_t first,
                                                  uint32_t other_first,
                                                  uint32_t count)
@@ -2933,6 +2954,45 @@ analysis_result semantic_analysis::member_definition_of_template(
                 (tokens.identifier(t) == mine_name ||
                  tokens.identifier(t) == class_name))
                 return not_supported(n, "basic.lookup.qual");
+    }
+    if (!variable && !inner && of.definition.is(syntax_kind::class_specifier)) {
+        /* [temp.mem]/1: "A member template of a class template that is
+           defined outside of its class template definition shall be
+           specified with a template-head equivalent to that of the class
+           template followed by a template-head equivalent to that of the
+           member template": a definition with the class's template-head
+           alone, of a name only member templates of the class declare
+           (each member that writes the name, a template-declaration) */
+        token_index name = 0;
+        out_of_class_member(definition, &name);
+        uint32_t wanted = 0;
+        if (name && tokens[name].kind == token_kind::identifier)
+            wanted = tokens.identifier(name);
+        bool by_template = false, by_other = false;
+        for (auto member : of.definition.class_specifier()
+                               .member_specification()
+                               .elements()) {
+            if (!wanted || member.is_token())
+                continue;
+            bool writes = false;
+            for (token_index t = member.first_token(); t < member.end_token();
+                 t++)
+                if (tokens[t].kind == token_kind::identifier &&
+                    tokens.identifier(t) == wanted)
+                    writes = true;
+            if (writes && member.is(syntax_kind::template_declaration))
+                by_template = true;
+            else if (writes)
+                by_other = true;
+        }
+        if (by_template && !by_other)
+            return ill_formed_at_token(
+                name,
+                "a member template of a class template defined outside of "
+                "its class template definition shall be specified with the "
+                "class template's template-head followed by the member "
+                "template's",
+                "temp.mem");
     }
     template_member_definition record;
     record.first_parameter = first;
