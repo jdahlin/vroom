@@ -288,6 +288,7 @@ analysis_result semantic_analysis::substituted_parameter_type(
     qualified_type t = sp.type;
     if (r == analysis_result::well_formed && form.has_declarator) {
         declarator_meaning dm;
+        flag_set pack(pack_declarator, true);
         r = declarator(node, form.declarator, t, dm);
     }
     current_scope = saved;
