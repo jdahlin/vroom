@@ -1743,7 +1743,8 @@ analysis_result semantic_analysis::call_with(
     if (called && !entity_table[called].constexpr_ &&
         !(entity_table[called].enclosing &&
           entity_table[entity_table[called].enclosing].lambda) &&
-        !(entity_table[called].gnu_flags & (gnu_bit_count | gnu_query_builtin)))
+        !(entity_table[called].gnu_flags &
+          (gnu_bit_count | gnu_query_builtin | gnu_floating_constant)))
         m.evaluation = constness::not_constant;
     /* a constexpr member function's invocation is the evaluator's */
     if (called && entity_table[called].constexpr_) {

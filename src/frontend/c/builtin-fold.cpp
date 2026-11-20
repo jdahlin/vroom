@@ -104,37 +104,8 @@ CC_PRIVATE bool cc_builtin_fold(cc *c, const node *x, cc_value *v)
                 : c->o->target == PP_DARWIN                  ? 52
                 : CC_X86_64(c)                               ? 63
                                                              : 112;
-        u128 payload = 0;
-        unsigned base = 10;
-        bool valid = true;
-        if (text[0] == '0') {
-            base = 8;
-            if (text[1] == 'x' || text[1] == 'X')
-                base = 16, text += 2;
-            if (base == 16 && !*text)
-                valid = false;
-        }
-        for (; *text; text++) {
-            unsigned digit =
-                *text >= '0' && *text <= '9'   ? (unsigned)(*text - '0')
-                : *text >= 'a' && *text <= 'f' ? (unsigned)(*text - 'a' + 10)
-                : *text >= 'A' && *text <= 'F' ? (unsigned)(*text - 'A' + 10)
-                                               : base;
-            if (digit >= base || payload > (UINT64_MAX - digit) / base) {
-                valid = false;
-                break;
-            }
-            payload = payload * base + digit;
-        }
-        if (!valid)
+        if (!vsoftfloat_nan_payload(text, p, x->aux == CC_BUILTIN_NANS, &v->q))
             return false;
-        payload &= (((u128)1 << (p - 1)) - 1);
-        if (x->aux == CC_BUILTIN_NANS) {
-            if (!payload)
-                payload = (u128)1 << (p - 2);
-        } else
-            payload |= (u128)1 << (p - 1);
-        v->q = (u128)0x7fff << 112 | payload << (112 - p);
         v->kind = CC_VALUE_FLOAT, v->ld = true,
         v->f = vsoftfloat_to_double(v->q), v->ice = false;
         return true;
