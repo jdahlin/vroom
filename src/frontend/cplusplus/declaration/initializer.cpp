@@ -1148,7 +1148,8 @@ analysis_result semantic_analysis::list_initialization_of(
         return class_list_initialization(list, clauses, type, direct, result);
     if (target.kind == type_kind::lvalue_reference ||
         target.kind == type_kind::rvalue_reference)
-        return not_supported(list, "dcl.init.list");
+        return reference_list_initialization(list, clauses, type, direct,
+                                             result);
     /* [dcl.init.list]/3.10: no element: value-initialization
        ([dcl.init]/8: zero-initialization of a scalar, an enumeration's
        too); one element of an enumeration is not analysed */
@@ -1183,6 +1184,71 @@ analysis_result semantic_analysis::list_initialization_of(
         /* braces around a scalar's initializer: clang's warning */
         return not_supported(list, "dcl.init.list");
     return initialize_from(list, clauses[0], type, direct, true, result);
+}
+
+/*
+ * [dcl.init.list]/3 for a reference: "(3.9) Otherwise, if the initializer
+ * list has a single element of type E and either T is not a reference type
+ * or its referenced type is reference-related to E, the object or reference
+ * is initialized from that element (by copy-initialization for copy-list-
+ * initialization, or by direct-initialization for direct-list-
+ * initialization)"; "(3.10) Otherwise, if T is a reference type, a prvalue
+ * is generated.  The prvalue initializes its result object by copy-list-
+ * initialization.  The prvalue is then used to direct-initialize the
+ * reference.  The type of the temporary is the type referenced by T".
+ * A reference to an array of unknown bound is not analysed.
+ */
+analysis_result semantic_analysis::reference_list_initialization(
+    SyntaxRef list, const owned_array<SyntaxElement> &clauses,
+    qualified_type type, bool direct, initialized_value &result)
+{
+    qualified_type referenced = type_table[type.unqualified()].operand;
+    const struct type x = type_table[referenced.unqualified()];
+    if (x.kind == type_kind::array && !x.bound_known)
+        return not_supported(list, "dcl.init.list");
+    qualified_type prvalue_type =
+        qualified_type::make(referenced.unqualified(), cv_none);
+    expression_meaning m;
+    m.type = prvalue_type;
+    m.category = value_category::prvalue;
+    initialized_value made;
+    if (clauses.size() == 1 && !clauses[0].is(syntax_kind::braced_init_list)) {
+        expression_meaning e;
+        VTRY(r, target_expression(clauses[0], type, e));
+        const struct type y = type_table[e.type.unqualified()];
+        bool related = similar(
+            prvalue_type, qualified_type::make(e.type.unqualified(), cv_none));
+        if (!related && x.kind == type_kind::class_type &&
+            y.kind == type_kind::class_type &&
+            entity_table[x.entity].kind == entity_kind::class_type &&
+            entity_table[y.entity].kind == entity_kind::class_type) {
+            bool ambiguous = false;
+            related = base_step(y.entity, x.entity, ambiguous) != 0;
+        }
+        if (related)
+            /* (3.9): initialized from the element */
+            return initialize_with(list, e, type, direct, true, result);
+        if (x.kind != type_kind::class_type && x.kind != type_kind::array) {
+            /* (3.10): the prvalue initialized from the element, analysed
+               already (narrowing checked) */
+            VTRY(r2, initialize_with(list, e, prvalue_type, false, true, made));
+            m.evaluation = made.evaluation;
+            m.value = made.value;
+            m.node = made.node;
+            return initialize_with(list, m, type, true, false, result);
+        }
+        /* a class or an array initialized from it: the clause is analysed
+           again by the list-initialization of the prvalue */
+    }
+    /* [dcl.init.list]/3.10 as clang has it (and as C++11 to C++17 worded
+       it): by copy-list-initialization or direct-list-initialization,
+       depending on the kind of initialization for the reference; the
+       text since CWG 2267 always copies */
+    VTRY(r, list_initialization_of(list, clauses, prvalue_type, direct, made));
+    m.evaluation = made.evaluation;
+    m.value = made.value;
+    m.node = made.node;
+    return initialize_with(list, m, type, true, false, result);
 }
 
 /*

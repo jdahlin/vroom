@@ -3544,6 +3544,12 @@ class semantic_analysis
     analysis_result list_initialization_of(
         SyntaxRef list, const owned_array<SyntaxElement> &clauses,
         qualified_type &type, bool direct, initialized_value &result);
+    /* [dcl.init.list]/3.9, /3.10 for a reference: initialized from the
+       single element it is reference-related to, else bound to a prvalue
+       of the referenced type that the list initializes */
+    analysis_result reference_list_initialization(
+        SyntaxRef list, const owned_array<SyntaxElement> &clauses,
+        qualified_type type, bool direct, initialized_value &result);
     /* [dcl.init.list]/3 for a class: an aggregate's elements, each from
        its clause or from an empty list */
     analysis_result class_list_initialization(

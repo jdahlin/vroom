@@ -1379,6 +1379,18 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
         initialized_value value;
         if (item.size() == 2 && item[1].is(syntax_kind::braced_init_list)) {
             r = list_initialization(item[1], type, true, value);
+            if (r == analysis_result::well_formed &&
+                (record.kind == type_kind::lvalue_reference ||
+                 record.kind == type_kind::rvalue_reference) &&
+                semantics[value.node].kind == semantic_kind::bind_reference &&
+                semantics[value.node].category == value_category::prvalue)
+                /* the reference is bound to the temporary the list
+                   initialized (reference_list_initialization) */
+                return ill_formed(item,
+                                  "a temporary expression bound to a "
+                                  "reference member in a mem-initializer is "
+                                  "ill-formed",
+                                  "class.base.init");
         } else if (item.size() == 3) {
             /* ( ): value-initialization ([dcl.init]/11): zero for the
                members analysis has */
@@ -1883,8 +1895,19 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
         declare_implicit(c, special_member::constructor, false, true);
     }
     if (!user_constructors && !entity_table[c].implicit_default_deleted &&
-        (construction || entity_table[c].first_constructor))
-        declare_implicit(c, special_member::constructor, false);
+        (construction || entity_table[c].first_constructor)) {
+        /* [class.default.ctor]/2: "A defaulted default constructor for
+           class X is defined as deleted if ... any non-variant non-static
+           data member with no default member initializer is of reference
+           type" (or a const one without a brace-or-equal-initializer): a
+           deleted function has no definition ([dcl.fct.def.delete]), and an
+           aggregate with such members is initialized by a braced list,
+           which calls no constructor ([dcl.init.aggr]) */
+        if (default_constructor_deleted(c))
+            entity_table[c].implicit_default_deleted = true;
+        else
+            declare_implicit(c, special_member::constructor, false);
+    }
     if (destruction && !entity_table[c].destructor)
         declare_implicit(c, special_member::destructor, false);
     return inherit_constructors(c, n);
@@ -2167,7 +2190,10 @@ bool semantic_analysis::default_constructor_deleted(entity_index c) const
     subobject_classes(c, classes);
     for (entity_index k : classes)
         if (entity_table[k].kind == entity_kind::class_type &&
-            default_constructor_deleted(k))
+            default_constructed(c, k) && default_constructor_deleted(k))
+            /* a member with a default member initializer is not
+               default-initialized by the constructor ([class.base.init]/9.1),
+               and a deleted function it would call does not delete this one */
             return true;
     return false;
 }
@@ -2682,18 +2708,22 @@ analysis_result semantic_analysis::class_direct_initialization(
         /* T() of an aggregate with default member initializers:
            [dcl.init]/9 value-initialization zero-initializes the object
            and then default-initializes it with the implicit, non-trivial
-           default constructor.  When every member has an initializer the
-           zeros are overwritten, so the constructor alone gives the
-           value; a member without one stays zero, which is not analysed
-           (zero-initialization then a constructor) */
+           default constructor.  When every member has an initializer and
+           no base class holds data the zeros are overwritten, so the
+           constructor alone gives the value; otherwise the construct node
+           is marked (op 1) to zero the object first */
         const entity &x = entity_table[c];
-        if (x.base_count)
-            return not_supported(n, "dcl.init");
+        bool overwritten = !x.base_count;
         for (uint32_t i = 0; i < x.member_count; i++)
             if (!entity_table[class_members[x.first_member + i]]
                      .default_initializer)
-                return not_supported(n, "dcl.init");
+                overwritten = false;
         r = construct(n, type, arguments, 0, value);
+        if (r == analysis_result::well_formed && !overwritten) {
+            if (semantics[value.node].kind != semantic_kind::construct)
+                return not_supported(n, "dcl.init");
+            semantics[value.node].op = 1;
+        }
     } else if (is_aggregate(c) &&
                (arguments.size() != 1 ||
                 arguments[0].type.unqualified() != type.unqualified())) {
