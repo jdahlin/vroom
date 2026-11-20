@@ -3532,11 +3532,13 @@ class semantic_analysis
                         const owned_array<designated_item> &items,
                         qualified_type &type, initialized_value &result);
     /* the elements a designator selects of the aggregate target: first and
-       last (an array range) */
+       last (an array range); through: the name is a member of the anonymous
+       union or structure that is the element */
     analysis_result designator_elements(
         SyntaxRef list, SyntaxElement designator, const struct type &target,
         const owned_array<entity_index> &members, uint64_t bound,
-        bool bound_known, uint64_t &first, uint64_t &last);
+        bool bound_known, uint64_t &first, uint64_t &last, bool &through);
+    bool anonymous_member_declares(entity_index cls, uint32_t name);
     /* [dcl.init.aggr]/5: an element no clause initializes */
     analysis_result omitted_element_checks(SyntaxRef list,
                                            qualified_type element,

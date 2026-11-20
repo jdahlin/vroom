@@ -34,6 +34,13 @@ static const S *const ptrs[] = {[1] = &s1, [0] = &s2};
 struct C { char name[6]; int v[2]; };
 static const C cs[3] = {[2].name = "abc", [2].v[1] = 7, [0] = {.v = {1, 2}}};
 static const U u2 = {.x = 9};
+/* a member of an anonymous union or structure: designated through it */
+struct R { unsigned char op, size; union { long imm; struct { int off; unsigned ref; }; unsigned lab; }; int tail; };
+struct Q { int head; struct { int x; int y; }; int tail; };
+static const R r1 = {.op = 1, .size = 2, .imm = -16};
+static const R r2 = {.imm = 5, .tail = 9};
+static const Q q1 = {.head = 1, .x = 2, .y = 3, .tail = 4};
+static const Q q2 = {.y = 7};
 static int local()
 {
     int v = 3;
@@ -64,6 +71,9 @@ int main()
     printf("%d %d\n", ptrs[0] == &s2, ptrs[1] == &s1);
     printf("%s %d %d %d %d %d\n", cs[2].name, cs[2].v[0], cs[2].v[1], cs[0].v[1], cs[0].name[0], cs[1].v[0]);
     printf("%d\n", u2.x);
+    printf("%d %d %ld %d %d %d %d %d %d %d\n", r1.op, r1.size, r1.imm, r1.tail, r2.op, (int)r2.imm, r2.tail, q1.head + q1.x * 10 + q1.y * 100 + q1.tail * 1000, q2.x, q2.y);
+    R rl = {.size = 3, .imm = local() - 1};
+    printf("%d %ld\n", rl.size, rl.imm);
     printf("%d\n", local());
     return 0;
 }
