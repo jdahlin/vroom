@@ -3886,6 +3886,9 @@ class semantic_analysis
            it is (function_templates' index plus one; 0 the primary) */
         entity_index template_entity = 0;
         uint32_t pattern = 0;
+        /* the definition's own template-parameters (template_parameter_
+           entities' index) */
+        uint32_t first_parameter = 0;
     };
     owned_array<template_member_definition> template_member_definitions;
     /* the simple-template-id before the declarator-id's :: of a
@@ -3893,6 +3896,8 @@ class semantic_analysis
        operator function, its operator keyword's token) */
     SyntaxRef out_of_class_member(SyntaxRef definition,
                                   token_index *name = nullptr) const;
+    SyntaxRef out_of_class_variable_member(SyntaxRef declaration,
+                                           token_index *name = nullptr) const;
     SyntaxRef out_of_class_nested(SyntaxRef definition,
                                   token_index *name = nullptr) const;
     entity_index plain_class_nominated(SyntaxRef nested);

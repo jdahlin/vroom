@@ -98,6 +98,10 @@ semantic_analysis::template_simple_declaration(TemplateDeclaration t,
             return not_supported(t, "temp.pre");
         if (SyntaxRef id = variable_specialization_id(s))
             return variable_partial_specialization(t, s, id);
+        /* [temp.static]/1: a static data member of a class template,
+           defined outside it */
+        if (out_of_class_variable_member(s))
+            return member_definition_of_template(t, s);
         return variable_template_definition(t, s);
     }
     /* [temp.fct]/1: a function template's declaration (template<class T>
@@ -2506,6 +2510,33 @@ SyntaxRef semantic_analysis::out_of_class_member(SyntaxRef definition,
     return nested[0].index();
 }
 
+/* the simple-template-id of the declarator-id S<A...>::m of a
+   simple-declaration of one init-declarator (template<class T> int S<T>::m
+   = 1;), else 0; and the member's name */
+SyntaxRef
+semantic_analysis::out_of_class_variable_member(SyntaxRef declaration,
+                                                token_index *name) const
+{
+    if (!declaration.is(syntax_kind::simple_declaration) ||
+        declaration.size() != 3 ||
+        !declaration[0].is(syntax_kind::decl_specifier_seq) ||
+        !declaration[1].is(syntax_kind::init_declarator))
+        return 0;
+    auto item = declaration[1];
+    if (item.size() != 2 || !item[0].is(syntax_kind::qualified_id))
+        return 0;
+    auto q = item[0];
+    if (q.size() != 2 || !q[0].is(syntax_kind::nested_name_specifier) ||
+        !q[1].is_identifier())
+        return 0;
+    auto nested = q[0];
+    if (nested.size() != 2 || !nested[0].is(syntax_kind::simple_template_id))
+        return 0;
+    if (name)
+        *name = q[1].token();
+    return nested[0].index();
+}
+
 /* a function-definition's declarator-id N::f (behind ptr-operators): the
    nested-name-specifier N::, else 0; and the member's name */
 SyntaxRef semantic_analysis::out_of_class_nested(SyntaxRef definition,
@@ -2575,10 +2606,13 @@ analysis_result semantic_analysis::member_definition_of_template(
     entity_index outer = current_scope;
     owned_array<SyntaxRef> parameters;
     VTRY(r, template_head_parameters(n, parameters));
+    /* [temp.static]/1: a static data member's definition is a
+       simple-declaration */
+    bool variable = definition.is(syntax_kind::simple_declaration);
     SyntaxTail parts(definition, leading_gnu_attributes(definition));
     /* (a constructor or destructor has no decl-specifier-seq) */
-    if ((parts.size() != 3 && parts.size() != 2) ||
-        !parts[parts.size() - 1].is(syntax_kind::function_body))
+    if (!variable && ((parts.size() != 3 && parts.size() != 2) ||
+                      !parts[parts.size() - 1].is(syntax_kind::function_body)))
         return not_supported(n, "temp.mem.func");
     /* [temp.param]/12: "A default template-argument shall not be specified
        in the template-parameter-lists of the definition of a member of a
@@ -2586,7 +2620,9 @@ analysis_result semantic_analysis::member_definition_of_template(
     for (SyntaxRef x : parameters)
         if (template_parameter_has_default(x))
             return not_supported(x, "temp.param");
-    SyntaxRef id = out_of_class_member(definition);
+    SyntaxRef id = out_of_class_variable_member(definition);
+    if (!variable)
+        id = out_of_class_member(definition);
     lookup_result x;
     entity_index named = 0;
     if (!template_id_name(id, x, named))
@@ -2631,14 +2667,31 @@ analysis_result semantic_analysis::member_definition_of_template(
         bool same = a.template_entity == pe ||
                     (a.kind == template_argument::kind_t::type &&
                      !a.template_entity && a.type == entity_table[pe].type);
-        if (!same ||
-            entity_table[pe].name !=
-                entity_table[template_parameter_entities[of.first_parameter +
-                                                         i]]
-                    .name)
+        uint32_t mine_name = entity_table[pe].name;
+        uint32_t class_name =
+            entity_table[template_parameter_entities[of.first_parameter + i]]
+                .name;
+        if (!same)
             return not_supported(n, "temp.mem.func");
+        if (mine_name == class_name)
+            continue;
+        /* a function's body finds the class's names */
+        if (!variable)
+            return not_supported(n, "temp.mem.func");
+        /* [basic.lookup.qual]/3: "names following the qualified-id being
+           declared are looked up in the scope of the member's class", which
+           finds the class's template-parameter names, not this
+           definition's: a variable whose initializer writes either of the
+           two names is not analysed */
+        SyntaxRef init = definition[1];
+        for (token_index t = init[0].end_token(); t < init.end_token(); t++)
+            if (tokens[t].kind == token_kind::identifier &&
+                (tokens.identifier(t) == mine_name ||
+                 tokens.identifier(t) == class_name))
+                return not_supported(n, "basic.lookup.qual");
     }
     template_member_definition record;
+    record.first_parameter = first;
     record.declaration = n;
     record.definition = definition;
     record.inner = inner;
@@ -2746,22 +2799,40 @@ analysis_result semantic_analysis::define_template_member(uint32_t member,
     }
     entity_index scope = entity_table.make(
         entity_kind::block_scope, 0, entity_table[x.template_entity].enclosing);
+    bool variable = o.definition.is(syntax_kind::simple_declaration);
+    uint32_t names = of.first_parameter;
+    if (variable)
+        names = o.first_parameter;
     for (uint32_t i = 0; i < of.parameter_count; i++)
-        bind_template_argument(
-            scope, template_parameter_entities[of.first_parameter + i],
-            template_arguments[first + i]);
+        bind_template_argument(scope, template_parameter_entities[names + i],
+                               template_arguments[first + i]);
     instantiation_context context;
     enter_instantiation(context, scope, o.declaration);
     template_member_scope = scope;
     declaration_access = 0;
     instantiating = 0;
     class_instantiating = 0;
-    analysis_result r = function_definition(o.definition);
+    analysis_result r = analysis_result::well_formed;
+    if (variable)
+        r = simple_declaration(o.definition);
+    else
+        r = function_definition(o.definition);
     leave_instantiation(context);
     /* the member defined: the class's function this definition declares
        (last_declared may be a name its body declared) */
     entity_index defined = 0;
-    if (r == analysis_result::well_formed) {
+    if (r == analysis_result::well_formed && variable) {
+        /* [temp.static]/1: the specialization's static data member */
+        token_index name = 0;
+        out_of_class_variable_member(o.definition, &name);
+        entity_index v =
+            entity_table.find(x.specialization, tokens.identifier(name));
+        if (v && entity_table[v].kind == entity_kind::variable &&
+            (declared_by(v, o.definition) || declared_by(v, o.declaration)))
+            defined = v;
+        if (!defined)
+            r = analysis_result::unsupported;
+    } else if (r == analysis_result::well_formed) {
         token_index name = 0;
         out_of_class_member(o.definition, &name);
         defined = defined_special_member(x.specialization, o, name);
@@ -2776,6 +2847,8 @@ analysis_result semantic_analysis::define_template_member(uint32_t member,
             r = analysis_result::unsupported;
     }
     if (r == analysis_result::well_formed) {
+        /* (a static data member of a class template is weak and emitted
+           where used, as an inline variable: [basic.def.odr]/13) */
         entity_table[defined].inline_ = true;
         return r;
     }
