@@ -77,6 +77,7 @@ uint32_t c_lowering::symbol(entity_index e, token_index at, int variant)
         failure.file = u.file;
         failure.line = u.line;
         failure.function = u.function;
+        failure.detail = u.detail;
         failure.front_end = true;
         return fail("a function whose body is not supported",
                     u.node.first_token());

@@ -347,25 +347,11 @@ enum gnu_attribute_flag : uint32_t {
     gnu_enable_if = 65536,
     /* mode(M): the type of the typedef or variable (gnu_mode_type) */
     gnu_mode = 131072,
-    /* [ext:gnu_library_builtins] __builtin_popcountg, __builtin_clzg and
-       __builtin_ctzg (with gnu_compiler_builtin): a constant expression
-       when its arguments are (bit_count_builtin) */
-    gnu_bit_count = 262144,
-    /* [ext:gnu_library_builtins] a builtin of vcc's C front end whose
-       arguments or result are not those of one function type
-       (__atomic_*, __sync_*, __c11_atomic_*, __builtin_va_start): declared
-       as a function taking anything, so that lookup finds it; a call is not
-       supported yet (call_with) */
-    gnu_untyped_builtin = 524288,
     /* [ext:gnu_library_builtins] the C library function a __builtin_NAME
        declares implicitly (library_builtin): a declaration of the library's
        own name, with or without noexcept, is of this function, as clang's
        are */
     gnu_library_function = 1048576,
-    /* [ext:gnu_library_builtins] __builtin_constant_p and the lock-free
-       queries (with gnu_untyped_builtin): a constant expression when their
-       arguments are (query_builtin) */
-    gnu_query_builtin = 2097152,
     /* [dcl.attr.nouniqueaddr] [[no_unique_address]] (the standard's, not a
        GCC attribute): a non-static data member that may share its bytes
        with another subobject (entity::no_unique_address) */
@@ -384,8 +370,6 @@ enum gnu_attribute_flag : uint32_t {
     /* "cleanup (cleanup_function)": a local variable's function, called
        with its address when it goes out of scope (gnu_cleanup) */
     gnu_cleanup = 67108864,
-    /* Float and double infinity and quiet NaN compiler builtins. */
-    gnu_floating_constant = 134217728,
 };
 /* the GNU attributes of a function's own symbol that analysis carries to
    member functions and function templates */
@@ -661,6 +645,10 @@ struct entity {
        and gnu_cleanup's function */
     uint32_t gnu_priority = 0;
     entity_index gnu_cleanup = 0;
+    /* [ext:gnu_library_builtins] a function that is a compiler builtin
+       (gnu_compiler_builtin): its row of the builtin registry
+       (ext/gnu/builtin-registry.cpp), 0 if it has none */
+    uint16_t gnu_builtin_row = 0;
     /* [ext:gnu_asm_labels] a function's or variable's asm label: the
        string-literal that is its symbol, 0 if none */
     token_index asm_label = 0;
@@ -948,6 +936,9 @@ struct unsupported_construct {
     const char *file = "";
     uint32_t line = 0;
     const char *function = "";
+    /* the form of the construct that has no rules yet (a builtin's name
+       and what about its call), "" if the subclause says enough */
+    const char *detail = "";
 };
 
 struct analysed_declaration {
@@ -1738,6 +1729,13 @@ class semantic_analysis
        and the call site (the check that refused it, for the diagnostic's
        note) */
     analysis_result not_supported(SyntaxRef n, call_site where = call_site());
+    /* ... naming the builtin function called and what about the call has
+       no rules yet ("__builtin_x: a pointer to a class"): the error says
+       so */
+    analysis_result not_supported_builtin(SyntaxRef n, const char *subclause,
+                                          entity_index called, const char *what,
+                                          call_site where = call_site());
+    owned_objects<owned_string> detail_texts;
     analysis_result not_supported(SyntaxRef n, const char *subclause,
                                   call_site where = call_site());
     /* whether the parser gave up on a part of the declaration */
@@ -2336,6 +2334,7 @@ class semantic_analysis
        [lex.name]/3 reserves it to the implementation, so a scope with
        names analysis did not follow does not hide the builtin */
     bool builtin_spelled(uint32_t name) const;
+    bool builtin_letter_type(char letter, qualified_type &t);
     entity_index compiler_builtin(uint32_t name, const char *spelling,
                                   size_t length);
     entity_index declare_builtin(uint32_t name, uint32_t symbol,
@@ -2953,15 +2952,17 @@ class semantic_analysis
        and its value in a constant evaluation */
     int bit_count_builtin(entity_index e) const;
     int query_builtin(entity_index e) const;
-    analysis_result query_builtin_result(SyntaxRef n, int which,
+    analysis_result query_builtin_result(SyntaxRef n, entity_index called,
+                                         int which,
                                          const owned_array<uint32_t> &nodes,
                                          qualified_type &result);
     analysis_result bit_count_arguments(SyntaxRef n, entity_index called,
                                         const owned_array<uint32_t> &nodes);
-    analysis_result va_list_builtin_result(SyntaxRef n, int which,
+    analysis_result va_list_builtin_result(SyntaxRef n, entity_index called,
+                                           int which,
                                            const owned_array<uint32_t> &nodes);
-    analysis_result overflow_builtin_result(SyntaxRef n, const char *spelling,
-                                            size_t length,
+    analysis_result overflow_builtin_result(SyntaxRef n, entity_index called,
+                                            const char *spelling, size_t length,
                                             const owned_array<uint32_t> &nodes,
                                             qualified_type &result);
     analysis_result atomic_builtin_result(SyntaxRef n, entity_index called,

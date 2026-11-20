@@ -22,6 +22,9 @@ struct lowering_failure {
     const char *file = nullptr;
     uint32_t line = 0;
     const char *function = nullptr;
+    /* ... and the construct's form, when the subclause alone is too general
+       (unsupported_construct::detail), "" if none */
+    const char *detail = "";
     /* a declaration kept as tokens: where the parse stopped and what it
        expected there (parser::unparsed_reason), at 0 if not known */
     token_index parse_at = 0;

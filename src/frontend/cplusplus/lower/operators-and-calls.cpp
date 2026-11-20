@@ -1,5 +1,6 @@
 /* operators-and-calls.cpp: operators, assignments, calls and conditionals (lower-internal.h) */
 #include "lower-internal.h"
+#include "frontend/cplusplus/builtin-registry.h"
 
 namespace cplusplus::lowering
 {
@@ -269,8 +270,8 @@ uint32_t c_lowering::call(const semantic_node &n)
                builtin node, made below */
         {
             builtin = analysis.entity_table[node(named).a].name;
-            untyped_builtin = analysis.entity_table[node(named).a].gnu_flags &
-                              gnu_untyped_builtin;
+            uint16_t row = analysis.entity_table[node(named).a].gnu_builtin_row;
+            untyped_builtin = row && gnu_builtin_untyped(row);
         } else {
             /* [expr.call]/8: "The postfix-expression is sequenced before
                each expression in the expression-list": the object

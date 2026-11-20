@@ -118,7 +118,12 @@ static void report_failure(int fd, token_stream &tokens,
                            const lowering_failure &why)
 {
     source_position at = tokens.position(why.at);
-    if (why.subclause)
+    if (why.subclause && why.detail && *why.detail)
+        dprintf(fd,
+                "%s:%u:%u: error: the rules of [%s] are not implemented "
+                "yet: %s\n",
+                at.file_name, at.line, at.column, why.subclause, why.detail);
+    else if (why.subclause)
         dprintf(fd,
                 "%s:%u:%u: error: the rules of [%s] are not implemented "
                 "yet\n",

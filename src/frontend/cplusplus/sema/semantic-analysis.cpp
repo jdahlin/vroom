@@ -58,6 +58,24 @@ analysis_result semantic_analysis::not_supported(SyntaxRef n,
     return analysis_result::unsupported;
 }
 
+analysis_result semantic_analysis::not_supported_builtin(SyntaxRef n,
+                                                         const char *subclause,
+                                                         entity_index called,
+                                                         const char *what,
+                                                         call_site where)
+{
+    size_t length = 0;
+    const char *spelling =
+        tokens.pp.identifier_spelling(entity_table[called].name - 1, &length);
+    char text[256];
+    snprintf(text, sizeof text, "%.*s %s", static_cast<int>(length), spelling,
+             what);
+    owned_string &detail = detail_texts.make(text, strlen(text));
+    analysis_result r = not_supported(n, subclause, where);
+    unsupported[unsupported.size() - 1].detail = detail.c_str();
+    return r;
+}
+
 analysis_result semantic_analysis::ill_formed(SyntaxRef at, const char *rule,
                                               const char *subclause)
 {
