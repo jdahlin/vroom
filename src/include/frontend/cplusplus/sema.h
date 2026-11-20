@@ -1224,6 +1224,9 @@ enum class semantic_kind : uint8_t {
     throw_exception,
     /* [expr.typeid]: an lvalue of type const std::type_info; not lowered */
     type_identification,
+    /* [ext:gnu_va_arg] __builtin_va_arg (a, T): a: the va_list (an
+       lvalue); a prvalue of the node's type */
+    va_arg_,
     /* [class.cdtor]/4, [abi:vtable-ctor]: a: the address of the object
        under construction or destruction (this), b: its class, whose
        virtual table pointer is stored in it */
@@ -2717,6 +2720,7 @@ class semantic_analysis
     bool class_trivially_copyable(entity_index c, bool &known);
     analysis_result gnu_offsetof(SyntaxRef n, expression_meaning &m);
     analysis_result clang_bit_cast(SyntaxRef n, expression_meaning &m);
+    analysis_result gnu_va_arg(SyntaxRef n, expression_meaning &m);
     analysis_result clang_convertvector(SyntaxRef n, expression_meaning &m);
     bool builtin_addressof_call(SyntaxRef n);
     /* clang's type-generic bit counts: which one the function e is (1
@@ -2729,6 +2733,12 @@ class semantic_analysis
                                          qualified_type &result);
     analysis_result bit_count_arguments(SyntaxRef n, entity_index called,
                                         const owned_array<uint32_t> &nodes);
+    analysis_result va_list_builtin_result(SyntaxRef n, int which,
+                                           const owned_array<uint32_t> &nodes);
+    analysis_result overflow_builtin_result(SyntaxRef n, const char *spelling,
+                                            size_t length,
+                                            const owned_array<uint32_t> &nodes,
+                                            qualified_type &result);
     analysis_result atomic_builtin_result(SyntaxRef n, entity_index called,
                                           const owned_array<uint32_t> &nodes,
                                           qualified_type &result);

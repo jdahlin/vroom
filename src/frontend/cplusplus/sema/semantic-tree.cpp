@@ -58,6 +58,7 @@ const char *semantic_kind_name(semantic_kind kind)
         "delete_object",
         "throw_exception",
         "type_identification",
+        "va_arg",
         "vtable_pointer_store",
         "block",
         "expression_statement",

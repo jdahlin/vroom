@@ -351,6 +351,23 @@ uint32_t ast_builder_builtin_call(cc *c, const char *name, size_t length,
             cc_id_list_append(c, &query, args[i]);
         return cc_builtin_atomic_lock_free_apply(c, b, &query, 0);
     }
+    /* the typed overflow builtins (__builtin_sadd_overflow, ...): the
+       operands converted to the parameters' types, as the parsed call does
+       (the C++ front end has checked the arguments' types) */
+    if ((b->id == CC_BUILTIN_ADD_OVERFLOW || b->id == CC_BUILTIN_SUB_OVERFLOW ||
+         b->id == CC_BUILTIN_MUL_OVERFLOW) &&
+        b->sig[1] != '.' && count == 3) {
+        const ctype *f = AST_TYPE(c, cc_builtin_type(c, b));
+        cc_id_list typed;
+        cc_id_list_init(&typed);
+        for (uint32_t i = 0; i < count; i++) {
+            uint32_t a = args[i];
+            if (i < 2)
+                a = cc_conversion_apply(c, a, c->params[f->aux + i]);
+            cc_id_list_append(c, &typed, a);
+        }
+        return cc_builtin_node_new(c, b->id, t, 0, &typed);
+    }
     /* the parser's tree of conditionals, as for C */
     if (b->id == CC_BUILTIN_FPCLASSIFY && count == 6)
         return cc_fpclassify_build(c, args, 0);

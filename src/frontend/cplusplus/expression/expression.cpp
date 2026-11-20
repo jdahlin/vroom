@@ -237,6 +237,8 @@ analysis_result semantic_analysis::expression_kind(SyntaxElement e,
         return clang_type_trait(e, m);
     case syntax_kind::gnu_offsetof_expression:
         return gnu_offsetof(e, m);
+    case syntax_kind::gnu_va_arg_expression:
+        return gnu_va_arg(e, m);
     case syntax_kind::clang_bit_cast_expression:
         return clang_bit_cast(e, m);
     case syntax_kind::clang_convertvector_expression:

@@ -72,6 +72,8 @@ node_index parser::primary_expression()
         return clang_type_trait_expression();
     if (at(extension_keyword::offsetof_)) /* [ext.gnu] */
         return gnu_offsetof_expression();
+    if (at(extension_keyword::va_arg_)) /* [ext.gnu] */
+        return gnu_va_arg_expression();
     if (at(extension_keyword::bit_cast)) /* [ext.clang] */
         return clang_bit_cast_expression();
     if (at(extension_keyword::convertvector)) /* [ext.clang] */

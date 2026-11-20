@@ -67,6 +67,9 @@ EXTENSION(gnu_compound_literals, gnu,
 EXTENSION(gnu_offsetof, gnu,
           "GCC manual 6.53, Support for offsetof: __builtin_offsetof (type, member), "
           "<cstddef>'s offsetof ([support.types.layout]/1)")
+EXTENSION(gnu_va_arg, gnu,
+          "GCC manual 6.55 (Variable Arguments): __builtin_va_arg (va_list, type), "
+          "<cstdarg>'s va_arg ([cstdarg.syn])")
 
 /* clang */
 EXTENSION(clang_feature_checks, clang,
