@@ -2391,9 +2391,38 @@ uint32_t semantic_analysis::own_pack_parameter(uint32_t name) const
     }
 }
 
+static token_index default_argument_start(SyntaxElement e)
+{
+    if (e.is_token())
+        return e.token();
+    return e.first_token();
+}
+
+/* whether two non-type template-parameters are written with the same
+   tokens up to their default template-argument, naming a type that
+   depends on template parameters */
+bool semantic_analysis::same_dependent_parameter_type(SyntaxRef a, SyntaxRef b)
+{
+    template_parameter_parts x, y;
+    if (!template_parameter_form(a, x) || !template_parameter_form(b, y))
+        return false;
+    token_index ea = a.end_token(), eb = b.end_token();
+    /* (the default-argument follows the "=") */
+    if (x.has_default)
+        ea = default_argument_start(x.default_argument) - 1;
+    if (y.has_default)
+        eb = default_argument_start(y.default_argument) - 1;
+    if (ea - a.first_token() != eb - b.first_token())
+        return false;
+    for (token_index i = 0; i < ea - a.first_token(); i++)
+        if (!same_token_spelling(a.first_token() + i, b.first_token() + i))
+            return false;
+    return ea > a.first_token();
+}
+
 bool semantic_analysis::same_template_parameters(uint32_t first,
                                                  uint32_t other_first,
-                                                 uint32_t count) const
+                                                 uint32_t count)
 {
     for (uint32_t i = 0; i < count; i++) {
         const entity &a = entity_table[template_parameter_entities[first + i]];
@@ -2407,9 +2436,18 @@ bool semantic_analysis::same_template_parameters(uint32_t first,
         if (a.kind == entity_kind::none && !(a.type == b.type)) {
             uint32_t at =
                 own_type_parameter_position(a.type, a.enclosing, first);
-            if (at == UINT32_MAX || a.type.cv() != b.type.cv() ||
-                at != own_type_parameter_position(b.type, b.enclosing,
-                                                  other_first))
+            if (at == UINT32_MAX) {
+                /* a dependent type written the same in both heads
+                   (template<class C, typename C::T>: [temp.over.link]/5's
+                   equivalent expressions as the same tokens); another
+                   spelling is not judged */
+                if (!same_dependent_parameter_type(
+                        template_parameter_nodes[first + i],
+                        template_parameter_nodes[other_first + i]))
+                    return false;
+            } else if (a.type.cv() != b.type.cv() ||
+                       at != own_type_parameter_position(b.type, b.enclosing,
+                                                         other_first))
                 return false;
         }
         if (a.kind == entity_kind::template_entity) {

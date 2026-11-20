@@ -404,6 +404,37 @@ node_index parser::clang_availability_arguments()
     return 0;
 }
 
+/* abi_tag's argument: one ordinary string-literal of identifier
+   characters, the same as an earlier one */
+analysis_result semantic_analysis::add_gnu_abi_tag(SyntaxRef at,
+                                                   token_index literal,
+                                                   gnu_attributes &g)
+{
+    if (tokens[literal].literal != literal_kind::string_literal)
+        return not_supported(at, "ext.gnu");
+    owned_buffer tag;
+    tokens.spelling(literal, tag.get());
+    if (tag.size() < 3 || tag.data()[0] != '"')
+        return not_supported(at, "ext.gnu");
+    for (size_t i = 1; i + 1 < tag.size(); i++) {
+        unsigned char ch = tag.data()[i];
+        if (!(ch == '_' || (ch >= '0' && ch <= '9') ||
+              ((ch | 32) >= 'a' && (ch | 32) <= 'z')))
+            return not_supported(at, "ext.gnu");
+    }
+    if (g.abi_tag) {
+        /* two tags: their order in the name is sorted */
+        owned_buffer before;
+        tokens.spelling(g.abi_tag, before.get());
+        if (before.size() != tag.size() ||
+            memcmp(before.data(), tag.data(), tag.size()))
+            return not_supported(at, "ext.gnu");
+    }
+    g.abi_tag = literal;
+    g.flags |= gnu_abi_tag;
+    return analysis_result::well_formed;
+}
+
 /*
  * The attributes of a gnu-attribute-specifier, wherever it is: before a
  * declaration, among its decl-specifiers or after a declarator (GCC
@@ -421,6 +452,8 @@ analysis_result semantic_analysis::gnu_attribute_specifier(SyntaxRef n,
     /* (standard attributes without effect, or [[noreturn]]:
        leading_gnu_attributes) */
     uint32_t standard = 0;
+    if (token_index tag = scoped_gnu_abi_tag(n))
+        return add_gnu_abi_tag(n, tag, g);
     if (n.is(syntax_kind::attribute_specifier) &&
         attributes_as_gnu(n, standard)) {
         g.flags |= standard;
@@ -564,30 +597,9 @@ analysis_result semantic_analysis::gnu_attribute_specifier(SyntaxRef n,
             continue;
         }
         if (rule->flag == gnu_abi_tag) {
-            /* one ordinary string-literal of identifier characters */
-            if (count != 4 || !a[2].is_token() ||
-                tokens[a[2].token()].literal != literal_kind::string_literal)
+            if (count != 4 || !a[2].is_token())
                 return not_supported(at, "ext.gnu");
-            owned_buffer tag;
-            tokens.spelling(a[2].token(), tag.get());
-            if (tag.size() < 3 || tag.data()[0] != '"')
-                return not_supported(at, "ext.gnu");
-            for (size_t i = 1; i + 1 < tag.size(); i++) {
-                unsigned char ch = tag.data()[i];
-                if (!(ch == '_' || (ch >= '0' && ch <= '9') ||
-                      ((ch | 32) >= 'a' && (ch | 32) <= 'z')))
-                    return not_supported(at, "ext.gnu");
-            }
-            if (g.abi_tag) {
-                /* two tags: their order in the name is sorted */
-                owned_buffer before;
-                tokens.spelling(g.abi_tag, before.get());
-                if (before.size() != tag.size() ||
-                    memcmp(before.data(), tag.data(), tag.size()))
-                    return not_supported(at, "ext.gnu");
-            }
-            g.abi_tag = a[2].token();
-            g.flags |= gnu_abi_tag;
+            VTRY(r, add_gnu_abi_tag(at, a[2].token(), g));
             continue;
         }
         /* the others take no arguments analysis has rules for (format's

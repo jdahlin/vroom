@@ -560,6 +560,33 @@ bool semantic_analysis::attributes_without_effect(SyntaxElement n) const
     return attributes_as_gnu(n, flags) && !flags;
 }
 
+/* [[gnu::abi_tag("TAG")]] as the one attribute of attribute-specifier n
+   (libc++'s _LIBCPP_HIDE_FROM_ABI on classes): GCC's abi_tag, which
+   gnu_attribute_specifier takes as __attribute__((abi_tag("TAG"))); the
+   tag's string-literal token, else 0 */
+token_index semantic_analysis::scoped_gnu_abi_tag(SyntaxElement n) const
+{
+    if (!n.is(syntax_kind::attribute_specifier) || n.size() != 5 ||
+        !n[2].is(syntax_kind::attribute))
+        return 0;
+    SyntaxElement a = n[2];
+    if (a.size() != 2 || !a[0].is(syntax_kind::attribute_scoped_token) ||
+        a[0].size() != 3 || !a[0][0].is_token() || !a[0][2].is_token() ||
+        !a[1].is(syntax_kind::attribute_argument_clause) || a[1].size() != 3 ||
+        !a[1][1].is_token())
+        return 0;
+    owned_buffer ns_spelling, spelling;
+    tokens.spelling(a[0][0].token(), ns_spelling.get());
+    tokens.spelling(a[0][2].token(), spelling.get());
+    const char *ns, *name;
+    size_t ns_length, length;
+    attribute_name(ns_spelling, &ns, &ns_length);
+    attribute_name(spelling, &name, &length);
+    if (!name_is(ns, ns_length, "gnu") || !name_is(name, length, "abi_tag"))
+        return 0;
+    return a[1][1].token();
+}
+
 /* The same, also accepting [dcl.attr.noreturn] noreturn (and
    gnu::noreturn), whose GCC flag goes into flags: GCC's noreturn says
    the same */

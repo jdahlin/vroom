@@ -2097,6 +2097,8 @@ class semantic_analysis
         entity_index ext_vector_parameter = 0;
     };
     analysis_result gnu_attribute_specifier(SyntaxRef n, gnu_attributes &g);
+    analysis_result add_gnu_abi_tag(SyntaxRef at, token_index literal,
+                                    gnu_attributes &g);
     analysis_result gnu_attribute_specifier(SyntaxRef n, declarator_meaning &m);
     analysis_result gnu_attribute_specifier(SyntaxRef n, specified &s);
     analysis_result gnu_mode_type(SyntaxRef at, token_index mode,
@@ -2110,6 +2112,7 @@ class semantic_analysis
     bool attributes_without_effect(SyntaxElement n) const;
     /* ... or [[noreturn]], whose GCC flag goes into flags */
     bool attributes_as_gnu(SyntaxElement n, uint32_t &flags) const;
+    token_index scoped_gnu_abi_tag(SyntaxElement n) const;
     bool gnu_attributes_without_effect(SyntaxElement n) const;
     bool class_head_attributes_without_effect(SyntaxElement c) const;
     uint32_t attributes_without_effect_before(SyntaxRef declaration) const;
@@ -3788,6 +3791,7 @@ class semantic_analysis
     };
     bool template_parameter_form(SyntaxRef parameter,
                                  template_parameter_parts &out) const;
+    bool same_dependent_parameter_type(SyntaxRef a, SyntaxRef b);
     bool template_parameter_has_default(SyntaxRef parameter) const
     {
         template_parameter_parts x;
@@ -3905,7 +3909,7 @@ class semantic_analysis
        first) are another's (from other_first) of the same kinds and
        types, count of each */
     bool same_template_parameters(uint32_t first, uint32_t other_first,
-                                  uint32_t count) const;
+                                  uint32_t count);
     /* [temp.mem.func]/1: a member function of a class template (or of a
        partial specialization, [temp.class.spec.mfunc]/1) defined outside
        it: the definition, analysed per specialization of the class

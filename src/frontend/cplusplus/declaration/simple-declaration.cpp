@@ -808,7 +808,7 @@ bool semantic_analysis::gnu_or_without_effect(SyntaxRef n) const
 {
     uint32_t flags = 0;
     if (n.is(syntax_kind::attribute_specifier))
-        return attributes_as_gnu(n, flags);
+        return attributes_as_gnu(n, flags) || scoped_gnu_abi_tag(n);
     if (!n.is(syntax_kind::attribute_specifier_seq))
         return only_gnu_attributes(tree, n);
     for (SyntaxElement c : n.elements()) {
