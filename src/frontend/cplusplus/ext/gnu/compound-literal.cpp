@@ -17,6 +17,7 @@
  * follow it: (struct s){1, 2}.x.
  */
 #include "../../cplusplus-internal.h"
+#include "frontend/cplusplus/sema.h"
 
 namespace cplusplus
 {
