@@ -1308,6 +1308,41 @@ semantic_analysis::variable_template_definition(SyntaxRef n,
 }
 
 /*
+ * [temp.names]/1 with [over.over]/2: a template-id naming one function
+ * template whose template arguments are all explicit, not called: the one
+ * specialization ([temp.arg.explicit]/4: "if all of the template arguments
+ * can be deduced or obtained from default template-arguments, they may all
+ * be omitted"; here none is), a function the expression names.  Several
+ * templates of the name, or arguments left to deduce from a target type,
+ * are [over.over]'s.
+ */
+analysis_result
+semantic_analysis::function_template_id_value(SyntaxRef n, uint32_t ft,
+                                              expression_meaning &m)
+{
+    token_index name = 0;
+    uint32_t found = 0;
+    bool qualified = false;
+    owned_array<template_argument> specified;
+    VTRY(parts, template_callee_parts(n, name, found, specified, qualified));
+    if (found != ft || overloaded_written_at)
+        return not_supported(n, "over.over");
+    if (specified.size() != function_templates[ft - 1].parameter_count)
+        return not_supported(n, "over.over");
+    for (const template_argument &a : specified)
+        if (depends(type_table, a.type) || a.template_entity ||
+            a.kind == template_argument::kind_t::pack)
+            return not_supported(n, "temp.dep");
+    entity_index e = 0;
+    VTRY(r, instantiate(n, function_templates[ft - 1].entity, specified.data(),
+                        static_cast<uint32_t>(specified.size()), e));
+    size_t uses_before = name_uses.size();
+    analysis_result named = named_entity(n[0].token(), e, m);
+    name_uses.resize(uses_before);
+    return named;
+}
+
+/*
  * [temp.inst]/7: "Unless a variable template specialization is a declared
  * specialization, the variable template specialization is implicitly
  * instantiated when it is referenced in a context that requires a
@@ -1329,6 +1364,9 @@ analysis_result semantic_analysis::variable_template_id(SyntaxRef n,
         if (!x.ambiguous)
             return concept_id(n, ct, m);
     uint32_t vt = variable_template_of(named);
+    if (!vt && !x.ambiguous)
+        if (uint32_t ft = function_template_of(x.unknown_entity))
+            return function_template_id_value(n, ft, m);
     if (!vt || x.ambiguous)
         return not_supported(n, "temp.names");
     owned_array<template_argument> arguments;

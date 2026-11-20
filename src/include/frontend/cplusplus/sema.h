@@ -3875,6 +3875,8 @@ class semantic_analysis
     /* [temp.inst]/7: a simple-template-id naming a variable template's
        specialization, as an id-expression */
     analysis_result variable_template_id(SyntaxRef n, expression_meaning &m);
+    analysis_result function_template_id_value(SyntaxRef n, uint32_t ft,
+                                               expression_meaning &m);
     /* ... the specialization, instantiated (or found) */
     analysis_result instantiate_variable(SyntaxRef at, uint32_t vt,
                                          const template_argument *arguments,
