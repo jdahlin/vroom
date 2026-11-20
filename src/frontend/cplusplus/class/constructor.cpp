@@ -170,6 +170,11 @@ analysis_result semantic_analysis::constructor_specifiers(SyntaxRef seq,
             VTRY(r, gnu_attribute_specifier(x, s));
             continue;
         }
+        /* [dcl.fct.spec]/2: explicit ( constant-expression ), a
+           constructor template's too ([temp.mem]/1); the condition is
+           not evaluated: the constructor counts as not explicit */
+        if (x.is(syntax_kind::explicit_specifier))
+            continue;
         if (!x.is_token())
             return not_supported(seq, "temp.mem");
         switch (x.keyword()) {
