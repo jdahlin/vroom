@@ -669,6 +669,14 @@ semantic_analysis::object_sequence(const expression_meaning &object,
        type of the implicit object parameter": the class the name is found
        in */
     entity_index owner = x.enclosing;
+    /* [over.match.funcs]/4: "For conversion functions, the function is
+       considered to be a member of the class of the implied object
+       argument for the purpose of defining the type of the implicit object
+       parameter": a base's one takes the derived class's object as it
+       is, no derived-to-base conversion ranks it below the derived
+       class's own */
+    if (x.conversion_function)
+        owner = c;
     if (c != owner && x.name && !x.conversion_function &&
         is_class_entity(owner) && is_class_entity(c)) {
         lookup_result found = lookup_qualified(c, x.name, lookup_filter::any);

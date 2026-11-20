@@ -870,6 +870,96 @@ semantic_analysis::function_definition(FunctionDefinition definition)
 }
 
 /*
+ * [class.access]/6: "All access controls in [class.access] affect the
+ * ability to access a class member name from a declaration of a particular
+ * entity, including parts of the declaration preceding the name of the
+ * entity being declared and, if the entity is a class, the
+ * base-specifiers" and /7: "the declarator-id of a member defined outside
+ * its class is in the class's scope for access": the decl-specifier-seq of
+ * a member declared by a qualified declarator-id (`const C::P *C::f()`)
+ * names private members of C as C's member does.  The class the first
+ * declarator's qualified declarator-id nominates by identifiers (a class or
+ * a typedef of one), 0 if there is none or the lookup is not as simple (the
+ * declarator then reports it).
+ */
+entity_index
+semantic_analysis::declarator_access_class(SyntaxRef declaration,
+                                           SyntaxRef specifiers) const
+{
+    if (at_block_scope() || function_state.active || defining_class)
+        return 0;
+    owned_array<SyntaxRef> work;
+    bool after = false;
+    for (SyntaxElement c : declaration.elements()) {
+        if (c.is_token())
+            continue;
+        if (c.index() == specifiers) {
+            after = true;
+            continue;
+        }
+        if (after && !c.is(syntax_kind::function_body))
+            work.append(c);
+    }
+    /* the first qualified-id in source order, not looking into parameters
+       or an initializer */
+    SyntaxRef found = 0;
+    while (!found && !work.empty()) {
+        SyntaxRef k = work.back();
+        work.resize(work.size() - 1);
+        syntax_kind kind = k.kind();
+        if (kind == syntax_kind::qualified_id) {
+            found = k;
+            break;
+        }
+        if (kind == syntax_kind::parameters_and_qualifiers ||
+            kind == syntax_kind::brace_or_equal_initializer ||
+            kind == syntax_kind::braced_init_list ||
+            kind == syntax_kind::function_body)
+            continue;
+        for (uint32_t i = k.size(); i-- > 0;)
+            if (!k[i].is_token())
+                work.append(k[i]);
+    }
+    if (!found)
+        return 0;
+    auto nested = found.qualified_id().nested_name_specifier();
+    if (!nested)
+        return 0;
+    entity_index scope = 0;
+    bool qualified = false;
+    if (nested.global())
+        qualified = true;
+    for (auto part : nested.parts()) {
+        if (!part.name.is_identifier() || !part.scoped)
+            return 0;
+        uint32_t name = tokens.identifier(part.name.token());
+        lookup_result r;
+        if (qualified)
+            r = lookup_qualified(scope, name, lookup_filter::scopes);
+        else
+            r = lookup_unqualified(name, lookup_filter::scopes);
+        if (r.ambiguous || r.unknown || !r.entity)
+            return 0;
+        entity_index e = r.entity;
+        if (entity_table[e].kind == entity_kind::typedef_name) {
+            const struct type &named =
+                type_table[entity_table[e].type.unqualified()];
+            if (named.kind != type_kind::class_type)
+                return 0;
+            e = named.entity;
+        }
+        if (entity_table[e].kind != entity_kind::class_type &&
+            entity_table[e].kind != entity_kind::namespace_entity)
+            return 0;
+        scope = e;
+        qualified = true;
+    }
+    if (!scope || entity_table[scope].kind != entity_kind::class_type)
+        return 0;
+    return scope;
+}
+
+/*
  * The declarators of a simple-declaration, or the one of a
  * function-definition.  [dcl.decl]/3: "Each init-declarator in a declaration
  * is analyzed separately as if it was in a declaration by itself."  The
@@ -903,6 +993,8 @@ analysis_result semantic_analysis::init_declarators(SyntaxRef declaration,
     /* (a declaration nested in an initializer has its own) */
     scoped_value<qualified_type> deduced(declaration_deduced, qualified_type());
     scoped_value<bool> group(placeholder_group, false);
+    scoped_value<entity_index> member_context(
+        access_class, declarator_access_class(declaration, specifiers));
     analysis_result r = decl_specifier_seq(specifiers, s, false);
     sole_elaborated = 0;
     if (r != analysis_result::well_formed)

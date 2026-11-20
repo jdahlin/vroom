@@ -3614,6 +3614,11 @@ class semantic_analysis
                              owned_array<expression_meaning> &out);
     /* the class whose member-specification is analysed, 0 if none */
     entity_index defining_class = 0;
+    /* [class.access]/6: the class a member's qualified declarator-id
+       nominates while its declaration is analysed, 0 otherwise (declarator_access_class) */
+    entity_index access_class = 0;
+    entity_index declarator_access_class(SyntaxRef declaration,
+                                         SyntaxRef specifiers) const;
     /* the tokens of the member-specification of the class being defined
        (class_specifier), 0 outside one */
     token_index defining_members_first = 0, defining_members_end = 0;
@@ -4884,6 +4889,12 @@ class semantic_analysis
     /* the first conversion function class c itself declares (the others
        follow by next_overload), 0 if none */
     entity_index own_conversion_functions(entity_index c) const;
+    /* [class.conv.fct]/4, [over.match.conv]/1: the conversion functions of
+       class c and of its bases that no conversion function to the same type
+       in a nearer class hides, appended to out; false when one is a
+       template, which analysis does not follow */
+    bool visible_conversion_functions(entity_index c,
+                                      owned_array<entity_index> &out) const;
     /* the value a call of the conversion function f gives: its type and
        value category ([expr.call]/14) */
     expression_meaning conversion_function_result(entity_index f) const;
